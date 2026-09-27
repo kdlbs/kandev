@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAge, formatLocalTime, truncatePreview } from "./format";
+import { formatAge, formatEvidenceTime, formatLocalTime, truncatePreview } from "./format";
 
 describe("formatAge", () => {
   it("renders under an hour as minutes only", () => {
@@ -27,6 +27,19 @@ describe("formatLocalTime", () => {
   it("formats an epoch millisecond timestamp as local HH:mm", () => {
     const date = new Date(2026, 8, 27, 8, 5);
     expect(formatLocalTime(date.getTime())).toBe("08:05");
+  });
+});
+
+describe("formatEvidenceTime", () => {
+  it("formats a strict RFC3339 timestamp as local HH:mm", () => {
+    const date = new Date(2026, 8, 27, 8, 5);
+    const iso = date.toISOString();
+    expect(formatEvidenceTime(iso)).toBe(formatLocalTime(date.getTime()));
+  });
+
+  it("returns undefined for a missing or malformed value", () => {
+    expect(formatEvidenceTime(undefined)).toBeUndefined();
+    expect(formatEvidenceTime("not-a-timestamp")).toBeUndefined();
   });
 });
 

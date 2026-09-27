@@ -18,6 +18,10 @@ export type UseCoordinatorAttentionResult = {
   classification: ClassifyResult;
   /** The name of each task's current step, keyed by task id (Adoption decision 3). */
   stepNameByTaskId: Map<string, string>;
+  /** The name of each loaded workflow of the workspace, keyed by workflow id (for a proposal's target). */
+  workflowNameById: Map<string, string>;
+  /** The name of a workflow's step, keyed by `${workflowId}:${stepId}` (for a proposal's target). */
+  stepNameByWorkflowStep: Map<string, string>;
   /** Open (non-archived) tasks of the workspace, keyed by id, for a proposal's source-task lookup. */
   openTasksById: Map<string, AttentionTask>;
   /** True once the tasks input has never had a successful read. */
@@ -71,6 +75,8 @@ export function useCoordinatorAttention(
   return {
     classification,
     stepNameByTaskId: tasksInput.stepNameByTaskId,
+    workflowNameById: tasksInput.workflowNameById,
+    stepNameByWorkflowStep: tasksInput.stepNameByWorkflowStep,
     openTasksById,
     tasksNeverLoaded: tasksInput.loadedAt === undefined,
     inputs,

@@ -46,6 +46,8 @@ beforeEach(() => {
   mockUseCoordinatorTasks.mockReturnValue({
     tasks: [],
     stepNameByTaskId: new Map(),
+    workflowNameById: new Map(),
+    stepNameByWorkflowStep: new Map(),
     error: false,
     loadedAt: 500,
     retry: retryTasksMock,
@@ -62,6 +64,8 @@ describe("useCoordinatorAttention - classification", () => {
     mockUseCoordinatorTasks.mockReturnValue({
       tasks: [task("t-1")],
       stepNameByTaskId: new Map([["t-1", "Build"]]),
+      workflowNameById: new Map([["wf-1", "Planner"]]),
+      stepNameByWorkflowStep: new Map([["wf-1:step-1", "Build"]]),
       error: false,
       loadedAt: 500,
       retry: retryTasksMock,
@@ -77,6 +81,8 @@ describe("useCoordinatorAttention - classification", () => {
     expect(result.current.classification.needsYou).toHaveLength(1);
     expect(result.current.classification.needsYou[0]?.kind).toBe("stall");
     expect(result.current.stepNameByTaskId.get("t-1")).toBe("Build");
+    expect(result.current.workflowNameById.get("wf-1")).toBe("Planner");
+    expect(result.current.stepNameByWorkflowStep.get("wf-1:step-1")).toBe("Build");
     expect(result.current.openTasksById.get("t-1")).toEqual(task("t-1"));
   });
 
@@ -84,6 +90,8 @@ describe("useCoordinatorAttention - classification", () => {
     mockUseCoordinatorTasks.mockReturnValue({
       tasks: [{ ...task("t-1"), isArchived: true }, task("t-2")],
       stepNameByTaskId: new Map(),
+      workflowNameById: new Map(),
+      stepNameByWorkflowStep: new Map(),
       error: false,
       loadedAt: 500,
       retry: retryTasksMock,
@@ -107,6 +115,8 @@ describe("useCoordinatorAttention - input status", () => {
     mockUseCoordinatorTasks.mockReturnValue({
       tasks: [],
       stepNameByTaskId: new Map(),
+      workflowNameById: new Map(),
+      stepNameByWorkflowStep: new Map(),
       error: true,
       loadedAt: undefined,
       retry: retryTasksMock,
@@ -142,6 +152,8 @@ describe("useCoordinatorAttention - retryFailed", () => {
     mockUseCoordinatorTasks.mockReturnValue({
       tasks: [],
       stepNameByTaskId: new Map(),
+      workflowNameById: new Map(),
+      stepNameByWorkflowStep: new Map(),
       error: true,
       loadedAt: 500,
       retry: retryTasksMock,

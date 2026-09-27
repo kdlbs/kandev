@@ -11,6 +11,10 @@ export type UseCoordinatorTasksResult = {
   tasks: AttentionTask[];
   /** The name of each task's current step, keyed by task id. Absent for an unknown step id (Adoption decision 3). */
   stepNameByTaskId: Map<string, string>;
+  /** The name of each loaded workflow of the workspace, keyed by workflow id (for a proposal's target). */
+  workflowNameById: Map<string, string>;
+  /** The name of a workflow's step, keyed by `${workflowId}:${stepId}` (for a proposal's target). */
+  stepNameByWorkflowStep: Map<string, string>;
   /** Set while the workspace's tasks failed to load (docs/specs/coordinator/system-design/needs-you.md#failure-and-recovery). */
   error: boolean;
   /** The time the screen last saw a successful tasks read complete. Undefined before the first success. */
@@ -18,6 +22,10 @@ export type UseCoordinatorTasksResult = {
   /** Re-fetches only the workflows that failed to load. */
   retry: () => void;
 };
+
+function workflowStepKey(workflowId: string, stepId: string): string {
+  return `${workflowId}:${stepId}`;
+}
 
 function matchesWorkspace(
   read: AppState["workspaceContextRead"],
@@ -51,13 +59,20 @@ export function useCoordinatorTasks(workspaceId: string | null): UseCoordinatorT
     [workflows, workspaceId],
   );
 
-  const { tasks, stepNameByTaskId } = useMemo(() => {
+  const { tasks, stepNameByTaskId, workflowNameById, stepNameByWorkflowStep } = useMemo(() => {
     const flattened: AttentionTask[] = [];
     const stepNames = new Map<string, string>();
+    const workflowNames = new Map<string, string>();
+    const workflowStepNames = new Map<string, string>();
     for (const workflowId of workspaceWorkflowIds) {
       const snapshot = snapshots[workflowId];
       if (!snapshot) continue;
+      const workflow = workflows.find((w) => w.id === workflowId);
+      if (workflow) workflowNames.set(workflowId, workflow.name);
       const stepNameById = new Map(snapshot.steps.map((step) => [step.id, step.title]));
+      for (const [stepId, title] of stepNameById) {
+        workflowStepNames.set(workflowStepKey(workflowId, stepId), title);
+      }
       for (const task of snapshot.tasks) {
         flattened.push({
           id: task.id,
@@ -73,8 +88,13 @@ export function useCoordinatorTasks(workspaceId: string | null): UseCoordinatorT
         if (stepName) stepNames.set(task.id, stepName);
       }
     }
-    return { tasks: flattened, stepNameByTaskId: stepNames };
-  }, [snapshots, workspaceWorkflowIds]);
+    return {
+      tasks: flattened,
+      stepNameByTaskId: stepNames,
+      workflowNameById: workflowNames,
+      stepNameByWorkflowStep: workflowStepNames,
+    };
+  }, [snapshots, workspaceWorkflowIds, workflows]);
 
   const matches = matchesWorkspace(workspaceContextRead, workspaceId);
   const error = matches && workspaceContextRead.snapshotError !== null;
@@ -101,6 +121,8 @@ export function useCoordinatorTasks(workspaceId: string | null): UseCoordinatorT
   return {
     tasks,
     stepNameByTaskId,
+    workflowNameById,
+    stepNameByWorkflowStep,
     error,
     loadedAt,
     retry: () => {

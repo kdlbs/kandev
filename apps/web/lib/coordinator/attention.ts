@@ -126,6 +126,11 @@ const NEEDS_YOU_KIND_RANK: Record<NeedsYouItemKind, number> = {
 
 const RUNNING_SESSION_STATES = new Set(["RUNNING", "STARTING"]);
 
+/** Whether a primary session state counts as "an agent is running" (AC-COORDINATOR-NEEDS-YOU-002.6). */
+export function isRunningSessionState(state: string | undefined): boolean {
+  return state !== undefined && RUNNING_SESSION_STATES.has(state);
+}
+
 const NANOS_PER_MS = BigInt(1_000_000);
 
 function toEpochMs(value: string | undefined): number | undefined {

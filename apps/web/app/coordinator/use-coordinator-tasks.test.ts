@@ -85,6 +85,12 @@ describe("useCoordinatorTasks - flattening", () => {
     expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1", "t-2"]);
     expect(result.current.stepNameByTaskId.get("t-1")).toBe("Build");
     expect(result.current.stepNameByTaskId.has("t-2")).toBe(false);
+    expect(result.current.workflowNameById.get("wf-a")).toBe("A");
+    expect(result.current.workflowNameById.get("wf-b")).toBe("B");
+    expect(result.current.workflowNameById.has("wf-other")).toBe(false);
+    expect(result.current.stepNameByWorkflowStep.get("wf-a:step-1")).toBe("Build");
+    expect(result.current.stepNameByWorkflowStep.get("wf-b:step-2")).toBe("Review");
+    expect(result.current.stepNameByWorkflowStep.has("wf-other:step-3")).toBe(false);
   });
 });
 

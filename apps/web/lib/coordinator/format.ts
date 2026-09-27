@@ -1,3 +1,7 @@
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+
+const NANOS_PER_MS = BigInt(1_000_000);
+
 /**
  * Formats an item or row's age (ms) as "<h>h <m>m", or "<m>m" under an hour;
  * a negative or missing age (a reference time in the future, or absent) reads
@@ -26,4 +30,15 @@ export function formatLocalTime(epochMs: number): string {
  */
 export function truncatePreview(preview: string, maxLength = 140): string {
   return preview.length > maxLength ? preview.slice(0, maxLength) : preview;
+}
+
+/**
+ * Formats a wire RFC3339 timestamp (e.g. a stall record's `last_event_at` or
+ * `detected_at`) as a local "HH:mm" time. Returns undefined for a missing or
+ * malformed value rather than trusting `Date.parse`'s normalization.
+ */
+export function formatEvidenceTime(value: string | undefined): string | undefined {
+  const ns = parseStrictRfc3339Timestamp(value);
+  if (ns === null) return undefined;
+  return formatLocalTime(Number(ns / NANOS_PER_MS));
 }
