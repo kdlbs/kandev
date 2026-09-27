@@ -74,9 +74,10 @@ Contributors can write the artifacts manually; use of the repository harness is 
 #### Acceptance criteria
 
 - **AC-CI-PR-DOCS-004.1:** Within one pull request revision or merge-group member evaluation, the system shall reuse the initial pull request snapshot and each repeated artifact lookup.
-- **AC-CI-PR-DOCS-004.2:** When a changed requirement keeps its trusted base identity, the system shall resolve it from the exact-head and base documents. It shall not make a GitHub code-search request for that requirement.
-- **AC-CI-PR-DOCS-004.3:** When a requirement is new, moved, unresolved, or ambiguous, the system shall use bounded fallback lookup and shall preserve missing-definition and duplicate-definition failures.
+- **AC-CI-PR-DOCS-004.2:** For every referenced requirement, the evaluator shall locate candidate definitions in that pull request's exact head revision, including files absent from the changed-file list, without making GitHub code-search requests.
+- **AC-CI-PR-DOCS-004.3:** A new or moved requirement shall qualify when it has one valid definition at the exact head. If deletion leaves no definition, or more than one definition remains, coverage shall fail, including when a duplicate is in an unchanged file.
 - **AC-CI-PR-DOCS-004.4:** A full evaluation shall run after pull request creation, reopening, revision changes, base-branch retargets, exact exception-label transitions, manual retries, and merge-group checks. It shall not run after title or description edits, draft-readiness changes, or unrelated label changes.
+- **AC-CI-PR-DOCS-004.5:** An unavailable, incomplete, or over-limit exact-revision lookup shall produce an infrastructure error rather than a coverage success or a missing-definition result.
 
 ## Out of scope
 
@@ -90,3 +91,4 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - [PR documentation coverage](../../../plans/pr-documentation-coverage/plan.md)
 - [GitHub API resilience](../../../plans/github-api-resilience/plan.md)
 - [Absent merge queue label reevaluation fix](../../../plans/pr-docs-absent-queue/plan.md)
+- [Git object requirement lookup](../../../plans/pr-documentation-git-lookup/plan.md)

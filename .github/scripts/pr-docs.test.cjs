@@ -571,7 +571,7 @@ test('multi-design work orders validate each requirement against its owning desi
 test('coverage loading searches only requirements declared by each design', async () => {
   const contents = multiDesignFixtureContents();
   const changed = runtimeAndWorkOrderDiff();
-  const searches = [];
+  const lookups = [];
   const client = {
     async getPullRequest() {
       return pullRequest(42, SHA_B, [], changed.length);
@@ -586,8 +586,8 @@ test('coverage loading searches only requirements declared by each design', asyn
       }
       return contents[pathname];
     },
-    async searchCode(requirementId, directory) {
-      searches.push({ requirementId, directory });
+    async findRequirementPaths(directory, requirementId) {
+      lookups.push({ requirementId, directory });
       return [directory.includes('/platform/')
         ? 'docs/specs/platform/requirements/diagnostic-logging.md'
         : 'docs/specs/web/requirements/browser-retention.md'];
@@ -597,7 +597,7 @@ test('coverage loading searches only requirements declared by each design', asyn
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
-  assert.deepEqual(searches, [
+  assert.deepEqual(lookups, [
     {
       requirementId: 'REQ-PLATFORM-DIAGNOSTIC-LOGGING-001',
       directory: 'docs/specs/platform/requirements',
@@ -1230,45 +1230,17 @@ test('GitHub client stops before an explicit wait exceeds the sleep budget', asy
   assert.equal(logs.some(log => log.includes('next_delay_ms=421000')), true);
 });
 
-test('GitHub client honors a long code-search rate-limit delay within the job budget', async () => {
-  let calls = 0;
-  const delays = [];
+test('GitHub API client no longer exposes code search', () => {
   const client = new validator.GitHubClient({
     owner: 'kdlbs',
     repo: 'kandev',
     token: 'token',
-    sleepImpl: async delay => delays.push(delay),
     fetchImpl: async () => {
-      calls += 1;
-      if (calls === 1) {
-        return {
-          ok: false,
-          status: 429,
-          headers: { 'retry-after': '344' },
-          async text() {
-            return JSON.stringify({ message: 'API rate limit exceeded' });
-          },
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        async text() {
-          return JSON.stringify({
-            incomplete_results: false,
-            items: [],
-            total_count: 0,
-          });
-        },
-      };
+      throw new Error('the documentation evaluator must not request code search');
     },
   });
 
-  const paths = await client.searchCode('REQ-EXAMPLE-001', 'docs/specs');
-
-  assert.deepEqual(paths, []);
-  assert.equal(calls, 2);
-  assert.deepEqual(delays, [344_000]);
+  assert.equal(client.searchCode, undefined);
 });
 
 test('GitHub client retries transport failures with short exponential backoff', async () => {
@@ -1696,7 +1668,7 @@ test('GitHub client converts a request timeout into a bounded error', async () =
 test('coverage loading searches only the referenced requirement files', async () => {
   const contents = uiFixtureContents();
   const loaded = [];
-  const searches = [];
+  const lookups = [];
   const workOrderPath = 'docs/plans/recovery/task-01-recovery.md';
   const changed = [
     { filename: 'apps/web/lib/runtime.ts', status: 'modified' },
@@ -1716,15 +1688,15 @@ test('coverage loading searches only the referenced requirement files', async ()
       }
       return contents[pathname];
     },
-    async searchCode(requirementId, directory) {
-      searches.push({ requirementId, directory });
+    async findRequirementPaths(directory, requirementId) {
+      lookups.push({ requirementId, directory });
       return ['docs/specs/ui/requirements/ui-coverage.md'];
     },
   };
 
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
   assert.equal(result.ok, true, result.errors.join('; '));
-  assert.deepEqual(searches, [{
+  assert.deepEqual(lookups, [{
     requirementId: 'REQ-UI-COVERAGE-001',
     directory: 'docs/specs/ui/requirements',
   }]);
@@ -1736,8 +1708,7 @@ test('coverage loading searches only the referenced requirement files', async ()
   ]);
 });
 
-test('a changed requirement body with the same identity avoids code search', async () => {
-  const baseContents = uiFixtureContents();
+test('a changed requirement body is resolved from its exact head without reading the base', async () => {
   const headContents = uiFixtureContents();
   const requirementPath = 'docs/specs/ui/requirements/ui-coverage.md';
   headContents[requirementPath] = headContents[requirementPath].replace(
@@ -1755,7 +1726,7 @@ test('a changed requirement body with the same identity avoids code search', asy
     { filename: requirementPath, status: 'modified', additions: 1, changes: 1 },
   ];
   const loaded = [];
-  const searches = [];
+  const lookups = [];
   const client = {
     async getPullRequest() {
       return pullRequest(42, SHA_B, [], changed.length);
@@ -1765,37 +1736,34 @@ test('a changed requirement body with the same identity avoids code search', asy
     },
     async getFile(pathname, ref) {
       loaded.push({ pathname, ref });
-      if (ref === SHA_A) {
-        return baseContents[pathname];
-      }
+      assert.equal(ref, SHA_B);
       if (Object.hasOwn(headContents, pathname)) {
         return headContents[pathname];
       }
       throw new Error('GitHub API request failed with HTTP 404: Not Found');
     },
-    async searchCode(requirementId, directory) {
-      searches.push({ requirementId, directory });
-      throw new Error('code search should not run for an unchanged identity');
+    async findRequirementPaths(directory, requirementId) {
+      lookups.push({ requirementId, directory });
+      return [requirementPath];
     },
   };
 
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
-  assert.deepEqual(searches, []);
+  assert.deepEqual(lookups, [{
+    requirementId: 'REQ-UI-COVERAGE-001',
+    directory: 'docs/specs/ui/requirements',
+  }]);
   assert.deepEqual(
     loaded.filter(entry => entry.pathname === requirementPath),
-    [
-      { pathname: requirementPath, ref: SHA_B },
-      { pathname: requirementPath, ref: SHA_A },
-    ],
+    [{ pathname: requirementPath, ref: SHA_B }],
   );
 });
 
-test('a requirement rename can reuse its unchanged base identity', async () => {
+test('a moved requirement resolves by content in its exact-head path', async () => {
   const requirementPath = 'docs/specs/ui/requirements/ui-coverage.md';
   const renamedPath = 'docs/specs/ui/requirements/renamed-coverage.md';
-  const baseContents = uiFixtureContents();
   const headContents = uiFixtureContents();
   headContents[renamedPath] = headContents[requirementPath];
   delete headContents[requirementPath];
@@ -1826,14 +1794,16 @@ test('a requirement rename can reuse its unchanged base identity', async () => {
     },
     async getFile(pathname, ref) {
       loaded.push({ pathname, ref });
-      const source = ref === SHA_A ? baseContents : headContents;
-      if (Object.hasOwn(source, pathname)) {
-        return source[pathname];
+      assert.equal(ref, SHA_B);
+      if (Object.hasOwn(headContents, pathname)) {
+        return headContents[pathname];
       }
       throw new Error('GitHub API request failed with HTTP 404: Not Found');
     },
-    async searchCode() {
-      throw new Error('code search should not run for an unchanged rename');
+    async findRequirementPaths(directory, requirementId) {
+      assert.equal(directory, 'docs/specs/ui/requirements');
+      assert.equal(requirementId, 'REQ-UI-COVERAGE-001');
+      return [renamedPath];
     },
   };
 
@@ -1842,10 +1812,7 @@ test('a requirement rename can reuse its unchanged base identity', async () => {
   assert.equal(result.status, 'covered', result.errors.join('; '));
   assert.deepEqual(
     loaded.filter(entry => entry.pathname === renamedPath || entry.pathname === requirementPath),
-    [
-      { pathname: renamedPath, ref: SHA_B },
-      { pathname: requirementPath, ref: SHA_A },
-    ],
+    [{ pathname: renamedPath, ref: SHA_B }],
   );
 });
 
@@ -1880,6 +1847,31 @@ function repeatedCoverageFixture() {
   return { contents, changed, requirementPath, requirementIds };
 }
 
+function sevenRequirementCoverageFixture() {
+  const contents = uiFixtureContents();
+  const planPath = 'docs/plans/recovery/plan.md';
+  const workOrderPath = 'docs/plans/recovery/task-01-recovery.md';
+  const designPath = 'docs/specs/ui/system-design/ui-coverage.md';
+  const requirementPath = 'docs/specs/ui/requirements/ui-coverage.md';
+  const requirementIds = Array.from({ length: 7 }, (_, index) =>
+    `REQ-UI-COVERAGE-00${index + 1}`
+  );
+  for (const pathname of [planPath, workOrderPath, designPath]) {
+    contents[pathname] = contents[pathname].replace(
+      '  - REQ-UI-COVERAGE-001',
+      requirementIds.map(id => `  - ${id}`).join('\n'),
+    );
+  }
+  contents[workOrderPath] = contents[workOrderPath].replace(
+    '  - AC-UI-COVERAGE-001.3',
+    requirementIds.map(id => `  - ${id.replace('REQ-', 'AC-')}.3`).join('\n'),
+  );
+  contents[requirementPath] = requirementIds.map(id =>
+    `### ${id}\n\n- **${id.replace('REQ-', 'AC-')}.3:** Runtime changes have a work order.\n`
+  ).join('\n');
+  return { contents, changed: runtimeAndWorkOrderDiff(), requirementPath, requirementIds };
+}
+
 function coverageClient(contents, changed, overrides = {}) {
   return {
     async getPullRequest() {
@@ -1901,21 +1893,67 @@ function coverageClient(contents, changed, overrides = {}) {
       }
       return contents[pathname];
     },
+    async findRequirementPaths(directory, requirementId) {
+      const prefix = `${directory}/`;
+      return Object.entries(contents)
+        .filter(([pathname, content]) =>
+          pathname.startsWith(prefix)
+          && pathname.endsWith('.md')
+          && typeof content === 'string'
+          && content.includes(requirementId)
+        )
+        .map(([pathname]) => pathname);
+    },
     ...overrides,
   };
 }
 
-// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
-test('six work orders sharing three requirements stay within the search quota', async () => {
-  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
-  const searches = [];
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-004.2
+test('seven requirements use exact-head lookup in one unchanged document without code search', async () => {
+  const { contents, changed, requirementPath, requirementIds } = sevenRequirementCoverageFixture();
+  const lookups = [];
+  let requirementReads = 0;
   const client = coverageClient(contents, changed, {
-    async searchCode(requirementId, directory) {
-      searches.push({ requirementId, directory });
-      if (searches.length > 10) {
-        throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
-      }
+    async findRequirementPaths(directory, requirementId) {
+      lookups.push({ directory, requirementId });
       return [requirementPath];
+    },
+    async getFile(pathname, ref) {
+      assert.equal(ref, SHA_B);
+      if (pathname === requirementPath) {
+        requirementReads += 1;
+      }
+      if (!Object.hasOwn(contents, pathname)) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+    async searchCode() {
+      throw new Error('GitHub code search must not be used');
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.deepEqual(lookups, requirementIds.map(requirementId => ({
+    directory: 'docs/specs/ui/requirements',
+    requirementId,
+  })));
+  assert.equal(requirementReads, 1);
+});
+
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
+test('six work orders reuse three exact-head requirement lookups', async () => {
+  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
+  const lookups = [];
+  const client = coverageClient(contents, changed, {
+    async findRequirementPaths(directory, requirementId) {
+      lookups.push({ requirementId, directory });
+      return [requirementPath];
+    },
+    async searchCode() {
+      throw new Error('GitHub code search must not be used');
     },
   });
 
@@ -1923,39 +1961,38 @@ test('six work orders sharing three requirements stay within the search quota', 
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
   assert.equal(result.workOrders.length, 6);
-  assert.deepEqual(searches, requirementIds.map(requirementId => ({
+  assert.deepEqual(lookups, requirementIds.map(requirementId => ({
     requirementId,
     directory: 'docs/specs/ui/requirements',
   })));
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
-test('newly added requirements resolve from the head diff without code search', async () => {
+test('newly added requirements resolve from their exact-head definitions', async () => {
   const { contents, changed, requirementPath: originalPath } = repeatedCoverageFixture();
   const requirementPath = 'docs/specs/ui/requirements/coverage.md';
   contents[requirementPath] = contents[originalPath];
   delete contents[originalPath];
   changed.push({ filename: requirementPath, status: 'added' });
-  let searches = 0;
-  let listings = 0;
+  let lookups = 0;
   const client = coverageClient(contents, changed, {
-    async searchCode() {
-      searches += 1;
-      throw new Error('code search should not run for a newly added requirement');
-    },
-    async listDirectory(directory, ref) {
+    async findRequirementPaths(directory, requirementId) {
       assert.equal(directory, 'docs/specs/ui/requirements');
-      assert.equal(ref, SHA_B);
-      listings += 1;
-      return [{ path: requirementPath, type: 'file' }];
+      lookups += 1;
+      return Object.entries(contents)
+        .filter(([pathname, content]) =>
+          pathname.startsWith(`${directory}/`)
+          && pathname.endsWith('.md')
+          && content.includes(requirementId)
+        )
+        .map(([pathname]) => pathname);
     },
   });
 
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
-  assert.equal(searches, 0);
-  assert.equal(listings, 1);
+  assert.equal(lookups, 3);
 });
 
 // @covers AC-CI-PR-DOCS-001.5
@@ -1967,62 +2004,36 @@ test('newly added canonical requirements still reject duplicate IDs', async () =
   delete contents[originalPath];
   contents[duplicatePath] = contents[requirementPath];
   changed.push({ filename: requirementPath, status: 'added' });
-  let searches = 0;
-  let listings = 0;
-  const client = coverageClient(contents, changed, {
-    async searchCode() {
-      searches += 1;
-      return [requirementPath];
-    },
-    async listDirectory(directory, ref) {
-      assert.equal(directory, 'docs/specs/ui/requirements');
-      assert.equal(ref, SHA_B);
-      listings += 1;
-      return [
-        { path: requirementPath, type: 'file' },
-        { path: duplicatePath, type: 'file' },
-      ];
-    },
-  });
+  const client = coverageClient(contents, changed);
 
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'invalid', result.errors.join('; '));
   assert.match(result.errors.join('; '), /ambiguous definitions/);
-  assert.equal(searches, 0);
-  assert.equal(listings, 1);
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5
-test('directory fallback reuses exact-head entries without accepting missing requirements', async t => {
-  for (const outcome of ['file', 'empty', 'missing']) {
-    await t.test(outcome, async () => {
-      const { contents, changed, requirementPath } = repeatedCoverageFixture();
-      const fallbackPath = 'docs/specs/ui/requirements/coverage.md';
-      contents[fallbackPath] = contents[requirementPath];
-      delete contents[requirementPath];
-      let listings = 0;
-      const client = coverageClient(contents, changed, {
-        async searchCode() {
-          return [];
-        },
-        async listDirectory(directory, ref) {
-          assert.equal(directory, 'docs/specs/ui/requirements');
-          assert.equal(ref, SHA_B);
-          listings += 1;
-          if (outcome === 'missing') {
-            throw new Error('GitHub API request failed with HTTP 404: Not Found');
-          }
-          return outcome === 'file' ? [{ path: fallbackPath, type: 'file' }] : [];
-        },
-      });
+test('missing Git matches do not fall back to a requirement filename guess', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  const guessedPath = 'docs/specs/ui/requirements/coverage.md';
+  contents[guessedPath] = contents[requirementPath];
+  delete contents[requirementPath];
+  const loaded = [];
+  const client = coverageClient(contents, changed, {
+    async findRequirementPaths() {
+      return [];
+    },
+    async getFile(pathname, ref) {
+      loaded.push({ pathname, ref });
+      return contents[pathname];
+    },
+  });
 
-      const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
-      assert.equal(result.status, outcome === 'file' ? 'covered' : 'invalid', result.errors.join('; '));
-      assert.equal(listings, 1);
-    });
-  }
+  assert.equal(result.status, 'invalid');
+  assert.match(result.errors.join('; '), /not defined in ui requirements/);
+  assert.equal(loaded.some(entry => entry.pathname === guessedPath), false);
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5
@@ -2038,10 +2049,10 @@ test('designs sharing an ID reuse lookups only within their requirement director
   contents['docs/specs/ci/system-design/shared.md'] = contents['docs/specs/ui/system-design/ui-coverage.md']
     .replace('system: ui', 'system: ci');
   contents['docs/specs/ci/requirements/shared.md'] = contents['docs/specs/ui/requirements/ui-coverage.md'];
-  const searches = [];
+  const lookups = [];
   const client = coverageClient(contents, runtimeAndWorkOrderDiff(), {
-    async searchCode(requirementId, directory) {
-      searches.push({ requirementId, directory });
+    async findRequirementPaths(directory, requirementId) {
+      lookups.push({ requirementId, directory });
       return [directory === 'docs/specs/ui/requirements'
         ? 'docs/specs/ui/requirements/ui-coverage.md'
         : 'docs/specs/ci/requirements/shared.md'];
@@ -2051,61 +2062,68 @@ test('designs sharing an ID reuse lookups only within their requirement director
   const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
-  assert.deepEqual(searches, ['ui', 'ci'].map(system => ({
+  assert.deepEqual(lookups, ['ui', 'ci'].map(system => ({
     requirementId: 'REQ-UI-COVERAGE-001',
     directory: `docs/specs/${system}/requirements`,
   })));
 });
 
 // @covers AC-CI-PR-DOCS-003.2
-test('lookup errors fail closed without poisoning later evaluations', async t => {
-  for (const boundary of ['searchCode', 'listDirectory']) {
-    await t.test(boundary, async () => {
-      const { contents, changed, requirementPath } = repeatedCoverageFixture();
-      const directoryFallbackPath = 'docs/specs/ui/requirements/coverage.md';
-      contents[directoryFallbackPath] = contents[requirementPath];
-      let fail = true;
-      const client = coverageClient(contents, changed, {
-        async searchCode() {
-          if (fail && boundary === 'searchCode') {
-            throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
-          }
-          return boundary === 'listDirectory' ? [] : [requirementPath];
-        },
-        async listDirectory() {
-          if (fail && boundary === 'listDirectory') {
-            throw new Error('GitHub API request failed with HTTP 503: Service Unavailable');
-          }
-          return [{ path: directoryFallbackPath, type: 'file' }];
-        },
-      });
+test('lookup errors fail closed without poisoning later evaluations', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  let fail = true;
+  const client = coverageClient(contents, changed, {
+    async findRequirementPaths() {
+      if (fail) {
+        throw new Error('Git object lookup search failed (time limit exceeded)');
+      }
+      return [requirementPath];
+    },
+  });
 
-      const failed = await validator.evaluatePullRequest({ client, pullNumber: 42 });
-      assert.equal(failed.ok, false);
-      assert.equal(failed.status, 'error');
-      assert.match(failed.errors.join('; '), /GitHub API request failed/);
-      fail = false;
-      const recovered = await validator.evaluatePullRequest({ client, pullNumber: 42 });
-      assert.equal(recovered.status, 'covered', recovered.errors.join('; '));
-    });
-  }
+  const failed = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.status, 'error');
+  assert.match(failed.errors.join('; '), /Git object lookup search failed/);
+  fail = false;
+  const recovered = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+  assert.equal(recovered.status, 'covered', recovered.errors.join('; '));
+});
+
+// @covers AC-CI-PR-DOCS-004.5
+test('a Git candidate that the exact-head contents API cannot read is an infrastructure error', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  const client = coverageClient(contents, changed, {
+    async getFile(pathname, ref) {
+      assert.equal(ref, SHA_B);
+      if (pathname === requirementPath) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      if (!Object.hasOwn(contents, pathname)) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'error');
+  assert.match(result.errors.join('; '), /found in the exact-head Git tree but could not be read/);
 });
 
 // @covers AC-CI-PR-DOCS-001.5
-test('lookup reuse preserves ambiguous requirement detection', async t => {
-  for (const source of ['search', 'PR-only file']) {
+test('exact-head lookup detects duplicates in unchanged or changed files', async t => {
+  for (const source of ['unchanged file', 'changed file']) {
     await t.test(source, async () => {
       const { contents, changed, requirementPath } = repeatedCoverageFixture();
       const duplicatePath = 'docs/specs/ui/requirements/duplicate.md';
       contents[duplicatePath] = contents[requirementPath];
-      if (source === 'PR-only file') {
+      if (source === 'changed file') {
         changed.push({ filename: duplicatePath, status: 'added' });
       }
-      const client = coverageClient(contents, changed, {
-        async searchCode() {
-          return source === 'search' ? [requirementPath, duplicatePath] : [requirementPath];
-        },
-      });
+      const client = coverageClient(contents, changed);
 
       const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
 
@@ -2120,17 +2138,23 @@ test('revision retries reload requirement lookups and files at the new exact hea
   const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
   const renamedPath = 'docs/specs/ui/requirements/renamed.md';
   let metadataReads = 0;
-  let searches = 0;
+  const snapshots = [];
+  const lookups = [];
   const client = coverageClient(contents, changed, {
     async getPullRequest() {
       return pullRequest(42, metadataReads++ === 0 ? SHA_B : SHA_C, [], changed.length);
     },
-    async searchCode() {
-      searches += 1;
-      return [metadataReads === 1 ? requirementPath : renamedPath];
+    createGitHeadReader(number, headSha) {
+      assert.equal(number, 42);
+      snapshots.push(headSha);
+      return {
+        async findRequirementPaths(directory, requirementId) {
+          lookups.push({ directory, headSha, requirementId });
+          return [headSha === SHA_B ? requirementPath : renamedPath];
+        },
+      };
     },
     async getFile(pathname, ref) {
-      assert.equal(ref, metadataReads === 1 ? SHA_B : SHA_C);
       if (ref === SHA_C && pathname === requirementPath) {
         throw new Error('GitHub API request failed with HTTP 404: Not Found');
       }
@@ -2142,20 +2166,30 @@ test('revision retries reload requirement lookups and files at the new exact hea
 
   assert.equal(result.status, 'covered', result.errors.join('; '));
   assert.equal(result.headSha, SHA_C);
-  assert.equal(searches, requirementIds.length * 2);
+  assert.deepEqual(snapshots, [SHA_B, SHA_C]);
+  assert.deepEqual(lookups.map(lookup => lookup.headSha), [
+    ...requirementIds.map(() => SHA_B),
+    ...requirementIds.map(() => SHA_C),
+  ]);
 });
 
 // @covers AC-CI-PR-DOCS-003.4
 test('merge-group members do not share cached requirement lookups or contents', async () => {
   const { contents, changed, requirementPath } = repeatedCoverageFixture();
   let currentMember;
+  const snapshots = [];
   const client = coverageClient(contents, changed, {
     async getPullRequest(number) {
       currentMember = number;
       return pullRequest(number, number === 1 ? SHA_D : SHA_E, [], changed.length);
     },
-    async searchCode() {
-      return currentMember === 1 ? [requirementPath] : [];
+    createGitHeadReader(number, headSha) {
+      snapshots.push({ number, headSha });
+      return {
+        async findRequirementPaths() {
+          return number === 1 ? [requirementPath] : [];
+        },
+      };
     },
     async getFile(pathname, ref) {
       assert.equal(ref, currentMember === 1 ? SHA_D : SHA_E);
@@ -2179,6 +2213,10 @@ test('merge-group members do not share cached requirement lookups or contents', 
   assert.equal(result.ok, false);
   assert.deepEqual(result.memberResults.map(member => member.status), ['covered', 'invalid']);
   assert.match(result.memberResults[1].errors.join('; '), /not defined in ui requirements/);
+  assert.deepEqual(snapshots, [
+    { number: 1, headSha: SHA_D },
+    { number: 2, headSha: SHA_E },
+  ]);
 });
 
 test('missing referenced artifacts become invalid coverage through the API adapter', async () => {

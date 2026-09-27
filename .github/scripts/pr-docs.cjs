@@ -3,6 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { TextDecoder } = require('node:util');
+const { GitHeadReader } = require('./pr-docs-git.cjs');
 
 const POSIX_PATH = path.posix;
 const WORK_ORDER_PATTERN = /^docs\/plans\/[^/]+\/task-\d{2}-[^/]+\.md$/;
@@ -67,6 +68,7 @@ const MAX_CHANGED_WORK_ORDERS = 100;
 const MAX_TOTAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_CHANGED_FILES = 3000;
+const MAX_REQUIREMENT_CANDIDATES = 200;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 250;
@@ -193,9 +195,6 @@ function requestClassForEndpoint(endpoint, method) {
   }
   if (pathname.includes('/pulls/') && pathname.endsWith('/files')) {
     return 'changed-files';
-  }
-  if (pathname === '/search/code') {
-    return 'code-search';
   }
   if (pathname === '/graphql') {
     return 'merge-queue';
@@ -938,6 +937,9 @@ class GitHubClient {
     fetchImpl = globalThis.fetch,
     sleepImpl = defaultSleep,
     logImpl = defaultLog,
+    trustedSha,
+    gitCwd = process.cwd(),
+    gitHeadReaderFactory = options => new GitHeadReader(options),
   } = {}) {
     if (typeof owner !== 'string' || typeof repo !== 'string' || owner === '' || repo === '') {
       throw new Error('GitHub repository owner and name are required');
@@ -954,13 +956,31 @@ class GitHubClient {
     if (typeof logImpl !== 'function') {
       throw new Error('log implementation is required');
     }
+    if (typeof gitHeadReaderFactory !== 'function') {
+      throw new Error('Git head reader factory is required');
+    }
+    if (typeof gitCwd !== 'string' || gitCwd.length === 0) {
+      throw new Error('Git working directory is required');
+    }
     this.owner = owner;
     this.repo = repo;
     this.token = token;
     this.fetchImpl = fetchImpl;
     this.sleepImpl = sleepImpl;
     this.logImpl = logImpl;
+    this.trustedSha = trustedSha;
+    this.gitCwd = gitCwd;
+    this.gitHeadReaderFactory = gitHeadReaderFactory;
     this.sleptMs = 0;
+  }
+
+  createGitHeadReader(pullNumber, headSha) {
+    return this.gitHeadReaderFactory({
+      cwd: this.gitCwd,
+      headSha,
+      pullNumber,
+      trustedSha: this.trustedSha,
+    });
   }
 
   async request(endpoint, { method = 'GET', body, requestClass: requestedClass } = {}) {
@@ -1322,63 +1342,6 @@ class GitHubClient {
     }
   }
 
-  async listDirectory(pathname, ref) {
-    const normalized = normalizeRepoPath(pathname);
-    const encodedPath = normalized.split('/').map(encodeURIComponent).join('/');
-    const response = await this.request(
-      `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
-      { requestClass: 'directory-listing' },
-    );
-    if (!Array.isArray(response)) {
-      throw new Error(`${normalized} is not a directory listing`);
-    }
-    return response.map(entry => {
-      if (!entry || typeof entry.path !== 'string') {
-        throw new Error(`${normalized} contains an invalid directory entry`);
-      }
-      const entryPath = normalizeRepoPath(entry.path);
-      if (!['file', 'directory'].includes(entry.type)) {
-        throw new Error(`${entryPath} is not a regular file or directory`);
-      }
-      return { path: entryPath, type: entry.type };
-    });
-  }
-
-  async searchCode(text, directory) {
-    if (typeof text !== 'string' || text.trim().length === 0) {
-      throw new Error('GitHub code-search text is missing');
-    }
-    const normalizedDirectory = normalizeRepoPath(directory);
-    const query = `"${text}" repo:${this.owner}/${this.repo} path:${normalizedDirectory}`;
-    const response = await this.request(
-      `/search/code?q=${encodeURIComponent(query)}&per_page=100`,
-      { requestClass: 'code-search' },
-    );
-    if (
-      !response
-      || !Array.isArray(response.items)
-      || response.incomplete_results === true
-      || !Number.isInteger(response.total_count)
-      || response.total_count < response.items.length
-      || response.total_count > 100
-    ) {
-      throw new Error('GitHub code-search response is incomplete or exceeds the supported limit');
-    }
-    const prefix = `${normalizedDirectory}/`;
-    const paths = new Set();
-    for (const item of response.items) {
-      if (typeof item?.path !== 'string') {
-        throw new Error('GitHub code-search entry has no path');
-      }
-      const itemPath = normalizeRepoPath(item.path);
-      if (!itemPath.startsWith(prefix) || !itemPath.endsWith('.md')) {
-        throw new Error(`GitHub code-search returned an unsupported path: ${itemPath}`);
-      }
-      paths.add(itemPath);
-    }
-    return [...paths];
-  }
-
   async createCommitStatus(sha, status, context = STATUS_CONTEXT) {
     requireCommitSha(sha, 'status revision');
     if (!status || !['pending', 'success', 'failure', 'error'].includes(status.state)) {
@@ -1508,73 +1471,25 @@ function isMissingResourceError(error) {
   return /\bHTTP 404\b/.test(String(error?.message ?? error));
 }
 
-function hasRequirementHeading(content, requirementId) {
-  return typeof content === 'string' && requirementHeadingPattern(requirementId).test(content);
-}
-
-function changedRequirementSources(changedFiles, requirementDirectory) {
-  const sources = new Map();
-  const prefix = `${requirementDirectory}/`;
-  for (const change of changedFiles ?? []) {
-    const currentPath = typeof change === 'string' ? change : change?.filename;
-    if (typeof currentPath !== 'string') {
-      continue;
-    }
-    let normalizedCurrent;
-    try {
-      normalizedCurrent = normalizeRepoPath(currentPath);
-    } catch {
-      continue;
-    }
-    const status = typeof change === 'string' ? undefined : change?.status;
-    const headPath = status === 'removed' ? undefined : normalizedCurrent;
-    const isAdded = status === 'added';
-    let basePath = isAdded ? undefined : normalizedCurrent;
-    if (status === 'renamed' && typeof change.previous_filename === 'string') {
-      try {
-        basePath = normalizeRepoPath(change.previous_filename);
-      } catch {
-        basePath = undefined;
-      }
-    }
-    const normalizedHead = headPath && headPath.startsWith(prefix) && headPath.endsWith('.md')
-      ? headPath
-      : undefined;
-    const normalizedBase = basePath && basePath.startsWith(prefix) && basePath.endsWith('.md')
-      ? basePath
-      : undefined;
-    if (!normalizedHead && !normalizedBase) {
-      continue;
-    }
-    const key = normalizedHead ?? `base:${normalizedBase}`;
-    if (!sources.has(key)) {
-      sources.set(key, { basePath: normalizedBase, headPath: normalizedHead, isAdded });
-    }
-  }
-  return [...sources.values()];
-}
-
-function candidateRequirementPath(requirementDirectory, requirementId) {
-  const parts = requirementId.split('-');
-  const filename = `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
-  return `${requirementDirectory}/${filename}`;
-}
-
-async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) {
+async function loadCoverageContents({ client, changedFiles, headSha, pullNumber }) {
   if (!classifyChangedFiles(changedFiles).requiresCoverage) {
     return {};
   }
   const contents = {};
   const loaded = new Map();
   const requirementSearches = new Map();
-  const requirementDirectories = new Map();
+  const changedWorkOrders = selectChangedWorkOrders(changedFiles);
+  let gitReader;
   let documentCount = 0;
   let totalBytes = 0;
-  async function load(pathname, ref, targetContents) {
+  async function load(pathname, ref, targetContents, { mustExist = false } = {}) {
     const normalized = normalizeRepoPath(pathname);
     const cacheKey = `${ref}\u0000${normalized}`;
     if (loaded.has(cacheKey)) {
       const content = loaded.get(cacheKey);
+      if (mustExist && content === undefined) {
+        throw new Error(`${normalized} was found in the exact-head Git tree but could not be read`);
+      }
       if (targetContents) {
         targetContents[normalized] = content;
       }
@@ -1589,6 +1504,9 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
     } catch (error) {
       if (!isMissingResourceError(error)) {
         throw error;
+      }
+      if (mustExist) {
+        throw new Error(`${normalized} was found in the exact-head Git tree but could not be read`);
       }
     }
     loaded.set(cacheKey, content);
@@ -1610,23 +1528,34 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
     return content;
   }
 
-  async function listRequirementDirectory(requirementDirectory, ref) {
-    const key = JSON.stringify([requirementDirectory, ref]);
-    if (!requirementDirectories.has(key)) {
-      let entries = [];
-      try {
-        entries = await client.listDirectory(requirementDirectory, ref);
-      } catch (error) {
-        if (!isMissingResourceError(error)) {
-          throw error;
-        }
+  async function findRequirementPaths(requirementDirectory, requirementId) {
+    const key = JSON.stringify([headSha, requirementDirectory, requirementId]);
+    if (!requirementSearches.has(key)) {
+      gitReader ??= typeof client.createGitHeadReader === 'function'
+        ? client.createGitHeadReader(pullNumber, headSha)
+        : client;
+      if (typeof gitReader?.findRequirementPaths !== 'function') {
+        throw new Error('exact-head Git requirement lookup is unavailable');
       }
-      requirementDirectories.set(key, entries);
+      const paths = await gitReader.findRequirementPaths(requirementDirectory, requirementId);
+      if (!Array.isArray(paths) || paths.length > MAX_REQUIREMENT_CANDIDATES) {
+        throw new Error('exact-head Git requirement lookup returned an invalid candidate list');
+      }
+      const safePaths = new Set();
+      const prefix = `${requirementDirectory}/`;
+      for (const pathname of paths) {
+        const normalized = normalizeRepoPath(pathname);
+        if (!normalized.startsWith(prefix) || !normalized.endsWith('.md')) {
+          throw new Error('exact-head Git requirement lookup returned an unsupported path');
+        }
+        safePaths.add(normalized);
+      }
+      requirementSearches.set(key, [...safePaths]);
     }
-    return requirementDirectories.get(key);
+    return requirementSearches.get(key);
   }
 
-  for (const workOrderPath of selectChangedWorkOrders(changedFiles)) {
+  for (const workOrderPath of changedWorkOrders) {
     const workOrderContent = await load(workOrderPath, headSha, contents);
     if (workOrderContent === undefined) {
       continue;
@@ -1687,116 +1616,17 @@ async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) 
       }
       const requirementDirectory = `docs/specs/${system}/requirements`;
       const requirementPaths = new Set();
-      const baseContentByHeadPath = new Map();
-      const addedRequirementPaths = new Set();
-      for (const source of changedRequirementSources(changedFiles, requirementDirectory)) {
-        if (source.headPath) {
-          requirementPaths.add(source.headPath);
-          if (source.isAdded) {
-            addedRequirementPaths.add(source.headPath);
-          }
-          await load(source.headPath, headSha, contents);
-        }
-        if (source.basePath) {
-          const baseContent = await load(source.basePath, baseSha);
-          if (source.headPath) {
-            baseContentByHeadPath.set(source.headPath, baseContent);
-          }
-        }
-      }
-      const checkedAddedRequirementPaths = new Set();
-      if (addedRequirementPaths.size > 0 && typeof client.listDirectory === 'function') {
-        const entries = await listRequirementDirectory(requirementDirectory, headSha);
-        for (const entry of entries) {
-          if (
-            entry.type !== 'file'
-            || typeof entry.path !== 'string'
-            || !entry.path.startsWith(`${requirementDirectory}/`)
-            || !entry.path.endsWith('.md')
-          ) {
-            continue;
-          }
-          const pathname = normalizeRepoPath(entry.path);
-          await load(pathname, headSha, contents);
-          if (addedRequirementPaths.has(pathname)) {
-            checkedAddedRequirementPaths.add(pathname);
-          }
-        }
-      }
       const workOrderRequirements = new Set(workOrder.requirements ?? []);
       const referencedRequirementIds = designRequirements.filter(requirementId =>
         workOrderRequirements.has(requirementId)
       );
-      const verifiedRequirementIds = new Set();
-      const ambiguousRequirementIds = new Set();
       for (const requirementId of referencedRequirementIds) {
-        const definitions = requirementDefinitions(contents, requirementId, system);
-        if (definitions.length > 1) {
-          ambiguousRequirementIds.add(requirementId);
-          continue;
-        }
-        if (definitions.length !== 1) {
-          continue;
-        }
-        const definition = definitions[0];
-        const baseContent = baseContentByHeadPath.get(definition.pathname);
-        if (
-          hasRequirementHeading(definition.content, requirementId)
-          && (
-            hasRequirementHeading(baseContent, requirementId)
-            || (
-              checkedAddedRequirementPaths.has(definition.pathname)
-              && definition.pathname === candidateRequirementPath(requirementDirectory, requirementId)
-            )
-          )
-        ) {
-          verifiedRequirementIds.add(requirementId);
-        }
-      }
-      const unresolvedRequirementIds = [];
-      if (typeof client.searchCode === 'function') {
-        for (const requirementId of referencedRequirementIds) {
-          if (verifiedRequirementIds.has(requirementId) || ambiguousRequirementIds.has(requirementId)) {
-            continue;
-          }
-          const searchKey = JSON.stringify([requirementDirectory, requirementId]);
-          if (!requirementSearches.has(searchKey)) {
-            requirementSearches.set(
-              searchKey,
-              await client.searchCode(requirementId, requirementDirectory),
-            );
-          }
-          const matches = requirementSearches.get(searchKey);
-          if (matches.length === 0) {
-            unresolvedRequirementIds.push(requirementId);
-          }
-          for (const pathname of matches) {
-            requirementPaths.add(pathname);
-          }
-        }
-      } else {
-        unresolvedRequirementIds.push(
-          ...referencedRequirementIds.filter(requirementId =>
-            !verifiedRequirementIds.has(requirementId) && !ambiguousRequirementIds.has(requirementId)
-          ),
-        );
-      }
-      if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
-        const entries = await listRequirementDirectory(requirementDirectory, headSha);
-        const candidateNames = new Set(unresolvedRequirementIds.map(requirementId =>
-          POSIX_PATH.basename(candidateRequirementPath(requirementDirectory, requirementId))
-        ));
-        for (const entry of entries) {
-          if (entry.type === 'file' && candidateNames.has(POSIX_PATH.basename(entry.path))) {
-            requirementPaths.add(entry.path);
-          }
+        for (const pathname of await findRequirementPaths(requirementDirectory, requirementId)) {
+          requirementPaths.add(pathname);
         }
       }
       for (const pathname of requirementPaths) {
-        const requirementContent = await load(pathname, headSha, contents);
-        if (requirementContent === undefined) {
-          continue;
-        }
+        await load(pathname, headSha, contents, { mustExist: true });
       }
     }
   }
@@ -1834,10 +1664,10 @@ async function evaluatePullRequestSnapshot({ client, pullRequest, expectedHeadSh
   }
   const changedFiles = await client.listFiles(pullRequest.number, pullRequest.changed_files);
   const fileContents = await loadCoverageContents({
-    baseSha: pullRequest.base.sha,
     changedFiles,
     client,
     headSha: pullRequest.head.sha,
+    pullNumber: pullRequest.number,
   });
   return {
     ...validateCoverage({ changedFiles, fileContents }),
@@ -2277,6 +2107,7 @@ async function run({
       owner: repository[1],
       repo: repository[2],
       token: env.GITHUB_TOKEN,
+      trustedSha: env.TRUSTED_CHECKOUT_SHA,
     });
   }
 
