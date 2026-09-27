@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // newDecisionHandlersForTest wraps approveFixture's Service in Handlers, for
@@ -111,6 +113,18 @@ func TestHTTPApproveProposal(t *testing.T) {
 			t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 		}
 	})
+
+	t.Run("403 when the caller lacks workspace.manage", func(t *testing.T) {
+		h, store, c, _ := newDecisionHandlersForTest(t)
+		p := insertProposal(t, store, c, sampleSpec())
+		h.service.authz = &fakeWorkspaceAuthorizer{err: taskservice.ErrForbidden}
+
+		rec := runHandler(h.httpApproveProposal, http.MethodPost,
+			"/api/v1/workspaces/ws-1/coordinators/"+c.ID+"/proposals/"+p.ID+"/approve", "", proposalParams(c.ID, p.ID))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
 }
 
 func TestHTTPRejectProposal(t *testing.T) {
@@ -192,6 +206,18 @@ func TestHTTPRejectProposal(t *testing.T) {
 			"/api/v1/workspaces/ws-1/coordinators/"+c.ID+"/proposals/missing/reject", "", proposalParams(c.ID, "missing"))
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+		}
+	})
+
+	t.Run("403 when the caller lacks workspace.manage", func(t *testing.T) {
+		h, store, c, _ := newDecisionHandlersForTest(t)
+		p := insertProposal(t, store, c, sampleSpec())
+		h.service.authz = &fakeWorkspaceAuthorizer{err: taskservice.ErrForbidden}
+
+		rec := runHandler(h.httpRejectProposal, http.MethodPost,
+			"/api/v1/workspaces/ws-1/coordinators/"+c.ID+"/proposals/"+p.ID+"/reject", "", proposalParams(c.ID, p.ID))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
 		}
 	})
 }

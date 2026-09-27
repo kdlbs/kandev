@@ -6,9 +6,37 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/authz"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 func strPtr(s string) *string { return &s }
+
+// TestRejectProposal_ForbiddenRequiresManageScope proves the reject route
+// authorizes with workspace.manage (not read) before touching the store, and
+// that a denial propagates without a write
+// (docs/plans/workspace-coordinator/task-07-proposals-backend.md's "a reader
+// gets 403").
+func TestRejectProposal_ForbiddenRequiresManageScope(t *testing.T) {
+	store, c, _, svc := approveFixture(t)
+	p := insertProposal(t, store, c, sampleSpec())
+	svc.authz = &fakeWorkspaceAuthorizer{err: taskservice.ErrForbidden}
+
+	_, err := svc.RejectProposal(context.Background(), "ws-1", c.ID, p.ID, RejectProposalRequest{})
+	if !errors.Is(err, taskservice.ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+	assertLastScope(t, svc, authz.ScopeWorkspaceManage)
+
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	if rerr != nil {
+		t.Fatalf("GetProposal: %v", rerr)
+	}
+	if reread.Status != ProposalStatusPending {
+		t.Fatalf("Status = %q, want pending (no write should have happened)", reread.Status)
+	}
+}
 
 func TestRejectProposal_PendingNoReason(t *testing.T) {
 	store, c, _, svc := approveFixture(t)
