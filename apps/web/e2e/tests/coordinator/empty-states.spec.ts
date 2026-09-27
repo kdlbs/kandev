@@ -19,6 +19,36 @@ test.describe("Coordinator missing/empty/failure states", () => {
     }
   });
 
+  // Sidebar rows read the active-workspace store slice, not the coordinator
+  // route's URL param (the coordinator route never syncs the two, unlike
+  // kanban/office routes), so a freshly created workspace only becomes what
+  // the sidebar renders once switched to through the real picker. seedData.workspaceId
+  // is not usable here either: it is a worker-scoped fixture shared across
+  // every test in the run, and other specs create coordinators on it, so it
+  // is not reliably coordinator-free by the time this test executes.
+  test("with no coordinator the sidebar Inbox row is unchanged and the generic entry has no badge (task-04 Acceptance)", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const workspace = await apiClient.createWorkspace(`Coordinator Empty Sidebar ${Date.now()}`);
+    try {
+      await testPage.goto("/");
+      await testPage.getByTestId("sidebar-workspace-trigger").click();
+      await testPage.getByTestId(`sidebar-workspace-item-${workspace.id}`).click();
+
+      await testPage.goto(linkToCoordinator(workspace.id));
+      await expect(testPage.getByTestId("no-coordinator-state")).toBeVisible();
+      await expect(testPage.getByTestId("coordinator-count-strip")).toHaveCount(0);
+
+      await expect(testPage.getByTestId("sidebar-needs-you-inbox")).toBeVisible();
+      const genericRow = testPage.getByTestId("sidebar-coordinator-generic");
+      await expect(genericRow).toBeVisible();
+      await expect(genericRow).toHaveText("Coordinator");
+    } finally {
+      await apiClient.deleteWorkspace(workspace.id, workspace.name);
+    }
+  });
+
   test("an id not in this workspace shows the unknown-coordinator state, not a 404 (AC .006.4)", async ({
     testPage,
     apiClient,

@@ -10,7 +10,7 @@
 // kept separate so it can be dropped independently of this file's coverage.
 import { test, expect } from "../../fixtures/test-base";
 import { waitForSessionState } from "../../helpers/session";
-import { linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
+import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
 const MIN_TOUCH_TARGET_PX = 44;
 
@@ -105,5 +105,63 @@ test.describe("Coordinator screens on a phone viewport", () => {
       (el) => getComputedStyle(el.parentElement ?? el).position,
     );
     expect(stripPosition).toBe("sticky");
+  });
+
+  // The phone nav's Inbox/Coordinator rows live in the "saved sidebar layout"
+  // navigation path (MobileRequiredRows), which only renders once the
+  // workspace has a customized layout on record (revision > 0); a workspace
+  // that has never been customized falls back to the legacy static
+  // destination list, which has no Inbox/Coordinator entries at all. A
+  // freshly created workspace starts at revision 0, so this seeds a minimal
+  // layout first. The phone nav also reads the active-workspace store slice,
+  // not the coordinator route's URL param (the coordinator route never syncs
+  // the two, unlike kanban/office routes), so the workspace is switched to
+  // through the real picker (mobile-workspace-trigger/-item, the
+  // app-nav-sheet's own copy of the sidebar's workspace switcher) before
+  // checking it. seedData.workspaceId is not usable for either concern: it
+  // is a worker-scoped fixture shared across every test in the run, so its
+  // layout/coordinator state depends on what earlier specs left behind.
+  test("with no coordinator the phone nav shows the generic entry with no badge and no strip (task-04 Acceptance)", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const workspace = await apiClient.createWorkspace(`Coordinator Mobile Empty ${Date.now()}`);
+    try {
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: workspace.id,
+          expected_revision: 0,
+          layout: {
+            version: 1,
+            revision: 0,
+            nodes: [{ id: "home", kind: "builtin", visible: true, destination_id: "home" }],
+          },
+        },
+      });
+
+      await testPage.goto("/");
+      await testPage.getByTestId("app-nav-trigger").tap();
+      const switchMenu = testPage.getByTestId("app-nav-sheet");
+      await expect(switchMenu).toBeVisible();
+      await switchMenu.getByTestId("mobile-workspace-trigger").tap();
+      // The dropdown's own menu content renders in a portal outside the
+      // app-nav-sheet dialog, so the item lookup is unscoped (matching the
+      // desktop picker's sidebar-workspace-item-* pattern).
+      await testPage.getByTestId(`mobile-workspace-item-${workspace.id}`).tap();
+
+      await testPage.goto(linkToCoordinator(workspace.id));
+      await expect(testPage.getByTestId("no-coordinator-state")).toBeVisible();
+      await expect(testPage.getByTestId("coordinator-count-strip")).toHaveCount(0);
+
+      await testPage.getByTestId("app-nav-trigger").tap();
+      const menu = testPage.getByTestId("app-nav-sheet");
+      await expect(menu).toBeVisible();
+
+      const genericRow = menu.getByTestId("mobile-sidebar-coordinator-generic");
+      await expect(genericRow).toBeVisible();
+      await expect(genericRow).toHaveText("Coordinator");
+    } finally {
+      await apiClient.deleteWorkspace(workspace.id, workspace.name);
+    }
   });
 });
