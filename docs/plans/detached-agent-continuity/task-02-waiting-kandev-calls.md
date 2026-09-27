@@ -81,7 +81,8 @@ harness tool timeout exceeds the budget.
    backend's answer. A call bound to a stream that a new stream supersedes
    returns `ErrKandevCallOutcomeUnknown`; a call not yet bound goes to the new
    stream once it is confirmed. It sends progress notifications at 20 s intervals or
-   less while waiting.
+   less while waiting. A call made on a new instance before its first
+   confirmation waits on episode 1's channels, as task 01 defines them.
 2. Budget expiry returns `ErrOfflineBudgetExhausted` to every waiting call. A
    call that was sent before the drop returns `ErrKandevCallOutcomeUnknown`.
    A call not yet sent when the stream drops waits instead, including one

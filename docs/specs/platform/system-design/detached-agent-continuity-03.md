@@ -58,22 +58,31 @@ timer.
   jitter factor drawn uniformly from 0.8 to 1.2 for each scheduled timer. The
   clamp applies after the jitter, so a delay is never above 300 s, the
   5-minute cap of `AC-PLATFORM-DETACHED-AGENT-CONTINUITY-002.2`, and never
-  below 4 s. At the cap step the delay is 240 s to 300 s.
+  below 4 s. The delay at `n = 0` is 4 s to 6 s, and at `n = 6` it is 256 s
+  to 300 s.
+- The **cap step** is `n = 7`, the first step whose delay is exactly 300 s
+  for every jitter draw, because 5 s * 128 * 0.8 is above 300 s.
 - Entering Disconnected sets `n = 0` and schedules the first timer. A new
   episode always starts at `n = 0`, whatever the previous episode reached.
 - Every attempt that ends without a clear or a cleanup advances `n` by one,
-  whatever triggered it, up to the step whose delay is 300 s. A joined
+  whatever triggered it, up to the cap step, and never past it. A joined
   trigger does not advance `n`, because it started no attempt.
 - An immediate trigger (reachability, user, or Kubernetes) stops the pending
   timer before it starts its attempt. The attempt's end schedules exactly one
   new timer from the advanced `n`. An immediate trigger therefore never
   shortens or resets the backoff, and never leaves two timers.
 - A result classed as "other error" in the [results
-  table](detached-agent-continuity-01.md#results) sets `n` to the cap step.
-  `n` never decreases within an episode, so every later timer in the episode
-  is at the cap delay, whatever the later results are.
-- The timer callback captures the episode generation. A callback whose
-  generation is no longer current returns without an attempt.
+  table](detached-agent-continuity-01.md#results) sets `n` to the cap step,
+  7. `n` never decreases within an episode, so every later timer in the
+  episode is at the cap delay, whatever the later results are.
+- A timer captures the link generation current when it is scheduled, read
+  under the execution lock. A callback whose generation is no longer current
+  returns without an attempt. Stop while Disconnected increments the
+  generation, so in the same lock hold it stops the pending timer, if any,
+  and schedules one timer at the delay for the current `n` that captures the
+  new generation (see [Stop while disconnected](#stop-while-disconnected)).
+  While an attempt runs, no timer is pending, and the attempt's end
+  schedules the next timer with the generation current at that end.
 - Clear, cleanup, and manager shutdown stop the timer. No timer outlives the
   execution's tracking.
 
@@ -87,6 +96,40 @@ below runs inside the same execution-lock hold as the write it guards, so
 Stop, which also takes that lock, can never interleave between the compare
 and the write. A compare that fails applies the rollback for the step
 reached and returns.
+
+From step 5 until it clears or rolls back, the attempt also holds an
+**attempt record** on the execution, under the execution lock: its
+`attach_id`, an `ended` flag, and an outcome channel. The record decides
+every race between the attempt stream and the attempt:
+
+- Step 5 sets the record, with `ended` false, before it dials.
+- The attempt stream's disconnect callback takes the execution lock. If a
+  record with its `attach_id` exists, it sets `ended` true and fails the
+  attempt as a transport error: it cancels the attempt's context, so the
+  step in progress returns and the attempt rolls back. It does not enter
+  Disconnected. If no
+  record exists, the callback takes the normal generation rule in [part
+  1](detached-agent-continuity-01.md#link-generation): after a clear it
+  enters Disconnected, and after a rollback it is stale and dropped.
+- Step 7.2 and step 7.3 require `ended` false in their lock holds.
+- Step 7.3, when its guard holds, removes the record and closes the outcome
+  channel as cleared, in the same lock hold. A rollback removes the record
+  and closes the outcome channel as rolled back, in its step 1 lock hold.
+
+So a stream that ends before step 7.3 always fails the attempt, and a stream
+that ends after it always enters Disconnected. At most one attempt record
+exists per execution, because attempts are single-flight.
+
+The backend holds each Kandev MCP request that arrives on a stream whose
+`attach_id` matches the attempt record. The request waits on the outcome
+channel, or until the stream's context ends, and is not dispatched. Cleared: the request is dispatched as usual.
+Rolled back: the request is dropped without an answer, and the rollback's
+stream close makes agentctl fail it with `ErrKandevCallOutcomeUnknown` (see
+[part 2](detached-agent-continuity-02.md#agent-guidance)). The backend never
+processed it, and the error text tells the agent to check state before it
+retries. The hold is bounded by the clear deadline in step 6. So no Kandev
+call is processed for a session whose Stop won, as
+`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.6` requires.
 
 1. **Redial.** Call `RedialRemoteInstance`, bounded by 30 s, with the
    identity from the execution's `DeliveryDescriptor`. Handle a non-refresh
@@ -131,9 +174,10 @@ reached and returns.
      `deliveryReplayCursor`, as for every other stream, so it is at the step 4
      barrier.
 
-   The new stream's disconnect callback captures generation `G+1`. Until
-   step 7 clears, that callback does not enter Disconnected. It fails the
-   attempt with a transport error, and the attempt rolls back.
+   The new stream's disconnect callback captures generation `G+1` and the
+   `attach_id`. While the attempt record exists, that callback does not
+   enter Disconnected. It fails the attempt with a transport error, and the
+   attempt rolls back.
 6. **Settle the episode.**
    - Read `GetDeliveryStatus` again. Its `Attachment` (see [part
      2](detached-agent-continuity-02.md#attachment-state)) must report
@@ -142,17 +186,28 @@ reached and returns.
      `AttachedAtSequence` is then the journal high water at the moment this
      stream became current, and the episode's end sequence. Zero is a valid
      end sequence for an empty journal.
+   - If `Attachment.UnjournaledBudgetPause` is set, agentctl could not
+     journal its budget event (see [part
+     2](detached-agent-continuity-02.md#budget-enforcement)). The episode
+     records it as a budget event at `AttachedAtSequence`, so the budget
+     flag and the notice rules of [part
+     1](detached-agent-continuity-01.md#notices) apply to it as to a
+     journaled one, and it sorts after every journaled event at the same
+     sequence. Its notice key is
+     `agent-link-budget-unjournaled:<session_id>:<episode_id>`, so a later
+     attempt that reads it again writes nothing new.
    - Wait until the projected cursor reaches `AttachedAtSequence`, bounded
      by 30 s. The live stream delivers any event that agentctl journaled
      after the step 4 barrier but before the stream became current. When
      this wait succeeds, replay is complete in the sense of
-     `AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.3`, and a 5 s **clear
+     `AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.3`, and a 3 s **clear
      deadline** starts. It bounds the rest of step 6 and step 7 up to the
-     lock hold. Each notice write and the confirm call in that span retries
-     after 250 ms on an error that is neither a transport error nor a 409,
-     until the deadline. When the deadline passes
-     before the lock hold, the attempt rolls back. A reconnect that succeeds
-     therefore always clears within 5 s of replay completing.
+     step 7.3 lock hold. Each notice write and the confirm call in that span
+     retries after 250 ms on an error that is neither a transport error nor
+     a 409, until the deadline. When the deadline passes before the lock
+     hold, the attempt rolls back. Step 7.4 then takes at most 2 s before
+     it publishes. A reconnect that succeeds therefore always publishes its
+     clear within 5 s of replay completing.
    - Classify the submission that was in flight, if any, with
      [`classifyReattachedSubmission`](#submission-classification).
 7. **Clear.** In this order:
@@ -160,8 +215,13 @@ reached and returns.
       ascending journal sequence (see [part
       1](detached-agent-continuity-01.md#notices)). They record journal
       facts, so they stay true if Stop wins below.
-   2. Confirm the stream: `POST /api/v1/agent/stream/confirm` with the
-      attempt's `attach_id`. agentctl is attached from here, and the offline
+   2. In one execution-lock hold, require `LinkGeneration == G+1`, link
+      state `disconnected`, and `ended` false. If any fails, the attempt
+      rolls back without confirming. Then, outside the lock, confirm the
+      stream: `POST /api/v1/agent/stream/confirm` with the
+      attempt's `attach_id`. Stop can still win after that check. Kandev
+      calls that the confirm releases are then held and dropped, as the
+      attempt record states. agentctl is attached from here, and the offline
       budget restarts at its next detach. A 409 `ATTACH_NOT_CURRENT` means
       the stream has ended or been superseded: the attempt fails as a
       transport error and rolls back, and the budget has not restarted.
@@ -169,12 +229,18 @@ reached and returns.
       rollback's close then starts a new episode with a full budget. A
       budget restart therefore always needs a confirm that reached agentctl,
       so attempts that keep failing in steps 4 to 6 never restart it.
-   3. In one execution-lock hold, require `LinkGeneration == G+1` and link
-      state `disconnected`, set link state `connected`, and read the
-      episode's budget flag. The generation does not change here. If the
-      compare fails, Stop won the race and the attempt rolls back.
+   3. In one execution-lock hold, require `LinkGeneration == G+1`, link
+      state `disconnected`, and `ended` false; set link state `connected`,
+      read the episode's budget flag, and remove the attempt record as
+      cleared. The generation does not change here. If the generation or
+      state compare fails, Stop won the race. If `ended` is true, the stream
+      has already gone. Either way the attempt rolls back.
    4. Persist and publish `events.AgentctlReady` with
-      `reconnected_after_ms`, and `budget_paused` set from that flag.
+      `reconnected_after_ms`, and `budget_paused` set from that flag. The
+      SQL write is bounded by 2 s. The publish runs after it returns, fails,
+      or times out, as [part 1](detached-agent-continuity-01.md#write-order)
+      states for a failed write. A write that timed out is logged and
+      counted like a failed one, and the next link write repairs it.
    5. Write the reconnected notice. It is written only after the guard in
       3 held, so it never records a reconnect that Stop overtook. A write
       error is retried up to 3 times, 1 s apart, then logged and counted as
@@ -226,6 +292,8 @@ therefore race without a double resolution.
 | Step 6 cursor wait times out | Rollback |
 | Clear deadline passes before step 7.3 | Rollback. The next attempt writes the same notice keys, so nothing duplicates |
 | Confirm returns 409 in step 7.2 | Rollback. The budget has not restarted |
+| Step 7.2 or 7.3 guard fails (Stop won, or the attempt stream ended) | Rollback. Held Kandev calls are dropped unprocessed |
+| Step 7.4 SQL write fails or passes 2 s | Logged and counted; the publish still runs |
 | Reconnected notice write fails in step 7.5 | Logged and counted; the link stays connected |
 
 ### Typed replay error
@@ -242,7 +310,12 @@ episode ends through durable delivery's existing path instead of a clear:
 2. Write the turn-ended and budget notices for the recorded events at or
    below the projected cursor, in ascending journal sequence. No reconnected
    notice is written, and no budget flag is read, because no queue dispatch
-   follows.
+   follows. Each notice write uses the step 7.5 policy: up to 3 retries,
+   1 s apart, then a log and a count of
+   `agent_link_write_failed_total{target="notice"}`. The branch then goes on
+   to step 3, and that notice is lost, because the episode ends here and no
+   later attempt writes it. The clear deadline does not apply to this
+   branch. The retries add at most 3 s to each notice.
 3. In one execution-lock hold, require `LinkGeneration == G+1` and link state
    `disconnected`, then set link state `cleared` and increment the
    generation. A failed compare means Stop won; the attempt rolls back.
@@ -264,10 +337,29 @@ so that no later attempt finds a half-live transport:
    `last_error`. If the generation differs, Stop owns the link state and the
    link fields are left as they are.
 2. Outside the lock: stop the new stream if step 5 started it, and close the
-   client. A stream that step 7.2 had confirmed was attached, so its close
-   starts a new agentctl episode with a full budget. That happens only when
-   Stop won at step 7.3, and the cleanup then stops the agent. An
-   unconfirmed stream's close leaves agentctl's budget running.
+   client. An unconfirmed stream's close leaves agentctl's budget running. A
+   stream whose step 7.2 confirm reached agentctl was attached, so its close
+   starts a new agentctl episode with a full budget. That happens in exactly
+   these cases, all after the step 7.2 confirm was sent:
+   - Stop won at step 7.3. The cleanup then stops the agent.
+   - The confirm's response was lost, as a transport error. agentctl may or
+     may not have confirmed.
+   - The clear deadline passed between step 7.2 and the step 7.3 lock hold.
+   - The attempt stream ended between step 7.2 and step 7.3, so `ended` was
+     true at step 7.3.
+
+   A repeated confirm and rollback can therefore restart the budget more
+   than once in one backend episode. `AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.4`
+   requires this: the backend did confirm the stream. It stays within
+   `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-004`, because each restart needs
+   an attempt that completed steps 1 to 6 on a working link. By then replay
+   has shown everything the agent did in the chat. Stop is available the
+   whole time. Attempts are also at least one backoff delay apart. When the
+   confirm returned 204 and step 1 keeps link state `disconnected`, the
+   same lock hold sets the episode's `BudgetDeadline` to the rollback time
+   plus the budget, and keeps `Since`.
+   After a lost confirm response the deadline is left as it was. It is the
+   earlier estimate, and it is correct if the confirm never arrived.
 3. Call the new redialer method `DropRedialedTransport(instance)`. It tears
    down the transport state that `Commit` installed and marks the instance's
    transport as lost, so the next redial replaces it:
@@ -305,7 +397,11 @@ rolls back, and its rollback leaves the link state to Stop. Then:
   still run on the host.
 - The user Reconnect trigger is removed. The backoff, reachability, and
   Kubernetes triggers stay, and serve only the cleanup. The step counter
-  continues from its current value.
+  continues from its current value. The same lock hold replaces the pending
+  backoff timer with one that captures the new generation (see [Backoff and
+  timer rules](#backoff-and-timer-rules)), so the cleanup always has a
+  scheduled attempt. With an attempt in flight, that attempt's end schedules
+  it.
 - Any pending prompt-completion waiter resolves as cancelled, the same way a
   stop resolves it today.
 

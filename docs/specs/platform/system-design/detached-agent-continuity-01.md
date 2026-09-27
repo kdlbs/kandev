@@ -569,6 +569,7 @@ label.
 | `agent_link_orphan_reap_total` | `executor_type`, `outcome` (`reaped`, `already_gone`, `reap_failed`) |
 | `agent_link_kandev_call_wait_total` | `outcome` (`answered`, `budget_exhausted`, `unknown_outcome`) |
 | `agent_link_write_failed_total` | `target` (`state`, `notice`) |
+| `agent_link_budget_journal_failed_total` (agentctl) | none |
 
 Each transition also logs one structured zap line with the execution and
 session IDs and the link generation.

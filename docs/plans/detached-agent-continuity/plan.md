@@ -116,9 +116,11 @@ This section lists the integration points per slice.
   - the `RemoteTransportRedialer` interface, the redial error types, and
     `verifyRedialIdentity`;
   - attempt steps with a synchronous replay barrier, an attach-sequence
-    barrier, a 5 s clear deadline, the stream confirm, guarded commit and
-    clear, the reconnected notice after the guard, the typed replay error
-    branch, and rollback after commit;
+    barrier, a 3 s clear deadline plus a 2 s bounded SQL write before the
+    publish, an attempt record that decides stream-end races and holds
+    Kandev calls until the clear, the guarded stream confirm, guarded commit
+    and clear, the reconnected notice after the guard, the typed replay
+    error branch, and rollback after commit;
   - `ConnectFromCursor` over a new `connectUpdatesStreamErr`, with
     `connectUpdatesStream` kept as a wrapper;
   - `classifyReattachedSubmission` for the in-flight submission;

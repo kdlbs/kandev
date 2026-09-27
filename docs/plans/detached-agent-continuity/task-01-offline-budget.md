@@ -38,9 +38,13 @@ from the executor profile.
   flag, close function), episode, per-episode `attachedCh` and
   `exhaustedCh`, `detachedSince`, the timer, `attachedAtSequence` (the
   journal high water read when a stream becomes current), and the
-  enforcement signals. Implement the Stream start, Supersede, Stream end, and
-  Confirm transitions. `GetDeliveryStatus` reports `Attachment{Current,
-  AttachID, Confirmed, AttachedAtSequence}`; zero is a valid sequence.
+  enforcement signals, and the unjournaled budget pause. An instance starts
+  detached in episode 1 with a fresh channel pair, `detachedSince` set, and
+  the budget timer armed; no channel is ever nil. Implement the Stream
+  start, Supersede, Stream end, and Confirm transitions. `GetDeliveryStatus`
+  reports `Attachment{Current, AttachID, Confirmed, AttachedAtSequence,
+  UnjournaledBudgetPause}`; zero is a valid sequence; a Confirm that marks a
+  stream confirmed clears the unjournaled pause.
   `Snapshot()` implements `AttachmentWaiter` for task 02, with `Attached`
   meaning confirmed. `IsAttached` reads under the same mutex and reports a
   current stream.
@@ -50,7 +54,9 @@ from the executor profile.
   idempotent; 409 `ATTACH_NOT_CURRENT` otherwise). A new stream supersedes
   the current one: `FailStreamRequests(old, ErrKandevCallOutcomeUnknown)`,
   close code 4001 `superseded`, and wait for the old goroutines to exit
-  before the new handshake completes.
+  before the new handshake completes. After the wait, re-check under
+  `attachMu` that the new stream is still current; if not, close it with
+  4001 and start no reader or writer.
 - **Stream liveness in `handleAgentStreamWS`:** a ping every 15 s, a 45 s
   read deadline extended on every frame, and a 10 s write deadline on every
   write.
@@ -68,7 +74,9 @@ from the executor profile.
   - after `cancelled` or `stopped`, cancel any still-pending permission
     request, then journal `agent_link.offline_budget_exhausted` once with
     `detached_since`, `exhausted_at`, `outcome`, and the last
-    `cancel_error`;
+    `cancel_error`; an append error retries up to 3 attempts, 1 s apart,
+    then logs, counts `agent_link_budget_journal_failed_total`, keeps the
+    event as the unjournaled budget pause, and ends enforcement;
   - a failed stop selects on a 60 s timer and `attachWaitCh` (checked
     first): the timer repeats the stop, which always runs to its end;
     `attachWaitCh` journals outcome `stop_failed` and ends;
@@ -126,7 +134,14 @@ from the executor profile.
    `AttachedAtSequence` is at or above the budget event's sequence. A stream
    that starts waiting during the 60 s stop-retry wait gets outcome
    `stop_failed` without another stop; one that starts waiting during a stop
-   retry sees that stop's result first.
+   retry sees that stop's result first. A new instance reports detached
+   before any stream; a Kandev call made then waits and never blocks on a
+   nil channel, and with no stream ever confirmed, `expire(1)` releases it
+   with `ErrOfflineBudgetExhausted`. With three starts A, B, C where C
+   supersedes B while B waits on A, B closes with 4001 and never reads
+   `updatesCh` or `requestCh`. A journal append that fails 3 times ends
+   enforcement, increments the counter, and `GetDeliveryStatus` reports the
+   pause until the next Confirm.
 2. The profile value reaches the instance config. Empty means 15. A
    non-integer, overflow, or out-of-range value is rejected at profile save
    and at launch with `ErrInvalidOfflineBudget`.
@@ -139,7 +154,7 @@ from the executor profile.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord|TestBudgetEnforcementRetriesThenStops|TestBudgetStopFailedHoldsGate|TestAttachWaitsForEnforcement|TestAttachedAtSequence|TestUnconfirmedStreamKeepsBudget|TestStreamConfirm|TestStreamSupersede|TestStopRetryAttachWaitTiebreak')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord|TestBudgetEnforcementRetriesThenStops|TestBudgetStopFailedHoldsGate|TestAttachWaitsForEnforcement|TestAttachedAtSequence|TestUnconfirmedStreamKeepsBudget|TestStreamConfirm|TestStreamSupersede|TestStopRetryAttachWaitTiebreak|TestInitialAttachmentState|TestSupersedeRecheckAfterWait|TestBudgetJournalAppendFailure')
 (cd apps/backend && go test -race -count=1 ./cmd/agentctl/... ./internal/orchestrator/executor/... -run 'TestReaperGateHoldsDuringOfflineBudget|TestOfflineBudgetProfileResolution|TestOfflineBudgetProfileValidation')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestIdentityAdvertisesDetachedContinuity|TestStreamCloseReason|TestAgentStreamLiveness|TestAgentStreamConfirmEndpoint|TestAgentStreamSupersedes')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/config/... ./internal/agent/runtime/agentctl/...)

@@ -58,7 +58,9 @@ the conversation notices.
     following part 3's "Backoff and timer rules": one step counter per
     episode that never decreases, advanced by every failed attempt whatever
     its trigger, reset by a new episode, one pending timer, and "other error"
-    at the cap for the rest of the episode;
+    at the cap step `n = 7` for the rest of the episode; each timer captures
+    the generation current when it is scheduled, and Stop while Disconnected
+    replaces the pending timer in its lock hold;
   - a `session.reconnect` WS action, authorized like `RetrySessionDelivery`.
 - **Attempt steps** from part 3 "Attempt steps", each generation compare
   inside the execution-lock hold of the write it guards: redial; pending
@@ -68,12 +70,18 @@ the conversation notices.
   `StreamManager.ConnectFromCursor(ctx, execution, attachID)` with a fresh
   `attach_id` and a 90 s dial bound; a second `GetDeliveryStatus` whose
   `Attachment` must be current with that `attach_id`, then a bounded cursor
-  wait to `AttachedAtSequence` (zero is valid); the 5 s clear deadline that
-  starts when that wait succeeds; the new `classifyReattachedSubmission`
+  wait to `AttachedAtSequence` (zero is valid), recording an
+  `UnjournaledBudgetPause` as a budget event at that sequence; the 3 s clear
+  deadline that starts when that wait succeeds; the attempt record
+  (`attach_id`, `ended`, outcome channel) from step 5 to the clear or
+  rollback, checked by the stream's disconnect callback and by steps 7.2
+  and 7.3; Kandev MCP requests on the attempt stream held until the outcome
+  channel closes, then dispatched (cleared) or dropped (rolled back); the new `classifyReattachedSubmission`
   (the existing `reconcileDisconnectedSubmission` and its call site stay
   unchanged); step 7 in part 3's order: turn-ended and budget notices, the
-  stream confirm, the guarded clear, the `agentctl.ready` publish with
-  `reconnected_after_ms` and `budget_paused`, then the reconnected notice.
+  guarded stream confirm, the guarded clear, the `agentctl.ready` publish
+  with `reconnected_after_ms` and `budget_paused` after an SQL write bounded
+  by 2 s, then the reconnected notice.
   Never `StreamManager.ReconnectAll`. Part 3's failure table applies.
 - **Stream connect refactor in `streams.go`:** move the body of
   `connectUpdatesStream` into `connectUpdatesStreamErr(dialCtx, execution,
@@ -84,10 +92,13 @@ the conversation notices.
   attachID)`.
 - **Typed replay error:** part 3 "Typed replay error": skip steps 5 and 6,
   write the recorded turn-ended and budget notices up to the projected
-  cursor, set link state `cleared` under the guard, and hand the error to
+  cursor (each retried 3 times 1 s apart, then counted and skipped), set
+  link state `cleared` under the guard, and hand the error to
   `handleStreamDisconnectWithAttempt`. Other replay errors roll back.
-- **Rollback after commit:** remove the installed client, advance the
-  generation, close the stream and client, and call the new
+- **Rollback after commit:** remove the installed client and the attempt
+  record, advance the generation, after a 204 confirm move `BudgetDeadline`
+  to the rollback time plus the budget, close the stream and client, and
+  call the new
   `DropRedialedTransport` (tasks 05-07 implement it per executor; the
   Kubernetes body is here).
 - **Backend restart:** the startup `ClearStaleAgentLinks` sweep (SQLite and
@@ -133,7 +144,10 @@ the conversation notices.
 ## Acceptance
 
 1. A reachability-returned event starts an attempt within 10 s. Backoff
-   follows the schedule, and no delay is above 300 s for any jitter draw. User Reconnect runs immediately and cancels the
+   follows the schedule, and no delay is above 300 s for any jitter draw;
+   `n = 6` yields 256 s to 300 s, `n = 7` exactly 300 s, and "other error"
+   sets `n = 7`. Stop while Disconnected with no reachability change
+   still runs the cleanup on the replaced timer. User Reconnect runs immediately and cancels the
    pending timer. A failed immediate attempt advances the step counter and
    leaves exactly one timer. A new episode restarts at 5 s.
 2. A successful attempt never calls `initializeAgentSession` or any launch
@@ -167,17 +181,27 @@ the conversation notices.
 10. With a fake clock, a successful attempt publishes the clear within 5 s
     after the step 6 cursor wait succeeds; a clear deadline that passes
     before step 7.3 rolls back. An idle execution with an empty journal
-    reconnects (`AttachedAtSequence` 0).
+    reconnects (`AttachedAtSequence` 0). An SQL write that blocks past 2 s
+    in step 7.4 still publishes the clear within 5 s.
+12. The attempt stream ending just before step 7.3 rolls back and never
+    leaves the session connected without a stream; ending just after it
+    enters Disconnected. Stop winning after the step 7.2 check drops every
+    Kandev call released by the confirm without dispatching it, and the
+    agent gets `ErrKandevCallOutcomeUnknown`. A rollback after a 204 confirm
+    moves `BudgetDeadline`; after a lost confirm response it does not.
+13. An `UnjournaledBudgetPause` sets `budget_paused`, holds the queue, and
+    writes one budget notice across repeated attempts.
 11. A typed replay error in step 4 connects no stream, writes the recorded
     notices but no reconnected notice, clears the link, and assigns durable
-    delivery's outcome. A pending stop cleanup whose calls succeeded but whose
+    delivery's outcome; a notice write that fails 4 times is counted and the
+    branch still clears. A pending stop cleanup whose calls succeeded but whose
     responses were lost converges on the next trigger.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup|TestBackoffTimerRules|TestRollbackAfterCommit|TestStopRacesGuards|TestClassifyReattachedSubmission|TestEpisodeSequenceBounds|TestLinkCounterSeeding|TestBackoffNeverAboveCap|TestClearDeadline|TestEmptyJournalReconnects|TestTypedReplayError|TestConfirmBeforeGuard|TestConnectFromCursor|TestPendingStopCleanupIdempotent')
-(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch|TestQueueDispatchAfterClear|TestClearStaleAgentLinksOnStartup|TestReconnectNotDisconnected|TestStaleLinkRepairOnReconnect|TestReconnectedNoticeAfterGuard|TestNoticeSequenceOrder')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup|TestBackoffTimerRules|TestRollbackAfterCommit|TestStopRacesGuards|TestClassifyReattachedSubmission|TestEpisodeSequenceBounds|TestLinkCounterSeeding|TestBackoffNeverAboveCap|TestClearDeadline|TestEmptyJournalReconnects|TestTypedReplayError|TestConfirmBeforeGuard|TestConnectFromCursor|TestPendingStopCleanupIdempotent|TestAttemptRecordStreamEndRace|TestHeldKandevCallsDroppedOnRollback|TestStopReplacesBackoffTimer|TestBackoffCapStep|TestClearPublishBoundedSQL|TestRollbackMovesBudgetDeadline')
+(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch|TestQueueDispatchAfterClear|TestClearStaleAgentLinksOnStartup|TestReconnectNotDisconnected|TestStaleLinkRepairOnReconnect|TestReconnectedNoticeAfterGuard|TestNoticeSequenceOrder|TestTypedReplayNoticeWriteFailure|TestUnjournaledBudgetPauseHoldsQueue')
 (cd apps/backend && go test -race -count=1 ./internal/task/repository/sqlite/... -run 'TestClearStaleAgentLinks')
 (cd apps/backend && go test -race -count=1 ./internal/executors/reachability/...)
 make -C apps/backend lint
