@@ -128,6 +128,11 @@ does not read file contents or alter the index, HEAD, branch, tracked files, or
 untracked files. Remote executors validate through their executor-owned
 inventory contract rather than host filesystem inspection.
 
+The [managed clone relocation](managed-clone-relocation.md) operation can
+establish a new canonical worktree before this admission check. It holds its own
+environment claim and leaves admission read-only. A failed relocation cannot
+make an invalid checkout ready.
+
 The lifecycle manager retains a defense-in-depth guard: if a repo-backed
 `WorkspaceInfo` reaches execution creation without the validated-environment
 marker and exact selected environment identity, it refuses to create the

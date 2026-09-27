@@ -5,12 +5,14 @@ import { useSessionRecoveryActions } from "./use-session-recovery-actions";
 const mocks = vi.hoisted(() => ({
   requestSessionRecover: vi.fn(),
   restoreSessionWorkspace: vi.fn(),
+  managedCloneRelocationRecoveryDetails: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock("@/lib/services/session-recovery-service", () => ({
   asRecoveryError: (error: unknown, fallback: string) =>
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,
+  managedCloneRelocationRecoveryDetails: mocks.managedCloneRelocationRecoveryDetails,
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
   requestSessionRecover: mocks.requestSessionRecover,
@@ -153,6 +155,38 @@ describe("useSessionRecoveryActions", () => {
 
     rerender({ errorStamp: "bootstrap-2" });
     await waitFor(() => expect(result.current.recoveryError).toBeNull());
+  });
+
+  it("uses the response stamp for the confirmed relocation action", async () => {
+    mocks.requestSessionRecover
+      .mockRejectedValueOnce(new Error("workspace needs relocation"))
+      .mockResolvedValueOnce(undefined);
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: "managed-stamp-2",
+    });
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        errorStamp: "old-stamp",
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRecover("resume");
+    });
+    expect(result.current.managedCloneRecoveryStamp).toBe("managed-stamp-2");
+    await act(async () => {
+      await result.current.handleManagedCloneRelocation();
+    });
+    expect(mocks.requestSessionRecover).toHaveBeenLastCalledWith(
+      TASK_ID,
+      SESSION_ID,
+      "relocate_and_resume",
+      "task:failedToResumeSession",
+      "managed-stamp-2",
+    );
   });
 });
 

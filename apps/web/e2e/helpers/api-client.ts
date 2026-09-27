@@ -1094,6 +1094,9 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      source_type?: string;
+      local_path?: string;
+      provider_scope?: string;
       default_branch?: string;
       pull_before_worktree?: boolean;
       provider?: string;
@@ -1101,6 +1104,7 @@ export class ApiClient {
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
+      remote_url?: string;
       dev_script?: string;
       setup_script?: string;
       cleanup_script?: string;

@@ -104,6 +104,25 @@ func TestClassifyLaunchFailureUsesWorkspaceCheckoutCategory(t *testing.T) {
 	}
 }
 
+func TestManagedCloneRelocationLaunchFailureOffersOnlyExplicitRecovery(t *testing.T) {
+	classification := classifyLaunchFailure(&worktree.ManagedCloneRelocationRequiredError{TaskID: "task-1"})
+	if classification.code != models.LaunchErrorCategoryManagedCloneRelocationRequired {
+		t.Fatalf("classification code = %q, want managed clone relocation", classification.code)
+	}
+	actions := launchFailureRecoveryActions(classification.code, "", false)
+	if len(actions) != 1 || actions[0] != models.RecoveryActionRelocateAndResume {
+		t.Fatalf("recovery actions = %#v, want explicit relocation only", actions)
+	}
+	value := map[string]interface{}{
+		"message": "workspace needs recovery", "code": classification.code,
+		"recovery_actions": actions, "occurred_at": time.Now().UTC(),
+	}
+	normalized, found := models.LoadLastAgentError(map[string]interface{}{models.SessionMetaKeyLastAgentError: value})
+	if !found || len(normalized.RecoveryActions) != 1 || normalized.RecoveryActions[0] != models.RecoveryActionRelocateAndResume {
+		t.Fatalf("normalized recovery actions = %#v, want explicit relocation", normalized.RecoveryActions)
+	}
+}
+
 func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-1"] = &models.TaskSession{

@@ -1085,16 +1085,46 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		if taskRepository.BranchPolicyBranchTemplate != "" {
 			branchTemplate = taskRepository.BranchPolicyBranchTemplate
 		}
+		var cloneRelocation *worktree.ManagedCloneRelocationProof
+		if paths, ok := s.repoCloneLocation.(interface {
+			ManagedCloneRelocationPaths(
+				*models.Repository,
+			) (root, providerSource, ownerNameSource, destination string, managed bool, err error)
+		}); ok {
+			root, source, ownerNameSource, destination, managed, pathErr := paths.ManagedCloneRelocationPaths(repository)
+			if pathErr != nil {
+				return fmt.Errorf("resolve managed clone paths for repository %q: %w", repository.ID, pathErr)
+			}
+			if managed {
+				cloneRelocation = &worktree.ManagedCloneRelocationProof{
+					ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
+					ExpectedDestinationPath: destination,
+					Identity: worktree.ManagedRepositoryIdentity{
+						Provider: repository.Provider, Host: repository.ProviderHost,
+						Owner: repository.ProviderOwner, Name: repository.ProviderName,
+					},
+				}
+			}
+		}
 		spec := lifecycle.WorkspaceRepositorySpec{
 			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
-			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+			CloneRelocation: cloneRelocation,
+			BaseBranch:      taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 		}
 		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
 			spec.WorktreeID = worktree.WorktreeID
+			spec.WorktreePath = worktree.WorktreePath
+			spec.WorktreeBranch = worktree.WorktreeBranch
 			spec.BranchSlug = worktree.BranchSlug
 			spec.BranchIdentitySlug = worktree.BranchSlug
+			spec.WorktreeSourceClonePath = worktree.WorktreeSourceClonePath
+			spec.WorktreeSourceCommonDir = worktree.WorktreeSourceCommonDir
+			if spec.CloneRelocation != nil {
+				spec.CloneRelocation.RecordedSourcePath = worktree.WorktreeSourceClonePath
+				spec.CloneRelocation.RecordedSourceCommonDir = worktree.WorktreeSourceCommonDir
+			}
 		}
 		info.WorkspaceRepositories = append(info.WorkspaceRepositories, spec)
 	}

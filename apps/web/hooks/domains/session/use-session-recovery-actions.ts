@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   asRecoveryError,
   branchRecoveryDetails,
+  managedCloneRelocationRecoveryDetails,
   requestSessionRecover,
   restoreSessionWorkspace,
   sessionRecoveryGuardDetails,
@@ -93,6 +94,7 @@ export function useSessionRecoveryActions({
   const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
   const [guardDetails, setGuardDetails] = useState<SessionRecoveryGuardDetails | null>(null);
+  const [managedCloneRecoveryStamp, setManagedCloneRecoveryStamp] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [manualRecoveryFailure, setManualRecoveryFailure] =
@@ -104,6 +106,7 @@ export function useSessionRecoveryActions({
     setRestoreError(null);
     setBranchDetails(null);
     setGuardDetails(null);
+    setManagedCloneRecoveryStamp(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
     setManualRecoveryFailure(null);
@@ -118,18 +121,36 @@ export function useSessionRecoveryActions({
       const operation = beginOperation();
       setBusyAction(action);
       try {
-        await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
+        const recoveryStamp = managedCloneRecoveryStamp ?? errorStamp;
+        if (action === "relocate_and_resume") {
+          await requestSessionRecover(
+            taskId,
+            sessionId,
+            action,
+            t("task:failedToResumeSession"),
+            recoveryStamp,
+          );
+        } else {
+          await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
+        }
         if (!isCurrentOperation(operation)) return false;
         setResumeError(null);
         setRestoreError(null);
         setBranchDetails(null);
         setGuardDetails(null);
+        setManagedCloneRecoveryStamp(null);
         setLastFailedAction(null);
         setRecoveryNotice(null);
         setManualRecoveryFailure(null);
       } catch (cause) {
         if (!isCurrentOperation(operation)) return false;
         const guard = sessionRecoveryGuardDetails(cause);
+        const managedClone = managedCloneRelocationRecoveryDetails(cause);
+        if (managedClone?.kind === "managed_clone_relocation_required") {
+          setManagedCloneRecoveryStamp(managedClone.error_stamp ?? errorStamp ?? null);
+        } else if (managedClone?.kind === "managed_clone_relocation_stale") {
+          setManagedCloneRecoveryStamp(null);
+        }
         setResumeError(guardOrFallbackError(cause, guard, t, t("task:failedToResumeSession")));
         setRestoreError(null);
         setBranchDetails(guard ? null : branchRecoveryDetails(cause));
@@ -144,7 +165,16 @@ export function useSessionRecoveryActions({
       }
       return true;
     },
-    [beginOperation, isCurrentOperation, pendingKey, sessionId, taskId, t],
+    [
+      beginOperation,
+      errorStamp,
+      isCurrentOperation,
+      managedCloneRecoveryStamp,
+      pendingKey,
+      sessionId,
+      taskId,
+      t,
+    ],
   );
 
   const handleRestore = useCallback(async () => {
@@ -160,6 +190,7 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(null);
       setGuardDetails(null);
+      setManagedCloneRecoveryStamp(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
       setManualRecoveryFailure(null);
@@ -184,17 +215,23 @@ export function useSessionRecoveryActions({
     return handleRecover("resume_new_branch");
   }, [handleRecover]);
 
+  const handleManagedCloneRelocation = useCallback(() => {
+    return handleRecover("relocate_and_resume");
+  }, [handleRecover]);
+
   return {
     busyAction: sharedBusyAction ?? busyAction,
     recoveryError,
     branchDetails,
     guardDetails,
+    managedCloneRecoveryStamp,
     recoveryNotice,
     manualRecoveryFailure,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleManagedCloneRelocation,
   };
 }
 

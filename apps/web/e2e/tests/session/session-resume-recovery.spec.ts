@@ -1,8 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
+import fs from "node:fs";
+import path from "node:path";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionState } from "../../helpers/session";
 import {
+  cleanupManagedCloneRelocationFixture,
+  countSimpleMockResponses,
   removeRecoveryBranch,
+  seedManagedCloneRelocationFailure,
+  seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
 } from "../../helpers/session-resume-recovery";
 
@@ -142,5 +149,141 @@ test.describe("worktree branch resume recovery", () => {
     await expect(fixture.session.recoveryError()).toHaveCount(0);
     await expect(fixture.session.activeChat()).toContainText("simple mock response");
     await assertNoDocumentHorizontalOverflow(testPage, "reloaded replacement branch warning");
+  });
+
+  test.describe("dirty managed clone relocation", () => {
+    test.afterEach(async ({ apiClient, seedData }) => {
+      await cleanupManagedCloneRelocationFixture(apiClient, seedData);
+    });
+
+    test("moves a dirty managed worktree and resumes the same conversation", async ({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      prCapture,
+    }) => {
+      test.setTimeout(180_000);
+
+      const fixture = await seedManagedCloneRelocationFixture(
+        testPage,
+        apiClient,
+        seedData,
+        backend,
+        `Managed clone relocation ${Date.now()}`,
+      );
+      const sessionId = fixture.task.session_id!;
+      const originalPath = fixture.repository.worktree_path!;
+      const beforeEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
+      const beforeRepository = beforeEnvironment?.repos?.find(
+        (repository) => repository.repository_id === seedData.repositoryId,
+      );
+      expect(beforeRepository?.worktree_branch).toBe(fixture.originalBranch);
+      expect(
+        new GitHelper(fixture.sourceClonePath, makeGitEnv(backend.tmpDir))
+          .exec("git remote get-url origin")
+          .trim(),
+      ).toBe(`https://github.com/e2e/${path.basename(fixture.sourceClonePath)}.git`);
+
+      const stopResponse = await apiClient.stopSession({
+        session_id: sessionId,
+        reason: "e2e managed clone relocation",
+        force: true,
+      });
+      expect(stopResponse.success).toBe(true);
+      await waitForSessionState(apiClient, {
+        taskId: fixture.task.id,
+        sessionId,
+        expectedState: "CANCELLED",
+        message: "Waiting for the managed clone relocation session to stop",
+        timeout: 30_000,
+      });
+      seedManagedCloneRelocationFailure(backend.tmpDir, sessionId);
+      await testPage.reload();
+      await fixture.session.waitForLoad();
+
+      const relocate = testPage.getByTestId("managed-clone-relocate-button");
+      await expect(relocate).toBeVisible({ timeout: 30_000 });
+      await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
+      await expect(testPage.getByTestId("recovery-fresh-button")).toHaveCount(0);
+      await expect(testPage.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
+      if (prCapture.capturing) {
+        await prCapture.screenshot("managed-clone-relocation-card-desktop", {
+          caption: "The task card explains why the managed clone needs repair.",
+        });
+      }
+      await relocate.click();
+      const confirmation = testPage.getByTestId("managed-clone-relocation-confirmation");
+      await expect(confirmation).toBeVisible();
+      await expect(confirmation).toContainText("snapshot");
+      await expect(confirmation).toContainText("staging choices");
+      if (prCapture.capturing) {
+        await prCapture.screenshot("managed-clone-relocation-confirm-desktop", {
+          caption: "The confirmation states what moves and what remains in the original checkout.",
+        });
+      }
+      const cancel = confirmation.getByRole("button", { name: "Cancel" });
+      const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
+      expect((await cancel.boundingBox())?.height).toBe(28);
+      expect((await confirm.boundingBox())?.height).toBe(28);
+      await testPage.getByTestId("managed-clone-relocation-confirm").click();
+
+      await fixture.session.waitForChatIdle({ timeout: 60_000 });
+      let afterEnvironment: Awaited<ReturnType<typeof apiClient.getTaskEnvironment>> = null;
+      let afterRepository = beforeRepository;
+      await expect
+        .poll(
+          async () => {
+            afterEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
+            afterRepository = afterEnvironment?.repos?.find(
+              (repository) => repository.repository_id === seedData.repositoryId,
+            );
+            return afterRepository?.worktree_path ?? null;
+          },
+          { timeout: 30_000, message: "Waiting for the relocated worktree identity" },
+        )
+        .not.toBe(originalPath);
+
+      const relocatedPath = afterRepository?.worktree_path;
+      expect(afterEnvironment?.id).toBe(beforeEnvironment?.id);
+      expect(afterRepository?.worktree_id).not.toBe(beforeRepository?.worktree_id);
+      expect(afterRepository?.worktree_branch).toBe(fixture.originalBranch);
+      expect(relocatedPath).toContain(".relocated-");
+      expect(fs.existsSync(originalPath)).toBe(true);
+      expect(fs.readFileSync(path.join(originalPath, fixture.dirtyFileName), "utf8")).toBe(
+        fixture.dirtyFileContent,
+      );
+      expect(fs.readFileSync(path.join(relocatedPath!, fixture.dirtyFileName), "utf8")).toBe(
+        fixture.dirtyFileContent,
+      );
+      const relocatedGit = new GitHelper(relocatedPath!, makeGitEnv(backend.tmpDir));
+      expect(relocatedGit.getCurrentSha()).toBe(fixture.originalHead);
+      expect(relocatedGit.exec("git rev-parse --git-common-dir").trim()).toBe(
+        path.join(fixture.destinationClonePath, ".git"),
+      );
+      await waitForSessionState(apiClient, {
+        taskId: fixture.task.id,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the relocated session to resume",
+        timeout: 30_000,
+      });
+      await expect(fixture.session.agentStatus()).toHaveCount(0, { timeout: 30_000 });
+      await expect(
+        fixture.session.activeChat().locator('[data-placeholder="Preparing workspace..."]'),
+      ).toHaveCount(0);
+      const priorMockResponses = await countSimpleMockResponses(apiClient, sessionId);
+      await fixture.session.sendMessage("/e2e:simple-message");
+      await expect
+        .poll(() => countSimpleMockResponses(apiClient, sessionId), {
+          timeout: 60_000,
+          message: "Waiting for the relocated session's follow-up response",
+        })
+        .toBeGreaterThan(priorMockResponses);
+      await expect(
+        fixture.session.activeChat().getByText("simple mock response", { exact: false }).last(),
+      ).toBeVisible({ timeout: 30_000 });
+      await assertNoDocumentHorizontalOverflow(testPage, "managed clone relocation recovery");
+    });
   });
 });

@@ -1179,7 +1179,7 @@ func (e *Executor) resumeSession(
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
 	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()

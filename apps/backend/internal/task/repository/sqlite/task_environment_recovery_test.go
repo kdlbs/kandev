@@ -156,6 +156,50 @@ func TestTaskEnvironmentRecoveryClaimRejectsStaleOwnership(t *testing.T) {
 	}
 }
 
+func TestTaskEnvironmentRecoveryClaimAllowsOnlyRequestingSessionRuntime(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-recovery-current-runtime"
+		environmentID = "environment-recovery-current-runtime"
+		sessionID     = "session-recovery-current-runtime"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	for _, id := range []string{sessionID, "session-recovery-other-runtime"} {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: id, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateCancelled,
+		}); err != nil {
+			t.Fatalf("create terminal session %s: %v", id, err)
+		}
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: "execution-current", Status: "ready",
+	}); err != nil {
+		t.Fatalf("create requesting session runtime: %v", err)
+	}
+
+	request := recoveryClaimRequest(environmentID, taskID, sessionID, "operation-current-runtime", 1)
+	request.AllowCurrentSessionRuntime = true
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("claim with requesting session runtime: %v", err)
+	}
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
+		t.Fatalf("release claim with requesting session runtime: %v", err)
+	}
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-recovery-other-runtime", SessionID: "session-recovery-other-runtime",
+		TaskID: taskID, AgentExecutionID: "execution-other", Status: "ready",
+	}); err != nil {
+		t.Fatalf("create other session runtime: %v", err)
+	}
+	request.OperationID = "operation-current-runtime-other-consumer"
+	if _, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request); !errors.Is(err, recoveryclaim.ErrBusy) {
+		t.Fatalf("claim with another session runtime error = %v, want ErrBusy", err)
+	}
+}
+
 func TestTaskEnvironmentRecoveryClaimAcceptsOnlyItsActiveCleanupJob(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

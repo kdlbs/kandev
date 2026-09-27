@@ -2529,5 +2529,12 @@
   "completionGateNoHistory": "完了に関する変更は記録されていません。",
   "completionGateAction_criteria_set": "条件を変更",
   "completionGateAction_criterion_verified": "証拠を記録",
-  "completionGateAction_completion_overridden": "完了時に例外を使用"
+  "completionGateAction_completion_overridden": "完了時に例外を使用",
+  "managedCloneRelocationBody": "この worktree は古いリポジトリクローンに属し、ローカル変更があります。ファイルは元のチェックアウトに残ります。ファイルを現在のクローンに移すと、同じセッションを再開できます。",
+  "managedCloneRelocationConfirmTitle": "ファイルを移してこのセッションを再開しますか？",
+  "managedCloneRelocationConfirmWarning": "元のチェックアウトとファイルのスナップショットはディスクに残ります。Git のステージ状態は引き継がれないため、コミット前に変更を確認してください。",
+  "managedCloneRelocationTitle": "ワークスペースの修復が必要です",
+  "managedCloneRelocateResume": "ファイルを移して再開",
+  "managedCloneRelocationConfirmBody": "Kandev は現在のリポジトリクローンに worktree を作成し、このセッションを続行します。",
+  "managedCloneRelocationConfirm": "移して再開"
 }

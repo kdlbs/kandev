@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { branchRecoveryDetails, sessionRecoveryGuardDetails } from "./session-recovery-service";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  branchRecoveryDetails,
+  managedCloneRelocationRecoveryDetails,
+  requestSessionRecover,
+  sessionRecoveryGuardDetails,
+} from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
+
+const mocks = vi.hoisted(() => ({ request: vi.fn() }));
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({ request: mocks.request }),
+}));
+
+beforeEach(() => vi.clearAllMocks());
 
 describe("sessionRecoveryGuardDetails", () => {
   it("returns the details for a retryable in-progress recovery refusal", () => {
@@ -54,4 +66,36 @@ describe("sessionRecoveryGuardDetails", () => {
     expect(branchRecoveryDetails(error)).not.toBeNull();
     expect(sessionRecoveryGuardDetails(error)).toBeNull();
   });
+});
+
+it("sends the current stamp with an explicit managed clone relocation", async () => {
+  mocks.request.mockResolvedValueOnce({ success: true });
+  await requestSessionRecover("task-1", "session-1", "relocate_and_resume", "failed", "stamp-1");
+  expect(mocks.request).toHaveBeenCalledWith(
+    "session.recover",
+    {
+      task_id: "task-1",
+      session_id: "session-1",
+      action: "relocate_and_resume",
+      error_stamp: "stamp-1",
+    },
+    30_000,
+  );
+});
+
+it("requires a stamp before requesting managed clone relocation", async () => {
+  await expect(
+    requestSessionRecover("task-1", "session-1", "relocate_and_resume", "failed"),
+  ).rejects.toThrow("failed");
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it("recognizes only the typed, path-free managed clone error details", () => {
+  const error = new WebSocketRequestError("workspace needs repair", "CONFLICT", {
+    kind: "managed_clone_relocation_required",
+    error_stamp: "stamp-2",
+    recovery_action: "relocate_and_resume",
+  });
+  expect(managedCloneRelocationRecoveryDetails(error)?.error_stamp).toBe("stamp-2");
+  expect(managedCloneRelocationRecoveryDetails(new Error("plain"))).toBeNull();
 });

@@ -308,10 +308,12 @@ function guardRecoveryActions(
     branchDetails: null,
     guardDetails: { kind: "session_recovery_in_progress", retryable: true },
     recoveryNotice: null,
+    managedCloneRecoveryStamp: null,
     manualRecoveryFailure: { operation },
     handleRecover: vi.fn().mockResolvedValue(false),
     handleRestore: vi.fn().mockResolvedValue(undefined),
     handleRetry: vi.fn().mockResolvedValue(false),
     handleNewBranch: vi.fn().mockResolvedValue(false),
+    handleManagedCloneRelocation: vi.fn().mockResolvedValue(false),
   };
 }

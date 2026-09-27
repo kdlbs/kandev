@@ -20,11 +20,36 @@ import (
 // admission. Slots are supplied by the selected task environment, not by a
 // task-wide worktree inventory.
 type RecoverySlot struct {
-	WorktreeID     string
-	RepositoryID   string
-	BranchSlug     string
-	RepositoryPath string
-	Worktree       *Worktree
+	WorktreeID      string
+	RepositoryID    string
+	BranchSlug      string
+	RepositoryPath  string
+	Worktree        *Worktree
+	CloneRelocation *ManagedCloneRelocationProof
+}
+
+// ManagedRepositoryIdentity is the provider identity selected by the
+// workspace repository record. It is checked against both clone origins
+// before an old worktree can move between managed clones.
+type ManagedRepositoryIdentity struct {
+	Provider string
+	Host     string
+	Owner    string
+	Name     string
+}
+
+// ManagedCloneRelocationProof contains clone paths derived from the managed
+// repository service plus the source identity recorded on the environment row.
+// Legacy rows may have empty RecordedSource fields and are proven from Git's
+// linked-worktree registration instead.
+type ManagedCloneRelocationProof struct {
+	ManagedRoot               string
+	ExpectedSourcePath        string
+	LegacyOwnerNameSourcePath string
+	ExpectedDestinationPath   string
+	RecordedSourcePath        string
+	RecordedSourceCommonDir   string
+	Identity                  ManagedRepositoryIdentity
 }
 
 // RecoveryAdmissionRequest identifies the already-selected environment and
@@ -38,6 +63,7 @@ type RecoveryAdmissionRequest struct {
 	OwnershipGeneration int64
 	ExecutorType        string
 	OperationID         string
+	RelocateDirty       bool
 	Slots               []RecoverySlot
 }
 
@@ -48,6 +74,13 @@ type RecoveryAdmission struct {
 	releaseFunc func(context.Context) error
 	once        sync.Once
 	releaseErr  error
+}
+
+type recoveryAdmissionContextKey struct{}
+
+type recoveryAdmissionContextValue struct {
+	admission *RecoveryAdmission
+	cleared   bool
 }
 
 // Claim returns the durable authority carried into nested lifecycle calls.
@@ -78,10 +111,45 @@ func WithRecoveryClaim(ctx context.Context, claim *models.TaskEnvironmentRecover
 	return recoveryclaim.WithClaim(ctx, claim)
 }
 
+// WithRecoveryAdmission carries both the durable claim and its release owner
+// through nested workspace launch calls.
+func WithRecoveryAdmission(ctx context.Context, admission *RecoveryAdmission) context.Context {
+	if admission == nil {
+		return ctx
+	}
+	ctx = recoveryclaim.WithClaim(ctx, admission.Claim())
+	return context.WithValue(ctx, recoveryAdmissionContextKey{}, recoveryAdmissionContextValue{admission: admission})
+}
+
+func recoveryAdmissionFromContext(ctx context.Context) *RecoveryAdmission {
+	if ctx == nil {
+		return nil
+	}
+	value, _ := ctx.Value(recoveryAdmissionContextKey{}).(recoveryAdmissionContextValue)
+	if value.cleared {
+		return nil
+	}
+	return value.admission
+}
+
 // WithoutRecoveryClaim preserves the operation context without passing a
 // released recovery authority into an asynchronous runtime-start phase.
 func WithoutRecoveryClaim(ctx context.Context) context.Context {
-	return recoveryclaim.WithoutClaim(ctx)
+	ctx = recoveryclaim.WithoutClaim(ctx)
+	return context.WithValue(ctx, recoveryAdmissionContextKey{}, recoveryAdmissionContextValue{cleared: true})
+}
+
+type dirtyCloneRelocationContextKey struct{}
+
+// WithDirtyCloneRelocation marks an explicitly authorized recovery operation.
+// The marker is set only after the orchestrator validates the current error stamp.
+func WithDirtyCloneRelocation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, dirtyCloneRelocationContextKey{}, true)
+}
+
+func dirtyCloneRelocationAllowed(ctx context.Context) bool {
+	allowed, _ := ctx.Value(dirtyCloneRelocationContextKey{}).(bool)
+	return allowed
 }
 
 // RecoveryClaimFromContext returns an admission claim carried by an internal
@@ -96,7 +164,10 @@ type recoveryClaimStore interface {
 }
 
 type recoverySlotInspection struct {
-	needsRecovery bool
+	needsRecovery   bool
+	needsRelocation bool
+	dirty           bool
+	relocation      managedCloneRelocationInspection
 }
 
 // AdmitRecovery inspects only the selected environment's slots. It returns a
@@ -112,6 +183,16 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 	if req.TaskID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.OwnershipGeneration <= 0 {
 		return nil, recoveryAdmissionError(req, "recovery request identity is incomplete")
 	}
+	req.RelocateDirty = req.RelocateDirty || dirtyCloneRelocationAllowed(ctx)
+	if admission := recoveryAdmissionFromContext(ctx); admission != nil {
+		if !recoveryClaimMatchesRequest(admission.Claim(), req) {
+			return nil, recoveryAdmissionError(req, "workspace start carries a different recovery claim")
+		}
+		if _, err := m.resolveRecoverySlots(ctx, &req); err != nil {
+			return nil, err
+		}
+		return admission, nil
+	}
 	if claim := recoveryclaim.ClaimFromContext(ctx); claim != nil {
 		if !recoveryClaimMatchesRequest(claim, req) {
 			return nil, recoveryAdmissionError(req, "workspace start carries a different recovery claim")
@@ -120,6 +201,9 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 		// Nested lifecycle admission only needs to carry that authority through
 		// workspace reconciliation; reacquiring a non-reentrant process mutex
 		// here would deadlock the same launch.
+		if _, err := m.resolveRecoverySlots(ctx, &req); err != nil {
+			return nil, err
+		}
 		return &RecoveryAdmission{claim: claim}, nil
 	}
 
@@ -138,12 +222,16 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 		return nil
 	}
 
-	needsRecovery, err := m.inspectRecoverySlots(ctx, &req, indices)
+	inspection, err := m.inspectRecoverySlots(ctx, &req, indices)
 	if err != nil {
 		_ = releaseLocks(ctx)
 		return nil, err
 	}
-	if !needsRecovery {
+	if inspection.dirty && !req.RelocateDirty {
+		_ = releaseLocks(ctx)
+		return nil, managedCloneRelocationRequiredError(req.TaskID)
+	}
+	if !inspection.needsRecovery {
 		_ = releaseLocks(ctx)
 		return nil, nil
 	}
@@ -170,6 +258,9 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 			SessionID:           req.SessionID,
 			OperationID:         operationID,
 			ExecutorType:        req.ExecutorType,
+			// The explicit repair owns this session's idle runtime; all other
+			// environment consumers remain a hard admission barrier.
+			AllowCurrentSessionRuntime: req.RelocateDirty,
 		})
 		if err != nil {
 			_ = releaseLocks(ctx)
@@ -182,7 +273,7 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 	// acquired and before any slot is changed. This closes the partial-inventory
 	// window between the first inspection and claim acquisition.
 	claimCtx := recoveryclaim.WithClaim(ctx, claim)
-	needsRecovery, err = m.inspectRecoverySlots(claimCtx, &req, indices)
+	inspection, err = m.inspectRecoverySlots(claimCtx, &req, indices)
 	if err != nil {
 		if claimOwned {
 			_ = m.releaseRecoveryClaim(ctx, claim)
@@ -190,7 +281,14 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 		_ = releaseLocks(ctx)
 		return nil, err
 	}
-	if !needsRecovery {
+	if inspection.dirty && !req.RelocateDirty {
+		if claimOwned {
+			_ = m.releaseRecoveryClaim(ctx, claim)
+		}
+		_ = releaseLocks(ctx)
+		return nil, managedCloneRelocationRequiredError(req.TaskID)
+	}
+	if !inspection.needsRecovery {
 		if claimOwned {
 			_ = m.releaseRecoveryClaim(ctx, claim)
 		}
@@ -203,8 +301,26 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 		if slot.Worktree == nil || slot.Worktree.Path == "" {
 			continue
 		}
-		inspection := inspectLinkedWorktree(slot.Worktree.Path)
-		if inspection.class != linkedWorktreeMissingAdmin {
+		slotInspection, inspectErr := m.inspectRecoverySlot(claimCtx, req.OwnerTaskID, slot)
+		if inspectErr != nil {
+			if claimOwned {
+				_ = m.releaseRecoveryClaim(ctx, claim)
+			}
+			_ = releaseLocks(ctx)
+			return nil, inspectErr
+		}
+		if slotInspection.needsRelocation {
+			if err := m.relocateRecoverySlot(claimCtx, &req, slot, slotInspection, claim); err != nil {
+				if claimOwned {
+					_ = m.releaseRecoveryClaim(ctx, claim)
+				}
+				_ = releaseLocks(ctx)
+				return nil, err
+			}
+			continue
+		}
+		linkedInspection := inspectLinkedWorktree(slot.Worktree.Path)
+		if linkedInspection.class != linkedWorktreeMissingAdmin {
 			continue
 		}
 		recovered, recoverErr := m.RecoverWorktree(claimCtx, slot.Worktree, CreateRequest{
@@ -244,6 +360,31 @@ func (m *Manager) AdmitRecovery(ctx context.Context, req RecoveryAdmissionReques
 			return releaseErr
 		},
 	}, nil
+}
+
+func (m *Manager) relocateRecoverySlot(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	slot *RecoverySlot,
+	inspection recoverySlotInspection,
+	claim *models.TaskEnvironmentRecoveryClaim,
+) error {
+	var relocated *Worktree
+	var err error
+	if inspection.dirty && req.RelocateDirty {
+		relocated, err = m.relocateDirtyManagedCloneWorktree(
+			ctx, slot.Worktree, slot.CloneRelocation, inspection.relocation, claim,
+		)
+	} else {
+		relocated, err = m.relocateCleanManagedCloneWorktree(
+			ctx, slot.Worktree, slot.CloneRelocation, inspection.relocation, claim,
+		)
+	}
+	if err != nil {
+		return err
+	}
+	slot.Worktree = relocated
+	return nil
 }
 
 //nolint:cyclop,gocognit // Slot resolution validates several independent durable identities.
@@ -320,23 +461,37 @@ func (m *Manager) lockRecoverySlots(req *RecoveryAdmissionRequest, indices []int
 		seen[key] = struct{}{}
 		lockValue, _ := m.recoveryLocks.LoadOrStore(key, &sync.Mutex{})
 		lock := lockValue.(*sync.Mutex)
-		lock.Lock()
+		if req.RelocateDirty {
+			// The stamped repair runs outside lifecycle singleflight and can wait
+			// for an in-flight read-only inspection to finish.
+			lock.Lock()
+		} else if !lock.TryLock() {
+			// Session startup is coalesced by lifecycle singleflight. Waiting here
+			// can make a competing workspace request own that flight while the
+			// recovery caller waits for it, so ordinary admissions never queue.
+			for i := len(locks) - 1; i >= 0; i-- {
+				locks[i].Unlock()
+			}
+			return nil, recoveryAdmissionError(*req, "selected worktree is already being recovered")
+		}
 		locks = append(locks, lock)
 	}
 	return locks, nil
 }
 
-func (m *Manager) inspectRecoverySlots(ctx context.Context, req *RecoveryAdmissionRequest, indices []int) (bool, error) {
-	needsRecovery := false
+func (m *Manager) inspectRecoverySlots(ctx context.Context, req *RecoveryAdmissionRequest, indices []int) (recoverySlotInspection, error) {
+	var all recoverySlotInspection
 	for _, index := range indices {
 		slot := &req.Slots[index]
 		inspection, err := m.inspectRecoverySlot(ctx, req.OwnerTaskID, slot)
 		if err != nil {
-			return false, err
+			return recoverySlotInspection{}, err
 		}
-		needsRecovery = needsRecovery || inspection.needsRecovery
+		all.needsRecovery = all.needsRecovery || inspection.needsRecovery
+		all.needsRelocation = all.needsRelocation || inspection.needsRelocation
+		all.dirty = all.dirty || inspection.dirty
 	}
-	return needsRecovery, nil
+	return all, nil
 }
 
 func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *RecoverySlot) (recoverySlotInspection, error) {
@@ -362,6 +517,18 @@ func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *
 	if inspection.class == linkedWorktreeHealthy {
 		if err := handle.VerifyPath(filepath.Clean(wt.Path)); err != nil {
 			return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
+		}
+		if slot.CloneRelocation != nil {
+			relocation, relocationErr := m.inspectManagedCloneRelocation(ctx, taskID, wt, slot.CloneRelocation)
+			if relocationErr != nil {
+				return recoverySlotInspection{}, relocationErr
+			}
+			if relocation.mismatch {
+				return recoverySlotInspection{
+					needsRecovery: true, needsRelocation: true, dirty: relocation.dirty,
+					relocation: relocation,
+				}, nil
+			}
 		}
 		return recoverySlotInspection{}, nil
 	}
@@ -405,6 +572,18 @@ func (m *Manager) recoveryOperationID(req *RecoveryAdmissionRequest, indices []i
 		if slot.Worktree == nil || slot.Worktree.Path == "" {
 			continue
 		}
+		relocationOperationID, relocationErr := pendingManagedCloneRelocationOperationID(
+			slot.Worktree.Path + ".kandev-clone-relocation.json",
+		)
+		if relocationErr != nil {
+			return "", recoveryAdmissionError(*req, "managed-clone relocation record is unreadable")
+		}
+		if relocationOperationID != "" {
+			if operationID != "" && operationID != relocationOperationID {
+				return "", recoveryAdmissionError(*req, "selected recovery records use different operation identities")
+			}
+			operationID = relocationOperationID
+		}
 		record, err := readRecoveryRecord(slot.Worktree.Path + ".kandev-recovery.json")
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -428,6 +607,20 @@ func (m *Manager) recoveryOperationID(req *RecoveryAdmissionRequest, indices []i
 		return uuid.NewString(), nil
 	}
 	return operationID, nil
+}
+
+func pendingManagedCloneRelocationOperationID(path string) (string, error) {
+	record, err := readManagedCloneRelocationRecord(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if record.State != managedCloneRelocationStatePrepared && record.State != managedCloneRelocationStateMaterialized {
+		return "", nil
+	}
+	return record.OperationID, nil
 }
 
 func (m *Manager) releaseRecoveryClaim(ctx context.Context, claim *models.TaskEnvironmentRecoveryClaim) error {

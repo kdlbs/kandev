@@ -2529,5 +2529,12 @@
   "completionGateNoHistory": "Ńō ćōḿƥĺēţĩōń ćĥàńĝēś ĥàvē ƀēēń ŕēćōŕďēď.",
   "completionGateAction_criteria_set": "Ćŕĩţēŕĩà ćĥàńĝēď",
   "completionGateAction_criterion_verified": "Ēvĩďēńćē ŕēćōŕďēď",
-  "completionGateAction_completion_overridden": "Ćōḿƥĺēţĩōń ōvēŕŕĩďē ũśēď"
+  "completionGateAction_completion_overridden": "Ćōḿƥĺēţĩōń ōvēŕŕĩďē ũśēď",
+  "managedCloneRelocationBody": "Ţĥĩś ŵōŕķţŕēē ƀēĺōńĝś ţō àń ōĺďēŕ ŕēƥōśĩţōŕŷ ćĺōńē àńď ĥàś ĺōćàĺ ćĥàńĝēś. Ŷōũŕ ƒĩĺēś ŕēḿàĩń ĩń ţĥē ōŕĩĝĩńàĺ ćĥēćķōũţ. Ḿōvē ţĥēḿ ţō ţĥē ćũŕŕēńţ ćĺōńē ţō ŕēśũḿē ţĥē śàḿē śēśśĩōń.",
+  "managedCloneRelocationConfirmTitle": "Ḿōvē ƒĩĺēś àńď ŕēśũḿē ţĥĩś śēśśĩōń?",
+  "managedCloneRelocationConfirmWarning": "Ţĥē ōŕĩĝĩńàĺ ćĥēćķōũţ àńď à ƒĩĺē śńàƥśĥōţ ŵĩĺĺ ŕēḿàĩń ōń ďĩśķ. Ĝĩţ śţàĝĩńĝ ćĥōĩćēś ďō ńōţ ţŕàńśƒēŕ, śō ŕēvĩēŵ ţĥē ćĥàńĝēś ƀēƒōŕē ŷōũ ćōḿḿĩţ.",
+  "managedCloneRelocationTitle": "Ŵōŕķśƥàćē ńēēďś ŕēƥàĩŕ",
+  "managedCloneRelocateResume": "Ḿōvē ƒĩĺēś àńď ŕēśũḿē",
+  "managedCloneRelocationConfirmBody": "Ķàńďēv ŵĩĺĺ ćŕēàţē à ŵōŕķţŕēē ĩń ţĥē ćũŕŕēńţ ŕēƥōśĩţōŕŷ ćĺōńē àńď ćōńţĩńũē ţĥĩś śēśśĩōń.",
+  "managedCloneRelocationConfirm": "Ḿōvē àńď ŕēśũḿē"
 }

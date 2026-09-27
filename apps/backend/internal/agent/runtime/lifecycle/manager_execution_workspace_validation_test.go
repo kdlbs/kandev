@@ -2,12 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func TestValidateWorkspaceInfoForExecutionRejectsRepoBackedNonGitPath(t *testing.T) {
@@ -72,6 +74,54 @@ func TestValidateWorkspaceInfoForExecutionRejectsUnrelatedWorktree(t *testing.T)
 	})
 	if err == nil {
 		t.Fatal("validateWorkspaceInfoForExecution() accepted an unrelated Git repository")
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionRejectsUnadmittedManagedCloneMismatch(t *testing.T) {
+	info := newUnadmittedManagedCloneMismatchWorkspaceInfo(t)
+	if err := validateWorkspaceInfoForExecution(context.Background(), info); err == nil {
+		t.Fatal("execution validation accepted a worktree from the wrong clone without recovery admission")
+	}
+}
+
+func TestCreateExecutionRejectsManagedCloneMismatchWithoutRecoveryManager(t *testing.T) {
+	info := newUnadmittedManagedCloneMismatchWorkspaceInfo(t)
+	manager := &Manager{}
+	_, err := manager.createExecutionWithMode(context.Background(), "task-1", info, false)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("createExecutionWithMode() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForRecoveryPreflightDefersManagedCloneMismatch(t *testing.T) {
+	info := newUnadmittedManagedCloneMismatchWorkspaceInfo(t)
+	if err := validateWorkspaceInfoForRecoveryPreflight(context.Background(), info); err != nil {
+		t.Fatalf("preflight validation rejected a Git worktree before relocation admission: %v", err)
+	}
+}
+
+func newUnadmittedManagedCloneMismatchWorkspaceInfo(t *testing.T) *WorkspaceInfo {
+	t.Helper()
+	managedRoot := t.TempDir()
+	source := initGitRepo(t)
+	destination := initGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked")
+	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath)
+	cmd.Dir = source
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, output)
+	}
+	return &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspacePath: worktreePath,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: destination, WorktreePath: worktreePath,
+			RepoName: "repository", WorktreeID: "worktree-1",
+			CloneRelocation: &worktree.ManagedCloneRelocationProof{
+				ManagedRoot: managedRoot, ExpectedSourcePath: source, ExpectedDestinationPath: destination,
+				Identity: worktree.ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "repository"},
+			},
+		}},
 	}
 }
 

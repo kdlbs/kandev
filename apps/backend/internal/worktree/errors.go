@@ -19,6 +19,20 @@ type WorktreeRecoveryError struct {
 	Reason           string
 }
 
+// ManagedCloneRelocationRequiredError identifies a verified dirty worktree
+// that can move only after the user confirms the staged-content limitation.
+type ManagedCloneRelocationRequiredError struct {
+	TaskID string
+}
+
+func (e *ManagedCloneRelocationRequiredError) Error() string {
+	return "managed repository worktree needs an explicit file-preserving recovery"
+}
+
+func managedCloneRelocationRequiredError(taskID string) error {
+	return &ManagedCloneRelocationRequiredError{TaskID: taskID}
+}
+
 func (e *WorktreeRecoveryError) Error() string {
 	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -6073,6 +6075,79 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 	sessions, err := repo.ListTaskSessions(ctx, "task-recover-new-branch")
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
+}
+
+func TestRecoverSessionDirtyCloneRefusalPreservesResumeTokenAndStampsRepairAction(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task-dirty-recovery", "session-dirty-recovery", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-dirty-recovery", WorkspaceID: "ws1", Name: "backend", SourceType: "local",
+		LocalPath: t.TempDir(), CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-dirty-recovery", TaskID: "task-dirty-recovery",
+		ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath:       t.TempDir(),
+		OwnershipGeneration: 1, Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-dirty-recovery", RepositoryID: "repo-dirty-recovery", BranchSlug: "backend",
+			WorktreeID: "wt-dirty-recovery", WorktreePath: filepath.Join(t.TempDir(), "worktree"),
+			WorktreeBranch: "feature/task", Position: 0, CreatedAt: now, UpdatedAt: now,
+		}},
+	}))
+	session, err := repo.GetTaskSession(ctx, "session-dirty-recovery")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-dirty-recovery"
+	session.TaskEnvironmentID = "env-dirty-recovery"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-dirty-recovery", SessionID: session.ID, TaskID: session.TaskID,
+		ResumeToken: "provider-conversation-1", Resumable: true, CreatedAt: now, UpdatedAt: now,
+	}))
+	preflightCalls := 0
+	svc.executor.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		preflightCalls++
+		if req.TaskEnvironmentID != "env-dirty-recovery" || len(req.Slots) != 1 {
+			t.Fatalf("preflight request = %+v, want selected task environment and slot", req)
+		}
+		return nil, &worktree.ManagedCloneRelocationRequiredError{TaskID: req.TaskID}
+	})
+
+	_, err = svc.RecoverSession(ctx, session.TaskID, session.ID, "fresh_start")
+	var repairErr *ManagedCloneRelocationRecoveryError
+	require.ErrorAs(t, err, &repairErr)
+	require.False(t, repairErr.Stale)
+	require.NotEmpty(t, repairErr.Stamp)
+	require.Equal(t, 1, preflightCalls)
+	running, err := repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "provider-conversation-1", running.ResumeToken, "fresh start must not clear provider identity before worktree recovery")
+	storedSession, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	lastError, found := models.LoadLastAgentError(storedSession.Metadata)
+	require.True(t, found)
+	require.Equal(t, models.LaunchErrorCategoryManagedCloneRelocationRequired, lastError.Code)
+	require.Equal(t, []string{models.RecoveryActionRelocateAndResume}, lastError.RecoveryActions)
+	require.Equal(t, repairErr.Stamp, lastError.Stamp())
+
+	_, err = svc.RecoverSession(ctx, session.TaskID, session.ID, "relocate_and_resume", "stale-stamp")
+	require.ErrorAs(t, err, &repairErr)
+	require.True(t, repairErr.Stale)
+	require.Equal(t, 1, preflightCalls, "stale stamp must be rejected before touching the worktree")
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	_, err = svc.RecoverSession(ctx, session.TaskID, session.ID, "relocate_and_resume", repairErr.Stamp)
+	require.ErrorAs(t, err, &repairErr)
+	require.True(t, repairErr.Stale, "an active session cannot authorize worktree transfer")
+	require.Equal(t, 1, preflightCalls, "active sessions must be rejected before worktree inspection")
+	running, err = repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "provider-conversation-1", running.ResumeToken)
 }
 
 // TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the

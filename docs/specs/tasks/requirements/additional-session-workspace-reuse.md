@@ -75,7 +75,9 @@ starting in a stale workspace retained by the previous executor.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.3:** A missing, non-Git,
   path-mismatched, or executor-mismatched workspace shall fail before agent
   process startup with a typed, recoverable error; it shall not expose the
-  invalid workspace as ready or as the task's current change projection.
+  invalid workspace as ready or as the task's current change projection. A
+  separately authorized recovery can establish a valid replacement before
+  this read-only admission check runs.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.4:** Rejecting an invalid
   workspace shall not delete, move, reset, clean, checkout, or otherwise modify
   the stale path, the canonical repository, or either environment inventory.
