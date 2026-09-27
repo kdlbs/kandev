@@ -17,7 +17,7 @@ import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 
 registerSeparateQueueRows(test);
 
@@ -74,7 +74,12 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
     await agentSelector.click();
     await page.getByRole("option").first().click();
   }
+  const quickChatStarted = waitForHttp(page, "POST", /^\/api\/v1\/workspaces\/[^/]+\/quick-chat$/, {
+    timeout: 30_000,
+  });
   await dialog.getByTestId("quick-chat-start").click();
+  const startResponse = await quickChatStarted;
+  expect(startResponse.ok(), "Quick Chat startup request should succeed").toBe(true);
 
   await waitForQuickChatComposerReady(dialog);
   return dialog;
