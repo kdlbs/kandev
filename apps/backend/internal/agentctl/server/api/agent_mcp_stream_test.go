@@ -111,3 +111,37 @@ func TestAgentStreamWSDisconnectReleasesDeliveredMCPRequest(t *testing.T) {
 		t.Fatal("delivered MCP request remained blocked after stream disconnect")
 	}
 }
+
+// @covers AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.1
+func TestAgentStreamSupersedeReleasesDeliveredMCPRequestAsUnknownOutcome(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir()}
+	backend := mcpserver.NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	server := httptest.NewServer(NewServer(cfg, process.NewManager(cfg, log), nil, backend, log).router)
+	t.Cleanup(server.Close)
+	first := dialTestWS(t, server)
+	t.Cleanup(func() { _ = first.Close() })
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- backend.RequestPayload(context.Background(), "mcp.tools.call", nil, nil)
+	}()
+
+	_ = first.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, err := first.ReadMessage(); err != nil {
+		t.Fatalf("read MCP request on first stream: %v", err)
+	}
+
+	second := dialTestWS(t, server)
+	t.Cleanup(func() { _ = second.Close() })
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, mcpserver.ErrKandevCallOutcomeUnknown) {
+			t.Fatalf("request error = %v, want %v", err, mcpserver.ErrKandevCallOutcomeUnknown)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("delivered MCP request remained blocked after stream supersede")
+	}
+}

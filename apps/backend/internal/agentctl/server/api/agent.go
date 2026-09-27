@@ -220,7 +220,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	}
 	if superseded != nil {
 		if s.mcpBackendClient != nil {
-			s.mcpBackendClient.FailStreamRequests(superseded.StreamID, errors.New("agent stream superseded"))
+			s.mcpBackendClient.FailStreamRequests(superseded.StreamID, mcp.ErrKandevCallOutcomeUnknown)
 		}
 		superseded.Close(process.CloseCodeSuperseded, "superseded")
 		if superseded.Done != nil {
