@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -586,5 +588,46 @@ func TestReapStalePendingMoves_IsRowLocalAcrossWorkflows(t *testing.T) {
 		"sess-b-fresh":  true,
 	} {
 		assertArmed(t, svc, sessionID, wantArmed)
+	}
+}
+
+// TestReapStalePendingMoves_ExactProfileGenerationFence exercises the durable
+// SQLite sweep path. A healthy current-generation row must survive recovery,
+// while a superseded generation is discarded before it can later replay.
+func TestReapStalePendingMoves_ExactProfileGenerationFence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		offset    int64
+		wantArmed bool
+	}{
+		{name: "current generation survives", offset: 0, wantArmed: true},
+		{name: "superseded generation is discarded", offset: -1, wantArmed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := buildPendingMoveScenario(t)
+			queueDB := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+			queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+			if err != nil {
+				t.Fatalf("create sqlite message queue: %v", err)
+			}
+			sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+
+			now := time.Now().UTC()
+			if _, err := sc.repo.AssignExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
+				TaskID: "task-1", WorkspaceID: "ws1", AgentProfileID: profileReview,
+				Generation: 1, ProfileRevision: now,
+			}); err != nil {
+				t.Fatalf("assign exact profile: %v", err)
+			}
+
+			requireSetPendingMove(t, sc.svc, sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
+				MoveID: "exact-generation-fence", TaskID: "task-1", WorkflowID: "wf1",
+				WorkflowStepID: stepInProgressID, QueuedAt: time.Now().UTC().Add(-time.Minute),
+				ExactProfileGeneration: 1 + tc.offset,
+			})
+
+			sc.svc.reapStalePendingMovesOnce(sc.ctx)
+			assertArmed(t, sc.svc, sc.reviewSessionID, tc.wantArmed)
+		})
 	}
 }

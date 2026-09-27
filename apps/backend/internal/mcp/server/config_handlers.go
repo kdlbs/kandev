@@ -354,6 +354,15 @@ func (s *Server) registerConfigExecutorTools() {
 
 func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
+		mcp.NewTool("assign_exact_task_profile_kandev",
+			mcp.WithDescription("Assign a concrete enabled agent profile to a task for its next exact-profile launch. The assignment is generation guarded and fails rather than falling back if the profile changes."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("agent_profile_id", mcp.Required(), mcp.Description("Concrete agent profile ID")),
+			mcp.WithNumber("generation", mcp.Required(), mcp.Description("Next assignment generation")),
+		),
+		s.wrapHandler("assign_exact_task_profile_kandev", s.assignExactTaskProfileHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks_kandev",
 			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
@@ -416,6 +425,26 @@ func (s *Server) registerConfigTaskTools() {
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
 	s.registerListTaskSessionsTool()
+}
+
+func (s *Server) assignExactTaskProfileHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		profileID, err := req.RequireString("agent_profile_id")
+		if err != nil {
+			return mcp.NewToolResultError("agent_profile_id is required"), nil
+		}
+		generation := req.GetFloat("generation", 0)
+		if generation < 1 || generation != float64(int64(generation)) {
+			return mcp.NewToolResultError("generation must be a positive integer"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPAssignExactTaskProfile, map[string]interface{}{
+			"task_id": taskID, "agent_profile_id": profileID, "generation": int64(generation),
+		})
+	}
 }
 
 // --- Handler implementations ---

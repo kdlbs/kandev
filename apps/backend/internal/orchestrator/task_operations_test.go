@@ -114,6 +114,107 @@ func TestStartSessionForWorkflowStepRejectsProfileMismatchBeforePrompt(t *testin
 	}
 }
 
+func TestStartSessionForWorkflowStepRejectsUnboundExactSessionBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-exact", "s-exact", "step1")
+	now := time.Now().UTC().Round(0)
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "t-exact", WorkspaceID: "ws1", AgentProfileID: "profile-exact",
+		ProfileRevision: now, Generation: 1,
+	}); err != nil {
+		t.Fatalf("assign exact profile: %v", err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s-exact")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-exact"
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", AgentProfileID: "profile-step"}
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		isAgentReadyFn: func(context.Context, string) bool { return true },
+		resolveProfileInfo: &executor.AgentProfileInfo{
+			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: now,
+		},
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "s-exact", "t-exact", "exec-exact")
+
+	err = svc.StartSessionForWorkflowStep(ctx, "t-exact", "s-exact", "step2")
+	if !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("StartSessionForWorkflowStep error = %v, want exact assignment fence", err)
+	}
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("prompt calls = %d, want none", len(agentMgr.capturedPrompts))
+	}
+}
+
+func TestLaunchWorkflowStepIncludesExactProfileLaunchReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-receipt", "s-receipt", "step1")
+	now := time.Now().UTC().Round(0)
+	const generation int64 = 1
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "t-receipt", WorkspaceID: "ws1", AgentProfileID: "profile-exact",
+		ProfileRevision: now, Generation: generation,
+	}); err != nil {
+		t.Fatalf("assign exact profile: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s-receipt")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-exact"
+	session.ExactProfileGeneration = generation
+	session.ExactProfileRevision = now.UnixNano()
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if _, err := repo.RecordExactProfileLaunchReceipt(ctx, &models.ExactProfileLaunchReceipt{
+		TaskID: "t-receipt", SessionID: "s-receipt", AgentProfileID: "profile-exact",
+		Generation: generation, ProfileRevision: now, Model: "exact-model",
+		Outcome: models.ExactProfileLaunchOutcomeApplied,
+	}); err != nil {
+		t.Fatalf("record receipt: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", AgentProfileID: "profile-step"}
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		isAgentReadyFn: func(context.Context, string) bool { return true },
+		resolveProfileInfo: &executor.AgentProfileInfo{
+			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: now,
+		},
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "s-receipt", "t-receipt", "exec-receipt")
+
+	response, err := svc.launchWorkflowStep(ctx, &LaunchSessionRequest{
+		TaskID: "t-receipt", SessionID: "s-receipt", WorkflowStepID: "step2",
+	})
+	if err != nil {
+		t.Fatalf("launch workflow step: %v", err)
+	}
+	if response.ExactProfileLaunchReceipt == nil || response.ExactProfileLaunchReceipt.Model != "exact-model" {
+		t.Fatalf("launch response receipt = %#v, want persisted exact receipt", response.ExactProfileLaunchReceipt)
+	}
+}
+
 // taskEnvironmentFailureRepo injects an error after session creation but before
 // Executor reaches AgentManager.LaunchAgent. This models workspace-preparation
 // failures, which do not trigger the executor's launch-failure callback.

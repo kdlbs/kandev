@@ -137,6 +137,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	}
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
+	if err := r.ensureTaskExactProfileSchema(); err != nil {
+		return err
+	}
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -195,6 +198,16 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// recreates task_sessions from an explicit column list and would drop a
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
+	// task_sessions exact-profile attribution columns bind a session to the
+	// task-owned exact assignment that created it. They stay zero for sessions
+	// created before, or outside, an exact assignment; an exact launch never
+	// reuses a session whose generation/revision does not match the active
+	// assignment. Like name above, both must be added after the
+	// migrateSessionsRemoveAgentExecutionID rebuild so a legacy upgrade does
+	// not drop them, and the rebuild's explicit column lists keep them so the
+	// ADD is already-present on fresh databases.
+	_ = r.migrate.Apply("task_sessions.exact_profile_generation", `ALTER TABLE task_sessions ADD COLUMN exact_profile_generation BIGINT NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("task_sessions.exact_profile_revision", `ALTER TABLE task_sessions ADD COLUMN exact_profile_revision BIGINT NOT NULL DEFAULT 0`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repository_secret_bindings.table", `
 		CREATE TABLE IF NOT EXISTS repository_secret_bindings (
@@ -789,6 +802,50 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 // ensureTaskWorkspaceFoldersSchema upgrades databases created before durable
 // folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
 // on SQLite and Postgres.
+// ensureTaskExactProfileSchema upgrades databases created before the
+// task-owned exact-profile assignment and launch-receipt tables existed.
+// Both statements are replay-safe on SQLite and Postgres.
+func (r *Repository) ensureTaskExactProfileSchema() error {
+	if _, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS task_exact_profile_assignments (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL,
+			profile_revision TIMESTAMP NOT NULL,
+			generation BIGINT NOT NULL,
+			source_workflow_id TEXT NOT NULL DEFAULT '',
+			source_workflow_step_id TEXT NOT NULL DEFAULT '',
+			source_task_state TEXT NOT NULL DEFAULT '',
+			active INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_task_exact_profile_assignments_active
+			ON task_exact_profile_assignments(task_id, active);
+		CREATE TABLE IF NOT EXISTS task_exact_profile_launch_receipts (
+			task_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			profile_revision_nanos BIGINT NOT NULL,
+			model TEXT NOT NULL DEFAULT '',
+			outcome TEXT NOT NULL,
+			failure_reason TEXT NOT NULL DEFAULT '',
+			inference_started INTEGER NOT NULL DEFAULT 0,
+			substitution_done INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_task_exact_profile_receipts_generation
+			ON task_exact_profile_launch_receipts(task_id, generation);
+	`); err != nil {
+		return fmt.Errorf("create exact task profile schema: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS task_workspace_folders (
