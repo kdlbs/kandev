@@ -11,9 +11,6 @@ const (
 	Office           = "office"
 	Automation       = "automation"
 	// Coordinator identifies a workspace coordinator's conversation session.
-	// It is declared here for the copilot and settings DTOs that reference
-	// it, but is deliberately absent from instanceModes: wiring it into the
-	// agentctl instance API is owned by a later work package.
 	Coordinator = "coordinator"
 )
 
@@ -23,6 +20,7 @@ var instanceModes = [...]string{
 	Config,
 	Office,
 	Automation,
+	Coordinator,
 }
 
 // InstanceModes returns the modes accepted by the agentctl instance API.

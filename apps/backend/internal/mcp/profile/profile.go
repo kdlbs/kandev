@@ -17,8 +17,7 @@ const (
 	SurfaceConfiguration Surface = "configuration"
 	SurfaceExternal      Surface = "external"
 	SurfaceAutomation    Surface = "automation"
-	// SurfaceCoordinator is the copilot's conversation MCP surface. Wiring it
-	// into Legacy()/normalizeSurface is owned by a later work package.
+	// SurfaceCoordinator is the copilot's conversation MCP surface.
 	SurfaceCoordinator Surface = "coordinator"
 )
 
@@ -93,10 +92,12 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 		surface = SurfaceExternal
 	case mcpmode.Automation:
 		surface = SurfaceAutomation
+	case mcpmode.Coordinator:
+		surface = SurfaceCoordinator
 	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation {
+	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
 		capabilities = append(capabilities, CapabilityUserQuestion)
 	}
 	return New(surface, capabilities, providers)
@@ -104,7 +105,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceCoordinator:
 		return surface
 	default:
 		return SurfaceKanbanTask
