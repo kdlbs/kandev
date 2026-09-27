@@ -125,3 +125,16 @@ It now waits for the workspace job to leave the in-flight map before checking
 the persisted retry deadline. This removes a race between the provider call
 and the durable result read. The test passed 100 repeated runs and 10
 race-enabled runs.
+
+An independent review found that an in-flight directory or file request could
+fail after its credential rotated. The error path now revalidates the
+continuation before returning the provider error, so a changed credential
+discards the old progress and restarts from a fresh directory listing. The
+channel-controlled regression proves the failed old-credential request is not
+recorded as the automatic sync result and only the replacement result applies.
+
+Validation passed:
+
+- `go test ./internal/workflowsync -run '^TestAutomaticSync(RestartsAfterFailedRequestUsesRotatedCredential|RestartsFetchAfterCredentialChange)$' -count=1`
+- `go test ./internal/workflowsync -count=1 -timeout=3m`
+- `go test -race ./internal/workflowsync -run 'Test.*(Automatic|Deferred|Continuation|Pacing|SyncDue)' -count=1 -timeout=3m`

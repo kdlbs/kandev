@@ -582,6 +582,9 @@ func (s *Service) loadAutomaticContinuationDirectory(
 	}
 	entries, _, err := s.listProviderEntries(ctx, cfg)
 	if err != nil {
+		if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
+			return validationErr
+		}
 		return err
 	}
 	if err := s.validateAutomaticContinuation(ctx, cfg, state); err != nil {
@@ -610,6 +613,9 @@ func (s *Service) fetchAutomaticContinuationEntries(
 		}
 		content, err := get(ctx, entry.path)
 		if err != nil {
+			if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
+				return validationErr
+			}
 			return fmt.Errorf("failed to fetch %s: %w", entry.path, err)
 		}
 		continuation.files = append(continuation.files, fetchedFile{path: entry.path, content: content})

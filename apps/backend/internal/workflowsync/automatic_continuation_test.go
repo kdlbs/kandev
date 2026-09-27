@@ -3,6 +3,7 @@ package workflowsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,9 @@ type pacedWorkflowGitHub struct {
 	fileReads          map[string]int
 	httpDirectoryReads int
 	httpFileReads      map[string]int
+	failCredential     string
+	failedFileStarted  chan struct{}
+	releaseFailedFile  chan struct{}
 	server             *httptest.Server
 }
 
@@ -74,6 +78,14 @@ func (p *pacedWorkflowGitHub) GetRepoFileContentForWorkspace(
 	p.mu.Lock()
 	p.fileReads[path]++
 	fingerprint := p.fingerprint
+	if fingerprint == p.failCredential {
+		started := p.failedFileStarted
+		release := p.releaseFailedFile
+		p.mu.Unlock()
+		close(started)
+		<-release
+		return nil, errors.New("credential rejected")
+	}
 	if strings.HasSuffix(path, "/beta.yml") && p.deferSecondFile {
 		p.deferSecondFile = false
 		close(p.deferred)
@@ -129,6 +141,15 @@ func (p *pacedWorkflowGitHub) setFingerprint(fingerprint string) {
 	p.mu.Lock()
 	p.fingerprint = fingerprint
 	p.mu.Unlock()
+}
+
+func (p *pacedWorkflowGitHub) failCredentialRequest(fingerprint string) (<-chan struct{}, chan<- struct{}) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failCredential = fingerprint
+	p.failedFileStarted = make(chan struct{})
+	p.releaseFailedFile = make(chan struct{})
+	return p.failedFileStarted, p.releaseFailedFile
 }
 
 func (p *pacedWorkflowGitHub) counts() (int, map[string]int) {
@@ -292,6 +313,38 @@ func TestAutomaticSyncRestartsFetchAfterCredentialChange(t *testing.T) {
 	require.Equal(t, 2, fileReads[DefaultPath+"/beta.yml"])
 	require.Equal(t, 1, applier.callCount())
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-credential")
+	require.NoError(t, err)
+	require.True(t, cfg.LastOk)
+	require.Equal(t, "credential-2", cfg.CredentialFingerprint)
+}
+
+func TestAutomaticSyncRestartsAfterFailedRequestUsesRotatedCredential(t *testing.T) {
+	provider := newPacedWorkflowGitHub(t)
+	provider.mu.Lock()
+	provider.deferSecondFile = false
+	provider.mu.Unlock()
+	started, release := provider.failCredentialRequest("credential-1")
+	svc, applier := setupAutomaticContinuationService(t, provider)
+	configureWorkspace(t, svc, "ws-credential-error")
+	t.Cleanup(svc.waitAutomaticSyncs)
+
+	svc.dispatchAutomaticSync("ws-credential-error", false)
+	<-started
+	provider.setFingerprint("credential-2")
+	close(release)
+
+	svc.automaticMu.Lock()
+	state := svc.automaticInFlight["ws-credential-error"]
+	svc.automaticMu.Unlock()
+	require.NotNil(t, state)
+	<-state.done
+
+	directoryReads, fileReads := provider.counts()
+	require.Equal(t, 2, directoryReads, "credential replacement requires a fresh listing")
+	require.Equal(t, 2, fileReads[DefaultPath+"/alpha.yml"], "the failed old-credential request must be retried")
+	require.Equal(t, 1, fileReads[DefaultPath+"/beta.yml"])
+	require.Equal(t, 1, applier.callCount(), "only the complete replacement-credential result is applied")
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-credential-error")
 	require.NoError(t, err)
 	require.True(t, cfg.LastOk)
 	require.Equal(t, "credential-2", cfg.CredentialFingerprint)
