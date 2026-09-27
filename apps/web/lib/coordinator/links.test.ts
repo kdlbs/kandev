@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  linkToCoordinator,
   linkToCoordinatorAdd,
   linkToCoordinatorNeedsYou,
   linkToCoordinatorQueue,
   linkToCoordinatorSettings,
   linkToCoordinatorSettingsList,
 } from "./links";
+
+describe("linkToCoordinator", () => {
+  it("builds the generic coordinator path", () => {
+    expect(linkToCoordinator("ws-1")).toBe("/workspaces/ws-1/coordinator");
+  });
+
+  it("encodes the workspace id", () => {
+    expect(linkToCoordinator("ws/1")).toBe("/workspaces/ws%2F1/coordinator");
+  });
+});
 
 describe("linkToCoordinatorNeedsYou", () => {
   it("builds the Needs you path", () => {

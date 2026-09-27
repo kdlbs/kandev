@@ -2,12 +2,14 @@
 
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconInbox, IconSquarePlus } from "@tabler/icons-react";
+import { IconInbox, IconRobot, IconSquarePlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useCoordinatorSidebarEntries } from "@/app/coordinator/use-coordinator-sidebar-entries";
+import { linkToCoordinator, linkToCoordinatorNeedsYou } from "@/lib/coordinator/links";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
@@ -149,6 +151,82 @@ function MobileNewTaskRow({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
+/**
+ * The coordinator phone navigation rows (AC-COORDINATOR-NEEDS-YOU-006.1):
+ * the same entries as `AppSidebarCoordinatorRows`, rendered with this file's
+ * own row markup. Renders nothing until the coordinator list has loaded.
+ */
+function MobileCoordinatorRows({
+  workspaceId,
+  onNavigate,
+}: {
+  workspaceId: string;
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  const { coordinators, badgeByCoordinatorId } = useCoordinatorSidebarEntries(workspaceId);
+
+  if (!coordinators) return null;
+
+  if (coordinators.length === 0) {
+    return (
+      <Button
+        asChild
+        variant="outline"
+        className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+      >
+        <Link
+          href={linkToCoordinator(workspaceId)}
+          onClick={onNavigate}
+          data-testid="mobile-sidebar-coordinator-generic"
+        >
+          <IconRobot className="h-4 w-4 shrink-0" />
+          <span className="flex-1 text-left">{t("coordinator:sidebarGenericEntry")}</span>
+        </Link>
+      </Button>
+    );
+  }
+
+  return (
+    <>
+      {coordinators.map((coordinator) => {
+        const badge = badgeByCoordinatorId.get(coordinator.id) ?? 0;
+        return (
+          <Button
+            key={coordinator.id}
+            asChild
+            variant="outline"
+            className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+          >
+            <Link
+              href={linkToCoordinatorNeedsYou(workspaceId, coordinator.id)}
+              onClick={onNavigate}
+              data-testid={`mobile-sidebar-coordinator-${coordinator.id}`}
+            >
+              <IconRobot className="h-4 w-4 shrink-0" />
+              <span className="flex-1 truncate text-left">{coordinator.name}</span>
+              {badge > 0 && <Badge>{badge}</Badge>}
+            </Link>
+          </Button>
+        );
+      })}
+    </>
+  );
+}
+
+function hasNoFixedRows(
+  fixedDestinationCount: number,
+  mode: ReturnType<typeof useOfficeModeState>,
+  needsYouEnabled: boolean,
+  coordinatorEnabled: boolean,
+  workspaceId: string | null,
+): boolean {
+  if (fixedDestinationCount > 0 || mode === "office") return false;
+  if (needsYouEnabled && workspaceId) return false;
+  if (coordinatorEnabled && workspaceId) return false;
+  return true;
+}
+
 function MobileRequiredRows({
   onNavigate,
   omitSections,
@@ -166,13 +244,16 @@ function MobileRequiredRows({
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
   const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
   const officeInboxCount = useAppStore(selectOfficeInboxCount);
+  const coordinatorEnabled = useFeature("coordinator");
   if (omitSections.has("primary")) return null;
   const fixedDestinations = primary.filter(
     (destination) =>
       (destination.id === "tasks" || destination.id === "threads") &&
       !omitDestinations.includes(destination.id),
   );
-  if (fixedDestinations.length === 0 && mode !== "office" && !(needsYouEnabled && workspaceId))
+  if (
+    hasNoFixedRows(fixedDestinations.length, mode, needsYouEnabled, coordinatorEnabled, workspaceId)
+  )
     return null;
   return (
     <div className="flex flex-col gap-3" data-testid="mobile-sidebar-fixed-navigation">
@@ -210,6 +291,9 @@ function MobileRequiredRows({
             {needsYouCount > 0 && <Badge>{`${needsYouCount}${needsYouHasMore ? "+" : ""}`}</Badge>}
           </Link>
         </Button>
+      )}
+      {coordinatorEnabled && workspaceId && (
+        <MobileCoordinatorRows workspaceId={workspaceId} onNavigate={onNavigate} />
       )}
     </div>
   );

@@ -1,5 +1,10 @@
 import type { QueueGroupKind } from "@/lib/coordinator/attention";
 
+/** `/workspaces/:id/coordinator`, the generic route (redirects, or the no-coordinator state). */
+export function linkToCoordinator(workspaceId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/coordinator`;
+}
+
 /** `/workspaces/:id/coordinator/:coordinatorId`, the coordinator's Needs you screen. */
 export function linkToCoordinatorNeedsYou(workspaceId: string, coordinatorId: string): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/coordinator/${encodeURIComponent(coordinatorId)}`;

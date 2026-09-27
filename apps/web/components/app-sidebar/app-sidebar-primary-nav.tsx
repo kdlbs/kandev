@@ -14,6 +14,7 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { homeDestinationHref } from "@/lib/navigation/core-destinations";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
+import { AppSidebarCoordinatorRows } from "./app-sidebar-coordinator-rows";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
 
@@ -53,6 +54,7 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
   const needsYouInboxEnabled = useFeature("needsYouInbox");
   const needsYouInboxCount = useAppStore(selectNeedsYouInboxCount);
   const needsYouInboxHasMore = useAppStore(selectNeedsYouInboxHasMore);
+  const coordinatorEnabled = useFeature("coordinator");
   const mode = useOfficeModeState();
   const inOffice = mode === "office";
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
@@ -83,6 +85,9 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
           collapsed={collapsed}
           testId="sidebar-needs-you-inbox"
         />
+      )}
+      {coordinatorEnabled && workspaceId && (
+        <AppSidebarCoordinatorRows workspaceId={workspaceId} collapsed={collapsed} />
       )}
       {workspaceId && collapsed && (
         <AppSidebarNavItem
