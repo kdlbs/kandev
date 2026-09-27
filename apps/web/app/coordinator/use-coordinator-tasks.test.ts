@@ -263,3 +263,83 @@ describe("useCoordinatorTasks - non-active workspace (direct fetch)", () => {
     await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(2));
   });
 });
+
+// Review round 4, R6/R7: split from the describe block above to keep each
+// test function under the file's line limit.
+describe("useCoordinatorTasks - non-active workspace transitions and partial failure", () => {
+  beforeEach(() => {
+    mockState = baseState({ workspaces: { activeId: "some-other-active-workspace" } });
+  });
+
+  // R6: a coordinator navigation between two different non-active workspaces
+  // reuses the same mounted hook instance (no `key` remounts
+  // `CoordinatorRoute`), so the prior workspace's tasks must not linger —
+  // not even transiently, and not if the new workspace's own fetch then
+  // fails.
+  it("clears stale tasks when the route workspace changes to a different non-active workspace, even if the new fetch fails", async () => {
+    mockListWorkflows.mockResolvedValueOnce({
+      workflows: [{ id: "wf-a", workspace_id: "workspace-a", name: "A" }],
+      total: 1,
+    });
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      workflow: { id: "wf-a", name: "A" },
+      steps: [{ id: "step-1", name: "Build" }],
+      tasks: [{ id: "t-a", title: "Task A", workflow_step_id: "step-1" }],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) => useCoordinatorTasks(workspaceId),
+      { initialProps: { workspaceId: "workspace-a" } },
+    );
+    await waitFor(() => expect(result.current.tasks.map((t) => t.id)).toEqual(["t-a"]));
+
+    let rejectB: (err: Error) => void = () => {};
+    mockListWorkflows.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectB = reject;
+        }),
+    );
+
+    rerender({ workspaceId: "workspace-b" });
+
+    expect(result.current.tasks).toEqual([]);
+    expect(result.current.loadedAt).toBeUndefined();
+
+    await act(async () => {
+      rejectB(new Error("network error"));
+    });
+
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current.tasks).toEqual([]);
+    expect(result.current.loadedAt).toBeUndefined();
+  });
+
+  // R7 (Review round 4): the tasks input's documented failure contract
+  // (docs/specs/coordinator/system-design/needs-you.md#failure-and-recovery)
+  // requires a partial failure to still show the workflows that loaded.
+  it("keeps a sibling workflow's tasks when one workflow's snapshot fetch fails", async () => {
+    mockListWorkflows.mockResolvedValue({
+      workflows: [
+        { id: "wf-ok", workspace_id: WORKSPACE_ID, name: "OK" },
+        { id: "wf-bad", workspace_id: WORKSPACE_ID, name: "Bad" },
+      ],
+      total: 2,
+    });
+    mockFetchWorkflowSnapshot.mockImplementation((workflowId: string) => {
+      if (workflowId === "wf-bad") return Promise.reject(new Error("snapshot fetch failed"));
+      return Promise.resolve({
+        workflow: { id: "wf-ok", name: "OK" },
+        steps: [{ id: "step-1", name: "Build" }],
+        tasks: [{ id: "t-ok", title: "Task OK", workflow_step_id: "step-1" }],
+      });
+    });
+
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current.tasks.map((t) => t.id)).toEqual(["t-ok"]);
+    expect(result.current.workflowNameById.get("wf-ok")).toBe("OK");
+    expect(result.current.loadedAt).toBeDefined();
+  });
+});

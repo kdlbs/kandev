@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockUseWorkspacePRs = vi.fn();
 const mockListWorkspaceTaskPRs = vi.fn();
@@ -85,5 +85,37 @@ describe("useCoordinatorPRs - non-active workspace (direct fetch)", () => {
 
     await waitFor(() => expect(result.current.get("t-1")).toEqual([{ id: "pr-1" }]));
     expect(mockListWorkspaceTaskPRs).toHaveBeenCalledWith(WORKSPACE_ID, { cache: "no-store" });
+  });
+
+  // R6 (Review round 4): a coordinator navigation between two different
+  // non-active workspaces reuses the same mounted hook instance, so a prior
+  // workspace's PR data must not linger — not even transiently, and not if
+  // the new workspace's own fetch then fails.
+  it("clears stale PR data when the route workspace changes to a different non-active workspace, even if the new fetch fails", async () => {
+    mockListWorkspaceTaskPRs.mockResolvedValueOnce({ task_prs: { "t-a": [{ id: "pr-a" }] } });
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) => useCoordinatorPRs(workspaceId),
+      { initialProps: { workspaceId: "workspace-a" } },
+    );
+    await waitFor(() => expect(result.current.get("t-a")).toEqual([{ id: "pr-a" }]));
+
+    let rejectB: (err: Error) => void = () => {};
+    mockListWorkspaceTaskPRs.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectB = reject;
+        }),
+    );
+
+    rerender({ workspaceId: "workspace-b" });
+
+    expect(result.current.size).toBe(0);
+
+    await act(async () => {
+      rejectB(new Error("network error"));
+    });
+
+    expect(result.current.size).toBe(0);
   });
 });

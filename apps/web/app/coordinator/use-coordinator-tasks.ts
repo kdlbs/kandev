@@ -171,7 +171,12 @@ function emptyDirectState(): DirectTasksState {
 
 async function fetchDirectTasksState(workspaceId: string): Promise<DirectTasksState> {
   const { workflows } = await listWorkflows(workspaceId);
-  const loaded = await Promise.all(
+  // Settled independently, not `Promise.all`: the tasks input's documented
+  // failure contract (docs/specs/coordinator/system-design/needs-you.md
+  // #failure-and-recovery) requires a partial failure to still show the
+  // workflows that loaded, matching `useAllWorkflowSnapshots`'s per-workflow
+  // independence on the active-cache path.
+  const settled = await Promise.allSettled(
     workflows.map(async (workflow) => ({
       workflow,
       snapshot: await fetchWorkflowSnapshot(workflow.id, { cache: "no-store" }),
@@ -182,7 +187,13 @@ async function fetchDirectTasksState(workspaceId: string): Promise<DirectTasksSt
   const stepNameByTaskId = new Map<string, string>();
   const workflowNameById = new Map<string, string>();
   const stepNameByWorkflowStep = new Map<string, string>();
-  for (const { workflow, snapshot } of loaded) {
+  let error = false;
+  for (const outcome of settled) {
+    if (outcome.status === "rejected") {
+      error = true;
+      continue;
+    }
+    const { workflow, snapshot } = outcome.value;
     workflowNameById.set(workflow.id, workflow.name);
     const stepNameById = new Map(snapshot.steps.map((step) => [step.id, step.name]));
     for (const [stepId, name] of stepNameById) {
@@ -201,7 +212,7 @@ async function fetchDirectTasksState(workspaceId: string): Promise<DirectTasksSt
     stepNameByTaskId,
     workflowNameById,
     stepNameByWorkflowStep,
-    error: false,
+    error,
     loadedAt: Date.now(),
   };
 }
@@ -226,10 +237,14 @@ function useCoordinatorTasksDirect(workspaceId: string | null): UseCoordinatorTa
   const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
-    if (!workspaceId) {
-      setState(emptyDirectState());
-      return;
-    }
+    // Reset before fetching, not just when `workspaceId` goes null: this
+    // effect's own instance can persist across a route change from one
+    // non-active workspace straight to another (no `key` remounts
+    // `CoordinatorRoute`), so a stale prior workspace's tasks must never
+    // survive into the next one, even transiently (mirrors
+    // `use-coordinator-list.ts`'s reset-before-fetch pattern).
+    setState(emptyDirectState());
+    if (!workspaceId) return;
     const requestId = ++requestRef.current;
     fetchDirectTasksState(workspaceId)
       .then((next) => {

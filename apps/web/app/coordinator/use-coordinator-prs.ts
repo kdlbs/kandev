@@ -43,10 +43,14 @@ function useCoordinatorPRsDirect(workspaceId: string | null): ReadonlyMap<string
   const requestRef = useRef(0);
 
   useEffect(() => {
-    if (!workspaceId) {
-      setPrsByTaskId(EMPTY_PRS);
-      return;
-    }
+    // Reset before fetching, not just when `workspaceId` goes null: this
+    // effect's own instance can persist across a route change from one
+    // non-active workspace straight to another (no `key` remounts
+    // `CoordinatorRoute`), so a stale prior workspace's PR data must never
+    // survive into the next one, even transiently (mirrors
+    // `use-coordinator-list.ts`'s reset-before-fetch pattern).
+    setPrsByTaskId(EMPTY_PRS);
+    if (!workspaceId) return;
     const requestId = ++requestRef.current;
     listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
       .then((response) => {
