@@ -131,4 +131,7 @@ the phone confirmation capture scrolls its action controls into view.
 Frontend typecheck and recovery UI tests (79 tests) passed, as did i18n checks,
 the earlier full desktop recovery E2E (2 tests), and mobile recovery E2E (5
 tests). Public docs validation and tests (62 tests), specification validation,
-spec lint, and `git diff --check` passed.
+spec lint, and `git diff --check` passed. In final fixup verification, the
+dirty relocation flow passed once on Chromium and once on mobile-chrome with
+retries disabled; both tests waited for the resumable runtime row to become
+durably `stopped` before offering relocation.

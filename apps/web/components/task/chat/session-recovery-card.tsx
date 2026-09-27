@@ -81,7 +81,7 @@ export function SessionRecoveryCard({
       </div>
       <ManagedCloneRelocationConfirmation
         open={relocationConfirmationOpen}
-        targetKey={`${model.sessionId}:${model.stamp ?? actions.managedCloneRecoveryStamp ?? ""}`}
+        targetKey={`${model.sessionId}:${actions.managedCloneRecoveryStamp ?? model.stamp ?? ""}`}
         onOpenChange={setRelocationConfirmationOpen}
         onConfirm={() => actions.handleManagedCloneRelocation()}
         disabled={actions.busyAction !== null}

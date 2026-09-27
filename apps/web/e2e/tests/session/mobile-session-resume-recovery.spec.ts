@@ -20,8 +20,8 @@ import {
 import {
   cleanupManagedCloneRelocationFixture,
   countSimpleMockResponses,
+  readManagedCloneRecoveryConsumers,
   removeRecoveryBranch,
-  seedManagedCloneRelocationFailure,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
 } from "../../helpers/session-resume-recovery";
@@ -411,7 +411,7 @@ test.describe("mobile: worktree branch resume recovery", () => {
 });
 
 test.describe("mobile: dirty managed clone relocation", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.afterEach(async ({ apiClient, seedData }) => {
     await cleanupManagedCloneRelocationFixture(apiClient, seedData);
@@ -453,12 +453,32 @@ test.describe("mobile: dirty managed clone relocation", () => {
       message: "Waiting for the mobile managed clone relocation session to stop",
       timeout: 30_000,
     });
-    seedManagedCloneRelocationFailure(backend.tmpDir, sessionId);
-    await testPage.reload();
-    await fixture.session.waitForLoad();
+    await fixture.session.recoveryResumeButton().click();
 
     const relocate = testPage.getByTestId("managed-clone-relocate-button");
     await expect(relocate).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const status = await apiClient.wsRequest<{
+            is_agent_running: boolean;
+          }>("task.session.status", { task_id: fixture.task.id, session_id: sessionId });
+          return status.is_agent_running;
+        },
+        {
+          timeout: 30_000,
+          intervals: [250, 500, 1_000],
+          message: "Waiting for the mobile stopped session runtime to exit",
+        },
+      )
+      .toBe(false);
+    await expect
+      .poll(() => readManagedCloneRecoveryConsumers(backend.tmpDir, fixture.environment.id), {
+        timeout: 30_000,
+        intervals: [250, 500, 1_000],
+        message: "Waiting for the mobile stopped resumable runtime to settle durably",
+      })
+      .toEqual([{ sessionId, state: "CANCELLED", runtimeStatus: "stopped" }]);
     await expect(relocate).toBeInViewport();
     expect((await relocate.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
@@ -506,8 +526,14 @@ test.describe("mobile: dirty managed clone relocation", () => {
     expect(afterEnvironment?.id).toBe(beforeEnvironment?.id);
     expect(afterRepository?.worktree_id).not.toBe(beforeRepository?.worktree_id);
     expect(afterRepository?.worktree_branch).toBe(fixture.originalBranch);
-    expect(fs.existsSync(originalPath)).toBe(true);
-    expect(fs.readFileSync(path.join(originalPath, fixture.dirtyFileName), "utf8")).toBe(
+    const relocationRecord = JSON.parse(
+      fs.readFileSync(`${originalPath}.kandev-clone-relocation.json`, "utf8"),
+    ) as { original: string };
+    const retainedOriginal = relocationRecord.original;
+    expect(retainedOriginal).not.toBe(originalPath);
+    expect(retainedOriginal).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+    expect(fs.existsSync(originalPath)).toBe(false);
+    expect(fs.readFileSync(path.join(retainedOriginal, fixture.dirtyFileName), "utf8")).toBe(
       fixture.dirtyFileContent,
     );
     expect(fs.readFileSync(path.join(relocatedPath!, fixture.dirtyFileName), "utf8")).toBe(
@@ -540,6 +566,12 @@ test.describe("mobile: dirty managed clone relocation", () => {
     await expect(
       fixture.session.activeChat().getByText("simple mock response", { exact: false }).last(),
     ).toBeVisible({ timeout: 30_000 });
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    const expectedFilesPath = relocatedPath!.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+    await expect(fixture.session.files.getByTestId("file-browser-workspace-path")).toHaveText(
+      expectedFilesPath,
+      { timeout: 30_000 },
+    );
     await assertNoDocumentHorizontalOverflow(testPage, "mobile managed clone relocation");
   });
 });

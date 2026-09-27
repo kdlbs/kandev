@@ -28,21 +28,22 @@ type managedCloneRelocationInspection struct {
 }
 
 type managedCloneRelocationRecord struct {
-	OperationID   string    `json:"operation_id"`
-	TaskID        string    `json:"task_id"`
-	EnvironmentID string    `json:"environment_id"`
-	WorktreeID    string    `json:"worktree_id"`
-	Original      string    `json:"original"`
-	Replacement   string    `json:"replacement"`
-	ReplacementID string    `json:"replacement_id"`
-	SourcePath    string    `json:"source_path"`
-	SourceCommon  string    `json:"source_common_dir"`
-	DestPath      string    `json:"destination_path"`
-	DestCommon    string    `json:"destination_common_dir"`
-	Branch        string    `json:"branch"`
-	Head          string    `json:"head"`
-	State         string    `json:"state"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	OperationID           string    `json:"operation_id"`
+	TaskID                string    `json:"task_id"`
+	EnvironmentID         string    `json:"environment_id"`
+	WorktreeID            string    `json:"worktree_id"`
+	Original              string    `json:"original"`
+	OriginalWorkspacePath string    `json:"original_workspace_path,omitempty"`
+	Replacement           string    `json:"replacement"`
+	ReplacementID         string    `json:"replacement_id"`
+	SourcePath            string    `json:"source_path"`
+	SourceCommon          string    `json:"source_common_dir"`
+	DestPath              string    `json:"destination_path"`
+	DestCommon            string    `json:"destination_common_dir"`
+	Branch                string    `json:"branch"`
+	Head                  string    `json:"head"`
+	State                 string    `json:"state"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 var relocationCommitPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
@@ -232,10 +233,18 @@ func (m *Manager) relocateCleanManagedCloneWorktree(
 	if err := verifyExactRelocationCheckout(ctx, m, &replacement, record); err != nil {
 		return nil, err
 	}
+	if err := writePublishedManagedCloneRelocationRecord(&record); err != nil {
+		return nil, managedCloneRelocationError(wt.TaskID, "cannot record replacement relocation state")
+	}
 	replacementPtr, err := m.publishManagedCloneReplacement(ctx, wt, &replacement, claim)
 	if err != nil {
 		return nil, err
 	}
+	archivePath, err := m.retainManagedCloneOriginal(ctx, &record)
+	if err != nil {
+		return nil, err
+	}
+	record.Original = archivePath
 	if err := markManagedCloneRelocationComplete(jobPath, &record, wt.TaskID); err != nil {
 		return nil, err
 	}
@@ -258,7 +267,8 @@ func prepareManagedCloneRelocationRecord(
 	}
 	record := managedCloneRelocationRecord{
 		OperationID: claim.OperationID, TaskID: wt.TaskID, EnvironmentID: wt.TaskEnvironmentID,
-		WorktreeID: wt.ID, Original: wt.Path, Replacement: wt.Path + ".relocated-" + claim.OperationID[:8],
+		WorktreeID: wt.ID, Original: wt.Path, OriginalWorkspacePath: wt.Path,
+		Replacement:   wt.Path + ".relocated-" + claim.OperationID[:8],
 		ReplacementID: uuid.NewString(), SourcePath: inspection.sourcePath,
 		SourceCommon: inspection.sourceGit, DestPath: proof.ExpectedDestinationPath,
 		DestCommon: inspection.destGit, Branch: inspection.branch, Head: inspection.head,
@@ -341,8 +351,18 @@ func (m *Manager) publishManagedCloneReplacement(
 
 func markManagedCloneRelocationComplete(jobPath string, record *managedCloneRelocationRecord, taskID string) error {
 	record.State, record.UpdatedAt = string(RecoveryStateComplete), time.Now().UTC()
-	if err := writeManagedCloneRelocationRecord(jobPath, *record, false); err != nil {
-		return managedCloneRelocationError(taskID, "cannot record clone relocation publication")
+	paths := []string{
+		jobPath,
+		record.Replacement + ".kandev-clone-relocation.json",
+		record.Original + ".kandev-clone-relocation.json",
+	}
+	for _, path := range paths {
+		if path == ".kandev-clone-relocation.json" {
+			continue
+		}
+		if err := writeManagedCloneRelocationRecord(path, *record, false); err != nil {
+			return managedCloneRelocationError(taskID, "cannot record clone relocation publication")
+		}
 	}
 	return nil
 }
@@ -384,6 +404,9 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	claim *models.TaskEnvironmentRecoveryClaim,
 ) (*Worktree, error) {
 	recoveryJobPath := wt.Path + ".kandev-recovery.json"
+	if err := validateDirtyCloneRelocationAuthorization(ctx); err != nil {
+		return nil, err
+	}
 	recovery, snapshotPath, recoveryLock, err := beginRecoveryWithOperation(wt, recoveryJobPath, claim.OperationID)
 	if err != nil {
 		return nil, err
@@ -405,6 +428,9 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	if err := verifyDirtyRelocationCheckout(ctx, m, *record, manifest); err != nil {
 		return nil, blockRecovery(recoveryJobPath, recovery, err)
 	}
+	if err := writePublishedManagedCloneRelocationRecord(record); err != nil {
+		return nil, blockRecovery(recoveryJobPath, recovery, err)
+	}
 
 	replacement := managedCloneRelocationReplacement(wt, *record)
 	if _, ok := m.store.(CompareAndSwapWorktreeWithRecoveryClaimStore); !ok {
@@ -414,9 +440,15 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	if err != nil {
 		return nil, fmt.Errorf("%w: guarded dirty relocation publication failed", ErrWorktreeCorrupted)
 	}
+	archivePath, err := m.retainManagedCloneOriginal(ctx, record)
+	if err != nil {
+		return nil, err
+	}
+	recovery.Original = archivePath
 	if _, err := m.completeRecovery(recoveryJobPath, recovery, wt, published); err != nil {
 		return nil, err
 	}
+	record.Original = archivePath
 	if err := markManagedCloneRelocationComplete(jobPath, record, wt.TaskID); err != nil {
 		return nil, err
 	}

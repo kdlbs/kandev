@@ -1092,10 +1092,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 			) (root, providerSource, ownerNameSource, destination string, managed bool, err error)
 		}); ok {
 			root, source, ownerNameSource, destination, managed, pathErr := paths.ManagedCloneRelocationPaths(repository)
-			if pathErr != nil {
-				return fmt.Errorf("resolve managed clone paths for repository %q: %w", repository.ID, pathErr)
-			}
-			if managed {
+			if pathErr == nil && managed {
 				cloneRelocation = &worktree.ManagedCloneRelocationProof{
 					ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
 					ExpectedDestinationPath: destination,

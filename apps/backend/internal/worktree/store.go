@@ -42,6 +42,15 @@ func (s *SQLiteStore) AcquireTaskEnvironmentRecoveryClaim(
 	return recoveryclaim.Acquire(ctx, s.db, req)
 }
 
+// GetTaskEnvironmentRecoveryClaim reads the durable authority held by an
+// interrupted recovery operation.
+func (s *SQLiteStore) GetTaskEnvironmentRecoveryClaim(
+	ctx context.Context,
+	environmentID string,
+) (*models.TaskEnvironmentRecoveryClaim, error) {
+	return recoveryclaim.Get(ctx, s.db, environmentID)
+}
+
 // ReleaseTaskEnvironmentRecoveryClaim releases the exact recovery authority
 // previously acquired for an environment.
 func (s *SQLiteStore) ReleaseTaskEnvironmentRecoveryClaim(

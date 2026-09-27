@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
@@ -15,6 +15,7 @@ type SqliteTestDatabase = {
   exec(sql: string): void;
   prepare(sql: string): {
     get(...parameters: unknown[]): unknown;
+    all(...parameters: unknown[]): unknown[];
     run(...parameters: unknown[]): unknown;
   };
   close(): void;
@@ -22,36 +23,123 @@ type SqliteTestDatabase = {
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 
-/** Seed the typed recovery projection after the test has stopped its session. */
-export function seedManagedCloneRelocationFailure(tmpDir: string, sessionId: string): string {
+type SessionRecoveryFrame = {
+  id?: string;
+  action?: string;
+  type?: string;
+  payload?: unknown;
+};
+
+function forEachSessionRecoveryFrame(
+  payload: unknown,
+  consume: (frame: SessionRecoveryFrame) => void,
+) {
+  if (typeof payload !== "string") return;
+  for (const part of payload.split("\n").filter(Boolean)) {
+    let frame: SessionRecoveryFrame;
+    try {
+      frame = JSON.parse(part) as SessionRecoveryFrame;
+    } catch {
+      continue;
+    }
+    if (frame.action === "session.recover" && typeof frame.id === "string") consume(frame);
+  }
+}
+
+/** Capture request IDs and responses for explicit session.recover requests. */
+export function captureSessionRecoveryMessages(page: Page) {
+  const requestIds: Record<string, string> = {};
+  const responses = new Map<string, { type?: string; payload?: unknown }>();
+  page.on("websocket", (socket) => {
+    if (!socket.url().endsWith("/ws")) return;
+    socket.on("framesent", ({ payload }) => {
+      forEachSessionRecoveryFrame(payload, (frame) => {
+        const action = (frame.payload as { action?: unknown } | null)?.action;
+        if (frame.type === "request" && typeof action === "string") {
+          requestIds[action] = frame.id!;
+        }
+      });
+    });
+    socket.on("framereceived", ({ payload }) => {
+      forEachSessionRecoveryFrame(payload, (frame) => {
+        if (frame.type === "response" || frame.type === "error") {
+          responses.set(frame.id!, { type: frame.type, payload: frame.payload });
+        }
+      });
+    });
+  });
+  return { requestIds, responses };
+}
+
+export function capturedSessionRecoveryResponse(
+  requestIds: Record<string, string>,
+  responses: Map<string, { type?: string; payload?: unknown }>,
+  action: string,
+) {
+  const id = requestIds[action];
+  return id ? responses.get(id) : undefined;
+}
+
+export function capturedSessionRecoveryResponseType(
+  requestIds: Record<string, string>,
+  responses: Map<string, { type?: string; payload?: unknown }>,
+  action: string,
+) {
+  return capturedSessionRecoveryResponse(requestIds, responses, action)?.type ?? null;
+}
+
+export function assertSuccessfulRelocationResponse(
+  response: { type?: string; payload?: unknown } | undefined,
+  runtimeConsumers: unknown,
+) {
+  if (response?.type === "error") {
+    throw new Error(
+      `relocate_and_resume was rejected: ${JSON.stringify(response.payload)}; ` +
+        `durable consumers: ${JSON.stringify(runtimeConsumers)}`,
+    );
+  }
+  expect(response?.type).toBe("response");
+}
+
+export async function expectMinimumElementHeight(locator: Locator, height: number) {
+  expect((await locator.boundingBox())?.height).toBeGreaterThan(height);
+}
+
+export function taskEnvironmentRepository(
+  environment: Awaited<ReturnType<ApiClient["getTaskEnvironment"]>>,
+  repositoryId: string,
+) {
+  return environment?.repos?.find((repository) => repository.repository_id === repositoryId);
+}
+
+export function taskEnvironmentRepositoryWorktreePath(
+  environment: Awaited<ReturnType<ApiClient["getTaskEnvironment"]>>,
+  repositoryId: string,
+) {
+  return taskEnvironmentRepository(environment, repositoryId)?.worktree_path ?? null;
+}
+
+/** Read the durable session/runtime inventory considered by relocation admission. */
+export function readManagedCloneRecoveryConsumers(
+  tmpDir: string,
+  environmentId: string,
+): Array<{ sessionId: string; state: string; runtimeStatus?: string }> {
   const { DatabaseSync } = nodeRequire("node:sqlite") as {
     DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
   };
   const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
   try {
-    db.exec("PRAGMA busy_timeout = 5000");
-    const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(sessionId) as
-      | { metadata?: string | null }
-      | undefined;
-    if (!row) throw new Error(`Session ${sessionId} was not found in the E2E database`);
-    const metadata = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
-    const stamp = `managed-clone-e2e-${Date.now()}`;
-    metadata.last_agent_error = {
-      message: "The task workspace contains local changes and needs explicit relocation.",
-      occurred_at: new Date().toISOString(),
-      scope: "session",
-      phase: "bootstrap",
-      code: "managed_clone_relocation_required",
-      details: "Move the workspace files and resume to continue this task session.",
-      recovery_actions: ["relocate_and_resume"],
-      stamp,
-    };
-    db.prepare("UPDATE task_sessions SET metadata = ?, updated_at = ? WHERE id = ?").run(
-      JSON.stringify(metadata),
-      new Date().toISOString(),
-      sessionId,
-    );
-    return stamp;
+    return db
+      .prepare(
+        `
+        SELECT ts.id AS sessionId, ts.state, er.status AS runtimeStatus
+        FROM task_sessions ts
+        LEFT JOIN executors_running er ON er.session_id = ts.id
+        WHERE ts.task_environment_id = ?
+        ORDER BY ts.id
+      `,
+      )
+      .all(environmentId) as Array<{ sessionId: string; state: string; runtimeStatus?: string }>;
   } finally {
     db.close();
   }

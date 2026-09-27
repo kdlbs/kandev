@@ -108,4 +108,9 @@ regressions passed with real Git worktrees. Full worktree, repoclone, lifecycle,
 and executor package tests passed, as did the backend build. The focused
 worktree regressions also passed with `-race`. Earlier SQL guard and persistence
 race-conformance checks passed. PostgreSQL-specific migration and concurrency
-tests were not run because `KANDEV_TEST_POSTGRES_DSN` was unset.
+tests were not run because `KANDEV_TEST_POSTGRES_DSN` was unset. Successful
+task-owned runtime stops now settle resumable executor rows to `stopped` before
+recovery admission; lifecycle and SQLite claim regressions passed, and the real
+dirty relocation E2E confirmed admission succeeds only after that durable state.
+Final PR-fixup verification also passed the changed-code backend linter with
+zero issues and the focused worktree relocation/admission regression set.

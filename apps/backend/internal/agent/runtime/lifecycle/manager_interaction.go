@@ -1229,6 +1229,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		exec.FinishedAt = &now
 	})
 
+	// Persist terminal runtime state before publishing the stop event so
+	// environment recovery cannot mistake a stopped resumable session for a
+	// live consumer.
 	if execution.Owner.Kind == ExecutionOwnerRun {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 			return err
@@ -1238,6 +1241,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	execution.EndSessionSpan()
 
 	m.RemoveExecution(executionID)
+	if execution.Owner.Kind != ExecutionOwnerRun {
+		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
+	}
 	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("agent stopped and removed from tracking",

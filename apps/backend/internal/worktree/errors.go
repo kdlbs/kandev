@@ -132,6 +132,11 @@ var (
 	// cleanup inventory was captured.
 	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 
+	// ErrManagedCloneRelocationAuthorizationStale means the error stamp that
+	// authorized a dirty clone relocation no longer identifies the current
+	// session failure.
+	ErrManagedCloneRelocationAuthorizationStale = errors.New("managed-clone relocation authorization is stale")
+
 	// ErrReuseWorktreeUnavailable is returned when an attach-only launch cannot
 	// find a valid canonical worktree. Callers must surface this as a workspace
 	// reuse failure; they must never fall through to git worktree add.

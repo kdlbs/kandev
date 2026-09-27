@@ -68,17 +68,44 @@ func TestAdmitRecoveryReusesOwningAdmissionFromContext(t *testing.T) {
 	}
 }
 
+func TestDirtyRecoverySlotLockWaitHonorsCancellation(t *testing.T) {
+	manager := &Manager{}
+	request := RecoveryAdmissionRequest{
+		TaskID: "task-lock-cancel", RelocateDirty: true,
+		Slots: []RecoverySlot{
+			{Worktree: &Worktree{ID: "a", Path: "/tasks/a", RepositoryPath: "/repos/a"}},
+			{Worktree: &Worktree{ID: "b", Path: "/tasks/b", RepositoryPath: "/repos/b"}},
+		},
+	}
+	firstLock := &sync.Mutex{}
+	secondLock := &sync.Mutex{}
+	manager.recoveryLocks.Store(recoverySlotKey(request.Slots[0]), firstLock)
+	manager.recoveryLocks.Store(recoverySlotKey(request.Slots[1]), secondLock)
+	secondLock.Lock()
+	defer secondLock.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if locks, err := manager.lockRecoverySlots(ctx, &request, []int{0, 1}); err == nil || locks != nil {
+		t.Fatalf("lockRecoverySlots() = (%v, %v), want cancellation error", locks, err)
+	}
+	if !firstLock.TryLock() {
+		t.Fatal("cancellation left an earlier worktree lock held")
+	}
+	firstLock.Unlock()
+}
+
 func TestLockRecoverySlotsFailsWhenAnotherAdmissionOwnsWorktree(t *testing.T) {
 	manager := &Manager{}
 	request := RecoveryAdmissionRequest{Slots: []RecoverySlot{{WorktreeID: "worktree-contended"}}}
-	first, err := manager.lockRecoverySlots(&request, []int{0})
+	first, err := manager.lockRecoverySlots(context.Background(), &request, []int{0})
 	if err != nil {
 		t.Fatalf("first admission lock: %v", err)
 	}
 
 	secondResult := make(chan error, 1)
 	go func() {
-		locks, lockErr := manager.lockRecoverySlots(&request, []int{0})
+		locks, lockErr := manager.lockRecoverySlots(context.Background(), &request, []int{0})
 		for i := len(locks) - 1; i >= 0; i-- {
 			locks[i].Unlock()
 		}
@@ -109,7 +136,7 @@ func TestLockRecoverySlotsFailsWhenAnotherAdmissionOwnsWorktree(t *testing.T) {
 func TestLockRecoverySlotsAllowsExplicitRecoveryToWaitForInspection(t *testing.T) {
 	manager := &Manager{}
 	request := RecoveryAdmissionRequest{Slots: []RecoverySlot{{WorktreeID: "worktree-explicit"}}}
-	owner, err := manager.lockRecoverySlots(&request, []int{0})
+	owner, err := manager.lockRecoverySlots(context.Background(), &request, []int{0})
 	if err != nil {
 		t.Fatalf("inspection lock: %v", err)
 	}
@@ -124,7 +151,7 @@ func TestLockRecoverySlotsAllowsExplicitRecoveryToWaitForInspection(t *testing.T
 	resultCh := make(chan result, 1)
 	go func() {
 		close(started)
-		locks, lockErr := manager.lockRecoverySlots(&explicit, []int{0})
+		locks, lockErr := manager.lockRecoverySlots(context.Background(), &explicit, []int{0})
 		resultCh <- result{locks: locks, err: lockErr}
 	}()
 	<-started

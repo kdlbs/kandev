@@ -3367,6 +3367,10 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnvironmentRepo {
 	out := make([]*models.TaskEnvironmentRepo, 0, len(worktrees))
 	for i, w := range worktrees {
+		sourceClonePath := ""
+		if w.MainRepoGitDir != "" {
+			sourceClonePath = filepath.Dir(w.MainRepoGitDir)
+		}
 		out = append(out, &models.TaskEnvironmentRepo{
 			RepositoryID:            w.RepositoryID,
 			BranchSlug:              w.BranchSlug,
@@ -3375,7 +3379,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 			WorktreeBranch:          w.WorktreeBranch,
 			WorktreeBranchOwner:     w.WorktreeBranchOwner,
 			WorktreeIntegrationRef:  w.WorktreeIntegrationRef,
-			WorktreeSourceClonePath: filepath.Dir(w.MainRepoGitDir),
+			WorktreeSourceClonePath: sourceClonePath,
 			WorktreeSourceCommonDir: w.MainRepoGitDir,
 			Position:                i,
 			ErrorMessage:            w.ErrorMessage,

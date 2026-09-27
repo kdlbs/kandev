@@ -10,6 +10,8 @@ export type SessionRecoveryAction =
   | "runtime_retry"
   | "relocate_and_resume";
 
+const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
+
 export type ManagedCloneRelocationRecoveryDetails = WebSocketRequestErrorDetails & {
   kind: "managed_clone_relocation_required" | "managed_clone_relocation_stale";
   error_stamp?: string;
@@ -133,7 +135,7 @@ export async function requestSessionRecover(
       action,
       ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
     },
-    30_000,
+    action === "relocate_and_resume" ? MANAGED_CLONE_RELOCATION_TIMEOUT_MS : 30_000,
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;

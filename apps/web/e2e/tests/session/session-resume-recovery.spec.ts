@@ -5,12 +5,19 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionState } from "../../helpers/session";
 import {
+  assertSuccessfulRelocationResponse,
+  captureSessionRecoveryMessages,
+  capturedSessionRecoveryResponse,
+  capturedSessionRecoveryResponseType,
   cleanupManagedCloneRelocationFixture,
   countSimpleMockResponses,
+  expectMinimumElementHeight,
+  readManagedCloneRecoveryConsumers,
   removeRecoveryBranch,
-  seedManagedCloneRelocationFailure,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
+  taskEnvironmentRepository,
+  taskEnvironmentRepositoryWorktreePath,
 } from "../../helpers/session-resume-recovery";
 
 test.describe("worktree branch resume recovery", () => {
@@ -152,6 +159,8 @@ test.describe("worktree branch resume recovery", () => {
   });
 
   test.describe("dirty managed clone relocation", () => {
+    test.describe.configure({ retries: 0 });
+
     test.afterEach(async ({ apiClient, seedData }) => {
       await cleanupManagedCloneRelocationFixture(apiClient, seedData);
     });
@@ -165,6 +174,9 @@ test.describe("worktree branch resume recovery", () => {
     }) => {
       test.setTimeout(180_000);
 
+      const { requestIds: recoveryRequestIds, responses: recoveryResponses } =
+        captureSessionRecoveryMessages(testPage);
+
       const fixture = await seedManagedCloneRelocationFixture(
         testPage,
         apiClient,
@@ -175,10 +187,9 @@ test.describe("worktree branch resume recovery", () => {
       const sessionId = fixture.task.session_id!;
       const originalPath = fixture.repository.worktree_path!;
       const beforeEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
-      const beforeRepository = beforeEnvironment?.repos?.find(
-        (repository) => repository.repository_id === seedData.repositoryId,
-      );
-      expect(beforeRepository?.worktree_branch).toBe(fixture.originalBranch);
+      const beforeRepository = taskEnvironmentRepository(beforeEnvironment, seedData.repositoryId);
+      expect(beforeRepository).toBeDefined();
+      expect(beforeRepository!.worktree_branch).toBe(fixture.originalBranch);
       expect(
         new GitHelper(fixture.sourceClonePath, makeGitEnv(backend.tmpDir))
           .exec("git remote get-url origin")
@@ -198,12 +209,53 @@ test.describe("worktree branch resume recovery", () => {
         message: "Waiting for the managed clone relocation session to stop",
         timeout: 30_000,
       });
-      seedManagedCloneRelocationFailure(backend.tmpDir, sessionId);
-      await testPage.reload();
-      await fixture.session.waitForLoad();
+      await fixture.session.recoveryResumeButton().click();
 
       const relocate = testPage.getByTestId("managed-clone-relocate-button");
       await expect(relocate).toBeVisible({ timeout: 30_000 });
+      await expect
+        .poll(() => {
+          return capturedSessionRecoveryResponseType(
+            recoveryRequestIds,
+            recoveryResponses,
+            "resume",
+          );
+        })
+        .toBe("error");
+      const resumeResponse = capturedSessionRecoveryResponse(
+        recoveryRequestIds,
+        recoveryResponses,
+        "resume",
+      );
+      expect(resumeResponse).toBeDefined();
+      expect(resumeResponse!.payload).toMatchObject({
+        details: {
+          kind: "managed_clone_relocation_required",
+          error_stamp: expect.any(String),
+        },
+      });
+      await expect
+        .poll(
+          async () => {
+            const status = await apiClient.wsRequest<{
+              is_agent_running: boolean;
+            }>("task.session.status", { task_id: fixture.task.id, session_id: sessionId });
+            return status.is_agent_running;
+          },
+          {
+            timeout: 30_000,
+            intervals: [250, 500, 1_000],
+            message: "Waiting for the stopped session runtime to exit",
+          },
+        )
+        .toBe(false);
+      await expect
+        .poll(() => readManagedCloneRecoveryConsumers(backend.tmpDir, fixture.environment.id), {
+          timeout: 30_000,
+          intervals: [250, 500, 1_000],
+          message: "Waiting for the stopped resumable runtime to settle durably",
+        })
+        .toEqual([{ sessionId, state: "CANCELLED", runtimeStatus: "stopped" }]);
       await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
       await expect(testPage.getByTestId("recovery-fresh-button")).toHaveCount(0);
       await expect(testPage.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
@@ -224,9 +276,29 @@ test.describe("worktree branch resume recovery", () => {
       }
       const cancel = confirmation.getByRole("button", { name: "Cancel" });
       const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
-      expect((await cancel.boundingBox())?.height).toBe(28);
-      expect((await confirm.boundingBox())?.height).toBe(28);
+      await expectMinimumElementHeight(cancel, 26);
+      await expectMinimumElementHeight(confirm, 26);
       await testPage.getByTestId("managed-clone-relocation-confirm").click();
+      await expect
+        .poll(
+          () =>
+            capturedSessionRecoveryResponseType(
+              recoveryRequestIds,
+              recoveryResponses,
+              "relocate_and_resume",
+            ),
+          { timeout: 30_000, message: "Waiting for managed clone relocation response" },
+        )
+        .toBeTruthy();
+      const relocationResponse = capturedSessionRecoveryResponse(
+        recoveryRequestIds,
+        recoveryResponses,
+        "relocate_and_resume",
+      );
+      assertSuccessfulRelocationResponse(
+        relocationResponse,
+        readManagedCloneRecoveryConsumers(backend.tmpDir, fixture.environment.id),
+      );
 
       await fixture.session.waitForChatIdle({ timeout: 60_000 });
       let afterEnvironment: Awaited<ReturnType<typeof apiClient.getTaskEnvironment>> = null;
@@ -235,22 +307,28 @@ test.describe("worktree branch resume recovery", () => {
         .poll(
           async () => {
             afterEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
-            afterRepository = afterEnvironment?.repos?.find(
-              (repository) => repository.repository_id === seedData.repositoryId,
-            );
-            return afterRepository?.worktree_path ?? null;
+            afterRepository = taskEnvironmentRepository(afterEnvironment, seedData.repositoryId);
+            return taskEnvironmentRepositoryWorktreePath(afterEnvironment, seedData.repositoryId);
           },
           { timeout: 30_000, message: "Waiting for the relocated worktree identity" },
         )
         .not.toBe(originalPath);
 
       const relocatedPath = afterRepository?.worktree_path;
-      expect(afterEnvironment?.id).toBe(beforeEnvironment?.id);
-      expect(afterRepository?.worktree_id).not.toBe(beforeRepository?.worktree_id);
-      expect(afterRepository?.worktree_branch).toBe(fixture.originalBranch);
+      expect(afterEnvironment).not.toBeNull();
+      expect(afterRepository).toBeDefined();
+      expect(afterEnvironment!.id).toBe(beforeEnvironment!.id);
+      expect(afterRepository!.worktree_id).not.toBe(beforeRepository!.worktree_id);
+      expect(afterRepository!.worktree_branch).toBe(fixture.originalBranch);
       expect(relocatedPath).toContain(".relocated-");
-      expect(fs.existsSync(originalPath)).toBe(true);
-      expect(fs.readFileSync(path.join(originalPath, fixture.dirtyFileName), "utf8")).toBe(
+      const relocationRecord = JSON.parse(
+        fs.readFileSync(`${originalPath}.kandev-clone-relocation.json`, "utf8"),
+      ) as { original: string };
+      const retainedOriginal = relocationRecord.original;
+      expect(retainedOriginal).not.toBe(originalPath);
+      expect(retainedOriginal).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+      expect(fs.existsSync(originalPath)).toBe(false);
+      expect(fs.readFileSync(path.join(retainedOriginal, fixture.dirtyFileName), "utf8")).toBe(
         fixture.dirtyFileContent,
       );
       expect(fs.readFileSync(path.join(relocatedPath!, fixture.dirtyFileName), "utf8")).toBe(
@@ -283,6 +361,12 @@ test.describe("worktree branch resume recovery", () => {
       await expect(
         fixture.session.activeChat().getByText("simple mock response", { exact: false }).last(),
       ).toBeVisible({ timeout: 30_000 });
+      await fixture.session.clickTab("Files");
+      const expectedFilesPath = relocatedPath!.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+      await expect(fixture.session.files.getByTestId("file-browser-workspace-path")).toHaveText(
+        expectedFilesPath,
+        { timeout: 30_000 },
+      );
       await assertNoDocumentHorizontalOverflow(testPage, "managed clone relocation recovery");
     });
   });

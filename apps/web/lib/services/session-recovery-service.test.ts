@@ -79,8 +79,28 @@ it("sends the current stamp with an explicit managed clone relocation", async ()
       action: "relocate_and_resume",
       error_stamp: "stamp-1",
     },
-    30_000,
+    30 * 60 * 1000,
   );
+});
+
+it("waits for a relocation response that arrives after the previous 30 second deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.request.mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve({ success: true }), 35_000)),
+    );
+    const request = requestSessionRecover(
+      "task-1",
+      "session-1",
+      "relocate_and_resume",
+      "failed",
+      "stamp-1",
+    );
+    await vi.advanceTimersByTimeAsync(35_000);
+    await expect(request).resolves.toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("requires a stamp before requesting managed clone relocation", async () => {

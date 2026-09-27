@@ -828,7 +828,7 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err != nil {
 		return nil, err
 	}
-	launchCtx, err := prepareManagedCloneRelocationRecovery(ctx, session, action, errorStamps)
+	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, errorStamps)
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +881,7 @@ func normalizeSessionRecoveryAction(
 	return action, nil
 }
 
-func prepareManagedCloneRelocationRecovery(
+func (s *Service) prepareManagedCloneRelocationRecovery(
 	ctx context.Context,
 	session *models.TaskSession,
 	action string,
@@ -894,17 +894,28 @@ func prepareManagedCloneRelocationRecovery(
 	if len(errorStamps) > 0 {
 		stamp = errorStamps[0]
 	}
+	if !isManagedCloneRelocationAuthorized(session, session.TaskID, stamp) {
+		return nil, &ManagedCloneRelocationRecoveryError{Stale: true}
+	}
+	ctx = worktree.WithDirtyCloneRelocation(ctx)
+	return worktree.WithManagedCloneRelocationAuthorization(ctx, func(checkCtx context.Context) error {
+		current, err := s.repo.GetTaskSession(checkCtx, session.ID)
+		if err != nil || !isManagedCloneRelocationAuthorized(current, session.TaskID, stamp) {
+			return worktree.ErrManagedCloneRelocationAuthorizationStale
+		}
+		return nil
+	}), nil
+}
+
+func isManagedCloneRelocationAuthorized(session *models.TaskSession, taskID, stamp string) bool {
+	if session == nil || session.ID == "" || session.TaskID != taskID || stamp == "" ||
+		(session.State != models.TaskSessionStateCancelled && session.State != models.TaskSessionStateFailed &&
+			session.State != models.TaskSessionStateWaitingForInput) {
+		return false
+	}
 	lastError, ok := models.LoadLastAgentError(session.Metadata)
-	if !ok || lastError.IsDismissed() ||
-		lastError.Code != models.LaunchErrorCategoryManagedCloneRelocationRequired ||
-		stamp == "" || !lastError.MatchesStamp(stamp) {
-		return nil, &ManagedCloneRelocationRecoveryError{Stale: true}
-	}
-	if session.State != models.TaskSessionStateCancelled && session.State != models.TaskSessionStateFailed &&
-		session.State != models.TaskSessionStateWaitingForInput {
-		return nil, &ManagedCloneRelocationRecoveryError{Stale: true}
-	}
-	return worktree.WithDirtyCloneRelocation(ctx), nil
+	return ok && !lastError.IsDismissed() &&
+		lastError.Code == models.LaunchErrorCategoryManagedCloneRelocationRequired && lastError.MatchesStamp(stamp)
 }
 
 func (s *Service) managedCloneRelocationPreflightError(
@@ -913,6 +924,9 @@ func (s *Service) managedCloneRelocationPreflightError(
 	action string,
 	preflightErr error,
 ) error {
+	if errors.Is(preflightErr, worktree.ErrManagedCloneRelocationAuthorizationStale) {
+		return &ManagedCloneRelocationRecoveryError{Stale: true}
+	}
 	var relocationRequired *worktree.ManagedCloneRelocationRequiredError
 	if !errors.As(preflightErr, &relocationRequired) {
 		return preflightErr

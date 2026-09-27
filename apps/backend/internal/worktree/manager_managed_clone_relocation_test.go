@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,8 @@ type managedCloneRelocationStore struct {
 	*recoveryCASStore
 	claim        *models.TaskEnvironmentRecoveryClaim
 	claimRequest models.TaskEnvironmentRecoveryClaimRequest
+	acquireErr   error
+	stalePublish bool
 }
 
 func (s *managedCloneRelocationStore) AcquireTaskEnvironmentRecoveryClaim(
@@ -22,7 +25,15 @@ func (s *managedCloneRelocationStore) AcquireTaskEnvironmentRecoveryClaim(
 	req models.TaskEnvironmentRecoveryClaimRequest,
 ) (*models.TaskEnvironmentRecoveryClaim, error) {
 	s.claimRequest = req
+	if s.acquireErr != nil {
+		return nil, s.acquireErr
+	}
 	if s.claim != nil {
+		if s.claim.TaskEnvironmentID == req.TaskEnvironmentID && s.claim.OwnerTaskID == req.OwnerTaskID &&
+			s.claim.OwnershipGeneration == req.OwnershipGeneration && s.claim.SessionID == req.SessionID &&
+			s.claim.OperationID == req.OperationID && s.claim.ExecutorType == req.ExecutorType {
+			return s.claim, nil
+		}
 		return nil, errRecoveryOperationClaimed
 	}
 	s.claim = &models.TaskEnvironmentRecoveryClaim{
@@ -47,6 +58,17 @@ func (s *managedCloneRelocationStore) ReleaseTaskEnvironmentRecoveryClaim(
 	return nil
 }
 
+func (s *managedCloneRelocationStore) GetTaskEnvironmentRecoveryClaim(
+	_ context.Context,
+	environmentID string,
+) (*models.TaskEnvironmentRecoveryClaim, error) {
+	if s.claim == nil || s.claim.TaskEnvironmentID != environmentID {
+		return nil, nil
+	}
+	claim := *s.claim
+	return &claim, nil
+}
+
 func (s *managedCloneRelocationStore) CompareAndSwapWorktreeWithRecoveryClaim(
 	ctx context.Context,
 	expected, replacement *Worktree,
@@ -54,6 +76,11 @@ func (s *managedCloneRelocationStore) CompareAndSwapWorktreeWithRecoveryClaim(
 ) (bool, error) {
 	if s.claim == nil || claim == nil || s.claim.OperationID != claim.OperationID {
 		return false, errRecoveryOperationClaimed
+	}
+	if s.stalePublish {
+		delete(s.worktrees, expected.ID)
+		s.worktrees[replacement.ID] = replacement
+		return false, nil
 	}
 	return s.CompareAndSwapWorktree(ctx, expected, replacement)
 }
@@ -71,6 +98,7 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 	seed := initGitRepoForWorktreeTest(t)
 	runGit(t, seed, "clone", "--no-hardlinks", seed, sourceClone)
 	runGit(t, seed, "clone", "--no-hardlinks", seed, destinationClone)
+	configureManagedCloneRelocationGitIdentity(t, sourceClone)
 	for _, clone := range []string{sourceClone, destinationClone} {
 		runGit(t, clone, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
 	}
@@ -107,7 +135,7 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	admission, err := mgr.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
+	recoveryRequest := RecoveryAdmissionRequest{
 		TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		Slots: []RecoverySlot{{
@@ -117,7 +145,24 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 				Identity: ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "widget"},
 			},
 		}},
-	})
+	}
+	store.claim = &models.TaskEnvironmentRecoveryClaim{
+		TaskEnvironmentID: "env-1", OwnerTaskID: "another-task", OwnershipGeneration: 1,
+		SessionID: "another-session", OperationID: "123e4567-e89b-12d3-a456-426614174000",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+	}
+	if _, err := mgr.AdmitRecovery(context.Background(), recoveryRequest); err == nil {
+		t.Fatal("AdmitRecovery() ignored a competing environment recovery claim")
+	}
+	if store.worktrees[wt.ID] == nil || store.worktrees[wt.ID].Path != originalPath {
+		t.Fatal("competing recovery claim changed the original worktree inventory")
+	}
+	if _, err := os.Lstat(originalPath + ".kandev-clone-relocation.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("competing recovery claim created a relocation journal: %v", err)
+	}
+	store.claim = nil
+	store.stalePublish = true
+	admission, err := mgr.AdmitRecovery(context.Background(), recoveryRequest)
 	if err != nil {
 		t.Fatalf("AdmitRecovery: %v", err)
 	}
@@ -152,10 +197,17 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 	if got := strings.TrimSpace(runGit(t, replacement.Path, "branch", "--show-current")); got != branch {
 		t.Fatalf("replacement branch = %q, want %q", got, branch)
 	}
-	if got := strings.TrimSpace(runGit(t, originalPath, "rev-parse", "HEAD")); got != wantHead {
+	relocationRecord, err := readManagedCloneRelocationRecord(originalPath + ".kandev-clone-relocation.json")
+	if err != nil {
+		t.Fatalf("read relocation record: %v", err)
+	}
+	if relocationRecord.Original == originalPath || pathWithin(filepath.Join(config.TasksBasePath, "task-1"), relocationRecord.Original) {
+		t.Fatalf("retained original remains discoverable under the task root: %q", relocationRecord.Original)
+	}
+	if got := strings.TrimSpace(runGit(t, relocationRecord.Original, "rev-parse", "HEAD")); got != wantHead {
 		t.Fatalf("original checkout HEAD = %s, want retained commit %s", got, wantHead)
 	}
-	if _, err := os.Stat(filepath.Join(originalPath, "unpublished.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(relocationRecord.Original, "unpublished.txt")); err != nil {
 		t.Fatalf("original unpushed file was not retained: %v", err)
 	}
 	if got := strings.TrimSpace(runGit(t, replacement.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")); filepath.Clean(got) != filepath.Clean(filepath.Join(destinationClone, ".git")) {
@@ -199,6 +251,7 @@ func TestManagerAdmitRecoveryRefusesDirtyManagedCloneWorktree(t *testing.T) {
 	seed := initGitRepoForWorktreeTest(t)
 	runGit(t, seed, "clone", "--no-hardlinks", seed, sourceClone)
 	runGit(t, seed, "clone", "--no-hardlinks", seed, destinationClone)
+	configureManagedCloneRelocationGitIdentity(t, sourceClone)
 	for _, clone := range []string{sourceClone, destinationClone} {
 		runGit(t, clone, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
 	}
@@ -276,6 +329,7 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	seed := initGitRepoForWorktreeTest(t)
 	runGit(t, seed, "clone", "--no-hardlinks", seed, sourceClone)
 	runGit(t, seed, "clone", "--no-hardlinks", seed, destinationClone)
+	configureManagedCloneRelocationGitIdentity(t, sourceClone)
 	for _, clone := range []string{sourceClone, destinationClone} {
 		runGit(t, clone, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
 	}
@@ -302,6 +356,21 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	if err := os.WriteFile(filepath.Join(originalPath, "dirty-untracked.txt"), []byte("keep me\n"), 0o755); err != nil {
 		t.Fatalf("write dirty file: %v", err)
 	}
+	ignoredName := "ignored-relocation.txt"
+	excludePath := filepath.Join(sourceClone, ".git", "info", "exclude")
+	exclude, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read clone exclude file: %v", err)
+	}
+	if err := os.WriteFile(excludePath, append(exclude, []byte("\n"+ignoredName+"\n")...), 0o600); err != nil {
+		t.Fatalf("ignore relocation test file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(originalPath, ignoredName), []byte("ignored but retained\n"), 0o640); err != nil {
+		t.Fatalf("write ignored file: %v", err)
+	}
+	if err := os.Symlink("dirty-untracked.txt", filepath.Join(originalPath, "dirty-link")); err != nil {
+		t.Fatalf("create dirty symlink: %v", err)
+	}
 	wt := &Worktree{
 		ID: "wt-dirty-authorized", TaskID: "task-dirty", TaskEnvironmentID: "env-dirty", RepositoryID: "repo-dirty",
 		Path: originalPath, RepositoryPath: destinationClone, Branch: branch, BranchSlug: "branch-dirty", Status: StatusActive,
@@ -313,7 +382,8 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 		t.Fatalf("NewManager: %v", err)
 	}
 	ctx := WithDirtyCloneRelocation(context.Background())
-	admission, err := mgr.AdmitRecovery(ctx, RecoveryAdmissionRequest{
+	ctx = WithManagedCloneRelocationAuthorization(ctx, func(context.Context) error { return nil })
+	request := RecoveryAdmissionRequest{
 		TaskID: "task-dirty", SessionID: "session-dirty", TaskEnvironmentID: "env-dirty", OwnerTaskID: "task-dirty",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		Slots: []RecoverySlot{{
@@ -324,15 +394,54 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 				Identity: ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "widget"},
 			},
 		}},
+	}
+	store.acquireErr = errors.New("environment has a live session or runtime")
+	if _, err := mgr.AdmitRecovery(ctx, request); err == nil {
+		t.Fatal("AdmitRecovery() accepted dirty relocation while the requesting session runtime was live")
+	}
+	if store.claimRequest.AllowCurrentSessionRuntime {
+		t.Fatal("dirty relocation excluded the requesting session from runtime-consumer checks")
+	}
+	if store.worktrees[wt.ID] == nil || store.worktrees[wt.ID].Path != originalPath {
+		t.Fatal("busy-runtime refusal changed the worktree inventory")
+	}
+	if _, err := os.Stat(originalPath + ".kandev-recovery.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("busy-runtime refusal started a snapshot: %v", err)
+	}
+	store.acquireErr = nil
+	staleValidationCalls := 0
+	staleCtx := WithDirtyCloneRelocation(context.Background())
+	staleCtx = WithManagedCloneRelocationAuthorization(staleCtx, func(context.Context) error {
+		staleValidationCalls++
+		if staleValidationCalls == 3 {
+			return errors.New("session error stamp changed")
+		}
+		return nil
 	})
+	if _, err := mgr.AdmitRecovery(staleCtx, request); !errors.Is(err, ErrManagedCloneRelocationAuthorizationStale) {
+		t.Fatalf("AdmitRecovery() error = %v, want stale relocation authorization", err)
+	}
+	if staleValidationCalls != 3 {
+		t.Fatalf("authorization validator calls = %d, want pre-claim, post-claim, and pre-mutation checks", staleValidationCalls)
+	}
+	if store.claim != nil {
+		t.Fatal("stale authorization retained the durable recovery claim")
+	}
+	if store.worktrees[wt.ID] == nil || store.worktrees[wt.ID].Path != originalPath {
+		t.Fatal("stale authorization changed the worktree inventory")
+	}
+	if _, err := os.Stat(originalPath + ".kandev-recovery.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale authorization started a snapshot: %v", err)
+	}
+	admission, err := mgr.AdmitRecovery(ctx, request)
 	if err != nil {
 		t.Fatalf("AdmitRecovery: %v", err)
 	}
 	if admission == nil {
 		t.Fatal("AdmitRecovery() returned no admission for explicit dirty relocation")
 	}
-	if !store.claimRequest.AllowCurrentSessionRuntime {
-		t.Fatal("explicit dirty relocation did not admit its requesting session runtime")
+	if store.claimRequest.AllowCurrentSessionRuntime {
+		t.Fatal("explicit dirty relocation excluded the requesting session runtime")
 	}
 	defer func() {
 		if err := admission.Release(context.Background()); err != nil {
@@ -358,6 +467,12 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	if info, err := os.Stat(filepath.Join(replacement.Path, "dirty-untracked.txt")); err != nil || info.Mode().Perm() != 0o755 {
 		t.Fatalf("untracked file mode = %v, %v", info, err)
 	}
+	if got, err := os.ReadFile(filepath.Join(replacement.Path, ignoredName)); err != nil || string(got) != "ignored but retained\n" {
+		t.Fatalf("ignored file = %q, %v", got, err)
+	}
+	if target, err := os.Readlink(filepath.Join(replacement.Path, "dirty-link")); err != nil || target != "dirty-untracked.txt" {
+		t.Fatalf("dirty symlink target = %q, %v", target, err)
+	}
 	if got := strings.TrimSpace(runGit(t, replacement.Path, "diff", "--cached", "--", "committed.txt")); got != "" {
 		t.Fatalf("staging state unexpectedly transferred: %s", got)
 	}
@@ -371,8 +486,136 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	if _, err := os.Stat(recoveryRecord.Snapshot); err != nil {
 		t.Fatalf("retained snapshot missing: %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(originalPath, "dirty-untracked.txt")); err != nil || string(got) != "keep me\n" {
+	if _, err := os.Lstat(originalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("original checkout remains beside the replacement: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(recoveryRecord.Original, "dirty-untracked.txt")); err != nil || string(got) != "keep me\n" {
 		t.Fatalf("original checkout was not retained: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(recoveryRecord.Original, ignoredName)); err != nil || string(got) != "ignored but retained\n" {
+		t.Fatalf("ignored file was not retained in the original checkout: %q, %v", got, err)
+	}
+	if target, err := os.Readlink(filepath.Join(recoveryRecord.Original, "dirty-link")); err != nil || target != "dirty-untracked.txt" {
+		t.Fatalf("original dirty symlink target = %q, %v", target, err)
+	}
+}
+
+func TestManagedCloneRelocationRejectsWrongProviderOrigin(t *testing.T) {
+	managedRoot := filepath.Join(t.TempDir(), "repos")
+	source := filepath.Join(managedRoot, "_providers", "github", "github.com", "acme", "widget")
+	destination := filepath.Join(managedRoot, "workspaces", "workspace-1", "github", "acme", "widget")
+	for _, path := range []string{source, destination} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed := initGitRepoForWorktreeTest(t)
+	runGit(t, seed, "clone", "--no-hardlinks", seed, source)
+	runGit(t, seed, "clone", "--no-hardlinks", seed, destination)
+	runGit(t, source, "remote", "set-url", "origin", "https://github.com/other/widget.git")
+	runGit(t, destination, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
+	manager, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "widget"}
+	if err := verifyManagedCloneOrigins(context.Background(), manager, source, destination, identity); err == nil {
+		t.Fatal("managed clone relocation accepted a source with a different provider owner")
+	}
+}
+
+func TestCanonicalManagedCloneDestinationRejectsForeignWorkspace(t *testing.T) {
+	managedRoot := filepath.Join(t.TempDir(), "repos")
+	expected := filepath.Join(managedRoot, "workspaces", "workspace-1", "github", "acme", "widget")
+	foreign := filepath.Join(managedRoot, "workspaces", "workspace-2", "github", "acme", "widget")
+	for _, path := range []string{expected, foreign} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := &Worktree{TaskID: "task-foreign", RepositoryPath: foreign}
+	proof := &ManagedCloneRelocationProof{
+		ManagedRoot: managedRoot, ExpectedDestinationPath: expected,
+		Identity: ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "widget"},
+	}
+	if _, _, err := canonicalManagedCloneDestination(worktree.TaskID, worktree, proof); err == nil {
+		t.Fatal("managed clone relocation accepted a destination from another workspace")
+	}
+}
+
+func TestAdmitRecoveryDoesNotPartiallyRelocateMultiRepositoryInventory(t *testing.T) {
+	managedRoot := filepath.Join(t.TempDir(), "repos")
+	config := newTestConfig(t)
+	seed := initGitRepoForWorktreeTest(t)
+	store := &managedCloneRelocationStore{recoveryCASStore: &recoveryCASStore{mockStore: newMockStore()}}
+	slots := make([]RecoverySlot, 0, 2)
+	originalPaths := make([]string, 0, 2)
+	for index := 0; index < 2; index++ {
+		name := fmt.Sprintf("repo-%d", index)
+		source := filepath.Join(managedRoot, "_providers", "github", "github.com", "acme", name)
+		destination := filepath.Join(managedRoot, "workspaces", "workspace-1", "github", "acme", name)
+		for _, path := range []string{source, destination} {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		runGit(t, seed, "clone", "--no-hardlinks", seed, source)
+		runGit(t, seed, "clone", "--no-hardlinks", seed, destination)
+		origin := "https://github.com/acme/" + name + ".git"
+		if index == 1 {
+			origin = "https://github.com/other/" + name + ".git"
+		}
+		runGit(t, source, "remote", "set-url", "origin", origin)
+		runGit(t, destination, "remote", "set-url", "origin", "https://github.com/acme/"+name+".git")
+		branch := fmt.Sprintf("feature/partial-%d", index)
+		runGit(t, source, "checkout", "-b", branch)
+		runGit(t, source, "checkout", "main")
+		originalPath := filepath.Join(config.TasksBasePath, "task-partial", name)
+		if err := os.MkdirAll(filepath.Dir(originalPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, source, "worktree", "add", originalPath, branch)
+		worktree := &Worktree{
+			ID: fmt.Sprintf("wt-partial-%d", index), TaskID: "task-partial", TaskEnvironmentID: "env-partial",
+			RepositoryID: name, Path: originalPath, RepositoryPath: destination,
+			Branch: branch, BranchSlug: name, Status: StatusActive,
+		}
+		store.worktrees[worktree.ID] = worktree
+		slots = append(slots, RecoverySlot{
+			WorktreeID: worktree.ID, RepositoryID: worktree.RepositoryID, BranchSlug: worktree.BranchSlug,
+			RepositoryPath: destination, CloneRelocation: &ManagedCloneRelocationProof{
+				ManagedRoot: managedRoot, ExpectedSourcePath: source, ExpectedDestinationPath: destination,
+				Identity: ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: name},
+			},
+		})
+		originalPaths = append(originalPaths, originalPath)
+	}
+	manager, err := NewManager(config, store, newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
+		TaskID: "task-partial", SessionID: "session-partial", TaskEnvironmentID: "env-partial",
+		OwnerTaskID: "task-partial", OwnershipGeneration: 1,
+		ExecutorType: string(models.ExecutorTypeWorktree), Slots: slots,
+	})
+	if err == nil {
+		t.Fatal("AdmitRecovery() accepted a multi-repository inventory with a wrong origin")
+	}
+	if store.claim != nil {
+		t.Fatal("failed multi-repository inspection acquired a durable claim")
+	}
+	for index, originalPath := range originalPaths {
+		if _, err := os.Stat(originalPath); err != nil {
+			t.Fatalf("repository %d original checkout was changed: %v", index, err)
+		}
+		replacements, err := filepath.Glob(originalPath + ".relocated-*")
+		if err != nil || len(replacements) != 0 {
+			t.Fatalf("repository %d created partial relocation paths %v, %v", index, replacements, err)
+		}
+		if store.worktrees[fmt.Sprintf("wt-partial-%d", index)].Path != originalPath {
+			t.Fatalf("repository %d changed its authoritative worktree row", index)
+		}
 	}
 }
 
@@ -397,4 +640,10 @@ func TestParseManagedGitOrigin(t *testing.T) {
 			}
 		})
 	}
+}
+
+func configureManagedCloneRelocationGitIdentity(t *testing.T, repository string) {
+	t.Helper()
+	runGit(t, repository, "config", "user.name", "Relocation Test")
+	runGit(t, repository, "config", "user.email", "relocation-test@example.invalid")
 }
