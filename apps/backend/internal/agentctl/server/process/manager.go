@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -2785,12 +2786,22 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	// If auto-approve is enabled, immediately approve with the first "allow" option
-	if m.cfg.AutoApprovePermissions {
-		return m.autoApprovePermission(req)
-	}
-	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
-		return response, nil
+	// A coordinator session's agentctl instance does not consult its own
+	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+	// injected-MCP approval; only the exact six-tool coordinator allowlist
+	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	if m.cfg.McpMode == mcpmode.Coordinator {
+		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
+			return response, nil
+		}
+	} else {
+		// If auto-approve is enabled, immediately approve with the first "allow" option
+		if m.cfg.AutoApprovePermissions {
+			return m.autoApprovePermission(req)
+		}
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
 	}
 
 	// Create pending permission with response channel
