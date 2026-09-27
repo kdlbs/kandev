@@ -19,7 +19,6 @@ test("phone drawer exposes cleanup retry and status with touch-sized actions", a
   testPage,
 }) => {
   test.setTimeout(120_000);
-  const releaseFeature = await backend.useEnv({ KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS: "true" });
   let taskId = "";
   try {
     const seeded = await seedPluginExecutorStatusTask(testPage, {
@@ -70,6 +69,5 @@ test("phone drawer exposes cleanup retry and status with touch-sized actions", a
   } finally {
     if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
     await uninstallFixturePlugin(apiClient);
-    await releaseFeature();
   }
 });

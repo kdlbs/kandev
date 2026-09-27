@@ -119,7 +119,6 @@ type Service struct {
 	agentToolSnapshot               plugintools.Snapshot
 	agentToolSnapshotReady          bool
 	runtime                         PluginRuntime
-	remoteExecutorPluginsEnabled    bool
 	executorProviderHostHandler     ExecutorProviderHostHandler
 	executorProviderInventoryReader ExecutorProviderInventoryReader
 	executorProviderOpMu            sync.Mutex
@@ -695,13 +694,6 @@ func (s *Service) KandevVersion() string {
 // SetRuntime wires the runtime.Manager Provide constructed.
 func (s *Service) SetRuntime(rt PluginRuntime) {
 	s.runtime = rt
-}
-
-// SetRemoteExecutorPluginsEnabled applies the restart-scoped rollout gate.
-func (s *Service) SetRemoteExecutorPluginsEnabled(enabled bool) {
-	s.mu.Lock()
-	s.remoteExecutorPluginsEnabled = enabled
-	s.mu.Unlock()
 }
 
 // Runtime returns the runtime manager Service spawns/supervises plugin

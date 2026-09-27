@@ -38,9 +38,12 @@ It specifies core support and a test provider. It does not implement an AWS prov
 - **AC-EXECUTORS-PLUGIN-001.2:** Profile creation and updates shall enforce the provider's configuration schema and existing executor-settings permissions. Secret values shall not appear in ordinary profile reads.
 - **AC-EXECUTORS-PLUGIN-001.3:** Missing, disabled, incompatible, or unhealthy providers shall reject new launches without selecting another executor. Saved selections and profiles shall remain visible.
 - **AC-EXECUTORS-PLUGIN-001.4:** Conflicting provider identities and undeclared provider calls shall be rejected. Existing plugins and built-in executor profiles shall retain their behavior.
-- **AC-EXECUTORS-PLUGIN-001.5:** When the release toggle is disabled, provider registration, profile mutation, allocation, attachment, and provider RPC dispatch shall be unavailable. Existing inventory shall remain readable and intact.
 - **AC-EXECUTORS-PLUGIN-001.6:** Before provider state is persisted, the host shall validate it against the provider's closed resource-state schema, including required fields, declared scalar types, enums, and numeric bounds. Undeclared or secret fields shall be rejected.
 - **AC-EXECUTORS-PLUGIN-001.7:** Profile updates shall submit blank optional non-secret fields so users can clear their saved values. Secret fields shall retain the existing unchanged, replace, and explicit clear behavior.
+- **AC-EXECUTORS-PLUGIN-001.8:** When no installed, active, compatible plugin declares an available provider, Kandev shall not offer a new plugin remote executor selection or dispatch provider operations. Existing inventory and saved selections shall remain readable and intact.
+
+AC-EXECUTORS-PLUGIN-001.5 covered the initial release toggle. It is retired; the original
+[implementation plan](../../../plans/remote-executor-plugins/plan.md) retains its historical references.
 
 ### REQ-EXECUTORS-PLUGIN-002: Provisioning and ordinary session behavior
 
@@ -123,3 +126,4 @@ It specifies core support and a test provider. It does not implement an AWS prov
 ## Implementation plans
 
 - [Remote executor plugins](../../../plans/remote-executor-plugins/plan.md)
+- [Remote executor plugin flag graduation](../../../plans/remote-executor-plugin-flag-graduation/plan.md)

@@ -40,8 +40,10 @@ Uninstall requires confirmed absence of all retained resources and unresolved al
 Upgrade requires compatibility with their recorded state versions.
 
 This decision establishes the provider boundary implemented by the host executor and plugin SDK.
-The restart-required rollout flag remains disabled in shipped profiles. Production Lambda support
-and migration of built-in executors remain separate work.
+The initial release used a restart-required rollout flag that was disabled in shipped profiles.
+That flag has since been retired; installed active providers with a compatible contract are available
+without a separate release toggle. Production Lambda support and migration of built-in executors remain
+separate work.
 
 ## Consequences
 

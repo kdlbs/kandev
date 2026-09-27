@@ -21,13 +21,9 @@ async function expectTouchTarget(locator: Locator, label: string) {
 
 test("phone users can configure and select a remote provider profile", async ({
   testPage,
-  backend,
   apiClient,
 }) => {
   test.setTimeout(120_000);
-  const releaseFeature = await backend.useEnv({
-    KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS: "true",
-  });
   try {
     const executor = await installFixtureExecutorProvider(testPage, apiClient);
     await testPage.goto("/settings/executors");
@@ -104,7 +100,7 @@ test("phone users can configure and select a remote provider profile", async ({
     await expect
       .poll(() => commandList.evaluate((element) => getComputedStyle(element).overflowY))
       .toBe("auto");
-    const option = drawer.getByRole("option", { name: profile.name });
+    const option = drawer.locator(`[cmdk-item][data-value="${profile.id}"]`);
     await expect(option).toContainText("Maximum lifetime: 8 hours.");
     await expectTouchTarget(option, "Provider profile option");
     await option.tap();
@@ -113,6 +109,5 @@ test("phone users can configure and select a remote provider profile", async ({
     await assertNoDocumentHorizontalOverflow(testPage, "provider profile picker drawer");
   } finally {
     await uninstallFixturePlugin(apiClient);
-    await releaseFeature();
   }
 });

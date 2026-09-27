@@ -13,7 +13,6 @@
   "allowUserNamespacesNote": "Esta definição só afeta contentores recém-criados. Os ambientes de tarefas existentes devem ser repostos para a alteração ter efeito.",
   "allowUserNamespacesTitle": "Suporte para namespaces de utilizador",
   "allowUserNamespacesWarning": "Isto desativa as restrições AppArmor predefinidas do Docker para contentores selecionados. Ative apenas para ambientes de agentes fidedignos que necessitem de sandboxing com namespaces de utilizador.",
-  "providerFeatureDisabled": "Os plugins de executores remotos estão desativados.",
   "providerFieldClear": "Limpar",
   "providerFieldClearPending": "{{field}} será removido ao guardar.",
   "providerFieldConfigured": "{{field}} está configurado.",

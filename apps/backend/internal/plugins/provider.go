@@ -103,7 +103,6 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 	}
 
 	svc := NewService(pluginStore, registry, eventBus, log)
-	svc.SetRemoteExecutorPluginsEnabled(cfg.Features.RemoteExecutorPlugins)
 	if cfg.Features.Canvases {
 		svc.subscribeWebAppEvents()
 	}

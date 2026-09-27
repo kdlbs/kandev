@@ -891,9 +891,9 @@ uninstall, or upgrade actions can be blocked while cleanup or compatibility is
 unresolved. Kandev retains cleanup inventory until the provider confirms that a
 resource is absent.
 
-The rollout flag is `features.remoteExecutorPlugins`. It is disabled in shipped
-profiles and requires a Kandev restart after an administrator enables it. A
-disabled flag prevents provider operations.
+After installation, an active plugin with a compatible provider contract can
+create and use provider profiles without a separate feature flag or restart.
+Disabled, incompatible, or unavailable providers cannot accept new operations.
 
 The maintained fixture's [provider implementation](../../apps/backend/cmd/plugin-fixture/executor_provider.go)
 and [contract tests](../../apps/backend/cmd/plugin-fixture/executor_provider_test.go)

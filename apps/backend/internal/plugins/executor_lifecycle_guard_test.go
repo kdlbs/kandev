@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	hcplugin "github.com/hashicorp/go-plugin"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 type pluginExecutorInventoryReaderFake struct {
@@ -45,7 +47,7 @@ func (f *pluginExecutorInventoryReaderFake) setRows(rows []*models.ExecutorRunni
 
 func TestPluginExecutorDisableRetention(t *testing.T) {
 	service, _, runtime := newTestService(t)
-	service.SetRemoteExecutorPluginsEnabled(false)
+	prepareExecutorProviderTestRuntime(t, runtime)
 	reader := &pluginExecutorInventoryReaderFake{rows: []*models.ExecutorRunning{
 		pluginExecutorLifecycleRecord(t, "lambda", 1, "ready"),
 	}}
@@ -81,21 +83,25 @@ func TestPluginExecutorDisableRetention(t *testing.T) {
 	if retainedRows != 1 {
 		t.Fatalf("retained inventory rows after disable = %d, want 1", retainedRows)
 	}
+	providers, err := service.ListExecutorProviders(context.Background())
+	if err != nil || len(providers) != 1 || providers[0].Available || providers[0].AvailabilityCause != "plugin_disabled" {
+		t.Fatalf("disabled provider catalog = %+v, %v; want retained unavailable entry", providers, err)
+	}
 	if err := service.Enable(installed.ID); err != nil {
 		t.Fatalf("Enable() error = %v", err)
 	}
 	if secret, ok := vault.get(secretID); !ok || secret != "provider-secret" || !runtime.Running(installed.ID) {
 		t.Fatalf("provider state after re-enable: secret=(%q, %v) runtime=%v", secret, ok, runtime.Running(installed.ID))
 	}
-	providers, err := service.ListExecutorProviders(context.Background())
-	if err != nil || len(providers) != 1 || providers[0].Available || providers[0].AvailabilityCause != "feature_disabled" {
-		t.Fatalf("flag-off provider catalog = %+v, %v; want retained unavailable entry", providers, err)
+	providers, err = service.ListExecutorProviders(context.Background())
+	if err != nil || len(providers) != 1 || !providers[0].Available || providers[0].AvailabilityCause != "" {
+		t.Fatalf("re-enabled provider catalog = %+v, %v; want available provider", providers, err)
 	}
 }
 
 func TestPluginExecutorUninstallRace(t *testing.T) {
 	service, _, runtime := newTestService(t)
-	service.SetRemoteExecutorPluginsEnabled(false)
+	prepareExecutorProviderTestRuntime(t, runtime)
 	reader := &pluginExecutorInventoryReaderFake{}
 	service.SetExecutorProviderInventoryReader(reader)
 	installed, err := service.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1}))
@@ -159,7 +165,7 @@ func TestPluginExecutorUninstallRace(t *testing.T) {
 
 func TestPluginExecutorUpgradeCompatibility(t *testing.T) {
 	service, _, runtime := newTestService(t)
-	service.SetRemoteExecutorPluginsEnabled(false)
+	prepareExecutorProviderTestRuntime(t, runtime)
 	reader := &pluginExecutorInventoryReaderFake{}
 	service.SetExecutorProviderInventoryReader(reader)
 	installed, err := service.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1}))
@@ -191,33 +197,34 @@ func TestPluginExecutorUpgradeCompatibility(t *testing.T) {
 	}
 }
 
-func TestPluginExecutorFlagOffRetention(t *testing.T) {
+func TestPluginExecutorRetainedResourceBlocksUninstall(t *testing.T) {
 	service, _, runtime := newTestService(t)
-	service.SetExecutorProviderInventoryReader(&pluginExecutorInventoryReaderFake{rows: []*models.ExecutorRunning{
+	prepareExecutorProviderTestRuntime(t, runtime)
+	reader := &pluginExecutorInventoryReaderFake{rows: []*models.ExecutorRunning{
 		pluginExecutorLifecycleRecord(t, "lambda", 1, "cleanup_pending"),
-	}})
+	}}
+	service.SetExecutorProviderInventoryReader(reader)
 	installed, err := service.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1}))
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	service.SetRemoteExecutorPluginsEnabled(false)
 	if err := service.Uninstall(context.Background(), installed.ID); err == nil {
-		t.Fatal("Uninstall() succeeded while feature flag was off and cleanup inventory was retained")
+		t.Fatal("Uninstall() succeeded while cleanup inventory was retained")
 	}
 	if !runtime.Running(installed.ID) {
-		t.Fatal("flag-off retention guard stopped the provider before rejecting uninstall")
+		t.Fatal("retention guard stopped the provider before rejecting uninstall")
 	}
 	if _, err := service.Get(installed.ID); err != nil {
-		t.Fatalf("flag-off guard removed provider record: %v", err)
+		t.Fatalf("retention guard removed provider record: %v", err)
 	}
-	if reader, ok := service.executorProviderInventoryReader.(*pluginExecutorInventoryReaderFake); !ok || reader.calls() != 1 {
-		t.Fatalf("inventory read count = %v; want one administrative read while flag is off", reader)
+	if reader.calls() != 1 {
+		t.Fatalf("inventory read count = %d; want one administrative read", reader.calls())
 	}
 }
 
 func TestPluginExecutorLifecycleInventoryReadFailureIsFailClosed(t *testing.T) {
 	service, _, runtime := newTestService(t)
-	service.SetRemoteExecutorPluginsEnabled(false)
+	prepareExecutorProviderTestRuntime(t, runtime)
 	reader := &pluginExecutorInventoryReaderFake{err: errors.New("database unavailable")}
 	service.SetExecutorProviderInventoryReader(reader)
 	installed, err := service.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1}))
@@ -233,6 +240,60 @@ func TestPluginExecutorLifecycleInventoryReadFailureIsFailClosed(t *testing.T) {
 	if _, err := service.Get(installed.ID); err != nil {
 		t.Fatalf("inventory read failure removed provider record: %v", err)
 	}
+}
+
+func prepareExecutorProviderTestRuntime(t *testing.T, runtime *fakeRuntime) {
+	t.Helper()
+	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
+		pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{Impl: &lifecycleExecutorProviderPlugin{}},
+	})
+	t.Cleanup(func() {
+		_ = client.Close()
+		server.Stop()
+	})
+	raw, err := client.Dispense(pluginsdk.PluginMapKey)
+	if err != nil {
+		t.Fatalf("Dispense() error = %v", err)
+	}
+	runtime.setRemote(raw.(*pluginsdk.RemotePlugin))
+}
+
+type lifecycleExecutorProviderPlugin struct{}
+
+func (*lifecycleExecutorProviderPlugin) OnEvent(context.Context, *pluginsdk.Event) error {
+	return nil
+}
+
+func (*lifecycleExecutorProviderPlugin) HandleWebhook(context.Context, *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
+	return &pluginsdk.WebhookResponse{Status: 200}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) ValidateExecutorProfile(context.Context, *pluginsdk.ValidateExecutorProfileRequest) (*pluginsdk.ValidateExecutorProfileResponse, error) {
+	return &pluginsdk.ValidateExecutorProfileResponse{}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) ProvisionExecutorEnvironment(context.Context, *pluginsdk.ProvisionExecutorEnvironmentRequest) (*pluginsdk.ProvisionExecutorEnvironmentResponse, error) {
+	return &pluginsdk.ProvisionExecutorEnvironmentResponse{}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) RecoverExecutorOperation(context.Context, *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
+	return &pluginsdk.RecoverExecutorOperationResponse{}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) AttachExecutorEnvironment(context.Context, *pluginsdk.AttachExecutorEnvironmentRequest) (*pluginsdk.AttachExecutorEnvironmentResponse, error) {
+	return &pluginsdk.AttachExecutorEnvironmentResponse{}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) InspectExecutorEnvironment(context.Context, *pluginsdk.InspectExecutorEnvironmentRequest) (*pluginsdk.InspectExecutorEnvironmentResponse, error) {
+	return &pluginsdk.InspectExecutorEnvironmentResponse{}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) ResolveExecutorConnection(context.Context, *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
+	return &pluginsdk.ResolveExecutorConnectionResponse{}, nil
+}
+
+func (*lifecycleExecutorProviderPlugin) DestroyExecutorEnvironment(context.Context, *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
+	return &pluginsdk.DestroyExecutorEnvironmentResponse{}, nil
 }
 
 func pluginExecutorLifecycleRecord(t *testing.T, key string, stateVersion uint32, phase string) *models.ExecutorRunning {

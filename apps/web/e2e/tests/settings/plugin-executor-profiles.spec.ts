@@ -15,13 +15,9 @@ useRegularMode();
 test.describe("remote executor profiles", () => {
   test("creates, edits, redacts secrets, and selects a provider in the task flow", async ({
     testPage,
-    backend,
     apiClient,
   }) => {
     test.setTimeout(120_000);
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS: "true",
-    });
     try {
       const executor = await installFixtureExecutorProvider(testPage, apiClient);
       await testPage.goto("/settings/executors");
@@ -96,13 +92,12 @@ test.describe("remote executor profiles", () => {
       const selector = testPage.getByTestId("executor-profile-selector");
       await expect(selector).toBeVisible();
       await selector.click();
-      const option = testPage.getByRole("option", { name: profile.name });
+      const option = testPage.locator(`[cmdk-item][data-value="${profile.id}"]`);
       await expect(option).toContainText("Maximum lifetime: 8 hours.");
       await option.click();
       await expect(selector).toContainText(profile.name);
     } finally {
       await uninstallFixturePlugin(apiClient);
-      await releaseFeature();
     }
   });
 });

@@ -479,7 +479,6 @@
   "allowUserNamespacesDescription": "コンテナ内で権限なしユーザーの名前空間作成と mount 操作を許可。bwrap みたいなサンドボックスツールが使える。",
   "allowUserNamespacesNote": "この設定が効くのは新規作成コンテナだけ。変更を反映するには、既存タスク環境をリセットする必要あり。",
   "allowUserNamespacesWarning": "有効にすると、Docker のデフォルト AppArmor 制限をオプトイン済みコンテナに対して無効化。user-namespace サンドボックスが必要な信頼済み agent runtime だけで有効にすること。",
-  "providerFeatureDisabled": "リモート executor プラグインは現在無効です。",
   "providerFieldClear": "クリア",
   "providerFieldClearPending": "保存すると {{field}} がクリアされます。",
   "providerFieldConfigured": "{{field}} は設定済みです。",

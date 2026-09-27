@@ -29,7 +29,7 @@ It does not implement chat, terminal, files, Git, or another agent protocol.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-EXECUTORS-PLUGIN-001 | Registration and profiles; rollout |
+| REQ-EXECUTORS-PLUGIN-001 | Registration and profiles; permanent availability |
 | REQ-EXECUTORS-PLUGIN-002 | Provider RPCs; bootstrap; launch flow |
 | REQ-EXECUTORS-PLUGIN-003 | Connection leases; security |
 | REQ-EXECUTORS-PLUGIN-004 | Inventory; recovery and cleanup |
@@ -319,20 +319,25 @@ IDs may appear in logs; resource state, headers, signed URLs, tokens, and config
 Add closed-label counters for operations (`provision`, `recover`, `attach`, `inspect`, `destroy`, `connect`)
 and outcomes (`success`, `failed`, `unknown`, `fenced`). Plugin or task IDs are never metric labels.
 
-## Rollout
+## Permanent availability
 
-Add **new** restart-required release toggle `features.remoteExecutorPlugins`, environment variable
-`KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS`. Defaults are false in prod, dev, and e2e profiles.
-Use the typed runtime flag registry, config binding, frontend feature defaults, and existing admin controls.
-Tests enable the flag explicitly. Registration and every RPC, background recovery, and admission path
-check the backend gate. Flag-off code can read inventory but cannot dispatch provider operations.
-Operators must re-enable and restart before provider cleanup. Inventory and blocking uninstall checks
-remain active while the flag is off. This avoids erasing resources through the disabled path.
+The initial release used the restart-required `features.remoteExecutorPlugins` toggle. The host retired
+its profile default, typed config field, active registry registration, service state and setter, frontend
+default, and flag-only branches. Its key and environment variable are in the append-only retired runtime
+flag identities. Existing SQLite overrides remain inert and are not deleted.
+
+Provider discovery remains manifest-owned. With no installed plugin declaring `executor_providers`,
+the catalog has no plugin remote entries and built-in executor profiles continue normally. An installed
+but disabled, incompatible, or unavailable provider remains ineligible for new launches. Saved profiles
+and retained inventory remain visible, and uninstall and upgrade guards still protect unresolved remote
+resources. Dispatch requires an active installed plugin, a declared compatible provider, and a running
+plugin process; these admission checks do not depend on a release toggle. Background recovery and
+cleanup retain the same provider and resource identity checks.
 
 The host provider API, packaged fixture, desktop and phone profile flows, retention disclosure, and
-operator guidance are implemented behind the off-by-default restart-required flag. Public documentation
-describes the provider contract and fixture, not a production cloud provider. A production cloud plugin
-requires its own live validation.
+operator guidance remain available when an eligible plugin is installed. Public documentation describes
+the provider contract and fixture, not a production cloud provider. A production cloud plugin requires
+its own live validation.
 
 ## Implementation evidence
 
@@ -350,11 +355,12 @@ envelope. A barrier test covers inspection racing with cleanup. Legacy `local_pc
 to standalone while unknown executor values fail closed. The detailed regression results are in
 [Task 10](../../../plans/remote-executor-plugins/task-10-review-remediations.md).
 
-The managed Chromium E2E tests cover provider profile availability and retention disclosure, plus
-feature-off profile admission without provider allocation. Separate profile and status E2Es cover the
-desktop and phone flows. Agentctl, lifecycle, and gateway tests cover authenticated request and WebSocket
-transport, recovery, and cleanup. The packaged browser test does not start a full remote agent session or
-exercise every prompt, permission, terminal, file, Git, editor, and preview action through the fixture.
+The managed Chromium E2E tests cover provider profile availability and retention disclosure with shipped
+defaults. With no eligible provider installed, they verify that built-in profile selection remains
+available. Separate profile and status E2Es cover desktop and phone flows. Agentctl, lifecycle, and gateway
+tests cover authenticated request and WebSocket transport, recovery, and cleanup. The packaged browser
+test does not start a full remote agent session or exercise every prompt, permission, terminal, file, Git,
+editor, and preview action through the fixture.
 
 The fixture and focused transport checks passed:
 

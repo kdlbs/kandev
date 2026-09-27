@@ -45,7 +45,7 @@ Choose Remote Docker over a single-node Kubernetes cluster when you want a conta
 
 ## Plugin-managed remote executors
 
-Plugin remote providers appear in **Settings > Executors** when an installed plugin declares `executor_providers`. The administrator must enable `features.remoteExecutorPlugins` and restart Kandev. This feature is disabled in shipped profiles.
+Plugin remote providers appear in **Settings > Executors** when an installed, active plugin declares a compatible `executor_providers` contract. No separate feature flag or restart is required. Disabled, incompatible, or unavailable providers remain ineligible for new launches, and built-in executors continue to work when no provider plugin is installed.
 
 The plugin provisions and removes provider compute. Kandev owns agentctl, agent lifecycle, workspace materialization, task authorization, and durable resource inventory. A provider must support recovery with the original operation identity. Kandev keeps unresolved cleanup inventory when a provider is unavailable or removal is not confirmed.
 

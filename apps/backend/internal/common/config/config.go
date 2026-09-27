@@ -555,11 +555,6 @@ type FeaturesConfig struct {
 	// Windows (survival trades the platform's kill-on-job-close safeguard for
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
-
-	// RemoteExecutorPlugins gates manifest-owned providers that allocate
-	// remote task environments. It remains off in every embedded profile
-	// until the complete lifecycle, recovery, and cleanup path is available.
-	RemoteExecutorPlugins bool `mapstructure:"remote_executor_plugins" json:"remoteExecutorPlugins"`
 }
 
 // LoggingConfig holds logging configuration.
