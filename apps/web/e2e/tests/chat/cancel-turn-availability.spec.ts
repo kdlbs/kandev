@@ -79,18 +79,34 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
     const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    const sessionId = await testPage.evaluate(() => {
+      const store = (
+        window as Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => { tasks: { activeSessionId: string | null } };
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      return store?.getState().tasks.activeSessionId;
+    });
+    if (!sessionId) throw new Error("The active task session is not available");
     const cancellationPending = gateway.waitForEvent("session.cancellation_changed", {
-      where: (payload) => payload.cancellation_pending === true,
+      where: (payload) => payload.session_id === sessionId && payload.cancellation_pending === true,
     });
     const cancellationSettled = gateway.waitForEvent("session.cancellation_changed", {
-      where: (payload) => payload.cancellation_pending === false,
+      where: (payload) =>
+        payload.session_id === sessionId && payload.cancellation_pending === false,
     });
     await cancelButton.click();
     await cancellationPending;
-    // The websocket event is the backend-owned acknowledgement. The browser
-    // store can miss the short-lived true projection when the mock turn stops
-    // in the same event loop, so wait for the user-facing control instead.
-    await expect(cancelButton).toBeDisabled({ timeout: 20_000 });
+    // A fast mock cancellation can settle before React renders the disabled
+    // state. Accept either disabled or hidden after the backend acknowledgement.
+    await expect
+      .poll(async () => {
+        if (!(await cancelButton.isVisible().catch(() => false))) return true;
+        return cancelButton.isDisabled();
+      })
+      .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await cancellationSettled;
     await waitForActiveSessionForegroundActivity(testPage, null);
