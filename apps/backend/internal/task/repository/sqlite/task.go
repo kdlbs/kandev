@@ -1945,11 +1945,12 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 }
 
 // ClearManualMoveLifecycleMarkersIfCompleted atomically removes the pending
-// and completed markers for a manual move only while the completed marker and
-// task update generation still match the recovery snapshot. A new move clears
-// the old completed marker in the same task write that creates its pending
-// marker, and a later completion reuses the boolean marker value, so the
-// generation predicate prevents either newer move from being erased.
+// and completed markers for a manual move without advancing tasks.updated_at,
+// and only while the completed marker and task update generation still match
+// the recovery snapshot. A new move clears the old completed marker in the
+// same task write that creates its pending marker, and a later completion
+// reuses the boolean marker value, so the generation predicate prevents either
+// newer move from being erased.
 func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
 	var query string
 	var args []interface{}
@@ -1959,7 +1960,7 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 			SET metadata = (
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
 				#- ARRAY[?]::text[] #- ARRAY[?]::text[]
-			)::text, updated_at = ?
+			)::text
 			WHERE id = ?
 			  AND jsonb_extract_path(
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
@@ -1970,7 +1971,6 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 		args = []interface{}{
 			models.MetaKeyManualMoveLifecyclePending,
 			models.MetaKeyManualMoveLifecycleCompleted,
-			r.nowUTC(),
 			taskID,
 			models.MetaKeyManualMoveLifecycleCompleted,
 			completedAt,
@@ -1981,7 +1981,7 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 			SET metadata = json_remove(
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
 				?, ?
-			), updated_at = ?
+			)
 			WHERE id = ?
 			  AND json_type(
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
@@ -1992,7 +1992,6 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 		args = []interface{}{
 			jsonPath(models.MetaKeyManualMoveLifecyclePending),
 			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
-			r.nowUTC(),
 			taskID,
 			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
 			completedAt,

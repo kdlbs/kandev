@@ -185,6 +185,9 @@ reconstruction, live bounded projection, GitHub refresh normalization, the
 desktop/mobile saved-view sort, localized catalogs, and production-build
 browser coverage.
 
+A later [recovery-cleanup fix package](../sidebar-activity-recovery-cleanup/plan.md)
+addresses a restart path that advanced the task timestamp without new activity.
+
 Targeted checks passed during implementation:
 
 - Backend focused GitHub, activity repository, summary, rebuild, projector, and
