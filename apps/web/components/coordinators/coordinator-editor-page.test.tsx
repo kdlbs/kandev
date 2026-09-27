@@ -24,6 +24,14 @@ vi.mock("@/lib/routing/client-router", () => ({
 vi.mock("@/lib/toast/sonner", () => ({
   toast: { error: (...args: unknown[]) => mockToastError(...args), success: vi.fn() },
 }));
+const mockRunWithNavigationBlockerBypassed = vi.fn((fn: () => void) => fn());
+vi.mock("@/lib/routing/navigation-guard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/routing/navigation-guard")>();
+  return {
+    ...actual,
+    runWithNavigationBlockerBypassed: (fn: () => void) => mockRunWithNavigationBlockerBypassed(fn),
+  };
+});
 
 type StoreState = {
   agentProfiles: { items: AgentProfileOption[] };
@@ -41,6 +49,8 @@ import { CoordinatorEditorPage } from "./coordinator-editor-page";
 
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00Z";
 const DELETE_BUTTON_TESTID = "delete-coordinator-button";
+const COORDINATORS_LIST_PATH = "/settings/workspaces/w1/coordinators";
+const SAVE_BUTTON_NAME = "Save changes";
 
 function mkExecutor(): Executor {
   return {
@@ -117,22 +127,30 @@ function setup(
     patch,
     remove,
   });
-  render(
+  const { rerender: rtlRerender } = render(
     <SettingsSaveProvider>
       <TooltipProvider>
         <CoordinatorEditorPage workspaceId="w1" coordinatorId="c1" />
       </TooltipProvider>
     </SettingsSaveProvider>,
   );
-  return { patch, remove, refresh };
+  const rerender = () =>
+    rtlRerender(
+      <SettingsSaveProvider>
+        <TooltipProvider>
+          <CoordinatorEditorPage workspaceId="w1" coordinatorId="c1" />
+        </TooltipProvider>
+      </SettingsSaveProvider>,
+    );
+  return { patch, remove, refresh, rerender };
 }
 
-describe("CoordinatorEditorPage", () => {
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
+describe("CoordinatorEditorPage: loading, errors and rendering", () => {
   it("shows a loading state (B3)", () => {
     setup({ status: "loading", coordinator: null });
     expect(screen.getByTestId("coordinator-editor-loading")).toBeTruthy();
@@ -150,7 +168,7 @@ describe("CoordinatorEditorPage", () => {
     setup({ status: "not-found", coordinator: null });
     expect(screen.getByTestId("coordinator-not-found")).toBeTruthy();
     expect(screen.getByTestId("all-coordinators-link").getAttribute("href")).toBe(
-      "/settings/workspaces/w1/coordinators",
+      COORDINATORS_LIST_PATH,
     );
     expect(screen.queryByLabelText("Name")).toBeNull();
   });
@@ -159,7 +177,7 @@ describe("CoordinatorEditorPage", () => {
     setup();
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Planner");
     expect(screen.getByTestId("all-coordinators-link").getAttribute("href")).toBe(
-      "/settings/workspaces/w1/coordinators",
+      COORDINATORS_LIST_PATH,
     );
     expect(screen.getByText(/starts the next conversation fresh/)).toBeTruthy();
     expect(screen.getByText(/auto-approve setting is ignored/)).toBeTruthy();
@@ -170,6 +188,14 @@ describe("CoordinatorEditorPage", () => {
     expect(screen.getByTestId("coordinator-agent-profile-status").textContent).toContain("removed");
   });
 
+  it("disables fields and hides Delete for a reader (AC-004.6)", () => {
+    setup({ scopes: [] });
+    expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByTestId(DELETE_BUTTON_TESTID)).toBeNull();
+  });
+});
+
+describe("CoordinatorEditorPage: delete", () => {
   it("shows the Delete coordinator button for a manager and opens the confirm dialog", () => {
     setup();
     expect(screen.getByTestId(DELETE_BUTTON_TESTID)).toBeTruthy();
@@ -184,9 +210,7 @@ describe("CoordinatorEditorPage", () => {
     fireEvent.click(screen.getByTestId("coordinator-delete-confirm"));
 
     await waitFor(() => expect(remove).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(mockReplace).toHaveBeenCalledWith("/settings/workspaces/w1/coordinators"),
-    );
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(COORDINATORS_LIST_PATH));
   });
 
   it("keeps the dialog open and toasts on a delete failure, without navigating (B7)", async () => {
@@ -201,19 +225,30 @@ describe("CoordinatorEditorPage", () => {
     expect(screen.getByTestId("coordinator-delete-confirm-dialog")).toBeTruthy();
   });
 
-  it("disables fields and hides Delete for a reader (AC-004.6)", () => {
-    setup({ scopes: [] });
-    expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
-    expect(screen.queryByTestId(DELETE_BUTTON_TESTID)).toBeNull();
-  });
+  it("deletes through the navigation-blocker bypass so a dirty form cannot block leaving a deleted coordinator (P2 regression)", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+    setup({ remove });
 
+    // Dirty the form first: this is the scenario the bug required (a dirty
+    // save contributor registers the in-app navigation blocker).
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+    fireEvent.click(screen.getByTestId("coordinator-delete-confirm"));
+
+    await waitFor(() => expect(remove).toHaveBeenCalled());
+    expect(mockRunWithNavigationBlockerBypassed).toHaveBeenCalled();
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(COORDINATORS_LIST_PATH));
+  });
+});
+
+describe("CoordinatorEditorPage: save", () => {
   it("saves through the settings save bar with only changed fields, then refreshes (B6, AC-004.4)", async () => {
     const patch = vi.fn().mockResolvedValue(coordinator({ name: "Renamed" }));
     const refresh = vi.fn();
     setup({ patch, refresh });
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
 
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ name: "Renamed" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -228,7 +263,7 @@ describe("CoordinatorEditorPage", () => {
     setup({ patch });
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
 
     await waitFor(() =>
       expect(screen.getByTestId("coordinator-name-error").textContent).toBe("Name too long"),
@@ -242,8 +277,51 @@ describe("CoordinatorEditorPage", () => {
     setup({ patch, refresh });
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
 
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  it("keeps an edit typed during an in-flight save instead of discarding it (P1 regression)", async () => {
+    const initial = coordinator({ context: "Some context" });
+    let resolvePatch: (value: Coordinator) => void = () => {};
+    const patch = vi.fn(
+      () =>
+        new Promise<Coordinator>((resolve) => {
+          resolvePatch = resolve;
+        }),
+    );
+    const refresh = vi.fn();
+    const { rerender } = setup({ coordinator: initial, patch, refresh });
+
+    const contextField = screen.getByLabelText("Context") as HTMLTextAreaElement;
+    fireEvent.change(contextField, { target: { value: "Saved value" } });
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON_NAME }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ context: "Saved value" }));
+
+    // The user keeps typing while the PATCH is still in flight.
+    fireEvent.change(contextField, { target: { value: "Saved value plus more" } });
+
+    // The save resolves. Both patch()'s own setCoordinator and the ensuing
+    // refresh() replace the hook's `coordinator` reference in the real
+    // implementation; simulate that by pointing the mocked hook at a fresh
+    // object with only what was actually submitted, then re-render.
+    const updated = coordinator({ context: "Saved value" });
+    resolvePatch(updated);
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    mockUseCoordinator.mockReturnValue({
+      coordinator: updated,
+      status: "ready",
+      refresh,
+      patch,
+      remove: vi.fn(),
+    });
+    rerender();
+
+    expect((screen.getByLabelText("Context") as HTMLTextAreaElement).value).toBe(
+      "Saved value plus more",
+    );
+    // The extra keystroke is still unsaved: the save bar must stay dirty.
+    expect(screen.getByRole("button", { name: SAVE_BUTTON_NAME })).toBeTruthy();
   });
 });

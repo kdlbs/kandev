@@ -16,6 +16,7 @@ import {
 } from "@/lib/coordinators/coordinator-form";
 import { canAddCoordinator } from "@/lib/coordinators/validate-form";
 import { coordinatorFieldError, type CoordinatorFieldError } from "@/lib/coordinators/field-error";
+import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { CoordinatorFormFields } from "./coordinator-form-fields";
 import type { WorkspaceState } from "@/lib/state/slices";
 
@@ -35,6 +36,7 @@ export function CoordinatorAddPage({ workspaceId }: CoordinatorAddPageProps) {
   const workspace = useAppStore(
     (state) => state.workspaces.items.find((item: Workspace) => item.id === workspaceId) ?? null,
   );
+  const canManage = hasScope(workspace?.scopes, SCOPE.workspaceManage);
 
   const [form, setForm] = useState<CoordinatorFormState>(() => ({
     name: "",
@@ -72,18 +74,20 @@ export function CoordinatorAddPage({ workspaceId }: CoordinatorAddPageProps) {
     }
   };
 
-  const canAdd = canAddCoordinator({
-    name: form.name,
-    agentProfileId: form.agentProfileId,
-    executorProfileId: form.executorProfileId,
-  });
+  const canAdd =
+    canManage &&
+    canAddCoordinator({
+      name: form.name,
+      agentProfileId: form.agentProfileId,
+      executorProfileId: form.executorProfileId,
+    });
 
   return (
     <div className="max-w-2xl space-y-6" data-testid="coordinator-add-page">
       <CoordinatorFormFields
         form={form}
         onChange={updateField}
-        disabled={saving}
+        disabled={!canManage || saving}
         agentProfiles={agentProfiles}
         executors={executors}
         fieldError={fieldError}

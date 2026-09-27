@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 
 type CoordinatorCardProps = {
@@ -46,7 +47,7 @@ export function CoordinatorCard({
         <p className="line-clamp-2 text-sm text-muted-foreground">{coordinator.context}</p>
       )}
       <div className="flex items-center gap-3 pt-1">
-        <Button asChild variant="outline" size="sm" className="cursor-pointer">
+        <Button asChild variant="outline" className="cursor-pointer">
           <Link href={openHref} data-testid={`coordinator-open-${coordinator.id}`}>
             {t("coordinator:open")}
           </Link>
@@ -54,7 +55,10 @@ export function CoordinatorCard({
         <Link
           href={configureHref}
           data-testid={`coordinator-configure-${coordinator.id}`}
-          className="text-sm text-primary hover:underline"
+          className={controlSizingClassName(
+            "standard",
+            "inline-flex items-center text-sm text-primary hover:underline",
+          )}
         >
           {t("coordinator:configure")}
         </Link>

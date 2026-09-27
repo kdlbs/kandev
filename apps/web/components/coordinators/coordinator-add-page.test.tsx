@@ -32,6 +32,7 @@ type StoreState = {
       id: string;
       default_agent_profile_id?: string | null;
       default_executor_id?: string | null;
+      scopes?: string[];
     }>;
   };
 };
@@ -90,6 +91,7 @@ function setup(
     defaultAgentProfileId?: string | null;
     defaultExecutorId?: string | null;
     create?: ReturnType<typeof vi.fn>;
+    scopes?: string[];
   } = {},
 ) {
   storeState = {
@@ -118,6 +120,7 @@ function setup(
           id: "w1",
           default_agent_profile_id: options.defaultAgentProfileId,
           default_executor_id: options.defaultExecutorId,
+          scopes: options.scopes ?? ["workspace.manage"],
         },
       ],
     },
@@ -232,5 +235,20 @@ describe("CoordinatorAddPage", () => {
     expect(mockToastError).toHaveBeenCalled();
     expect(mockReplace).not.toHaveBeenCalled();
     expect(addButton.disabled).toBe(false);
+  });
+
+  it("disables every field and the submit button for a reader (SEC-004 / P2 regression)", () => {
+    setup({ defaultAgentProfileId: "agent-1", defaultExecutorId: "exec-1", scopes: [] });
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Context") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(
+      (screen.getByTestId("coordinator-agent-profile-picker") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((screen.getByTestId("executor-profile-selector") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    expect((screen.getByTestId(ADD_BUTTON_TESTID) as HTMLButtonElement).disabled).toBe(true);
   });
 });

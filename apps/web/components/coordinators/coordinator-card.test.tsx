@@ -73,4 +73,25 @@ describe("CoordinatorCard", () => {
       "/settings/workspaces/ws-1/coordinators/c-1",
     );
   });
+
+  it("gives Open and Configure a 44px touch target on phones and coarse pointers (mobile parity regression)", () => {
+    render(
+      <CoordinatorCard
+        coordinator={mkCoordinator()}
+        agentProfileLabel="Claude, Sonnet"
+        executorProfileLabel="worktree"
+        openHref="/workspaces/ws-1/coordinator/c-1"
+        configureHref="/settings/workspaces/ws-1/coordinators/c-1"
+      />,
+    );
+
+    const openLink = screen.getByTestId("coordinator-open-c-1");
+    expect(openLink.className).toContain("max-md:h-11");
+    expect(openLink.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(openLink.className).not.toContain("h-6");
+
+    const configureLink = screen.getByTestId("coordinator-configure-c-1");
+    expect(configureLink.className).toContain("max-md:h-11");
+    expect(configureLink.className).toContain("[@media(pointer:coarse)]:h-11");
+  });
 });

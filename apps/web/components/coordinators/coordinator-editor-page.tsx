@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { ApiError } from "@/lib/api/client";
 import { toast } from "@/lib/toast/sonner";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -112,12 +113,20 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Populates the form once per loaded coordinator, not on every `coordinator`
+  // reference change: patch() and refresh() both replace that reference after
+  // a save, and resetting form/savedForm from that response would discard any
+  // edit the user made during the round trip. handleSave below advances
+  // savedForm to the submitted snapshot instead of relying on a reset here.
+  const initializedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (status !== "ready" || !coordinator) return;
+    if (initializedForRef.current === coordinatorId) return;
     const next = coordinatorFormFromRecord(coordinator);
     setForm(next);
     setSavedForm(next);
-  }, [status, coordinator]);
+    initializedForRef.current = coordinatorId;
+  }, [status, coordinator, coordinatorId]);
 
   const patchPayload = buildPatchCoordinatorPayload(form, savedForm);
   const isDirty = canManage && status === "ready" && Object.keys(patchPayload).length > 0;
@@ -128,8 +137,10 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
 
   const handleSave = async () => {
     setFieldError(null);
+    const submitted: CoordinatorFormState = { ...form, name: form.name.trim() };
     try {
       await patch(patchPayload);
+      setSavedForm(submitted);
       refresh();
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
@@ -163,7 +174,11 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
     setDeleting(true);
     try {
       await remove();
-      router.replace(coordinatorsListHref(workspaceId));
+      // The coordinator is already gone: the dirty-navigation guard
+      // (registered whenever this page's save contributor is dirty) must not
+      // prompt to confirm leaving a record that no longer exists. Mirrors
+      // automation-editor.tsx's useRemoveAutomation.
+      runWithNavigationBlockerBypassed(() => router.replace(coordinatorsListHref(workspaceId)));
     } catch {
       toast.error(t("coordinator:failedToDeleteCoordinator"));
     } finally {
