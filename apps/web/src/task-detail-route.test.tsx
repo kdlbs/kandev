@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
@@ -7,22 +7,57 @@ import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import { taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import type { Task, TaskSession } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
 
 const mocks = vi.hoisted(() => ({
   fetchSessionDataForTask: vi.fn(),
+  deferRouteHydration: false,
+  onHydrated: null as (() => void) | null,
 }));
 const KANBAN_TASK_SHELL_TEST_ID = "kanban-task-shell";
 const STATE_HYDRATOR_TEST_ID = "state-hydrator";
+const FORCE_SESSION_ID_ATTRIBUTE = "data-force-session-id";
+const ROUTE_READY_ATTRIBUTE = "data-route-ready";
 const TASK_DATA_ATTRIBUTE = "data-task-id";
 const LOADING_TASK_COPY = "Loading task";
 const TASK_ONE_ID = "task-1";
 const TASK_TWO_ID = "task-2";
 
-vi.mock("@/components/state-hydrator", () => ({
-  StateHydrator: ({ sessionId }: { sessionId?: string }) => (
-    <div data-testid={STATE_HYDRATOR_TEST_ID} data-force-session-id={sessionId ?? ""} />
-  ),
-}));
+vi.mock("@/components/state-hydrator", async () => {
+  const { useLayoutEffect, useRef } = await import("react");
+  const { useAppStoreApi } = await import("@/components/state-provider");
+  return {
+    StateHydrator: ({
+      initialState,
+      sessionId,
+      taskSessionHydrationEpochsAtRequestStart,
+      onHydrated,
+    }: {
+      initialState: Partial<AppState>;
+      sessionId?: string;
+      taskSessionHydrationEpochsAtRequestStart?: Readonly<
+        Record<string, TaskSessionHydrationEpoch>
+      >;
+      onHydrated?: () => void;
+    }) => {
+      const store = useAppStoreApi();
+      const onHydratedRef = useRef(onHydrated);
+      onHydratedRef.current = onHydrated;
+      useLayoutEffect(() => {
+        if (Object.keys(initialState).length) {
+          store.getState().hydrate(initialState, {
+            forceMergeSessionId: sessionId,
+            taskSessionHydrationEpochsAtRequestStart,
+          });
+        }
+        const markHydrated = () => onHydratedRef.current?.();
+        mocks.onHydrated = markHydrated;
+        if (!mocks.deferRouteHydration) markHydrated();
+      }, [initialState, sessionId, store, taskSessionHydrationEpochsAtRequestStart]);
+      return <div data-testid={STATE_HYDRATOR_TEST_ID} data-force-session-id={sessionId ?? ""} />;
+    },
+  };
+});
 
 vi.mock("@/app/tasks/[id]/kanban-task-shell", async () => {
   const { useAppStore } = await import("@/components/state-provider");
@@ -118,6 +153,8 @@ function makeSessionHydrationState(session: TaskSession): Partial<AppState> {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mocks.deferRouteHydration = false;
+  mocks.onHydrated = null;
 });
 
 function renderTaskRoute(element: ReactElement, initialState?: Partial<AppState>) {
@@ -174,9 +211,9 @@ describe("TaskDetailRoute", () => {
       TASK_ONE_ID,
     );
     expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID)).toBeTruthy();
-    expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute("data-force-session-id")).toBe(
-      "session-1",
-    );
+    expect(
+      screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute(FORCE_SESSION_ID_ATTRIBUTE),
+    ).toBe("session-1");
   });
 
   it("does not force-merge a client-fetched session over the live session cache", async () => {
@@ -184,9 +221,27 @@ describe("TaskDetailRoute", () => {
 
     renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
 
-    await waitFor(() => expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID)).toBeTruthy());
-    expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute("data-force-session-id")).toBe(
-      "",
+    await waitFor(() => expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy());
+    expect(
+      screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute(FORCE_SESSION_ID_ATTRIBUTE),
+    ).toBe("");
+  });
+
+  it("keeps route session consumers gated until client data hydration completes", async () => {
+    mocks.deferRouteHydration = true;
+    mocks.fetchSessionDataForTask.mockResolvedValueOnce(makeFetchedData());
+
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
+
+    await waitFor(() => expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy());
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(ROUTE_READY_ATTRIBUTE)).toBe(
+      "false",
+    );
+
+    act(() => mocks.onHydrated?.());
+
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(ROUTE_READY_ATTRIBUTE)).toBe(
+      "true",
     );
   });
 });
@@ -209,12 +264,12 @@ describe("TaskDetailRoute client navigation", () => {
 
     expect(screen.getByRole("status").textContent).toContain(LOADING_TASK_COPY);
     expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBe(initialShell);
-    expect(initialShell.getAttribute("data-route-ready")).toBe("false");
+    expect(initialShell.getAttribute(ROUTE_READY_ATTRIBUTE)).toBe("false");
     routeData.resolve(taskTwoData);
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBe(initialShell);
       expect(initialShell.getAttribute(TASK_DATA_ATTRIBUTE)).toBe(TASK_TWO_ID);
-      expect(initialShell.getAttribute("data-route-ready")).toBe("true");
+      expect(initialShell.getAttribute(ROUTE_READY_ATTRIBUTE)).toBe("true");
     });
   });
 
@@ -247,9 +302,9 @@ describe("TaskDetailRoute client navigation", () => {
     });
     expect(mocks.fetchSessionDataForTask).toHaveBeenNthCalledWith(1, TASK_TWO_ID, undefined);
     expect(mocks.fetchSessionDataForTask).toHaveBeenNthCalledWith(2, TASK_ONE_ID, undefined);
-    expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute("data-force-session-id")).toBe(
-      "",
-    );
+    expect(
+      screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute(FORCE_SESSION_ID_ATTRIBUTE),
+    ).toBe("");
   });
 
   it("uses the session selected by route loading when the requested session is unavailable", async () => {

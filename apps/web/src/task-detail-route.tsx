@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -84,6 +85,20 @@ export function TaskDetailRoute({
   initialData,
 }: TaskDetailRouteProps) {
   const route = useTaskDetailRouteData({ taskId, sessionId, initialData });
+  const [hydratedRouteKey, setHydratedRouteKey] = useState<string | null>(null);
+  const markRouteHydrated = useCallback(() => {
+    if (route.displayedRouteKey) setHydratedRouteKey(route.displayedRouteKey);
+  }, [route.displayedRouteKey]);
+  const onRouteHydrated =
+    route.currentRouteStatus === "loaded" &&
+    route.displayedRouteKey === route.routeKey &&
+    route.initialState !== null
+      ? markRouteHydrated
+      : undefined;
+  const routeDataReady =
+    route.currentRouteStatus === "error" ||
+    (route.currentRouteStatus === "loaded" &&
+      (route.initialState === null || hydratedRouteKey === route.routeKey));
 
   if (route.showInitialLoading) {
     return <TaskRouteLoading />;
@@ -96,10 +111,11 @@ export function TaskDetailRoute({
           initialState={route.initialState}
           sessionId={route.forceMergeSession ? (route.activeSessionId ?? undefined) : undefined}
           taskSessionHydrationEpochsAtRequestStart={route.hydrationEpochsAtRequestStart}
+          onHydrated={onRouteHydrated}
         />
       ) : null}
       {route.showShell ? (
-        <TaskRouteSessionHydrationProvider isReady={route.routeDataReady}>
+        <TaskRouteSessionHydrationProvider isReady={routeDataReady}>
           <div className="h-full min-h-0 w-full" inert={route.isLoadingOverPreviousRoute}>
             {route.task && isDetachedManagedConversation(route.task) ? (
               <RetainedManagedConversationTranscript
@@ -224,9 +240,6 @@ function useTaskDetailRouteFetch(args: {
     fetchSessionDataForTask(taskId, sessionId)
       .then((next) => {
         if (!cancelled) {
-          store.getState().hydrate(next.initialState, {
-            taskSessionHydrationEpochsAtRequestStart: hydrationEpochsAtRequestStart,
-          });
           const loadedState: TaskDetailRouteState = {
             routeKey,
             status: "loaded",
@@ -270,6 +283,9 @@ function deriveTaskDetailRouteView(
   const shellTaskId = isLoadingOverPreviousRoute ? (task?.id ?? taskId) : taskId;
 
   return {
+    routeKey: taskRouteKey(taskId, sessionId),
+    currentRouteStatus: currentRouteState.status,
+    displayedRouteKey: displayedRouteState?.routeKey ?? null,
     data,
     task,
     initialState,
@@ -281,7 +297,6 @@ function deriveTaskDetailRouteView(
         : undefined,
     shellTaskId,
     isLoadingOverPreviousRoute,
-    routeDataReady: currentRouteState.status !== "loading",
     showShell: displayedRouteState !== null || currentRouteState.status !== "loading",
     showInitialLoading: currentRouteState.status === "loading" && displayedRouteState === null,
   };
