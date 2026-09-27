@@ -10,7 +10,10 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitRow, type CommitItem } from "./commit-row";
-import type { CommitDetailTarget, CommitFileNavigationRequest } from "@/lib/state/diff-target-types";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+} from "@/lib/state/diff-target-types";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { ChangedFile } from "./changes-panel-helpers";
 import { useTranslation } from "react-i18next";
