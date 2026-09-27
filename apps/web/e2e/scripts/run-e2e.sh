@@ -323,9 +323,9 @@ run_docker() {
     esac
   done
   if [[ "$requires_coordinator" == 1 ]]; then
-    [[ -d "$REPO_ROOT/../kandev-plugin-coordinator" ]] \
-      || die "reference coordinator checkout is required at $REPO_ROOT/../kandev-plugin-coordinator"
-    coordinator_mount=(-v "$REPO_ROOT/../kandev-plugin-coordinator:/work/kandev-plugin-coordinator:ro")
+    [[ -d "$REPO_ROOT/../kandev-plugin-coordinator-template" ]] \
+      || die "reference coordinator checkout is required at $REPO_ROOT/../kandev-plugin-coordinator-template"
+    coordinator_mount=(-v "$REPO_ROOT/../kandev-plugin-coordinator-template:/work/kandev-plugin-coordinator-template:ro")
   fi
   if [[ "$requires_observer" == 1 ]]; then
     [[ -d "$REPO_ROOT/../kandev-plugin-observer" ]] \

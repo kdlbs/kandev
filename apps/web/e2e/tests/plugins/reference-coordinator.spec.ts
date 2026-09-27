@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  COORDINATOR_PLUGIN_ID,
   invokeCoordinatorAction,
   installAndGrantCoordinator,
   uninstallCoordinator,
@@ -46,7 +47,7 @@ test.describe("packaged reference coordinator", () => {
     );
     alternateProfileId = alternateProfile.id;
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+    await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
     await expect(testPage.getByTestId("coordinator-empty")).toBeVisible();
     await testPage.getByTestId("coordinator-add-instance").click();
     await expect(testPage.getByTestId("coordinator-settings")).toBeVisible();
@@ -107,15 +108,15 @@ test.describe("packaged reference coordinator", () => {
 
     const disable = await apiClient.rawRequest(
       "POST",
-      "/api/plugins/kandev-plugin-coordinator-template/disable",
+      `/api/plugins/${COORDINATOR_PLUGIN_ID}/disable`,
     );
     if (!disable.ok) throw new Error(`Could not disable coordinator package: ${disable.status}`);
     const enable = await apiClient.rawRequest(
       "POST",
-      "/api/plugins/kandev-plugin-coordinator-template/enable",
+      `/api/plugins/${COORDINATOR_PLUGIN_ID}/enable`,
     );
     if (!enable.ok) throw new Error(`Could not re-enable coordinator package: ${enable.status}`);
-    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+    await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
     await expect(testPage.getByTestId("coordinator-page")).toBeVisible();
     const restored = await invokeCoordinatorAction<{ instances: CoordinatorInstance[] }>(
       apiClient,

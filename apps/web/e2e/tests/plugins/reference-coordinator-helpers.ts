@@ -8,8 +8,8 @@ import { expect, test } from "../../fixtures/test-base";
 export const COORDINATOR_PLUGIN_ID = "kandev-plugin-coordinator-template";
 
 const PLUGIN_ROOTS = [
-  path.resolve(__dirname, "../../../../../kandev-plugin-coordinator-template"),
-  path.resolve(__dirname, "../../../../../../kandev-plugin-coordinator-template"),
+  path.resolve(__dirname, "../../../../..", COORDINATOR_PLUGIN_ID),
+  path.resolve(__dirname, "../../../../../..", COORDINATOR_PLUGIN_ID),
 ];
 const PLUGIN_ROOT =
   PLUGIN_ROOTS.find((root) => existsSync(path.join(root, "manifest.yaml"))) ?? PLUGIN_ROOTS[0];

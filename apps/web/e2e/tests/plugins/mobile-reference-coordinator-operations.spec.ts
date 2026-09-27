@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  COORDINATOR_PLUGIN_ID,
   installAndGrantCoordinator,
   invokeCoordinatorAction,
   uninstallCoordinator,
@@ -35,7 +36,7 @@ test("phone coordinator adopts a task, submits evidence, and shows its outcome",
       instructions: "Claim selected tasks and report current evidence.",
     });
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+    await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
     await testPage.getByRole("tab", { name: "Tasks" }).tap();
     await testPage.getByTestId("coordinator-external-task-id").fill(taskId);
     await testPage.getByTestId("coordinator-adopt-external-task").tap();

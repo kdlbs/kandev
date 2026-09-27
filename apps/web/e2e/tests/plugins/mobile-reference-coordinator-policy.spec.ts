@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  COORDINATOR_PLUGIN_ID,
   installAndGrantCoordinator,
   invokeCoordinatorAction,
   uninstallCoordinator,
@@ -27,7 +28,7 @@ test("phone coordinator keeps proposal review and approval in the task tab", asy
     description: "Confirm the mobile checklist is complete.",
   });
 
-  await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+  await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
   await testPage.getByRole("tab", { name: "Tasks" }).tap();
   const proposals = testPage.getByTestId("coordinator-proposal-list");
   await expect(proposals).toContainText("Inspect the phone release checklist");

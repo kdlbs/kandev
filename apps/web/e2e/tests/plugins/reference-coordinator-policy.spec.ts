@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  COORDINATOR_PLUGIN_ID,
   installAndGrantCoordinator,
   invokeCoordinatorAction,
   uninstallCoordinator,
@@ -27,7 +28,7 @@ test("reference coordinator records and approves one durable proposal", async ({
     description: "Check the release notes and report missing steps.",
   });
 
-  await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+  await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
   const proposals = testPage.getByTestId("coordinator-proposal-list");
   await expect(proposals).toContainText("Review the deployment notes");
   await proposals.getByTestId("coordinator-proposal-approve").click();

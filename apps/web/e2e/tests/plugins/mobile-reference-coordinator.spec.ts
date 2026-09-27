@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  COORDINATOR_PLUGIN_ID,
   installAndGrantCoordinator,
   invokeCoordinatorAction,
   uninstallCoordinator,
@@ -39,7 +40,7 @@ test.describe("reference coordinator on phone", () => {
     );
     alternateProfileId = alternateProfile.id;
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+    await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
     await testPage.getByTestId("coordinator-add-instance").tap();
     await expect(testPage.getByTestId("coordinator-settings")).toBeVisible();
     await testPage.getByTestId("coordinator-field-name").fill("Delivery lead");
@@ -88,9 +89,7 @@ test.describe("reference coordinator on phone", () => {
     const pauseResponses: string[] = [];
     testPage.on("response", async (response) => {
       if (
-        response
-          .url()
-          .endsWith("/api/plugins/kandev-plugin-coordinator-template/actions/conversation.pause")
+        response.url().endsWith(`/api/plugins/${COORDINATOR_PLUGIN_ID}/actions/conversation.pause`)
       ) {
         pauseResponses.push(`${response.status()}: ${await response.text()}`);
       }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  COORDINATOR_PLUGIN_ID,
   createLinkedJiraTask,
   installAndGrantCoordinator,
   invokeCoordinatorAction,
@@ -34,7 +35,7 @@ test("desktop coordinator adopts a linked task, writes to Jira, and reports outc
     taskId = linkedTask.taskId;
     watchId = linkedTask.watchId;
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
+    await testPage.goto(`/plugins/${COORDINATOR_PLUGIN_ID}`);
     await expect(testPage.getByTestId("coordinator-external-task-id")).toBeVisible();
     await testPage.getByTestId("coordinator-external-task-id").fill(taskId);
     await testPage.getByTestId("coordinator-adopt-external-task").click();
