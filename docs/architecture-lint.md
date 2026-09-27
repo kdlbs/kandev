@@ -1,5 +1,8 @@
 # Architecture lint
 
+For cleanup priorities, proposed rules, and review cadence, see the
+[architecture maintenance roadmap](architecture-maintenance/README.md).
+
 Kandev turns a small set of accepted architecture boundaries into fast repository checks. The
 pre-commit hook runs them automatically; use `make lint-architecture` to run them directly. CI runs
 the same dependency-free Python linter against tracked files and reports `path:line` diagnostics.
