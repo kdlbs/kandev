@@ -1484,6 +1484,11 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		if execCtxErr != nil && (errors.Is(execCtxErr, context.DeadlineExceeded) || errors.Is(execCtxErr, context.Canceled)) {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
 		}
+		if isGraphQLGHArgs(args) {
+			if apiErr := c.graphQLPayloadAPIError(stdout.Bytes()); apiErr != nil {
+				return stdout.String(), fmt.Errorf("gh graphql: %w", apiErr)
+			}
+		}
 		if apiErr := inspectAuthStderr(args, stderr.String()); apiErr != nil {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), apiErr)
 		}

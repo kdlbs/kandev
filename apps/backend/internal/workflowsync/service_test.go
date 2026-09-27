@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +26,31 @@ type fakeGitHubClients struct {
 
 type failingGitHubClients struct {
 	err error
+}
+
+type cancellationGitHubClients struct {
+	started   chan struct{}
+	startOnce sync.Once
+	blocked   atomic.Bool
+	calls     atomic.Int32
+}
+
+func (f *cancellationGitHubClients) ListRepoDirectoryForWorkspace(
+	ctx context.Context, _, _, _, _, _ string,
+) ([]github.RepoContentEntry, error) {
+	f.calls.Add(1)
+	if f.blocked.Load() {
+		f.startOnce.Do(func() { close(f.started) })
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return nil, nil
+}
+
+func (f *cancellationGitHubClients) GetRepoFileContentForWorkspace(
+	context.Context, string, string, string, string, string,
+) ([]byte, error) {
+	return nil, nil
 }
 
 func (f failingGitHubClients) ListRepoDirectoryForWorkspace(
@@ -151,6 +177,79 @@ func configureWorkspace(t *testing.T, svc *Service, workspaceID string) {
 		RepoName:  "flows",
 	})
 	require.NoError(t, err)
+}
+
+func setupCanceledRecoveryTest(t *testing.T, workspaceID string) (*Service, *cancellationGitHubClients, time.Time) {
+	t.Helper()
+	store := setupTestStore(t)
+	provider := &cancellationGitHubClients{started: make(chan struct{})}
+	provider.blocked.Store(true)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(store, provider, nil, &fakeApplier{}, log)
+	configureWorkspace(t, svc, workspaceID)
+	now := time.Now().UTC().Truncate(time.Second)
+	svc.now = func() time.Time { return now }
+	svc.jitter = func(time.Duration) time.Duration { return 0 }
+	retryAt := now.Add(2 * time.Hour)
+	priorError := &github.GitHubAPIError{
+		StatusCode: http.StatusForbidden, Endpoint: "/graphql",
+		FailureKind: github.FailureSecondaryRateLimit,
+		RetryAt:     retryAt, RetrySource: github.RetrySourceRetryAfter,
+	}
+	for range 3 {
+		cfg, err := store.GetConfigForWorkspace(context.Background(), workspaceID)
+		require.NoError(t, err)
+		directive := buildFailureDirective(cfg, priorError, now, svc.jitter)
+		require.NoError(t, store.RecordSyncFailure(context.Background(), workspaceID, "previous rate failure", directive, now))
+	}
+	return svc, provider, retryAt
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-003.2
+// @covers AC-INTEGRATIONS-GITHUB-RATE-003.4
+// @covers AC-INTEGRATIONS-GITHUB-RATE-003.6
+func TestManualSyncCanceledContextPersistsRecovery(t *testing.T) {
+	svc, provider, existingRetryAt := setupCanceledRecoveryTest(t, "ws-canceled")
+	type requestIdentityKey struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), requestIdentityKey{}, "request identity"))
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.SyncWorkspace(ctx, "ws-canceled")
+		done <- err
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual sync did not reach the provider request")
+	}
+	cancel()
+	err := <-done
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+
+	restarted := NewService(svc.store, provider, nil, svc.applier, svc.logger)
+	restarted.now = svc.now
+	restarted.jitter = svc.jitter
+	cfg, err := restarted.GetConfigForWorkspace(context.Background(), "ws-canceled")
+	require.NoError(t, err)
+	assert.Equal(t, 4, cfg.ConsecutiveFailures)
+	assert.Equal(t, string(github.FailureTransient), cfg.LastErrorClass)
+	assert.False(t, cfg.PollSuspended)
+	require.NotNil(t, cfg.NextAttemptAt)
+	assert.Equal(t, existingRetryAt, *cfg.NextAttemptAt)
+
+	restarted.runAutomaticJob(context.Background(), automaticJob{workspaceID: "ws-canceled"})
+	assert.Equal(t, int32(1), provider.calls.Load(), "restart retried before the stored boundary")
+
+	provider.blocked.Store(false)
+	_, err = restarted.SyncWorkspace(context.Background(), "ws-canceled")
+	require.NoError(t, err)
+	cfg, err = restarted.GetConfigForWorkspace(context.Background(), "ws-canceled")
+	require.NoError(t, err)
+	assert.Zero(t, cfg.ConsecutiveFailures)
+	assert.Empty(t, cfg.LastErrorClass)
+	assert.Nil(t, cfg.NextAttemptAt)
 }
 
 func TestSyncWorkspaceDoesNotLogProviderResponseBody(t *testing.T) {

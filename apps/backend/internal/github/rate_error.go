@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -32,6 +33,8 @@ const (
 )
 
 const secondaryFallbackDelay = time.Minute
+
+const rateLimitedGraphQLErrorBody = "GitHub GraphQL rate limit exceeded"
 
 // RateLimitErrorCode identifies an operation-local GitHub rate failure.
 const RateLimitErrorCode = "github_rate_limited"
@@ -72,8 +75,39 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 		result.Resource = snap.Resource
 		result.Snapshot = &snap
 	}
-
+	graphQLRateError := mergeGraphQLRatePayload(endpoint, body, now, &result)
 	result.Kind = classifyFailureKind(resp.StatusCode, string(body), resp.Header.Get("X-RateLimit-Remaining"), resp.Header.Get("Retry-After"))
+	if graphQLRateError {
+		result.Kind = graphQLRateFailureKind(result.Snapshot)
+	}
+	setGitHubFailureRetry(&result, resp, now)
+	return result
+}
+
+func mergeGraphQLRatePayload(endpoint string, body []byte, now time.Time, result *githubFailure) bool {
+	if !strings.HasPrefix(endpoint, "/graphql") {
+		return false
+	}
+	rateError, snapshot := parseGraphQLRatePayload(body, now)
+	if snapshot == nil {
+		return rateError
+	}
+	if result.Snapshot == nil {
+		result.Snapshot = snapshot
+		return rateError
+	}
+	mergeGraphQLRateSnapshot(result.Snapshot, snapshot)
+	return rateError
+}
+
+func graphQLRateFailureKind(snapshot *RateSnapshot) FailureKind {
+	if snapshot != nil && snapshot.RemainingObserved && snapshot.Remaining <= 0 {
+		return FailurePrimaryRateLimit
+	}
+	return FailureSecondaryRateLimit
+}
+
+func setGitHubFailureRetry(result *githubFailure, resp *http.Response, now time.Time) {
 	switch result.Kind {
 	case FailurePrimaryRateLimit:
 		if result.Snapshot != nil && !result.Snapshot.ResetAt.IsZero() {
@@ -90,7 +124,91 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 	case FailureSecondaryRateLimit:
 		result.RetryAt, result.RetrySource = retryAfter(resp.Header.Get("Retry-After"), now)
 	}
-	return result
+}
+
+func parseGraphQLRatePayload(body []byte, now time.Time) (bool, *RateSnapshot) {
+	var payload struct {
+		Errors []graphQLError `json:"errors"`
+		Data   struct {
+			RateLimit json.RawMessage `json:"rateLimit"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, nil
+	}
+	return hasGraphQLRateError(payload.Errors), parseGraphQLRateSnapshot(payload.Data.RateLimit, now)
+}
+
+func hasGraphQLRateError(items []graphQLError) bool {
+	for _, item := range items {
+		if isGraphQLRateError(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func isGraphQLRateError(item graphQLError) bool {
+	kind := strings.ToLower(item.Type)
+	message := strings.ToLower(item.Message)
+	return strings.Contains(kind, "rate_limited") || strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "secondary rate") || strings.Contains(message, "abuse detection")
+}
+
+func parseGraphQLRateSnapshot(raw json.RawMessage, now time.Time) *RateSnapshot {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var rate struct {
+		Limit     *int            `json:"limit"`
+		Remaining *int            `json:"remaining"`
+		ResetAt   json.RawMessage `json:"resetAt"`
+	}
+	if err := json.Unmarshal(raw, &rate); err != nil {
+		return nil
+	}
+	snapshot := &RateSnapshot{Resource: ResourceGraphQL, UpdatedAt: now}
+	if rate.Limit != nil {
+		snapshot.Limit = *rate.Limit
+	}
+	if rate.Remaining != nil {
+		snapshot.Remaining = *rate.Remaining
+		snapshot.RemainingObserved = true
+	}
+	if rate.Limit == nil && rate.Remaining == nil && len(rate.ResetAt) == 0 {
+		return nil
+	}
+	snapshot.ResetAt = parseGraphQLResetAt(rate.ResetAt)
+	return snapshot
+}
+
+func parseGraphQLResetAt(raw json.RawMessage) time.Time {
+	if len(raw) == 0 || string(raw) == "null" {
+		return time.Time{}
+	}
+	var reset string
+	if err := json.Unmarshal(raw, &reset); err != nil {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, reset)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
+}
+
+func mergeGraphQLRateSnapshot(target, payload *RateSnapshot) {
+	if payload.Limit != 0 {
+		target.Limit = payload.Limit
+	}
+	if payload.RemainingObserved {
+		target.Remaining = payload.Remaining
+		target.RemainingObserved = true
+	}
+	if !payload.ResetAt.IsZero() {
+		target.ResetAt = payload.ResetAt
+	}
+	target.UpdatedAt = payload.UpdatedAt
 }
 
 func classifyFailureKind(status int, body, remainingHeader, retryAfterHeader string) FailureKind {

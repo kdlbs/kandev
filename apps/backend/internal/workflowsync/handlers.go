@@ -132,6 +132,9 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 		return
 	}
 	result, syncErr := c.service.SyncWorkspace(ctx.Request.Context(), workspaceID)
+	if ctx.Request.Context().Err() != nil {
+		return
+	}
 	if workspaceDenied(syncErr) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 		return

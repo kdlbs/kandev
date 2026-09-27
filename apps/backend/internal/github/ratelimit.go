@@ -32,9 +32,8 @@ const (
 // counters update at human speed rather than once per request.
 const rateUpdateDebounce = 5 * time.Second
 
-// secondaryRateLimitReason is safe to expose in task-bound snapshots. Provider
-// response bodies may contain arbitrary untrusted text, so the tracker records
-// only this bounded diagnostic alongside the resource and retry metadata.
+// Provider response bodies may contain arbitrary untrusted text, so the
+// tracker records only this bounded diagnostic alongside retry metadata.
 const secondaryRateLimitReason = "secondary_rate_limit"
 
 // RateSnapshot captures the rate-limit state for one bucket at a point in time.

@@ -402,6 +402,50 @@ func TestHTTPForceSyncReturnsRateLimitDetailsWhenAdmissionWaitIsCanceled(t *test
 	assert.Equal(t, "retry_after_header", body.RateLimit.Source)
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-003.6
+func TestHTTPForceSyncCanceledRequestPersistsRecovery(t *testing.T) {
+	svc, provider, existingRetryAt := setupCanceledRecoveryTest(t, victimWorkspace)
+	server := httptest.NewServer(newTestRouter(t, svc))
+	t.Cleanup(server.Close)
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		requestCtx,
+		http.MethodPost,
+		server.URL+"/api/v1/workflow-sync/sync?workspace_id="+victimWorkspace,
+		nil,
+	)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		resp, requestErr := http.DefaultClient.Do(req)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		done <- requestErr
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("force sync did not reach the provider request")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP request did not stop after cancellation")
+	}
+
+	require.Eventually(t, func() bool {
+		cfg, err := svc.store.GetConfigForWorkspace(context.Background(), victimWorkspace)
+		return err == nil && cfg != nil && cfg.ConsecutiveFailures == 4 &&
+			cfg.LastErrorClass == string(github.FailureTransient) &&
+			cfg.NextAttemptAt != nil && cfg.NextAttemptAt.Equal(existingRetryAt) && !cfg.LastOk
+	}, 2*time.Second, time.Millisecond)
+}
+
 // @covers AC-INTEGRATIONS-GITHUB-RATE-004.3
 func TestHTTPForceSyncSuccessOmitsRateLimitDetails(t *testing.T) {
 	svc, _ := setupTestService(t, seededMockClient())

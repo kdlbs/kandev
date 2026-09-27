@@ -48,3 +48,9 @@ system_design:
   zero, or negative reset now keeps the reset unknown. The shared observer and
   real PAT request path defer the next background request to the one-minute
   fallback instead of treating the Unix epoch as a completed reset.
+
+## Repair follow-up, 2026-09-27
+
+[Repair task 04](../github-rate-limit-pr3143-repair/task-04-continuations.md)
+records operation-progress coverage across pacing deferrals.
+Single-request admission tests do not prove multi-request sync progress.

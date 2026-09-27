@@ -94,6 +94,14 @@ func (c *PATClient) recordRateHeaders(resp *http.Response, endpoint string) {
 func (c *PATClient) apiError(resp *http.Response, endpoint string, body []byte) *GitHubAPIError {
 	failure := classifyGitHubResponse(resp, endpoint, body, time.Now().UTC())
 	incGitHubResponseClassification(failure.Kind, failure.Resource, failure.RetrySource)
+	errorBody := string(body)
+	if strings.HasPrefix(endpoint, "/graphql") &&
+		(failure.Kind == FailurePrimaryRateLimit || failure.Kind == FailureSecondaryRateLimit) {
+		errorBody = rateLimitedGraphQLErrorBody
+	}
+	if c.rateTracker != nil && failure.Snapshot != nil {
+		c.rateTracker.Record(*failure.Snapshot)
+	}
 	if c.rateTracker != nil && failure.Kind == FailureSecondaryRateLimit {
 		c.rateTracker.ObserveSecondary(failure.Resource, failure.RetryAt, failure.RetrySource, string(body))
 	}
@@ -101,7 +109,7 @@ func (c *PATClient) apiError(resp *http.Response, endpoint string, body []byte) 
 		c.rateTracker.ObservePrimary(failure.Resource, failure.RetryAt, failure.RetrySource)
 	}
 	return &GitHubAPIError{
-		StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body),
+		StatusCode: resp.StatusCode, Endpoint: endpoint, Body: errorBody,
 		FailureKind: failure.Kind, Resource: failure.Resource, RetryAt: failure.RetryAt,
 		RetrySource: failure.RetrySource, Rate: failure.Snapshot,
 	}

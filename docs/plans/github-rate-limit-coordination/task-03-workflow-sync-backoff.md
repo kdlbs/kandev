@@ -49,3 +49,11 @@ system_design:
 - After the 2026-09-25 current-base merge, `go test ./internal/workflowsync
   -count=1 -timeout=2m` and `go test -race ./internal/workflowsync -count=1
   -timeout=3m` passed.
+
+## Repair follow-up, 2026-09-27
+
+[Repair task 03](../github-rate-limit-pr3143-repair/task-03-cancellation.md)
+records actual canceled-context persistence coverage.
+[Repair task 04](../github-rate-limit-pr3143-repair/task-04-continuations.md)
+records resumable automatic fetches. Both work orders contain their passing
+regression checks and results.

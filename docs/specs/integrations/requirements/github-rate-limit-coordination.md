@@ -14,18 +14,16 @@ Kandev coordinates GitHub provider traffic so background synchronization cannot
 starve interactive agents and operators. The integration records the provider
 signals it observes and distinguishes primary quota exhaustion from secondary
 throttling. Failed Kandev-managed operations return the rate context that
-affected the operation. Task surfaces expose a read-only, provider-free
-snapshot of the locally observed state through `get_github_rate_limit_kandev`;
-the underlying coordinator state and provider responses remain internal to the
-integration.
+affected the operation. Coordinator snapshots and provider responses remain
+internal to the integration. Agents do not need a separate diagnostic request.
 
 ## Terminology
 
 - **Primary limit:** A GitHub resource bucket whose response reports
   `X-RateLimit-Remaining: 0` and a reset time.
 - **Observed secondary throttle:** A 403 or 429 rate/abuse response without a
-  zero primary remainder. GitHub exposes no authoritative status endpoint for
-  this condition.
+  zero primary remainder, or an equivalent GraphQL error payload. GitHub exposes
+  no authoritative status endpoint for this condition.
 - **Retry source:** Either GitHub's `Retry-After` signal or Kandev's
   conservative fallback when GitHub omits that signal.
 - **Quota principal:** The upstream human login or GitHub App installation that
@@ -58,6 +56,10 @@ provider failure instead of treating every 403 as primary quota exhaustion.
 - **AC-INTEGRATIONS-GITHUB-RATE-001.5:** When a successful provider response is
   accepted before a locally estimated secondary retry time, the integration
   shall clear the observed secondary throttle early.
+- **AC-INTEGRATIONS-GITHUB-RATE-001.6:** When GraphQL returns a rate error with
+  HTTP 200, the integration shall apply the same primary and secondary rules.
+  A successful payload with zero remaining quota shall remain successful.
+  Message-only rate errors shall retain their retry context.
 
 ### REQ-INTEGRATIONS-GITHUB-RATE-002: Principal-wide provider admission
 
@@ -98,6 +100,14 @@ provider bursts.
   denied by provider admission, it shall remain pending outside the bounded
   execution pool and resume on an admission change or retry boundary. A
   REST-only workflow sync shall be gated by the Core resource only.
+- **AC-INTEGRATIONS-GITHUB-RATE-003.6:** When a manual attempt is canceled,
+  automatic polling shall retain a durable recovery boundary. A later retry
+  signal shall extend that boundary. Cancellation shall not continue provider
+  work or erase an existing failure before recovery succeeds.
+- **AC-INTEGRATIONS-GITHUB-RATE-003.7:** When admission defers a request within
+  an automatic sync, that sync shall eventually complete after admission opens.
+  Deferral alone shall not repeat completed requests or apply partial results.
+  A changed configuration or a later manual result shall invalidate old work.
 
 ### REQ-INTEGRATIONS-GITHUB-RATE-004: Operation-local rate failure context
 
@@ -112,10 +122,17 @@ from a separate diagnostic request.
 - **AC-INTEGRATIONS-GITHUB-RATE-004.2:** When GitHub rejects a managed operation,
   the returned rate kind shall match the failure that governed that operation.
   The failure response itself shall not leak unrelated primary and secondary
-  observations; the task-surface snapshot tool is the supported way to read
-  the aggregate local state.
+  observations.
 - **AC-INTEGRATIONS-GITHUB-RATE-004.3:** A successful operation shall not return
   quota or coordinator snapshot details.
+- **AC-INTEGRATIONS-GITHUB-RATE-004.4:** Kanban and Office agent surfaces shall
+  not expose a separate GitHub rate-snapshot tool. Failed managed operations
+  shall retain their operation-local rate details.
+
+## Implementation plans
+
+- [Original implementation](../../../plans/github-rate-limit-coordination/plan.md).
+- [PR 3143 repair package](../../../plans/github-rate-limit-pr3143-repair/plan.md).
 
 ## Out of scope
 

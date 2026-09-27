@@ -208,6 +208,9 @@ type Service struct {
 	// independent of the passive cooldown.
 	passiveWorkspaceRefreshMu sync.Mutex
 	passiveWorkspaceRefreshAt map[string]time.Time
+	batchedProgressMu         sync.Mutex
+	batchedPRProgress         map[string]*batchedPRProgressEntry
+	batchedBranchProgress     map[string]*batchedBranchProgressEntry
 
 	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
 	// the service spawns lazily (currently refreshStaleWorkspaceWatches).
@@ -326,6 +329,7 @@ func (s *Service) Stop() {
 			s.prDiscoveryHealth.clearAll()
 			s.invalidateAllPRDiscoveryAttempts("")
 		}
+		s.clearBatchedPRProgress()
 	})
 }
 
@@ -619,4 +623,5 @@ func (s *Service) ClearPRCaches() {
 	if s.prFeedbackCache != nil {
 		s.prFeedbackCache.clear()
 	}
+	s.clearBatchedPRProgress()
 }

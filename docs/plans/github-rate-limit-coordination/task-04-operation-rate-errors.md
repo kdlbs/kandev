@@ -37,3 +37,14 @@ task-scoped view of locally cached coordinator state. Provider and admission
 errors continue to keep structured context that belongs to the affected
 operation. Manual Workflow Sync returns safe rate details beside its existing
 error.
+
+## Repair follow-up, 2026-09-27
+
+The snapshot-tool restoration recorded here conflicts with the maintainer's
+earlier removal request.
+[Repair task 05](../github-rate-limit-pr3143-repair/task-05-agent-contract.md)
+restores the internal-only boundary and adds tool-absence coverage.
+This historical result does not authorize a live snapshot tool.
+Task 05 completed this removal on 2026-09-27. Its tool-absence tests and public
+documentation are the current implementation receipt; the earlier presence
+tests and counts above remain historical.

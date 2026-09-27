@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -54,6 +55,25 @@ func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *tes
 			t.Fatalf("background deferral counter delta = %d, want 1", delta)
 		}
 	})
+}
+
+func TestRateTrackerDoesNotRetainProviderSecondaryLimitReason(t *testing.T) {
+	const providerSecret = "provider-body-must-not-be-retained"
+	tracker := NewRateTracker(nil, nil)
+	tracker.ObserveSecondary(
+		ResourceCore,
+		time.Now().Add(time.Minute),
+		RetrySourceRetryAfter,
+		"secondary rate limit: "+providerSecret,
+	)
+
+	state := tracker.Secondary(ResourceCore)
+	if state.Reason != secondaryRateLimitReason {
+		t.Fatalf("secondary reason = %q, want bounded classification", state.Reason)
+	}
+	if strings.Contains(state.Reason, providerSecret) {
+		t.Fatalf("secondary reason retained provider content: %q", state.Reason)
+	}
 }
 
 func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWithoutHoldingWorker(t *testing.T) {

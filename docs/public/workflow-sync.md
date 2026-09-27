@@ -203,7 +203,9 @@ Except for “not configured,” a completed force-sync request returns HTTP `20
 
 A GitHub rate failure sets `error_code` to `github_rate_limited`. Its
 `rate_limit` object contains `kind`, `resource`, `retry_at`,
-`retry_after_seconds`, and `source`. Successful syncs omit these fields.
+`retry_after_seconds`, and `source`. These details belong to the failed sync
+operation; successful syncs omit them. There is no separate MCP tool for reading
+the coordinator's cached quota or admission state.
 
 ## Stop syncing and clean up
 

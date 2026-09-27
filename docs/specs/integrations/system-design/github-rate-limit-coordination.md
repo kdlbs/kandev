@@ -43,6 +43,12 @@ When a zero-remaining response omits a valid reset, the parsed snapshot keeps
 an unknown reset. The operation reports a conservative one-minute retry from
 observation time, and admission uses that same fixed boundary before reopening.
 
+GraphQL classification inspects the error array before recording success.
+An HTTP 200 rate error uses response quota evidence, not the status alone.
+Message-only rate errors use the same classifier as typed rate errors.
+The CLI path retains available payload evidence before it handles subprocess
+failure. Successful payloads remain successful even when they spend the last point.
+
 ## Principal-wide coordinator
 
 `RateCoordinator` is a singleton owned by `github.Service`. It maps a stable,
@@ -59,6 +65,19 @@ block both classes without occupying an execution slot while waiting. Automatic
 Workflow Sync admission failures remain in the scheduler's pending queue and
 are requeued by the admission-change signal or retry deadline; REST-only sync
 uses the Core resource and does not wait on GraphQL or Search state.
+
+Automatic Workflow Sync retains a fetch continuation with its queued job.
+The continuation records the directory result, next file, and completed files.
+Each worker performs eligible requests and returns on admission deferral.
+The scheduler requeues the continuation, not a new sync from the directory.
+No deferred continuation holds a worker slot or a workspace lock.
+
+Before each continuation resumes, the service checks workspace access and the
+current configuration under the workspace lock. A continuation binds to the
+configuration, credential fingerprint, and local sync generation that created it.
+Configuration replacement, deletion, manual completion, or credential change
+invalidates old work. Only a complete, current fetch can reach reconciliation.
+Terminal completion and shutdown release continuation data and in-flight ownership.
 
 ## Workflow Sync recovery
 
@@ -79,6 +98,16 @@ Explicit Sync now bypasses automatic scheduling state, updates the single error
 on failure, and clears the state on success. GitLab receives generic transient
 backoff but does not use GitHub-specific response classification.
 
+Manual admission does not require an eager database reset. It bypasses the
+automatic due predicate while retaining the saved recovery state until an outcome.
+Cancellation records its outcome with a five-second, identity-preserving context
+derived with `context.WithoutCancel`. That context is for persistence only.
+Provider requests and reconciliation retain the original cancelable context.
+The stored boundary is no earlier than an existing boundary or the provider signal.
+The existing workspace lock orders this write against configuration mutation.
+HTTP disconnects do not guarantee response delivery. A later authorized config
+read provides the durable result without another provider call.
+
 ## Operation-local failure contract
 
 `GitHubAPIError` carries the classified failure kind, rate resource, retry
@@ -93,13 +122,9 @@ Successful operations omit the object.
 
 Manual Workflow Sync returns this object beside its existing error and config.
 Automatic Workflow Sync stores its error class and next attempt. The scheduler,
-telemetry, and logs read coordinator state directly. Kanban and Office task
-surfaces also expose `get_github_rate_limit_kandev`, a task-bound, read-only
-snapshot that derives workspace scope from the bound task and performs no
-credential resolution or GitHub request. It reports cached primary observations,
-observed secondary state across the core, GraphQL, and search resources, the
-shared quota principal, and current admission decisions. Direct `gh` commands from an agent shell stay outside this response
-path.
+telemetry, and logs read coordinator state directly. Kanban and Office expose
+no separate rate-snapshot tool. Direct `gh` commands from an agent shell stay
+outside this response path.
 
 ## Persistence and migration
 
@@ -125,3 +150,12 @@ data from Kandev estimates.
 
 - [Separate GitHub deployment, workspace automation, and personal identities](../../../decisions/0047-github-authentication-ownership.md)
 - [Coordinate GitHub rate state by provider principal](../../../decisions/2026-08-29-github-provider-rate-coordination.md)
+
+## Implementation plans
+
+- [Original implementation](../../../plans/github-rate-limit-coordination/plan.md).
+- [PR 3143 repair package](../../../plans/github-rate-limit-pr3143-repair/plan.md).
+
+The repair package records completed implementation and verification for these
+requirements. Runtime behavior follows the cancellation, continuation, and
+internal snapshot rules in this design.

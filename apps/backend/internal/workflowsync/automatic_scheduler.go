@@ -13,6 +13,116 @@ const automaticSyncWorkerLimit = 4
 type automaticJob struct {
 	workspaceID string
 	force       bool
+	state       *automaticJobState
+}
+
+type automaticJobState struct {
+	mu           sync.Mutex
+	force        bool
+	generation   uint64
+	cancelled    bool
+	changed      chan struct{}
+	done         chan struct{}
+	doneOnce     sync.Once
+	continuation *fetchContinuation
+}
+
+func newAutomaticJobState(force bool) *automaticJobState {
+	return &automaticJobState{
+		force:      force,
+		generation: 1,
+		changed:    make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+}
+
+func (s *automaticJobState) currentGeneration() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.generation
+}
+
+func (s *automaticJobState) forceRequested() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.force
+}
+
+func (s *automaticJobState) isCancelled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
+}
+
+func (s *automaticJobState) admissionWaitSnapshot(expectedGeneration uint64) (<-chan struct{}, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancelled {
+		return nil, false, errAutomaticJobInvalidated
+	}
+	if s.generation != expectedGeneration {
+		return nil, true, nil
+	}
+	return s.changed, false, nil
+}
+
+func (s *automaticJobState) getContinuation() *fetchContinuation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.continuation
+}
+
+func (s *automaticJobState) setContinuation(continuation *fetchContinuation) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancelled {
+		return false
+	}
+	s.continuation = continuation
+	return true
+}
+
+func (s *automaticJobState) restartContinuation() {
+	s.mu.Lock()
+	s.generation++
+	s.continuation = nil
+	s.signalChangedLocked()
+	s.mu.Unlock()
+}
+
+func (s *automaticJobState) requestForceAndRestart() {
+	s.mu.Lock()
+	s.force = true
+	s.generation++
+	s.continuation = nil
+	s.signalChangedLocked()
+	s.mu.Unlock()
+}
+
+func (s *automaticJobState) invalidate(cancel bool) {
+	s.mu.Lock()
+	s.generation++
+	s.continuation = nil
+	if cancel {
+		s.cancelled = true
+	}
+	s.signalChangedLocked()
+	s.mu.Unlock()
+}
+
+func (s *automaticJobState) signalChangedLocked() {
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+func (s *automaticJobState) finish() {
+	s.mu.Lock()
+	s.cancelled = true
+	s.generation++
+	s.continuation = nil
+	s.signalChangedLocked()
+	s.doneOnce.Do(func() { close(s.done) })
+	s.mu.Unlock()
 }
 
 type queuedAutomaticJob struct {

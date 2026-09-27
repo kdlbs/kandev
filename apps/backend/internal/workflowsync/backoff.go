@@ -58,6 +58,9 @@ func buildFailureDirective(
 
 	policyDelay := retryPolicyDelay(cfg.IntervalSeconds, directive.consecutive, jitter)
 	retryAt := now.Add(policyDelay).UTC()
+	if cfg.NextRetryAt != nil && cfg.NextRetryAt.After(retryAt) {
+		retryAt = cfg.NextRetryAt.UTC()
+	}
 	var apiErr *github.GitHubAPIError
 	if errors.As(syncErr, &apiErr) {
 		directive.retrySource = apiErr.RetrySource

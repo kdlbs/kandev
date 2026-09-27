@@ -77,3 +77,13 @@ unset), while `internal/task/handlers` and `internal/task/service` reject local
 repository parent access. Representative task failures reproduce from an exact
 archive of the same `main` base. The broad gate remains failing on these base
 failures.
+
+## Repair follow-up, 2026-09-27
+
+[Repair task 05](../github-rate-limit-pr3143-repair/task-05-agent-contract.md)
+owns the next public-contract documentation update.
+The prior counts and base-failure notes are historical and must not serve as
+validation of the repair package or a rebased head.
+Task 05 of the repair package later removed the task-bound snapshot tool and
+updated both public MCP catalogs. The "preserved" snapshot statement above is
+superseded; its original test and validation counts remain historical receipts.

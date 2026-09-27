@@ -55,3 +55,9 @@ system_design:
   covers the classified error and the next background admission.
 - Follow-up verification passed: `go test ./internal/github ./internal/workflowsync -count=1`
   and focused PAT regression tests under `go test -race ./internal/github`.
+
+## Repair follow-up, 2026-09-27
+
+[Repair task 02](../github-rate-limit-pr3143-repair/task-02-graphql.md)
+records HTTP 200 and message-only GraphQL classification coverage.
+The results here remain historical.

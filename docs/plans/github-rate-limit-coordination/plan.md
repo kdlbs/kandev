@@ -41,3 +41,13 @@ runtime.
 
 Each work order owns focused Go/race coverage. The final work order runs the
 backend test/lint and public documentation gates from the approved task plan.
+
+## Repair follow-up, 2026-09-27
+
+The [PR 3143 repair package](../github-rate-limit-pr3143-repair/plan.md)
+records completed corrections against head `ffd4f76be`.
+This package remains a historical receipt, not proof that the current head
+satisfies every criterion. The follow-up covers GraphQL classification,
+cancellation persistence, automatic continuation, and the internal snapshot
+boundary. Its work orders record their results. Current PR delivery is tracked
+in the workspace task's Delivery checklist.
