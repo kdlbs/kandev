@@ -577,7 +577,7 @@ async function waitForReadyInstances(instancesDir, count, tick) {
     .slice(0, count);
 }
 
-async function readInstances(instancesDir) {
+export async function readInstances(instancesDir) {
   const entries = await readdir(instancesDir, { withFileTypes: true });
   const instances = [];
   for (const entry of entries) {
