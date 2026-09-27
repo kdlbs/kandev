@@ -113,6 +113,12 @@ type TaskRepository interface {
 	ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error)
 	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
 	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
+	// ListCoordinatorOriginTasks returns every task with origin "coordinator"
+	// (all workspaces when workspaceID is empty), ordered by id
+	// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
+	// coordinator_id is read from the returned Metadata in Go; this query does
+	// no dialect-specific JSON extraction.
+	ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
 	// tasks for a single watch, identified by the integration's task-metadata
 	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
