@@ -91,3 +91,11 @@ func (s *Store) FenceWorkspace(ctx context.Context, workspaceID string) (Workspa
 	}
 	return result, nil
 }
+
+// CleanupWorkspaceProviderAccess fences ledger admission during workspace
+// deletion. Callers that export credentials must use Runtime cleanup to
+// revoke in-memory exact tokens as well.
+func (s *Store) CleanupWorkspaceProviderAccess(ctx context.Context, workspaceID string) error {
+	_, err := s.FenceWorkspace(ctx, workspaceID)
+	return err
+}

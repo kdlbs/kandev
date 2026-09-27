@@ -94,6 +94,9 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	if services.GitHub == nil {
 		t.Fatal("GitHub service is unavailable after PostgreSQL boot")
 	}
+	if services.ProviderAccess == nil {
+		t.Fatal("provider access ledger is unavailable after PostgreSQL boot")
+	}
 	if _, err := services.GitHub.GetWorkspaceSettings(context.Background(), "boot-workspace"); err != nil {
 		t.Fatalf("GitHub persistence is unavailable after PostgreSQL boot: %v", err)
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	pluginstate "github.com/kandev/kandev/internal/plugins/state"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/provideraccess"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -116,6 +117,7 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"plugin-user-state":     pluginUserStateSchema,
 	"canvas":                canvasSchema,
 	"github":                githubSchema,
+	"provider-access":       providerAccessSchema,
 	"gitlab":                gitlabSchema,
 	"jira":                  jiraSchema,
 	"linear":                linearSchema,
@@ -124,6 +126,11 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"workflow-sync":         workflowSyncSchema,
 	"office-config-sync":    officeConfigSyncSchema,
 	"automation":            automationSchema,
+}
+
+func providerAccessSchema(s testconformance.ScenarioContext) error {
+	_, err := provideraccess.NewStore(s.DB)
+	return err
 }
 
 func schemaInitializerFor(descriptor requiredstores.Descriptor) testconformance.Scenario {

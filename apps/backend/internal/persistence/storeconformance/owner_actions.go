@@ -182,6 +182,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["plugin-user-state"] = ownerBehavior{actions: []apiAction{pluginUserStateAction()}}
 	behaviors["canvas"] = ownerBehavior{actions: []apiAction{canvasAction()}}
 	behaviors["github"] = ownerBehavior{actions: []apiAction{githubAction()}}
+	behaviors["provider-access"] = ownerBehavior{actions: []apiAction{providerAccessAction()}}
 	behaviors["gitlab"] = ownerBehavior{actions: []apiAction{gitlabAction()}}
 	behaviors["jira"] = ownerBehavior{actions: []apiAction{jiraAction()}}
 	behaviors["linear"] = ownerBehavior{actions: []apiAction{linearAction()}}

@@ -46,6 +46,7 @@ import (
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/provideraccess"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
@@ -152,6 +153,7 @@ func assembleServices(
 		Utility:                  core.utilitySvc,
 		Workflow:                 core.workflowSvc,
 		GitHub:                   providers.github,
+		ProviderAccess:           providers.providerAccess,
 		GitLab:                   providers.gitlab,
 		GitLabCleanup:            providers.gitlabCleanup,
 		AzureDevOps:              providers.azureDevOps,
@@ -516,14 +518,15 @@ func wireTaskWorkflowCrossReferences(
 // initThirdPartyProviders constructs, so provideServices can wire them
 // without repeating each one's init-and-record boilerplate inline.
 type thirdPartyProviders struct {
-	github        *github.Service
-	gitlab        *gitlab.Service
-	gitlabCleanup func() error
-	azureDevOps   *azuredevops.Service
-	jira          *jira.Service
-	linear        *linear.Service
-	sentry        *sentry.Service
-	workflowSync  *workflowsync.Service
+	github         *github.Service
+	providerAccess *provideraccess.Store
+	gitlab         *gitlab.Service
+	gitlabCleanup  func() error
+	azureDevOps    *azuredevops.Service
+	jira           *jira.Service
+	linear         *linear.Service
+	sentry         *sentry.Service
+	workflowSync   *workflowsync.Service
 }
 
 func initThirdPartyProviders(
@@ -551,6 +554,13 @@ func initThirdPartyProviders(
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
 		}
 	}
+	providerAccessStore, providerAccessErr := provideraccess.NewStore(dbPool.Writer())
+	if recordErr := recordRequiredStore(ctx, storeTracker, "provider-access", providerAccessErr); recordErr != nil {
+		return nil, fmt.Errorf("initialize provider access: %w", recordErr)
+	}
+	// Credential export is disabled in production; the store fences persisted
+	// admission on workspace deletion. Export requires Runtime cleanup instead.
+	taskSvc.SetProviderAccessCleanup(providerAccessStore)
 	gitlabSvc, gitlabCleanup, gitlabErr := initGitLabServiceRequiredWithSettings(repos.SystemSettings, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(ctx, storeTracker, "gitlab", gitlabErr); recordErr != nil {
 		return nil, fmt.Errorf("initialize gitlab: %w", recordErr)
@@ -584,7 +594,8 @@ func initThirdPartyProviders(
 		return nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
 	return &thirdPartyProviders{
-		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
+		github: githubSvc, providerAccess: providerAccessStore,
+		gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
 		azureDevOps: azureDevOpsSvc, jira: jiraSvc, linear: linearSvc,
 		sentry: sentrySvc, workflowSync: workflowSyncSvc,
 	}, nil

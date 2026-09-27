@@ -33,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/provideraccess"
 	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -85,21 +86,22 @@ type Services struct {
 	Task                     *taskservice.Service
 	// Org owns organizations. Always non-nil; Enabled() reports whether the
 	// multi-tenancy feature is on.
-	Org           *org.Service
-	OrgUnits      *orgunit.Service
-	User          *userservice.Service
-	Editor        *editorservice.Service
-	Notification  *notificationservice.Service
-	Prompts       *promptservice.Service
-	Utility       *utilityservice.Service
-	Workflow      *workflowservice.Service
-	GitHub        *github.Service
-	GitLab        *gitlab.Service
-	GitLabCleanup func() error
-	AzureDevOps   *azuredevops.Service
-	Jira          *jira.Service
-	Linear        *linear.Service
-	Sentry        *sentry.Service
+	Org            *org.Service
+	OrgUnits       *orgunit.Service
+	User           *userservice.Service
+	Editor         *editorservice.Service
+	Notification   *notificationservice.Service
+	Prompts        *promptservice.Service
+	Utility        *utilityservice.Service
+	Workflow       *workflowservice.Service
+	GitHub         *github.Service
+	ProviderAccess *provideraccess.Store
+	GitLab         *gitlab.Service
+	GitLabCleanup  func() error
+	AzureDevOps    *azuredevops.Service
+	Jira           *jira.Service
+	Linear         *linear.Service
+	Sentry         *sentry.Service
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service
