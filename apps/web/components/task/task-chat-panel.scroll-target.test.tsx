@@ -89,7 +89,7 @@ describe("usePendingScrollToStart", () => {
   it("retries after the first prompt row is not mounted yet", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onComplete = vi.fn();
 
     renderHook(() =>
@@ -181,7 +181,7 @@ const DELETED_TARGET_RESULT: LoadMessageWindowResult = {
 
 /** Builds a MessageListHandle whose scrollToMessage mock returns the given value. */
 function scrollHandle(returns: boolean): MessageListHandle {
-  return { scrollToMessage: vi.fn(() => returns) };
+  return { scrollToMessage: vi.fn(() => returns), scrollToLatest: vi.fn(() => true) };
 }
 
 const PROPS = {
@@ -392,7 +392,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
     mockAppStoreState.messages.bySession["session-1"] = [];
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onConsumed = vi.fn();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { rerender } = renderHook(
@@ -409,7 +409,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     );
 
     await flushFrames();
-    messageListRef.current = { scrollToMessage };
+    messageListRef.current = { scrollToMessage, scrollToLatest: vi.fn() };
     scrollToMessage.mockReturnValue(true);
     rerender({ readinessKey: "b" });
     await flushFrames();
@@ -433,7 +433,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
     mockAppStoreState.messages.bySession["session-1"] = [];
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onConsumed = vi.fn();
     const { rerender } = renderHook(
       ({ readinessKey }) =>
@@ -449,7 +449,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     );
 
     await flushFrames();
-    messageListRef.current = { scrollToMessage };
+    messageListRef.current = { scrollToMessage, scrollToLatest: vi.fn() };
     scrollToMessage.mockReturnValue(true);
     rerender({ readinessKey: "b" });
     await flushFrames();
@@ -522,7 +522,7 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true)
       .mockReturnValue(false);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const onConsumed = vi.fn();
     const { rerender } = renderHook(
       ({ readinessKey, messageId }) =>
@@ -802,7 +802,7 @@ it("reasserts a Dockview target when merged loading settles before scroll", asyn
   vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
   mockDockviewState.scrollTarget = target({ messageId: "target" });
   const scrollToMessage = vi.fn().mockReturnValue(false);
-  const messageListRef = { current: { scrollToMessage } };
+  const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
   const { rerender } = renderHook(
     ({ renderedMessageCount }) =>
       useScrollTargetConsumption({
@@ -898,7 +898,7 @@ it("reasserts a Dockview target when merged loading settles after scroll", async
   vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
   mockDockviewState.scrollTarget = target({ messageId: "target" });
   const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-  const messageListRef = { current: { scrollToMessage } };
+  const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
   const { rerender } = renderHook(
     ({ renderedMessageCount }) =>
       useScrollTargetConsumption({
@@ -933,7 +933,7 @@ it("clears a deleted Dockview target after the first scroll", async () => {
   vi.mocked(loadMessageWindowAround).mockReturnValue(pending.promise);
   mockDockviewState.scrollTarget = target({ messageId: DELETED_MESSAGE_ID });
   const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-  const messageListRef = { current: { scrollToMessage } };
+  const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
   const { rerender } = renderHook(
     ({ renderedMessageCount }) =>
       useScrollTargetConsumption({
@@ -1420,7 +1420,7 @@ describe("useScrollTargetConsumption — canonical-host unmount ownership", () =
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true)
       .mockReturnValue(false);
-    const messageListRef = { current: { scrollToMessage } };
+    const messageListRef = { current: { scrollToMessage, scrollToLatest: vi.fn() } };
     const { rerender } = renderHook(
       ({ renderedMessageCount }) =>
         useScrollTargetConsumption({

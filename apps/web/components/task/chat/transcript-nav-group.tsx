@@ -1,12 +1,15 @@
 "use client";
 
 import { ShareButton } from "@/components/task/share/share-button";
+import { JumpToLatestButton } from "./jump-to-latest-button";
 import { ScrollToLastPromptButton, ScrollToStartButton } from "./scroll-to-last-prompt-button";
 
 export type TranscriptNavGroupProps = {
   canShare: boolean;
   taskId: string | null;
   sessionId: string | null;
+  showJumpToLatest?: boolean;
+  onJumpToLatest?: () => void;
   showScrollToLastPrompt?: boolean;
   onScrollToLastPrompt?: () => void;
   /** Where the last prompt sits relative to the viewport, i.e. which way
@@ -23,6 +26,8 @@ export function TranscriptNavGroup({
   canShare,
   taskId,
   sessionId,
+  showJumpToLatest,
+  onJumpToLatest,
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
@@ -31,6 +36,9 @@ export function TranscriptNavGroup({
 }: TranscriptNavGroupProps) {
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      {onJumpToLatest && (
+        <JumpToLatestButton isVisible={Boolean(showJumpToLatest)} onClick={onJumpToLatest} />
+      )}
       {showScrollToStart && onScrollToStart && <ScrollToStartButton onClick={onScrollToStart} />}
       {showScrollToLastPrompt && onScrollToLastPrompt && (
         <ScrollToLastPromptButton

@@ -1162,6 +1162,18 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     [allMessages, lastPromptMessageId],
   );
   const [lastPromptEdge, setLastPromptEdge] = useState<LastPromptEdge>("visible");
+  const [latestVisibilitySessionId, setLatestVisibilitySessionId] = useState<string | null>(null);
+  const onLatestVisibilityChange = useCallback(
+    (isVisible: boolean) => {
+      setLatestVisibilitySessionId(isVisible ? resolvedSessionId : null);
+    },
+    [resolvedSessionId],
+  );
+  const showJumpToLatest =
+    Boolean(resolvedSessionId) && latestVisibilitySessionId === resolvedSessionId;
+  const jumpToLatest = useCallback(() => {
+    messageListRef.current?.scrollToLatest();
+  }, []);
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
@@ -1296,6 +1308,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                   dividerBeforeItemKey={dividerBeforeItemKey}
                   lastPromptMessageId={lastPromptMessageId}
                   onLastPromptEdgeChange={setLastPromptEdge}
+                  onLatestVisibilityChange={onLatestVisibilityChange}
                   firstMessageId={firstMessageId}
                   onFirstMessageHiddenChange={setIsFirstMessageHidden}
                   anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
@@ -1361,6 +1374,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             showScrollToLastPrompt={showScrollButton}
             onScrollToLastPrompt={scrollToLastPrompt}
             lastPromptScrollDirection={scrollDirection}
+            showJumpToLatest={showJumpToLatest}
+            onJumpToLatest={jumpToLatest}
             showScrollToStart={showScrollToStartButton}
             onScrollToStart={scrollToStart}
             statusTaskId={statusTaskId ?? taskIdHint}
@@ -1391,6 +1406,8 @@ type ChatFooterProps = {
   showScrollToLastPrompt: boolean;
   onScrollToLastPrompt: () => void;
   lastPromptScrollDirection: "up" | "down";
+  showJumpToLatest: boolean;
+  onJumpToLatest: () => void;
   showScrollToStart: boolean;
   onScrollToStart: () => void;
   statusTaskId: string | null;
@@ -1420,6 +1437,8 @@ function ChatFooter({
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
+  showJumpToLatest,
+  onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
   statusTaskId,
@@ -1450,6 +1469,8 @@ function ChatFooter({
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}
+      showJumpToLatest={showJumpToLatest}
+      onJumpToLatest={onJumpToLatest}
       showScrollToStart={showScrollToStart}
       onScrollToStart={onScrollToStart}
       statusTaskId={statusTaskId}

@@ -1,5 +1,9 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
-import { createChatScrollMotion, type ScrollMotion } from "./chat-scroll-motion";
+import {
+  createChatScrollMotion,
+  listenForScrollIntent,
+  type ScrollMotion,
+} from "./chat-scroll-motion";
 export type ChatScrollMotionOptions = {
   scrollRef: RefObject<HTMLDivElement | null>;
   motionEnabled: boolean;
@@ -21,22 +25,32 @@ export function useChatScrollMotion(options: ChatScrollMotionOptions) {
   }, []);
   useLayoutEffect(() => {
     const element = options.scrollRef.current;
-    if (!element || !options.motionEnabled || !options.enabled || !options.isVisible) return;
-    const motion = createChatScrollMotion(element, canFollow, () => {
+    if (!element || !options.enabled || !options.isVisible) return;
+    const onUserScrollIntent = () => {
       userReading.current = true;
       latest.current.isNearBottomRef.current = false;
-    });
-    driver.current = motion;
+    };
+    let motion: ScrollMotion | null = null;
+    let removeIntentListener = () => {};
+    if (options.motionEnabled) {
+      motion = createChatScrollMotion(element, canFollow, onUserScrollIntent);
+      driver.current = motion;
+    } else {
+      removeIntentListener = listenForScrollIntent(element, onUserScrollIntent);
+    }
     const observer = new ResizeObserver(() => {
-      if (canFollow()) motion.request();
+      if (!canFollow()) return;
+      if (motion) motion.request();
+      else latest.current.instant(element);
     });
     const content = element.querySelector("[data-chat-content]");
     if (content) observer.observe(content);
     return () => {
-      const settle = motion.isRunning() && !latest.current.motionEnabled && canFollow();
+      const settle = Boolean(motion?.isRunning() && !latest.current.motionEnabled && canFollow());
       observer.disconnect();
-      motion.dispose();
-      driver.current = null;
+      removeIntentListener();
+      motion?.dispose();
+      if (driver.current === motion) driver.current = null;
       if (settle) latest.current.instant(element);
     };
   }, [

@@ -53,3 +53,54 @@ it("animates allowed requests, settles on disable, and stops when hidden", () =>
   expect(frames.size).toBe(0);
   hook.unmount();
 });
+
+it("keeps a bottom-following transcript current after delayed content resize without motion", () => {
+  let resize: ResizeObserverCallback | undefined;
+  let observed: Element | undefined;
+  let disconnected = false;
+  class TestResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      resize = callback;
+    }
+    observe(element: Element) {
+      observed = element;
+    }
+    unobserve() {}
+    disconnect() {
+      disconnected = true;
+    }
+  }
+  vi.stubGlobal("ResizeObserver", TestResizeObserver);
+
+  const el = document.createElement("div");
+  const content = document.createElement("div");
+  content.dataset.chatContent = "";
+  el.append(content);
+  Object.defineProperties(el, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 200 },
+  });
+  const isNearBottomRef = { current: true };
+  const instant = vi.fn((element: HTMLElement) => {
+    element.scrollTop = 800;
+  });
+  const hook = renderHook(useChatScrollMotion, {
+    initialProps: {
+      scrollRef: { current: el },
+      motionEnabled: false,
+      enabled: true,
+      isVisible: true,
+      sessionId: "s",
+      isNearBottomRef,
+      isBlocked: () => false,
+      instant,
+    },
+  });
+
+  expect(observed).toBe(content);
+  act(() => resize?.([], {} as ResizeObserver));
+
+  expect(instant).toHaveBeenCalledWith(el);
+  hook.unmount();
+  expect(disconnected).toBe(true);
+});

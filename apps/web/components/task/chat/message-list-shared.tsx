@@ -60,6 +60,8 @@ export type MessageListProps = {
   /** Called whenever the first message stops being fully visible (`true`) or
    * becomes fully visible again (`false`). */
   onFirstMessageHiddenChange?: (isHidden: boolean) => void;
+  /** Called when transcript rows extend below the current viewport. */
+  onLatestVisibilityChange?: (isVisible: boolean) => void;
   /** Rendered as the first child inside the scroll container, sticky at its
    * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
    * when the setting is off or on mobile. */
@@ -89,6 +91,8 @@ export type MessageListHandle = {
     messageId: string,
     options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" },
   ) => boolean;
+  /** Navigates to the newest rendered transcript content and takes focus. */
+  scrollToLatest: () => boolean;
 };
 
 /** Render key for a transcript item: `item.id` for turn-group, prepare-
@@ -284,6 +288,20 @@ export function isElementFullyVisible(container: HTMLElement, target: HTMLElemen
   const t = target.getBoundingClientRect();
   const tolerance = 0.5;
   return t.top >= c.top - tolerance && t.bottom <= c.bottom + tolerance;
+}
+
+/** True when rendered transcript content extends below its viewport. */
+export function hasTranscriptContentBelowViewport(params: {
+  hasContent: boolean;
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  tolerance?: number;
+}): boolean {
+  return (
+    params.hasContent &&
+    params.scrollHeight - params.scrollTop - params.clientHeight > (params.tolerance ?? 8)
+  );
 }
 
 /** Pixel offset to reserve at the top of the transcript for the anchored

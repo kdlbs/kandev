@@ -1527,6 +1527,7 @@
   "scriptFailed": "脚本失败",
   "scripts": "脚本",
   "scrollToActiveSession": "滚动到活动会话",
+  "jumpToLatest": "跳转到最新消息",
   "scrollToLastPrompt": "滚动到上一条提示词",
   "scrollToStartOfTranscript": "滚动到记录开头",
   "searchAgents": "搜索智能体…",

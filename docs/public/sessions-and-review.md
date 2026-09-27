@@ -319,6 +319,10 @@ and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
 
+Select **Jump to latest** above the composer to return to the newest message,
+including agent replies. The action appears only when newer content is below
+the transcript. It does not change the session's auto-scroll preference.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.

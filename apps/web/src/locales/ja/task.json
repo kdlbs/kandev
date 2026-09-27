@@ -1594,6 +1594,7 @@
   "scriptFailed": "スクリプト失敗",
   "scripts": "スクリプト",
   "scrollToActiveSession": "アクティブなセッションへスクロール",
+  "jumpToLatest": "最新メッセージに移動",
   "scrollToLastPrompt": "最後のプロンプトへスクロール",
   "scrollToStartOfTranscript": "トランスクリプトの先頭へスクロール",
   "searchAgents": "エージェントを検索...",

@@ -1527,6 +1527,7 @@
   "scriptFailed": "指令碼失敗",
   "scripts": "指令碼",
   "scrollToActiveSession": "滾動到活動工作階段",
+  "jumpToLatest": "跳轉到最新訊息",
   "scrollToLastPrompt": "滾動到上一條提示詞",
   "scrollToStartOfTranscript": "滾動到記錄開頭",
   "searchAgents": "搜尋代理程式…",

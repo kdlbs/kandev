@@ -1594,6 +1594,7 @@
   "scriptFailed": "Script failed",
   "scripts": "Scripts",
   "scrollToActiveSession": "Scroll to active session",
+  "jumpToLatest": "Jump to latest",
   "scrollToLastPrompt": "Scroll to last prompt",
   "scrollToStartOfTranscript": "Scroll to start of transcript",
   "searchAgents": "Search agents...",

@@ -12,7 +12,7 @@ export function cancelChatScrollMotion(element: HTMLElement): void {
   activeMotions.get(element)?.cancel();
 }
 
-function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () => void {
+export function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () => void {
   const onKey = (event: KeyboardEvent) => {
     const target = event.target;
     if (

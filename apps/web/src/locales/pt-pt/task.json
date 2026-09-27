@@ -1528,6 +1528,7 @@
   "scriptFailed": "O script falhou",
   "scripts": "Scripts",
   "scrollToActiveSession": "Ir para a sessão ativa",
+  "jumpToLatest": "Ir para a mensagem mais recente",
   "scrollToLastPrompt": "Ir para o último prompt",
   "scrollToStartOfTranscript": "Ir para o início da transcrição",
   "searchAgents": "Pesquisar agentes...",
