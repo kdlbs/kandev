@@ -29,7 +29,7 @@ func TestLogicalStatsCacheLeavesColdSnapshotUnavailableWhenRequiredTableIsMissin
 	cache := newLogicalStatsCache(context.Background(), svc.scanLogicalStats, logicalStatsCacheOptions{})
 	t.Cleanup(cache.Close)
 
-	if pending := cache.Read(); pending.state != "pending" {
+	if pending := cache.Read(); pending.state != logicalStatsStatePending {
 		t.Fatalf("cold read = %#v, want pending while the scan starts", pending)
 	}
 	waitLogicalStatsCache(t, cache)
@@ -59,7 +59,7 @@ func TestLogicalStatsCachePreservesCompleteSnapshotWhenRequiredTableDisappears(t
 	waitLogicalStatsCache(t, cache)
 	ready := cache.Read()
 	want := logicalStorageStats{messageContent: 1, messageMetadata: 2, messagePayload: 2, gitSnapshot: 3}
-	if ready.state != "ready" || ready.snapshot == nil || ready.snapshot.values != want {
+	if ready.state != logicalStatsStateReady || ready.snapshot == nil || ready.snapshot.values != want {
 		t.Fatalf("initial read = %#v, want complete ready snapshot %#v", ready, want)
 	}
 
@@ -68,12 +68,12 @@ func TestLogicalStatsCachePreservesCompleteSnapshotWhenRequiredTableDisappears(t
 	}
 	cache.Invalidate(false)
 	refreshing := cache.Read()
-	if refreshing.state != "refreshing" || refreshing.snapshot == nil || refreshing.snapshot.values != want {
+	if refreshing.state != logicalStatsStateRefreshing || refreshing.snapshot == nil || refreshing.snapshot.values != want {
 		t.Fatalf("read during missing-table refresh = %#v, want prior complete values", refreshing)
 	}
 	waitLogicalStatsCache(t, cache)
 	stale := cache.Read()
-	if stale.state != "stale" || stale.snapshot == nil || stale.snapshot.values != want ||
+	if stale.state != logicalStatsStateStale || stale.snapshot == nil || stale.snapshot.values != want ||
 		!stale.snapshot.measuredAt.Equal(ready.snapshot.measuredAt) || stale.error != logicalStatsErrorScanFailed {
 		t.Fatalf("read after missing-table refresh = %#v, want unchanged last-good snapshot marked stale", stale)
 	}

@@ -13,6 +13,10 @@ const (
 	defaultLogicalStatsRetryMax  = 5 * time.Minute
 	defaultLogicalStatsDeferWait = 5 * time.Second
 	logicalStatsOutcomeCancelled = "cancelled"
+	logicalStatsStatePending     = "pending"
+	logicalStatsStateReady       = "ready"
+	logicalStatsStateRefreshing  = "refreshing"
+	logicalStatsStateStale       = "stale"
 	logicalStatsStateUnavailable = "unavailable"
 )
 
@@ -127,7 +131,7 @@ func (c *logicalStatsCache) ReadStale() logicalStatsRead {
 	c.mu.Lock()
 	read := c.readLocked(c.options.now().UTC())
 	if read.snapshot != nil {
-		read.state = "stale"
+		read.state = logicalStatsStateStale
 	}
 	c.mu.Unlock()
 	return read
@@ -153,16 +157,16 @@ func (c *logicalStatsCache) readLocked(now time.Time) logicalStatsRead {
 		copy := *c.snapshot
 		snapshot = &copy
 	}
-	state := "pending"
+	state := logicalStatsStatePending
 	switch {
 	case snapshot == nil && c.errorCode != "" && c.flight == nil:
 		state = logicalStatsStateUnavailable
 	case snapshot != nil && c.flight != nil:
-		state = "refreshing"
+		state = logicalStatsStateRefreshing
 	case snapshot != nil && !c.invalidated && now.Sub(snapshot.measuredAt) < c.options.ttl:
-		state = "ready"
+		state = logicalStatsStateReady
 	case snapshot != nil:
-		state = "stale"
+		state = logicalStatsStateStale
 	}
 	return logicalStatsRead{snapshot: snapshot, state: state, error: c.errorCode}
 }

@@ -30,7 +30,7 @@ func TestLogicalStatsCacheSharesColdScanAcrossReads(t *testing.T) {
 		t.Fatal("cold scan did not start")
 	}
 	second := cache.Read()
-	if first.state != "pending" || second.state != "pending" {
+	if first.state != logicalStatsStatePending || second.state != logicalStatsStatePending {
 		t.Fatalf("cold reads = %q and %q, want pending", first.state, second.state)
 	}
 	if calls.Load() != 1 {
@@ -46,7 +46,7 @@ func TestLogicalStatsCacheSharesColdScanAcrossReads(t *testing.T) {
 		t.Fatal("shared scan did not finish")
 	}
 	ready := cache.Read()
-	if ready.state != "ready" || ready.snapshot == nil || ready.snapshot.values.messageContent != 7 {
+	if ready.state != logicalStatsStateReady || ready.snapshot == nil || ready.snapshot.values.messageContent != 7 {
 		t.Fatalf("read after cold scan = %#v, want ready snapshot", ready)
 	}
 }
@@ -72,18 +72,18 @@ func TestLogicalStatsCacheKeepsStaleSnapshotThroughFailureAndBackoff(t *testing.
 	cache.Read()
 	waitLogicalStatsCache(t, cache)
 	ready := cache.Read()
-	if ready.state != "ready" || ready.snapshot.values.messageContent != 10 {
+	if ready.state != logicalStatsStateReady || ready.snapshot.values.messageContent != 10 {
 		t.Fatalf("initial read = %#v, want ready snapshot", ready)
 	}
 
 	clock.Advance(10 * time.Minute)
 	refreshing := cache.Read()
-	if refreshing.state != "refreshing" || refreshing.snapshot == nil || refreshing.snapshot.values.messageContent != 10 {
+	if refreshing.state != logicalStatsStateRefreshing || refreshing.snapshot == nil || refreshing.snapshot.values.messageContent != 10 {
 		t.Fatalf("expired read = %#v, want refreshing with last good values", refreshing)
 	}
 	waitLogicalStatsCache(t, cache)
 	stale := cache.Read()
-	if stale.state != "stale" || stale.snapshot == nil || stale.snapshot.values.messageContent != 10 || stale.error != logicalStatsErrorScanFailed {
+	if stale.state != logicalStatsStateStale || stale.snapshot == nil || stale.snapshot.values.messageContent != 10 || stale.error != logicalStatsErrorScanFailed {
 		t.Fatalf("read after failed refresh = %#v, want stale last-good snapshot and stable error", stale)
 	}
 	cache.Read()
@@ -95,7 +95,7 @@ func TestLogicalStatsCacheKeepsStaleSnapshotThroughFailureAndBackoff(t *testing.
 	cache.Read()
 	waitLogicalStatsCache(t, cache)
 	recovered := cache.Read()
-	if recovered.state != "ready" || recovered.snapshot == nil || recovered.snapshot.values.messageContent != 20 || recovered.error != "" {
+	if recovered.state != logicalStatsStateReady || recovered.snapshot == nil || recovered.snapshot.values.messageContent != 20 || recovered.error != "" {
 		t.Fatalf("read after recovery = %#v, want new ready snapshot", recovered)
 	}
 }
@@ -142,13 +142,13 @@ func TestLogicalStatsCacheExplicitRetryBypassesBackoff(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("explicit retry did not start a scan during backoff")
 	}
-	if got := cache.Read(); got.state != "pending" {
+	if got := cache.Read(); got.state != logicalStatsStatePending {
 		t.Fatalf("read during retry = %#v, want pending", got)
 	}
 
 	releaseOnce.Do(func() { close(releaseRetry) })
 	waitLogicalStatsCache(t, cache)
-	if got := cache.Read(); got.state != "ready" || got.snapshot == nil || got.snapshot.values.messageContent != 23 {
+	if got := cache.Read(); got.state != logicalStatsStateReady || got.snapshot == nil || got.snapshot.values.messageContent != 23 {
 		t.Fatalf("read after explicit retry = %#v, want ready snapshot", got)
 	}
 }
@@ -226,7 +226,7 @@ func TestLogicalStatsCacheDoesNotOverlapAnInvalidatedScan(t *testing.T) {
 		t.Fatal("replacement scan did not finish")
 	}
 	read := cache.Read()
-	if read.state != "ready" || read.snapshot == nil || read.snapshot.values.messageContent != 2 {
+	if read.state != logicalStatsStateReady || read.snapshot == nil || read.snapshot.values.messageContent != 2 {
 		t.Fatalf("read after replacement = %#v, want the second completed snapshot", read)
 	}
 }

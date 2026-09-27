@@ -391,7 +391,7 @@ func TestStatsColdReadDoesNotWaitForLogicalScan(t *testing.T) {
 		if got.err != nil {
 			t.Fatalf("Stats: %v", got.err)
 		}
-		if got.stats.LogicalStatsState != "pending" || got.stats.MessageContentBytes != nil || got.stats.LogicalStatsMeasuredAt != nil {
+		if got.stats.LogicalStatsState != logicalStatsStatePending || got.stats.MessageContentBytes != nil || got.stats.LogicalStatsMeasuredAt != nil {
 			t.Fatalf("cold logical stats = %#v, want pending with null totals and timestamp", got.stats)
 		}
 	case <-time.After(100 * time.Millisecond):
@@ -512,7 +512,7 @@ func TestStatsMarksLogicalSnapshotStaleWhilePersistenceIsUnhealthy(t *testing.T)
 	if err != nil {
 		t.Fatalf("Stats while persistence is unhealthy: %v", err)
 	}
-	if got.LogicalStatsState != "stale" || !got.MetadataStale {
+	if got.LogicalStatsState != logicalStatsStateStale || !got.MetadataStale {
 		t.Fatalf("health fallback = %#v, want stale logical and metadata values", got)
 	}
 	svc.logicalStats.mu.Lock()
@@ -533,12 +533,12 @@ func TestInvalidateDatabaseKeepsLogicalStatsWorkerAvailable(t *testing.T) {
 	}
 
 	svc.InvalidateDatabase()
-	if got := svc.logicalStats.Read(); got.state != "pending" {
+	if got := svc.logicalStats.Read(); got.state != logicalStatsStatePending {
 		t.Fatalf("read after invalidation = %#v, want a new background scan", got)
 	}
 	waitLogicalStatsCache(t, svc.logicalStats)
 	got := svc.logicalStats.Read()
-	if got.state != "ready" || got.snapshot == nil || got.snapshot.values.messageContent != 17 {
+	if got.state != logicalStatsStateReady || got.snapshot == nil || got.snapshot.values.messageContent != 17 {
 		t.Fatalf("read after replacement scan = %#v, want a fresh snapshot", got)
 	}
 	if scans.Load() != 1 {
@@ -761,7 +761,7 @@ func TestHandleRefreshStatsStartsScanDespiteBackoff(t *testing.T) {
 	}
 	releaseOnce.Do(func() { close(releaseRetry) })
 	waitLogicalStatsCache(t, svc.logicalStats)
-	if got := svc.logicalStats.Read(); got.state != "ready" || got.snapshot == nil || got.snapshot.values.messageContent != 29 {
+	if got := svc.logicalStats.Read(); got.state != logicalStatsStateReady || got.snapshot == nil || got.snapshot.values.messageContent != 29 {
 		t.Fatalf("read after refresh = %#v, want the new snapshot", got)
 	}
 }
