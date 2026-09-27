@@ -5,7 +5,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import type { Task, TaskSession } from "@/lib/types/http";
 import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
@@ -136,7 +136,7 @@ function taskSessionListRequestOptions(signal?: AbortSignal) {
 type TaskSessionLoadCommit = {
   sessions: TaskSession[];
   force: boolean;
-  activityEpochsAtRequestStart: Readonly<Record<string, number>>;
+  hydrationEpochsAtRequestStart: ReturnType<typeof captureTaskSessionHydrationEpochs>;
 };
 
 function commitTaskSessionLoad(
@@ -145,9 +145,9 @@ function commitTaskSessionLoad(
   generation: number,
   commit: TaskSessionLoadCommit,
 ): TaskSession[] {
-  const { sessions, force, activityEpochsAtRequestStart } = commit;
+  const { sessions, force, hydrationEpochsAtRequestStart } = commit;
   if (taskSessionLoadIsCurrent(store, taskId, generation)) {
-    store.getState().setTaskSessionsForTask(taskId, sessions, activityEpochsAtRequestStart);
+    store.getState().setTaskSessionsForTask(taskId, sessions, hydrationEpochsAtRequestStart);
     return sessions;
   }
   // Forced callers use this result to choose a pending-action owner. Never
@@ -174,7 +174,7 @@ async function loadTaskSessionsForTaskFromStore(
     return cachedSessions;
   }
   const loadGeneration = beginTaskSessionLoad(store, taskId);
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(store.getState(), taskId);
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(store.getState(), taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
     const response = await listTaskSessions(taskId, taskSessionListRequestOptions(signal));
@@ -182,7 +182,7 @@ async function loadTaskSessionsForTaskFromStore(
     return commitTaskSessionLoad(store, taskId, loadGeneration, {
       sessions,
       force,
-      activityEpochsAtRequestStart,
+      hydrationEpochsAtRequestStart,
     });
   } catch (error) {
     if (!isAbortError(error)) console.error("Failed to load task sessions:", error);

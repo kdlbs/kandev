@@ -1,9 +1,12 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
+import { StateProvider } from "@/components/state-provider";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import { taskId, workspaceId, workflowId } from "@/lib/types/ids";
-import type { Task } from "@/lib/types/http";
+import type { Task, TaskSession } from "@/lib/types/http";
+import type { AppState } from "@/lib/state/store";
 
 const mocks = vi.hoisted(() => ({
   fetchSessionDataForTask: vi.fn(),
@@ -21,24 +24,37 @@ vi.mock("@/components/state-hydrator", () => ({
   ),
 }));
 
-vi.mock("@/app/tasks/[id]/kanban-task-shell", () => ({
-  KanbanTaskShell: ({
-    task,
-    taskId,
-    sessionId,
-  }: {
-    task: Task | null;
-    taskId: string;
-    sessionId: string | null;
-  }) => (
-    <div
-      data-testid={KANBAN_TASK_SHELL_TEST_ID}
-      data-route-task-id={taskId}
-      data-task-id={task?.id ?? ""}
-      data-session-id={sessionId ?? ""}
-    />
-  ),
-}));
+vi.mock("@/app/tasks/[id]/kanban-task-shell", async () => {
+  const { useAppStore } = await import("@/components/state-provider");
+  const { useTaskRouteSessionHydrated } =
+    await import("@/components/task/task-route-session-hydration");
+  return {
+    KanbanTaskShell: ({
+      task,
+      taskId,
+      sessionId,
+    }: {
+      task: Task | null;
+      taskId: string;
+      sessionId: string | null;
+    }) => {
+      const readCursor = useAppStore((state) =>
+        sessionId ? (state.taskSessions.items[sessionId]?.last_read_message_id ?? "") : "",
+      );
+      const routeReady = useTaskRouteSessionHydrated();
+      return (
+        <div
+          data-testid={KANBAN_TASK_SHELL_TEST_ID}
+          data-route-task-id={taskId}
+          data-route-ready={routeReady}
+          data-task-id={task?.id ?? ""}
+          data-session-id={sessionId ?? ""}
+          data-read-cursor={readCursor}
+        />
+      );
+    },
+  };
+});
 
 vi.mock("@/lib/ssr/session-page-state", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ssr/session-page-state")>();
@@ -80,17 +96,59 @@ function makeFetchedData(): FetchedSessionData {
   };
 }
 
+function makeTaskSession(lastReadMessageId: string): TaskSession {
+  return {
+    id: "session-1",
+    task_id: TASK_ONE_ID,
+    last_read_message_id: lastReadMessageId,
+  } as TaskSession;
+}
+
+function makeSessionHydrationState(session: TaskSession): Partial<AppState> {
+  return {
+    taskSessions: { items: { [session.id]: session } },
+    taskSessionsByTask: {
+      itemsByTaskId: { [session.task_id]: [session] },
+      loadingByTaskId: { [session.task_id]: false },
+      loadedByTaskId: { [session.task_id]: true },
+    },
+  } as unknown as Partial<AppState>;
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
+function renderTaskRoute(element: ReactElement, initialState?: Partial<AppState>) {
+  return render(element, {
+    wrapper: ({ children }) => (
+      <StateProvider initialState={initialState}>{children}</StateProvider>
+    ),
+  });
+}
+
 describe("TaskDetailRoute", () => {
+  it("hydrates client route session data before mounting the selected task shell", async () => {
+    const initialState = makeSessionHydrationState(makeTaskSession("message-1"));
+    const fetchedData = makeFetchedData();
+    fetchedData.initialState = makeSessionHydrationState(makeTaskSession("message-2"));
+    mocks.fetchSessionDataForTask.mockResolvedValueOnce(fetchedData);
+
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />, initialState);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-read-cursor")).toBe(
+        "message-2",
+      );
+    });
+  });
+
   it("shows accessible task-loading progress while route data is pending", async () => {
     const routeData = deferred<FetchedSessionData>();
     mocks.fetchSessionDataForTask.mockReturnValueOnce(routeData.promise);
 
-    render(<TaskDetailRoute taskId={TASK_ONE_ID} />);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
 
     expect(screen.queryByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeNull();
     expect(screen.getByRole("status").textContent).toContain(LOADING_TASK_COPY);
@@ -109,7 +167,7 @@ describe("TaskDetailRoute", () => {
   });
 
   it("uses boot route data without fetching again", async () => {
-    render(<TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />);
 
     expect(mocks.fetchSessionDataForTask).not.toHaveBeenCalled();
     expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
@@ -124,7 +182,7 @@ describe("TaskDetailRoute", () => {
   it("does not force-merge a client-fetched session over the live session cache", async () => {
     mocks.fetchSessionDataForTask.mockResolvedValueOnce(makeFetchedData());
 
-    render(<TaskDetailRoute taskId={TASK_ONE_ID} />);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
 
     await waitFor(() => expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID)).toBeTruthy());
     expect(screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute("data-force-session-id")).toBe(
@@ -142,7 +200,7 @@ describe("TaskDetailRoute client navigation", () => {
       sessionId: "session-2",
     };
     mocks.fetchSessionDataForTask.mockReturnValueOnce(routeData.promise);
-    const { rerender } = render(
+    const { rerender } = renderTaskRoute(
       <TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />,
     );
     const initialShell = screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID);
@@ -151,10 +209,12 @@ describe("TaskDetailRoute client navigation", () => {
 
     expect(screen.getByRole("status").textContent).toContain(LOADING_TASK_COPY);
     expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBe(initialShell);
+    expect(initialShell.getAttribute("data-route-ready")).toBe("false");
     routeData.resolve(taskTwoData);
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBe(initialShell);
       expect(initialShell.getAttribute(TASK_DATA_ATTRIBUTE)).toBe(TASK_TWO_ID);
+      expect(initialShell.getAttribute("data-route-ready")).toBe("true");
     });
   });
 
@@ -167,7 +227,7 @@ describe("TaskDetailRoute client navigation", () => {
     mocks.fetchSessionDataForTask
       .mockResolvedValueOnce(taskTwoData)
       .mockResolvedValueOnce(makeFetchedData());
-    const { rerender } = render(
+    const { rerender } = renderTaskRoute(
       <TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />,
     );
 
@@ -195,7 +255,7 @@ describe("TaskDetailRoute client navigation", () => {
   it("uses the session selected by route loading when the requested session is unavailable", async () => {
     mocks.fetchSessionDataForTask.mockResolvedValueOnce(makeFetchedData());
 
-    render(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="missing-session" />);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="missing-session" />);
 
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-session-id")).toBe(
@@ -210,7 +270,7 @@ describe("TaskDetailRoute fallback", () => {
   it("keeps the previous shell inert behind loading progress on the first frame after route reuse", async () => {
     const routeData = deferred<FetchedSessionData>();
     mocks.fetchSessionDataForTask.mockReturnValueOnce(routeData.promise);
-    const { rerender } = render(
+    const { rerender } = renderTaskRoute(
       <TaskDetailRoute taskId={TASK_ONE_ID} initialData={makeFetchedData()} />,
     );
 
@@ -235,7 +295,7 @@ describe("TaskDetailRoute fallback", () => {
   it("reaches the unavailable task shell when route data fails", async () => {
     mocks.fetchSessionDataForTask.mockRejectedValueOnce(new Error("task not found"));
 
-    render(<TaskDetailRoute taskId="missing-task" />);
+    renderTaskRoute(<TaskDetailRoute taskId="missing-task" />);
 
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy();
