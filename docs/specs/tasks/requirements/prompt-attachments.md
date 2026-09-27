@@ -1,8 +1,8 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-08-04
-updated: 2026-09-10
+updated: 2026-09-27
 owners:
   - Kandev team
 ---
@@ -56,6 +56,11 @@ This document is the migrated task-system source for the capability. The source 
   able to open preparation image previews and inspect file labels through the
   existing attachment controls. Preview failures shall not hide prompt text
   or other attachments, and the phone transcript shall remain within the viewport.
+
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.12:** Every editable task-session composer shall upload readable pasted images in its task workspace, including Office, Quick Chat, runs, and passthrough surfaces. The outcome shall not depend on a loaded Kanban board.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.13:** If the workspace is unresolved, the composer shall retain selected files and show a localized explanation. It shall block attachment submission until every file has a ready upload descriptor. Plain text submission shall remain available without attachments.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.14:** When task or session identity changes during upload, late results shall not enter the replacement draft. Another selected workspace shall never supply the upload scope.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.15:** Desktop and phone users shall have reachable file selection, preview, retry, and removal controls. Unreadable image clipboard content shall show feedback without changing ordinary text paste. Read-only transcript views shall remain read-only.
 
 ## Migrated source detail
 

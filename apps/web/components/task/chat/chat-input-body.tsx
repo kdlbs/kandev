@@ -11,6 +11,7 @@ import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
+import { Button } from "@kandev/ui/button";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
@@ -289,15 +290,46 @@ export type ChatInputContextAreaProps = {
   hasContextZone: boolean;
   allItems: ContextItem[];
   sessionId: string | null;
+  scopeError?: boolean;
+  onRetryScope?: () => void;
 };
 
 export function ChatInputContextArea({
   hasContextZone,
   allItems,
   sessionId,
+  scopeError,
+  onRetryScope,
 }: ChatInputContextAreaProps) {
-  if (!hasContextZone) return null;
-  return <ContextZone items={allItems} sessionId={sessionId} />;
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  if (!hasContextZone && !scopeError) return null;
+  return (
+    <>
+      {hasContextZone && <ContextZone items={allItems} sessionId={sessionId} />}
+      {scopeError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-3 py-2 text-xs text-destructive"
+          data-testid="attachment-scope-error"
+        >
+          <span>{t("chat:attachmentWorkspaceUnavailable")}</span>
+          {onRetryScope && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={isFinePointer ? undefined : "min-h-11"}
+              onClick={onRetryScope}
+              data-testid="attachment-scope-retry"
+            >
+              {t("task:retry")}
+            </Button>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 export type ChatInputBodyProps = {

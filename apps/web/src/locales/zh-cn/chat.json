@@ -18,6 +18,7 @@
   "attachmentPreviewAlt": "预览",
   "attachmentPreviewFullAlt": "完整尺寸预览",
   "attachmentUploadFailed": "附件上传失败",
+  "attachmentWorkspaceUnavailable": "无法找到此任务的工作区。文件仍保留在草稿中。",
   "attachmentUploadPending": "正在上传附件…",
   "attachmentUploadPendingSubmit": "请等待附件上传完成后再发送。",
   "chatTabName": "聊天 {{index}}",

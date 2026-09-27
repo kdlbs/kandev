@@ -75,6 +75,8 @@ type ChatInputContainerProps = {
   sessionId: string | null;
   taskId: string | null;
   workspaceId?: string | null;
+  workspaceResolutionFailed?: boolean;
+  onRetryWorkspaceResolution?: () => void;
   entityReferencesEnabled?: boolean;
   taskTitle?: string;
   taskDescription: string;
@@ -163,10 +165,17 @@ function buildContextAreaProps(
   s: ContainerState,
   p: ChatInputContainerProps,
 ): ChatInputContextAreaProps {
+  const hasPendingFileAttachment = s.allItems.some(
+    (item) =>
+      (item.kind === "image" || item.kind === "file-attachment") &&
+      Boolean(item.attachment.file && !item.attachment.attachmentId),
+  );
   return {
     hasContextZone: s.hasContextZone,
     allItems: s.allItems,
     sessionId: p.sessionId,
+    scopeError: Boolean(p.workspaceResolutionFailed) && hasPendingFileAttachment,
+    onRetryScope: p.onRetryWorkspaceResolution,
   };
 }
 
@@ -325,6 +334,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const s = useChatInputContainer({
       ref,
       sessionId,
+      taskId,
       workspaceId: props.workspaceId,
       isSending,
       isStarting,
