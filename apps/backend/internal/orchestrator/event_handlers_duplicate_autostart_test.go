@@ -555,6 +555,14 @@ func TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning(t *testing.T
 
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.WorkflowStepID = "step-work"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("set task workflow step: %v", err)
+	}
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{
@@ -631,6 +639,14 @@ func TestAutoStartCreatedLaunch_DoesNotRestoreHandoffAfterQueueingMergedPrompt(t
 
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.WorkflowStepID = "step-work"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("set task workflow step: %v", err)
+	}
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{

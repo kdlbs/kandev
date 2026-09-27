@@ -1847,6 +1847,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.SessionID = req.SessionID
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
+	execution.initialPromptAccepted = req.OnInitialPromptAccepted
 	execution.WorkspaceID = req.WorkspaceID
 	execution.RunID = req.Owner.RunID
 	execution.RunSessionID = req.Owner.RunSessionID

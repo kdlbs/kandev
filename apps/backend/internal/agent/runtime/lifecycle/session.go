@@ -975,7 +975,17 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				sendPromptCallbacks{onDispatched: onDispatched, onFailure: failureHandler},
+				sendPromptCallbacks{
+					onDispatched: func() {
+						if onDispatched != nil {
+							onDispatched()
+						}
+						if accepted := execution.takeInitialPromptAcceptedCallback(); accepted != nil {
+							accepted()
+						}
+					},
+					onFailure: failureHandler,
+				},
 				false,
 			)
 			if err != nil {

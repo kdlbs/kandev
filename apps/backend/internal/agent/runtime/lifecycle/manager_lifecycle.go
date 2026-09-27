@@ -203,6 +203,20 @@ func (m *Manager) Start(ctx context.Context) error {
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
+			// Recover the persisted prompt generation for this execution so a
+			// stale pre-restart turn cannot complete as a fresh one after the
+			// backend restarts (the same persisted prior row the running-writer
+			// owns). A missing or mismatched prior row leaves the generation
+			// unknown, which is the safe default the prompt-done path enforces.
+			var promptGeneration uint64
+			promptGenerationUnknown := true
+			if reader, ok := m.runningWriter.(executorRunningReader); ok {
+				prior, readErr := reader.GetExecutorRunningBySessionID(recoveryCtx, ri.SessionID)
+				if readErr == nil && prior != nil && prior.AgentExecutionID == ri.InstanceID {
+					promptGeneration = promptGenerationFromMetadata(prior.Metadata)
+					promptGenerationUnknown = promptGeneration == 0
+				}
+			}
 			execution := &AgentExecution{
 				ID:        ri.InstanceID,
 				TaskID:    ri.TaskID,
@@ -211,19 +225,21 @@ func (m *Manager) Start(ctx context.Context) error {
 				// declared source is the recovery-inventory record's
 				// execution-profile column, carried onto ri by
 				// buildRecoveredInstances -- never the adopted instance.
-				AgentProfileID:       ri.AgentProfileID,
-				ExecutorType:         getMetadataString(ri.Metadata, MetadataKeyExecutorType),
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
-				RuntimeName:          ri.RuntimeName,
-				Status:               v1.AgentStatusRunning,
-				StartedAt:            time.Now(),
-				metadata:             ri.Metadata,
-				agentctl:             ri.Client,
-				standaloneInstanceID: ri.StandaloneInstanceID,
-				standalonePort:       ri.StandalonePort,
-				promptDoneCh:         make(chan PromptCompletionSignal, 1),
+				AgentProfileID:          ri.AgentProfileID,
+				ExecutorType:            getMetadataString(ri.Metadata, MetadataKeyExecutorType),
+				ContainerID:             ri.ContainerID,
+				ContainerIP:             ri.ContainerIP,
+				WorkspacePath:           ri.WorkspacePath,
+				RuntimeName:             ri.RuntimeName,
+				Status:                  v1.AgentStatusRunning,
+				StartedAt:               time.Now(),
+				metadata:                ri.Metadata,
+				agentctl:                ri.Client,
+				standaloneInstanceID:    ri.StandaloneInstanceID,
+				standalonePort:          ri.StandalonePort,
+				promptDoneCh:            make(chan PromptCompletionSignal, 1),
+				promptGeneration:        promptGeneration,
+				promptGenerationUnknown: promptGenerationUnknown,
 				// AC-EXECUTORS-SURVIVAL-002.14: run identity is re-derived from
 				// the runtime environment, which is itself read back from the
 				// adopted instance rather than the database (both deliberately

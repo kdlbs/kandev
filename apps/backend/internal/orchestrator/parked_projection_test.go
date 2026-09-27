@@ -76,6 +76,20 @@ func (r *parkedTestRepo) UpdateTaskSessionState(_ context.Context, id string, st
 	return nil
 }
 
+func (r *parkedTestRepo) SetSessionMetadataKey(_ context.Context, id, key string, value interface{}) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sessions[id]
+	if !ok {
+		return errors.New("session not found")
+	}
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]interface{})
+	}
+	s.Metadata[key] = value
+	return nil
+}
+
 func (r *parkedTestRepo) deleteSession(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

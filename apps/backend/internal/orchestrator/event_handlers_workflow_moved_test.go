@@ -647,8 +647,16 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 	})
 
 	t.Run("queues auto-start prompt on enter", func(t *testing.T) {
-		repo := setupTestRepo(t)
+		repo, workflowQueue := setupTestRepoWithSQLiteQueue(t)
 		seedSession(t, repo, "t1", "s1", "step1")
+		store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
+		if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_enter"); err != nil {
+			t.Fatalf("ApplyTransition step2: %v", err)
+		}
+		transition, err := repo.GetLatestTaskStepTransition(ctx, "t1")
+		if err != nil || transition == nil {
+			t.Fatalf("GetLatestTaskStepTransition: transition=%+v err=%v", transition, err)
+		}
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -665,16 +673,18 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		}
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		svc.messageQueue = workflowQueue
 		// Seed an active-turn entry so flipStaleRunningToWaiting recognises the
 		// session as genuinely mid-turn and the auto-start prompt is queued
 		// (the behavior this subtest asserts).
 		svc.activeTurns.Store("s1", "turn-1")
 		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "step1",
-			ToStepID:        "step2",
-			TaskDescription: "auto-start task",
+			TaskID:           "t1",
+			SessionID:        "s1",
+			FromStepID:       "step1",
+			ToStepID:         "step2",
+			StepTransitionID: transition.ID,
+			TaskDescription:  "auto-start task",
 		})
 
 		// Since session is in RUNNING state, the auto-start prompt should be queued
@@ -687,6 +697,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 				}
 				if status.Entries[0].QueuedBy != messagequeue.QueuedByWorkflow {
 					t.Fatalf("expected queued_by workflow, got %s", status.Entries[0].QueuedBy)
+				}
+				if !status.Entries[0].IsWorkflowControl() {
+					t.Fatalf("expected transition-keyed workflow control delivery, metadata = %+v", status.Entries[0].Metadata)
 				}
 				meta := status.Entries[0].Metadata
 				if got := meta["workflow_message"]; got != true {

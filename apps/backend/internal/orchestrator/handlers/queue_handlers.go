@@ -266,6 +266,14 @@ type QueueIdentitySendNowDispatcher interface {
 	SendQueuedNowForSession(context.Context, messagequeue.QueueSessionIdentity, string, string) (int, error)
 }
 
+type queuedUserWorkAdmitter interface {
+	AdmitQueuedUserWork(
+		ctx context.Context,
+		taskID, sessionID string,
+		admit func(context.Context) (*messagequeue.QueuedMessage, error),
+	) (*messagequeue.QueuedMessage, error)
+}
+
 // QueueAccessAuthorizer scopes queue reads and mutations to visible sessions.
 type QueueAccessAuthorizer interface {
 	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
@@ -357,6 +365,7 @@ type QueueHandlers struct {
 	queueAutoRun             QueueAutoRunController
 	queueDispatcher          QueueSendNowDispatcher
 	queueEdit                QueueEditLeaseController
+	queuedWorkAdmitter       queuedUserWorkAdmitter
 	accessAuthorizer         QueueAccessAuthorizer
 	sessionTaskResolver      SessionTaskResolver
 	eventBus                 bus.EventBus
@@ -415,7 +424,9 @@ func NewQueueHandlers(
 	if controller, ok := queueDrainer.(QueueAutoRunController); ok {
 		handlers.queueAutoRun = controller
 	}
-
+	if admitter, ok := queueDrainer.(queuedUserWorkAdmitter); ok {
+		handlers.queuedWorkAdmitter = admitter
+	}
 	return handlers
 }
 
@@ -667,6 +678,16 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		if result != nil {
 			queued, snapshot, previewSnapshot, replay = result.Message, result.Snapshot, result.PreviewSnapshot, result.Replay
 		}
+	case h.queuedWorkAdmitter != nil:
+		// Route ordinary user work through the exact-turn settlement guard so a
+		// completion already being reconciled cannot admit a successor prompt
+		// midway. Identified admissions and plan-comment replays keep their
+		// dedicated idempotent paths above; the settlement guard wraps only
+		// the anonymous-identity ordinary work that can reopen a completion.
+		admit := func(admittedCtx context.Context) (*messagequeue.QueuedMessage, error) {
+			return h.admitQueuedMessage(admittedCtx, &req, queuedBy, metadata)
+		}
+		queued, err = h.queuedWorkAdmitter.AdmitQueuedUserWork(ctx, req.TaskID, req.SessionID, admit)
 	default:
 		queued, err = h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
 	}

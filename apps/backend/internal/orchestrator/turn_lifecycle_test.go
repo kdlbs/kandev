@@ -442,6 +442,22 @@ func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
 	}
 }
 
+func TestPromptDispatchCallbackCommitsAcceptedDeliveryBeforeOutcome(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	accepted := false
+	outcome := &promptDispatchOutcome{}
+	svc.promptDispatchCallback(context.Background(), "task1", "session1", nil, nil, outcome, func() error {
+		accepted = true
+		return nil
+	})()
+	if !accepted {
+		t.Fatal("accepted-delivery callback did not run at the prompt acceptance boundary")
+	}
+	if dispatched, err := outcome.snapshot(); !dispatched || err != nil {
+		t.Fatalf("dispatch outcome = (%v, %v), want accepted after durable callback", dispatched, err)
+	}
+}
+
 func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
 	svc, _ := newTurnLifecycleTestService(t)
 	reserved := &models.Turn{ID: "turn-accepted", TaskSessionID: "session1", TaskID: "task1"}

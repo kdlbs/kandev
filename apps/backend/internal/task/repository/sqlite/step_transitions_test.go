@@ -134,6 +134,54 @@ func TestGenesisRowOnTaskCreation(t *testing.T) {
 	}
 }
 
+func TestGetLatestTaskStepTransitionUsesMonotonicLedgerIdentity(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	ctx := context.Background()
+	task := createStepTransitionsTestTask(t, repo, "task-latest-transition", "wf-1", "step-a")
+	genesis, err := repo.GetLatestTaskStepTransition(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetLatestTaskStepTransition genesis: %v", err)
+	}
+	if genesis == nil || genesis.ToWorkflowStepID != "step-a" {
+		t.Fatalf("genesis transition = %+v, want step-a", genesis)
+	}
+
+	task.WorkflowStepID = "step-b"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE task_step_transitions SET occurred_at = ? WHERE id = ?
+	`), time.Now().UTC().Add(time.Hour), genesis.ID); err != nil {
+		t.Fatalf("force non-monotonic transition timestamp: %v", err)
+	}
+	latest, err := repo.GetLatestTaskStepTransition(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetLatestTaskStepTransition moved: %v", err)
+	}
+	if latest == nil || latest.ToWorkflowStepID != "step-b" {
+		t.Fatalf("latest transition = %+v, want step-b", latest)
+	}
+	if latest.ID <= genesis.ID {
+		t.Fatalf("latest transition id = %d, want greater than genesis %d", latest.ID, genesis.ID)
+	}
+}
+
+func TestGetLatestTaskStepTransitionReturnsNilWhenNoLedgerRowExists(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-no-transition", WorkspaceID: "ws-1", Title: "No workflow"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	transition, err := repo.GetLatestTaskStepTransition(ctx, "task-no-transition")
+	if err != nil {
+		t.Fatalf("GetLatestTaskStepTransition: %v", err)
+	}
+	if transition != nil {
+		t.Fatalf("transition = %+v, want nil", transition)
+	}
+}
+
 func TestTaskCreatedWithNoWorkflowWritesNoGenesisRow(t *testing.T) {
 	repo := newStepTransitionsTestRepo(t)
 	createStepTransitionsTestTask(t, repo, "task-no-workflow", "", "")

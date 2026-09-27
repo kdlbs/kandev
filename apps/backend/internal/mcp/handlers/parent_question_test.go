@@ -3,13 +3,18 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +30,19 @@ func (p *parentQuestionPausePolicyRecorder) PauseForClarificationInputWithOption
 ) (int, error) {
 	p.options = append(p.options, options)
 	return p.count, p.err
+}
+
+type failingParentReplyDeliveryRepository struct {
+	messagequeue.Repository
+	messagequeue.DeliveryLedger
+	fail bool
+}
+
+func (r *failingParentReplyDeliveryRepository) CreateOrGetDelivery(ctx context.Context, delivery messagequeue.Delivery) (*messagequeue.Delivery, bool, error) {
+	if r.fail {
+		return nil, false, errors.New("injected receipt persistence failure")
+	}
+	return r.DeliveryLedger.CreateOrGetDelivery(ctx, delivery)
 }
 
 func seedParentQuestionScenario(t *testing.T, svc *service.Service, repo seedRepo) (*models.Task, *models.Task, *models.TaskSession, *models.TaskSession) {
@@ -193,6 +211,83 @@ func TestHandleMessageTask_AnswersParentQuestionIdempotently(t *testing.T) {
 	var answerAgainPayload map[string]interface{}
 	require.NoError(t, json.Unmarshal(answerAgain.Payload, &answerAgainPayload))
 	require.Equal(t, "already_answered", answerAgainPayload["status"])
+}
+
+func TestHandleMessageTask_ParentReplyPersistsQueuedReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, parentSession, childSession := seedParentQuestionScenario(t, svc, repo)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	h.inputPauser = &recordingClarificationInputPauser{}
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 10, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "parent-reply-source-turn", TaskID: parent.ID, TaskSessionID: parentSession.ID, StartedAt: time.Now().UTC()}))
+
+	questionResp, err := h.handleAskParentQuestion(ctx, parentQuestionMessage(t, child.ID, childSession.ID))
+	require.NoError(t, err)
+	var questionPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(questionResp.Payload, &questionPayload))
+	answer := senderPayload(child.ID, "Use Postgres.", parent.ID)
+	answer["sender_session_id"] = parentSession.ID
+	answer["reply_to_question_id"] = questionPayload["question_id"]
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, answer))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type, string(response.Payload))
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, "delivered", payload["delivery_status"])
+	receiptID, ok := payload["delivery_id"].(string)
+	require.True(t, ok)
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, receiptID)
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryDelivered, receipt.State)
+	assert.Equal(t, childSession.ID, receipt.TargetSessionID)
+	assert.Equal(t, 0, orch.queue.GetStatus(ctx, childSession.ID).Count)
+	repeated, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, answer))
+	require.NoError(t, err)
+	var repeatedPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(repeated.Payload, &repeatedPayload))
+	assert.Equal(t, "already_answered", repeatedPayload["status"])
+	assert.Equal(t, receiptID, repeatedPayload["delivery_id"])
+}
+
+func TestHandleMessageTask_ParentReplyLeavesQuestionPendingWhenReceiptPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, parentSession, childSession := seedParentQuestionScenario(t, svc, repo)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	h.inputPauser = &recordingClarificationInputPauser{}
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	baseQueue, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	failingQueue := &failingParentReplyDeliveryRepository{Repository: baseQueue, DeliveryLedger: baseQueue.(messagequeue.DeliveryLedger), fail: true}
+	orch.queue = messagequeue.NewService(failingQueue, 10, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "reply-persistence-source", TaskID: parent.ID, TaskSessionID: parentSession.ID, StartedAt: time.Now().UTC()}))
+
+	questionResp, err := h.handleAskParentQuestion(ctx, parentQuestionMessage(t, child.ID, childSession.ID))
+	require.NoError(t, err)
+	var questionPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(questionResp.Payload, &questionPayload))
+	answer := senderPayload(child.ID, "Use Postgres.", parent.ID)
+	answer["sender_session_id"] = parentSession.ID
+	answer["reply_to_question_id"] = questionPayload["question_id"]
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, answer))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	question, err := svc.GetMessage(ctx, questionPayload["question_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, parentQuestionStatusPending, question.Metadata[models.MetaKeyParentQuestionStatus])
+
+	failingQueue.fail = false
+	response, err = h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, answer))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	question, err = svc.GetMessage(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parentQuestionStatusAnswered, question.Metadata[models.MetaKeyParentQuestionStatus])
 }
 
 func TestHandleAskParentQuestion_RejectsRootTask(t *testing.T) {
