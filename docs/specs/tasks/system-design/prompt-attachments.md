@@ -21,8 +21,8 @@ It cannot claim staged files or infer task ownership.
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                        | Design sections                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
 | `REQ-TASKS-PROMPT-ATTACHMENTS-001` | Claim admission, materialization and delivery, failure and recovery, security |
 
 ## Components and responsibilities
@@ -198,7 +198,7 @@ and unavailable-content cases without suppressing existing progress errors.
 
 ## Composer workspace resolution
 
-This extension covers AC-TASKS-PROMPT-ATTACHMENTS-001.12 through .15.
+This extension covers AC-TASKS-PROMPT-ATTACHMENTS-001.12 through .17.
 The task system owns upload scope because it owns attachment authorization.
 It reuses the existing attachment API and ADR without changing persistence.
 
@@ -211,24 +211,33 @@ Use one shared composer-scope hook for both consumers. Resolve an exact task ID
 from Office task records and existing task collections. Preserve the existing
 Quick Chat session mapping. A conflicting task-bound identity must not select
 a workspace by collection order. Missing or conflicting scope requires an
-authoritative `fetchTask(taskId)` read through the hook. Deduplicate that read
-per task, and ignore responses after the requested task changes or unmounts.
-A failed read leaves scope unresolved with visible recovery. Do not use the
-currently selected workspace as a fallback. Cold direct links must work without
-first opening an Office or Kanban list.
+authoritative `fetchTask(taskId)` read through the hook. Once that read starts,
+its pending, resolved, or failed state takes precedence over cached workspace
+records. Deduplicate the read per task, keep a current subscriber through cache
+changes, and ignore responses after the requested task changes or unmounts. A
+failed read leaves scope unresolved with visible recovery until the user retries.
+Do not use the currently selected workspace as a fallback. Cold direct links must
+work without first opening an Office or Kanban list.
 
-`use-chat-input-state.ts` must block submission whenever any browser file lacks
-an uploaded attachment ID, independent of workspace availability. Retain draft
-text and files while scope resolves. Show localized scope feedback and allow
-retry after lookup failure. Start pending uploads when valid scope arrives.
-Use existing upload-error, retry, removal, and best-effort deletion behavior.
-Never convert a newly selected file into an inline-byte submission because
-scope is missing. Keep legacy stored descriptor compatibility separate.
+`use-chat-input-state.ts` must block message and plan-implementation actions
+whenever any attachment lacks an uploaded attachment ID, independent of
+workspace availability. Retain draft text and files while scope resolves. Show
+localized scope feedback and allow retry after lookup failure. Start pending
+uploads when valid scope arrives. Recover old inline draft bytes as a file and
+upload them before use; an unrecoverable descriptor remains blocked until the
+user removes it. Do not persist bytes for a new pending browser file. Use
+existing upload-error, retry, removal, and best-effort deletion behavior. Never
+convert an incomplete file into an inline-byte submission because scope is
+missing. Keep compatibility for already-ready descriptors and legacy message
+attachments separate.
 
 Capture task/session/workspace identity for asynchronous upload work. A late
 completion must not update a successor draft. Delete an unclaimed late upload
-on a best-effort basis. Draft restoration must not transfer files between tasks.
-Submission remains blocked while any selected attachment is pending or failed.
+on a best-effort basis. Clear the attachment collection if the task changes
+while a session ID is reused, and delete its unclaimed descriptors. Session
+changes load only that session's own draft. Draft restoration must not transfer
+files between tasks. Message submission and plan implementation remain blocked
+while any attachment is pending, failed, or otherwise missing its descriptor.
 
 ### Surface boundary
 
@@ -245,6 +254,9 @@ This extension does not claim that comment uploads are fixed.
 Keep attachment chips above the editable prompt. Place localized scope or
 upload feedback beside the chips, with retry and removal actions. Sending is
 unavailable while any file is incomplete. Preserve typed text and ready siblings.
+Plan implementation controls use the same incomplete-upload state and remain
+disabled on desktop and phone until every attachment is ready or removed. Keep
+their handlers guarded so direct invocation cannot bypass that state.
 The phone entry remains the existing task Chat view. Reuse the shipped mobile
 session layout and attachment controls. Chips wrap, touch controls remain at
 least 44px, and the transcript retains its existing scroll owner. Keep existing

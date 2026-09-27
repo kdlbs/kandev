@@ -542,6 +542,33 @@ describe("usePlanActions", () => {
     expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith(SESSION_ID, false);
   });
 
+  // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.17
+  it("does not advance from plan mode while a file lacks its uploaded descriptor", async () => {
+    const { result } = renderHook(() =>
+      usePlanActions({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        planModeEnabled: true,
+        handlePlanModeChange: vi.fn(),
+        chatInputRef: {
+          current: {
+            getValue: () => "",
+            getAttachments: () => [
+              { type: "resource", data: "cGVuZGluZw==", mime_type: "text/plain" },
+            ],
+            clear: vi.fn(),
+          },
+        } as never,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.implementPlanHandler?.(false);
+    });
+
+    expect(mockMoveTask).not.toHaveBeenCalled();
+  });
+
   it("keeps plan mode enabled when moving to the work step fails", async () => {
     mockMoveTask.mockRejectedValueOnce(new Error("move failed"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);

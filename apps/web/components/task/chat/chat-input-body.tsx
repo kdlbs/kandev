@@ -214,6 +214,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const submitDisabledReason = p.hasPendingAttachmentUploads
     ? t("chat:attachmentUploadPendingSubmit")
     : p.submitDisabledReason;
+  const pendingPlanReason = p.hasPendingAttachmentUploads ? submitDisabledReason : undefined;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -258,6 +259,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         isAgentBusy={isAgentBusy}
         canCancelAgent={p.canCancelAgent}
         hasContent={hasContent}
+        planActionDisabledReason={pendingPlanReason}
         isDisabled={p.submitDisabled}
         submitDisabledReason={submitDisabledReason}
         isSending={isSending}

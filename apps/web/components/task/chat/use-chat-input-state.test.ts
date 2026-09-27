@@ -9,6 +9,7 @@ import type { TipTapInputHandle } from "./tiptap-input";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { FileAttachment } from "./file-attachment";
 import * as attachmentFiles from "./file-attachment";
+import { setChatDraftAttachments } from "@/lib/local-storage";
 
 const uploadAttachmentMock = vi.hoisted(() => vi.fn());
 const deleteAttachmentMock = vi.hoisted(() => vi.fn());
@@ -21,6 +22,7 @@ vi.mock("@/lib/api/domains/attachment-api", () => ({
 type SubmitHandler = Parameters<typeof useChatInputState>[0]["onSubmit"];
 const ATTACHMENT_CONTENT = "attachment";
 const TEXT_MIME_TYPE = "text/plain";
+const UPLOADED_ATTACHMENT_ID = "uploaded-attachment";
 const WORKSPACE_ONE = "workspace-1";
 const KEEP_DRAFT_TEXT = "keep this draft";
 
@@ -110,7 +112,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   uploadAttachmentMock.mockReset().mockResolvedValue({
-    attachment_id: "uploaded-attachment",
+    attachment_id: UPLOADED_ATTACHMENT_ID,
     name: "notes.txt",
     mime_type: TEXT_MIME_TYPE,
     kind: "resource",
@@ -307,7 +309,45 @@ describe("useChatInputState attachment feedback", () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(result.current.hasPendingAttachmentUploads).toBe(true);
     expect(result.current.value).toBe(KEEP_DRAFT_TEXT);
-    expect(result.current.attachments).toHaveLength(1);
+  });
+
+  // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.16
+  it("uploads a restored file draft before allowing submission", async () => {
+    setChatDraftAttachments("session-1", [
+      {
+        id: "restored-file",
+        data: btoa(ATTACHMENT_CONTENT),
+        mimeType: TEXT_MIME_TYPE,
+        fileName: "notes.txt",
+        size: ATTACHMENT_CONTENT.length,
+        isImage: false,
+        deliveryMode: "path",
+      },
+    ]);
+    const onSubmit = vi.fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>();
+    const scope = { workspaceId: null as string | null };
+    const { result, rerender } = renderInputState(onSubmit, scope);
+
+    expect(result.current.hasPendingAttachmentUploads).toBe(true);
+    expect(result.current.attachments[0]?.file).toBeInstanceOf(File);
+    attachInputHandle(result.current.inputRef, vi.fn());
+    act(() => result.current.handleSubmit(vi.fn()));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    act(() => {
+      scope.workspaceId = WORKSPACE_ONE;
+      rerender();
+    });
+    await waitFor(() => expect(result.current.attachments[0]?.attachmentId).toBeTruthy());
+    expect(uploadAttachmentMock).toHaveBeenCalledOnce();
+
+    act(() => result.current.handleSubmit(vi.fn()));
+    expect(onSubmit).toHaveBeenCalledWith({
+      message: "",
+      attachments: [
+        expect.objectContaining({ attachment_id: UPLOADED_ATTACHMENT_ID, name: "notes.txt" }),
+      ],
+    });
   });
 
   it("starts the upload and allows file submission when scope resolves", async () => {
@@ -340,7 +380,7 @@ describe("useChatInputState attachment feedback", () => {
     expect(onSubmit).toHaveBeenCalledWith({
       message: KEEP_DRAFT_TEXT,
       attachments: [
-        expect.objectContaining({ attachment_id: "uploaded-attachment", name: "notes.txt" }),
+        expect.objectContaining({ attachment_id: UPLOADED_ATTACHMENT_ID, name: "notes.txt" }),
       ],
     });
   });
@@ -433,7 +473,6 @@ describe("useChatInputState attachment feedback", () => {
       scope.taskId = "task-2";
       scope.sessionId = "session-2";
       rerender();
-      await waitFor(() => expect(result.current.attachments).toEqual([]));
 
       await act(async () => {
         processing.resolve(processedFile(file, "old-draft-file"));
@@ -464,7 +503,7 @@ describe("useChatInputState attachment feedback", () => {
     expect(onSubmit).toHaveBeenCalledWith({
       message: "",
       attachments: [
-        expect.objectContaining({ attachment_id: "uploaded-attachment", name: "notes.txt" }),
+        expect.objectContaining({ attachment_id: UPLOADED_ATTACHMENT_ID, name: "notes.txt" }),
       ],
     });
   });
@@ -554,7 +593,28 @@ describe("useChatInputState attachment feedback", () => {
     });
 
     await waitFor(() => expect(deleteAttachmentMock).toHaveBeenCalledWith("late-attachment"));
-    expect(result.current.attachments).toEqual([]);
+  });
+
+  it("clears ready attachments when the task changes but the session ID stays the same", async () => {
+    const scope = {
+      workspaceId: WORKSPACE_ONE,
+      taskId: "task-1",
+      sessionId: "session-1",
+    };
+    const { result, rerender } = renderInputState(vi.fn(), scope);
+
+    await act(async () => {
+      await result.current.addFiles([
+        new File([ATTACHMENT_CONTENT], "notes.txt", { type: TEXT_MIME_TYPE }),
+      ]);
+    });
+    await waitFor(() => expect(result.current.attachments[0]?.attachmentId).toBeTruthy());
+
+    scope.taskId = "task-2";
+    rerender();
+
+    await waitFor(() => expect(result.current.attachments).toEqual([]));
+    await waitFor(() => expect(deleteAttachmentMock).toHaveBeenCalledWith(UPLOADED_ATTACHMENT_ID));
   });
 
   it("warns when a batch exceeds the maximum number of files", async () => {

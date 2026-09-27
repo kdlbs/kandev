@@ -7,6 +7,7 @@ import { resolveComposerWorkspaceId } from "@/components/task/chat/composer-work
 
 type LookupState = {
   taskId: string | null;
+  retryAttempt: number;
   status: "loading" | "resolved" | "failed";
   workspaceId: string | null;
 };
@@ -42,38 +43,58 @@ export function useComposerWorkspace(sessionId: string | null, taskId: string | 
       officeTasks: state.office.tasks.items,
     }),
   );
-  const [retryVersion, setRetryVersion] = useState(0);
+  const [retryState, setRetryState] = useState({ taskId: null as string | null, attempt: 0 });
+  const retryAttempt = retryState.taskId === taskId ? retryState.attempt : 0;
   const [lookup, setLookup] = useState<LookupState>({
     taskId: null,
+    retryAttempt: 0,
     status: "loading",
     workspaceId: null,
   });
 
   useEffect(() => {
-    if (!taskId || cachedWorkspaceId) return;
+    if (!taskId) return;
+    const currentLookup =
+      lookup.taskId === taskId && lookup.retryAttempt === retryAttempt ? lookup : null;
+    if (currentLookup && currentLookup.status !== "loading") return;
+    if (!currentLookup && cachedWorkspaceId && retryAttempt === 0) return;
 
     let active = true;
-    setLookup({ taskId, status: "loading", workspaceId: null });
+    if (!currentLookup) {
+      setLookup({ taskId, retryAttempt, status: "loading", workspaceId: null });
+    }
     void fetchTaskWorkspace(taskId).then(
       (workspaceId) => {
-        if (active) setLookup({ taskId, status: "resolved", workspaceId });
+        if (active) setLookup({ taskId, retryAttempt, status: "resolved", workspaceId });
       },
       () => {
-        if (active) setLookup({ taskId, status: "failed", workspaceId: null });
+        if (active) setLookup({ taskId, retryAttempt, status: "failed", workspaceId: null });
       },
     );
     return () => {
       active = false;
     };
-  }, [cachedWorkspaceId, retryVersion, taskId]);
+  }, [cachedWorkspaceId, lookup, retryAttempt, taskId]);
 
-  const retry = useCallback(() => setRetryVersion((version) => version + 1), []);
-  const currentLookup = lookup.taskId === taskId ? lookup : null;
-  const workspaceId = cachedWorkspaceId ?? currentLookup?.workspaceId ?? null;
-  const status =
-    workspaceId || !taskId
-      ? "resolved"
-      : (currentLookup?.status ?? (taskId ? "loading" : "resolved"));
+  const retry = useCallback(() => {
+    setRetryState((state) => ({
+      taskId,
+      attempt: state.taskId === taskId ? state.attempt + 1 : 1,
+    }));
+  }, [taskId]);
+  const currentLookup =
+    taskId && lookup.taskId === taskId && lookup.retryAttempt === retryAttempt ? lookup : null;
+  let workspaceId: string | null = null;
+  let status: LookupState["status"] = taskId ? "loading" : "resolved";
+  if (!taskId) {
+    status = "resolved";
+  } else if (currentLookup) {
+    status = currentLookup.status;
+    if (currentLookup.status === "resolved") workspaceId = currentLookup.workspaceId;
+  } else if (retryAttempt === 0 && cachedWorkspaceId) {
+    workspaceId = cachedWorkspaceId;
+    status = "resolved";
+  }
 
   return { workspaceId, status, retry };
 }

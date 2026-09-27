@@ -5,6 +5,8 @@ import type { Task } from "@/lib/types/http";
 const fetchTaskMock = vi.hoisted(() => vi.fn());
 const TASK_WORKSPACE = "task-workspace";
 const LOOKUP_TASK_ID = "task-1";
+const TASK_SESSION_ID = "task-session";
+const TEMPORARY_FAILURE = "temporary failure";
 const CACHED_WORKSPACE = "cached-workspace";
 const CONFLICTING_WORKSPACE = "conflicting-workspace";
 const RETRY_WORKSPACE = "retry-workspace";
@@ -58,7 +60,7 @@ describe("useComposerWorkspace", () => {
 
   it("fetches the authoritative workspace for a cold task route", async () => {
     fetchTaskMock.mockResolvedValue(task(TASK_WORKSPACE));
-    const { result } = renderHook(() => useComposerWorkspace("task-session", LOOKUP_TASK_ID));
+    const { result } = renderHook(() => useComposerWorkspace(TASK_SESSION_ID, LOOKUP_TASK_ID));
 
     await waitFor(() => expect(result.current.workspaceId).toBe(TASK_WORKSPACE));
     expect(fetchTaskMock).toHaveBeenCalledWith(LOOKUP_TASK_ID, { cache: "no-store" });
@@ -79,9 +81,9 @@ describe("useComposerWorkspace", () => {
 
   it("can retry after the task lookup fails", async () => {
     fetchTaskMock
-      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockRejectedValueOnce(new Error(TEMPORARY_FAILURE))
       .mockResolvedValueOnce(task(TASK_WORKSPACE));
-    const { result } = renderHook(() => useComposerWorkspace("task-session", LOOKUP_TASK_ID));
+    const { result } = renderHook(() => useComposerWorkspace(TASK_SESSION_ID, LOOKUP_TASK_ID));
 
     await waitFor(() => expect(result.current.status).toBe("failed"));
     act(() => result.current.retry());
@@ -113,28 +115,27 @@ describe("useComposerWorkspace", () => {
   ] as const)(
     "reattaches to a pending lookup when cached scope $cacheTransition",
     async ({ cacheTransition, outcome }) => {
+      const taskId = `cache-${cacheTransition}`;
       const request = deferred<Task>();
       fetchTaskMock
         .mockReturnValueOnce(request.promise)
         .mockResolvedValueOnce(task(RETRY_WORKSPACE));
-      const { result, rerender } = renderHook(() =>
-        useComposerWorkspace("task-session", LOOKUP_TASK_ID),
-      );
+      const { result, rerender } = renderHook(() => useComposerWorkspace(TASK_SESSION_ID, taskId));
 
       await waitFor(() => expect(fetchTaskMock).toHaveBeenCalledTimes(1));
       act(() => {
-        mockState.office.tasks.items = [{ id: LOOKUP_TASK_ID, workspaceId: CACHED_WORKSPACE }];
+        mockState.office.tasks.items = [{ id: taskId, workspaceId: CACHED_WORKSPACE }];
         rerender();
       });
-      expect(result.current.workspaceId).toBe(CACHED_WORKSPACE);
+      expect(result.current).toMatchObject({ workspaceId: null, status: "loading" });
 
       act(() => {
         mockState.office.tasks.items =
           cacheTransition === "disappears"
             ? []
             : [
-                { id: LOOKUP_TASK_ID, workspaceId: CACHED_WORKSPACE },
-                { id: LOOKUP_TASK_ID, workspaceId: CONFLICTING_WORKSPACE },
+                { id: taskId, workspaceId: CACHED_WORKSPACE },
+                { id: taskId, workspaceId: CONFLICTING_WORKSPACE },
               ];
         rerender();
       });
@@ -143,7 +144,7 @@ describe("useComposerWorkspace", () => {
         await act(async () => request.resolve(task(TASK_WORKSPACE)));
         await waitFor(() => expect(result.current.workspaceId).toBe(TASK_WORKSPACE));
       } else {
-        await act(async () => request.reject(new Error("temporary failure")));
+        await act(async () => request.reject(new Error(TEMPORARY_FAILURE)));
         await waitFor(() => expect(result.current.status).toBe("failed"));
         act(() => result.current.retry());
         await waitFor(() => expect(result.current.workspaceId).toBe(RETRY_WORKSPACE));
@@ -152,6 +153,28 @@ describe("useComposerWorkspace", () => {
       expect(fetchTaskMock).toHaveBeenCalledTimes(outcome === "resolve" ? 1 : 2);
     },
   );
+
+  it("keeps authoritative failure and retry state while matching cache is present", async () => {
+    const taskId = "authoritative-failure";
+    const request = deferred<Task>();
+    fetchTaskMock.mockReturnValueOnce(request.promise).mockResolvedValueOnce(task(RETRY_WORKSPACE));
+    const { result, rerender } = renderHook(() => useComposerWorkspace(TASK_SESSION_ID, taskId));
+
+    await waitFor(() => expect(fetchTaskMock).toHaveBeenCalledTimes(1));
+    act(() => {
+      mockState.office.tasks.items = [{ id: taskId, workspaceId: CACHED_WORKSPACE }];
+      rerender();
+    });
+    expect(result.current).toMatchObject({ workspaceId: null, status: "loading" });
+
+    await act(async () => request.reject(new Error(TEMPORARY_FAILURE)));
+    await waitFor(() =>
+      expect(result.current).toMatchObject({ workspaceId: null, status: "failed" }),
+    );
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.workspaceId).toBe(RETRY_WORKSPACE));
+    expect(fetchTaskMock).toHaveBeenCalledTimes(2);
+  });
 
   it.each(["resolve", "reject"] as const)(
     "reattaches to a pending lookup when task identity changes A -> null -> A and the old request %s",
@@ -174,7 +197,7 @@ describe("useComposerWorkspace", () => {
         await waitFor(() => expect(result.current.workspaceId).toBe("workspace-a"));
         expect(fetchTaskMock).toHaveBeenCalledTimes(1);
       } else {
-        await act(async () => request.reject(new Error("temporary failure")));
+        await act(async () => request.reject(new Error(TEMPORARY_FAILURE)));
         await waitFor(() => expect(result.current.status).toBe("failed"));
         act(() => result.current.retry());
         await waitFor(() => expect(result.current.workspaceId).toBe(RETRY_WORKSPACE));

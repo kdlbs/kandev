@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
   writeJsonAtomically,
+  createAtomicRecordWriter,
   waitForFile,
 } from "./desktop-launch-smoke.mjs";
 
@@ -58,6 +59,28 @@ async function withTempDir(run) {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test("atomic instance-record writes serialize concurrent updates without partial JSON", async () => {
+  await withTempDir(async (dir) => {
+    const filePath = join(dir, "instance.json");
+    const saveRecord = createAtomicRecordWriter(filePath);
+    const record = { revision: 0, payload: "x".repeat(32_000) };
+    await saveRecord(record);
+
+    const writes = [];
+    for (let revision = 1; revision <= 20; revision += 1) {
+      record.revision = revision;
+      writes.push(saveRecord(record));
+    }
+    await Promise.all(writes);
+
+    assert.deepEqual(JSON.parse(await readFile(filePath, "utf8")), {
+      revision: 20,
+      payload: "x".repeat(32_000),
+    });
+    assert.deepEqual(await readdir(dir), ["instance.json"]);
+  });
+});
 
 test("waitForFile resolves once the target file appears", async () => {
   await withTempDir(async (dir) => {
@@ -216,8 +239,15 @@ test("main window registers download handling before its configured WebView is c
   const mainWindow = JSON.parse(configSource).app.windows.find(({ label }) => label === "main");
 
   assert.ok(mainWindow, "the configured main window must exist");
-  assert.equal(mainWindow.create, false, "Tauri must leave creation to the configured callback builder");
-  assert.match(mainSource, /WebviewWindowBuilder::from_config[\s\S]*?\.on_download\([\s\S]*?\)\s*\.build\(\)/);
+  assert.equal(
+    mainWindow.create,
+    false,
+    "Tauri must leave creation to the configured callback builder",
+  );
+  assert.match(
+    mainSource,
+    /WebviewWindowBuilder::from_config[\s\S]*?\.on_download\([\s\S]*?\)\s*\.build\(\)/,
+  );
   assert.match(mainSource, /downloads::handle_download_event/);
 });
 
@@ -371,12 +401,15 @@ test(
         ["zh-Hant", "zh-tw"],
       ]) {
         const localeContext = await browser.newContext();
-        await localeContext.addInitScript((languages) => {
-          Object.defineProperty(navigator, "languages", {
-            configurable: true,
-            value: languages,
-          });
-        }, [language]);
+        await localeContext.addInitScript(
+          (languages) => {
+            Object.defineProperty(navigator, "languages", {
+              configurable: true,
+              value: languages,
+            });
+          },
+          [language],
+        );
         const localePage = await localeContext.newPage();
         await localePage.goto("http://127.0.0.1:4178", { waitUntil: "networkidle" });
         assert.equal(await localePage.locator("html").getAttribute("lang"), expectedLocale);
@@ -407,7 +440,9 @@ test(
         () => typeof window.__KANDEV_DESKTOP_SET_STATUS === "function",
       );
       assert.equal(
-        await lightPage.locator("[data-startup-drag-region]").getAttribute("data-tauri-drag-region"),
+        await lightPage
+          .locator("[data-startup-drag-region]")
+          .getAttribute("data-tauri-drag-region"),
         "",
       );
 

@@ -92,10 +92,10 @@ Workflow position and runtime state differ. Moving a task changes its step. It d
 
 Normal **Move here** and next-step actions use the destination step's saved defaults. Choose **Move with options** in the workflow stepper, Chat status bar, or passthrough toolbar when one move needs an exception. The options apply to that entry only.
 
-| Option | Effect |
-| --- | --- |
-| **Reset context** | Adds a reset. It cannot remove a reset required by the destination step. |
-| **Instructions** | Adds one instruction block after the destination prompt. |
+| Option               | Effect                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Reset context**    | Adds a reset. It cannot remove a reset required by the destination step.                                                       |
+| **Instructions**     | Adds one instruction block after the destination prompt.                                                                       |
 | **Skip step prompt** | Suppresses the destination prompt and task-description fallback. Without instructions, the task moves without starting a turn. |
 
 For a keyboard move, press `Cmd/Ctrl+K`, search for **Move to**, and select a destination. Press `Cmd/Ctrl+Enter` to move with defaults, or `Enter` to open options. A failed move keeps your instructions so you can retry. On touch devices, move options open in a bottom drawer.
@@ -171,11 +171,11 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 2. **Choose a workspace and workflow.** Kandev can infer them from the current view. A regular task must belong to a workflow. Use the arrow between the workflow and step names to see where each start action places the task.
 3. **Choose a source:**
 
-   | Source | Use it for | Notes |
-   | --- | --- | --- |
-   | **Repo** | A configured, discovered, or new local repository | Choose a branch or [branch policy](#branch-policies). Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
-   | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable. |
+   | Source     | Use it for                                        | Notes                                                                                                                                                                                                                                        |
+   | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | **Repo**   | A configured, discovered, or new local repository | Choose a branch or [branch policy](#branch-policies). Add more rows for a multi-repository task.                                                                                                                                             |
+   | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
+   | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
 4. **Choose an executor and agent profile.** Both profiles must be compatible. A workflow default agent profile locks the task-level selector.
 5. **Add a description when needed.** Use the eye button beside **Enhance prompt with AI** to preview a step's prompt template. The preview does not resolve task IDs or saved-prompt references until the task exists.
@@ -224,10 +224,10 @@ Manage named branch policies in **Settings → Workspaces → _workspace_ → Re
 stores a base branch, a branch-name template, and a pull-request target for one repository. The
 task picker shows policies before raw branches.
 
-| Choice | Result |
-| --- | --- |
+| Choice            | Result                                                                                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Branch policy** | Starts a fresh branch from the saved base and applies its branch-name template. The saved pull-request target is the merge destination; open the information icon to review the values. |
-| **Raw branch** | Continues to open the existing branch. |
+| **Raw branch**    | Continues to open the existing branch.                                                                                                                                                  |
 
 When you create a task, Kandev saves the selected policy values on the task repository. Later edits
 or deletion of the policy do not change the task. Kandev's pull-request dialog uses the saved target
@@ -281,9 +281,9 @@ tool. Config and Office sessions never receive the title tool.
 
 Open **Settings → Preferences → Task Behavior → Tasks → Profile for Tasks Created by Agents** to choose the fallback profile for new tasks and subtasks created by `create_task_kandev` without `agent_profile_id`. The choice also affects the first session's model, mode, and dynamic options.
 
-| Preference | Profile and session behavior |
-| --- | --- |
-| **Creating session profile** | Uses the verified caller session's profile and current model, mode, and dynamic options. A workflow launch profile takes priority. This can reuse a more expensive setup. |
+| Preference                    | Profile and session behavior                                                                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Creating session profile**  | Uses the verified caller session's profile and current model, mode, and dynamic options. A workflow launch profile takes priority. This can reuse a more expensive setup.                                                                                     |
 | **Workspace default profile** | Uses the workflow launch profile, then the target workspace's **Default Agent Profile**. Skips caller, source, parent, and current-task profiles. Does not copy the caller's model, mode, or dynamic options. Creation fails if neither profile is available. |
 
 Select an option, then choose **Save changes**. Workflow-selected profiles always win when the new task lands on a workflow step. Away from a workflow step, an explicit `agent_profile_id` wins and prevents creator-session runtime inheritance. The only affected Kandev MCP tool is `create_task_kandev`. `spawn_session_kandev` adds a session to the current task, so it does not use this preference. Tasks you create in the UI are not affected.
@@ -443,10 +443,10 @@ agentctl-managed workspace processes, so save unsaved work and restart those pro
 Local Docker, Kubernetes, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
 without restarting the agent or changing its CWD.
 
-| Source | Supported use |
-| --- | --- |
+| Source         | Supported use                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Repository** | Worktree, Local/Local PC, Local Docker, Kubernetes, SSH, or Sprites. Appears in Files and repository-aware Changes, branch, editor, and pull-request surfaces. |
-| **Folder** | Local/Local PC or Worktree only. A live host path that appears in Files only. |
+| **Folder**     | Local/Local PC or Worktree only. A live host path that appears in Files only.                                                                                  |
 
 Local Git repositories need a cloneable origin on Local Docker, Kubernetes, SSH, and Sprites. Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 
@@ -454,7 +454,7 @@ Local Git repositories need a cloneable origin on Local Docker, Kubernetes, SSH,
 
 The task prompt supports image, audio, and resource attachments. Kandev accepts at most 10 files per submission, with a 100 MiB raw limit per file and a 100 MiB raw aggregate limit. Files are uploaded over authenticated HTTP before the task or message is submitted, so the task-create JSON and WebSocket frames carry attachment descriptors rather than base64 file contents. An upload that is still in progress or has failed must finish or be retried before the prompt can be sent. Removing a staged attachment discards its private upload; unclaimed uploads expire automatically after 24 hours. This prompt-attachment limit does not change the separate 10 MB task-document upload contract.
 
-Task-session chat uploads files to the task's workspace. It also works when you open a task from Office before a Kanban board loads. If Kandev cannot find the workspace, the draft keeps the files and text. Kandev blocks sending while a file has no upload descriptor. You can retry the workspace lookup. You can still send plain text. Office comments use a separate API. This change does not add file attachments to comments. Office run transcripts remain read-only.
+Task-session chat uploads files to the task's workspace. It also works when you open a task from Office before a Kanban board loads. If Kandev cannot find the workspace, the draft keeps the files and text. Kandev blocks message and plan implementation actions while an attachment has no upload descriptor. You can retry the workspace lookup. You can still send plain text. A restored attachment is uploaded before use when its bytes can be recovered; remove and reattach it if they cannot. Office comments use a separate API. This change does not add file attachments to comments. Office run transcripts remain read-only.
 
 During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
@@ -680,10 +680,10 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 
 Workflow WIP limits and the instance-wide session limit control different things:
 
-| Limit | Scope and effect |
-| --- | --- |
-| **WIP limit** | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
-| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later. |
+| Limit             | Scope and effect                                                                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
+| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later.                                                                  |
 
 The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
 
@@ -729,7 +729,7 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
    - **Send** includes visible comments in a message to the selected session.
    - **Run** sends only that comment in plan mode to the task's primary session.
    - After Kandev accepts either action, it removes the delivered comments from the plan and every composer.
-6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the draft and marks it as sent for implementation. The button is then disabled for that plan.
+6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the draft and marks it as sent for implementation. The action stays disabled while a composer attachment is uploading or failed. After implementation starts, the button is disabled for that plan.
 
 Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
 text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
@@ -818,15 +818,15 @@ to review an action and return to your list.
 - While the request is pending, the task stays visible with a spinner and an **Archiving in progress** toast. On failure, it returns to its normal state.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
-| Executor      | Archive cleanup                                                                                                                                                                                                       |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
+| Executor      | Archive cleanup                                                                                                                                                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                                                    |
 | Git worktree  | Attempts to remove the Kandev-owned worktree directory. It removes a managed local branch only when its exact head is already integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
-| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                               |
-| Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
-| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
-| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
+| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                                                      |
+| Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                                                    |
+| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                                                    |
+| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                                                      |
+| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                                         |
 
 The archive confirmation is on by default in **Settings → Preferences → Task Behavior → Tasks → Archiving**.
 
