@@ -28,6 +28,7 @@ type DeliveryLedger interface {
 	ClaimDueDeliveries(ctx context.Context, now time.Time, leaseOwner string, leaseDuration time.Duration, limit int) ([]Delivery, error)
 	RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner string, nextAttemptAt time.Time, lastError string) (*Delivery, error)
 	MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error)
+	DeleteTerminalDeliveryQueueEntry(ctx context.Context, deliveryID, sessionID, queueEntryID string) error
 	AcknowledgeDelivery(ctx context.Context, deliveryID, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
 	AcknowledgeDeliveryByQueueEntry(ctx context.Context, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
 	MarkDeliveryAmbiguousByQueueEntry(ctx context.Context, queueEntryID, lastError string) (*Delivery, error)
@@ -491,6 +492,25 @@ func (r *sqliteRepository) MarkDeliveryQueued(ctx context.Context, deliveryID, l
 		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryQueued), 1)
 	}
 	return stored, err
+}
+
+// DeleteTerminalDeliveryQueueEntry removes an admission row only when its
+// receipt can no longer be claimed. The state check and deletion share one SQL
+// statement so a successor's queued acknowledgement cannot lose its FIFO row.
+func (r *sqliteRepository) DeleteTerminalDeliveryQueueEntry(ctx context.Context, deliveryID, sessionID, queueEntryID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ?
+		  AND EXISTS (
+			SELECT 1 FROM message_deliveries
+			WHERE id = ? AND target_session_id = ? AND state IN (?, ?, ?)
+		  )
+	`), queueEntryID, sessionID, deliveryID, sessionID,
+		DeliveryCancelled, DeliveryTerminalFailed, DeliveryAmbiguous)
+	if err != nil {
+		return fmt.Errorf("delete terminal delivery queue entry: %w", err)
+	}
+	return nil
 }
 
 // AcknowledgeDelivery marks the receipt terminal only after the queue entry

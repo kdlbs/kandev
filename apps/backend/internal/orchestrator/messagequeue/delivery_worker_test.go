@@ -19,6 +19,23 @@ type failingDeliveryQueueAcknowledgementRepository struct {
 	failDispatchAcknowledgement bool
 }
 
+type pausedDeliveryAcknowledgementRepository struct {
+	Repository
+	DeliveryLedger
+	firstWorkerAtAcknowledgement chan struct{}
+	resumeFirstWorker            chan struct{}
+}
+
+func (r *pausedDeliveryAcknowledgementRepository) MarkDeliveryQueued(
+	ctx context.Context, deliveryID, leaseOwner, queueEntryID string,
+) (*Delivery, error) {
+	if leaseOwner == "worker-a" {
+		close(r.firstWorkerAtAcknowledgement)
+		<-r.resumeFirstWorker
+	}
+	return r.DeliveryLedger.MarkDeliveryQueued(ctx, deliveryID, leaseOwner, queueEntryID)
+}
+
 func seedDeliveryTarget(t *testing.T, repo Repository) {
 	t.Helper()
 	seedQueueSessionIdentity(t, repo, QueueSessionIdentity{
@@ -154,14 +171,89 @@ func TestProcessDueDeliveriesNotifiesOnQueuePromotion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryQueued, stored.State)
 
-	// A stale worker cannot reacquire this receipt with worker-b. The failed
-	// acknowledgement must remove its FIFO row and suppress notification rather
-	// than dispatching a cancelled or lease-lost delivery.
+	// A stale worker cannot reacquire this receipt with worker-b. Its failed
+	// acknowledgement must retain the successor's accepted row.
 	service.processClaimedDelivery(ctx, ledger, *stored, "worker-b", now)
 	assert.Equal(t, []string{"target-session"}, notified)
 	entries, err := repo.ListBySession(ctx, "target-session")
 	require.NoError(t, err)
-	assert.Empty(t, entries, "a lease-lost receipt must not remain dispatchable")
+	require.Len(t, entries, 1)
+	assert.Equal(t, stored.QueueEntryID, entries[0].ID)
+}
+
+func TestProcessDueDeliveriesLeaseLoserRetainsSuccessorAcknowledgedEntry(t *testing.T) {
+	baseRepo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, baseRepo)
+	ledger := baseRepo.(DeliveryLedger)
+	repo := &pausedDeliveryAcknowledgementRepository{
+		Repository: baseRepo, DeliveryLedger: ledger,
+		firstWorkerAtAcknowledgement: make(chan struct{}), resumeFirstWorker: make(chan struct{}),
+	}
+	service := NewService(repo, 2, logger.Default())
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "lease-handoff-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "retain successor row", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, processErr := service.ProcessDueDeliveries(ctx, now, "worker-a")
+		firstDone <- processErr
+	}()
+	<-repo.firstWorkerAtAcknowledgement
+	processed, err := service.ProcessDueDeliveries(ctx, now.Add(defaultDeliveryLease), "worker-b")
+	close(repo.resumeFirstWorker)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	require.Equal(t, DeliveryQueued, stored.State)
+	entries, err := baseRepo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "the acknowledged receipt must retain its only FIFO row")
+	assert.Equal(t, stored.QueueEntryID, entries[0].ID)
+	reserved, ok := service.ReserveQueued(ctx, "target-session")
+	require.True(t, ok)
+	require.NoError(t, service.AcknowledgeQueued(ctx, reserved))
+	stored, err = ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, stored.State)
+}
+
+func TestDeleteTerminalDeliveryQueueEntryPreservesActiveAndRemovesTerminal(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	seedDeliveryTarget(t, repo)
+	ledger := repo.(DeliveryLedger)
+	service := NewService(repo, 2, logger.Default())
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "terminal-cleanup-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "one queue row", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+	_, err = service.ProcessDueDeliveries(ctx, now, "worker-a")
+	require.NoError(t, err)
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	require.NoError(t, ledger.DeleteTerminalDeliveryQueueEntry(ctx, delivery.ID, "target-session", stored.QueueEntryID))
+	entries, err := repo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+
+	_, err = ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, stored.QueueEntryID, "acceptance_uncertain")
+	require.NoError(t, err)
+	require.NoError(t, ledger.DeleteTerminalDeliveryQueueEntry(ctx, delivery.ID, "target-session", stored.QueueEntryID))
+	entries, err = repo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 func TestAcceptedQueuedDeliveryDoesNotReplayAfterRestart(t *testing.T) {
@@ -231,7 +323,7 @@ func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure
 
 	entries, err := baseRepo.ListBySession(ctx, "target-session")
 	require.NoError(t, err)
-	assert.Empty(t, entries, "a lost delivery lease must not leave a FIFO entry")
+	require.Len(t, entries, 1, "the next claimant must be able to reuse the admission row")
 
 	repo.failQueueAcknowledgement = false
 	processed, err = service.ProcessDueDeliveries(ctx, stored.LeaseExpiresAt, "worker-b")

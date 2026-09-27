@@ -419,6 +419,16 @@ func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
 	rollbackEntries, err := repo.ListBySession(ctx, rollbackEntry.SessionID)
 	require.NoError(t, err)
 	require.Len(t, rollbackEntries, 1)
+	require.NoError(t, ledger.DeleteTerminalDeliveryQueueEntry(ctx, rollback.ID, rollbackEntry.SessionID, rollbackEntry.ID))
+	rollbackEntries, err = repo.ListBySession(ctx, rollbackEntry.SessionID)
+	require.NoError(t, err)
+	require.Len(t, rollbackEntries, 1)
+	_, err = ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, rollbackEntry.ID, "acceptance_uncertain")
+	require.NoError(t, err)
+	require.NoError(t, ledger.DeleteTerminalDeliveryQueueEntry(ctx, rollback.ID, rollbackEntry.SessionID, rollbackEntry.ID))
+	rollbackEntries, err = repo.ListBySession(ctx, rollbackEntry.SessionID)
+	require.NoError(t, err)
+	assert.Empty(t, rollbackEntries)
 
 	// A concurrent expired-lease claim and FIFO acknowledgement may race on a
 	// restarted worker. PostgreSQL must leave exactly one durable outcome: a
