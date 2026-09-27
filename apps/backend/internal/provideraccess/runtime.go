@@ -74,6 +74,13 @@ func (r *Runtime) Redeem(ctx context.Context, leaseID string) (github.Installati
 	if err != nil {
 		return github.InstallationToken{}, err
 	}
+	permissions := github.InstallationPermissions{
+		"actions": github.PermissionWrite, "pull_requests": github.PermissionRead,
+		"metadata": github.PermissionRead,
+	}
+	if !validRerunToken(token, first.InstallationID, first.CanonicalRepository, permissions) {
+		return github.InstallationToken{}, r.revokeUnexported(ctx, token.Token, ErrProviderTokenScope)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, verifyErr := r.authority.VerifyLease(ctx, leaseID)

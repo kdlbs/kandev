@@ -34,6 +34,7 @@ type fakeRerunTokens struct {
 	revocations int
 	revokeErr   error
 	onMint      func()
+	overbroad   bool
 }
 
 func (f *fakeRerunTokens) Mint(_ context.Context, _ int64, _ string) (github.InstallationToken, error) {
@@ -44,9 +45,18 @@ func (f *fakeRerunTokens) Mint(_ context.Context, _ int64, _ string) (github.Ins
 	if onMint != nil {
 		onMint()
 	}
-	return github.InstallationToken{Token: "fake-secret",
+	token := github.InstallationToken{Token: "fake-secret",
 		ExpiresAt: time.Now().Add(45 * time.Minute),
-		Principal: github.TokenPrincipal{PrincipalID: "installation:42", InstallationID: 42}}, nil
+		Principal: github.TokenPrincipal{PrincipalID: "installation:42", InstallationID: 42},
+		Permissions: github.InstallationPermissions{
+			"actions": github.PermissionWrite, "pull_requests": github.PermissionRead,
+			"metadata": github.PermissionRead,
+		},
+		Repositories: []github.InstallationTokenRepository{{FullName: "repo-1"}}}
+	if f.overbroad {
+		token.Permissions["contents"] = github.PermissionWrite
+	}
+	return token, nil
 }
 
 func (f *fakeRerunTokens) Revoke(_ context.Context, _ string) error {
@@ -114,6 +124,20 @@ func TestRuntimeDeniesDriftAndRevokesUnexportedToken(t *testing.T) {
 	if state, err := store.ExposureStateAt(context.Background(), lease.ID, time.Now()); err != nil ||
 		state != ExposureUnknown {
 		t.Fatalf("drift exposure = %s, err = %v", state, err)
+	}
+}
+
+func TestRuntimeRejectsOverbroadTokenFromInjectedSource(t *testing.T) {
+	runtime, store, _, tokens, _, lease := newRuntimeTestFixture(t)
+	tokens.overbroad = true
+	if token, err := runtime.Redeem(context.Background(), lease.ID); !errors.Is(err, ErrProviderTokenScope) ||
+		token.Token != "" || tokens.revocations != 1 {
+		t.Fatalf("overbroad runtime token = %+v, err = %v, revocations = %d",
+			token, err, tokens.revocations)
+	}
+	if state, err := store.ExposureStateAt(context.Background(), lease.ID, time.Now()); err != nil ||
+		state != ExposureUnknown {
+		t.Fatalf("overbroad exposure = %s, err = %v", state, err)
 	}
 }
 
