@@ -157,9 +157,11 @@ func TestHandoffUnarchiveTaskTree_ManualRoot_ClearsOrphanMarkerOnChildren(t *tes
 		t.Fatalf("CreateTask(child): %v", err)
 	}
 
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	if err := svc.ArchiveTask(ctx, parentID); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
+	waitForCleanupDone(t, svc)
 	child, err := repo.GetTask(ctx, childID)
 	if err != nil {
 		t.Fatalf("GetTask(child) after archive: %v", err)
