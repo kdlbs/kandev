@@ -284,9 +284,9 @@ starts once, and is gone when that session is gone.
 
 Each exclusion below is a deliberate contract boundary, not an oversight.
 
-- **Reconnecting a session whose transport was lost.** Teardown ends the
-  transport and does not re-dial, re-forward, or re-attach. The SSH executor is
-  resumable, so a later resume re-establishes the connection.
+- **Reconnecting a session whose transport was lost.** Teardown does not
+  re-dial. [Detached agent continuity](../../platform/requirements/detached-agent-continuity.md)
+  owns reconnection.
 - **Task, session, and agent state transitions.** This capability does not fail,
   retry, restart, or re-queue the agent's work. It closes the transport; existing
   disconnect handling decides what the user sees.
