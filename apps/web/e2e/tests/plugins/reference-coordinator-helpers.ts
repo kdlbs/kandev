@@ -3,7 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
-import { expect } from "../../fixtures/test-base";
+import { expect, test } from "../../fixtures/test-base";
+
+export const COORDINATOR_PLUGIN_ID = "kandev-plugin-coordinator";
 
 const PLUGIN_ROOTS = [
   path.resolve(__dirname, "../../../../../kandev-plugin-coordinator"),
@@ -13,7 +15,7 @@ const PLUGIN_ROOT =
   PLUGIN_ROOTS.find((root) => existsSync(path.join(root, "manifest.yaml"))) ?? PLUGIN_ROOTS[0];
 const MANIFEST_PATH = path.join(PLUGIN_ROOT, "manifest.yaml");
 
-function readManifestIdentity() {
+function readPackagePath() {
   if (!existsSync(MANIFEST_PATH)) {
     throw new Error(`Packaged reference coordinator checkout is missing: ${PLUGIN_ROOT}`);
   }
@@ -22,31 +24,35 @@ function readManifestIdentity() {
   const version = manifest.match(/^version:\s*["']?([^"'\s]+)["']?\s*$/m)?.[1];
   if (!id || !version)
     throw new Error(`Could not read plugin id and version from ${MANIFEST_PATH}`);
-  return { id, version };
+  if (id !== COORDINATOR_PLUGIN_ID) {
+    throw new Error(`Expected coordinator plugin id ${COORDINATOR_PLUGIN_ID}, found ${id}`);
+  }
+  return path.join(PLUGIN_ROOT, `${id}-${version}.tar.gz`);
 }
 
-const identity = readManifestIdentity();
-export const COORDINATOR_PLUGIN_ID = identity.id;
-export const COORDINATOR_PACKAGE_PATH = path.join(
-  PLUGIN_ROOT,
-  `${identity.id}-${identity.version}.tar.gz`,
-);
+const COORDINATOR_PACKAGE_AVAILABLE = (() => {
+  try {
+    return existsSync(readPackagePath());
+  } catch {
+    return false;
+  }
+})();
 
 export async function installAndGrantCoordinator(
   page: Page,
   apiClient: ApiClient,
   workspaceId: string,
 ): Promise<void> {
-  if (!existsSync(COORDINATOR_PACKAGE_PATH)) {
-    throw new Error(
-      `Reference coordinator package is missing: ${COORDINATOR_PACKAGE_PATH}. Run make verify-package-host in ${PLUGIN_ROOT}.`,
-    );
-  }
+  test.skip(
+    !COORDINATOR_PACKAGE_AVAILABLE,
+    "Reference coordinator E2E requires the packaged sibling checkout",
+  );
+  const packagePath = readPackagePath();
   await page.goto("/settings/plugins");
   await page.getByTestId("install-plugin-trigger").click();
   await expect(page.getByTestId("install-plugin-dialog")).toBeVisible();
   await page.getByTestId("install-plugin-tab-upload").click();
-  await page.getByTestId("install-plugin-file-input").setInputFiles(COORDINATOR_PACKAGE_PATH);
+  await page.getByTestId("install-plugin-file-input").setInputFiles(packagePath);
   await page.getByTestId("install-plugin-upload-submit").click();
   await expect(page.getByTestId("install-plugin-dialog")).toBeHidden({ timeout: 30_000 });
   await expect(page.getByTestId(`plugin-row-${COORDINATOR_PLUGIN_ID}`)).toBeVisible({

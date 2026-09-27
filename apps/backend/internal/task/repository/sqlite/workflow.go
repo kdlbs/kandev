@@ -481,7 +481,7 @@ func (r *Repository) ReorderWorkflowsIfUnchanged(
 	for position, id := range workflowIDs {
 		result, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE workflows SET sort_order = ?, updated_at = ?
-			WHERE id = ? AND workspace_id = ? AND updated_at = ? AND hidden = 0
+			WHERE id = ? AND workspace_id = ? AND updated_at = ? AND hidden = FALSE
 				AND (source = '' OR source = 'manual')
 				AND EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
 		`), position, now, id, workspaceID, expectedByID[id], workspaceID, expectedWorkspace)

@@ -100,7 +100,7 @@ describe("TaskArchiveConfirmDialog presentation", () => {
     expect(screen.getByTestId("task-confirmation-body").className).toContain("min-h-0");
     expect(screen.getByTestId("task-confirmation-body").className).toContain("space-y-3");
     expect(screen.getByTestId("task-confirmation-body").className).toContain("overflow-y-auto");
-    expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).className).toContain("min-h-11");
+    expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).className).toContain("min-h-[44px]");
     expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).className).toContain("w-full");
     expect(screen.getByTestId(ARCHIVE_CONFIRM_TEST_ID).getAttribute("data-variant")).toBe(
       "default",
