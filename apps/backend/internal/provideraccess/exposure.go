@@ -126,7 +126,9 @@ func (s *Store) recordExposureReceipt(ctx context.Context, receipt ExposureRecei
   FROM provider_access_leases l JOIN provider_access_grants g ON g.id = l.grant_id
   WHERE l.id = ? AND l.grant_id = ? AND g.provider = ? AND g.repository_id = ?
   AND l.revoked_at IS NULL AND l.expires_at > ? AND g.revoked_at IS NULL
-  AND g.expires_at > ? AND g.generation = l.grant_generation`),
+  AND g.expires_at > ? AND g.generation = l.grant_generation
+  AND EXISTS (SELECT 1 FROM provider_access_redemptions r
+    WHERE r.lease_id = l.id AND r.grant_id = g.id)`),
 		receipt.ProviderPrincipalID, receipt.PermissionProfile,
 		receipt.ProviderExpiresAt.Unix(), now.Unix(), receipt.LeaseID,
 		receipt.GrantID, receipt.Provider, receipt.RepositoryID, now.Unix(), now.Unix())

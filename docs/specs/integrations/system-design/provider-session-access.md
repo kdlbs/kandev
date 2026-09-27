@@ -22,8 +22,9 @@ supplies connection-bound installation identity and workspace capability
 approval; the [Git credential broker](../../../decisions/2026-07-31-provider-neutral-git-credential-broker.md)
 is a pattern for exact scope and revocation, not an API-token transport.
 The [threat model](../../../plans/provider-session-access/threat-model.md)
-records the exported-bearer risk. Credential issuance and redemption remain
-disabled until the Coordinator records a Human security decision.
+records the exported-bearer risk. The Human selected the uncached one-repository
+GitHub App token boundary on 2026-09-27; credential delivery remains disabled
+until the Host and plugin integration gates pass.
 
 | Contract | Design sections |
 | --- | --- |

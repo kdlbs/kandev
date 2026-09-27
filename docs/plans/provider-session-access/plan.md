@@ -101,18 +101,16 @@ end-to-end replacement remain unimplemented.
 - The Coordinator plugin currently has no admitted integration implementation
   owner or branch. Host completion alone cannot satisfy AC-001.8.
 - Current GitLab workspace PATs cannot satisfy the temporary scoped grant.
-- Provider token issuance is disabled while the Human decides whether a
-  repository-wide Actions token that can outlive Host revocation failure is
-  acceptable to deliver to trusted plugin code.
+- The Human selected the uncached one-repository GitHub App token on
+  2026-09-27. Live issuance remains disabled until implementation, review,
+  QA, current-head CI, and plugin integration gates pass.
 - A generic origin-only egress policy cannot enforce one PR/run after bearer
   export. A TLS-terminating gateway with exact request/live-state checks
   becomes a provider-operation intermediary; see the threat model.
 
 ## Open questions
 
-- Human security decision, routed by the Coordinator, on whether the bounded
-  GitHub bearer window under uncached minting/provider revocation fits the
-  approved direct-access direction. Until recorded, do not enable redemption
-  or publish a plugin adapter that can obtain the token.
+- Option A is recorded; keep live redemption disabled until the complete Host
+  and plugin security contract is reviewed and verified.
 - Plugin program owner admission and minimum SDK/Host version for the
   `provider-access/v1` adapter.

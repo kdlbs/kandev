@@ -1,7 +1,8 @@
 # Provider session access threat model
 
-Status: proposed, credential issuance disabled. This analysis does not approve
-production redemption. It covers one managed Coordinator plugin session
+Status: Option A selected by the Human on 2026-09-27; production credential
+delivery remains disabled pending implementation and verification. This covers
+one managed Coordinator plugin session
 recovering a failed GitHub Actions run on one linked pull request.
 
 ## Authority and exact scope
@@ -84,9 +85,9 @@ per-plugin network namespace and egress interception that could close this
 gap without a new runtime security boundary. Therefore egress controls may
 reduce destinations, but cannot be claimed as PR/run enforcement here.
 
-## Human decision required
+## Human decision and remaining delivery gates
 
-Option A: explicitly trust the reviewed plugin as a temporary one-repository
+Option A (selected): explicitly trust the reviewed plugin as a temporary one-repository
 Actions-write principal, accept that an exported bearer can outlive lease
 revocation failure or Host crash for up to GitHub's provider lifetime, and
 enable the uncached Host redemption path only after independent security
@@ -100,6 +101,6 @@ The plugin program must review its permissions, installation ownership,
 revocation and audit independently. Neither option makes GitLab's current
 workspace PAT eligible.
 
-The Coordinator routes this trust-boundary choice to the Human. Until it is
-recorded, no live mint, redemption, token transport, provider mutation,
-plugin admission, or ready-for-review transition is authorized by this plan.
+The Human selected Option A. Live mint, redemption, token transport, provider
+mutation, plugin admission, and ready-for-review transition still require
+their own complete implementation and verification gates.

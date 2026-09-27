@@ -1,6 +1,6 @@
 # ADR-2026-09-26-plugin-direct-provider-access: Scoped direct provider access for managed plugin sessions
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-09-26
 **Area:** backend, protocol, security, integrations
 
@@ -23,11 +23,14 @@ write authority.
 
 ## Decision
 
-The direct-call ownership direction is Human-approved. The credential handoff
-described below is a proposal and must remain disabled until the Human accepts
-the residual GitHub bearer window described in Consequences. The concrete
-[threat model](../plans/provider-session-access/threat-model.md) is part of
-that review; it does not make the handoff approved.
+The Human approved Option A on 2026-09-27: a reviewed Coordinator plugin may
+receive a fresh, uncached, one-repository GitHub App installation token with
+the minimum permissions described below. The Human accepted the residual
+GitHub bearer window after failed provider revocation or Host crash. This
+decision authorizes implementation; production credential delivery remains
+subject to complete Host/plugin verification and normal review and rollout.
+The concrete [threat model](../plans/provider-session-access/threat-model.md)
+records that residual.
 
 Kandev owns a versioned, provider-neutral `provider-access/v1` Host contract
 for an administrator-approved grant, an opaque short-lived lease, credential
@@ -101,10 +104,10 @@ must be removed or superseded before the replacement is ready.
   checking exact path/body and live PR/run identity becomes a provider-action
   intermediary, recreating the proxy boundary under a different name.
 
-## Decision gate
+## Delivery gate
 
-The Human must explicitly choose whether this temporary repository-wide
-Actions-write exposure is acceptable for a reviewed plugin or whether the
-plugin must own a separate App credential lifecycle. Until then issuance,
-redemption and plugin admission remain disabled. Neither choice makes a
-GitHub token cryptographically PR/run scoped.
+Option A is the selected trust boundary. Credential delivery remains disabled
+until exact-session Host admission, provider revocation, plugin-side target
+checks, independent review, QA, and current-head CI pass. The lease does not
+make a GitHub token cryptographically PR/run scoped. GitLab workspace PATs
+remain ineligible.

@@ -91,6 +91,8 @@ func NewStore(db *sqlx.DB) (*Store, error) {
 		return nil, errors.New("provider access database is required")
 	}
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS provider_access_workspace_fences (
+   workspace_id TEXT PRIMARY KEY, fenced_at BIGINT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS provider_access_grants (
    id TEXT PRIMARY KEY, scope_key TEXT NOT NULL,
    plugin_installation_id TEXT NOT NULL, plugin_id TEXT NOT NULL,
@@ -133,6 +135,10 @@ func NewStore(db *sqlx.DB) (*Store, error) {
    FOREIGN KEY(lease_id) REFERENCES provider_access_leases(id))`,
 		`CREATE INDEX IF NOT EXISTS provider_access_exposures_expiry
    ON provider_access_exposures(provider_expires_at)`,
+		`CREATE TABLE IF NOT EXISTS provider_access_redemptions (
+   lease_id TEXT PRIMARY KEY, grant_id TEXT NOT NULL,
+   mint_started_at BIGINT NOT NULL, possible_provider_expiry BIGINT NOT NULL,
+   FOREIGN KEY(lease_id) REFERENCES provider_access_leases(id))`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
@@ -156,6 +162,9 @@ func (s *Store) ReplaceGrant(ctx context.Context, grant *Grant) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := checkWorkspaceFence(ctx, tx, s.db.DriverName(), grant.WorkspaceID); err != nil {
+		return err
+	}
 	if dialect.IsPostgres(s.db.DriverName()) {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "provider-access-grant:"+key); err != nil {
 			return err
@@ -188,6 +197,39 @@ func (s *Store) ReplaceGrant(ctx context.Context, grant *Grant) error {
 	}
 	grant.CreatedAt, grant.UpdatedAt = now, now
 	return nil
+}
+
+func checkWorkspaceFence(ctx context.Context, tx *sqlx.Tx, driverName, workspaceID string) error {
+	if err := lockWorkspace(ctx, tx, driverName, workspaceID); err != nil {
+		return err
+	}
+	if !dialect.IsPostgres(driverName) {
+		// Acquire SQLite's writer slot before reading the workspace fence.
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_workspace_fences
+  SET fenced_at = fenced_at WHERE workspace_id = ?`), workspaceID); err != nil {
+			return err
+		}
+	}
+	var fencedAt int64
+	err := tx.GetContext(ctx, &fencedAt, tx.Rebind(`SELECT fenced_at
+  FROM provider_access_workspace_fences WHERE workspace_id = ?`), workspaceID)
+	if err == nil {
+		return ErrGrantUnavailable
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
+}
+
+func lockWorkspace(ctx context.Context, tx *sqlx.Tx, driverName, workspaceID string) error {
+	if !dialect.IsPostgres(driverName) {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"provider-access-workspace:"+workspaceID)
+	return err
 }
 
 func validateGrant(grant *Grant) error {

@@ -26,6 +26,7 @@ func TestPostgresExposureAdmissionWaitsForGrantRevocationLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimTestMint(t, store, grant, lease)
 	receipt := testExposureReceipt(grant, lease)
 	holder, err := store.db.BeginTxx(ctx, nil)
 	if err != nil {

@@ -26,9 +26,9 @@ Add the optional versioned Host RPC/SDK contract and bind redemption to the
 grant, active session, linked PR head and provider connection. Mint and revoke
 a distinct one-repository GitHub App token per redeemed lease.
 
-Credential mint/export is held behind the Human security decision documented
-in [the threat model](threat-model.md). This work order is not authorized to
-enable redemption merely because its Host protocol compiles.
+The Human selected Option A on 2026-09-27. This authorizes implementation
+with fake provider fixtures; live token export still requires independent
+review, QA, current-head CI, and plugin integration admission.
 
 ## In scope
 

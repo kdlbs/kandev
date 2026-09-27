@@ -27,6 +27,13 @@ func testExposureReceipt(grant Grant, lease *Lease) ExposureReceipt {
 	}
 }
 
+func claimTestMint(t *testing.T, store *Store, grant Grant, lease *Lease) {
+	t.Helper()
+	if _, err := store.ClaimMintIntent(context.Background(), testMintClaim(grant, lease)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExportedBearerRemainsResidualAfterLeaseExpiryAndFailedRevoke(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "provider-access.db")
 	open := func() (*sqlx.DB, *Store) {
@@ -53,6 +60,7 @@ func TestExportedBearerRemainsResidualAfterLeaseExpiryAndFailedRevoke(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimTestMint(t, store, grant, lease)
 	providerExpiry := time.Now().UTC().Add(45 * time.Minute)
 	receipt := testExposureReceipt(grant, lease)
 	receipt.ProviderExpiresAt = providerExpiry
@@ -91,6 +99,7 @@ func TestConfirmedProviderRevocationEndsExposure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimTestMint(t, store, grant, lease)
 	if err := store.RecordExposureOrRevoke(ctx, testExposureReceipt(grant, lease), func(context.Context) error {
 		t.Fatal("successful admission revoked its token")
 		return nil
@@ -117,6 +126,7 @@ func TestExposureAdmissionFailureRevokesUnexportedToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimTestMint(t, store, grant, lease)
 	if err := store.RevokeGrant(ctx, grant.WorkspaceID, grant.ID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +163,7 @@ func TestDuplicateExposureAdmissionRevokesSecondToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimTestMint(t, store, grant, lease)
 	receipt := testExposureReceipt(grant, lease)
 	if err := store.RecordExposureOrRevoke(ctx, receipt, func(context.Context) error {
 		t.Fatal("first token was revoked")
@@ -195,6 +206,7 @@ func TestFinalExposureRejectsStaleExpectedLeaseIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			claimTestMint(t, store, grant, lease)
 			receipt := testExposureReceipt(grant, lease)
 			test.mutate(&receipt)
 			revocations := 0
