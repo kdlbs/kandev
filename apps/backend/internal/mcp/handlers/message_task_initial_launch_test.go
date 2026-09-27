@@ -287,6 +287,7 @@ func TestPeerMessageInitialLaunch_QueuesBeforeWorkflowTurnPreparation(t *testing
 	require.NoError(t, err)
 	taskBefore, err := taskSvc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
+	assert.Equal(t, "step-b", taskBefore.WorkflowStepID, "initial launch should own only the first on_turn_start transition")
 	stepReadsBefore := steps.reads.Load()
 
 	h := &Handlers{
