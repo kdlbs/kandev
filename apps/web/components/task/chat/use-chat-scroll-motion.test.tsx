@@ -104,3 +104,55 @@ it("keeps a bottom-following transcript current after delayed content resize wit
   hook.unmount();
   expect(disconnected).toBe(true);
 });
+
+it("only pauses following for input that moves toward earlier transcript content", () => {
+  const el = document.createElement("div");
+  Object.defineProperties(el, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 200 },
+    scrollTop: { configurable: true, value: 800 },
+  });
+  const isNearBottomRef = { current: true };
+  const { unmount } = renderHook(useChatScrollMotion, {
+    initialProps: {
+      scrollRef: { current: el },
+      motionEnabled: false,
+      enabled: true,
+      isVisible: true,
+      sessionId: "s",
+      isNearBottomRef,
+      isBlocked: () => false,
+      instant: vi.fn(),
+    },
+  });
+
+  el.dispatchEvent(new WheelEvent("wheel", { deltaY: 120 }));
+  el.dispatchEvent(new WheelEvent("wheel", { deltaY: 0 }));
+  const zoomWheel = new WheelEvent("wheel", { deltaY: -120, ctrlKey: true });
+  Object.defineProperty(zoomWheel, "ctrlKey", { value: true });
+  el.dispatchEvent(zoomWheel);
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
+  expect(isNearBottomRef.current).toBe(true);
+  const touchStart = new Event("touchstart");
+  Object.defineProperty(touchStart, "touches", { value: [{ clientY: 100 }] });
+  el.dispatchEvent(touchStart);
+  const touchMoveDown = new Event("touchmove");
+  Object.defineProperty(touchMoveDown, "touches", { value: [{ clientY: 80 }] });
+  el.dispatchEvent(touchMoveDown);
+
+  expect(isNearBottomRef.current).toBe(true);
+
+  const touchEnd = new Event("touchend");
+  Object.defineProperty(touchEnd, "touches", { value: [] });
+  el.dispatchEvent(touchEnd);
+  const touchStartAgain = new Event("touchstart");
+  Object.defineProperty(touchStartAgain, "touches", { value: [{ clientY: 100 }] });
+  el.dispatchEvent(touchStartAgain);
+  const touchMoveUp = new Event("touchmove");
+  Object.defineProperty(touchMoveUp, "touches", { value: [{ clientY: 112 }] });
+  el.dispatchEvent(touchMoveUp);
+
+  expect(isNearBottomRef.current).toBe(false);
+  unmount();
+});

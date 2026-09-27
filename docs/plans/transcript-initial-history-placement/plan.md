@@ -238,6 +238,33 @@ Targeted ESLint passed with zero warnings after extracting the placement,
 pagination, composer, and status-row helpers. Desktop and phone Jump to latest
 E2E passed after the final refactor.
 
+PR fixup on 2026-09-27 addressed five review threads and two failed E2E leaves.
+Reader navigation now claims the pending placement during refresh. Jump to
+latest cancels session-owned Dockview, pending-message, and scroll-to-start
+navigation before taking bottom ownership. Directional input pauses follow only
+when moving toward older content; tests cover downward/no-op input and upward
+scrollbar-thumb drags. Archived transcripts keep the latest action. Quick Chat
+focus is restored after the browser's click default focuses its scroll container.
+
+The phone Jump test sets an off-bottom position before tapping the control.
+Chromium did not synthesize a click after the test's raw CDP swipe, while the
+separate phone live-follow test still verifies the real 30px upward touch.
+The stale composer-disclosure assertion now verifies that the reader stays more
+than 300px from the bottom after upward movement, instead of expecting an
+unchanged pixel anchor while clarification rows are inserted.
+
+Post-fixup verification:
+
+- `pnpm exec vitest run components/task/chat/chat-scroll-motion.test.ts components/task/chat/use-chat-scroll-motion.test.tsx components/task/chat/message-list-native.test.tsx components/task/task-chat-panel.scroll-target.test.tsx`: 146 tests passed.
+- `pnpm run typecheck`: passed.
+- Targeted ESLint on changed TS/TSX files: passed with no errors. Four pre-existing complexity/line-count warnings remain in the native scroll manager, its test harness, and divider effect.
+- `pnpm run i18n:ratchet`: passed.
+- `(cd apps/web && pnpm e2e:run --host --project chromium e2e/tests/chat/quick-chat.spec.ts e2e/tests/chat/jump-to-latest.spec.ts e2e/tests/task/threads-composer-disclosure.spec.ts --grep "clarification shortcuts work after clicking the message surface|Jump to latest returns to the newest grouped reply and preserves auto-scroll|archived transcript keeps Jump to latest available without a composer|scrolls long required questions through the Grid footer" --retries=0)`: 7 passed; the managed Vite build passed.
+- `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-jump-to-latest.spec.ts e2e/tests/chat/mobile-auto-scroll-toggle.spec.ts --grep "phone Jump to latest fits coarse targets|archived phone transcript keeps a reachable Jump to latest control|is reachable and toggles by touch|follows a live turn from the bottom, then pauses after a small upward touch" --retries=0)`: 4 passed.
+- `(cd apps/web && pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/last-prompt-scroll.spec.ts --retries=0)`: 11 passed.
+- `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-last-prompt-scroll.spec.ts --retries=0)`: 1 passed.
+- `git diff --check`: passed after recording these results.
+
 ## Risks
 
 - A bottom retry can overwrite a valid restore, unread target, or user gesture.

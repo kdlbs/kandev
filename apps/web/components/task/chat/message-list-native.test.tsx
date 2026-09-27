@@ -322,6 +322,58 @@ function useNativeScrollMetrics(
   }, [metrics, scrollRef]);
 }
 
+function useNativeScrollHarnessPlacement({
+  scrollRef,
+  items,
+  sessionId,
+  enabled,
+  includeDividerPlacement,
+  isProgrammaticScrollLocked,
+  isVisible,
+  historyRefreshPending,
+  claimReaderPosition,
+  isReaderPositionClaimed,
+  clampScrollTop,
+  metrics,
+}: {
+  scrollRef: { current: HTMLDivElement | null };
+  items: RenderItem[];
+  sessionId: string | null;
+  enabled: boolean;
+  includeDividerPlacement: boolean;
+  isProgrammaticScrollLocked: () => boolean;
+  isVisible: boolean;
+  historyRefreshPending: boolean;
+  claimReaderPosition: () => void;
+  isReaderPositionClaimed: () => boolean;
+  clampScrollTop: boolean;
+  metrics?: NativeScrollMetrics;
+}) {
+  useScrollToDividerOrBottom(scrollRef, includeDividerPlacement ? items.length : 0, null, 0, {
+    enabled,
+    sessionId,
+    isProgrammaticScrollLocked,
+    isVisible,
+    historyRefreshPending,
+    onUserScrollIntent: includeDividerPlacement ? claimReaderPosition : undefined,
+    isReaderPositionClaimed: includeDividerPlacement ? isReaderPositionClaimed : undefined,
+  });
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!clampScrollTop || !element || !metrics) return;
+    Object.defineProperty(element, "scrollTop", {
+      configurable: true,
+      get: () => metrics.scrollTop,
+      set: (value: number) => {
+        metrics.scrollTop = Math.max(
+          0,
+          Math.min(value, metrics.scrollHeight - metrics.clientHeight),
+        );
+      },
+    });
+  }, [clampScrollTop, metrics, scrollRef]);
+}
+
 function NativeScrollManagementHarness({
   items,
   messages = [],
@@ -340,6 +392,7 @@ function NativeScrollManagementHarness({
   programmaticLockRef,
   isWorking = false,
   clampScrollTop = false,
+  includeDividerPlacement = false,
 }: {
   items: RenderItem[];
   messages?: Message[];
@@ -360,6 +413,7 @@ function NativeScrollManagementHarness({
   programmaticLockRef?: { current: (() => boolean) | null };
   isWorking?: boolean;
   clampScrollTop?: boolean;
+  includeDividerPlacement?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
@@ -368,6 +422,8 @@ function NativeScrollManagementHarness({
     showRecovery,
     scrollToLatest,
     handleScrollToMessage,
+    claimReaderPosition,
+    isReaderPositionClaimed,
     isProgrammaticScrollLocked,
   } = useNativeScrollManagement({
     scrollRef,
@@ -384,20 +440,20 @@ function NativeScrollManagementHarness({
     isVisible,
     historyRefreshPending,
   });
-  useLayoutEffect(() => {
-    const element = scrollRef.current;
-    if (!clampScrollTop || !element || !metrics) return;
-    Object.defineProperty(element, "scrollTop", {
-      configurable: true,
-      get: () => metrics.scrollTop,
-      set: (value: number) => {
-        metrics.scrollTop = Math.max(
-          0,
-          Math.min(value, metrics.scrollHeight - metrics.clientHeight),
-        );
-      },
-    });
-  }, [clampScrollTop, metrics, scrollRef]);
+  useNativeScrollHarnessPlacement({
+    scrollRef,
+    items,
+    sessionId,
+    enabled,
+    includeDividerPlacement,
+    isProgrammaticScrollLocked,
+    isVisible,
+    historyRefreshPending,
+    claimReaderPosition,
+    isReaderPositionClaimed,
+    clampScrollTop,
+    metrics,
+  });
   setOptionalRef(latestRef, scrollToLatest);
   setOptionalRef(scrollToMessageRef, handleScrollToMessage);
   setOptionalRef(programmaticLockRef, isProgrammaticScrollLocked);
@@ -518,6 +574,102 @@ describe("useNativeScrollManagement transcript pagination", () => {
       });
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps a manual reader position when cached history refresh completes", () => {
+    const metrics = { scrollHeight: 600, scrollTop: 275, clientHeight: 400 };
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+        metrics={metrics}
+        sessionId="session-b"
+        enabled
+        includeDividerPlacement
+        historyRefreshPending
+      />,
+    );
+    const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+    expect(metrics.scrollTop).toBe(600);
+
+    act(() => {
+      scrollContainer.dispatchEvent(new WheelEvent("wheel", { deltaY: -240, bubbles: true }));
+      metrics.scrollTop = 100;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 1400;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+        metrics={metrics}
+        sessionId="session-b"
+        enabled
+        includeDividerPlacement
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(100);
+  });
+
+  it("keeps an explicit message-navigation position when cached history refresh completes", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const metrics = { scrollHeight: 600, scrollTop: 275, clientHeight: 400 };
+    const scrollToMessageRef: {
+      current: ((messageId: string, options?: { align?: "start" | "center" }) => boolean) | null;
+    } = { current: null };
+    try {
+      const { rerender, container } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled
+          includeDividerPlacement
+          historyRefreshPending
+          scrollToMessageRef={scrollToMessageRef}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+      const target = container.querySelector<HTMLElement>("#msg-navigation-target");
+      if (!target) throw new Error(HARNESS_RENDER_ERROR);
+      Object.defineProperty(scrollContainer, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 400),
+      });
+      Object.defineProperty(target, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 20),
+      });
+
+      expect(scrollToMessageRef.current?.("navigation-target", { align: "start" })).toBe(true);
+      metrics.scrollTop = 100;
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+        scrollContainer.dispatchEvent(new Event("scrollend"));
+      });
+      metrics.scrollHeight = 1400;
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled
+          includeDividerPlacement
+          scrollToMessageRef={scrollToMessageRef}
+        />,
+      );
+
+      expect(metrics.scrollTop).toBe(100);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
     }
   });
 
@@ -1359,6 +1511,9 @@ describe("useNativeScrollManagement transcript pagination", () => {
     );
 
     act(() => {
+      screen
+        .getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID)
+        .dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
       metrics.scrollTop = 40;
       screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).dispatchEvent(new Event("scroll"));
     });
@@ -2166,7 +2321,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     if (!scrollContainer) throw new Error(MISSING_SCROLL_CONTAINER_ERROR);
     expect(scrollContainer.scrollTop).toBe(150);
 
-    scrollContainer.dispatchEvent(new Event("wheel", { bubbles: true }));
+    scrollContainer.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
 
     rerender(<Harness itemCount={2} anchoredBarOffsetPx={76} />);
 

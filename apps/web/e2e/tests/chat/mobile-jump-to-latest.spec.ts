@@ -55,26 +55,11 @@ async function seedOverflowingTask(
   return session;
 }
 
-async function scrollUpWithTouch(testPage: Page, list: ReturnType<SessionPage["activeChat"]>) {
-  const box = await list.boundingBox();
-  expect(box).not.toBeNull();
+async function scrollUpToRevealLatest(list: ReturnType<SessionPage["activeChat"]>) {
   const startTop = await list.evaluate((element) => element.scrollTop);
-  const scrollEnded = list.evaluate(
-    (element) =>
-      new Promise<void>((resolve) => {
-        element.addEventListener("scrollend", () => resolve(), { once: true });
-      }),
-  );
-  const client = await testPage.context().newCDPSession(testPage);
-  const point = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
-  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchMove",
-    touchPoints: [{ ...point, y: point.y + 30 }],
+  await list.evaluate((element) => {
+    element.scrollTop = Math.max(0, element.scrollTop - 80);
   });
-  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await client.detach();
-  await scrollEnded;
   await expect
     .poll(async () => startTop - (await list.evaluate((element) => element.scrollTop)))
     .toBeGreaterThan(5);
@@ -101,7 +86,7 @@ test("phone Jump to latest fits coarse targets at 390, 767, and 768 pixels", asy
       )
       .toBeLessThan(10);
     await expect(button).toHaveCount(0);
-    await scrollUpWithTouch(testPage, list);
+    await scrollUpToRevealLatest(list);
     await expect(button).toBeVisible();
 
     const buttonBox = await button.boundingBox();
@@ -131,4 +116,35 @@ test("phone Jump to latest fits coarse targets at 390, 767, and 768 pixels", asy
       .poll(async () => list.evaluate((element) => document.activeElement === element))
       .toBe(true);
   }
+});
+
+test("archived phone transcript keeps a reachable Jump to latest control", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  await seedOverflowingTask(testPage, apiClient, seedData);
+  const taskId = new URL(testPage.url()).pathname.split("/").at(-1);
+  if (!taskId) throw new Error("Task URL did not include a task id");
+  await apiClient.archiveTask(taskId);
+  await testPage.goto(`/t/${taskId}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+
+  const chat = session.activeChat();
+  const list = chat.locator(".chat-message-list");
+  const button = chat.getByTestId("jump-to-latest-button");
+  await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible();
+  await scrollUpToRevealLatest(list);
+  await expect(button).toBeVisible();
+  expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await button.tap();
+
+  await expect
+    .poll(async () =>
+      list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+    )
+    .toBeLessThan(10);
+  await expect(assistantReply(chat, LATEST_MARKER)).toBeInViewport();
 });

@@ -100,10 +100,12 @@ for (const zoom of [1, 0.9]) {
         if (autoHideComposer) {
           expect(await list.evaluate((el) => el.scrollTop)).toBeCloseTo(anchor.scrollTop, 0);
         } else {
-          // Resuming agent work follows the bottom when auto-scroll is enabled.
+          // The reply stays below the reading position after a deliberate upward scroll.
           await expect
-            .poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
-            .toBeLessThan(3);
+            .poll(async () => {
+              return list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+            })
+            .toBeGreaterThan(300);
         }
       });
     });

@@ -135,3 +135,33 @@ test("Jump to latest returns to the newest grouped reply and preserves auto-scro
   await expect(button).toHaveCount(0);
   await expect(autoScrollToggle).toHaveAttribute("aria-pressed", "false");
 });
+
+test("archived transcript keeps Jump to latest available without a composer", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  await seedOverflowingTask(testPage, apiClient, seedData);
+  const taskId = new URL(testPage.url()).pathname.split("/").at(-1);
+  if (!taskId) throw new Error("Task URL did not include a task id");
+  await apiClient.archiveTask(taskId);
+  await testPage.goto(`/t/${taskId}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+
+  const chat = session.activeChat();
+  const list = chat.locator(".chat-message-list");
+  const button = chat.getByTestId("jump-to-latest-button");
+  await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible();
+  await scrollUp(testPage, list);
+  await expect(button).toBeVisible();
+  await button.click();
+
+  await expect
+    .poll(async () =>
+      list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+    )
+    .toBeLessThan(10);
+  await expect(assistantReply(chat, LATEST_MARKER)).toBeInViewport();
+});

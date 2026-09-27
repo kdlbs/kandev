@@ -2,8 +2,16 @@
 
 /* eslint-disable max-lines -- native transcript composition owns scrolling. */
 
-import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } from "react";
-import { cancelChatScrollMotion } from "./chat-scroll-motion";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  memo,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
+import { cancelChatScrollMotion, listenForScrollIntent } from "./chat-scroll-motion";
 import { useChatMotion } from "@/hooks/use-chat-motion";
 import { ChatMotionProvider } from "./chat-motion";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
@@ -143,7 +151,108 @@ type ScrollToDividerOptions = {
   isProgrammaticScrollLocked?: () => boolean;
   isVisible?: boolean;
   historyRefreshPending?: boolean;
+  onUserScrollIntent?: () => void;
+  isReaderPositionClaimed?: () => boolean;
 };
+
+function hasCompetingInitialPositionOwner(
+  hasPendingLayoutRestore: boolean,
+  hasExplicitScrollTarget: boolean,
+  hasProgrammaticOwner: boolean,
+) {
+  return hasPendingLayoutRestore || hasExplicitScrollTarget || hasProgrammaticOwner;
+}
+
+function applyInitialDividerPosition(params: {
+  element: HTMLDivElement;
+  isVisibleRef: { current: boolean };
+  sessionId: string | null;
+  isProgrammaticScrollLocked: () => boolean;
+  didInitialScroll: { current: boolean };
+  activationPendingRef: { current: boolean };
+  isUserScrollingRef: { current: boolean };
+  isReaderPositionClaimed?: () => boolean;
+  dividerBeforeItemKey: string | null | undefined;
+  didScrollToDivider: { current: boolean };
+  isWithinSettlingWindow: () => boolean;
+  anchoredBarOffsetPx: number;
+  onDividerScroll?: () => void;
+  enabled: boolean;
+}) {
+  const {
+    element,
+    isVisibleRef,
+    sessionId,
+    isProgrammaticScrollLocked,
+    didInitialScroll,
+    activationPendingRef,
+    isUserScrollingRef,
+    isReaderPositionClaimed,
+    dividerBeforeItemKey,
+    didScrollToDivider,
+    isWithinSettlingWindow,
+    anchoredBarOffsetPx,
+    onDividerScroll,
+    enabled,
+  } = params;
+  if (!isVisibleRef.current) return;
+  const dockviewState = useDockviewStore.getState();
+  const hasPendingLayoutRestore = dockviewState.pendingChatScrollTop !== null;
+  const hasExplicitScrollTarget =
+    sessionId !== null && dockviewState.scrollTarget?.sessionId === sessionId;
+  const hasProgrammaticOwner = isProgrammaticScrollLocked();
+  if (
+    hasCompetingInitialPositionOwner(
+      hasPendingLayoutRestore,
+      hasExplicitScrollTarget,
+      hasProgrammaticOwner,
+    )
+  ) {
+    didInitialScroll.current = true;
+    activationPendingRef.current = false;
+    if (hasExplicitScrollTarget || hasProgrammaticOwner) {
+      isUserScrollingRef.current = true;
+    }
+    return;
+  }
+  if (isReaderPositionClaimed?.()) {
+    didInitialScroll.current = true;
+    activationPendingRef.current = false;
+    return;
+  }
+  const canReassertDivider = canReassertDividerScroll({
+    hasDividerTarget: Boolean(dividerBeforeItemKey),
+    didScrollToDivider: didScrollToDivider.current,
+    isUserScrolling: isUserScrollingRef.current,
+    isWithinSettlingWindow: isWithinSettlingWindow(),
+  });
+  if (canReassertDivider) {
+    const dividerElement = element.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
+    if (dividerElement) {
+      // Align within the transcript container so fixed mobile headers and the
+      // desktop anchored prompt bar both keep the divider visible.
+      const containerRect = element.getBoundingClientRect();
+      const dividerRect = dividerElement.getBoundingClientRect();
+      cancelChatScrollMotion(element);
+      element.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
+      onDividerScroll?.();
+      didScrollToDivider.current = true;
+      didInitialScroll.current = true;
+      activationPendingRef.current = false;
+      return;
+    }
+  }
+  if (didInitialScroll.current) return;
+  if (!enabled) {
+    didInitialScroll.current = true;
+    activationPendingRef.current = false;
+    return;
+  }
+  cancelChatScrollMotion(element);
+  element.scrollTop = element.scrollHeight;
+  didInitialScroll.current = true;
+  activationPendingRef.current = false;
+}
 
 function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   const {
@@ -172,6 +281,8 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   } = params;
   const {
     handleScrollToMessage,
+    claimReaderPosition,
+    isReaderPositionClaimed,
     scrollToLatest: handleScrollToLatest,
     sentinelRef,
     markNotNearBottom,
@@ -200,6 +311,8 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   }, [anchoredBarOffsetPx]);
   useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey, anchoredBarOffsetPx, {
     onDividerScroll: markNotNearBottom,
+    onUserScrollIntent: claimReaderPosition,
+    isReaderPositionClaimed,
     scrollLayoutKey,
     enabled,
     sessionId,
@@ -209,8 +322,12 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   });
   useImperativeHandle(
     ref,
-    () => ({ scrollToMessage: handleScrollToMessage, scrollToLatest: handleScrollToLatest }),
-    [handleScrollToMessage, handleScrollToLatest],
+    () => ({
+      scrollToMessage: handleScrollToMessage,
+      scrollToLatest: handleScrollToLatest,
+      claimReaderPosition,
+    }),
+    [claimReaderPosition, handleScrollToMessage, handleScrollToLatest],
   );
   useTranscriptEdgeTracking({
     scrollRef,
@@ -340,15 +457,10 @@ type NativeMessageListBodyProps = {
  *   lands the scroll. Rather than trying to classify every wave as
  *   "prepend" or "append" up front, the correction below keeps
  *   re-asserting the divider's position on every relevant change, bounded
- *   by BOTH of: the reader hasn't started scrolling yet (isUserScrolling
- *   — wheel/touchstart/keydown, since a plain 'scroll' event can't tell
- *   user intent apart from our own programmatic writes), AND still being
- *   within a short settling window since activation (isWithinSettlingWindow).
- *   The window exists so a live message arriving long after the visit has
- *   genuinely settled — with no wheel/touch/key event to catch, e.g. a
- *   scrollbar drag — can never re-trigger a correction; once either gate
- *   trips, it's the user's scroll position to own, same as Slack never
- *   re-snapping you to the unread line once you've started reading.
+ *   by BOTH of: the reader hasn't directed the transcript toward older
+ *   content (a plain 'scroll' event can't distinguish reader input from our
+ *   own programmatic writes), AND the visit is still within a short settling
+ *   window. Once either gate trips, the reader owns the position.
  * - didScrollToDivider and didInitialScroll are separate latches so the
  *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
  *   doesn't block the divider correction from still applying once it
@@ -374,9 +486,21 @@ export function useScrollToDividerOrBottom(
     isProgrammaticScrollLocked = () => false,
     isVisible = true,
     historyRefreshPending = false,
+    onUserScrollIntent,
+    isReaderPositionClaimed,
   } = options;
   const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
-  const isUserScrollingRef = useDividerUserScrolling(scrollRef);
+  const didInitialScroll = useRef(false);
+  const didScrollToDivider = useRef(false);
+  const markReaderPosition = useCallback(() => {
+    didInitialScroll.current = true;
+    activationPendingRef.current = false;
+    onUserScrollIntent?.();
+  }, [activationPendingRef, onUserScrollIntent]);
+  const isUserScrollingRef = useDividerUserScrolling(
+    scrollRef,
+    enabled ? undefined : markReaderPosition,
+  );
 
   // Bounds how long the divider correction below can keep re-asserting
   // itself after activation, independent of user interaction: a scrollbar drag
@@ -390,8 +514,6 @@ export function useScrollToDividerOrBottom(
   const isWithinSettlingWindow = () =>
     settlingDeadlineRef.current !== null && Date.now() < settlingDeadlineRef.current;
 
-  const didInitialScroll = useRef(false);
-  const didScrollToDivider = useRef(false);
   useEffect(() => {
     const becameVisible = isVisible && !previousVisibleForSettlingRef.current;
     previousVisibleForSettlingRef.current = isVisible;
@@ -406,59 +528,23 @@ export function useScrollToDividerOrBottom(
     if (!el || historyRefreshPending) return;
     if (itemCount === 0) return;
 
-    const placeInitialPosition = () => {
-      if (!isVisibleRef.current) return;
-      const dockviewState = useDockviewStore.getState();
-      const hasPendingLayoutRestore = dockviewState.pendingChatScrollTop !== null;
-      const hasExplicitScrollTarget =
-        sessionId !== null && dockviewState.scrollTarget?.sessionId === sessionId;
-      const hasProgrammaticOwner = isProgrammaticScrollLocked();
-      if (hasPendingLayoutRestore || hasExplicitScrollTarget || hasProgrammaticOwner) {
-        didInitialScroll.current = true;
-        activationPendingRef.current = false;
-        if (hasExplicitScrollTarget || hasProgrammaticOwner) {
-          isUserScrollingRef.current = true;
-        }
-        return;
-      }
-      const canReassertDivider = canReassertDividerScroll({
-        hasDividerTarget: Boolean(dividerBeforeItemKey),
-        didScrollToDivider: didScrollToDivider.current,
-        isUserScrolling: isUserScrollingRef.current,
-        isWithinSettlingWindow: isWithinSettlingWindow(),
+    const placeInitialPosition = () =>
+      applyInitialDividerPosition({
+        element: el,
+        isVisibleRef,
+        sessionId,
+        isProgrammaticScrollLocked,
+        didInitialScroll,
+        activationPendingRef,
+        isUserScrollingRef,
+        isReaderPositionClaimed,
+        dividerBeforeItemKey,
+        didScrollToDivider,
+        isWithinSettlingWindow,
+        anchoredBarOffsetPx,
+        onDividerScroll,
+        enabled,
       });
-      if (canReassertDivider) {
-        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
-        if (dividerEl) {
-          // scrollIntoView aligns against the viewport, which puts the target
-          // behind the fixed mobile session header instead of inside this
-          // nested scroll container. Move by the relative geometry instead;
-          // the desktop anchored prompt bar still reserves its measured height.
-          const containerRect = el.getBoundingClientRect();
-          const dividerRect = dividerEl.getBoundingClientRect();
-          cancelChatScrollMotion(el);
-          el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
-          onDividerScroll?.();
-          didScrollToDivider.current = true;
-          didInitialScroll.current = true;
-          activationPendingRef.current = false;
-          return;
-        }
-      }
-      if (didInitialScroll.current) return;
-      // Disabled initial placement is owned by useInitialScrollPosition,
-      // which restores the persisted reader offset (or its bottom fallback).
-      // This divider hook only owns the enabled bottom fallback.
-      if (!enabled) {
-        didInitialScroll.current = true;
-        activationPendingRef.current = false;
-        return;
-      }
-      cancelChatScrollMotion(el);
-      el.scrollTop = el.scrollHeight;
-      didInitialScroll.current = true;
-      activationPendingRef.current = false;
-    };
 
     if (activationPendingRef.current) {
       return scheduleAfterPanelRestore(placeInitialPosition);
@@ -473,29 +559,27 @@ export function useScrollToDividerOrBottom(
     enabled,
     sessionId,
     isProgrammaticScrollLocked,
+    isReaderPositionClaimed,
     isVisible,
     historyRefreshPending,
     scrollRef,
   ]);
 }
 
-function useDividerUserScrolling(scrollRef: React.RefObject<HTMLDivElement | null>) {
+function useDividerUserScrolling(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  onUserScrollIntent?: () => void,
+) {
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const markUserScrolling = () => {
       isUserScrollingRef.current = true;
+      onUserScrollIntent?.();
     };
-    el.addEventListener("wheel", markUserScrolling, { passive: true });
-    el.addEventListener("touchstart", markUserScrolling, { passive: true });
-    el.addEventListener("keydown", markUserScrolling);
-    return () => {
-      el.removeEventListener("wheel", markUserScrolling);
-      el.removeEventListener("touchstart", markUserScrolling);
-      el.removeEventListener("keydown", markUserScrolling);
-    };
-  }, [scrollRef]);
+    return listenForScrollIntent(el, markUserScrolling);
+  }, [onUserScrollIntent, scrollRef]);
   return isUserScrollingRef;
 }
 

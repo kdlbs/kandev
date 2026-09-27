@@ -670,6 +670,7 @@ type AutoScrollParams = {
   isProgrammaticScrollLocked: () => boolean;
   isVisible?: boolean;
   initialPlacementPending?: boolean;
+  onUserScrollIntent?: () => void;
 };
 
 export function useAutoScroll(params: AutoScrollParams) {
@@ -685,6 +686,7 @@ export function useAutoScroll(params: AutoScrollParams) {
     isProgrammaticScrollLocked,
     isVisible = true,
     initialPlacementPending = false,
+    onUserScrollIntent,
   } = params;
   const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
@@ -713,6 +715,7 @@ export function useAutoScroll(params: AutoScrollParams) {
     sessionId,
     isNearBottomRef,
     instant: scrollNativeToBottom,
+    onUserScrollIntent,
     isBlocked: () =>
       motionBlocked ||
       initialPlacementPending ||
@@ -1221,6 +1224,7 @@ export function useScrollToMessage(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   runGuardedScroll: (performScroll: () => void) => void,
   motionEnabled = true,
+  onPositionClaim?: () => void,
 ) {
   // Bumped on every scrollToMessage call; in-flight verifiers of a superseded
   // request bail on the next frame so stale work can never land the
@@ -1249,6 +1253,7 @@ export function useScrollToMessage(
       const selector = `[id="msg-${CSS.escape(messageId)}"]`;
       const el = scrollRef.current?.querySelector<HTMLElement>(selector);
       if (!el) return false;
+      onPositionClaim?.();
       const alignStart = options?.align === "start";
       if (scrollRef.current) cancelChatScrollMotion(scrollRef.current);
       runGuardedScroll(() => {
@@ -1310,7 +1315,7 @@ export function useScrollToMessage(
       });
       return true;
     },
-    [runGuardedScroll, scrollRef, motionEnabled],
+    [onPositionClaim, runGuardedScroll, scrollRef, motionEnabled],
   );
   return { scrollToMessage, cancel };
 }
@@ -1646,6 +1651,39 @@ function useInitialPlacementLatches(
 
 type InitialPlacementLatches = ReturnType<typeof useInitialPlacementLatches>;
 
+function useNativePlacementOwnership(
+  sessionId: string | null,
+  pendingChatInitialPlacement: { sessionId: string; token: number } | null,
+) {
+  const envSwitchPlacementToken =
+    pendingChatInitialPlacement?.sessionId === sessionId ? pendingChatInitialPlacement.token : null;
+  const placementLatches = useInitialPlacementLatches(sessionId, envSwitchPlacementToken);
+  const claimReaderPosition = useReaderPositionClaim(placementLatches, envSwitchPlacementToken);
+  const isReaderPositionClaimed = useIsReaderPositionClaimed(placementLatches);
+  return {
+    envSwitchPlacementToken,
+    placementLatches,
+    initialPlacementPending: placementLatches.initialPlacementPending,
+    claimReaderPosition,
+    isReaderPositionClaimed,
+  };
+}
+
+function useReaderPositionClaim(
+  placementLatches: InitialPlacementLatches,
+  envSwitchPlacementToken: number | null,
+) {
+  return useCallback(() => {
+    placementLatches.didInitialScroll.current = true;
+    placementLatches.completeInitialPlacement();
+    completeEnvSwitchPlacement(envSwitchPlacementToken);
+  }, [envSwitchPlacementToken, placementLatches]);
+}
+
+function useIsReaderPositionClaimed(placementLatches: InitialPlacementLatches) {
+  return useCallback(() => placementLatches.didInitialScroll.current, [placementLatches]);
+}
+
 type InitialScrollPositionParams = {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   itemCount: number;
@@ -1914,6 +1952,61 @@ function useNativePagination(
   return { sentinelRef, retryLoadMore, showRecovery };
 }
 
+function useNativeProgrammaticScrollOwnership(params: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  programmaticScrollLockRef: React.RefObject<boolean>;
+  resyncIsNearBottom: () => void;
+  onPlacementReleased: () => void;
+}) {
+  const { scrollRef, programmaticScrollLockRef, resyncIsNearBottom, onPlacementReleased } = params;
+  const { runGuardedScroll, releaseProgrammaticScroll } = useProgrammaticScrollGuard(
+    scrollRef,
+    programmaticScrollLockRef,
+    resyncIsNearBottom,
+    onPlacementReleased,
+  );
+  return { runGuardedScroll, releaseProgrammaticScroll };
+}
+
+function useNativePaginationAndInitialPlacement(
+  params: NativeScrollManagementParams,
+  placement: {
+    initialPlacementPending: boolean;
+    isProgrammaticScrollLocked: () => boolean;
+    isNearBottomRef: React.RefObject<boolean>;
+    pendingChatScrollTop: PendingChatScrollRestore | null;
+    completedChatScrollRestore: { sessionId: string | null; token: number } | null;
+    placementRevision: number;
+    envSwitchPlacementToken: number | null;
+    isRestoringLayout: boolean;
+    placementLatches: InitialPlacementLatches;
+  },
+) {
+  const { sentinelRef, retryLoadMore, showRecovery } = useNativePagination(
+    params,
+    placement.initialPlacementPending,
+    placement.isProgrammaticScrollLocked,
+  );
+  useInitialScrollPosition({
+    scrollRef: params.scrollRef,
+    itemCount: params.items.length,
+    sessionId: params.sessionId,
+    enabled: params.enabled,
+    hasUnreadDivider: params.hasUnreadDivider,
+    isNearBottomRef: placement.isNearBottomRef,
+    isVisible: params.isVisible,
+    historyRefreshPending: params.messagesLoading || (params.historyRefreshPending ?? false),
+    pendingChatScrollTop: placement.pendingChatScrollTop,
+    completedChatScrollRestore: placement.completedChatScrollRestore,
+    placementRevision: placement.placementRevision,
+    envSwitchPlacementToken: placement.envSwitchPlacementToken,
+    isRestoringLayout: placement.isRestoringLayout,
+    isProgrammaticScrollLocked: placement.isProgrammaticScrollLocked,
+    placementLatches: placement.placementLatches,
+  });
+  return { sentinelRef, retryLoadMore, showRecovery };
+}
+
 function useScrollToLatestAction(params: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   sessionId: string | null;
@@ -1979,7 +2072,6 @@ function useScrollToLatestAction(params: {
 export function useNativeScrollManagement(params: NativeScrollManagementParams) {
   const {
     scrollRef,
-    items,
     messages,
     isWorking,
     sessionId,
@@ -1997,10 +2089,13 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
   const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
   const pendingChatScrollTop = useDockviewStore((state) => state.pendingChatScrollTop);
   const completedChatScrollRestore = useDockviewStore((state) => state.completedChatScrollRestore);
-  const envSwitchPlacementToken =
-    pendingChatInitialPlacement?.sessionId === sessionId ? pendingChatInitialPlacement.token : null;
-  const placementLatches = useInitialPlacementLatches(sessionId, envSwitchPlacementToken);
-  const initialPlacementPending = placementLatches.initialPlacementPending;
+  const {
+    envSwitchPlacementToken,
+    placementLatches,
+    initialPlacementPending,
+    claimReaderPosition,
+    isReaderPositionClaimed,
+  } = useNativePlacementOwnership(sessionId, pendingChatInitialPlacement);
   const [placementRevision, notifyPlacementRelease] = useState(0);
   const onPlacementReleased = useCallback(
     () => notifyPlacementRelease((revision) => revision + 1),
@@ -2021,15 +2116,16 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       initialPlacementPending,
       motionEnabled,
       motionBlocked: messagesLoading || historyRefreshPending || isLoadingMore,
+      onUserScrollIntent: claimReaderPosition,
     });
-  const { runGuardedScroll, releaseProgrammaticScroll } = useProgrammaticScrollGuard(
+  const { runGuardedScroll, releaseProgrammaticScroll } = useNativeProgrammaticScrollOwnership({
     scrollRef,
     programmaticScrollLockRef,
     resyncIsNearBottom,
     onPlacementReleased,
-  );
+  });
   const { scrollToMessage: handleScrollToMessage, cancel: cancelScrollToMessage } =
-    useScrollToMessage(scrollRef, runGuardedScroll, motionEnabled);
+    useScrollToMessage(scrollRef, runGuardedScroll, motionEnabled, claimReaderPosition);
   const scrollToLatest = useScrollToLatestAction({
     scrollRef,
     sessionId,
@@ -2040,31 +2136,25 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
     isNearBottomRef,
     syncOwnedScrollTop,
   });
-  const { sentinelRef, retryLoadMore, showRecovery } = useNativePagination(
+  const { sentinelRef, retryLoadMore, showRecovery } = useNativePaginationAndInitialPlacement(
     params,
-    initialPlacementPending,
-    isProgrammaticScrollLocked,
+    {
+      initialPlacementPending,
+      isProgrammaticScrollLocked,
+      isNearBottomRef,
+      pendingChatScrollTop,
+      completedChatScrollRestore,
+      placementRevision,
+      envSwitchPlacementToken,
+      isRestoringLayout,
+      placementLatches,
+    },
   );
-  useInitialScrollPosition({
-    scrollRef,
-    itemCount: items.length,
-    sessionId,
-    enabled,
-    hasUnreadDivider,
-    isNearBottomRef,
-    isVisible,
-    historyRefreshPending: messagesLoading || historyRefreshPending,
-    pendingChatScrollTop,
-    completedChatScrollRestore,
-    placementRevision,
-    envSwitchPlacementToken,
-    isRestoringLayout,
-    isProgrammaticScrollLocked,
-    placementLatches,
-  });
 
   return {
     handleScrollToMessage,
+    claimReaderPosition,
+    isReaderPositionClaimed,
     scrollToLatest,
     sentinelRef,
     resyncIsNearBottom,

@@ -63,6 +63,7 @@ import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { LaunchQueueStatus } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import { JumpToLatestButton } from "./chat/jump-to-latest-button";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -84,6 +85,52 @@ export type PendingMessageScrollTarget = {
   token: number;
   hostPanelId: string;
 };
+
+export function cancelOlderTranscriptNavigation(params: {
+  sessionId: string | null;
+  panelId: string | null;
+  dockviewTarget: TranscriptScrollTarget | null;
+  clearDockviewTarget: (token: number) => void;
+  pendingScrollTarget?: PendingMessageScrollTarget | null;
+  pendingScrollToMessageId?: string | null;
+  consumePendingMessage: (messageId: string) => void;
+  cancelPendingMessage: () => void;
+  cancelPendingScrollToStart: () => void;
+  clearPendingScrollToStart: () => void;
+}): void {
+  const {
+    sessionId,
+    panelId,
+    dockviewTarget,
+    clearDockviewTarget,
+    pendingScrollTarget,
+    pendingScrollToMessageId,
+    consumePendingMessage,
+    cancelPendingMessage,
+    cancelPendingScrollToStart,
+    clearPendingScrollToStart,
+  } = params;
+  if (
+    sessionId &&
+    panelId &&
+    dockviewTarget?.sessionId === sessionId &&
+    dockviewTarget.hostPanelId === panelId
+  ) {
+    clearDockviewTarget(dockviewTarget.token);
+  }
+
+  let pendingMessageId = pendingScrollToMessageId ?? null;
+  if (pendingScrollTarget) {
+    pendingMessageId =
+      pendingScrollTarget.sessionId === sessionId ? pendingScrollTarget.messageId : null;
+  }
+  if (pendingMessageId) {
+    cancelPendingMessage();
+    consumePendingMessage(pendingMessageId);
+  }
+  cancelPendingScrollToStart();
+  clearPendingScrollToStart();
+}
 /** Reports whether a target has a dedicated DOM row in the transcript. */
 export function isMessageRowRendered(items: readonly RenderItem[], messageId: string): boolean {
   return items.some((item) => item.type === "message" && item.message.id === messageId);
@@ -204,6 +251,7 @@ type PendingMessageScrollEffectOptions = {
     requestKeys: MutableRefObject<Set<string>>;
     completedAround: MutableRefObject<Set<string>>;
     targetIdentity: MutableRefObject<string | null>;
+    cancelledTargetKey: MutableRefObject<string | null>;
     scrollSucceededTarget: MutableRefObject<string | null>;
     reassertionTimer: MutableRefObject<number | null>;
     reassertionAttempted: MutableRefObject<Set<string>>;
@@ -326,10 +374,15 @@ function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOption
     }
     if (!effectiveSessionId || !effectiveMessageId || !effectiveTargetKey) {
       refs.targetIdentity.current = null;
+      refs.cancelledTargetKey.current = null;
       refs.completedAround.current.clear();
       cancelReassertion();
       setIsLoading(false);
       return;
+    }
+    if (refs.cancelledTargetKey.current === effectiveTargetKey) return;
+    if (refs.cancelledTargetKey.current !== effectiveTargetKey) {
+      refs.cancelledTargetKey.current = null;
     }
     if (refs.targetIdentity.current !== effectiveTargetKey) {
       refs.targetIdentity.current = effectiveTargetKey;
@@ -398,6 +451,7 @@ export function usePendingMessageScroll({
       requestKeys: { current: new Set<string>() },
       completedAround: { current: new Set<string>() },
       targetIdentity: { current: null as string | null },
+      cancelledTargetKey: { current: null as string | null },
       scrollSucceededTarget: { current: null as string | null },
       reassertionTimer: { current: null as number | null },
       reassertionAttempted: { current: new Set<string>() },
@@ -442,7 +496,15 @@ export function usePendingMessageScroll({
     refs,
     setIsLoading,
   });
-  return { isLoading };
+  const cancel = useCallback(() => {
+    if (effectiveTargetKey) refs.cancelledTargetKey.current = effectiveTargetKey;
+    refs.targetIdentity.current = null;
+    refs.lifecycle.current = { ...refs.lifecycle.current, messageId: null, target: null };
+    refs.completedAround.current.clear();
+    cancelTargetReassertion(refs.reassertionTimer);
+    setIsLoading(false);
+  }, [effectiveTargetKey, refs]);
+  return { isLoading, cancel };
 }
 
 const SCROLL_TO_START_RETRY_DELAY_MS = 50;
@@ -466,6 +528,8 @@ export function usePendingScrollToStart({
   requestKey,
   onComplete,
 }: PendingScrollToStartOptions) {
+  const cancelRef = useRef<(() => void) | null>(null);
+  const cancel = useCallback(() => cancelRef.current?.(), []);
   useEffect(() => {
     if (!pending || hasMore) return;
     if (!firstMessageId) {
@@ -477,26 +541,44 @@ export function usePendingScrollToStart({
     let frameId: number | null = null;
     let timeoutId: number | null = null;
     let attempts = 0;
+    const stop = () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      frameId = null;
+      timeoutId = null;
+    };
+    cancelRef.current = stop;
+    const finish = (didScroll: boolean) => {
+      stop();
+      if (cancelRef.current === stop) cancelRef.current = null;
+      onComplete(didScroll);
+    };
     const attempt = () => {
+      frameId = null;
+      timeoutId = null;
       if (cancelled) return;
       attempts += 1;
       const didScroll = Boolean(
         messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
       );
       if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
-        onComplete(didScroll);
+        finish(didScroll);
         return;
       }
-      timeoutId = window.setTimeout(attempt, SCROLL_TO_START_RETRY_DELAY_MS);
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        attempt();
+      }, SCROLL_TO_START_RETRY_DELAY_MS);
     };
 
     frameId = requestAnimationFrame(attempt);
     return () => {
-      cancelled = true;
-      if (frameId !== null) cancelAnimationFrame(frameId);
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      stop();
+      if (cancelRef.current === stop) cancelRef.current = null;
     };
   }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
+  return cancel;
 }
 
 /** Computes the render-item key the unread "New" divider should appear
@@ -1140,18 +1222,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     ),
     renderedMessageCount: allMessages.length,
   });
-  const { isLoading: isPendingJumpLoading } = usePendingMessageScroll({
-    messageListRef,
-    sessionId: resolvedSessionId,
-    messageId: pendingScrollToMessageId,
-    target: pendingScrollTarget,
-    onConsumed: onPendingScrollConsumed,
-    readinessKey: `${allMessages.length}:${isInitialMessagesLoading}:${
-      allMessages[0]?.id ?? ""
-    }:${allMessages.at(-1)?.id ?? ""}`,
-    isInitialMessagesLoading,
-    isVisible,
-  });
+  const { isLoading: isPendingJumpLoading, cancel: cancelPendingMessageScroll } =
+    usePendingMessageScroll({
+      messageListRef,
+      sessionId: resolvedSessionId,
+      messageId: pendingScrollToMessageId,
+      target: pendingScrollTarget,
+      onConsumed: onPendingScrollConsumed,
+      readinessKey: `${allMessages.length}:${isInitialMessagesLoading}:${
+        allMessages[0]?.id ?? ""
+      }:${allMessages.at(-1)?.id ?? ""}`,
+      isInitialMessagesLoading,
+      isVisible,
+    });
   const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading;
   const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
   const lastPromptMessage = useMemo(
@@ -1171,9 +1254,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const showJumpToLatest =
     Boolean(resolvedSessionId) && latestVisibilitySessionId === resolvedSessionId;
-  const jumpToLatest = useCallback(() => {
-    messageListRef.current?.scrollToLatest();
-  }, []);
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
@@ -1209,7 +1289,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     setPendingScrollToStart(false);
     if (didScroll) setIsFirstMessageHidden(false);
   }, []);
-  usePendingScrollToStart({
+  const cancelPendingScrollToStart = usePendingScrollToStart({
     messageListRef,
     firstMessageId,
     hasMore,
@@ -1218,9 +1298,35 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     onComplete: completeScrollToStart,
   });
   const scrollToStart = useCallback(() => {
+    messageListRef.current?.claimReaderPosition?.();
     setScrollToStartRequest((request) => request + 1);
     setPendingScrollToStart(true);
   }, []);
+  const jumpToLatest = useCallback(() => {
+    const dockviewState = useDockviewStore.getState();
+    cancelOlderTranscriptNavigation({
+      sessionId: resolvedSessionId,
+      panelId,
+      dockviewTarget: dockviewState.scrollTarget,
+      clearDockviewTarget: dockviewState.clearScrollTarget,
+      pendingScrollTarget,
+      pendingScrollToMessageId,
+      consumePendingMessage: (messageId) => onPendingScrollConsumed?.(messageId),
+      cancelPendingMessage: cancelPendingMessageScroll,
+      cancelPendingScrollToStart,
+      clearPendingScrollToStart: () => setPendingScrollToStart(false),
+    });
+    messageListRef.current?.scrollToLatest();
+  }, [
+    cancelPendingMessageScroll,
+    cancelPendingScrollToStart,
+    messageListRef,
+    onPendingScrollConsumed,
+    panelId,
+    pendingScrollTarget,
+    pendingScrollToMessageId,
+    resolvedSessionId,
+  ]);
   // Search can target backend rows before the visible transcript boundary.
   const navigateSearchHit = useCallback(
     (id: string) => {
@@ -1448,8 +1554,9 @@ function ChatFooter({
   const { t } = useTranslation();
   if (isArchived) {
     return (
-      <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
-        {t("task:thisTaskIsArchivedAndRead")}
+      <div className="bg-muted/50 flex flex-shrink-0 items-center border-t px-4 py-2 text-sm text-muted-foreground">
+        <span className="flex-1 text-center">{t("task:thisTaskIsArchivedAndRead")}</span>
+        <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
       </div>
     );
   }

@@ -93,6 +93,8 @@ export type MessageListHandle = {
   ) => boolean;
   /** Navigates to the newest rendered transcript content and takes focus. */
   scrollToLatest: () => boolean;
+  /** Claims transcript position before async older-page navigation starts. */
+  claimReaderPosition?: () => void;
 };
 
 /** Render key for a transcript item: `item.id` for turn-group, prepare-

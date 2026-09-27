@@ -13,6 +13,7 @@ export type ChatScrollMotionOptions = {
   isNearBottomRef: RefObject<boolean>;
   isBlocked: () => boolean;
   instant: (element: HTMLElement) => void;
+  onUserScrollIntent?: () => void;
 };
 export function useChatScrollMotion(options: ChatScrollMotionOptions) {
   const latest = useRef(options);
@@ -29,6 +30,7 @@ export function useChatScrollMotion(options: ChatScrollMotionOptions) {
     const onUserScrollIntent = () => {
       userReading.current = true;
       latest.current.isNearBottomRef.current = false;
+      latest.current.onUserScrollIntent?.();
     };
     let motion: ScrollMotion | null = null;
     let removeIntentListener = () => {};
