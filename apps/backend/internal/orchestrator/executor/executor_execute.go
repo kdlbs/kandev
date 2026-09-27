@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -38,30 +39,125 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	return ok && cm
 }
 
+// resolveCoordinatorSessionStart runs the fail-closed checks for a
+// coordinator-origin task: the executor must have a CoordinatorLookup wired,
+// the task must resolve to a live coordinator, and that coordinator's agent
+// and executor profiles must both be ready
+// (docs/specs/coordinator/system-design/copilot.md#fail-closed). Returns the
+// coordinator id on success; any failure here stops the session start.
+func (e *Executor) resolveCoordinatorSessionStart(ctx context.Context, taskID string) (string, error) {
+	if e.coordinators == nil {
+		return "", fmt.Errorf("coordinator task %s: coordinator lookup is not configured", taskID)
+	}
+	coordinatorID, ok, err := e.coordinators.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("resolve coordinator for task %s: %w", taskID, err)
+	}
+	if !ok {
+		return "", fmt.Errorf("task %s is not a live coordinator conversation task", taskID)
+	}
+	ready, err := e.coordinators.CoordinatorProfilesReady(ctx, coordinatorID)
+	if err != nil {
+		return "", fmt.Errorf("check coordinator %s profile readiness: %w", coordinatorID, err)
+	}
+	if !ready {
+		return "", fmt.Errorf("coordinator %s agent or executor profile is not ready", coordinatorID)
+	}
+	return coordinatorID, nil
+}
+
+// coordinatorMatchesAbsentTask reports whether taskID (whose task row cannot
+// be read — deleted or never existed) is nonetheless some coordinator's
+// current conversation task. A match or a lookup error fails the caller's
+// session start; only "no lookup wired" (feature off) or "no match" lets the
+// caller fall through to the ordinary no-row behavior
+// (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+func (e *Executor) coordinatorMatchesAbsentTask(ctx context.Context, taskID string) (bool, error) {
+	if e.coordinators == nil {
+		return false, nil
+	}
+	_, ok, err := e.coordinators.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("resolve coordinator for task %s: %w", taskID, err)
+	}
+	return ok, nil
+}
+
 // resolveTaskSessionMCPMode derives restricted MCP access from canonical task
-// ownership and session purpose. Config mode wins because those sessions need
-// config tools even if their backing task is Office-owned.
+// ownership and session purpose
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode). The
+// task is loaded first so a read error fails every session, config-mode
+// included; a coordinator-origin task then wins regardless of config_mode.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
+	task, err := e.repo.GetTask(ctx, taskID)
+	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
+	if err != nil && !notFound {
+		return "", fmt.Errorf("load task for MCP mode: %w", err)
+	}
+	noRow := task == nil
+
+	if task != nil && task.Origin == models.TaskOriginCoordinator {
+		if _, cErr := e.resolveCoordinatorSessionStart(ctx, taskID); cErr != nil {
+			return "", cErr
+		}
+		return McpModeCoordinator, nil
+	}
+	if noRow {
+		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
+		if cErr != nil {
+			return "", cErr
+		}
+		if matched {
+			return "", fmt.Errorf("task %s resolves to a coordinator but has no task row", taskID)
+		}
+	}
+
 	if isConfigModeSession(session) {
 		return McpModeConfig, nil
 	}
-	task, err := e.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return "", fmt.Errorf("load task for MCP mode: %w", err)
+
+	if noRow {
+		if notFound {
+			return "", fmt.Errorf("load task for MCP mode: %w", err)
+		}
+		return "", nil
 	}
-	if task != nil && task.Origin == models.TaskOriginAutomationRun {
+	if task.Origin == models.TaskOriginAutomationRun {
 		return McpModeAutomation, nil
 	}
-	if task != nil && task.IsFromOffice {
+	if task.IsFromOffice {
 		return McpModeOffice, nil
 	}
-	if allowTitleTool && task != nil && models.IsAgentTitleOwner(task.Metadata, session.ID) {
+	if allowTitleTool && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		return McpModeTaskTitlePending, nil
 	}
 	return "", nil
 }
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
+	task, err := e.repo.GetTask(ctx, taskID)
+	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
+	if err != nil && !notFound {
+		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+	}
+	noRow := task == nil
+
+	if task != nil && task.Origin == models.TaskOriginCoordinator {
+		if _, cErr := e.resolveCoordinatorSessionStart(ctx, taskID); cErr != nil {
+			return mcpprofile.Context{}, cErr
+		}
+		return e.withCanvasCapability(mcpprofile.NewCoordinator()), nil
+	}
+	if noRow {
+		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
+		if cErr != nil {
+			return mcpprofile.Context{}, cErr
+		}
+		if matched {
+			return mcpprofile.Context{}, fmt.Errorf("task %s resolves to a coordinator but has no task row", taskID)
+		}
+	}
+
 	if isConfigModeSession(session) {
 		capabilities := []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}
 		if session.IsPassthrough {
@@ -69,11 +165,11 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		}
 		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
-	task, err := e.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
-	}
-	if task == nil {
+
+	if noRow {
+		if notFound {
+			return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+		}
 		// A few lifecycle paths can prepare a request from a session snapshot
 		// before the task row is visible (and older executor fakes model that
 		// state). Keep the legacy kanban profile in that narrow case; production

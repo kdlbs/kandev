@@ -57,6 +57,13 @@ func NewAutomation() Context {
 	return New(SurfaceAutomation, nil, nil)
 }
 
+// NewCoordinator returns the fixed profile used by a coordinator's
+// conversation session: no user-question, title, or canvas capability
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+func NewCoordinator() Context {
+	return New(SurfaceCoordinator, nil, nil)
+}
+
 func (c Context) HasCapability(capability Capability) bool {
 	return slices.Contains(c.Capabilities, capability)
 }

@@ -1956,6 +1956,15 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// SetCoordinatorLookup forwards the coordinator lookup to the executor's
+// fail-closed coordinator-session-start check. Guarded by the caller on the
+// coordinator feature flag (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+func (s *Service) SetCoordinatorLookup(lookup executor.CoordinatorLookup) {
+	if s.executor != nil {
+		s.executor.SetCoordinatorLookup(lookup)
+	}
+}
+
 // TaskSessionCanvasGuidanceEnabled reports whether the resolved MCP profile for
 // a session includes canvas authoring. It is the narrow read-only seam used by
 // message handlers before they persist the first prompt.

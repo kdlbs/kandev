@@ -18,6 +18,7 @@ type Principal struct {
 	CallerTaskID    string
 	CallerSessionID string
 	Surface         mcpprofile.Surface
+	CoordinatorID   string
 }
 
 func (p Principal) IsAutomation() bool {
@@ -58,7 +59,7 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		return nil, err
 	}
 
-	automationID, surface, err := principalSurface(task)
+	automationID, coordinatorID, surface, err := r.principalSurface(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
 	}
@@ -68,6 +69,7 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		CallerTaskID:    taskID,
 		CallerSessionID: sessionID,
 		Surface:         surface,
+		CoordinatorID:   coordinatorID,
 	}), nil
 }
 
@@ -113,16 +115,34 @@ func (r *Resolver) resolvePrincipalWorkspace(ctx context.Context, task *models.T
 	return task.WorkspaceID, nil
 }
 
-func principalSurface(task *models.Task) (string, mcpprofile.Surface, error) {
+// principalSurface derives the MCP surface (and, for automation/coordinator
+// tasks, the owning automation/coordinator id) from task. The coordinator
+// branch runs first: a coordinator-origin task must resolve to its
+// coordinator or be refused, never fall through to the Kanban/office default
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+func (r *Resolver) principalSurface(ctx context.Context, task *models.Task) (automationID, coordinatorID string, surface mcpprofile.Surface, err error) {
+	if task.Origin == models.TaskOriginCoordinator {
+		if r.coordinators == nil {
+			return "", "", mcpprofile.SurfaceCoordinator, fmt.Errorf("coordinator lookup is not configured")
+		}
+		id, ok, err := r.coordinators.CoordinatorForConversationTask(ctx, task.ID)
+		if err != nil {
+			return "", "", mcpprofile.SurfaceCoordinator, fmt.Errorf("resolve coordinator for task %s: %w", task.ID, err)
+		}
+		if !ok {
+			return "", "", mcpprofile.SurfaceCoordinator, fmt.Errorf("task %s is not a live coordinator conversation task", task.ID)
+		}
+		return "", id, mcpprofile.SurfaceCoordinator, nil
+	}
 	if task.Origin != models.TaskOriginAutomationRun {
 		if task.IsFromOffice {
-			return "", mcpprofile.SurfaceOfficeTask, nil
+			return "", "", mcpprofile.SurfaceOfficeTask, nil
 		}
-		return "", mcpprofile.SurfaceKanbanTask, nil
+		return "", "", mcpprofile.SurfaceKanbanTask, nil
 	}
-	automationID := models.StringFromAny(task.Metadata["automation_id"])
+	automationID = models.StringFromAny(task.Metadata["automation_id"])
 	if automationID == "" {
-		return "", mcpprofile.SurfaceAutomation, fmt.Errorf("automation ID is missing")
+		return "", "", mcpprofile.SurfaceAutomation, fmt.Errorf("automation ID is missing")
 	}
-	return automationID, mcpprofile.SurfaceAutomation, nil
+	return automationID, "", mcpprofile.SurfaceAutomation, nil
 }

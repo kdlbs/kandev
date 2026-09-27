@@ -2182,6 +2182,9 @@ func registerMCPAndDebugRoutes(
 		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
 		p.log,
 	)
+	if p.services != nil && p.services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
