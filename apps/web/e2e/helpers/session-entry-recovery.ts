@@ -18,6 +18,11 @@ type DropRule = {
   sessionId?: string;
 };
 
+type RejectRule = {
+  message: string;
+  sessionId?: string;
+};
+
 type DelayRule = {
   remaining: number;
   delayMs: number;
@@ -27,9 +32,16 @@ type DelayRule = {
 export type SessionEntryRecoveryProxy = {
   delayNextResponses: (action: string, count: number, delayMs: number, reason: string) => void;
   dropNextResponses: (action: string, count: number, scope?: { sessionId?: string }) => void;
+  rejectResponsesUntilReleased: (
+    action: string,
+    message: string,
+    scope?: { sessionId?: string },
+  ) => void;
+  releaseRejectedResponses: (action: string) => void;
   requestCount: (action: string) => number;
   delayedResponseCount: (action: string) => number;
   droppedResponseCount: (action: string) => number;
+  rejectedResponseCount: (action: string) => number;
 };
 
 function parseFrame(value: string): WireFrame | null {
@@ -77,6 +89,18 @@ function consumeDropRule(
   return true;
 }
 
+function consumeRejectRule(
+  context: RequestContext | undefined,
+  rejectRules: Map<string, RejectRule>,
+  rejectedCounts: Map<string, number>,
+): string | undefined {
+  if (!context) return undefined;
+  const rule = rejectRules.get(context.action);
+  if (!rule || (rule.sessionId && context.sessionId !== rule.sessionId)) return undefined;
+  rejectedCounts.set(context.action, (rejectedCounts.get(context.action) ?? 0) + 1);
+  return rule.message;
+}
+
 function consumeDelayRule(
   action: string | undefined,
   message: string,
@@ -97,8 +121,8 @@ function consumeDelayRule(
 }
 
 /**
- * Delay or drop selected gateway responses while forwarding every other frame.
- * Rules correlate replies by request id, so the test never relies on
+ * Fail, delay, or drop selected gateway responses while forwarding every other
+ * frame. Rules correlate replies by request id, so the test never relies on
  * action-only or payload timing and does not inspect message contents.
  */
 export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntryRecoveryProxy> {
@@ -106,8 +130,10 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const requestCounts = new Map<string, number>();
   const delayedCounts = new Map<string, number>();
   const droppedCounts = new Map<string, number>();
+  const rejectedCounts = new Map<string, number>();
   const rules = new Map<string, DelayRule>();
   const dropRules = new Map<string, DropRule>();
+  const rejectRules = new Map<string, RejectRule>();
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
@@ -147,6 +173,17 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
         const frame = parseFrame(trimmed);
         const context = takeResponseContext(frame, requestContexts);
         if (isResponseFrame(frame)) {
+          const rejection = consumeRejectRule(context, rejectRules, rejectedCounts);
+          if (rejection && frame) {
+            ws.send(
+              JSON.stringify({
+                ...frame,
+                type: "error",
+                payload: { code: "E2E_SIMULATED_ERROR", message: rejection },
+              }),
+            );
+            continue;
+          }
           if (consumeDropRule(context, dropRules, droppedCounts)) continue;
           if (consumeDelayRule(context?.action, trimmed, rules, delayedCounts, ws.send.bind(ws)))
             continue;
@@ -167,8 +204,14 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
       if (count < 1) throw new Error("dropNextResponses requires a positive response count");
       dropRules.set(action, { remaining: count, sessionId: scope?.sessionId });
     },
+    rejectResponsesUntilReleased: (action, message, scope) => {
+      if (!message) throw new Error("rejectResponsesUntilReleased requires an error message");
+      rejectRules.set(action, { message, sessionId: scope?.sessionId });
+    },
+    releaseRejectedResponses: (action) => rejectRules.delete(action),
     requestCount: (action) => requestCounts.get(action) ?? 0,
     delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
     droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
+    rejectedResponseCount: (action) => rejectedCounts.get(action) ?? 0,
   };
 }
