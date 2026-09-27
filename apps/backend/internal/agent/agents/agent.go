@@ -303,6 +303,15 @@ type RuntimeConfig struct {
 	// Kandev MCP server removes that presentation suffix before the client adds
 	// it back, so the model sees the canonical tool name.
 	NamespacesMCPToolsByServer bool
+	// ToolTimeoutEnvKey names the Env key, if any, that bounds a single
+	// blocking tool call for this agent's harness, in milliseconds. Launch
+	// raises this key's managed default to cover the resolved offline
+	// budget and rejects a higher-precedence override that would undercut
+	// it, so a waiting Kandev MCP call is never aborted by the harness
+	// before the budget itself ends. Empty when the agent has no such key.
+	// See docs/specs/platform/system-design/detached-agent-continuity-02.md
+	// ("Harness tool timeout").
+	ToolTimeoutEnvKey string
 }
 
 // MountTemplate defines a mount with template variables.

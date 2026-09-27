@@ -89,6 +89,21 @@ func TestClaudeACPSeparatesMCPStartupAndToolBudgets(t *testing.T) {
 	}
 }
 
+// TestToolTimeoutCoversOfflineBudget pins the declaration half of
+// AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.1's "Harness tool timeout"
+// contract: Claude names the exact Env key the launch-time offline-budget
+// check raises and enforces. See
+// docs/specs/platform/system-design/detached-agent-continuity-02.md.
+func TestToolTimeoutCoversOfflineBudget(t *testing.T) {
+	rt := NewClaudeACP().Runtime()
+	if rt.ToolTimeoutEnvKey != "MCP_TOOL_TIMEOUT" {
+		t.Fatalf("ToolTimeoutEnvKey = %q, want %q", rt.ToolTimeoutEnvKey, "MCP_TOOL_TIMEOUT")
+	}
+	if _, ok := rt.Env[rt.ToolTimeoutEnvKey]; !ok {
+		t.Fatalf("Runtime().Env missing declared tool-timeout key %q", rt.ToolTimeoutEnvKey)
+	}
+}
+
 func TestClaudeACPPermissionSettingsSkipPermissions(t *testing.T) {
 	settings := NewClaudeACP().PermissionSettings()
 	setting, ok := settings[PermissionKeyDangerouslySkipPermissions]

@@ -149,6 +149,7 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			// it does not select a session mode.
 			"IS_SANDBOX": "1",
 		},
+		ToolTimeoutEnvKey: "MCP_TOOL_TIMEOUT",
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
 		},

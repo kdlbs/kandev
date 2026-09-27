@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -15,6 +16,32 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const (
+	// fallbackOfflineBudgetMinutes mirrors the offline-budget default used
+	// when a launch's resolved metadata is absent or unparseable (system
+	// design part 2 "Budget configuration": absent or zero means 15
+	// minutes). The orchestrator validates offline_budget_minutes before
+	// launch, so this fallback only needs to match that default, not
+	// re-validate the [1,1440] range.
+	fallbackOfflineBudgetMinutes = 15
+	// toolTimeoutOverheadMinutes is the margin added to the resolved
+	// offline budget when raising an agent's declared tool-timeout key
+	// (system design part 2 "Harness tool timeout").
+	toolTimeoutOverheadMinutes = 10
+	// toolTimeoutMinPaddingMinutes is the minimum margin a higher-precedence
+	// override must leave above the resolved offline budget before launch
+	// rejects it.
+	toolTimeoutMinPaddingMinutes = 1
+	millisecondsPerMinute        = 60000
+)
+
+// ErrToolTimeoutBelowOfflineBudget is returned when a higher-precedence
+// environment source sets an agent's declared tool-timeout key below the
+// resolved offline budget plus one minute (system design part 2 "Harness
+// tool timeout"): a lower harness timeout would let the harness abort a
+// waiting Kandev MCP call before the budget itself ends.
+var ErrToolTimeoutBelowOfflineBudget = errors.New("harness tool timeout is below the offline budget")
 
 // TaskEnvironmentRepositoryReader supplies durable repository bindings when a
 // backend restart reconstructs a workspace-only execution.
@@ -40,7 +67,9 @@ func (m *Manager) resolveStrictEnvironment(
 	appendAgentProfileDefinitions(&definitions, profileInfo)
 
 	appendStandardDefinitions(&definitions, executionID, req)
-	appendAgentRuntimeDefaults(&definitions, agentConfig)
+	if err := appendAgentRuntimeDefaults(&definitions, agentConfig, resolveOfflineBudgetMinutes(req)); err != nil {
+		return nil, err
+	}
 	appendRequiredCredentialDefinitions(ctx, &definitions, m.credsMgr, agentConfig)
 	if req.managedGoCachePath != "" {
 		definitions = append(definitions, runtimeenv.Definition{
@@ -106,22 +135,92 @@ func appendAgentProfileDefinitions(definitions *[]runtimeenv.Definition, profile
 	}
 }
 
-func appendAgentRuntimeDefaults(definitions *[]runtimeenv.Definition, agentConfig agents.Agent) {
+// appendAgentRuntimeDefaults converts each of agentConfig's declared runtime
+// env entries into a managed-default definition, skipping any key a
+// higher-precedence definition already declared. When the agent declares a
+// ToolTimeoutEnvKey (system design part 2 "Harness tool timeout"), it also
+// enforces that key against offlineBudgetMinutes: a value this call is about
+// to inject is raised to cover the budget, and a pre-existing
+// higher-precedence value that would undercut the budget fails the launch
+// with ErrToolTimeoutBelowOfflineBudget.
+func appendAgentRuntimeDefaults(definitions *[]runtimeenv.Definition, agentConfig agents.Agent, offlineBudgetMinutes int) error {
 	if agentConfig == nil {
-		return
+		return nil
 	}
 	rt := agentConfig.Runtime()
 	if rt == nil {
-		return
+		return nil
 	}
 	for key, value := range rt.Env {
 		if hasEnvironmentDefinition(*definitions, key) {
+			if key == rt.ToolTimeoutEnvKey {
+				if err := checkToolTimeoutOverride(*definitions, key, offlineBudgetMinutes); err != nil {
+					return err
+				}
+			}
 			continue
+		}
+		if key == rt.ToolTimeoutEnvKey {
+			value = raiseToolTimeoutValue(value, offlineBudgetMinutes)
 		}
 		*definitions = append(*definitions, runtimeenv.Definition{
 			Key: key, Literal: value, Origin: runtimeenv.OriginManagedAgentDefaults,
 		})
 	}
+	return nil
+}
+
+// resolveOfflineBudgetMinutes reads the offline budget resolved for this
+// launch (lifecycle.MetadataKeyOfflineBudgetMinutes). The orchestrator
+// validates and clamps the configured value to [1,1440] before launch,
+// so an absent or unparseable value here only needs the same permissive
+// default agentctl itself falls back to (system design part 2 "Budget
+// configuration").
+func resolveOfflineBudgetMinutes(req *LaunchRequest) int {
+	if req == nil {
+		return fallbackOfflineBudgetMinutes
+	}
+	raw := getMetadataString(req.Metadata, MetadataKeyOfflineBudgetMinutes)
+	minutes, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || minutes <= 0 {
+		return fallbackOfflineBudgetMinutes
+	}
+	return minutes
+}
+
+// raiseToolTimeoutValue returns the larger of current (a base-10 integer in
+// milliseconds) and the offline budget plus its overhead margin, also in
+// milliseconds. A current value that fails to parse is treated as unset so
+// the budget-derived floor always applies.
+func raiseToolTimeoutValue(current string, offlineBudgetMinutes int) string {
+	currentMs, err := strconv.Atoi(strings.TrimSpace(current))
+	floorMs := (offlineBudgetMinutes + toolTimeoutOverheadMinutes) * millisecondsPerMinute
+	if err == nil && currentMs >= floorMs {
+		return current
+	}
+	return strconv.Itoa(floorMs)
+}
+
+// checkToolTimeoutOverride enforces that a higher-precedence definition
+// already present for the declared tool-timeout key does not undercut the
+// offline budget. A definition whose Literal is empty (secret-backed) or
+// non-numeric cannot be checked at this pre-resolve boundary and is left to
+// the agent CLI itself.
+func checkToolTimeoutOverride(definitions []runtimeenv.Definition, key string, offlineBudgetMinutes int) error {
+	thresholdMs := (offlineBudgetMinutes + toolTimeoutMinPaddingMinutes) * millisecondsPerMinute
+	for _, definition := range definitions {
+		if definition.Key != key || definition.Literal == "" {
+			continue
+		}
+		valueMs, err := strconv.Atoi(strings.TrimSpace(definition.Literal))
+		if err != nil || valueMs >= thresholdMs {
+			continue
+		}
+		return fmt.Errorf("%s=%dms is below the offline budget of %d minutes (minimum %d minutes): %w",
+			key, valueMs, offlineBudgetMinutes, offlineBudgetMinutes+toolTimeoutMinPaddingMinutes,
+			ErrToolTimeoutBelowOfflineBudget)
+	}
+	return nil
 }
 
 func appendRequiredCredentialDefinitions(

@@ -29,7 +29,7 @@ func TestAppendAgentRuntimeDefaultsFillsOnlyMissingKeys(t *testing.T) {
 	definitions := []runtimeenv.Definition{
 		{Key: claimed, Literal: "profile-wins", Origin: runtimeenv.OriginAgentProfile},
 	}
-	appendAgentRuntimeDefaults(&definitions, agentConfig)
+	require.NoError(t, appendAgentRuntimeDefaults(&definitions, agentConfig, fallbackOfflineBudgetMinutes))
 
 	byKey := map[string]runtimeenv.Definition{}
 	for _, d := range definitions {
@@ -53,7 +53,7 @@ func TestAppendAgentRuntimeDefaultsFillsOnlyMissingKeys(t *testing.T) {
 func TestAppendAgentRuntimeDefaultsIgnoresMissingConfig(t *testing.T) {
 	definitions := []runtimeenv.Definition{{Key: "EXISTING", Literal: "value"}}
 
-	appendAgentRuntimeDefaults(&definitions, nil)
+	require.NoError(t, appendAgentRuntimeDefaults(&definitions, nil, fallbackOfflineBudgetMinutes))
 
 	require.Len(t, definitions, 1)
 }
