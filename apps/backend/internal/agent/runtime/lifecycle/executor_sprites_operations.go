@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -500,6 +501,7 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OfflineBudgetMinutes:       offlineBudgetMinutesFromReq(req),
 		Env:                        selectedCheckoutAgentEnv(req.Env, req.Metadata),
 	}
 }
@@ -635,6 +637,31 @@ func requiresProcessKillFromReq(req *ExecutorCreateRequest) bool {
 		return false
 	}
 	return rt.RequiresProcessKill
+}
+
+// offlineBudgetMinutesFromMetadata resolves the executor profile's offline
+// budget from launch metadata. orchestrator/executor already validated and
+// resolved this value before launch (empty means "use the profile default",
+// never forwarded here as a literal); an empty or unparseable value here
+// yields 0, meaning "use agentctl's own default" (config.applyOverrides only
+// applies a positive override).
+func offlineBudgetMinutesFromMetadata(metadata map[string]interface{}) int {
+	raw := getMetadataString(metadata, MetadataKeyOfflineBudgetMinutes)
+	if raw == "" {
+		return 0
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return minutes
+}
+
+// offlineBudgetMinutesFromReq is the ExecutorCreateRequest-shaped variant of
+// offlineBudgetMinutesFromMetadata for the builders that carry a request
+// rather than a bare metadata map.
+func offlineBudgetMinutesFromReq(req *ExecutorCreateRequest) int {
+	return offlineBudgetMinutesFromMetadata(req.Metadata)
 }
 
 // namespacesMCPToolsByServerFromReq returns the agent's MCP tool presentation

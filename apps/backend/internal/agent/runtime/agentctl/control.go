@@ -117,6 +117,11 @@ type CreateInstanceRequest struct {
 	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
 	// DeliveryHarnessGeneration fences events to one native harness conversation.
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// OfflineBudgetMinutes is how many minutes this instance tolerates no
+	// confirmed backend stream before cancelling the running turn (system
+	// design part 2 "Offline budget"). Zero means the agentctl default of 15
+	// minutes.
+	OfflineBudgetMinutes int `json:"offline_budget_minutes,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

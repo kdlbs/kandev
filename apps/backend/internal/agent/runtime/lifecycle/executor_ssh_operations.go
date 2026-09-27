@@ -744,6 +744,7 @@ func buildSSHCreateInstanceRequest(
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OfflineBudgetMinutes:       offlineBudgetMinutesFromReq(req),
 		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
 	}
 	if req.DurableJournalOwnerID != "" {

@@ -50,6 +50,11 @@ func (m *ControlServer) runUnownedReaper(period, interval time.Duration) {
 		case <-m.reaperStop:
 			return
 		case <-ticker.C:
+			hold, latestEnforcementEnd := m.reaperGate.ReaperGate()
+			m.ownership.NoteEnforcementEnd(latestEnforcementEnd)
+			if hold {
+				continue
+			}
 			if m.decideUnownedShutdown(period) {
 				m.requestShutdown()
 				m.logger.Warn("no ownership claim renewed within the unowned period, shutting down",

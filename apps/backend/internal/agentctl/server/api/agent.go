@@ -175,7 +175,10 @@ type CancelResponse struct {
 
 // Stream liveness timings (system design part 2 "Stream liveness"): a ping
 // every 15s, a 45s read deadline extended on every frame, and a 10s write
-// deadline on every write.
+// deadline on every write. These are the production defaults; Server holds
+// the effective values (streamPingInterval/streamReadDeadline/
+// streamWriteDeadline) so tests can override them via
+// SetStreamLivenessTimings.
 const (
 	agentStreamPingInterval  = 15 * time.Second
 	agentStreamReadDeadline  = 45 * time.Second
@@ -204,7 +207,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	}
 
 	closeConn := func(code int, reason string) {
-		deadline := time.Now().Add(agentStreamWriteDeadline)
+		deadline := time.Now().Add(s.streamWriteDeadline)
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), deadline)
 		_ = conn.Close()
 	}
@@ -260,18 +263,18 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	writeMessage := func(data []byte) error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		_ = conn.SetWriteDeadline(time.Now().Add(agentStreamWriteDeadline))
+		_ = conn.SetWriteDeadline(time.Now().Add(s.streamWriteDeadline))
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 	sendPing := func() error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		return conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(agentStreamWriteDeadline))
+		return conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(s.streamWriteDeadline))
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(agentStreamReadDeadline))
+	_ = conn.SetReadDeadline(time.Now().Add(s.streamReadDeadline))
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(agentStreamReadDeadline))
+		return conn.SetReadDeadline(time.Now().Add(s.streamReadDeadline))
 	})
 
 	// Get the session updates channel
@@ -283,7 +286,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 		mcpRequestCh = s.mcpBackendClient.GetRequestChannel()
 	}
 
-	go s.runAgentStreamPinger(ctx, sendPing)
+	go s.runAgentStreamPinger(ctx, s.streamPingInterval, sendPing)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -298,12 +301,12 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	}
 }
 
-// runAgentStreamPinger sends a liveness ping every agentStreamPingInterval
-// until ctx is done. It runs detached from wg: a failed ping leaves
-// detection to the read deadline on the peer's side and to this stream's own
-// read deadline on ours, rather than needing to be waited on itself.
-func (s *Server) runAgentStreamPinger(ctx context.Context, sendPing func() error) {
-	ticker := time.NewTicker(agentStreamPingInterval)
+// runAgentStreamPinger sends a liveness ping every pingInterval until ctx is
+// done. It runs detached from wg: a failed ping leaves detection to the read
+// deadline on the peer's side and to this stream's own read deadline on
+// ours, rather than needing to be waited on itself.
+func (s *Server) runAgentStreamPinger(ctx context.Context, pingInterval time.Duration, sendPing func() error) {
+	ticker := time.NewTicker(pingInterval)
 	defer ticker.Stop()
 	for {
 		select {

@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
+	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -1941,6 +1942,16 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 	return nil
 }
 
+// validateOfflineBudgetProfileConfig rejects an executor profile's
+// offline_budget_minutes value at save time, mirroring the launch-time check
+// in orchestrator/executor (system design part 2 "Budget configuration").
+func validateOfflineBudgetProfileConfig(config map[string]string) error {
+	if _, err := orchestratorexecutor.ResolveOfflineBudgetMinutes(config["offline_budget_minutes"]); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
 	if req.Type == models.ExecutorTypePluginRemote {
 		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
@@ -2257,6 +2268,9 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 			return nil, err
 		}
 	}
+	if err := validateOfflineBudgetProfileConfig(req.Config); err != nil {
+		return nil, err
+	}
 	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
 		return nil, err
 	}
@@ -2298,14 +2312,17 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.updatePluginExecutorProfile(ctx, profile, executor, req)
 	}
+	config := profile.Config
+	if req.Config != nil {
+		config = req.Config
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		config := profile.Config
-		if req.Config != nil {
-			config = req.Config
-		}
 		if err := validateKubernetesProfileConfig(config); err != nil {
 			return nil, err
 		}
+	}
+	if err := validateOfflineBudgetProfileConfig(config); err != nil {
+		return nil, err
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name

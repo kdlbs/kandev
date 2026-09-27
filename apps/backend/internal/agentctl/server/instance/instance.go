@@ -26,6 +26,16 @@ type processManager interface {
 	// identity" reconstruction row). Empty before the agent's session/new or
 	// session/load completes.
 	GetSessionID() string
+	// AttachmentReaperGate reports whether this instance currently holds the
+	// unowned reaper's shutdown decision open, and the time its most recent
+	// budget enforcement ended (zero if it never has), for the unowned
+	// reaper gate (system design part 2 "Unowned reaper",
+	// AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5).
+	AttachmentReaperGate() (hold bool, enforcementEndedAt time.Time)
+	// CloseAgentStream closes the instance's current backend stream, if any,
+	// with the given code and reason (system design part 2 "Capability and
+	// close reason").
+	CloseAgentStream(code int, reason string)
 }
 
 // Instance represents a single agent instance running as a subprocess.
@@ -234,6 +244,12 @@ type CreateRequest struct {
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
+
+	// OfflineBudgetMinutes is how many minutes this instance tolerates no
+	// confirmed backend stream before cancelling the running turn (system
+	// design part 2 "Offline budget"). Zero means the agentctl default of 15
+	// minutes.
+	OfflineBudgetMinutes int `json:"offline_budget_minutes,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

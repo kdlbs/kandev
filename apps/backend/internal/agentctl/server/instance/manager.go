@@ -250,6 +250,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OfflineBudgetMinutes:       req.OfflineBudgetMinutes,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",
@@ -550,6 +551,34 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 	return result
 }
 
+// ReaperGate aggregates every live instance's reaper-gate state for the
+// unowned reaper (system design part 2 "Unowned reaper",
+// AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5): hold is true while any
+// instance is detached with its budget not yet expired, or with its budget
+// expired and enforcement not yet ended. latestEnforcementEnd is the latest
+// time any instance's enforcement ended (zero if none ever have), which
+// pushes the unowned period's floor past a cancel. Reading each instance
+// under m.mu (rather than a snapshot taken at start) means instances created
+// or removed after startup are covered, and a removed instance no longer
+// holds the gate.
+func (m *Manager) ReaperGate() (hold bool, latestEnforcementEnd time.Time) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, inst := range m.instances {
+		if inst.manager == nil {
+			continue
+		}
+		instHold, endedAt := inst.manager.AttachmentReaperGate()
+		if instHold {
+			hold = true
+		}
+		if endedAt.After(latestEnforcementEnd) {
+			latestEnforcementEnd = endedAt
+		}
+	}
+	return hold, latestEnforcementEnd
+}
+
 // StopInstance stops and removes an instance by ID.
 func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	m.mu.RLock()
@@ -680,14 +709,26 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.instances))
-	for id := range m.instances {
+	insts := make([]*Instance, 0, len(m.instances))
+	for id, inst := range m.instances {
 		ids = append(ids, id)
+		insts = append(insts, inst)
 	}
 	provisional := make([]*provisionalInstance, 0, len(m.provisional))
 	for _, bundle := range m.provisional {
 		provisional = append(provisional, bundle)
 	}
 	m.mu.Unlock()
+
+	// Close every live instance's current backend stream with an explicit
+	// agentctl_shutdown reason before tearing instances down, so the backend
+	// learns why the stream ended instead of seeing a raw disconnect (system
+	// design part 2 "Capability and close reason").
+	for _, inst := range insts {
+		if inst.manager != nil {
+			inst.manager.CloseAgentStream(process.CloseCodeNormal, process.CloseReasonAgentctlShutdown)
+		}
+	}
 
 	var shutdownErr error
 	for _, bundle := range provisional {

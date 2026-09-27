@@ -1816,7 +1816,11 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
 		}
 	} else {
-		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		var configErr error
+		execConfig, configErr = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
 	}
 	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
 		ctx, task, session, req, options,
@@ -2190,9 +2194,12 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the
 // resume request, persisting executor assignment if newly resolved.
-func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
+func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) (executorConfig, error) {
 	executorWasEmpty := session.ExecutorID == ""
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
+	if err := validateOfflineBudgetMetadata(execConfig.Metadata); err != nil {
+		return execConfig, err
+	}
 	session.ExecutorID = execConfig.ExecutorID
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
@@ -2210,7 +2217,7 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 		req.Metadata = execConfig.Metadata
 	}
 
-	return execConfig
+	return execConfig, nil
 }
 
 // isRecoverableCancelledResumeSession reports whether session was cancelled by

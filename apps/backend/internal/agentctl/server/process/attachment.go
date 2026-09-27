@@ -18,6 +18,18 @@ const defaultOfflineBudget = 15 * time.Minute
 const (
 	CloseCodeSuperseded    = 4001
 	CloseCodeOfflineBudget = 4002
+	// CloseCodeNormal is the standard WebSocket normal-closure code, used
+	// with CloseReasonAgentExited and CloseReasonAgentctlShutdown (system
+	// design part 2 "Capability and close reason").
+	CloseCodeNormal = 1000
+)
+
+// Close reasons paired with CloseCodeNormal (system design part 2
+// "Capability and close reason"): the agent process exited on its own, or
+// agentctl itself is shutting down.
+const (
+	CloseReasonAgentExited      = "agent_exited"
+	CloseReasonAgentctlShutdown = "agentctl_shutdown"
 )
 
 // BudgetPause records one offline-budget-exhausted event. It is journaled by
@@ -178,6 +190,13 @@ type attachmentState struct {
 
 	unjournaledPause *BudgetPause
 
+	// enforcementEndedAt is when this instance's most recent budget
+	// enforcement ended, zero if it has never enforced. It backs the unowned
+	// reaper's floor: the unowned period counts from the later of the last
+	// ownership renewal and the latest enforcement end (system design part 2
+	// "Unowned reaper").
+	enforcementEndedAt time.Time
+
 	budget time.Duration
 	hooks  attachmentHooks
 
@@ -222,6 +241,21 @@ func (as *attachmentState) IsAttached() bool {
 	return as.current != nil
 }
 
+// CloseCurrent closes the current stream, if any, with the given code and
+// reason, using the same close function StreamStart/FinalizeStreamStart
+// registered for it (system design part 2 "Capability and close reason").
+// A no-op when no stream is current. Does not itself change attachment
+// state: the close triggers the peer's disconnect, which reaches StreamEnd
+// through the normal handleAgentStreamWS teardown path.
+func (as *attachmentState) CloseCurrent(code int, reason string) {
+	as.mu.Lock()
+	current := as.current
+	as.mu.Unlock()
+	if current != nil && current.close != nil {
+		current.close(code, reason)
+	}
+}
+
 // Snapshot implements AttachmentWaiter.
 func (as *attachmentState) Snapshot() AttachmentSnapshot {
 	as.mu.Lock()
@@ -240,6 +274,31 @@ func (as *attachmentState) Enforcing() bool {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	return as.enforcing
+}
+
+// ReaperGate reports whether this instance currently holds the unowned
+// reaper's shutdown decision open, and the time its most recent enforcement
+// ended (zero if it never has). Per system design part 2 "Unowned reaper"
+// (AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5), it holds while detached with
+// its budget not yet expired, or with its budget expired and enforcement
+// still running; an attached instance, or a detached one whose expired
+// budget finished enforcing, does not hold.
+func (as *attachmentState) ReaperGate() (hold bool, enforcementEndedAt time.Time) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	enforcementEndedAt = as.enforcementEndedAt
+	if as.current != nil {
+		return false, enforcementEndedAt
+	}
+	if as.enforcing {
+		return true, enforcementEndedAt
+	}
+	select {
+	case <-as.exhaustedCh:
+		return false, enforcementEndedAt
+	default:
+		return true, enforcementEndedAt
+	}
 }
 
 // Status reports the attachment state for the delivery-status endpoint.

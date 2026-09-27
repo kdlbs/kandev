@@ -354,6 +354,9 @@ func (e *Executor) createOfficeSession(
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}
+	if err := validateOfflineBudgetMetadata(execConfig.Metadata); err != nil {
+		return nil, err
+	}
 
 	if err := e.persistOfficeSession(ctx, task.ID, session); err != nil {
 		return nil, fmt.Errorf("persist office session: %w", err)

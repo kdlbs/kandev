@@ -49,7 +49,27 @@ type Server struct {
 	// running control server alongside it relies on.
 	credentialSource InstanceCredentialSource
 
+	// streamPingInterval, streamReadDeadline, and streamWriteDeadline hold
+	// this server's agent stream liveness timings (system design part 2
+	// "Stream liveness"). NewServer sets the production defaults
+	// (agentStreamPingInterval/agentStreamReadDeadline/
+	// agentStreamWriteDeadline); SetStreamLivenessTimings overrides them for
+	// tests so liveness behavior can be exercised without a real 15s/45s/10s
+	// wait.
+	streamPingInterval  time.Duration
+	streamReadDeadline  time.Duration
+	streamWriteDeadline time.Duration
+
 	upgrader websocket.Upgrader
+}
+
+// SetStreamLivenessTimings overrides the default agent stream ping interval
+// and read/write deadlines. Call before a stream connects; it has no effect
+// on a stream already in flight.
+func (s *Server) SetStreamLivenessTimings(ping, read, write time.Duration) {
+	s.streamPingInterval = ping
+	s.streamReadDeadline = read
+	s.streamWriteDeadline = write
 }
 
 // SetCredentialSource wires this instance server's authentication and
@@ -67,15 +87,18 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
-		cfg:              cfg,
-		procMgr:          procMgr,
-		mcpServer:        mcpServer,
-		mcpBackendClient: mcpBackendClient,
-		logger:           log.WithFields(zap.String("component", "api-server")),
-		router:           gin.New(),
-		portProxies:      newPortProxyCache(),
-		metricsCollector: metrics.NewCollector(),
-		lspInstaller:     lspinstaller.NewRegistry("", log, lspinstaller.WithCommandRunner(procMgr)),
+		cfg:                 cfg,
+		procMgr:             procMgr,
+		mcpServer:           mcpServer,
+		mcpBackendClient:    mcpBackendClient,
+		logger:              log.WithFields(zap.String("component", "api-server")),
+		router:              gin.New(),
+		portProxies:         newPortProxyCache(),
+		metricsCollector:    metrics.NewCollector(),
+		lspInstaller:        lspinstaller.NewRegistry("", log, lspinstaller.WithCommandRunner(procMgr)),
+		streamPingInterval:  agentStreamPingInterval,
+		streamReadDeadline:  agentStreamReadDeadline,
+		streamWriteDeadline: agentStreamWriteDeadline,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication

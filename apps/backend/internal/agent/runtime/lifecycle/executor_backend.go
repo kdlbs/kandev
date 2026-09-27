@@ -335,6 +335,18 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+
+	// MetadataKeyOfflineBudgetMinutes carries the executor profile's offline
+	// budget (system design part 2 "Offline budget": how long agentctl
+	// tolerates no confirmed backend stream before cancelling the running
+	// turn) as launch metadata, so every executor's CreateInstanceRequest
+	// builder can derive agentctl.CreateInstanceRequest.OfflineBudget from
+	// it. It is an *authoritative* profile key (see
+	// profileConfigAuthoritativeKeys in internal/orchestrator/executor),
+	// which also validates and resolves its value before launch — by the
+	// time a builder reads this key, empty means "use the default" and any
+	// other value is already a valid base-10 integer from 1 to 1440.
+	MetadataKeyOfflineBudgetMinutes = "offline_budget_minutes"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -368,6 +380,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+	MetadataKeyOfflineBudgetMinutes:    true,
 
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:               true,

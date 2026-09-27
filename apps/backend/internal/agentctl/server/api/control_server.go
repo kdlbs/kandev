@@ -52,6 +52,19 @@ type ControlServer struct {
 	// instead of the atomic check-and-latch) fails a test even though it
 	// would still pass every other reaper assertion.
 	decideUnownedShutdown func(time.Duration) bool
+
+	// reaperGate is consulted every reaper tick for the unowned reaper's
+	// per-instance hold condition (system design part 2 "Unowned reaper",
+	// AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5), defaulted to instMgr.
+	// Tests substitute a fake to pin hold/floor values without spawning real
+	// instances.
+	reaperGate reaperGateSource
+}
+
+// reaperGateSource is satisfied by *instance.Manager, narrowed to the single
+// call the unowned reaper needs every tick.
+type reaperGateSource interface {
+	ReaperGate() (hold bool, latestEnforcementEnd time.Time)
 }
 
 // NewControlServer creates a new ControlServer for instance management.
@@ -80,6 +93,7 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	}
 
 	cs.decideUnownedShutdown = cs.ownership.TryBeginShutdownIfUnownedFor
+	cs.reaperGate = instMgr
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
 	cs.router.Use(controlCredentialAuth(cs.credentials, adoptionOnlyPaths, "/health", "/auth/handshake", "/identity", "/ownership/prove"))

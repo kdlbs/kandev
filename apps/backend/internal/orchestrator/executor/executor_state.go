@@ -2,7 +2,9 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +13,46 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
+
+const (
+	// defaultOfflineBudgetMinutes is used when a profile's
+	// offline_budget_minutes is absent or empty (system design part 2
+	// "Budget configuration").
+	defaultOfflineBudgetMinutes = 15
+	minOfflineBudgetMinutes     = 1
+	maxOfflineBudgetMinutes     = 1440
+)
+
+// ErrInvalidOfflineBudget is returned when an executor profile's
+// offline_budget_minutes value is present but is not a base-10 integer from
+// 1 to 1440 (system design part 2 "Budget configuration").
+var ErrInvalidOfflineBudget = errors.New("offline_budget_minutes must be a base-10 integer from 1 to 1440")
+
+// ResolveOfflineBudgetMinutes resolves an executor profile's
+// offline_budget_minutes config value. An empty value (absent or blank)
+// resolves to the default of 15 minutes; any other value must be a base-10
+// integer from 1 to 1440, else ErrInvalidOfflineBudget.
+func ResolveOfflineBudgetMinutes(raw string) (int, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultOfflineBudgetMinutes, nil
+	}
+	minutes, err := strconv.Atoi(trimmed)
+	if err != nil || minutes < minOfflineBudgetMinutes || minutes > maxOfflineBudgetMinutes {
+		return 0, ErrInvalidOfflineBudget
+	}
+	return minutes, nil
+}
+
+// validateOfflineBudgetMetadata rejects an invalid offline_budget_minutes
+// value already resolved onto launch metadata. Called again at launch (in
+// addition to profile save validation) per system design part 2 "Budget
+// configuration".
+func validateOfflineBudgetMetadata(metadata map[string]interface{}) error {
+	raw, _ := metadata[lifecycle.MetadataKeyOfflineBudgetMinutes].(string)
+	_, err := ResolveOfflineBudgetMinutes(raw)
+	return err
+}
 
 // GetExecutionBySession returns the execution state for a specific session.
 // "Has been launched" is determined by whether an executors_running row exists
@@ -286,6 +328,10 @@ var profileConfigAuthoritativeKeys = []string{
 	lifecycle.MetadataKeyDockerNetwork,
 	lifecycle.MetadataKeyDockerNetworkGwPriority,
 	lifecycle.MetadataKeyDockerAdditionalNetworks,
+	// The offline budget is admin-owned launch policy (system design part 2
+	// "Budget configuration"). A task that could supply its own value could
+	// arm a shorter or longer tolerance than its profile approved.
+	lifecycle.MetadataKeyOfflineBudgetMinutes,
 }
 
 // clearAuthoritativeMetadataKeys blanks every profile-owned key in the

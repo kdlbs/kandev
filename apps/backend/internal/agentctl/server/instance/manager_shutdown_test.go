@@ -359,14 +359,19 @@ func (s *fakeHTTPServer) Close() error {
 }
 
 type fakeProcessManager struct {
-	stopErr              error
-	stopped              bool
-	stopCalls            int
-	stopStarted          chan<- struct{}
-	stopRelease          <-chan struct{}
-	stopStartOnce        sync.Once
-	workspaceSourceRoots []string
-	sessionID            string
+	stopErr                error
+	stopped                bool
+	stopCalls              int
+	stopStarted            chan<- struct{}
+	stopRelease            <-chan struct{}
+	stopStartOnce          sync.Once
+	workspaceSourceRoots   []string
+	sessionID              string
+	reaperHold             bool
+	reaperEnforcementEnd   time.Time
+	closeAgentStreamCalled bool
+	closedCode             int
+	closedReason           string
 }
 
 // legacyResourceReleaseError proves a process teardown error cannot authorize
@@ -386,6 +391,16 @@ func (m *fakeProcessManager) CloseAdmission() {}
 func (m *fakeProcessManager) WorkspaceSourceRoots() []string { return m.workspaceSourceRoots }
 
 func (m *fakeProcessManager) GetSessionID() string { return m.sessionID }
+
+func (m *fakeProcessManager) AttachmentReaperGate() (bool, time.Time) {
+	return m.reaperHold, m.reaperEnforcementEnd
+}
+
+func (m *fakeProcessManager) CloseAgentStream(code int, reason string) {
+	m.closeAgentStreamCalled = true
+	m.closedCode = code
+	m.closedReason = reason
+}
 
 func (m *fakeProcessManager) StopForTeardown(context.Context) error {
 	m.stopped = true

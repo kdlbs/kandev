@@ -1547,6 +1547,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}
+	if err := validateOfflineBudgetMetadata(execConfig.Metadata); err != nil {
+		e.logger.Error("invalid offline_budget_minutes on executor profile",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return "", err
+	}
 	// Validate every managed-credential repository binding before persisting
 	// the session row. Doing this after the row exists would leave a
 	// zero-message session behind once launch fails at credential issuance.
@@ -2543,6 +2549,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if err := validateOfflineBudgetMetadata(execConfig.Metadata); err != nil {
+		return nil, execConfig, err
+	}
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
 		req.ExecutorType = execConfig.ExecutorType

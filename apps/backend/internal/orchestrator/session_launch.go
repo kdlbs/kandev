@@ -39,6 +39,14 @@ const sessionTerminalErrText = "session is terminal"
 
 const sessionRecoveryActionContinueFromHistory = "continue_from_history"
 
+// restoreAttemptOutcomeBlocked and restoreAttemptOutcomeContextContinued are
+// the two restore-attempt/metric outcome values a continuation checkpoint
+// can settle to.
+const (
+	restoreAttemptOutcomeBlocked          = "blocked"
+	restoreAttemptOutcomeContextContinued = "context_continued"
+)
+
 // SessionIntent represents the type of session operation requested.
 type SessionIntent string
 
@@ -1922,7 +1930,7 @@ func (s *Service) persistContinuationCheckpoint(
 		IncarnationID:      incarnationID,
 		ExpectedGeneration: expectedGeneration,
 		Action:             sessionRecoveryActionContinueFromHistory,
-		Outcome:            "blocked",
+		Outcome:            restoreAttemptOutcomeBlocked,
 		Reason:             "native_state_missing",
 		TargetWorkspace:    session.WorkspacePath,
 		Authorized:         true,
@@ -2066,7 +2074,7 @@ func (s *Service) commitContinuationGeneration(ctx context.Context, checkpoint *
 		NativeSessionID:       acpSessionID,
 		OriginalWorkspace:     checkpoint.workspace,
 		CurrentWorkspace:      checkpoint.workspace,
-		CreationReason:        "context_continued",
+		CreationReason:        restoreAttemptOutcomeContextContinued,
 		CreatedAt:             now,
 		CommittedAt:           now,
 	}, checkpoint.expectedGen)
@@ -2101,11 +2109,11 @@ func (s *Service) finishContinuationCheckpoint(ctx context.Context, checkpoint *
 	if err := checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, status, now); err != nil {
 		resultErr = errors.Join(resultErr, fmt.Errorf("settle continuation snapshot: %w", err))
 	}
-	attemptOutcome := "blocked"
-	metricOutcome := "blocked"
+	attemptOutcome := restoreAttemptOutcomeBlocked
+	metricOutcome := restoreAttemptOutcomeBlocked
 	if status == models.ContinuitySnapshotConsumed {
-		attemptOutcome = "context_continued"
-		metricOutcome = "context_continued"
+		attemptOutcome = restoreAttemptOutcomeContextContinued
+		metricOutcome = restoreAttemptOutcomeContextContinued
 	}
 	if err := checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, attemptOutcome, now); err != nil {
 		resultErr = errors.Join(resultErr, fmt.Errorf("settle restore attempt: %w", err))

@@ -140,6 +140,12 @@ func (m *Manager) IsAttached() bool {
 	return m.ensureAttach().IsAttached()
 }
 
+// CloseAgentStream closes the current backend stream, if any, with the given
+// code and reason (system design part 2 "Capability and close reason").
+func (m *Manager) CloseAgentStream(code int, reason string) {
+	m.ensureAttach().CloseCurrent(code, reason)
+}
+
 // AttachmentSnapshot returns the current attachment snapshot for task 02's
 // Kandev call waiters.
 func (m *Manager) AttachmentSnapshot() AttachmentSnapshot {
@@ -156,6 +162,14 @@ func (m *Manager) AttachmentStatus() Attachment {
 // running, for the unowned reaper gate.
 func (m *Manager) AttachmentEnforcing() bool {
 	return m.ensureAttach().Enforcing()
+}
+
+// AttachmentReaperGate reports whether this instance currently holds the
+// unowned reaper's shutdown decision open, and the time its most recent
+// budget enforcement ended, for the reaper gate (system design part 2
+// "Unowned reaper").
+func (m *Manager) AttachmentReaperGate() (hold bool, enforcementEndedAt time.Time) {
+	return m.ensureAttach().ReaperGate()
 }
 
 // StreamStart begins a new agent stream, superseding any prior current

@@ -158,6 +158,7 @@ func buildContainerCreateInstanceRequest(
 		DeliveryStreamID:           config.DeliveryStreamID,
 		DeliveryIncarnationID:      config.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  config.DeliveryHarnessGeneration,
+		OfflineBudgetMinutes:       offlineBudgetMinutesFromMetadata(config.Metadata),
 	}
 }
 

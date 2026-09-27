@@ -18,6 +18,13 @@ type ownershipState struct {
 	mu           sync.Mutex
 	lastRenewal  time.Time
 	shuttingDown bool
+
+	// enforcementFloor is the latest observed budget-enforcement end time
+	// across every instance (system design part 2 "Unowned reaper"): the
+	// unowned period counts from the later of lastRenewal and this floor, so
+	// the journal stays readable for at least one full unowned period after
+	// a cancel. It only ever moves forward.
+	enforcementFloor time.Time
 }
 
 // newOwnershipState starts the clock at construction (process start), so a
@@ -41,13 +48,37 @@ func (o *ownershipState) Renew() bool {
 	return true
 }
 
-// UnownedFor returns how long it has been since the last successful
-// renewal, judged on this process's own clock per design 01 ("never on a
-// wall-clock value either side supplies").
+// UnownedFor returns how long it has been since the later of the last
+// successful renewal and the latest observed enforcement end, judged on this
+// process's own clock per design 01 ("never on a wall-clock value either
+// side supplies").
 func (o *ownershipState) UnownedFor() time.Duration {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return time.Since(o.lastRenewal)
+	return time.Since(o.unownedSinceLocked())
+}
+
+// unownedSinceLocked returns the later of lastRenewal and enforcementFloor.
+// Called with mu held.
+func (o *ownershipState) unownedSinceLocked() time.Time {
+	since := o.lastRenewal
+	if o.enforcementFloor.After(since) {
+		since = o.enforcementFloor
+	}
+	return since
+}
+
+// NoteEnforcementEnd records the latest observed instance enforcement-end
+// time across every instance (system design part 2 "Unowned reaper"),
+// pushing the unowned period's effective start forward past a budget
+// cancel. It never moves the floor backward and does not affect the
+// shutdown latch by itself.
+func (o *ownershipState) NoteEnforcementEnd(t time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if t.After(o.enforcementFloor) {
+		o.enforcementFloor = t
+	}
 }
 
 // BeginShutdown latches the one-way unowned-shutdown decision. Returns false
@@ -79,7 +110,7 @@ func (o *ownershipState) TryBeginShutdownIfUnownedFor(period time.Duration) bool
 	if o.shuttingDown {
 		return false
 	}
-	if time.Since(o.lastRenewal) < period {
+	if time.Since(o.unownedSinceLocked()) < period {
 		return false
 	}
 	o.shuttingDown = true

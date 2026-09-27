@@ -1781,6 +1781,7 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
+	m.writeAgentPgidFile(m.cmd.Process.Pid, time.Now())
 
 	return processGeneration, nil
 }
@@ -2663,6 +2664,12 @@ func (m *Manager) stop(ctx context.Context) error {
 	// lifecycle transition; concurrent readers may briefly block while process
 	// group reaping finishes.
 
+	// Removed unconditionally: agentctl deliberately stopping the agent is
+	// exactly when the orphan record must go, regardless of which status
+	// branch below applies (system design part 2 "Orphaned agent after
+	// agentctl loss"). Idempotent, so a repeated Stop is harmless.
+	m.removeAgentPgidFile()
+
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
 	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
@@ -3344,6 +3351,11 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 		} else {
 			m.mainReapPending.Store(false)
 		}
+		// The agent exited on its own -- not because agentctl told it to
+		// stop -- so the current backend stream, if any, is closed with an
+		// explicit reason instead of a raw disconnect (system design part 2
+		// "Capability and close reason").
+		m.CloseAgentStream(CloseCodeNormal, CloseReasonAgentExited)
 	}
 	m.status.Store(StatusStopped)
 }

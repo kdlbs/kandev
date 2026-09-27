@@ -135,11 +135,16 @@ func (as *attachmentState) journalAndEnd(outcome string, cancelErr error) {
 // endEnforcement ends enforcement: it sets enforcing false and closes
 // enforcementDoneCh, in one attachMu hold, releasing any stream start
 // waiting on it. A non-nil pause is kept as the unjournaled budget pause
-// until the next Confirm.
+// until the next Confirm. It also records enforcementEndedAt, pushing the
+// unowned reaper's floor forward (system design part 2 "Unowned reaper").
+// This only runs once enforcement is actually done (a stop that keeps
+// failing loops in enforce() without reaching here, so the reaper gate stays
+// held by ReaperGate's enforcing check the whole time).
 func (as *attachmentState) endEnforcement(unjournaledPause *BudgetPause) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	as.enforcing = false
 	as.unjournaledPause = unjournaledPause
+	as.enforcementEndedAt = as.hooks.now()
 	closeAttachWaitLocked(as.enforcementDoneCh)
 }

@@ -306,6 +306,7 @@ func buildStandaloneCreateInstanceRequest(
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OfflineBudgetMinutes:       offlineBudgetMinutesFromReq(req),
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 	}
 }

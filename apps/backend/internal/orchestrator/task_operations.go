@@ -7125,10 +7125,10 @@ func (s *Service) finishPromptExecutorDispatch(
 				context.WithoutCancel(ctx), sessionID, "backend_delivery_completion_failed", delivery,
 			)
 			return &PromptResult{
-					StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
-				}, &acceptedPromptDispatchError{
-					err: errors.Join(completionErr, recoveryErr),
-				}
+				StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
+			}, &acceptedPromptDispatchError{
+				err: errors.Join(completionErr, recoveryErr),
+			}
 		}
 	}
 	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID}, nil
