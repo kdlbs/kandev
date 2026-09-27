@@ -61,6 +61,51 @@ func TestGetCoordinator_UnknownIDIsNotFound(t *testing.T) {
 	}
 }
 
+func TestCoordinatorForConversationTask_MatchAndNoMatch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	taskID := "task-1"
+	c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+	if err := store.CreateCoordinator(ctx, c); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	gotID, ok, err := store.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("CoordinatorForConversationTask: %v", err)
+	}
+	if !ok || gotID != c.ID {
+		t.Fatalf("CoordinatorForConversationTask(%q) = (%q, %v), want (%q, true)", taskID, gotID, ok, c.ID)
+	}
+
+	if _, ok, err := store.CoordinatorForConversationTask(ctx, "no-such-task"); err != nil || ok {
+		t.Fatalf("CoordinatorForConversationTask(no-such-task) = (_, %v, %v), want (_, false, nil)", ok, err)
+	}
+}
+
+func TestGetCoordinatorByID_NotFoundHasNoWorkspaceScope(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e"}
+	if err := store.CreateCoordinator(ctx, c); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	got, err := store.GetCoordinatorByID(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("GetCoordinatorByID: %v", err)
+	}
+	if got.Name != "Ops" {
+		t.Fatalf("GetCoordinatorByID returned %+v", got)
+	}
+
+	if _, err := store.GetCoordinatorByID(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetCoordinatorByID(missing): err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestListCoordinators_OrderedByCreatedAtThenID(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

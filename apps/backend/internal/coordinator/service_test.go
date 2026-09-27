@@ -582,3 +582,98 @@ func TestServiceListStalls(t *testing.T) {
 		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
 }
+
+// TestService_CoordinatorForConversationTask exercises the lookup the
+// mcp/scope resolver and the executor's fail-closed checks use
+// (copilot.md#principal-and-mode): no workspace scope of its own, since the
+// caller (an authenticated session's own task/mode resolution) is trusted
+// server-side, not a user-scoped request.
+func TestService_CoordinatorForConversationTask(t *testing.T) {
+	svc := newServiceForTest(t, nil, nil, nil)
+	ctx := context.Background()
+
+	taskID := "conversation-task-1"
+	created := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+	if err := svc.store.CreateCoordinator(ctx, created); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	id, ok, err := svc.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("CoordinatorForConversationTask() unexpected error: %v", err)
+	}
+	if !ok || id != created.ID {
+		t.Fatalf("CoordinatorForConversationTask() = (%q, %v), want (%q, true)", id, ok, created.ID)
+	}
+
+	if _, ok, err := svc.CoordinatorForConversationTask(ctx, "orphaned-task"); err != nil || ok {
+		t.Fatalf("CoordinatorForConversationTask(orphaned) = (_, %v, %v), want (_, false, nil)", ok, err)
+	}
+}
+
+// TestService_CoordinatorProfilesReady covers the fail-closed profile check
+// (copilot.md#fail-closed): ready only when both profiles resolve ok.
+func TestService_CoordinatorProfilesReady(t *testing.T) {
+	agents := map[string]*settingsmodels.AgentProfile{
+		"agent-ok":          {ID: "agent-ok", WorkspaceID: "ws-1"},
+		"agent-passthrough": {ID: "agent-passthrough", WorkspaceID: "ws-1", CLIPassthrough: true},
+	}
+	executors := map[string]*taskmodels.ExecutorProfile{
+		"executor-ok": {ID: "executor-ok"},
+	}
+
+	t.Run("both profiles ok", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "agent-ok", ExecutorProfileID: "executor-ok"}
+		if err := svc.store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		ready, err := svc.CoordinatorProfilesReady(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CoordinatorProfilesReady() unexpected error: %v", err)
+		}
+		if !ready {
+			t.Fatal("CoordinatorProfilesReady() = false, want true")
+		}
+	})
+
+	t.Run("passthrough agent profile is not ready", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "agent-passthrough", ExecutorProfileID: "executor-ok"}
+		if err := svc.store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		ready, err := svc.CoordinatorProfilesReady(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CoordinatorProfilesReady() unexpected error: %v", err)
+		}
+		if ready {
+			t.Fatal("CoordinatorProfilesReady() = true, want false")
+		}
+	})
+
+	t.Run("missing executor profile is not ready", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "agent-ok", ExecutorProfileID: "missing-executor"}
+		if err := svc.store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		ready, err := svc.CoordinatorProfilesReady(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CoordinatorProfilesReady() unexpected error: %v", err)
+		}
+		if ready {
+			t.Fatal("CoordinatorProfilesReady() = true, want false")
+		}
+	})
+
+	t.Run("unknown coordinator id errors", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		if _, err := svc.CoordinatorProfilesReady(context.Background(), "missing"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("CoordinatorProfilesReady(missing) error = %v, want ErrNotFound", err)
+		}
+	})
+}

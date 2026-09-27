@@ -263,6 +263,32 @@ func (s *Service) ListProposals(ctx context.Context, workspaceID, coordinatorID 
 	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status)
 }
 
+// CoordinatorForConversationTask returns the id of the coordinator whose
+// current conversation_task_id equals taskID, for the mcp/scope resolver's
+// principalSurface and the executor's fail-closed session-start checks
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode). It
+// carries no workspace scope of its own: the caller is server-side task/mode
+// resolution, not a user-scoped request.
+func (s *Service) CoordinatorForConversationTask(ctx context.Context, taskID string) (string, bool, error) {
+	return s.store.CoordinatorForConversationTask(ctx, taskID)
+}
+
+// CoordinatorProfilesReady reports whether coordinatorID's agent and executor
+// profiles are both usable (agent present and not passthrough, executor
+// present), for the executor's fail-closed session-start check
+// (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+func (s *Service) CoordinatorProfilesReady(ctx context.Context, coordinatorID string) (bool, error) {
+	found, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return false, err
+	}
+	agentStatus, executorStatus, err := s.validator.ProfileStatus(ctx, found.WorkspaceID, found.AgentProfileID, found.ExecutorProfileID)
+	if err != nil {
+		return false, fmt.Errorf("compute profile status: %w", err)
+	}
+	return agentStatus == ProfileStatusOK && executorStatus == ProfileStatusOK, nil
+}
+
 // ListStalls returns a workspace's stall records
 // (needs-you.md#stall-records).
 func (s *Service) ListStalls(ctx context.Context, workspaceID string) ([]*Stall, error) {

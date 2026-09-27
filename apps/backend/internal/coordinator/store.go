@@ -176,6 +176,42 @@ func (s *Store) GetCoordinator(ctx context.Context, workspaceID, id string) (*Co
 	return row.toCoordinator(), nil
 }
 
+// GetCoordinatorByID returns the coordinator with the given id, with no
+// workspace scope check. Used only where the caller already trusts the id
+// (the mcp/scope resolver and the executor's fail-closed checks resolve the
+// id from CoordinatorForConversationTask first).
+func (s *Store) GetCoordinatorByID(ctx context.Context, id string) (*Coordinator, error) {
+	var row coordinatorRow
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
+		SELECT `+coordinatorColumns+` FROM coordinators WHERE id = ?`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get coordinator by id: %w", err)
+	}
+	return row.toCoordinator(), nil
+}
+
+// CoordinatorForConversationTask returns the id of the coordinator whose
+// current conversation_task_id equals taskID
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode). ok is
+// false when no coordinator matches: an orphaned or archived conversation
+// task, or a task id that never belonged to any coordinator's conversation
+// task. Needs no task row of its own.
+func (s *Store) CoordinatorForConversationTask(ctx context.Context, taskID string) (string, bool, error) {
+	var id string
+	err := s.ro.GetContext(ctx, &id, s.ro.Rebind(`
+		SELECT id FROM coordinators WHERE conversation_task_id = ?`), taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("coordinator for conversation task: %w", err)
+	}
+	return id, true, nil
+}
+
 // ListCoordinators returns every coordinator of a workspace ordered by
 // created_at then id, never nil.
 func (s *Store) ListCoordinators(ctx context.Context, workspaceID string) ([]*Coordinator, error) {
