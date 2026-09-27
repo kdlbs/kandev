@@ -158,6 +158,7 @@ func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 
 	tests := []struct {
 		name          string
+		taskOrigin    string
 		taskMetadata  map[string]interface{}
 		sessionID     string
 		sessionMeta   map[string]interface{}
@@ -169,6 +170,12 @@ func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 			name:        "ordinary session is eligible",
 			sessionID:   "ordinary-session",
 			wantAllowed: true,
+		},
+		{
+			name:          "coordinator conversation task is message-only",
+			taskOrigin:    models.TaskOriginCoordinator,
+			sessionID:     "ordinary-session",
+			wantBlockCode: autoResumeBlockedCoordinatorMessageOnly,
 		},
 		{
 			name:      "durable parking does not block source session",
@@ -252,7 +259,7 @@ func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 	service := &Service{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			task := &models.Task{Metadata: tt.taskMetadata}
+			task := &models.Task{Origin: tt.taskOrigin, Metadata: tt.taskMetadata}
 			session := &models.TaskSession{
 				ID:        tt.sessionID,
 				Metadata:  tt.sessionMeta,

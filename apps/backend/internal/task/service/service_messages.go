@@ -659,12 +659,25 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	return message, nil
 }
 
+// authorizeMessageCreate enforces session.prompt for an ordinary task, and
+// workspace.manage instead for a coordinator conversation task
+// (docs/specs/coordinator/system-design/copilot.md#attended-only,
+// AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
+// manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
 	if req == nil || req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {
-		return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		scope := authz.ScopeSessionPrompt
+		task, err := s.tasks.GetTask(ctx, req.TaskID)
+		if err != nil {
+			return err
+		}
+		if task != nil && task.Origin == models.TaskOriginCoordinator {
+			scope = authz.ScopeWorkspaceManage
+		}
+		return s.authorizeTaskSessionScope(ctx, req.TaskID, req.TaskSessionID, scope)
 	}
 	return s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt)
 }

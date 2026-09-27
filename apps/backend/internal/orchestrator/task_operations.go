@@ -4300,6 +4300,11 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 const (
 	autoResumeBlockedLaunchQueued         = "launch_queued"
 	autoResumeBlockedOwnershipUnavailable = "ownership_unavailable"
+	// autoResumeBlockedCoordinatorMessageOnly blocks passive/startup/reconnect
+	// resume of a coordinator conversation task
+	// (docs/specs/coordinator/system-design/copilot.md#attended-only): the
+	// session may only be resumed by a manager's message.add turn start.
+	autoResumeBlockedCoordinatorMessageOnly = "coordinator_message_only"
 )
 
 func (s *Service) sessionOpenRecoveryBlockReason(
@@ -4332,6 +4337,9 @@ func (s *Service) autoResumeEligibility(
 ) (bool, string) {
 	if session == nil || task == nil {
 		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		return false, autoResumeBlockedCoordinatorMessageOnly
 	}
 	raw, present := task.Metadata[models.MetaKeyDeferredLaunch]
 	if !present || raw == nil {
