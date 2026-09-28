@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 ---
 
 # Coordinator copilot and tool surface Requirements
@@ -121,8 +121,9 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-COPILOT-002.1:** The only way to start a coordinator turn
-  shall be a message a manager sends to its conversation task.
+- **AC-COORDINATOR-COPILOT-002.1:** The only ways to start a coordinator turn
+  shall be a manager's message to its conversation task and a wake delivery
+  admitted by `REQ-COORDINATOR-WAKE-004`.
 - **AC-COORDINATOR-COPILOT-002.2:** Opening, closing or reloading the copilot,
   creating the conversation, a stall event, a workspace deletion event, a
   proposal decision, startup recovery and session recovery after a restart
