@@ -8,13 +8,14 @@ import (
 const defaultStreamCoalesceWindow = 100 * time.Millisecond
 
 type coalescedStreamChunk struct {
-	eventType        string
-	messageID        string
-	attemptID        string
-	content          string
-	isAppend         bool
-	diagnostic       bool
-	promptGeneration uint64
+	eventType         string
+	messageID         string
+	attemptID         string
+	startupGeneration uint64
+	content           string
+	isAppend          bool
+	diagnostic        bool
+	promptGeneration  uint64
 }
 
 // streamCoalescer combines adjacent append chunks for one execution. The
@@ -23,22 +24,23 @@ type coalescedStreamChunk struct {
 // is intentional: combining across another message ID would change wire
 // ordering.
 type streamCoalescer struct {
-	emitMu               sync.Mutex
-	mu                   sync.Mutex
-	window               time.Duration
-	pending              *coalescedStreamChunk
-	timer                *time.Timer
-	closed               bool
-	publish              func(coalescedStreamChunk)
-	lastEventType        string
-	lastMessageID        string
-	lastAttemptID        string
-	lastDiagnostic       bool
-	lastPromptGeneration uint64
-	forceImmediate       bool
-	received             int
-	coalesced            int
-	flushed              int
+	emitMu                sync.Mutex
+	mu                    sync.Mutex
+	window                time.Duration
+	pending               *coalescedStreamChunk
+	timer                 *time.Timer
+	closed                bool
+	publish               func(coalescedStreamChunk)
+	lastEventType         string
+	lastMessageID         string
+	lastAttemptID         string
+	lastStartupGeneration uint64
+	lastDiagnostic        bool
+	lastPromptGeneration  uint64
+	forceImmediate        bool
+	received              int
+	coalesced             int
+	flushed               int
 }
 
 type streamCoalescerStats struct {
@@ -82,6 +84,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	// attemptID boundary would relabel one attempt's content with another's.
 	sameAsLast := c.lastEventType == chunk.eventType && c.lastMessageID == chunk.messageID &&
 		c.lastAttemptID == chunk.attemptID &&
+		c.lastStartupGeneration == chunk.startupGeneration &&
 		c.lastDiagnostic == chunk.diagnostic && c.lastPromptGeneration == chunk.promptGeneration
 	immediate := !chunk.isAppend || c.forceImmediate || !sameAsLast
 	c.forceImmediate = false
@@ -91,6 +94,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 		ready = append(ready, chunk)
 	case c.pending != nil && c.pending.eventType == chunk.eventType && c.pending.messageID == chunk.messageID &&
 		c.pending.attemptID == chunk.attemptID &&
+		c.pending.startupGeneration == chunk.startupGeneration &&
 		c.pending.diagnostic == chunk.diagnostic && c.pending.promptGeneration == chunk.promptGeneration:
 		c.pending.content += chunk.content
 		c.coalesced++
@@ -104,6 +108,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	c.lastEventType = chunk.eventType
 	c.lastMessageID = chunk.messageID
 	c.lastAttemptID = chunk.attemptID
+	c.lastStartupGeneration = chunk.startupGeneration
 	c.lastDiagnostic = chunk.diagnostic
 	c.lastPromptGeneration = chunk.promptGeneration
 	c.mu.Unlock()

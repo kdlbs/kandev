@@ -69,6 +69,7 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 				chunk.diagnostic,
 				chunk.promptGeneration,
 				chunk.attemptID,
+				chunk.startupGeneration,
 			)
 		})
 	}
@@ -117,13 +118,14 @@ func (m *Manager) enqueueStreamingContent(
 		return
 	}
 	m.streamCoalescer(execution).add(coalescedStreamChunk{
-		eventType:        eventType,
-		messageID:        messageID,
-		attemptID:        attemptID,
-		content:          content,
-		isAppend:         isAppend,
-		diagnostic:       diagnostic,
-		promptGeneration: promptGeneration,
+		eventType:         eventType,
+		messageID:         messageID,
+		attemptID:         attemptID,
+		startupGeneration: execution.startupAttemptSnapshot(),
+		content:           content,
+		isAppend:          isAppend,
+		diagnostic:        diagnostic,
+		promptGeneration:  promptGeneration,
 	})
 }
 
@@ -338,6 +340,7 @@ func (m *Manager) publishStreamingContentNow(
 	diagnostic bool,
 	promptGeneration uint64,
 	attemptID string,
+	startupGeneration uint64,
 ) {
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
@@ -349,6 +352,7 @@ func (m *Manager) publishStreamingContentNow(
 		IsAppend:                    isAppend,
 		ProviderDiagnosticCandidate: diagnostic,
 		PromptGeneration:            promptGeneration,
+		StartupGeneration:           startupGeneration,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"
@@ -479,7 +483,7 @@ func (m *Manager) publishStreamingMessageFinal(
 		zap.String("message_id", messageID),
 		zap.Int("content_length", len(content)))
 
-	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true, diagnostic, promptGeneration, attemptID)
+	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true, diagnostic, promptGeneration, attemptID, execution.startupAttemptSnapshot())
 }
 
 // publishStreamingThinking publishes a streaming thinking event for real-time thinking updates.
@@ -511,7 +515,7 @@ func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, think
 		zap.String("thinking_id", thinkingID),
 		zap.Int("content_length", len(content)))
 
-	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true, false, promptGeneration, attemptID)
+	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true, false, promptGeneration, attemptID, execution.startupAttemptSnapshot())
 }
 
 // updateExecutionError updates an execution with an error

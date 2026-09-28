@@ -157,6 +157,22 @@ func TestStreamCoalescerDoesNotMergeChunksFromDifferentPromptGenerations(t *test
 	}
 }
 
+func TestStreamCoalescerDoesNotMergeChunksFromDifferentStartupGenerations(t *testing.T) {
+	var got []coalescedStreamChunk
+	coalescer := newStreamCoalescer(time.Hour, func(chunk coalescedStreamChunk) {
+		got = append(got, chunk)
+	})
+
+	coalescer.add(coalescedStreamChunk{eventType: "message_streaming", messageID: "m1", content: "x", startupGeneration: 1})
+	coalescer.add(coalescedStreamChunk{eventType: "message_streaming", messageID: "m1", content: "a", isAppend: true, startupGeneration: 1})
+	coalescer.add(coalescedStreamChunk{eventType: "message_streaming", messageID: "m1", content: "b", isAppend: true, startupGeneration: 2})
+	coalescer.flush()
+
+	if len(got) != 3 || got[1].startupGeneration != 1 || got[2].startupGeneration != 2 {
+		t.Fatalf("startup generation output = %#v, want separate generations 1 and 2", got)
+	}
+}
+
 func TestStreamCoalescerStatsCountReceivedMergedAndFlushedSegments(t *testing.T) {
 	coalescer := newStreamCoalescer(time.Hour, func(coalescedStreamChunk) {})
 	coalescer.add(coalescedStreamChunk{eventType: "thinking_streaming", messageID: "m1", content: "a"})

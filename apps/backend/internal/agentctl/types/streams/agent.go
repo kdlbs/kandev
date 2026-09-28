@@ -129,6 +129,10 @@ type AgentEvent struct {
 	// the lifetime of the callback.
 	AttemptID string `json:"attempt_id,omitempty"`
 
+	// StartupGeneration is assigned by lifecycle when it accepts this callback.
+	// It distinguishes replacement startups that reuse one execution ID.
+	StartupGeneration uint64 `json:"startup_generation,omitempty"`
+
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 

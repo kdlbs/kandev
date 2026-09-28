@@ -327,6 +327,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		ProviderError:               event.ProviderError,
 		SessionStatus:               event.SessionStatus,
 		PromptGeneration:            event.PromptGeneration,
+		StartupGeneration:           event.StartupGeneration,
 		RetractedMessageIDs:         append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                      event.TurnID,
 		Data:                        event.Data,

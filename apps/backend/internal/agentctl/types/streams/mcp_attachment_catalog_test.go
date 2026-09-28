@@ -7,6 +7,28 @@ import (
 	"unicode/utf8"
 )
 
+func TestMCPToolCatalogDigestIsDeterministicAndUsesCompleteCatalog(t *testing.T) {
+	first := []MCPToolSummary{
+		{Name: "zeta", Description: "last", InputSchema: json.RawMessage(`{"type":"object","properties":{"z":{"type":"string"}}}`)},
+		{Name: "alpha", Description: "first", InputSchema: json.RawMessage(`{"properties":{"a":{"type":"string"}},"type":"object"}`)},
+	}
+	second := []MCPToolSummary{first[1], first[0]}
+
+	firstDigest, firstAlgorithm := MCPToolCatalogDigest(first)
+	secondDigest, secondAlgorithm := MCPToolCatalogDigest(second)
+	if firstAlgorithm != "sha256:mcp-safe-catalog-v1" || secondAlgorithm != firstAlgorithm {
+		t.Fatalf("digest algorithms = %q, %q", firstAlgorithm, secondAlgorithm)
+	}
+	if firstDigest == "" || firstDigest != secondDigest {
+		t.Fatalf("catalog digest must be order-independent: %q != %q", firstDigest, secondDigest)
+	}
+
+	completeDigest, _ := MCPToolCatalogDigest(append(first, MCPToolSummary{Name: "later", Description: "still included"}))
+	if completeDigest == firstDigest {
+		t.Fatal("catalog digest omitted a tool outside the persisted catalog slice")
+	}
+}
+
 func TestMCPAttachmentCatalogNormalizesEntriesBeforeStorage(t *testing.T) {
 	tools := make([]map[string]string, MaxMCPAttachmentTools+2)
 	for i := range tools {
@@ -111,6 +133,27 @@ func TestMCPAttachmentHistorySupersededAttemptDropsCatalogButKeepsCount(t *testi
 	}
 	if len(previous.Tools) != 0 || previous.ToolCatalogTruncated {
 		t.Fatalf("previous catalog = %+v, want no entries and no truncation marker", previous)
+	}
+}
+
+func TestMCPAttachmentHistorySupersededAttemptKeepsCatalogDigest(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	digest, algorithm := MCPToolCatalogDigest([]MCPToolSummary{{Name: "message_task_kandev"}})
+	if !history.Apply(MCPAttachmentEvidence{
+		AttemptID:                "attempt-1",
+		ServerName:               "kandev",
+		Kind:                     MCPAttachmentEvidenceToolsListObserved,
+		ToolCount:                1,
+		ToolCatalogHash:          digest,
+		ToolCatalogHashAlgorithm: algorithm,
+	}) {
+		t.Fatal("Apply() rejected catalog evidence")
+	}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-2"})
+	previous, ok := history.Previous[0].Servers[0], len(history.Previous) == 1 && len(history.Previous[0].Servers) == 1
+	if !ok || previous.ToolCatalogHash != digest || previous.ToolCatalogHashAlgorithm != algorithm {
+		t.Fatalf("historical catalog digest = %+v, want %q (%q)", previous, digest, algorithm)
 	}
 }
 
