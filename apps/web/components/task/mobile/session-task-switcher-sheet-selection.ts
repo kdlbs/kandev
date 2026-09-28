@@ -147,9 +147,9 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
     const { request } = buildPrepareRequest(taskId);
     try {
       const response = await launchSession(request);
+      if (response.session_id) clearTaskSessionAutoProvisioningSuppression(taskId);
       if (!selectionIsCurrent(actions)) return;
       if (response.session_id) {
-        clearTaskSessionAutoProvisioningSuppression(taskId);
         actions.setActiveSession(taskId, response.session_id);
         navigate(taskId);
         actions.onOpenChange(false);

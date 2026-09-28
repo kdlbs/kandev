@@ -67,7 +67,11 @@ Remove All suppresses automatic session provisioning so the confirmed empty
 state survives navigation and reload. A failed bulk deletion clears that
 suppression. Creating a new session through the task's New Session action
 clears it after the server returns a session ID, restoring ordinary
-single-session deletion behavior for that task.
+single-session deletion behavior for that task. Each task has its own browser
+storage entry so another tab cannot overwrite or restore a different task's
+fence. Storage failures retain the current tab's state. A successful launch
+clears the fence even if task-switch navigation was superseded while the
+request was pending.
 
 ## Desktop presentation
 

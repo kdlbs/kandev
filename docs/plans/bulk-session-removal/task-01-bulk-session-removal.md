@@ -167,3 +167,18 @@ event projections make sessions visible before the first authoritative fetch.
 Confirmation rechecks that state before sending deletes. Two controller
 regressions failed before the fix; 68 affected frontend tests, typecheck,
 desktop session-tab E2E (14/14), and phone bulk-removal E2E (1/1) passed after it.
+
+## Independent QA remediation (2026-09-28)
+
+Successful desktop and phone selector prepares now clear the Remove All fence
+as soon as `session.launch` returns an ID, even if task navigation was
+superseded while the request was pending. Separate browser storage entries per
+task prevent one tab's later write from restoring a fence another tab cleared.
+Regression tests reproduced both stale-selection failures and the cross-tab
+clear before the repairs. Browser storage failures still preserve the current
+tab's fence state.
+
+Verification: 83 focused Vitest tests, web typecheck, targeted ESLint, i18n
+ratchet, specification validators, phone bulk-removal E2E (1/1), and desktop
+bulk-removal E2E (3/3) passed. The first phone E2E attempt stopped before page
+load when its backend fixture exited; a fresh diagnostic run passed.

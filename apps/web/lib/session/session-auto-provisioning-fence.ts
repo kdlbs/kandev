@@ -1,49 +1,35 @@
-const suppressedTaskIds = new Set<string>();
-const storageKey = "kandev.bulk-session-removal-fences";
+const storageKeyPrefix = "kandev.bulk-session-removal-fence.";
+const unpersistedStateByTaskId = new Map<string, boolean>();
 
-function readPersistedTaskIds(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]") as unknown;
-    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function replaceSuppressedTaskIds(taskIds: Iterable<string>) {
-  suppressedTaskIds.clear();
-  for (const taskId of taskIds) suppressedTaskIds.add(taskId);
-}
-
-function persist() {
+function persist(taskId: string, suppressed: boolean) {
+  unpersistedStateByTaskId.set(taskId, suppressed);
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify([...suppressedTaskIds]));
+    const key = `${storageKeyPrefix}${taskId}`;
+    if (suppressed) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+    unpersistedStateByTaskId.delete(taskId);
   } catch {
-    // Persistence only preserves the fence across reloads; the current tab remains protected.
+    // Browser storage is best-effort; the current tab still honors the fence.
   }
-}
-
-function restore(taskId: string) {
-  if (typeof window === "undefined" || suppressedTaskIds.has(taskId)) return;
-  readPersistedTaskIds().forEach((id) => suppressedTaskIds.add(id));
 }
 
 export function suppressTaskSessionAutoProvisioning(taskId: string) {
-  replaceSuppressedTaskIds([...suppressedTaskIds, ...readPersistedTaskIds(), taskId]);
-  persist();
+  persist(taskId, true);
 }
 
 export function isTaskSessionAutoProvisioningSuppressed(taskId: string | null) {
   if (!taskId) return false;
-  restore(taskId);
-  return suppressedTaskIds.has(taskId);
+  const unpersisted = unpersistedStateByTaskId.get(taskId);
+  if (unpersisted !== undefined) return unpersisted;
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(`${storageKeyPrefix}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function clearTaskSessionAutoProvisioningSuppression(taskId: string) {
-  const taskIds = new Set([...suppressedTaskIds, ...readPersistedTaskIds()]);
-  taskIds.delete(taskId);
-  replaceSuppressedTaskIds(taskIds);
-  persist();
+  persist(taskId, false);
 }

@@ -275,9 +275,9 @@ export async function prepareAndSwitchTask(
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
+    if (resp.session_id) clearTaskSessionAutoProvisioningSuppression(taskId);
     if (!shouldContinue()) return false;
     if (resp.session_id) {
-      clearTaskSessionAutoProvisioningSuppression(taskId);
       // Pass `null` instead of the original oldSessionId — releaseLayoutToDefault
       // already saved + released the outgoing env, and the dockview now holds the
       // default layout. If we forwarded oldSessionId, the subsequent

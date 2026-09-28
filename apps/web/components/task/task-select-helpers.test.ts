@@ -99,6 +99,7 @@ import type { TaskSession } from "@/lib/types/http";
 
 const NEW_TASK_ID = "task-new";
 const OLD_SESSION_ID = "old-session";
+const NEW_SESSION_ID = "new-session";
 
 function makeStore(activeSessionId: string | null, hasLinkedPR = false): StoreApi<AppState> {
   const state = {
@@ -450,7 +451,7 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     resolveLaunch({
       success: true,
       task_id: NEW_TASK_ID,
-      session_id: "new-session",
+      session_id: NEW_SESSION_ID,
       state: "ready",
     });
     const result = await promise;
@@ -458,7 +459,7 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     expect(result).toBe(true);
     expect(clearTaskSessionAutoProvisioningSuppression).toHaveBeenCalledWith(NEW_TASK_ID);
     expect(switchToSession).toHaveBeenCalledTimes(1);
-    expect(switchToSession).toHaveBeenCalledWith(NEW_TASK_ID, "new-session", null);
+    expect(switchToSession).toHaveBeenCalledWith(NEW_TASK_ID, NEW_SESSION_ID, null);
     expect(setPreparingTaskId).toHaveBeenLastCalledWith(null);
   });
 
@@ -479,6 +480,27 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     expect(releaseLayoutToDefault).toHaveBeenCalledTimes(1);
     expect(switchToSession).not.toHaveBeenCalled();
     expect(setPreparingTaskId).toHaveBeenLastCalledWith(null);
+  });
+
+  it("clears the bulk-removal fence when a successful prepare is superseded", async () => {
+    vi.mocked(launchSession).mockResolvedValue({
+      success: true,
+      task_id: NEW_TASK_ID,
+      session_id: NEW_SESSION_ID,
+      state: "ready",
+    });
+    const switchToSession = vi.fn();
+
+    await prepareAndSwitchTask(
+      NEW_TASK_ID,
+      makeStore(OLD_SESSION_ID),
+      switchToSession,
+      vi.fn(),
+      () => false,
+    );
+
+    expect(clearTaskSessionAutoProvisioningSuppression).toHaveBeenCalledWith(NEW_TASK_ID);
+    expect(switchToSession).not.toHaveBeenCalled();
   });
 
   it("returns false and does not call switchToSession when session_id is absent", async () => {
@@ -504,7 +526,7 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     vi.mocked(launchSession).mockResolvedValue({
       success: true,
       task_id: NEW_TASK_ID,
-      session_id: "new-session",
+      session_id: NEW_SESSION_ID,
       state: "ready",
     });
     dockviewState.api = {};
