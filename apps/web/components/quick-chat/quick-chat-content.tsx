@@ -8,6 +8,7 @@ import {
   type ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
+import { useVisibleItems } from "./startup-rows";
 import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
 import {
   ChatInputArea,
@@ -37,6 +38,8 @@ type QuickChatContentProps = {
   /** Applied to the composer message once per submit, before
    *  `buildSubmitMessage`. See {@link useSubmitHandler}. */
   transformOutgoing?: (message: string) => string;
+  /** See {@link useVisibleItems}. */
+  hideStartupRows?: boolean;
 };
 
 /** Bundles the composer-priming hooks: a rejected launch prompt is restored
@@ -114,6 +117,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   onInitialPromptAttempted,
   initialDraft,
   transformOutgoing,
+  hideStartupRows,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
@@ -121,6 +125,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
+  const items = useVisibleItems(panelState.groupedItems, hideStartupRows);
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
@@ -160,7 +165,7 @@ export const QuickChatContent = memo(function QuickChatContent({
       />
       <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
         <MessageList
-          items={panelState.groupedItems}
+          items={items}
           messages={panelState.allMessages}
           permissionsByToolCallId={panelState.permissionsByToolCallId}
           childrenByParentToolCallId={panelState.childrenByParentToolCallId}

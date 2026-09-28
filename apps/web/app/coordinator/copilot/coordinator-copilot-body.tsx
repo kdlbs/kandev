@@ -98,6 +98,7 @@ function ReadyBody({
           session={session}
           automaticRecovery={false}
           hideSessionSelectors
+          hideStartupRows
           taskArchiveState={routeSession.archive_state}
           initialDraft={pendingDraft}
           transformOutgoing={transformOutgoing}

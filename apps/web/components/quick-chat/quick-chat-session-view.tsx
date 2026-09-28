@@ -48,6 +48,9 @@ type QuickChatSessionViewProps = {
   /** Applied to the composer message once per submit, before
    *  `buildSubmitMessage`. See {@link useSubmitHandler}. */
   transformOutgoing?: (message: string) => string;
+  /** Hides the "Environment prepared" and "Started agent" rows once the agent
+   *  booted. See {@link hideSuccessfulStartupRows}. */
+  hideStartupRows?: boolean;
 };
 
 function resolveTaskArchiveState(
@@ -92,6 +95,7 @@ export function QuickChatSessionView({
   taskArchiveState: taskArchiveStateProp,
   initialDraft,
   transformOutgoing,
+  hideStartupRows,
 }: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
@@ -146,6 +150,7 @@ export function QuickChatSessionView({
           onInitialPromptAttempted={onInitialPromptAttempted}
           initialDraft={initialDraft}
           transformOutgoing={transformOutgoing}
+          hideStartupRows={hideStartupRows}
         />
       </div>
     </div>
