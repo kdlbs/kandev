@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -318,4 +319,20 @@ func (s *Service) ListStalls(ctx context.Context, workspaceID string) ([]*Stall,
 		return nil, err
 	}
 	return s.store.ListStalls(ctx, workspaceID)
+}
+
+// PruneStalls deletes stall records for a missing or archived task, and
+// records older than 30 days (needs-you.md#stall-records). Unauthorized: it
+// is only ever called from the coordinator startup pass, never from a
+// workspace-scoped request.
+func (s *Service) PruneStalls(ctx context.Context, now time.Time) (int64, error) {
+	return s.store.PruneStalls(ctx, now)
+}
+
+// DeleteWorkspaceState deletes a workspace's coordinators, proposals and
+// stall records (coordinators.md#workspace-deletion). Unauthorized: callers
+// are the workspace.deleted subscriber and the E2E reset endpoint, neither of
+// which carries a workspace-scoped request to authorize.
+func (s *Service) DeleteWorkspaceState(ctx context.Context, workspaceID string) error {
+	return s.store.DeleteWorkspaceState(ctx, workspaceID)
 }

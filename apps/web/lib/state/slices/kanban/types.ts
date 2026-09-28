@@ -99,6 +99,8 @@ export type KanbanState = {
     workflowStepId: string;
     workflowAgentOverrides?: WorkflowAgentOverrides;
     title: string;
+    /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
+    identifier?: string;
     description?: string;
     autopilot?: boolean;
     priority?: TaskPriority;

@@ -146,6 +146,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@babel/core": "^7.29.6",
     "@eslint/js": "^9.39.2",
     "@playwright/test": "^1.61.1",
