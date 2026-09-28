@@ -255,13 +255,21 @@ export function useProposalById(
 ): UseProposalByIdResult {
   const proposal = useProposalRow(coordinatorId, proposalId);
   const [notFound, setNotFound] = useState(false);
+  const seqRef = useRef(0);
+  const lastSucceededSeqRef = useRef(0);
 
   // Every response is merged whatever order it arrives in; the merge rules
-  // decide which row wins (proposal-cards.md#client-store).
+  // decide which row wins (proposal-cards.md#client-store). A 404 older than
+  // an already-succeeded read must not evict the row that read just merged.
   const read = useCallback((ws: string, coordinator: string, id: string) => {
+    const seq = ++seqRef.current;
     getProposal(ws, coordinator, id)
-      .then((row) => useProposalsStore.getState().mergeOne(coordinator, row))
+      .then((row) => {
+        lastSucceededSeqRef.current = Math.max(lastSucceededSeqRef.current, seq);
+        useProposalsStore.getState().mergeOne(coordinator, row);
+      })
       .catch((error: unknown) => {
+        if (lastSucceededSeqRef.current > seq) return;
         if (error instanceof ApiError && error.status === 404) {
           useProposalsStore.getState().evict(coordinator, id);
           setNotFound(true);

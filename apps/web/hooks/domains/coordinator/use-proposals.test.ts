@@ -417,4 +417,25 @@ describe("overlapping reads", () => {
 
     await waitFor(() => expect(result.current.proposal?.status).toBe("approved"));
   });
+
+  it("does not let an older 404 by-id read evict a row merged by a newer read", async () => {
+    const first = deferred<Proposal>();
+    getProposalMock
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(proposal({ id: "p-1", status: "approved" }));
+    const wsClient = makeWsClient();
+    clients.active = wsClient;
+
+    const { result } = renderHook(() => useProposalById(WORKSPACE_ID, COORDINATOR_ID, "p-1"));
+    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
+    act(() => handler(UPDATED_PAYLOAD));
+    await waitFor(() => expect(result.current.proposal?.status).toBe("approved"));
+
+    await act(async () => {
+      first.reject(new ApiError("not found", 404, {}));
+    });
+
+    expect(result.current.notFound).toBe(false);
+    expect(result.current.proposal?.status).toBe("approved");
+  });
 });
