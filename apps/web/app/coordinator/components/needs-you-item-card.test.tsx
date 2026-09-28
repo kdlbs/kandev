@@ -132,6 +132,26 @@ describe("NeedsYouItemCard - head, severity and age", () => {
     );
     expect(screen.getByText("Task t-1")).not.toBeNull();
   });
+
+  it("stripes the card by severity, so the list is scannable without the badges", () => {
+    const item = errorItem();
+    render(<NeedsYouItemCard item={item} {...NO_OP_MAPS} coordinatorName="Planner" />);
+    expect(screen.getByTestId(`needs-you-item-${item.id}`).className).toContain(
+      "border-l-destructive",
+    );
+  });
+
+  it("stripes a proposal as review rather than decide now", () => {
+    const item = proposalItem();
+    render(<NeedsYouItemCard item={item} {...NO_OP_MAPS} coordinatorName="Planner" />);
+    expect(screen.getByTestId(`needs-you-item-${item.id}`).className).toContain("border-l-primary");
+  });
+
+  it("pushes the age to the end of the head row", () => {
+    const item = errorItem();
+    render(<NeedsYouItemCard item={item} {...NO_OP_MAPS} coordinatorName="Planner" />);
+    expect(screen.getByText("1m").className).toContain("ml-auto");
+  });
 });
 
 describe("NeedsYouItemCard - why/clears text by kind", () => {

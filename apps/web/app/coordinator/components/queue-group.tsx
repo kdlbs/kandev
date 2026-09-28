@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { cn } from "@/lib/utils";
 import type { QueueGroupKind, QueueItem } from "@/lib/coordinator/attention";
 import type { TaskPR } from "@/lib/types/github";
 import { QueueRow } from "./queue-row";
@@ -15,6 +16,13 @@ const GROUP_LABEL_KEY: Record<QueueGroupKind, string> = {
 };
 
 const COLLAPSED_BY_DEFAULT: ReadonlySet<QueueGroupKind> = new Set(["done", "other"]);
+
+/**
+ * The group heading: a small uppercase eyebrow, not a title competing with
+ * the item cards below it (mockup v2.1 `h2`).
+ */
+const GROUP_HEADING_CLASS =
+  "text-muted-foreground text-[10px] font-semibold tracking-[0.09em] uppercase";
 
 export type QueueGroupProps = {
   group: QueueGroupKind;
@@ -34,7 +42,12 @@ function QueueGroupRows({
   prsByTaskId: ReadonlyMap<string, TaskPR[]>;
 }) {
   return (
-    <div className="divide-border divide-y" data-testid="queue-group-rows">
+    // Rows sit in one bordered panel rather than floating on the page
+    // background (mockup v2.1 `.card` around `.row`).
+    <div
+      className="border-border bg-card divide-border divide-y rounded-md border"
+      data-testid="queue-group-rows"
+    >
       {items.map((item) => (
         <QueueRow
           key={item.id}
@@ -69,7 +82,7 @@ export function QueueGroup({
         data-testid={`queue-group-${group}`}
         className="space-y-2"
       >
-        <h3 className="flex items-center gap-2 text-sm font-medium">
+        <h3 className={cn("flex items-center gap-2", GROUP_HEADING_CLASS)}>
           <span>{label}</span>
           <Badge variant="secondary">{items.length}</Badge>
         </h3>
@@ -90,7 +103,7 @@ export function QueueGroup({
     >
       <CollapsibleTrigger asChild>
         <Button variant="ghost" className="flex w-full items-center justify-start gap-2 px-0">
-          <span className="text-sm font-medium">{label}</span>
+          <span className={GROUP_HEADING_CLASS}>{label}</span>
           <Badge variant="secondary">{items.length}</Badge>
         </Button>
       </CollapsibleTrigger>

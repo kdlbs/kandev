@@ -1,14 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@kandev/ui/card";
+import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@kandev/ui/card";
+import { cn } from "@/lib/utils";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import { deriveCopilotItemId } from "@/lib/coordinator/copilot-id";
 import { formatAge } from "@/lib/coordinator/format";
@@ -70,7 +63,16 @@ export function NeedsYouItemCard({
   const copilotId = deriveCopilotItemId(item, openTasksById);
 
   return (
-    <Card data-testid={`needs-you-item-${item.id}`}>
+    // The severity is the stripe down the left edge, so the list can be
+    // scanned for what decides now without reading every badge (mockup v2.1
+    // `.item.hot` / `.item.cool`).
+    <Card
+      className={cn(
+        "border-l-[3px]",
+        severity === "decide-now" ? "border-l-destructive" : "border-l-primary",
+      )}
+      data-testid={`needs-you-item-${item.id}`}
+    >
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           <span>{head.identifier}</span>
@@ -82,7 +84,7 @@ export function NeedsYouItemCard({
               ? t("coordinator:severityDecideNow")
               : t("coordinator:severityReview")}
           </Badge>
-          <span className="text-muted-foreground font-normal">{formatAge(item.ageMs)}</span>
+          <span className="text-muted-foreground ml-auto font-normal">{formatAge(item.ageMs)}</span>
         </CardTitle>
         <CardAction>
           <AskAboutThisButton coordinatorId={coordinatorId} id={copilotId} canManage={canManage} />
@@ -97,14 +99,14 @@ export function NeedsYouItemCard({
             coordinatorName={coordinatorName}
           />
         )}
-        <div>
-          <p className="text-xs font-medium">{t("coordinator:whyItIsHere")}</p>
-          <CardDescription>{why}</CardDescription>
-        </div>
-        <div>
-          <p className="text-xs font-medium">{t("coordinator:whatClearsIt")}</p>
-          <CardDescription>{clears}</CardDescription>
-        </div>
+        {/* Label beside its text, not above it: two stacked pairs turned a
+            four-line card into eight (mockup v2.1 `.why`). */}
+        <dl className="grid grid-cols-[minmax(82px,max-content)_minmax(0,1fr)] gap-x-2.5 gap-y-0.5">
+          <dt className="text-muted-foreground">{t("coordinator:whyItIsHere")}</dt>
+          <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{why}</dd>
+          <dt className="text-muted-foreground">{t("coordinator:whatClearsIt")}</dt>
+          <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{clears}</dd>
+        </dl>
       </CardContent>
       {item.kind !== "proposal" && (
         <CardFooter>

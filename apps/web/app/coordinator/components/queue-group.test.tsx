@@ -62,3 +62,33 @@ describe("QueueGroup", () => {
     expect(screen.queryByText("KAN-4")).toBeNull();
   });
 });
+
+describe("QueueGroup - section styling", () => {
+  it("heads a group with an uppercase eyebrow, not a title competing with the rows", () => {
+    render(
+      <QueueGroup
+        group="working"
+        items={[item("1")]}
+        stepNameByTaskId={new Map()}
+        prsByTaskId={NO_PRS}
+      />,
+    );
+    const heading = screen.getByRole("heading", { level: 3 });
+    expect(heading.className).toContain("uppercase");
+    expect(heading.className).toContain("text-muted-foreground");
+  });
+
+  it("puts the rows in one bordered panel", () => {
+    render(
+      <QueueGroup
+        group="working"
+        items={[item("1")]}
+        stepNameByTaskId={new Map()}
+        prsByTaskId={NO_PRS}
+      />,
+    );
+    const rows = screen.getByTestId("queue-group-rows");
+    expect(rows.className).toContain("border");
+    expect(rows.className).toContain("bg-card");
+  });
+});
