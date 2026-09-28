@@ -23,6 +23,7 @@ export class SidebarTaskPageCache {
   private summaries: AppState["sidebarStatusSummaryByWorkspaceId"][string] | undefined;
   private bytes = 0;
   private epoch = 0;
+  private accessDeniedListeners = new Set<() => void>();
 
   constructor(private store: PageStore) {}
 
@@ -73,6 +74,18 @@ export class SidebarTaskPageCache {
     this.requests.clear();
   }
 
+  subscribeAccessDenied(listener: () => void) {
+    this.accessDeniedListeners.add(listener);
+    return () => {
+      this.accessDeniedListeners.delete(listener);
+    };
+  }
+
+  denyAccess() {
+    this.clear();
+    for (const listener of this.accessDeniedListeners) listener();
+  }
+
   get(key: string): SidebarTaskPageResponse | null {
     this.synchronize();
     return this.pages.get(key)?.page ?? null;
@@ -90,16 +103,16 @@ export class SidebarTaskPageCache {
     }
   }
 
-  request(workspaceId: string, query: SidebarTaskQuery, identity: string) {
+  request(workspaceId: string, query: SidebarTaskQuery, cacheKey: string) {
     const epoch = this.synchronize();
-    const key = JSON.stringify([identity, query]);
+    const requestKey = JSON.stringify([cacheKey, query]);
     // Recency follows a view activation/read, never extends its fetch-age expiry.
-    const snapshot = this.pages.get(identity);
+    const snapshot = this.pages.get(cacheKey);
     if (snapshot) {
-      this.pages.delete(identity);
-      this.pages.set(identity, snapshot);
+      this.pages.delete(cacheKey);
+      this.pages.set(cacheKey, snapshot);
     }
-    let request = this.requests.get(key);
+    let request = this.requests.get(requestKey);
     if (!request) {
       const controller = new AbortController();
       const created: Request = {
@@ -113,18 +126,18 @@ export class SidebarTaskPageCache {
             if (
               this.synchronize() === epoch &&
               !controller.signal.aborted &&
-              this.requests.get(key) === created
+              this.requests.get(requestKey) === created
             ) {
-              this.retain(identity, page);
+              this.retain(cacheKey, page);
             }
             return page;
           })
           .finally(() => {
-            if (this.requests.get(key) === created) this.requests.delete(key);
+            if (this.requests.get(requestKey) === created) this.requests.delete(requestKey);
           }),
       };
       request = created;
-      this.requests.set(key, request);
+      this.requests.set(requestKey, request);
     }
     request.consumers += 1;
     let released = false;
@@ -134,9 +147,9 @@ export class SidebarTaskPageCache {
         if (released) return;
         released = true;
         request.consumers -= 1;
-        if (request.consumers === 0 && this.requests.get(key) === request) {
+        if (request.consumers === 0 && this.requests.get(requestKey) === request) {
           request.controller.abort();
-          this.requests.delete(key);
+          this.requests.delete(requestKey);
         }
       },
     };

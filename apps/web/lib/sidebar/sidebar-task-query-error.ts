@@ -5,8 +5,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+export function isSidebarTaskAccessDenied(error: unknown): boolean {
+  return error instanceof ApiError && [401, 403, 404].includes(error.status);
+}
+
 export function sidebarTaskQueryError(error: unknown, hasPage: boolean, t: TFunction) {
-  if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+  if (isSidebarTaskAccessDenied(error)) {
     return { message: t("sidebar:workspaceContextAccessDenied"), canRetry: false };
   }
   if (!(error instanceof ApiError) || error.errorCode !== "sidebar_query_invalid") {

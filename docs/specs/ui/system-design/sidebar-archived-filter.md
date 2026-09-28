@@ -201,7 +201,10 @@ On a view change, synchronously select an eligible cached first page, then
 revalidate once without hiding it. A miss has no page until its request succeeds.
 Do not temporarily label the old view's rows as the newly selected view. On
 refresh failure, retain the eligible page and show a nonblocking error. Authorization
-failures clear it instead. Enforce generation and request identity before both
+failures clear it instead. Access-denial notifications reset every mounted
+consumer, including idle siblings, and fence their outstanding completions.
+Query-revision changes also reject stale display commits; a queued fresh read
+preserves the requested page without displaying the invalidated response. Enforce generation and request identity before both
 display commits and cache writes. Abort errors caused by supersession are silent.
 
 The existing sidebar query revision is the conservative invalidation boundary.

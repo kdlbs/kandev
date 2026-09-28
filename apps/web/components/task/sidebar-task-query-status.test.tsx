@@ -31,3 +31,9 @@ it("announces background refresh without a blocking loading surface", () => {
   rerender(<SidebarTaskQueryStatus error={null} pending={false} hasPage onRetry={vi.fn()} />);
   expect(screen.queryByRole("status")).toBeNull();
 });
+
+it("leaves initial loading to the task list", () => {
+  render(<SidebarTaskQueryStatus error={null} pending hasPage={false} onRetry={vi.fn()} />);
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});

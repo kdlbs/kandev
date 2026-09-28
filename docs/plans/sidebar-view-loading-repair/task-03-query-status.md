@@ -172,3 +172,6 @@ new-copy ratchet. Targeted unit/event tests, TypeScript, zero-warning ESLint,
 Go lint, public-doc validation, catalog/spec/harness validation, documentation
 coverage preflight, and `git diff --check` passed. Final hook receipt and browser
 capture evidence are recorded in the plan.
+
+Review follow-up adds initial-loading status coverage and removes the redundant
+pagination guard. The final expanded frontend/consumer run passes 105 tests.

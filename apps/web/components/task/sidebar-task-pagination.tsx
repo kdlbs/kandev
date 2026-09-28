@@ -17,19 +17,16 @@ export function SidebarTaskPagination({
   touchTargets?: boolean;
 }) {
   if (!page) return null;
-  const showPaging = page !== null && page.total_visible_tasks > page.page_size;
-  if (!showPaging) return null;
+  if (page.total_visible_tasks <= page.page_size) return null;
 
   return (
     <div className="space-y-1 border-t border-border px-2 py-2" data-testid="sidebar-page-controls">
-      {showPaging && page ? (
-        <PageButtons
-          page={page}
-          pending={pending}
-          onPageChange={onPageChange}
-          touchTargets={touchTargets}
-        />
-      ) : null}
+      <PageButtons
+        page={page}
+        pending={pending}
+        onPageChange={onPageChange}
+        touchTargets={touchTargets}
+      />
     </div>
   );
 }

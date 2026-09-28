@@ -137,3 +137,12 @@ measurement because each query took about two minutes; the full benchmark
 command is therefore incomplete. These are cost observations, not a passing
 latency budget. Query SQL is unchanged. Cached-return behavior is proved separately
 with held responses, without claiming an improvement to cold-query latency.
+
+PR review follow-up: reproduced and fixed stale display commits after query revision
+changes and access-denied rows retained by idle sibling consumers. Shared denial
+notifications now reset all mounted consumers and fence their pending responses.
+The original page-navigation invalidation test now requires the last accepted
+page to remain displayed until the fresh requested page arrives, then scroll once
+after its committed render. A separate
+regression proves transient errors still expose Retry after a corrected filter;
+the reported missing-Retry scenario did not reproduce on the original head.

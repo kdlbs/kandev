@@ -195,8 +195,8 @@ Design validation passed on 2026-09-28:
 
 Implementation completed on 2026-09-28. Each work order records its exact checks
 and scope. Backend membership/model/HTTP tests passed with both SQLite and a
-real disposable PostgreSQL 17 instance. Frontend validation includes 92 targeted
-unit/event tests and 8 existing consumer tests. Desktop and phone paging/recovery
+real disposable PostgreSQL 17 instance. Frontend validation includes 105 targeted
+unit/event/consumer tests after the review regressions. Desktop and phone paging/recovery
 browser tests pass against the managed production build.
 
 Cold-query benchmark results and the incomplete PostgreSQL middle/final run are
@@ -223,3 +223,17 @@ and linked specifications describe the implemented behavior.
 [original archive views](../sidebar-archived-filter/plan.md) are completed history.
 Their prior command results remain unchanged. This package owns the new matrix
 and supersedes only filter admission, cache retention, and query-status behavior.
+
+## Review follow-up
+
+Reproduced two P1 findings with failing hook tests: a revision-invalidated response
+could briefly replace the accepted page, and a denied read left an idle sibling's
+local page visible. Both now pass, including late completion after shared denial.
+The reported missing Retry after validation correction already passed; a contract
+test preserves that behavior. Also removed a redundant pagination guard, added
+initial-loading status coverage, and clarified request/cache key names.
+
+The first CI monitor stopped after five failed policy lookups (26 passed,
+0 failed, 31 pending at that snapshot). Direct GitHub ruleset retrieval succeeded;
+this monitor result does not establish terminal CI. Follow-up delivery preserves
+that limitation and does not claim the PR merged or deployed.

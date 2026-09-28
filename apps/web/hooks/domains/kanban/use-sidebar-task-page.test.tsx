@@ -200,10 +200,12 @@ describe("useSidebarTaskPage request lifecycle", () => {
     await act(async () => requests[1]?.deferred.resolve(response(2, true, false)));
     expect(requests).toHaveLength(3);
     expect(requests[2]?.query.page).toBe(2);
-    expect(afterNavigation).toHaveBeenCalledTimes(1);
+    expect(result.current.response?.page).toBe(1);
+    expect(afterNavigation).not.toHaveBeenCalled();
     await act(async () => requests[2]?.deferred.resolve(response(2, true, false)));
     expect(result.current.requestedPage).toBeNull();
     expect(result.current.response?.page).toBe(2);
+    expect(afterNavigation).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 });
@@ -340,4 +342,68 @@ it.each([401, 403, 404])("removes cached and displayed rows on HTTP %s", async (
   const replacement = renderHook(() => useSidebarTaskPage("ws-1"));
   expect(replacement.result.current.response).toBeNull();
   await act(async () => pending.resolve(response(1, false, false)));
+});
+
+it.each([false, true])(
+  "clears sibling rows and late completions on denial (pending=%s)",
+  async (pendingSibling) => {
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce(response(1, false, true));
+    const first = renderHook(() => useSidebarTaskPage("ws-1"));
+    const sibling = renderHook(() => useSidebarTaskPage("ws-1"));
+    await waitFor(() => expect(sibling.result.current.response).not.toBeNull());
+    const late = deferred<SidebarTaskPageResponse>();
+    if (pendingSibling) {
+      vi.mocked(querySidebarTasks).mockReturnValueOnce(late.promise);
+      act(() => sibling.result.current.goToPage(2));
+    }
+    vi.mocked(querySidebarTasks).mockRejectedValueOnce(new ApiError("private", 403, {}));
+    act(() => first.result.current.refresh());
+    await waitFor(() => expect(first.result.current.response).toBeNull());
+    expect(sibling.result.current.response).toBeNull();
+    expect(sibling.result.current.error).toBe("sidebar:workspaceContextAccessDenied");
+    expect(sibling.result.current.requestedPage).toBeNull();
+    await act(async () => late.resolve(response(2, true, false)));
+    expect(sibling.result.current.response).toBeNull();
+    expect(sibling.result.current.requestedPage).toBeNull();
+  },
+);
+
+it("does not display a response invalidated before the trailing refresh starts", async () => {
+  const stale = deferred<SidebarTaskPageResponse>();
+  vi.mocked(querySidebarTasks)
+    .mockResolvedValueOnce(response(1, false, false))
+    .mockReturnValueOnce(stale.promise);
+  const hook = renderHook(() => useSidebarTaskPage("ws-1"));
+  await waitFor(() => expect(hook.result.current.response?.query_key).toBe("query-1"));
+  vi.useFakeTimers();
+  act(() => hook.result.current.refresh());
+  mocks.state.sidebarArchivedTasks.revisionByWorkspaceId["ws-1"] = 1;
+  hook.rerender();
+  await act(async () => stale.resolve({ ...response(1, false, false), query_key: "deleted-row" }));
+  expect(hook.result.current.response?.query_key).toBe("query-1");
+  vi.mocked(querySidebarTasks).mockResolvedValueOnce({
+    ...response(1, false, false),
+    query_key: "fresh",
+  });
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  expect(hook.result.current.response?.query_key).toBe("fresh");
+});
+
+it("offers Retry for a transient failure after correcting an invalid filter", async () => {
+  vi.mocked(querySidebarTasks)
+    .mockRejectedValueOnce(
+      new ApiError("private", 400, {
+        error_code: "sidebar_query_invalid",
+        details: { reason: "invalid_clause", filter_index: 0 },
+      }),
+    )
+    .mockResolvedValueOnce(response(1, false, false))
+    .mockRejectedValueOnce(new ApiError("private", 503, {}));
+  const hook = renderHook(() => useSidebarTaskPage("ws-1"));
+  await waitFor(() => expect(hook.result.current.canRetry).toBe(false));
+  act(() => hook.result.current.refresh());
+  await waitFor(() => expect(hook.result.current.response).not.toBeNull());
+  act(() => hook.result.current.refresh());
+  await waitFor(() => expect(hook.result.current.error).toBe("sidebar:queryRefreshFailed"));
+  expect(hook.result.current.canRetry).toBe(true);
 });
