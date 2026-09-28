@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 requirements:
   - REQ-COORDINATOR-PROPOSALS-001
   - REQ-COORDINATOR-PROPOSALS-002
@@ -108,7 +108,11 @@ There is no deduplication key.
 4. Create the task through the task service with the frozen spec, external
    id `coordinator-proposal:<id>` (with `AllowReservedExternalID`), origin the
    regular board origin, and no `start_agent`, no `prepare_session` and no
-   `auto_start_on_create` metadata marker. Branch on the returned
+   `auto_start_on_create` metadata marker. The request sets no agent
+   profile: the coordinator's profile belongs to its conversation, and the
+   task resolves its agent at start through the orchestrator's
+   `resolveTaskAgentProfile` (step, workflow, workspace default) like any
+   board task (`AC-COORDINATOR-PROPOSALS-002.13`). Branch on the returned
    `CreateTaskResult.Outcome`:
    - `CreateTaskOutcomeCreated`: call `Service.SettleExternalID(ctx,
      task.ID, "coordinator-proposal:<id>")`, as the MCP and HTTP create

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 ---
 
 # Coordinator copilot and tool surface Requirements
@@ -91,6 +91,11 @@ Mockup:
   an open is about to return, whether that task was reused or just created,
   between the open reading it as current and the open's own response: the
   open shall return 409 rather than a task that is actually archived.
+- **AC-COORDINATOR-COPILOT-001.10:** When the current conversation task's
+  session has ended (failed, cancelled or completed), so it can no longer
+  accept a message, the next open shall archive that task and return a new
+  conversation task, as after a context change; the open itself still starts
+  no agent.
 
 ### REQ-COORDINATOR-COPILOT-002: Attended turns
 
@@ -186,9 +191,12 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-004.5:** When a turn is running and the popover
   closes, the turn shall continue and the launcher shall show it is busy; the
   composer's Stop shall end the turn.
-- **AC-COORDINATOR-COPILOT-004.6:** When the session cannot start or resume, the
-  popover shall show Kandev's session recovery feedback and the lists shall
-  keep working.
+- **AC-COORDINATOR-COPILOT-004.6:** When the session cannot start, or has
+  ended, the popover shall show Kandev's session recovery feedback with an
+  action that opens the conversation again (which returns a fresh session under
+  `AC-COORDINATOR-COPILOT-001.10`), and the lists shall keep working. This
+  state is the copilot's own; the task page, mobile and Settings chat recovery
+  are unchanged.
 - **AC-COORDINATOR-COPILOT-004.7:** Escape shall close the popover and return
   focus to the launcher.
 - **AC-COORDINATOR-COPILOT-004.8:** At a 1200px-wide viewport the open popover
@@ -196,6 +204,38 @@ Mockup:
   horizontal scroll.
 - **AC-COORDINATOR-COPILOT-004.9:** Configuration chat on `/settings` shall
   behave as before, Expand included.
+- **AC-COORDINATOR-COPILOT-004.10:** While a turn is running, the composer
+  shall not send a message; it offers Stop instead.
+
+### REQ-COORDINATOR-COPILOT-006: Activity display
+
+**Intent:** The manager sees that the coordinator is working, not how Kandev
+runs it.
+
+This requirement changes mockup `p1-05`, which shows each Kandev tool call as
+its own row. It follows the pattern of assistant chats aimed at non-developers:
+calm by default, detail on demand.
+
+#### Acceptance criteria
+
+- **AC-COORDINATOR-COPILOT-006.1:** While a turn is running, the popover shall
+  show one status line above the composer that updates in place with a plain
+  verb for the current tool (for example "Reading tasks", "Checking
+  workflows", "Drafting a proposal") and the elapsed seconds. Tool calls shall
+  not render as one row each while the turn runs.
+- **AC-COORDINATOR-COPILOT-006.2:** When a turn ends, its tool calls shall
+  collapse into one chip naming how many were made and how long the turn took,
+  collapsed by default; expanding it shows one row per tool call with its
+  existing detail.
+- **AC-COORDINATOR-COPILOT-006.3:** A `propose_task_kandev` call shall never be
+  collapsed: its proposal card always renders in full.
+- **AC-COORDINATOR-COPILOT-006.4:** Once the agent has started successfully, the
+  session start-up rows (environment preparation and agent start) shall be
+  hidden; while the agent is still starting, or when it failed to start, they
+  shall stay visible.
+- **AC-COORDINATOR-COPILOT-006.5:** The activity display applies to the
+  coordinator popover only; Settings configuration chat, Quick Chat and the
+  task page shall render as before.
 
 ### REQ-COORDINATOR-COPILOT-005: Ask about this
 

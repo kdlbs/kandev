@@ -21,6 +21,7 @@ requirements:
   - REQ-COORDINATOR-COPILOT-003
   - REQ-COORDINATOR-COPILOT-004
   - REQ-COORDINATOR-COPILOT-005
+  - REQ-COORDINATOR-COPILOT-006
   - REQ-COORDINATOR-PROPOSALS-001
   - REQ-COORDINATOR-PROPOSALS-002
   - REQ-COORDINATOR-PROPOSALS-003
@@ -62,7 +63,15 @@ WP-0 --+--> G0 (gates opening upstream PRs, not building)
                                        +--> task-03 session, surface -+--> task-06 copilot wired --> task-08 proposal UI
                                        +--> task-04 Needs you, Queue -+                                  ^
                                        +--> task-07 approve/reject backend -----------------------------+
+
+task-06 --> task-09 conversation recovery --+
+task-08 ------------------------------------+--> task-10 activity display
 ```
+
+Tasks 09 and 10 were added on 2026-09-28 from the real-agent check of the
+integrated phase 1 build: a conversation whose agent failed to start could
+never recover, and the transcript showed Kandev's session plumbing to a
+business user.
 
 Critical path: WP-0, task 01, task 03, task 06, task 08. At most three agents
 build at once; tasks 03 and 04 go first, as the two largest. Parallel work
@@ -93,7 +102,9 @@ predecessor merges.
 | [task-05](task-05-popover-shell.md) | WP-4a | M | WP-0 | Popover shell and chat props exist; Configuration chat and task chat unchanged |
 | [task-06](task-06-copilot-wired.md) | WP-4b | M | 03, 04, 05 | A manager asks the coordinator about the workspace from the Coordinator screens |
 | [task-07](task-07-proposals-backend.md) | WP-5a | M | 01 | A pending or failed proposal is approved exactly once or rejected through the API; recovery holds |
-| [task-08](task-08-proposals-ui.md) | WP-5b | M | 06, 07 | Proposals approved, edited and rejected on both surfaces; phase 1 complete |
+| [task-08](task-08-proposals-ui.md) | WP-5b | M | 06, 07 | Proposals approved, edited and rejected on both surfaces |
+| [task-09](task-09-conversation-recovery.md) | WP-4c | S | 06 | A conversation whose session ended or failed to start recovers from the popover |
+| [task-10](task-10-activity-display.md) | WP-4d | S | 08, 09 | The copilot shows a live status line and a collapsed tool chip; phase 1 complete |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Each work order is its own
 PR, keeps `prod` off, and ships its tests. Every acceptance criterion of the

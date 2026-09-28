@@ -21,6 +21,17 @@ yet built. The feature described here needs none of them: it is a projection
 of task facts Kandev already publishes, one ordinary Kandev session per
 coordinator, and one write (a task proposal a person decides).
 
+[ADR-2026-09-25-plugin-coordination-platform](2026-09-25-plugin-coordination-platform.md),
+accepted after this ADR was first drafted, gives plugins the roles, policy,
+memory, proposals and product composition of coordination, and gives core
+the generic execution, managed conversation and restricted tool policy
+contracts. Asked directly whether the workspace coordinator should be core or
+a plugin, the kdlbs maintainer answered on 2026-09-28: "sounds good to be in
+the core, we can move to a plugin later if needed. just have it behind a
+feature flag so we can test it a bit". This ADR records that direction; the
+[relationship section](#relationship-to-adr-2026-09-25-plugin-coordination-platform)
+says what it does and does not change.
+
 This decision places the workspace coordinator in core for Kanban workspaces,
 behind `features.coordinator`, and records the phase plan. The phase 1
 requirements and system designs live under
@@ -38,13 +49,13 @@ requirements govern):
 
 | # | Decision | Phase 1 answer | Status |
 | --- | --- | --- | --- |
-| D1 | Where the product lives | A core Coordinator page for Kanban workspaces. A coordinator plugin stays possible as an optional extension. | proposed, G0 |
+| D1 | Where the product lives | A core Coordinator page for Kanban workspaces, behind `features.coordinator` so it can be tested before it is promoted. It may move to a plugin on the managed coordination platform later if needed. | agreed with the maintainer, 2026-09-28 |
 | D2 | The runner | An ordinary Kandev session on an ephemeral task, started like Configuration chat, one per coordinator. It needs no automation, run queue or plugin, and has no wake. The wake is decided at G4. | proposed, G0 |
 | D3 | Durable coordinator state | Its conversation task, its proposals and the stall records. No checkpoint, because nothing resumes it unattended. Revisited at G4. | proposed, G0 |
 | D4 | May a coordinator move or archive cards? | No, in every phase. Moving, archiving, deleting and stopping are not on its surface, and it can never merge or move a task to Done. This is a rule about the coordinator actor only; people, workflows and other actors keep their contracts. `product-constraints.md` records the rule. | proposed, G0 |
 | D5 | How it asks a person | Through proposals, in its chat and on Needs you. `ask_user_question_kandev` is not on its surface. | proposed, G0 |
 | D6 | ADR 0004's coordination-task pattern | Not used, and left unchanged. | proposed, G0 |
-| D7 | The plugin's interim path | The v1 fence stays as ADR-2026-08-31 defines it. Several open PRs touch `internal/mcp` (including #2756, #2841, #2909, #2974, #3048, #3155, #3165); this list is not exhaustive and each is left to its own review: phase 1 needs none and blocks none. Whichever lands second rebases. Before adding the `coordinator` surface, mode and origin names, the implementation checks main for a name already taken. | proposed, G0 |
+| D7 | The plugin's interim path | The v1 fence stays as ADR-2026-08-31 defines it. #3994 added the `managed-conversation` MCP surface and mode and the adapter-enforced managed tool policy; the `coordinator` surface, mode and origin coexist with them, and the agentctl permission handler checks the coordinator allowlist, then the managed tool policy, then the default. Other open PRs that touch `internal/mcp` are left to their own review: phase 1 needs none and blocks none, and whichever lands second rebases. Before adding a name, the implementation checks main for a name already taken. | proposed, G0 |
 | D8 | Scope and cardinality | Workspace scope. Several coordinators per workspace, each reading the whole workspace until Watches narrows it in phase 2. Each proposal belongs to one coordinator. | proposed, G0 |
 | D9 | Autonomy and approval | Phase 1 is attended: every turn starts from a manager's message. The coordinator's Kandev surface can only read and propose, enforced by the MCP guard and by auto-approving exactly those tools. The agent CLI's own tools are governed by its profile and settings, as in any Kandev chat; see [Residual risk](#residual-risk-the-agents-own-tools). Enforced containment of those tools is a condition of G4, before any unattended turn. | proposed, G0 |
 | D10 | External intake | Phase 4. | proposed, G4 |
@@ -93,6 +104,29 @@ plugin call chain, the capability approval ledger, exact writers, transition
 guards, DTOs and result vocabulary. A coordinator plugin built on those
 contracts remains possible as an optional extension. This ADR does not move
 the plugin's v1 fence.
+
+### Relationship to ADR-2026-09-25-plugin-coordination-platform
+
+ADR-2026-09-25 stands unchanged for everything it decides about the generic
+Host: execution, durable input admission, canonical task observations, task
+claims, completion gates, managed conversations, the restricted agent tool
+policy and reusable chat components. This ADR adds no Host contract and
+changes none of those.
+
+What differs is where one product lives. ADR-2026-09-25 expects coordination
+products to be plugins; this ADR places the workspace coordinator in core as
+a flagged, reversible experiment, on the maintainer's direction of 2026-09-28.
+It is not a general coordinator framework: it is one page, one attended
+conversation per coordinator, and one write that a person decides.
+
+Phase 1 does not run on the managed conversation surface because that surface
+is plugin-bound today: its tool policy names a plugin, an installation and a
+manifest digest, and it registers only that plugin's tools, so the
+coordinator's core read tools and `propose_task_kandev` cannot appear on it.
+If the coordinator later moves to a plugin, its conversation would run on the
+managed conversation surface with its tools declared by the plugin, and the
+core page, store and routes would be removed or reduced to what the plugin
+cannot provide.
 
 ### Residual risk: the agent's own tools
 
@@ -215,6 +249,10 @@ or when 10 working days pass with no maintainer reply; in the second case this
 section records "proceeding without maintainer reply" with the date. An
 objection re-plans the affected work packages before their upstream PRs open.
 
+2026-09-28: the maintainer agreed to D1 (core, behind a feature flag, may move
+to a plugin later). G0 stays pending until the maintainer has reviewed this
+design package.
+
 ## Prior art
 
 - **Conductor loop (author's notes, `concepts/conductor-loop.md`, updated
@@ -246,6 +284,9 @@ objection re-plans the affected work packages before their upstream PRs open.
   its data survives the flag being off.
 - A coordinator plugin, if built, must coexist with this page; the generic
   Host contracts it would use are unaffected.
+- The placement is reversible: because every coordinator surface sits behind
+  `features.coordinator`, moving the product to a plugin later removes core
+  code without a data migration for users who never turned the flag on.
 - The MCP guard's allowlist is the single place new coordinator abilities
   join, one decision at a time.
 - The residual risk of the agent's own tools is accepted for attended turns
@@ -258,6 +299,11 @@ objection re-plans the affected work packages before their upstream PRs open.
   Host contracts it does not need, and makes the attention list depend on a
   separately released component. Rejected for phase 1; the plugin remains an
   option.
+- **Build it now as a plugin on the managed coordination platform
+  (ADR-2026-09-25).** Its managed conversation is plugin-bound, so the
+  coordinator's tools would have to be plugin tools and the page a plugin
+  surface. Deferred on the maintainer's direction to test the product in core
+  first; it remains the path if the product moves.
 - **Build on Office.** Office's coordinator role routes autonomous agents with
   budgets and heartbeats; Kanban workspaces would inherit an autonomy model
   they did not ask for. Rejected.

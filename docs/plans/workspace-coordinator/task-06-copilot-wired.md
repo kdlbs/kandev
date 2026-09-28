@@ -19,7 +19,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-004.3
   - AC-COORDINATOR-COPILOT-004.4
   - AC-COORDINATOR-COPILOT-004.5
-  - AC-COORDINATOR-COPILOT-004.6
+  - AC-COORDINATOR-COPILOT-004.10
   - AC-COORDINATOR-COPILOT-004.7
   - AC-COORDINATOR-COPILOT-004.8
   - AC-COORDINATOR-COPILOT-005.1
@@ -112,7 +112,7 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
   and start no turn; after a reload the transcript shows the session's state
   as stored: an idle session shows idle until Send, and a turn that kept
   running across the reload shows running with the launcher busy.
-- Readers see no launcher; Escape, Stop, recovery feedback and the 1200px and
+- Readers see no launcher; Escape, Stop, no send while a turn runs, and the 1200px and
   390px layouts pass; no Quick Chat tab appears.
 
 ## Verification

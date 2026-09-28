@@ -6,13 +6,14 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 requirements:
   - REQ-COORDINATOR-COPILOT-001
   - REQ-COORDINATOR-COPILOT-002
   - REQ-COORDINATOR-COPILOT-003
   - REQ-COORDINATOR-COPILOT-004
   - REQ-COORDINATOR-COPILOT-005
+  - REQ-COORDINATOR-COPILOT-006
 ---
 
 # Coordinator copilot and tool surface System Design
@@ -38,6 +39,7 @@ see [Residual](#residual-external-surface).
 | `REQ-COORDINATOR-COPILOT-003` | [Principal and mode](#principal-and-mode), [Tool surface](#tool-surface), [Fail closed](#fail-closed), [Permission policy](#permission-policy) |
 | `REQ-COORDINATOR-COPILOT-004` | [Popover](#popover) |
 | `REQ-COORDINATOR-COPILOT-005` | [Ask about this](#ask-about-this) |
+| `REQ-COORDINATOR-COPILOT-006` | [Activity display](#activity-display) |
 
 ## Conversation task
 
@@ -52,8 +54,12 @@ see [Residual](#residual-external-surface).
      (409 with the `coordinator_profile_unavailable` body of
      [coordinators](coordinators.md#validation) when the agent profile is
      `missing` or `passthrough`, or the executor profile is `missing`).
-  2. When `conversation_task_id` names a live, unarchived task, ensure its
-     session (step 6) and return it.
+  2. When `conversation_task_id` names a live, unarchived task whose primary
+     session is not terminal, ensure its session (step 6) and return it. When
+     that session is `FAILED`, `CANCELLED` or `COMPLETED` it rejects every
+     message, so the task is not reusable: archive it through the task
+     service's `ArchiveTask`, clear the reference with the same conditional
+     update as step 4, and continue at step 3 (`AC-COORDINATOR-COPILOT-001.10`).
   3. Otherwise create an ephemeral task through the task service's internal
      create call: origin `coordinator`, title `Coordinator: <name>`, the
      coordinator's agent and executor profiles, metadata
@@ -107,6 +113,7 @@ see [Residual](#residual-external-surface).
 | Event | Current conversation task | Earlier conversation tasks |
 | --- | --- | --- |
 | Context change ([coordinators](coordinators.md#routes)) | archived through the task service's `ArchiveTask`, which stops a running turn; the reference is cleared | unchanged (archived) |
+| Current session ended (`FAILED`, `CANCELLED`, `COMPLETED`) | archived by the next open (step 2); a new task is created | unchanged (archived) |
 | Coordinator deletion | deleted through the task service, which stops a running turn | deleted |
 | Workspace deletion | deleted with the workspace's tasks | deleted with the workspace's tasks |
 
@@ -182,6 +189,16 @@ editing the stored user message.
   shows as running and the launcher shows busy (`AC-COORDINATOR-COPILOT-002.4`).
   The Retry action of the recovery feedback stays a manual action; it restores
   the execution and sends no message, so it starts no turn.
+- Because the hook sets its error and notice only on its automatic path, the
+  copilot does not rely on it for `AC-COORDINATOR-COPILOT-004.6`. The popover
+  reads the session state from the store and keeps a coordinator-local
+  recovery state: when the session is terminal or its start failed, it shows
+  the recovery feedback with an action that re-runs the conversation open,
+  which returns a fresh task and session (step 2). `useSessionResumption` is
+  unchanged, so the task page, mobile and Settings chat keep their behaviour.
+- While the session is running, the composer's send is disabled and Stop is
+  offered (`AC-COORDINATOR-COPILOT-004.10`), so a message never queues behind a
+  running turn.
 
 ## Principal and mode
 
@@ -331,6 +348,27 @@ risk as accepted and unmitigated for phase 1.
   composer.
 - On wide screens the popover is placed so it leaves the item column's action
   area uncovered at 1200px; a Playwright check asserts no overlap.
+
+## Activity display
+
+The popover renders its transcript through opt-in `QuickChatSessionView` props,
+the same pattern as `hideSessionSelectors`, so every other chat is unchanged
+(`AC-COORDINATOR-COPILOT-006.5`).
+
+- `hideStartupRows`: `hideSuccessfulStartupRows`
+  (`components/quick-chat/startup-rows.ts`) drops `prepare_progress` items and
+  successful agent-boot `script_execution` messages, but only once a
+  successful boot exists in the transcript; a failed or still-starting boot
+  keeps every row. A turn group left empty is dropped.
+- A status line above the composer, shown while the session is running, maps
+  the latest running tool call to a plain verb through a fixed table keyed by
+  tool name, with a generic fallback verb, and shows the seconds since the
+  turn started. Running tool calls are not rendered as rows.
+- When the turn ends, the turn group's tool calls render as one collapsed chip
+  with the call count and the turn duration; expanding it shows the existing
+  tool rows. `propose_task_kandev` calls are taken out of the group before
+  collapsing, so the proposal card ([proposals](proposals.md)) always renders.
+- Every string goes through `t()` in all shipped locales.
 
 ## Ask about this
 
