@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -21,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	eventbus "github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -30,8 +27,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
@@ -924,24 +921,16 @@ func newAuthoritativeMemoryQueue(repo *sqliterepo.Repository, log *logger.Logger
 
 func strPtr(s string) *string { return &s }
 
-// setupTestRepo creates a real in-memory SQLite repository for testing.
+var orchestratorTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *sqlx.DB) error {
+	_, err := sqliterepo.NewWithDB(database, database, nil)
+	return err
+})
+
+// setupTestRepo creates a separate disk-backed SQLite repository for testing.
 func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	t.Cleanup(func() { _ = sqlxDB.Close() })
-
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
-	t.Cleanup(func() { _ = cleanup() })
-
-	return repo
+	database, _ := orchestratorTestSQLiteTemplate.Open(t)
+	return sqliterepo.NewWithInitializedDB(database, database, nil)
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
