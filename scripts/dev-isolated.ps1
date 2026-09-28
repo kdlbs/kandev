@@ -276,8 +276,22 @@ if ($NoBuild) {
         (Join-Path $RepoRoot 'profiles.yaml'),
         (Join-Path $BackendDir 'go.mod'),
         (Join-Path $BackendDir 'go.sum'),
+        (Join-Path $BackendDir 'config\workflows'),
+        (Join-Path $BackendDir 'config\utilityagents'),
         (Join-Path $BackendDir 'config\prompts'),
-        (Join-Path $BackendDir 'internal\webapp\embedded\generated')
+        (Join-Path $BackendDir 'internal\agent\agents\logos'),
+        (Join-Path $BackendDir 'internal\agent\agents\managed_npm_runtime_versions.json'),
+        (Join-Path $BackendDir 'internal\agent\docker\seccomp'),
+        (Join-Path $BackendDir 'internal\agentctl\server\api\scripts'),
+        (Join-Path $BackendDir 'internal\agentctl\types\replayfixtures\fixtures'),
+        (Join-Path $BackendDir 'internal\editors\discovery\editors.json'),
+        (Join-Path $BackendDir 'internal\i18n\locales'),
+        (Join-Path $BackendDir 'internal\mcp\canvasskill\files'),
+        (Join-Path $BackendDir 'internal\notifications\providers\assets'),
+        (Join-Path $BackendDir 'internal\office\configloader\instructions'),
+        (Join-Path $BackendDir 'internal\office\configloader\skills'),
+        (Join-Path $BackendDir 'internal\profiles\profiles.yaml'),
+        (Join-Path $BackendDir 'internal\webapp\embedded')
       )
       foreach ($inputPath in $embeddedInputs) {
         if (-not (Test-Path -LiteralPath $inputPath)) { continue }
