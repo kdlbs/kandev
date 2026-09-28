@@ -18,6 +18,9 @@ import (
 
 const phaseComplete = "complete"
 
+// ErrRepairPending distinguishes an unresolved repair from a running backend.
+var ErrRepairPending = errors.New("inventory repair is unresolved")
+
 type journal struct {
 	Plan         Plan          `json:"plan"`
 	Phase        string        `json:"phase"`
@@ -42,7 +45,7 @@ func CheckPending(home, driver, database string) error {
 	}
 	for _, path := range paths {
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inventory repair is unresolved at %s; use the repair plan with --apply or --rollback before starting the backend", path)
+			return fmt.Errorf("%w at %s; use the repair plan with --apply or --rollback before starting the backend", ErrRepairPending, path)
 		}
 	}
 	return nil
@@ -189,7 +192,7 @@ func prepareJournal(ctx context.Context, in *inspection, db *sql.DB) (*journal, 
 	if err := privateDirectory(dir); err != nil {
 		return nil, err
 	}
-	changes, err := in.mutations(ctx, time.Now().UTC().Format(time.RFC3339Nano))
+	changes, err := in.mutations(ctx, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}

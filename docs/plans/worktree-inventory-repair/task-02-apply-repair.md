@@ -107,3 +107,11 @@ head-map entry is not permission to rewrite the old observation.
 ## Results
 
 Implemented private verified SQLite snapshots, durable journals and startup fences, exact transactional updates, relocation, verification, rollback, and linked cleanup successors. Race tests pass for all interruption boundaries, unchanged refs/index/content and unrelated column bytes, real worktree admission, dirty-checkout refusal, real source capture, and actual cleanup-worker replay. Startup-fence tests and SQL/store-conformance checks pass. The full affected-package race run passed (inventoryrepair, CLI, worktree, task/service, orchestrator/executor, ownershiplock); the backendapp startup regression and persistence/storeconformance run also passed. Scoped lint, SQL guard, public docs, specification lint/catalog, documentation-coverage preflight, and whitespace checks passed. The standalone utility built successfully; a real backend binary refused an unresolved repair before database creation.
+
+Aggregate review regressions reproduced inherited Git overrides changing repository
+selection, cleanup timestamp text breaking chronological ordering and rollback,
+and unresolved-repair startup suggesting a second instance. Repair commands now
+discard inherited Git overrides, cleanup mutations retain original timestamp text
+and use driver-compatible new timestamps, and startup distinguishes the repair
+refusal. Repair/CLI and focused startup race tests pass, including the existing
+running-instance conflict diagnostics.

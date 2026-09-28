@@ -66,6 +66,8 @@ Preflight the complete requested change set before any move or database write:
    verify their task, workspace, and directory identities.
 3. Validate the checkout's `.git` pointer, common directory, administrative
    backlink, and exact `git worktree list` entry. Observe symbolic HEAD and OID.
+   Local repair Git commands discard inherited `GIT_*` environment overrides
+   so the explicit paths determine repository selection and index/object state.
    Preserve detached or ambiguous cases for separate recovery rather than
    guessing a branch.
 4. Resolve a missing repository ID only from the explicitly selected authorized
@@ -113,7 +115,8 @@ runtime recovery, naming the operation needed to finish or reverse it. Repair
 re-entry validates both locations and database tuples before rolling forward
 or back. Failure to roll back leaves the journal unresolved and startup blocked;
 the helper never reports success for partial application. This startup gate is
-limited to journals created by this explicit utility.
+limited to journals created by this explicit utility. Its typed refusal reports
+repair recovery guidance independently from a running-instance ownership conflict.
 
 ## Cleanup evidence
 
@@ -132,6 +135,9 @@ new pending job with a unique operation ID linked to that predecessor in its
 snapshot. Reuse the prior operation's resource scope and completed progress;
 do not add newly discovered resources, change discard consent, or rerun
 already-completed unrelated cleanup. Verify current task archive identity.
+Use the SQLite driver's timestamp text format for new cleanup timestamps so
+ordinary queue ordering remains valid. Preserve original cleanup timestamp text
+in the journal and restore it byte-for-byte on rollback.
 
 Build complete identities and current cleanup HEAD evidence for the successor
 after all consumers are absent. Existing source manifests stay with their

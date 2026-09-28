@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type row map[string]any

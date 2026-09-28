@@ -9,19 +9,28 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
+
+	"github.com/mattn/go-sqlite3"
 )
 
 var columnPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-func (in *inspection) cleanupMutations(ctx context.Context, job row, at string) ([]mutation, error) {
-	snapshot, err := in.successorSnapshot(ctx, job, at)
+// The final aliases retain timestamp text for exact rollback instead of driver normalization.
+const cleanupJobProjection = `*, CAST(created_at AS TEXT) AS created_at,
+CAST(updated_at AS TEXT) AS updated_at, CAST(completed_at AS TEXT) AS completed_at,
+CAST(next_attempt_at AS TEXT) AS next_attempt_at`
+
+func (in *inspection) cleanupMutations(ctx context.Context, job row, at time.Time) ([]mutation, error) {
+	snapshot, err := in.successorSnapshot(ctx, job, at.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
 	predecessor := maps.Clone(job)
+	timestamp := at.Format(sqlite3.SQLiteTimestampFormats[0])
 	predecessor["state"] = "cancelled"
-	predecessor["completed_at"] = at
-	predecessor["updated_at"] = at
+	predecessor["completed_at"] = timestamp
+	predecessor["updated_at"] = timestamp
 	successor := maps.Clone(job)
 	id := "inventory-repair-" + in.report.Plan.OperationID + "-" + stringValue(job, "id")
 	successor["id"] = id
@@ -31,8 +40,8 @@ func (in *inspection) cleanupMutations(ctx context.Context, job row, at string) 
 	successor["next_attempt_at"] = nil
 	successor["last_error"] = ""
 	successor["completed_at"] = nil
-	successor["created_at"] = at
-	successor["updated_at"] = at
+	successor["created_at"] = timestamp
+	successor["updated_at"] = timestamp
 	successor["resource_snapshot"] = snapshot
 	existing, err := queryRows(ctx, in.db, `SELECT id FROM task_resource_cleanup_jobs WHERE id = ? OR operation_id = ?`, id, id)
 	if err != nil {

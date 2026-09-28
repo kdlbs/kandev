@@ -163,7 +163,7 @@ func (in *inspection) inspectConsumers(ctx context.Context, id, taskID string) e
 	if len(claims) > 0 {
 		in.report.Blockers = append(in.report.Blockers, "environment recovery claim "+id)
 	}
-	jobs, err := in.read(ctx, "jobs:"+taskID, `SELECT * FROM task_resource_cleanup_jobs WHERE task_id = ? ORDER BY id`, taskID)
+	jobs, err := in.read(ctx, "jobs:"+taskID, `SELECT `+cleanupJobProjection+` FROM task_resource_cleanup_jobs WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return err
 	}

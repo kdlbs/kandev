@@ -21,13 +21,25 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	out, err, ctxErr := subproc.RunGitOutputAfterAcquire(ctx, subproc.GitLifecycle, 30*time.Second, func(execCtx context.Context) *exec.Cmd {
 		cmd := subproc.NewGitCommand(execCtx, args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = repairGitEnvironment()
 		return cmd
 	})
 	if err != nil || ctxErr != nil {
 		return "", fmt.Errorf("git inspection %s: %w", args[0], errors.Join(err, ctxErr))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func repairGitEnvironment() []string {
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		// Repair uses only local Git operations bound to explicitly inspected paths.
+		if !strings.HasPrefix(strings.ToUpper(key), "GIT_") {
+			env = append(env, entry)
+		}
+	}
+	return append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
 }
 
 func inspectGit(ctx context.Context, repository, path string) (GitState, error) {

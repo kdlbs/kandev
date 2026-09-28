@@ -210,6 +210,8 @@ repairs for local SQLite installations using the host **Worktree** executor.
 Application and rollback require Linux and permission to inspect the installation
 owner's processes through `/proc`. Preview and verification only read state.
 Use a backend build containing the repair startup guard before applying a repair.
+The utility ignores inherited `GIT_*` environment settings; its plan selects the
+repository and checkout paths.
 
 1. Build the utility from `apps/backend`:
 
@@ -263,7 +265,9 @@ evidence through the normal cleanup worker.
 If interrupted, rerun the same plan with `--apply` to finish or `--rollback` to
 reverse it. Changed inventory or checkout content prevents either operation.
 An unresolved journal blocks backend startup; retain the journal and backup
-until resolved. After restart, check the cleanup job and resume the affected
+until resolved. Startup reports the repair recovery command without suggesting
+a second instance. Verify before restarting; online verification may observe
+concurrent changes. After restart, check the cleanup job and resume the affected
 session. Metadata verification alone does not establish that those operations
 have completed. Normal dirty-checkout, branch, and ownership guards still apply.
 

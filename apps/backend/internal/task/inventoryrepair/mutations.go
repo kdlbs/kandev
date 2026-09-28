@@ -8,6 +8,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"time"
 )
 
 type mutation struct {
@@ -17,7 +18,7 @@ type mutation struct {
 	After  row    `json:"after"`
 }
 
-func (in *inspection) mutations(ctx context.Context, at string) ([]mutation, error) {
+func (in *inspection) mutations(ctx context.Context, at time.Time) ([]mutation, error) {
 	var result []mutation
 	for _, r := range in.report.Plan.Repairs {
 		before := in.slots[r.WorktreeID]
@@ -66,7 +67,11 @@ func mutationRow(ctx context.Context, db queryer, m mutation) (row, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := queryRows(ctx, db, `SELECT * FROM `+table+` WHERE id = ?`, m.ID)
+	columns := "*"
+	if table == "task_resource_cleanup_jobs" {
+		columns = cleanupJobProjection
+	}
+	rows, err := queryRows(ctx, db, `SELECT `+columns+` FROM `+table+` WHERE id = ?`, m.ID)
 	if err != nil {
 		return nil, err
 	}
