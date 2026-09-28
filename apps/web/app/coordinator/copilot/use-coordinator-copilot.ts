@@ -57,9 +57,20 @@ export function useCoordinatorCopilot(
   const removeEntry = useCopilotStore((s) => s.removeEntry);
   const clearChipAndDraft = useCopilotStore((s) => s.clearChipAndDraft);
 
-  const [routeSession, setRouteSession] = useState<ConversationResponse | null>(null);
+  const [ownedRouteSession, setOwnedRouteSession] = useState<{
+    coordinatorId: string;
+    session: ConversationResponse;
+  } | null>(null);
   const [pendingDraft, setPendingDraft] = useState<string | undefined>(undefined);
   const [askKey, setAskKey] = useState(0);
+
+  // Guards against a coordinator switch: this hook's own state (not just the
+  // `[coordinatorId]` effect below) must never hand a previous coordinator's
+  // session to a render that already reflects the new `coordinatorId`.
+  const routeSession =
+    ownedRouteSession && ownedRouteSession.coordinatorId === coordinatorId
+      ? ownedRouteSession.session
+      : null;
 
   const launcher = useCoordinatorLauncher(
     workspaceId,
@@ -69,7 +80,7 @@ export function useCoordinatorCopilot(
   const openSequence = useCopilotOpenSequence(workspaceId, effectiveId);
 
   useEffect(() => {
-    setRouteSession(null);
+    setOwnedRouteSession(null);
     setPendingDraft(undefined);
   }, [coordinatorId]);
 
@@ -83,8 +94,10 @@ export function useCoordinatorCopilot(
   }, [entry.open, entry.chip]);
 
   useEffect(() => {
-    if (openSequence.state.kind === "ready") setRouteSession(openSequence.state.session);
-  }, [openSequence.state]);
+    if (openSequence.state.kind === "ready") {
+      setOwnedRouteSession({ coordinatorId, session: openSequence.state.session });
+    }
+  }, [openSequence.state, coordinatorId]);
 
   useEffect(() => {
     if (openSequence.state.kind === "gone") clearChipAndDraft(coordinatorId);
@@ -108,6 +121,11 @@ export function useCoordinatorCopilot(
         setOpen(coordinatorId, true);
         return;
       }
+      // The popover fully unmounts on close (no `forceMount`), so a consumed
+      // one-shot seed must not survive to reapply itself into the composer
+      // on the next mount; unsent typed text is the composer's own concern
+      // (its per-session draft storage), not this seed.
+      setPendingDraft(undefined);
       if (openSequence.state.kind === "gone") removeEntry(coordinatorId);
       else setOpen(coordinatorId, false);
     },

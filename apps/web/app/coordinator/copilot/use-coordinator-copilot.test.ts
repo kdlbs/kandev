@@ -238,4 +238,38 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
     expect(result.current.routeSession).toBeNull();
     expect(result.current.pendingDraft).toBeUndefined();
   });
+
+  it("clears pendingDraft on close so reopening never reinserts the already-applied draft", () => {
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    act(() => result.current.handleOpenChange(false));
+    rerender();
+
+    expect(result.current.pendingDraft).toBeUndefined();
+  });
+
+  it("never derives the launcher busy-state from a previous coordinator's stale session on a coordinator switch", () => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }),
+    );
+    const { rerender } = renderHook(
+      ({ coordinatorId }: { coordinatorId: string }) =>
+        useCoordinatorCopilot(WORKSPACE_ID, coordinatorId, true),
+      { initialProps: { coordinatorId: "coord-1" } },
+    );
+
+    mocks.useCoordinatorLauncher.mockClear();
+    mocks.useCopilotOpenSequence.mockReturnValue(openSequenceMock({ kind: "idle" }));
+    rerender({ coordinatorId: "coord-2" });
+
+    for (const call of mocks.useCoordinatorLauncher.mock.calls) {
+      expect(call).toEqual([WORKSPACE_ID, "coord-2", null]);
+    }
+  });
 });

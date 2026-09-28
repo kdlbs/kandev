@@ -39,6 +39,7 @@ const conversation: ConversationResponse = {
 
 const chip: CopilotChip = { id: "KAN-418", label: "KAN-418" };
 const SUGGESTION_QUESTION = "What needs me first, and why?";
+const QUICK_CHAT_MARKER_TEST_ID = "quick-chat-session-view-marker";
 
 function mockController(overrides: Partial<ReturnType<typeof useCoordinatorCopilot>> = {}) {
   useCoordinatorCopilot.mockReturnValue({
@@ -113,7 +114,7 @@ describe("CoordinatorCopilot", () => {
     expect(
       screen.getByText("The agent profile was removed. Choose another in Settings."),
     ).toBeTruthy();
-    expect(screen.queryByTestId("quick-chat-session-view-marker")).toBeNull();
+    expect(screen.queryByTestId(QUICK_CHAT_MARKER_TEST_ID)).toBeNull();
   });
 
   it("shows both profile messages when neither status is ok", async () => {
@@ -174,7 +175,7 @@ describe("CoordinatorCopilot - ready conversation", () => {
       routeSession: conversation,
     });
     renderCopilot();
-    await waitFor(() => screen.getByTestId("quick-chat-session-view-marker"));
+    await waitFor(() => screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID));
     expect(quickChatSessionViewCalls[0]).toMatchObject({
       session: {
         kind: "chat",
@@ -238,7 +239,44 @@ describe("CoordinatorCopilot - ready conversation", () => {
       routeSession: conversation,
     });
     renderCopilot();
-    await waitFor(() => screen.getByTestId("quick-chat-session-view-marker"));
+    await waitFor(() => screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID));
     expect(screen.queryByText(SUGGESTION_QUESTION)).toBeNull();
+  });
+});
+
+describe("CoordinatorCopilot - ready conversation: transformOutgoing", () => {
+  it("passes a transformOutgoing that prefixes the chip id while a chip is set", async () => {
+    mockController({
+      open: true,
+      openSequence: {
+        state: { kind: "ready", session: conversation },
+        open: vi.fn(),
+        retry: vi.fn(),
+      },
+      routeSession: conversation,
+      chip,
+    });
+    renderCopilot();
+    await waitFor(() => screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID));
+    const transformOutgoing = quickChatSessionViewCalls[0].transformOutgoing as (
+      message: string,
+    ) => string;
+    expect(transformOutgoing("Why is this here?")).toBe("About KAN-418: Why is this here?");
+  });
+
+  it("passes no transformOutgoing when no chip is set", async () => {
+    mockController({
+      open: true,
+      openSequence: {
+        state: { kind: "ready", session: conversation },
+        open: vi.fn(),
+        retry: vi.fn(),
+      },
+      routeSession: conversation,
+      chip: null,
+    });
+    renderCopilot();
+    await waitFor(() => screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID));
+    expect(quickChatSessionViewCalls[0].transformOutgoing).toBeUndefined();
   });
 });
