@@ -372,6 +372,28 @@ func TestCreateOnboardingAgent_BindsDynamicSourceProfile(t *testing.T) {
 	}
 }
 
+// TestCreateOnboardingAgent_RejectsForeignSourceProfile verifies onboarding
+// refuses a source profile that belongs to a different workspace, matching the
+// office-agent configuration path.
+func TestCreateOnboardingAgent_RejectsForeignSourceProfile(t *testing.T) {
+	svc, _, _ := newTestOnboardingService(t)
+	foreign := &models.AgentInstance{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, WorkspaceID: "ws-other"}
+	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"dynamic-profile": foreign,
+	}}
+	capture := &capturingAgentCreator{}
+	svc.agentCreator = capture
+
+	if _, err := svc.createOnboardingAgent(context.Background(), "ws-1", CompleteRequest{
+		AgentName: "CEO", AgentProfileID: "dynamic-profile",
+	}); err == nil {
+		t.Fatal("create onboarding agent accepted a foreign workspace profile")
+	}
+	if capture.agent != nil {
+		t.Fatalf("agent was created for a foreign profile: %+v", capture.agent)
+	}
+}
+
 // TestApplyOnboardingTierProfileSkipsDynamicSource verifies the legacy
 // provider_profiles seed is skipped for a dynamic source instead of emitting
 // an "unsupported provider" warning.

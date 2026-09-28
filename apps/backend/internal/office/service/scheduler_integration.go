@@ -941,6 +941,11 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	taskID string, launch LaunchContext,
 ) (handled bool, launched bool) {
+	if agent.ExecutionAgentProfileID != "" {
+		// A dynamic-bound Office agent owns provider order through its bound
+		// profile; the legacy workspace-routing dispatcher must not override it.
+		return false, false
+	}
 	rd := si.svc.routingDispatcher
 	if rd == nil {
 		return false, false

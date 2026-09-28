@@ -124,6 +124,31 @@ func TestResolveExecutionFollowsOfficeBinding(t *testing.T) {
 	}
 }
 
+// TestResolveExecutionFailsClosedWhenOfficeBindingDisabled covers the disabled
+// bound profile: the binding still names a dynamic profile with a live route
+// document, but that profile is no longer enabled, so resolution fails closed
+// instead of launching through its candidates.
+func TestResolveExecutionFailsClosedWhenOfficeBindingDisabled(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "disabled-dynamic",
+		},
+		bound:    &agentsettingsmodels.AgentProfile{ID: "disabled-dynamic", AgentID: agents.DynamicAgentID, Enabled: false},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "disabled-dynamic", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "disabled-dynamic", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	if _, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, ""); err == nil {
+		t.Fatal("Resolve succeeded with a disabled office binding")
+	}
+}
+
 func TestResolveExecutionFailsClosedWhenOfficeBindingMissing(t *testing.T) {
 	ctx := context.Background()
 	profiles := &dynamicResolverTestProfiles{
@@ -197,6 +222,7 @@ type dynamicResolverTestProfiles struct {
 	store.DynamicProfileRepository
 	logical  *agentsettingsmodels.AgentProfile
 	office   *agentsettingsmodels.AgentProfile
+	bound    *agentsettingsmodels.AgentProfile
 	concrete *agentsettingsmodels.AgentProfile
 	dynamic  *agentsettingsmodels.DynamicAgentProfile
 	routes   []agentsettingsmodels.DynamicAgentRoute
@@ -204,11 +230,13 @@ type dynamicResolverTestProfiles struct {
 
 func (p *dynamicResolverTestProfiles) GetAgentProfile(_ context.Context, id string) (*agentsettingsmodels.AgentProfile, error) {
 	switch {
-	case id == p.logical.ID:
+	case p.bound != nil && id == p.bound.ID:
+		return p.bound, nil
+	case p.logical != nil && id == p.logical.ID:
 		return p.logical, nil
 	case p.office != nil && id == p.office.ID:
 		return p.office, nil
-	case id == p.concrete.ID:
+	case p.concrete != nil && id == p.concrete.ID:
 		return p.concrete, nil
 	default:
 		return nil, errors.New("profile not found")

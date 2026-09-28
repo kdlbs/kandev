@@ -601,6 +601,13 @@ func (r *ProfileExecutionResolver) dynamicSourceProfileID(ctx context.Context, l
 		return "", fmt.Errorf("resolve profile %s: %w", logicalProfileID, err)
 	}
 	if profile != nil && profile.ExecutionAgentProfileID != "" {
+		bound, err := r.profiles.GetAgentProfile(ctx, profile.ExecutionAgentProfileID)
+		if err != nil {
+			return "", fmt.Errorf("resolve bound execution profile %s: %w", profile.ExecutionAgentProfileID, err)
+		}
+		if bound == nil || !bound.Enabled {
+			return "", fmt.Errorf("bound execution profile %s is unavailable", profile.ExecutionAgentProfileID)
+		}
 		return profile.ExecutionAgentProfileID, nil
 	}
 	return logicalProfileID, nil

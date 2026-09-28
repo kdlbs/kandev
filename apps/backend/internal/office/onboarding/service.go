@@ -592,6 +592,9 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 		if err != nil {
 			return "", fmt.Errorf("look up source profile %s: %w", req.AgentProfileID, err)
 		}
+		if src.WorkspaceID != "" && src.WorkspaceID != wsID {
+			return "", errors.New("source agent profile belongs to a different workspace")
+		}
 		agent.AgentID = src.AgentID
 		if src.AgentID == agents.DynamicAgentID {
 			// The chosen profile is a dynamic routing owner. Bind the Office
