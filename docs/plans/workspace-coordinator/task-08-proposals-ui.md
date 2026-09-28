@@ -55,6 +55,9 @@ transcript (task 06), on task 07's routes. Completes phase 1.
 
 - Any backend change (task 07).
 - Undo, other proposal classes, reply with a condition (later phases).
+- The approved task's agent profile and executor (see the requirements' Out
+  of scope; the approve path sets neither, so a later start relies on the
+  workspace default agent profile). A follow-up decides the rule.
 
 ## ASCII UI preview
 

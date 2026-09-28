@@ -259,3 +259,9 @@ Mockup:
 - Any `automatic` write class (decision D13, gate G2 and phase 4).
 - Expiry of pending proposals: they stay until decided or their coordinator is
   deleted.
+- The agent profile and executor of the task an approval creates. The approve
+  path (`createApprovedTask`, `apps/backend/internal/coordinator/approve.go:367`)
+  sets neither, so starting that task later relies on the workspace's default
+  agent profile; with no default it cannot start. The rule (inherit the
+  coordinator's profiles, choose one in Edit, or require a workspace default) is
+  an open product decision for a follow-up, not phase 1's proposal UI.
