@@ -38,7 +38,7 @@ row.
 - The collapsed tool chip per finished turn, with `propose_task_kandev` calls
   kept out of it.
 - Copy in every shipped locale.
-- Everything opt-in on the view, set only by the coordinator popover
+- Everything opt-in on the view, set only by the coordinator panel
   ([copilot design](../../specs/coordinator/system-design/copilot.md#activity-display)).
 
 ## Out of scope
@@ -89,7 +89,7 @@ cd apps/web && pnpm e2e:run tests/coordinator
 
 ## Dependencies
 
-- Tasks 08 and 09 have passed Review, since all three touch the popover. The
+- Tasks 08 and 09 have passed Review, since all three touch the panel. The
   branch stacks on task 08's branch with task 09's branch merged in.
 
 ## Risks

@@ -117,7 +117,7 @@ covers the reader case of `AC-COORDINATOR-PROPOSALS-005.1` ("for managers"):
 workflow, step and "Proposed by" line with no Approve, Edit or Reject. The
 reader assertion for this same card on Needs you is task 04's component test;
 the copilot transcript surface needs no separate coverage of its own, because
-`AC-COORDINATOR-COPILOT-004.1` already keeps the launcher, and so the popover
+`AC-COORDINATOR-COPILOT-004.1` already keeps the launcher, and so the panel
 the chat card renders inside, unreachable to a reader.
 
 `proposals.spec.ts` also covers

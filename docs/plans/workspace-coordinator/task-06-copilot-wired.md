@@ -6,7 +6,7 @@ wave: 3
 depends_on:
   - "03-session-tool-surface"
   - "04-needs-you-queue-stalls"
-  - "05-popover-shell"
+  - "05-panel-shell"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COPILOT-002
@@ -22,6 +22,8 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-004.10
   - AC-COORDINATOR-COPILOT-004.7
   - AC-COORDINATOR-COPILOT-004.8
+  - AC-COORDINATOR-COPILOT-004.11
+  - AC-COORDINATOR-COPILOT-004.12
   - AC-COORDINATOR-COPILOT-005.1
   - AC-COORDINATOR-COPILOT-005.2
   - AC-COORDINATOR-COPILOT-005.4
@@ -35,17 +37,22 @@ system_design:
 
 ## Summary
 
-Put the copilot on the Coordinator screens: task 05's shell and
+Put the copilot on the Coordinator screens: task 05's right-side panel and
 `QuickChatSessionView` on the session from task 03's conversation route, with
 **Ask about this** and its context chip on task 04's item cards. On the
 critical path.
 
 ## In scope
 
-- Coordinator controller: launcher for `workspace.manage` only, busy state
-  from the session store, 420 by 550 popover titled `Coordinator: <name>`, no
-  Expand, full width below 640px. With the flag off no launcher renders.
-- The popover builds its `QuickChatSession` value from the conversation
+- Coordinator controller: launcher for `workspace.manage` only, shown while
+  the panel is closed; busy state from the session store on the launcher, and
+  in the panel header while open. Task 05's `RightSidePanel` beside the list,
+  full content height, titled `Coordinator: <name>`, Close, no maximize; width
+  stored under `kandev.coordinatorCopilot.width` (default 500px); Escape from
+  inside the panel and the floating backdrop close it with focus returned to
+  the launcher; full screen at the mobile breakpoint. With the flag off no
+  launcher renders.
+- The panel builds its `QuickChatSession` value from the conversation
   route's response with `kind: "chat"`, passes `archive_state` as
   `taskArchiveState`, `automaticRecovery={false}` and
   `hideSessionSelectors`.
@@ -61,14 +68,18 @@ critical path.
   after an `ok` GET, and an unknown status value (shown as that field's
   `missing` message).
 - Empty-conversation intro and one suggestion.
-- Copilot store `{open, chip, draft}`, **Ask about this** wiring on task 04's
+- Copilot store `{coordinatorId, open, chip, draft}`, kept across Needs you
+  and Queue of the same coordinator and reset on any other path or
+  coordinator; **Ask about this** wiring on task 04's
   item cards, the chip, and the "About <id>: " prefix through task 05's
   `transformOutgoing`, with the hint under the composer.
-- Screens leave room for the popover at 1200px.
+- The Coordinator screens' list column narrows beside the inline panel, so
+  at 1440px with the sidebar expanded no item action is covered.
 
 ## Out of scope
 
-- The launcher on other pages, Expand, a Quick Chat tab (phase 3).
+- The launcher on other pages, a maximize or Expand action, a Quick Chat tab
+  (phase 3).
 - Proposal decisions on the chat card (task 08; the card renders read-only).
 
 ## ASCII UI preview
@@ -76,24 +87,26 @@ critical path.
 From [plan UI-02](plan.md#ui-02-the-copilot-coordinator-screens):
 
 ```text
-                                     +---------------------------------+
-                                     | * Coordinator: Planner      [x] |
-                                     |---------------------------------|
-                                     | You: split KAN-418 into two     |
-                                     | ( ) list_tasks_kandev           |
-                                     | Planner: I proposed it.         |
-                                     | ! create_task  Pending Approval |
-                                     |---------------------------------|
-                                     | [about KAN-418 x]               |
-                                     | Ask the coordinator...     [>]  |
-                                     | sent as "About KAN-418: ..."    |
-                                     +---------------------------------+
-                                                                 ( * )
++-- Needs you (list narrows) ---------+ +-----------------------------------+
+| ! KAN-418 stalled  [Ask about this] | | * Coordinator: Planner        [x] |
+| ? KAN-402 asks a question   [...]   | |-----------------------------------|
+|                                     | | You: split KAN-418 into two       |
+|                                     | | ( ) list_tasks_kandev             |
+|                                     | | Planner: I proposed it.           |
+|                                     | | ! create_task  Pending Approval   |
+|                                     | |-----------------------------------|
+|                                     | | [about KAN-418 x]                 |
+|                                     | | Ask the coordinator...       [>]  |
+|                                     | | sent as "About KAN-418: ..."      |
++-------------------------------------+ +-----------------------------------+
+                          left-edge resize; launcher ( * ) hidden while open
 ```
 
 ## Mockup screenshots and scenarios
 
-Screenshots (visual reference; the acceptance criteria govern):
+Screenshots (visual reference; the acceptance criteria govern). They draw
+the copilot as a popover; take the content from them and the frame from
+`AC-COORDINATOR-COPILOT-004.1`, `004.8` and `004.11`:
 
 - [`docs/plans/workspace-coordinator/assets/p1-02-ask-about-this.png`](assets/p1-02-ask-about-this.png)
 - [`docs/plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png`](assets/p1-05-chat-create-task-proposal.png)
@@ -112,15 +125,18 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
   and start no turn; after a reload the transcript shows the session's state
   as stored: an idle session shows idle until Send, and a turn that kept
   running across the reload shows running with the launcher busy.
-- Readers see no launcher; Escape, Stop, no send while a turn runs, and the 1200px and
-  390px layouts pass; no Quick Chat tab appears.
+- Readers see no launcher; Escape, backdrop close, Stop, no send while a turn
+  runs, resize bounds and the persisted width, the open panel, chip and draft
+  kept from Needs you to Queue and cleared on leaving, and the 1440px inline,
+  narrower floating and 390px full-screen layouts pass; no Quick Chat tab
+  appears.
 
 ## Verification
 
 ```bash
 cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
-cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/config-chat
+cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/settings/config-chat-popover.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-copilot.spec.ts
 ```
 
@@ -130,7 +146,7 @@ layout assertions live in their own `mobile-copilot.spec.ts` file rather than
 a rerun of `copilot.spec.ts` under a different project.
 
 `tests/coordinator/copilot.spec.ts` includes a permission-request case: the
-mock agent calls one of its own tools, the popover shows Approve and Deny
+mock agent calls one of its own tools, the panel shows Approve and Deny
 through `QuickChatSessionView`'s existing permission UI (unchanged by this
 work order), and approving lets the tool call complete. This is the test that
 pins `AC-COORDINATOR-COPILOT-003.9` (task 03's, enforced by the guard and
@@ -142,7 +158,7 @@ Coordinator screens, so the "In scope" summary's "no launcher renders" claim
 is a checked assertion. A second component test covers the reader-visibility
 case (`AC-COORDINATOR-COPILOT-004.1`) with the flag on: a `workspace.manage`
 viewer sees the launcher on both Coordinator screens, and a `workspace.read`
-viewer sees neither launcher, with no popover reachable by URL or keyboard.
+viewer sees neither launcher, with no panel reachable by URL or keyboard.
 Task 02's `tests/auth/coordinator-settings-reader.spec.ts` is the coordinator
 suite's one `auth`-project Playwright spec; this reader-gating check does not
 need a second one.

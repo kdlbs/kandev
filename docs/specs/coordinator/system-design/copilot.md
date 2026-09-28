@@ -22,7 +22,8 @@ requirements:
 
 The copilot is an ordinary Kandev session on an ephemeral task whose origin is
 `coordinator`. This design adds one task origin, one MCP surface, one mcpmode,
-one authorization guard and one popover shell. It reuses the session
+one authorization guard and one right-side panel shared with the board
+preview. It reuses the session
 lifecycle, the agentctl MCP server, the permission UI and the Quick Chat
 session view unchanged in behaviour for every other origin.
 
@@ -37,7 +38,7 @@ see [Residual](#residual-external-surface).
 | `REQ-COORDINATOR-COPILOT-001` | [Conversation task](#conversation-task), [Standing instructions](#standing-instructions) |
 | `REQ-COORDINATOR-COPILOT-002` | [Attended only](#attended-only) |
 | `REQ-COORDINATOR-COPILOT-003` | [Principal and mode](#principal-and-mode), [Tool surface](#tool-surface), [Fail closed](#fail-closed), [Permission policy](#permission-policy) |
-| `REQ-COORDINATOR-COPILOT-004` | [Popover](#popover) |
+| `REQ-COORDINATOR-COPILOT-004` | [Panel](#panel) |
 | `REQ-COORDINATOR-COPILOT-005` | [Ask about this](#ask-about-this) |
 | `REQ-COORDINATOR-COPILOT-006` | [Activity display](#activity-display) |
 
@@ -75,7 +76,7 @@ see [Residual](#residual-external-surface).
      instead finds `conversation_task_id` NULL (a concurrent context or
      profile change cleared it after the stale value was read in step 2, so
      no other task exists to converge on), delete the task just created and
-     return 409; the popover's next open retries with the fresh row.
+     return 409; the panel's next open retries with the fresh row.
   5. When the re-read in step 4 finds no coordinator row (the coordinator was
      deleted between steps 1 and 4), the route deletes the task it created and
      returns 404. When a delete in step 4 or 5 fails, the route still answers
@@ -94,7 +95,7 @@ see [Residual](#residual-external-surface).
      [coordinators](coordinators.md#routes)) can archive exactly this task
      and clear the reference between step 2's read (the reuse path) or step
      4's commit (the create path) and this point, in which case they no
-     longer match: return 409, with no task, so the popover's next open
+     longer match: return 409, with no task, so the panel's next open
      retries with the fresh value, the same shape as step 4's own race.
      Otherwise return the session id with the task's archive state (always
      `false` from this route, since a task this route would return as
@@ -119,7 +120,7 @@ see [Residual](#residual-external-surface).
 
 An archived conversation task is never returned by the route, never resolves
 to a coordinator (see [Principal and mode](#principal-and-mode)) and is never
-listed. The popover of an archived conversation shows the missing-conversation
+listed. The panel of an archived conversation shows the missing-conversation
 state and a new open creates the next task.
 
 ### Conversation cleanup
@@ -181,7 +182,7 @@ editing the stored user message.
   `wsAddMessage` handler and any HTTP create-message route call
   `CreateMessage`, so neither transport can bypass it. A reader's message is
   refused before any session action.
-- The popover passes `automaticRecovery={false}` to the Quick Chat session
+- The panel passes `automaticRecovery={false}` to the Quick Chat session
   view, which forwards it to `useSessionResumption` as the new option
   `skipAutomaticRecovery`. With it set, the hook sends no check, resume or
   restore request on mount, on reload or on reconnect; it still reads the
@@ -190,7 +191,7 @@ editing the stored user message.
   The Retry action of the recovery feedback stays a manual action; it restores
   the execution and sends no message, so it starts no turn.
 - Because the hook sets its error and notice only on its automatic path, the
-  copilot does not rely on it for `AC-COORDINATOR-COPILOT-004.6`. The popover
+  copilot does not rely on it for `AC-COORDINATOR-COPILOT-004.6`. The panel
   reads the session state from the store and keeps a coordinator-local
   recovery state: when the session is terminal or its start failed, it shows
   the recovery feedback with an action that re-runs the conversation open,
@@ -268,13 +269,13 @@ coordinator resolvable, task readable, agent profile present and not
 passthrough, executor profile present,
 mode set to `Coordinator`. Any failure stops the start with an error surfaced
 through the session recovery feedback. No branch falls back to the default
-task mode. The popover follows the profile statuses of
+task mode. The panel follows the profile statuses of
 [coordinators](coordinators.md#validation): when the coordinator GET reports
 `agent_profile_status` or `executor_profile_status` other than `ok`, it does
 not call the conversation route and shows the matching messages in place of
 the composer. A 409 from the route
 (a profile deleted or switched to passthrough since the GET) carries both
-statuses in its `coordinator_profile_unavailable` body, and the popover shows
+statuses in its `coordinator_profile_unavailable` body, and the panel shows
 the messages built from them.
 
 ## Permission policy
@@ -298,7 +299,7 @@ the messages built from them.
   `mcp__kandev__list_tasks_kandev`) to server `kandev` and a tool that is one
   of the six names above, each compared as the full string, never by prefix.
   A name that does not parse is not auto-approved.
-- Every other request reaches the popover through the existing permission
+- Every other request reaches the panel through the existing permission
   message flow with Approve and Deny.
 
 ## Residual external surface
@@ -323,35 +324,59 @@ unattended turn to be steered this way. The
 [ADR](../../../decisions/2026-09-26-workspace-coordinator.md) records this
 risk as accepted and unmitigated for phase 1.
 
-## Popover
+## Panel
 
-- `ChatPopoverShell` is extracted from `ConfigChatPanel` (position, size,
-  header, close, Escape handling, focus return). `ConfigChatPanel` keeps its
-  Expand and behaviour; a snapshot test pins it.
-- `CoordinatorCopilot` renders the shell at 420 by 550 pixels, bottom right,
-  title `Coordinator: <name>`, no Expand, full width below 640px. The launcher
-  renders only when the user holds `workspace.manage`; its busy state reads the
-  conversation session's state from the session store.
+- `RightSidePanel` is extracted from `components/kanban-with-preview.tsx`: the
+  inline or floating layout from `useKanbanLayout` (inline while the main
+  column keeps `PREVIEW_PANEL.MIN_KANBAN_WIDTH_PERCENT` of the container,
+  otherwise `fixed` from the right edge above a click-to-close backdrop, bottom
+  at `--app-status-bar-height`), the left-edge `ResizeHandle`, the width clamp
+  from `getRenderedPreviewPanelWidth` and the `PREVIEW_PANEL` bounds, the
+  Escape listener and the mobile full-screen mode. The caller supplies the
+  width storage, so the board keeps `setKanbanPreviewState` and its key, and
+  the board preview renders through the extracted component with its
+  behaviour unchanged (`AC-COORDINATOR-COPILOT-004.13`; its existing tests and
+  a layout test pin it). `ConfigChatPanel` is not touched
+  (`AC-COORDINATOR-COPILOT-004.9`).
+- `CoordinatorCopilot` renders `RightSidePanel` beside the Coordinator
+  screens' list, full content height, header title `Coordinator: <name>`,
+  Close and no maximize. Its width is stored in local storage under its own
+  key (`kandev.coordinatorCopilot.width`), default
+  `PREVIEW_PANEL.DEFAULT_WIDTH_PX`, shared by every coordinator. Escape closes
+  it only while focus is inside the panel, then focus returns to the launcher;
+  the backdrop click does the same when the panel floats.
+- The launcher renders at the bottom right only when the user holds
+  `workspace.manage` and the panel is closed; its busy state, and the panel
+  header's while open, read the conversation session's state from the session
+  store.
+- The copilot store `{coordinatorId, open, chip, draft}` is an in-memory
+  client store, not a component state, so it survives the page swap between
+  Needs you and Queue (separate routes in `spa-routes.tsx`). The copilot
+  controller that both screens render keeps it while the path stays under
+  `/workspaces/:id/coordinator/:coordinatorId` with the same id, and resets it
+  to closed, no chip and no draft on any other path or coordinator id. It is
+  not persisted, so a reload starts closed (`AC-COORDINATOR-COPILOT-004.12`).
 - The body is `QuickChatSessionView` with new optional props, all defaulting
   to today's behaviour: `automaticRecovery` (default `true`; see
   [Attended only](#attended-only)), `hideSessionSelectors` (default `false`;
   hides the mode and model selectors), `taskArchiveState` (when given, it is
   used instead of `resolveTaskArchiveState`, whose fallback cannot see an
   ephemeral task outside the Quick Chat store), `initialDraft` and
-  `transformOutgoing`. The popover builds the `QuickChatSession` value it
+  `transformOutgoing`. The panel builds the `QuickChatSession` value it
   passes from the route's response with `kind: "chat"`;
   `QuickChatSessionKind` (`"chat" | "config"`) is not widened, so the Quick
   Chat tab list, selection and `serverIdsByKind` types are untouched. The
-  popover passes the route's `archive_state` as `taskArchiveState`; without
+  panel passes the route's `archive_state` as `taskArchiveState`; without
   the prop the view behaves as today.
 - The empty state shows the intro text and one suggestion that fills the
   composer.
-- On wide screens the popover is placed so it leaves the item column's action
-  area uncovered at 1200px; a Playwright check asserts no overlap.
+- A Playwright check at a 1440px viewport with the sidebar expanded and the
+  default width asserts the panel is inline and overlaps no item action; a
+  second check at a narrower viewport asserts it floats with a backdrop.
 
 ## Activity display
 
-The popover renders its transcript through opt-in `QuickChatSessionView` props,
+The panel renders its transcript through opt-in `QuickChatSessionView` props,
 the same pattern as `hideSessionSelectors`, so every other chat is unchanged
 (`AC-COORDINATOR-COPILOT-006.5`).
 
@@ -374,7 +399,7 @@ the same pattern as `hideSessionSelectors`, so every other chat is unchanged
 
 - A small copilot store holds `{open, chip: {id, label} | null, draft}`.
   **Ask about this** sets the chip and the draft `Why is <id> here?`, opens the
-  popover and focuses the composer; a second call replaces both.
+  panel and focuses the composer; a second call replaces both.
 - `transformOutgoing` prefixes `About <id>: ` while the chip is set; the hint
   under the composer shows the stored form.
 - `user-message-body.tsx` gains a coordinator branch: when the task origin is

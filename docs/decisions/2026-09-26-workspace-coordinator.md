@@ -210,7 +210,7 @@ behind it.
 
 | Phase | Ships | Work packages | Gate |
 | --- | --- | --- | --- |
-| 1. Core flow | Coordinators in workspace settings; a sidebar entry per coordinator beside the Inbox; Needs you and Queue with the count strip; item cards for stalls, questions and permissions, errors, and task proposals (Approve, Edit, Reject); Ask about this; the copilot popover on the Coordinator screens, which reads the workspace and proposes tasks | WP-0 to WP-5b (WP-0, WP-1, WP-1b, WP-2, WP-3, WP-4a, WP-4b, WP-5a, WP-5b) | G0 |
+| 1. Core flow | Coordinators in workspace settings; a sidebar entry per coordinator beside the Inbox; Needs you and Queue with the count strip; item cards for stalls, questions and permissions, errors, and task proposals (Approve, Edit, Reject); Ask about this; the copilot chat panel on the right side of the Coordinator screens, which reads the workspace and proposes tasks | WP-0 to WP-5b (WP-0, WP-1, WP-1b, WP-2, WP-3, WP-4a, WP-4b, WP-5a, WP-5b) | G0 |
 | 2. Config | Watches, May do and Standing orders per coordinator; the "What it did" log with undo; guided setup; Resume on stall cards; merge prompts; a second proposal class (message a running agent) | WP-6, WP-7 | G2 |
 | 3. Copilot everywhere | The launcher on every page, the page context chip, one launcher with Configuration chat on `/settings`, Expand into a Quick Chat tab | WP-8, WP-9 | G3 |
 | 4. Relay and intake | Wake on its tasks' events; questions and permissions answered in place; Came in (Jira, Linear); tracker write-back as a proposal | WP-10 to WP-12 | G4 |

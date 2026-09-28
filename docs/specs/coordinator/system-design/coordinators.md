@@ -135,7 +135,7 @@ A profile change takes effect only for the *next* conversation: the running
 session was created with the old profile pair, and Kandev does not migrate a
 live agentctl session onto a different agent or executor profile mid-session,
 so archiving is the only way a changed profile can take effect at all. The
-next popover open creates a fresh conversation task and session from the
+next panel open creates a fresh conversation task and session from the
 coordinator's current `agent_profile_id` and `executor_profile_id`
 ([copilot](copilot.md#conversation-task)), which is also when
 `AC-COORDINATOR-COORDINATORS-005.1` recovery is evaluated against the
