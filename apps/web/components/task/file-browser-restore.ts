@@ -51,7 +51,9 @@ export function retainExpandedChildren(
 }
 
 export function mergeLoadedFolder(tree: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
-  if (tree.path === incoming.path) return mergeTreeNodes(tree, incoming);
+  // The requested folder is authoritative; only its depth-limited descendants may be retained.
+  if (tree.path === incoming.path)
+    return mergeTreeNodes(tree, { ...incoming, children: incoming.children ?? [] });
   if (!tree.children) return tree;
   const children = tree.children.map((child) => mergeLoadedFolder(child, incoming));
   return children.every((child, index) => child === tree.children![index])
@@ -119,6 +121,12 @@ function applyFolderResult(
   } else {
     state.failedPaths.push(result.path);
     state.blocked.add(result.path);
+    const missing = tree && findNodeByPath(tree, result.path);
+    if (tree && missing) {
+      const empty = { ...missing, children: [] };
+      tree = mergeLoadedFolder(tree, empty);
+      state.onTree?.(empty, false);
+    }
   }
   return tree;
 }

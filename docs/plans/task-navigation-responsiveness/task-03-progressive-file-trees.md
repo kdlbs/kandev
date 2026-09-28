@@ -187,3 +187,15 @@ survive A-to-B-to-A rebinding. This test passed without production tree changes.
 - Verification: all 78 tests in the eight affected session/tree suites pass,
   together with changed-file ESLint and frontend TypeScript. Commands and final
   delivery results are tracked in Task 04.
+
+### Authoritative empty-folder follow-up
+
+- Two real-loader RED cases reproduced retained descendants surviving empty or
+  null folder responses. Empty directories omit `children` on the backend wire;
+  the requested folder now clears its children without discarding loaded
+  descendants of depth-limited sibling entries. Null folder responses clear
+  retained descendants before their expansion is pruned. Reopening reads fresh
+  contents instead of treating the deleted cache entries as already loaded.
+- All 51 tests in six affected tree suites, changed-file ESLint, and frontend
+  TypeScript passed. Existing transient-error and concurrent-merge tests remain
+  green; prior navigation timing measurements are unchanged historical evidence.

@@ -282,3 +282,15 @@ validation pass; the full suite is delegated to the PR CI run.
   conversations, and a 633-file repository. A new production build passes the
   desktop/phone progressive-loading, retry, task round-trip, file-opening,
   touch-target, overflow and page-error checks. No production data was copied.
+
+### Authoritative empty-folder follow-up
+
+- Final source review found empty directory responses omit `children`; the
+  retained-tree merge interpreted this as an unrequested descendant. Two RED
+  loader assertions cover empty and null folder responses after a session switch.
+  Both now remove stale descendants and permit fresh reads on expansion.
+- `VITEST_MAX_WORKERS=2 pnpm exec vitest run` against restore-expanded,
+  restore-loader, tree state/cache, load-children, and file-change application:
+  6 files / 51 tests passed. Frontend TypeScript and changed-file ESLint pass.
+  Final build, desktop/phone preview smoke, merged-result validation and CI are
+  tracked in the PR's current-head delivery evidence.

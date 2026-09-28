@@ -159,7 +159,10 @@ or context retirement.
 4. Publish each successful merge against the latest owner tree, preventing two
    concurrent completions from overwriting each other's changes. Preserve
    unchanged subtree identities. Do not wait for the slowest sibling to show a
-   successfully loaded branch.
+   successfully loaded branch. The requested folder's children are authoritative:
+   an omitted children field means empty at that level, while depth-limited
+   descendants may retain their loaded children. A null folder response also
+   clears that folder's retained descendants before pruning expansion state.
 5. Start descendants only after their parent proves they exist and are folders.
    Share the same per-owner/path outstanding read with manual expansion so a
    user action cannot duplicate a restoration request.
