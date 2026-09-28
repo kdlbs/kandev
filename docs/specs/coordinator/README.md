@@ -19,6 +19,9 @@ extension through the generic plugin Host contracts.
 
 Phase 1 is attended: every coordinator turn starts from a message a workspace
 manager sends. The coordinator's Kandev tool surface can only read and propose.
+Phase 3 (autonomy, behind `features.coordinatorPhase3`) lets a manager turn on
+unattended turns for one coordinator: it is woken by episodes on its own tasks,
+within a containment check and a cost ceiling.
 
 ## Terms
 
@@ -37,6 +40,16 @@ manager sends. The coordinator's Kandev tool surface can only read and propose.
   observation for a coordinated workspace.
 - **Copilot:** the chat panel on the right side of the Coordinator screens,
   backed by the coordinator's conversation session.
+- **Autonomy:** a per-coordinator setting that allows unattended turns.
+- **Wake:** a durable record of one episode on one of the coordinator's own
+  tasks (a question, permission, stall, error or completion) waiting to be
+  delivered.
+- **Unattended turn:** a coordinator turn started by a wake delivery, not by a
+  person.
+- **Containment:** the check that must pass before an unattended turn starts.
+- **Cost ceiling:** the coordinator's declared spend limit per rolling 24 hours.
+- **Improvement proposal:** a proposal to replace the coordinator's context,
+  applied only by a manager.
 
 ## Ownership
 
@@ -49,7 +62,8 @@ This system owns:
 - stall records and their retention;
 - the Needs you and Queue projections, the count strip, the sidebar entries and
   the `coordinator.updated` event;
-- the `features.coordinator` release toggle.
+- wakes, unattended turn records, class reviews and pending changes;
+- the `features.coordinator` and `features.coordinatorPhase3` release toggles.
 
 ## Exclusions
 
@@ -94,3 +108,5 @@ The system is new and has no legacy sources.
 
 - [Workspace coordinator in core](../../decisions/2026-09-26-workspace-coordinator.md)
 - [Workspace coordinator implementation plan](../../plans/workspace-coordinator/plan.md)
+- [Coordinator phase 3: autonomy](../../decisions/2026-09-29-coordinator-phase-3-autonomy.md)
+- [Coordinator phase 3 implementation plan](../../plans/workspace-coordinator-p3/plan.md)
