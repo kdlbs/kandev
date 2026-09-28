@@ -350,7 +350,7 @@ func TestInspectPreservedCheckoutRejectsWrongBranchAndSymlink(t *testing.T) {
 	}
 }
 
-func TestInspectPreservedCheckoutRejectsOversizedIgnoredFile(t *testing.T) {
+func TestInspectPreservedCheckoutHashesLargeIgnoredFile(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	if err := os.WriteFile(filepath.Join(repositoryPath, ".gitignore"), []byte("ignored.bin\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -364,11 +364,14 @@ func TestInspectPreservedCheckoutRejectsOversizedIgnoredFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+	evidence, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
 		RepositoryPath: repositoryPath, WorktreePath: worktreePath,
 		ExpectedBranch: "feature/pr-branch", WorktreeID: "synthetic-worktree",
 	})
-	if !errors.Is(err, ErrPreservedCheckoutUnproven) {
-		t.Fatalf("oversized ignored file error = %v", err)
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout with large ignored file: %v", err)
+	}
+	if evidence.ContentHash == "" {
+		t.Fatal("large ignored file produced no content hash")
 	}
 }

@@ -19,9 +19,6 @@ import (
 var ErrPreservedCheckoutUnproven = errors.New("preserved checkout identity is not proven")
 
 const (
-	maxPreservedCheckoutEntries  = 10_000
-	maxPreservedCheckoutFileSize = 4 * 1024 * 1024
-	maxPreservedCheckoutBytes    = 64 * 1024 * 1024
 	maxPreservedCheckoutHashTime = 30 * time.Second
 )
 
@@ -211,7 +208,6 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 	paths := bytes.Split(output, []byte{0})
 	sort.Slice(paths, func(i, j int) bool { return bytes.Compare(paths[i], paths[j]) < 0 })
 	hash := sha256.New()
-	entryCount, byteCount := 0, int64(0)
 	_, _ = hash.Write([]byte("kandev-checkout-content-v1\x00"))
 	for _, rawPath := range paths {
 		if len(rawPath) == 0 {
@@ -220,13 +216,9 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("%w: checkout content budget", ErrPreservedCheckoutUnproven)
 		}
-		entryCount++
-		if entryCount > maxPreservedCheckoutEntries {
-			return "", fmt.Errorf("%w: checkout content budget", ErrPreservedCheckoutUnproven)
-		}
 		path := filepath.Join(worktreePath, filepath.FromSlash(string(rawPath)))
 		mode, contents, size, err := preservedCheckoutEntry(path)
-		if err != nil || size > maxPreservedCheckoutFileSize || byteCount+size > maxPreservedCheckoutBytes {
+		if err != nil {
 			return "", fmt.Errorf("%w: checkout content budget", ErrPreservedCheckoutUnproven)
 		}
 		var frame [20]byte
@@ -237,7 +229,6 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 		_, _ = hash.Write(rawPath)
 		if contents != nil {
 			_, _ = hash.Write(contents)
-			byteCount += size
 			continue
 		}
 		if size == 0 {
@@ -246,7 +237,6 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 		if err := streamPreservedCheckoutFile(ctx, hash, path, size); err != nil {
 			return "", err
 		}
-		byteCount += size
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
