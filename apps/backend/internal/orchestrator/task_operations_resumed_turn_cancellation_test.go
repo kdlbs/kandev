@@ -800,12 +800,12 @@ func TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance(t *testing.T) {
 	attempt.setExecutionID(oldExecution)
 	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
 
-	beforeAdmission, acceptAdmission, releaseAdmission := svc.newModelSwitchAdmissionGate(
+	beforeAdmission, acceptAdmission, releaseAdmission, releaseSwitchGuard := svc.newModelSwitchAdmissionGate(
 		context.WithoutCancel(ctx), taskID, sessionID, session, promptTaskOptions{}, attempt, nil,
 	)
 	result, handled, err := svc.trySwitchModelForPromptWithAdmission(
 		ctx, taskID, sessionID, "new-model", "model-switch prompt", session,
-		&foregroundDispatch{}, beforeAdmission, acceptAdmission, releaseAdmission, attempt,
+		&foregroundDispatch{}, beforeAdmission, acceptAdmission, releaseAdmission, attempt, releaseSwitchGuard,
 	)
 	if err != nil {
 		t.Fatalf("model-switch fallback: %v", err)

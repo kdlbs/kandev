@@ -94,9 +94,10 @@ type InitialPromptFailure struct {
 }
 
 type sendPromptCallbacks struct {
-	beforeAdmission func() error
-	onDispatched    func()
-	onFailure       func(InitialPromptFailure)
+	beforeAdmission     func() error
+	onAdmissionRejected func(InitialPromptFailure)
+	onDispatched        func()
+	onFailure           func(InitialPromptFailure)
 }
 
 // NewSessionManager creates a new SessionManager
@@ -955,8 +956,12 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		acpAttachments := convertAttachments(attachments)
 		beforeAdmission, onDispatched, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
 		var failureHandler func(InitialPromptFailure)
+		var admissionRejectedHandler func(InitialPromptFailure)
 		if onInitialPromptFailure != nil {
 			initialPromptFailure := sm.initialPromptFailure
+			admissionRejectedHandler = func(InitialPromptFailure) {
+				onInitialPromptFailure()
+			}
 			failureHandler = func(failure InitialPromptFailure) {
 				onInitialPromptFailure()
 				if initialPromptFailure != nil {
@@ -977,9 +982,10 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				acpAttachments,
 				false,
 				sendPromptCallbacks{
-					beforeAdmission: beforeAdmission,
-					onDispatched:    onDispatched,
-					onFailure:       failureHandler,
+					beforeAdmission:     beforeAdmission,
+					onAdmissionRejected: admissionRejectedHandler,
+					onDispatched:        onDispatched,
+					onFailure:           failureHandler,
 				},
 				false,
 			)
@@ -1526,14 +1532,9 @@ func (sm *SessionManager) sendPrompt(
 		return nil, err
 	}
 	flushStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
-	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
-			sm.logger.Warn("failed to store user message to history", zap.Error(err))
-		}
-	}
 	if callbacks.beforeAdmission != nil {
 		if err := callbacks.beforeAdmission(); err != nil {
-			sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
+			sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
 			return nil, err
 		}
 	}
@@ -1548,6 +1549,11 @@ func (sm *SessionManager) sendPrompt(
 	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration, steer); err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
+	}
+	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
+		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
+			sm.logger.Warn("failed to store user message to history", zap.Error(err))
+		}
 	}
 	// The generation is now accepted by agentctl and in flight, so a concurrent
 	// steer may reuse it. (The steer path never marks — it reuses, not owns.)

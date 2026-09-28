@@ -490,6 +490,12 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	if watchdogEntry != nil {
 		watchdogEntry.endRecoveryCancellation()
 	}
+	if !guard.locked {
+		s.logger.Warn("clarification recovery lost the cancellation guard; skipping recovery",
+			zap.String("session_id", data.SessionID),
+			zap.Error(cancelErr))
+		return false
+	}
 	if cancelErr != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),

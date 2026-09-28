@@ -6158,7 +6158,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			return nil, errQueuedDispatchSuperseded
 		}
 	}
-	modelSwitchAdmission, acceptModelSwitchAdmission, releaseModelSwitchAdmission := s.newModelSwitchAdmissionGate(
+	modelSwitchAdmission, acceptModelSwitchAdmission, releaseModelSwitchAdmission, releaseModelSwitchAttemptGuard := s.newModelSwitchAdmissionGate(
 		options.executorContext(resumePromptCtx), taskID, sessionID, session, options, resumeAttempt,
 		modelSwitchQueuedReservation,
 	)
@@ -6174,7 +6174,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	switchResult, switchHandled, modelSwitchGuard, switchErr := s.resolveModelSwitchAttempt(
 		resumePromptCtx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, runBeforeDispatch,
 		runAfterDispatchAdmission, modelSwitchAdmission, acceptModelSwitchAdmission, releaseModelSwitchAdmission,
-		resumeAttempt, modelSwitchGuard,
+		resumeAttempt, modelSwitchGuard, releaseModelSwitchAttemptGuard,
 	)
 	if switchHandled {
 		if switchErr == nil {
@@ -6197,6 +6197,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if err != nil {
 		releaseModelSwitchAdmission()
 		return nil, err
+	}
+	if rollback.dispatchGuard != nil {
+		defer rollback.dispatchGuard.release()
 	}
 	// An in-place path that fell through model switching has now claimed the
 	// queued prompt under its normal dispatch guard. The asynchronous fallback
@@ -6284,6 +6287,9 @@ func (s *Service) preparePromptAdmissionCallback(
 	if guard == nil {
 		return nil
 	}
+	// Prompt preparation may synchronously publish stream events, so it runs
+	// without the session guard. The returned callback reacquires that guard
+	// immediately before provider admission and revalidates ownership.
 	guard.unlock()
 	return func() error {
 		if err := guard.relockWithContext(ctx); err != nil {
@@ -6381,11 +6387,12 @@ func (s *Service) resolveModelSwitchAttempt(
 	releaseModelSwitchAdmission func(),
 	resumeAttempt *resumeAttempt,
 	modelSwitchGuard *lockedCancelInFlightGuard,
+	releaseModelSwitchAttemptGuard func(),
 ) (switchResult *PromptResult, handled bool, remainingGuard *lockedCancelInFlightGuard, switchErr error) {
 	result, handledSwitch, attemptErr := s.attemptModelSwitchForPromptWithAdmission(
 		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, runBeforeDispatch,
 		runAfterDispatchAdmission, modelSwitchBeforeAdmission, acceptModelSwitchAdmission,
-		releaseModelSwitchAdmission, resumeAttempt,
+		releaseModelSwitchAdmission, resumeAttempt, releaseModelSwitchAttemptGuard,
 	)
 	if !handledSwitch {
 		if modelSwitchGuard != nil {
@@ -7021,10 +7028,7 @@ func (s *Service) acquireNonterminalDispatchGuardForPrompt(
 		s.rollbackPromptDispatchOnGuardFailure(ctx, taskID, sessionID, options, foregroundDispatch, rollback)
 		return nil, nil, newWorkflowAutoStartSessionTerminalizedError(fresh)
 	}
-	var releaseOnce sync.Once
-	return func() {
-		releaseOnce.Do(guard.release)
-	}, guard, nil
+	return guard.unlock, guard, nil
 }
 
 // rollbackPromptDispatchOnGuardFailure unwinds the foreground dispatch and
@@ -7196,7 +7200,7 @@ func (s *Service) attemptModelSwitchForPrompt(
 	}
 	return s.attemptModelSwitchForPromptWithAdmission(
 		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
-		runBeforeDispatch, runAfterDispatchAdmission, nil, nil, nil, resumeAttempt,
+		runBeforeDispatch, runAfterDispatchAdmission, nil, nil, nil, resumeAttempt, nil,
 	)
 }
 
@@ -7209,6 +7213,7 @@ func (s *Service) attemptModelSwitchForPromptWithAdmission(
 	acceptAdmission func(),
 	releaseAdmission func(),
 	resumeAttempt *resumeAttempt,
+	releaseModelSwitchAttemptGuard func(),
 ) (result *PromptResult, handled bool, err error) {
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
@@ -7230,7 +7235,7 @@ func (s *Service) attemptModelSwitchForPromptWithAdmission(
 	}
 	result, handled, switchErr := s.trySwitchModelForPromptWithAdmission(
 		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
-		beforeAdmission, acceptAdmission, releaseAdmission, resumeAttempt,
+		beforeAdmission, acceptAdmission, releaseAdmission, resumeAttempt, releaseModelSwitchAttemptGuard,
 	)
 	if handled && switchErr != nil {
 		s.clearPromptAttemptEvidence(sessionID, "", 0)
@@ -7248,7 +7253,7 @@ func (s *Service) trySwitchModelForPrompt(
 	resumeAttempt *resumeAttempt,
 ) (*PromptResult, bool, error) {
 	return s.trySwitchModelForPromptWithAdmission(
-		ctx, taskID, sessionID, model, prompt, session, dispatch, nil, nil, nil, resumeAttempt,
+		ctx, taskID, sessionID, model, prompt, session, dispatch, nil, nil, nil, resumeAttempt, nil,
 	)
 }
 
@@ -7261,6 +7266,7 @@ func (s *Service) trySwitchModelForPromptWithAdmission(
 	acceptAdmission func(),
 	releaseAdmission func(),
 	resumeAttempt *resumeAttempt,
+	releaseModelSwitchAttemptGuard func(),
 ) (*PromptResult, bool, error) {
 	releaseHold, onDispatched, onFailure, holdErr := s.modelSwitchResumeCallbacks(session, model, resumeAttempt)
 	if holdErr != nil {
@@ -7272,6 +7278,7 @@ func (s *Service) trySwitchModelForPromptWithAdmission(
 	)
 	result, switched, err := s.trySwitchModelWithAdmissionCallbacks(
 		ctx, taskID, sessionID, model, prompt, session, beforeAdmission, onDispatched, onFailure,
+		releaseModelSwitchAttemptGuard,
 	)
 	return s.finishModelSwitchPrompt(
 		ctx, taskID, sessionID, session, dispatch, resumeAttempt,
@@ -7382,7 +7389,7 @@ func (s *Service) newModelSwitchAdmissionGate(
 	options promptTaskOptions,
 	resumeAttempt *resumeAttempt,
 	queuedReservation *queuedDispatchReservation,
-) (func(string) error, func(), func()) {
+) (func(string) error, func(), func(), func()) {
 	var mu sync.Mutex
 	var admissionGuard *lockedCancelInFlightGuard
 	accepted := false
@@ -7399,6 +7406,15 @@ func (s *Service) newModelSwitchAdmissionGate(
 			guard.release()
 		}
 	}
+	releaseSwitchGuard := func() {
+		mu.Lock()
+		guard := admissionGuard
+		admissionGuard = nil
+		mu.Unlock()
+		if guard != nil {
+			guard.release()
+		}
+	}
 	acceptAdmission := func() {
 		mu.Lock()
 		if admissionGuard != nil && admissionGuard.locked {
@@ -7408,6 +7424,9 @@ func (s *Service) newModelSwitchAdmissionGate(
 		mu.Unlock()
 	}
 	beforeAdmission := func(executionID string) error {
+		// The startup provider call may happen after the original prompt context
+		// is cancelled. Keep this bounded wait alive so it can observe the
+		// cancellation operation and then reject against the immutable fence.
 		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
 		defer cancel()
 		guard, err := s.lockCancelInFlightGuardAfterCancellation(waitCtx, sessionID)
@@ -7431,7 +7450,7 @@ func (s *Service) newModelSwitchAdmissionGate(
 		mu.Unlock()
 		return nil
 	}
-	return beforeAdmission, acceptAdmission, releaseAdmission
+	return beforeAdmission, acceptAdmission, releaseAdmission, releaseSwitchGuard
 }
 
 func (s *Service) validateModelSwitchDispatchOwnership(
@@ -7673,9 +7692,8 @@ func (s *Service) claimLifecyclePromptDispatchWithResumeAttempt(
 		return nil, promptClaimRollback{}, err
 	}
 	dispatchGuard := s.lockCancelInFlightGuard(sessionID)
-	var releaseGuardOnce sync.Once
 	releaseDispatchGuard := func() {
-		releaseGuardOnce.Do(dispatchGuard.release)
+		dispatchGuard.unlock()
 	}
 	keepDispatchGuard := false
 	defer func() {
@@ -7737,8 +7755,30 @@ func (s *Service) rollbackPromptClaim(
 	taskID, sessionID string,
 	rollback promptClaimRollback,
 ) {
-	if rollback.dispatchGuardRelease != nil {
+	guard := rollback.dispatchGuard
+	if guard != nil {
+		if err := guard.relockWithContext(ctx); err != nil {
+			s.logger.Warn("skipping prompt claim rollback because the session guard could not be reacquired",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			guard.release()
+			return
+		}
+		defer guard.release()
+	} else if rollback.dispatchGuardRelease != nil {
 		rollback.dispatchGuardRelease()
+	}
+	if rollback.turnID != "" && s.turnService != nil {
+		activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil || activeTurn == nil || activeTurn.ID != rollback.turnID {
+			s.logger.Debug("skipping stale prompt claim rollback",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("turn_id", rollback.turnID),
+				zap.Error(err))
+			return
+		}
 	}
 	if rollback.sessionIdentity.SessionIncarnationID != "" {
 		s.restoreLifecycleClaimForIdentity(ctx, rollback.sessionIdentity, rollback.previousSessionState)
@@ -8203,10 +8243,7 @@ func (s *Service) claimSessionRunningForPrompt(
 	// reservation between live promotion and provider acceptance.
 	var dispatchGuardRelease func()
 	if claimEntryID != "" {
-		var releaseOnce sync.Once
-		dispatchGuardRelease = func() {
-			releaseOnce.Do(admissionGuard.release)
-		}
+		dispatchGuardRelease = admissionGuard.unlock
 		keepDispatchGuard = true
 	}
 	if claimEntryID != "" {
@@ -8382,7 +8419,7 @@ func (s *Service) validateLifecycleSessionAdmission(
 	ctx context.Context,
 	sessionID string,
 	resumeAttempt *resumeAttempt,
-	lock *sync.Mutex,
+	lock *cancelInFlightMutex,
 	cancellationFence *promptCancellationFence,
 ) error {
 	// Match ordinary prompt admission: a reset-owned cancellation must reject
@@ -8721,7 +8758,7 @@ func (s *Service) trySwitchModelWithDispatchCallbacks(
 	onFailure func(),
 ) (*PromptResult, bool, error) {
 	return s.trySwitchModelWithAdmissionCallbacks(
-		ctx, taskID, sessionID, model, effectivePrompt, session, nil, onDispatched, onFailure,
+		ctx, taskID, sessionID, model, effectivePrompt, session, nil, onDispatched, onFailure, nil,
 	)
 }
 
@@ -8732,6 +8769,7 @@ func (s *Service) trySwitchModelWithAdmissionCallbacks(
 	beforeAdmission func(executionID string) error,
 	onDispatched func(executionID string),
 	onFailure func(),
+	releaseModelSwitchAttemptGuard func(),
 ) (*PromptResult, bool, error) {
 	if !modelSwitchRequired(session, model) {
 		return nil, false, nil
@@ -8750,6 +8788,7 @@ func (s *Service) trySwitchModelWithAdmissionCallbacks(
 	switchCtx := context.WithoutCancel(ctx)
 	switchResult, err := s.executor.SwitchModelWithAdmissionCallbacks(
 		switchCtx, taskID, sessionID, model, effectivePrompt, beforeAdmission, onDispatched, onFailure,
+		releaseModelSwitchAttemptGuard,
 	)
 	if err != nil {
 		return nil, true, fmt.Errorf("model switch failed: %w", err)
@@ -8760,6 +8799,9 @@ func (s *Service) trySwitchModelWithAdmissionCallbacks(
 		// Invalidate the message creator's model cache so the next message picks up the new model.
 		if s.messageCreator != nil {
 			s.messageCreator.InvalidateModelCache(sessionID)
+		}
+		if releaseModelSwitchAttemptGuard != nil {
+			releaseModelSwitchAttemptGuard()
 		}
 		return nil, false, nil
 	}
@@ -9079,7 +9121,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 // the caller's whole critical section while refs bookkeeping must stay
 // brief and independent of that.
 type cancelInFlightGuard struct {
-	mu   sync.Mutex
+	mu   *cancelInFlightMutex
 	refs int
 }
 
@@ -9178,14 +9220,14 @@ type cancellationAction struct {
 // concurrently-active sessions: once refs drops to zero the entry is
 // deleted from the map instead of accumulating one permanent entry per
 // session ever created.
-func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, func()) {
+func (s *Service) acquireCancelInFlightGuard(sessionID string) (*cancelInFlightMutex, func()) {
 	s.cancelInFlightMu.Lock()
 	if s.cancelInFlight == nil {
 		s.cancelInFlight = make(map[string]*cancelInFlightGuard)
 	}
 	guard, ok := s.cancelInFlight[sessionID]
 	if !ok {
-		guard = &cancelInFlightGuard{}
+		guard = &cancelInFlightGuard{mu: newCancelInFlightMutex()}
 		s.cancelInFlight[sessionID] = guard
 	}
 	guard.refs++
@@ -9204,18 +9246,16 @@ func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, fun
 		}
 		s.cancelInFlightMu.Unlock()
 	}
-	return &guard.mu, release
+	return guard.mu, release
 }
 
 // lockedCancelInFlightGuard keeps the yield/reacquire protocol in one place
 // for operations that must release the session guard around lifecycle I/O.
 type lockedCancelInFlightGuard struct {
-	mutex      *sync.Mutex
+	mutex      *cancelInFlightMutex
 	releaseRef func()
 	locked     bool
 }
-
-const cancellationGuardPollInterval = time.Millisecond
 
 func (s *Service) lockCancelInFlightGuard(sessionID string) *lockedCancelInFlightGuard {
 	mutex, release := s.acquireCancelInFlightGuard(sessionID)
@@ -9271,34 +9311,8 @@ func (s *Service) lockCancelInFlightGuardWithContext(
 	return &lockedCancelInFlightGuard{mutex: mutex, releaseRef: release, locked: true}, nil
 }
 
-func lockMutexWithContext(ctx context.Context, mutex *sync.Mutex) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if mutex.TryLock() {
-			if err := ctx.Err(); err != nil {
-				mutex.Unlock()
-				return err
-			}
-			return nil
-		}
-		timer := time.NewTimer(cancellationGuardPollInterval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
+func lockMutexWithContext(ctx context.Context, mutex *cancelInFlightMutex) error {
+	return mutex.LockContext(ctx)
 }
 
 func (s *Service) lockCancelInFlightGuardAfterCancellation(

@@ -140,3 +140,12 @@ Verification passed:
 - Web typecheck.
 - Final catalog, specification linter tests, specification lint, delivery coverage preflight,
   local links, and diff checks are recorded in the plan results.
+
+PR fixup verification (2026-09-28):
+
+- The Chromium and mobile-chrome queued-pause flows passed again with the provider marker
+  persisted on the open queued turn before Pause.
+- The previously failing queue-reorder CI spec passed both cases with retries disabled after
+  `typeWhileBusy` began waiting for the editor's `contenteditable=true` transition before click.
+- Web typecheck and final documentation/coverage checks passed after updating the test helpers and
+  package results. Catalog validation counted 321 decisions and 1223 specifications.

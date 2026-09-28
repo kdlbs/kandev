@@ -400,7 +400,7 @@ func (s *Service) processOnTurnStartAdmissionWithGuard(
 	ctx context.Context,
 	taskID, sessionID string,
 	strict bool,
-	lock *sync.Mutex,
+	lock *cancelInFlightMutex,
 	waitForCancellation bool,
 ) (ProcessOnTurnStartResult, error) {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")

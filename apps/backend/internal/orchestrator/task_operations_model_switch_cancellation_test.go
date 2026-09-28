@@ -23,6 +23,65 @@ type queuedModelSwitchPauseFixture struct {
 	sessionID string
 }
 
+func TestTrySwitchModelRejectsInPlaceMutationAfterCompletedPause(t *testing.T) {
+	ctx := context.Background()
+	const taskID, sessionID = "task-in-place-pause", "session-in-place-pause"
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "old-model"}
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("persist original model: %v", err)
+	}
+	seedExecutorRunning(t, repo, sessionID, taskID, "execution-in-place-pause")
+	manager := &mockAgentManager{
+		isAgentRunning:           true,
+		repoForExecutionLookup:   repo,
+		setSessionModelSupported: true,
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, sessionID); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	_, revision := svc.CancellationPendingSnapshot(sessionID)
+	fence := &promptCancellationFence{revision: revision}
+	if err := svc.CancelAgent(ctx, sessionID); err != nil {
+		t.Fatalf("complete pause before model switch admission: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload paused session: %v", err)
+	}
+	beforeAdmission := func(string) error {
+		return svc.validatePromptAdmissionContext(ctx, taskID, sessionID, fence, "test model switch")
+	}
+
+	_, handled, err := svc.trySwitchModelForPromptWithAdmission(
+		ctx, taskID, sessionID, "new-model", "queued prompt", session, nil,
+		beforeAdmission, nil, nil, nil, nil,
+	)
+	if !handled || !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("model switch after completed pause = (handled=%v, err=%v), want cancellation-fenced rejection", handled, err)
+	}
+	if len(manager.setSessionModelCalls) != 0 {
+		t.Fatalf("in-place model setter calls after completed pause = %d, want 0", len(manager.setSessionModelCalls))
+	}
+	paused, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload session after rejected model switch: %v", err)
+	}
+	if got, _ := paused.AgentProfileSnapshot["model"].(string); got != "old-model" {
+		t.Fatalf("persisted model after completed pause = %q, want old-model", got)
+	}
+}
+
 func newQueuedModelSwitchPauseFixture(
 	t *testing.T,
 	inPlace bool,
@@ -154,12 +213,12 @@ func TestResumeAttempt_ModelSwitchFallbackCancellationBeforeInitialPromptAccepta
 	attempt.setExecutionID(oldExecution)
 	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
 
-	beforeAdmission, acceptAdmission, releaseAdmission := svc.newModelSwitchAdmissionGate(
+	beforeAdmission, acceptAdmission, releaseAdmission, releaseSwitchGuard := svc.newModelSwitchAdmissionGate(
 		context.WithoutCancel(ctx), taskID, sessionID, session, promptTaskOptions{}, attempt, nil,
 	)
 	_, handled, err := svc.trySwitchModelForPromptWithAdmission(
 		ctx, taskID, sessionID, "new-model", "model-switch prompt", session,
-		&foregroundDispatch{}, beforeAdmission, acceptAdmission, releaseAdmission, attempt,
+		&foregroundDispatch{}, beforeAdmission, acceptAdmission, releaseAdmission, attempt, releaseSwitchGuard,
 	)
 	if err != nil {
 		t.Fatalf("model-switch fallback: %v", err)
@@ -293,8 +352,31 @@ func TestPromptTask_QueuedInPlaceModelSwitchRejectsAfterCompletedPause(t *testin
 	case <-time.After(5 * time.Second):
 		t.Fatal("in-place model switch did not enter the controlled unlocked window")
 	}
-	if err := fixture.svc.CancelAgent(ctx, fixture.sessionID); err != nil {
-		t.Fatalf("complete explicit pause during in-place switch: %v", err)
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- fixture.svc.CancelAgent(ctx, fixture.sessionID) }()
+	pendingDeadline := time.NewTimer(5 * time.Second)
+	pendingPoll := time.NewTicker(time.Millisecond)
+	defer pendingDeadline.Stop()
+	defer pendingPoll.Stop()
+	for {
+		pending, _ := fixture.svc.CancellationPendingSnapshot(fixture.sessionID)
+		if pending {
+			break
+		}
+		select {
+		case <-pendingDeadline.C:
+			t.Fatal("explicit pause did not register while the in-place switch held admission")
+		case <-pendingPoll.C:
+		}
+	}
+	close(switchRelease)
+	select {
+	case err := <-cancelDone:
+		if err != nil {
+			t.Fatalf("complete explicit pause during in-place switch: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("explicit pause did not finish after the in-place switch released admission")
 	}
 	generationAfterPause := fixture.manager.currentPromptGeneration.Load()
 	pausedTurns, err := fixture.repo.ListTurnsBySession(ctx, fixture.sessionID)
@@ -306,7 +388,6 @@ func TestPromptTask_QueuedInPlaceModelSwitchRejectsAfterCompletedPause(t *testin
 			t.Fatalf("turn after completed pause is still active: %+v", turn)
 		}
 	}
-	close(switchRelease)
 	select {
 	case promptErr := <-promptDone:
 		if !errors.Is(promptErr, ErrAgentPromptInProgress) {

@@ -126,3 +126,15 @@ Review remediation (2026-09-28):
 - `promptTask` captures the cancellation projection revision before preparation. Restart admission and queued in-place continuation reject a changed revision under the session guard, even after the pause operation leaves the active registry.
 - `TestPromptTask_ModelSwitchFallbackRejectsAdmissionAfterCompletedPause` and `TestPromptTask_QueuedInPlaceModelSwitchRejectsAfterCompletedPause` verify cancellation-fenced rejection, zero provider calls, no generation advance, and no successor turn after explicit pause completes.
 - The targeted regressions passed, and `go test -race ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1 -timeout=600s` passed across all four packages.
+
+PR fixup findings (2026-09-28):
+
+- Separate admission rejection from provider delivery failure in the lifecycle path.
+  A rejected replacement prompt now runs cleanup without failing the accepted execution.
+- Persist user history only after the provider accepts the prompt. Rejection leaves prior
+  assistant history intact and does not create a new prompt generation.
+- `TestDispatchInitialPromptAdmissionRejectionDoesNotFailExecutionOrPersistPrompt` exercises
+  the real lifecycle initial-prompt callback wiring and covers execution status, generation,
+  and history after rejection.
+- The final four-package race suite passed after these fixes: orchestrator 411.827s, executor
+  3.667s, lifecycle 87.349s, backendapp 92.980s.

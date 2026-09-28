@@ -28,7 +28,7 @@ change workflow movement or the cancellation setting.
 The [task reconciliation design](../system-design/queued-session-ownership.md#replay-and-reconciliation-locking)
 defines concurrency at this boundary.
 
-The proposed [dispatch and stream coordination design](../system-design/workflow-cancelled-turn-completion.md)
+The [dispatch and stream coordination design](../system-design/workflow-cancelled-turn-completion.md)
 repairs pre-dispatch lock ordering and cancellation guard deadlines under the existing criteria.
 Delivery is tracked in the [queued-prompt pause fix package](../../../plans/queued-prompt-pause-deadlock/plan.md).
 

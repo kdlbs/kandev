@@ -956,7 +956,7 @@ func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
 // the agent doesn't support in-place switching, it falls back to stopping and
 // restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
-	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, nil, nil)
+	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, nil, nil, nil)
 }
 
 // SwitchModelWithDispatchCallbacks is the model-switch variant used by a
@@ -969,7 +969,7 @@ func (e *Executor) SwitchModelWithDispatchCallbacks(
 	onDispatched func(executionID string),
 	onFailure func(),
 ) (*PromptResult, error) {
-	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, onDispatched, onFailure)
+	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, onDispatched, onFailure, nil)
 }
 
 // SwitchModelWithAdmissionCallbacks adds a final admission callback for the
@@ -980,8 +980,12 @@ func (e *Executor) SwitchModelWithAdmissionCallbacks(
 	beforeAdmission func(executionID string) error,
 	onDispatched func(executionID string),
 	onFailure func(),
+	onInPlaceSwitchFallback func(),
 ) (*PromptResult, error) {
-	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, beforeAdmission, onDispatched, onFailure)
+	return e.switchModel(
+		ctx, taskID, sessionID, newModel, prompt,
+		beforeAdmission, onDispatched, onFailure, onInPlaceSwitchFallback,
+	)
 }
 
 func (e *Executor) switchModel(
@@ -990,19 +994,34 @@ func (e *Executor) switchModel(
 	beforeAdmission func(executionID string) error,
 	onDispatched func(executionID string),
 	onFailure func(),
+	onInPlaceSwitchFallback func(),
 ) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
 
-	// Try in-place model switch first.
+	// Try in-place model switch first. A queued prompt's admission gate fences
+	// the mutable ACP setting and its persisted snapshot with the same
+	// cancellation identity used by the later provider prompt admission.
+	if beforeAdmission != nil {
+		executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if err != nil || executionID == "" {
+			return nil, ErrExecutionNotFound
+		}
+		if err := beforeAdmission(executionID); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.agentManager.SetSessionModelBySessionID(ctx, sessionID, newModel); err == nil {
 		e.logger.Info("model switched in-place via ACP model selection",
 			zap.String("session_id", sessionID),
 			zap.String("new_model", newModel))
 		e.persistInPlaceModelSwitch(ctx, sessionID, newModel)
 		return &PromptResult{StopReason: "model_switched_in_place"}, nil
+	}
+	if onInPlaceSwitchFallback != nil {
+		onInPlaceSwitchFallback()
 	}
 
 	e.logger.Debug("in-place model switch not available, falling back to agent restart",

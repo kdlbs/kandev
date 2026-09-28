@@ -169,7 +169,7 @@ func TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery(t *testin
 	}
 }
 
-func TestPromptTaskReleasesQueuedDispatchGuardDuringModelSwitch(t *testing.T) {
+func TestPromptTaskHoldsQueuedDispatchGuardDuringInPlaceModelMutation(t *testing.T) {
 	ctx := context.Background()
 	const taskID, sessionID = "task-prompt-model-switch", "session-prompt-model-switch"
 	repo := setupTestRepo(t)
@@ -246,8 +246,8 @@ func TestPromptTaskReleasesQueuedDispatchGuardDuringModelSwitch(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for model switch")
 	}
-	if !cancelInFlightGuardIsAvailable(svc, sessionID) {
-		t.Fatal("queued dispatch guard remained physically locked during model switch")
+	if !cancelInFlightGuardIsHeld(svc, sessionID) {
+		t.Fatal("queued dispatch guard was not held through in-place model mutation")
 	}
 	close(agentMgr.allowSwitch)
 	select {
@@ -258,17 +258,6 @@ func TestPromptTaskReleasesQueuedDispatchGuardDuringModelSwitch(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("promptTask did not return after model switch")
 	}
-}
-
-func cancelInFlightGuardIsAvailable(s *Service, sessionID string) bool {
-	s.cancelInFlightMu.Lock()
-	guard := s.cancelInFlight[sessionID]
-	s.cancelInFlightMu.Unlock()
-	if guard == nil || !guard.mu.TryLock() {
-		return false
-	}
-	guard.mu.Unlock()
-	return true
 }
 
 func cancelInFlightGuardIsHeld(s *Service, sessionID string) bool {

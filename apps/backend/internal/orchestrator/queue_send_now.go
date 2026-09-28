@@ -68,7 +68,7 @@ func (s *Service) sendQueuedNow(ctx context.Context, identity *messagequeue.Queu
 }
 
 type sendNowGuard struct {
-	lock    *sync.Mutex
+	lock    *cancelInFlightMutex
 	release func()
 	locked  bool
 }

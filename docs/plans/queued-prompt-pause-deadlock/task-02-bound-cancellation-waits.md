@@ -109,3 +109,20 @@ Verification passed:
 - TestCancelAgent_GuardDeadlineSettlesOperation and TestCancelAgent_GuardDeadlineCannotMutateSuccessor.
 - Targeted cancellation/dispatch race run with count=10: passed in 77.146s.
 - Final orchestrator and handler race suite: orchestrator 430.509s, handlers 5.642s.
+
+PR fixup findings (2026-09-28):
+
+- Use a FIFO cancellation guard with context-aware acquisition and direct waiter handoff.
+  A stream of TryLock callers can no longer starve an already-queued cancellation waiter,
+  and timed-out waits do not allocate repeated polling timers.
+- Keep the dispatch guard reference through prompt-claim rollback, reacquire it before
+  rollback writes, and preserve successor turns when the failed claim becomes stale.
+- Stop clarification recovery when cancellation guard reacquisition fails; no fallback
+  state write or turn recovery may occur without the guard.
+- `TestCancelInFlightMutexContextWaitCanBeCancelled`,
+  `TestCancelInFlightMutexHandsOffInQueueOrder`,
+  `TestRollbackPromptClaimWaitsForSuccessorGuardAndKeepsItsTurn`, and
+  `TestRetryClarificationAfterCancel_DoesNotRecoverAfterGuardReacquireFails` cover these
+  boundaries.
+- The final four-package race suite passed after these changes: orchestrator 411.827s, executor
+  3.667s, lifecycle 87.349s, backendapp 92.980s.

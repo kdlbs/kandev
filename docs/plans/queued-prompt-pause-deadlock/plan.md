@@ -167,7 +167,7 @@ while the guard stayed held across provider restart, then passed after the guard
 initial-prompt admission callback were added. The browser fixture now disables auto-run and
 auto-merge until both queued messages are confirmed.
 
-- go test ./internal/orchestrator -run '^(TestQueuedDispatchAwaitingInitialAdmissionSurvivesWorkerCleanup|TestPromptTaskReleasesQueuedDispatchGuardDuringModelSwitch|TestResumeAttempt_ModelSwitchFallbackCancellationBeforeInitialPromptAcceptance|TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance|TestPromptTask_QueuedStreamBoundaryDoesNotDeadlock)$' -count=1 -timeout=180s: passed.
+- go test ./internal/orchestrator -run '^(TestQueuedDispatchAwaitingInitialAdmissionSurvivesWorkerCleanup|TestPromptTaskHoldsQueuedDispatchGuardDuringInPlaceModelMutation|TestResumeAttempt_ModelSwitchFallbackCancellationBeforeInitialPromptAcceptance|TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance|TestPromptTask_QueuedStreamBoundaryDoesNotDeadlock)$' -count=1 -timeout=180s: passed.
 - go test -race ./internal/orchestrator ./internal/orchestrator/handlers -count=1 -timeout=600s: passed; orchestrator 430.509s, handlers 5.642s.
 - go test -race ./internal/agent/runtime/lifecycle -run '^TestSessionManager_StreamBoundaryPrecedesAdmission$' -count=1 -timeout=120s: passed. The fixture uses the real lifecycle stream coalescer and synchronously publishes through the in-memory event bus.
 - Earlier Task 01 race suite: go test -race ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1 -timeout=600s: passed; orchestrator 337.177s, executor 3.506s, lifecycle 68.381s, backendapp 81.821s.
@@ -230,3 +230,35 @@ No new ADR is needed; the local repair rationale is recorded in the task design.
 - Timeout cleanup must not outlive its ownership or erase a successor operation.
 - The host `/tmp` is full. Use an owned writable temporary directory on a volume with capacity; never delete shared files.
 - Rebase-time changes to the same admission callbacks require a fresh source and test comparison before implementation.
+
+## PR #4034 fixup validation (2026-09-28)
+
+The review fixes preserve the existing cancellation contract and add no new product behavior.
+Admission rejection now runs cleanup separately from provider-delivery failure, and user history
+records the new prompt only after provider acceptance. The cancellation-pending revision fences
+both restart and in-place model-switch admission, including the interval after a pause operation
+has completed and left the active registry. The concrete lifecycle adapter forwards both required
+callback registrations.
+
+Cancellation guard waits use FIFO, context-aware handoff instead of `TryLock` polling. Prompt-claim
+rollback reacquires the retained guard and checks active-turn ownership before writes. Clarification
+recovery stops if cancellation cannot reacquire the guard. The queue fast-path test now waits for
+its mock provider and dispatch settlement; this avoids leaving its background worker outside the
+test lifetime. Desktop/mobile tests wait for the provider-correlated marker on the open queued turn
+before pausing. The queue-reorder helper waits for `contenteditable=true` before clicking; both
+reorder cases passed with retries disabled.
+
+Final verification passed:
+
+- `go test -race ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1 -timeout=600s`: all packages passed; orchestrator 411.827s, executor 3.667s, lifecycle 87.349s, backendapp 92.980s.
+- Focused race regressions for completed-pause model-switch fencing, FIFO cancellation guard handoff, rollback successor safety, and clarification recovery.
+- `go test -race ./internal/orchestrator -run '^TestQueueUserPrompt_T2DrainsWhenTaskAdmitted$' -count=1 -timeout=120s`: passed.
+- `go test -race ./internal/agent/runtime/lifecycle -run '^TestDispatchInitialPromptAdmissionRejectionDoesNotFailExecutionOrPersistPrompt$' -count=1 -timeout=120s`: passed after tightening the test to traverse `dispatchInitialPrompt`.
+- `go test ./internal/mcp/handlers -run '^TestMessageTaskReadiness_Delivery$' -count=1` and `go test ./cmd/mock-agent/... -count=1 -timeout=180s`: passed.
+- `make -C apps/backend build` and `pnpm run typecheck`: passed.
+- Managed Chromium queued-pause/task-switch and mobile-chrome queued-pause/reload flows: 2 tests passed per project. The queue-reorder Chromium spec passed 2 tests with retries disabled.
+- Catalog validation (321 decisions, 1223 specifications), 36 specification-linter tests, all specification lint, delivery coverage for all three work orders, `gofmt`, Prettier, and `git diff --check`.
+
+The PR checks that originally failed were reproduced and corrected: the MCP readiness fake now
+implements the admission callback, and the queue-reorder helper waits for editor readiness before
+clicking. No runtime restart or live-session mutation was performed.

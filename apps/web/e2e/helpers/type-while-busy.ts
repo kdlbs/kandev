@@ -31,6 +31,10 @@ export async function typeWhileBusy(page: Page, editor: Locator, text: string): 
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await editor.scrollIntoViewIfNeeded();
   for (let attempt = 0; attempt < 3; attempt++) {
+    // Busy state can arrive before the composer finishes switching from its
+    // disabled editor to the editable queue composer. Click only after that
+    // transition so the click cannot be lost on a non-editable ProseMirror.
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
     const box = await editor.boundingBox();
     if (!box) throw new Error("Editor bounding box not found");
     await page.mouse.click(box.x + 20, box.y + box.height / 2);

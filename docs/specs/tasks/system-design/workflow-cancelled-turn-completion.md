@@ -27,7 +27,7 @@ This design describes the implemented repair and the compatibility invariants th
 - `preparePromptDispatchCallback` releases the guard after provider acceptance and ownership publication.
 - `executor.Executor` and `backendapp.lifecycleAdapter` carry admission and dispatch callbacks into `lifecycle.SessionManager`.
 - `SessionManager.sendPrompt` serializes prompts with `AgentExecution.promptMu`.
-- `preparePrompt` creates the effective prompt; `sendPrompt` materializes attachments and flushes stream/history before admission.
+- `preparePrompt` creates the effective prompt; `sendPrompt` materializes attachments and flushes prior stream/history before admission. It appends the new user message to history only after provider acceptance.
 - `admitPrompt` allocates the prompt generation and performs the local buffer reset after admission.
 - `streamCoalescer.add` and `flushBoundary` serialize publication with `emitMu`.
 - `handleAgentStreamEvent` acquires the session guard during synchronous event publication.
@@ -46,21 +46,24 @@ Do not add another queue, durable lease, or cancellation registry.
 1. Under the session guard, capture the dispatch reservation, session incarnation,
    execution, turn, resume attempt, and workflow-entry binding where applicable.
 2. Release the physical guard before lifecycle prompt serialization, prior completion
-   waits, stream draining, history persistence, attachment preparation, or provider restart.
+   waits, draining prior streamed assistant history, attachment preparation, or provider restart.
 3. Drain the previous stream boundary through the existing ordered publication path.
    Keep each old frame's execution, turn correlation, and prompt generation intact.
 4. At a new internal admission callback, reacquire the session guard and validate the
    captured ownership against current state. Return an error if it was cancelled or superseded.
 5. Only the admitted attempt may allocate its new prompt generation and dispatch.
-   Local buffer reset after admission must not flush streams or invoke guarded event consumers.
+   Persist the new user message only after provider acceptance; rejection must leave it out of
+   history and must not fail the still-accepted execution. Local buffer reset after admission
+   must not flush streams or invoke guarded event consumers.
 6. Retain the guard through provider acceptance and the existing ownership-publication callback.
    Release it before waiting for turn completion. Release it on every rejection or dispatch failure.
 
 The callback is an internal runtime seam, not an HTTP or ACP contract.
 Extend the existing callback path through executor, adapter, manager, and session manager.
 Model-switch restarts send their initial prompt asynchronously, so register the same final
-admission check with the startup callbacks. Release any session guard before provider restart;
-the initial-prompt callback reacquires and validates it after lifecycle preparation.
+admission check with the startup callbacks. Fence an in-place model mutation and its persisted
+snapshot with the cancellation revision; release the session guard before provider restart.
+The initial-prompt callback reacquires and validates it after lifecycle preparation.
 When a queued model-switch worker returns before that callback, keep its accepted reservation in
 an awaiting-admission phase. Send Now remains blocked until provider acceptance promotes that
 exact reservation to live, or admission failure clears only that reservation.
@@ -99,7 +102,9 @@ attempt and a completed pause no longer has an active operation.
 Preserve `emitMu` ordering and `handleAgentStreamEvent` serialization.
 Removing either lock or making each publication an independent goroutine would weaken existing guarantees.
 Keep first-chunk, boundary flush, terminal-frame, history, and generation-isolation behavior.
-Preparation failure callbacks must run after any dispatch guard is released.
+Admission rejection uses a cleanup callback distinct from provider delivery failure, so a rejected
+replacement cannot mark an already-running execution failed. Preparation failure callbacks must
+run after any dispatch guard is released.
 
 ## Bounded cancellation guard acquisition
 
@@ -108,11 +113,13 @@ Every guard acquisition performed by that operation must observe its context.
 This includes initial preparation, reacquisition after lifecycle cancellation, explicit joined
 reconciliation, and source-specific actions in `finishCancellationWithActions`.
 
-Use the same physical mutex and reference-counted guard registry.
-A narrow context-aware acquisition helper can use `TryLock` with a bounded timer wait.
-Check context before acquisition and again after success; release immediately if the deadline won.
-Do not start a goroutine that can acquire the mutex after its caller returns.
-Keep ordinary stream-handler serialization unchanged.
+Use the same reference-counted guard registry with a FIFO, context-aware lock.
+`LockContext` places a blocked caller in the waiter queue, and unlock hands ownership directly to
+the oldest live waiter. `TryLock` fails while an owner or queued waiter exists, so nonblocking
+callbacks cannot bypass cancellation. Check context before acquisition and after a waiter is
+granted; release immediately if the deadline won. Do not poll, allocate repeated wait timers, or
+start a goroutine that can acquire the lock after its caller returns. Keep ordinary stream-handler
+serialization unchanged.
 
 If acquisition expires, return the operation error and settle every joined waiter.
 Skip source-specific mutations that require the unavailable guard.
