@@ -2,11 +2,14 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+var ErrArchivedWorktreeIdentityChanged = errors.New("archived worktree identity changed")
 
 // DirtyWorktree describes local changes that would be lost by task deletion.
 // Paths are derived from the persisted worktree record and Git status; callers
@@ -23,6 +26,10 @@ type DirtyWorktree struct {
 // active regardless of this option.
 type WorktreeCleanupOptions struct {
 	DiscardWorktreeChanges bool
+	RequireCleanCheckout   bool
+	ExpectedTaskID         string
+	ExpectedWorktreePath   string
+	ExpectedRepositoryPath string
 }
 
 // InspectDirtyWorktrees audits the recorded paths and reports local Git

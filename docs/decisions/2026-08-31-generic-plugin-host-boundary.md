@@ -4,6 +4,14 @@
 **Date:** 2026-08-31
 **Area:** backend, frontend, protocol, security, workflow
 
+## Scoped follow-up
+
+The [coordination platform decision](2026-09-25-plugin-coordination-platform.md)
+accepts the generic ownership boundary for a scoped delivery package. It reuses the
+implemented approval substrate and adds explicit queued-input and retained managed
+conversation contracts. This broader proposal remains proposed; its unselected
+provider-mutation and cleanup work is not implied by that package.
+
 ## Context
 
 The Coordinator product is moving into a separately released plugin. Its policy,
@@ -145,12 +153,15 @@ directive, consume a continuation, or gain a `host.v2.*` capability.
 | `GetState`, `SetState`, `DeleteState`, `ListState`; `GetSecret`, `SetSecret`, `DeleteSecret`; `RevealSecret`; `EmitEvent`; `InvokeUtilityAgent` | Their existing manifest declarations (`state`, `secrets`, `events`, `agent_invoke`) | No workspace or capability revision is inferred. Existing plugin-scoped semantics continue. | Not an H1-H5 exact operation; no H6 authority is created. |
 | `GetConfig(GetConfigRequest {})` | Ungated, plugin-global operator configuration | The empty request remains empty and has no workspace, approval, or capability revision. It returns only the calling plugin’s own config under the existing secret policy. | It is explicitly outside H6. A future scoped configuration operation, if needed, must be a new versioned successor and cannot change `GetConfig`. |
 | `ListTasks`, `GetTask`, `ListWorkspaces`, `ListWorkflows`, `ListWorkflowSteps`, `ListAgentProfiles`, `ListExecutorProfiles`, `ListRepositories`, `ListSessions`, `ListSessionCodeStats`, `ListMessages`, `ListPendingInteractions`, `GetInteraction` | The exact existing `api_read:<resource>` declaration documented in `plugin.proto` | Existing request fields remain optional/as shipped; no workspace or revision is synthesized. | H2 exact projections use separately named `*Exact` methods and `host.v2.read:*` capabilities. v1 reads cannot satisfy an H0 exact-read receipt. |
-| `CreateTask`, `UpdateTask`, `MoveTask`, `SendMessage`, `PreviewPluginOwnedTaskTree`, `DeletePluginOwnedTaskTree`, `RespondToPermission`, `AnswerClarification`, `CancelClarification` | The exact existing `api_write:<resource>` declaration documented in `plugin.proto` | Existing request fields remain as shipped; no workspace, H6 revision, guard, or provenance is invented. | They are not H3/H4/H5 exact writers. A plugin needing an H0 writer must call the new exact method with a `host.v2.write:*` approval. |
+| `CreateTask`, `UpdateTask`, `MoveTask`, `SendMessage`, `PreviewPluginOwnedTaskTree`, `DeletePluginOwnedTaskTree` | The exact existing `api_write:<resource>` declaration documented in `plugin.proto` | Existing request fields remain as shipped; no workspace, H6 revision, guard, or provenance is invented. | They are not H3/H4/H5 exact writers. A plugin needing an H0 writer must call the new exact method with a `host.v2.write:*` approval. |
+| `RespondToPermission`, `AnswerClarification`, `CancelClarification` | Retained `api_write:interactions` declaration | Wire and SDK source compatibility only. The current Host returns `PermissionDenied`; v1 requests carry neither the observed interaction revision nor a native human response receipt. | Superseded for plugin-originated responses by [the 2026-09-25 coordination decision](2026-09-25-plugin-coordination-platform.md) and WO08. Use the exact interaction commands with a Host-issued, single-use human response receipt. |
 
 No synthetic legacy revision exists. Existing installed plugins keep only the
 v1 behavior they already had, subject to their existing manifest declaration and
-ordinary lifecycle. A new installation using a legacy v1 writer additionally
-requires a server-side compatibility grant scoped to that installation; the
+ordinary lifecycle. The three interaction response methods retain their wire
+shape but are denied by the current Host as described above. A new installation
+using a legacy v1 writer additionally requires a server-side compatibility grant
+scoped to that installation; the
 grant cannot authorize any new exact capability or bypass H6/C1/C2 safeguards.
 
 ### Public Host surface inventory

@@ -40,6 +40,8 @@ function composerArgs(errorMessage: string) {
       handleAddContextFile: vi.fn(),
     } as never,
     composerWorkspaceId: "workspace-1",
+    workspaceResolutionFailed: false,
+    onRetryWorkspaceResolution: vi.fn(),
     isMoving: false,
     implementPlanHandler: undefined,
     executor: { unavailable: false },

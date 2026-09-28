@@ -149,7 +149,7 @@
   "onTurnStartLabel": "輪次開始時",
   "onTurnStartTrigger": "輪次開始時",
   "onUserMessage": "使用者訊息時",
-  "openAgentSettings": "開啟代理程式設定檔設定",
+  "openAgentSettings": "開啟代理程式設定",
   "orPasteYaml": "或貼上 YAML",
   "overrideAgentProfileHelp": "覆蓋此步驟的代理程式設定檔。進入此步驟時，如果使用其他設定，將建立具有全新上下文的新工作階段。",
   "overrideOriginalSessionOptions": "覆蓋原工作階段選項",

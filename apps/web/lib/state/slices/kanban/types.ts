@@ -334,6 +334,8 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   sidebarArchivedTasks: SidebarArchivedTasksState;
+  /** Fresh status projections for bounded sidebar pages, keyed by workspace then task. */
+  sidebarStatusSummaryByWorkspaceId: Record<string, Record<string, TaskStatusSummary>>;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;

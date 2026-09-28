@@ -107,7 +107,14 @@ Desktop forces the backend to `127.0.0.1`, supplies a random 256-bit health toke
 
 The preferred desktop port is `38430`. If only that port is unavailable, Kandev asks the OS for a free loopback port. `KANDEV_DESKTOP_PORT` can request a different port, but a non-UTF-8 value, a non-integer, `0`, or a value above `65535` is a fatal startup configuration error. If the requested port is occupied, the desktop still falls back to an OS-assigned loopback port.
 
-Startup waits up to 60 seconds for the owned backend. A missing packaged binary, invalid port, configuration/database error, or early backend exit appears on the startup screen with the most recent captured backend output. Reinstall the complete artifact if runtime validation reports a missing `kandev`, `agentctl`, or remote helper.
+Startup waits up to 60 seconds for the owned backend. A missing packaged binary, invalid port, configuration/database error, or early backend exit appears on the startup screen with the most recent captured backend output. Reinstall the app if runtime validation reports a missing `kandev`, `agentctl`, or helper manifest.
+
+Stable Desktop resources contain the host binaries and a remote-helper manifest. Local startup and
+local tasks do not need a helper download. The first remote task for a platform downloads the
+matching helper if no verified copy is cached. Kandev checks its digest before use. Allow outbound
+HTTPS to `github.com` and `release-assets.githubusercontent.com`; GitHub redirects release-asset
+downloads to the second host. Desktop has no full offline installer or updater. A cached helper or
+an existing helper-path override supports remote work without this download.
 
 ## Data, processes, and cleanup
 
@@ -233,6 +240,13 @@ Reinstalling repairs packaged program files but intentionally leaves user data u
 ### Agent works in a terminal but not Desktop
 
 Use the full command path in the agent profile and verify GUI-visible credentials. Shell aliases and functions are not executables and cannot be discovered by `PATH`.
+
+### A remote task cannot get its helper
+
+Read the preparation error. If it names a download or network problem, allow outbound HTTPS to
+`github.com` and `release-assets.githubusercontent.com`, then retry. A Stable Desktop installer has
+no full offline variant. Use a cached helper or an existing helper-path override when the app cannot
+reach those hosts.
 
 ### Update check reports no usable feed
 

@@ -1,19 +1,19 @@
 // host_interactions.go implements pluginHost's Interactions() accessor — the
-// Host interaction API (ADR 0052). Reads are gated on api_read:interactions,
-// writes on api_write:interactions; the two gate independently, so an
-// attention or inbox plugin can declare read-only and still reconcile.
+// Host interaction API (ADR 0052). Reads are gated on api_read:interactions.
+// The v1 response methods remain for source compatibility but are denied:
+// they cannot carry the exact observed revision or a human response receipt.
+// Exact Host v2 writes use the same native responder after receipt validation.
 //
 // The gate cannot live at the accessor (like Tasks() and Messages(), this one
 // mixes reads and writes), so every method checks its own capability.
 //
 // Reads come from the durable request record through the task service — the
 // same authority kandev's own pending-action projection uses, never a
-// repository directly. Writes route through the first-party services the
-// native UI drives (the orchestrator for permissions, the clarification
-// handler for question bundles), so the agent actually unblocks and every
-// surface converges through the normal events. Both dependencies arrive
-// through narrow interfaces satisfied by backendapp adapters, because the
-// service types cannot be referenced here without an import cycle.
+// repository directly. Exact writes route through the first-party services
+// the native UI drives (the orchestrator for permissions, the clarification
+// handler for question bundles), so the agent unblocks and every surface
+// converges through normal events. Dependencies arrive through narrow
+// interfaces satisfied by backendapp adapters, avoiding an import cycle.
 package plugins
 
 import (
@@ -133,94 +133,26 @@ func (r interactionReader) Get(ctx context.Context, id string) (*pluginsdk.Inter
 func (r interactionReader) RespondToPermission(
 	ctx context.Context, in pluginsdk.PermissionResponse,
 ) (*pluginsdk.Interaction, error) {
-	responder, err := r.host.interactionWriteTarget()
-	if err != nil {
-		return nil, err
-	}
-	if responder == nil {
-		return r.host.UnimplementedHostData.Interactions().RespondToPermission(ctx, in)
-	}
-	interaction, err := r.host.answerableInteraction(ctx, in.InteractionID, taskmodels.InteractionKindPermission)
-	if err != nil {
-		return nil, err
-	}
-	optionID, rejected, err := resolvePermissionChoice(interaction, in)
-	if err != nil {
-		return nil, err
-	}
-	if err := responder.RespondToPermission(ctx, PluginPermissionResponse{
-		TaskID:    interaction.TaskID,
-		SessionID: interaction.SessionID,
-		RequestID: interaction.RequestID,
-		PendingID: interaction.ID,
-		OptionID:  optionID,
-		Cancelled: in.Cancelled,
-	}); err != nil {
-		return nil, err
-	}
-	// The orchestrator records the same derivation: a cancelled or reject-kind
-	// response is rejected, anything else approved.
-	resolved := taskmodels.InteractionStatusApproved
-	if rejected || in.Cancelled {
-		resolved = taskmodels.InteractionStatusRejected
-	}
-	return r.host.reloadInteraction(ctx, interaction, resolved)
+	return nil, r.host.exactHumanResponseRequired()
 }
 
 func (r interactionReader) AnswerClarification(
 	ctx context.Context, in pluginsdk.ClarificationResponse,
 ) (*pluginsdk.Interaction, error) {
-	responder, err := r.host.interactionWriteTarget()
-	if err != nil {
-		return nil, err
-	}
-	if responder == nil {
-		return r.host.UnimplementedHostData.Interactions().AnswerClarification(ctx, in)
-	}
-	interaction, err := r.host.answerableInteraction(ctx, in.InteractionID, taskmodels.InteractionKindClarification)
-	if err != nil {
-		return nil, err
-	}
-	if len(in.Answers) == 0 {
-		return nil, invalidArgument("answers is required")
-	}
-	answers := make([]PluginClarificationAnswer, len(in.Answers))
-	for i, answer := range in.Answers {
-		if answer.QuestionID == "" {
-			return nil, invalidArgument(fmt.Sprintf("answer %d is missing question_id", i+1))
-		}
-		answers[i] = PluginClarificationAnswer{
-			QuestionID:      answer.QuestionID,
-			SelectedOptions: answer.SelectedOptions,
-			CustomText:      answer.CustomText,
-		}
-	}
-	if err := responder.AnswerClarification(ctx, interaction.ID, answers); err != nil {
-		return nil, err
-	}
-	return r.host.reloadInteraction(ctx, interaction, taskmodels.InteractionStatusAnswered)
+	return nil, r.host.exactHumanResponseRequired()
 }
 
 func (r interactionReader) CancelClarification(
 	ctx context.Context, id, reason string,
 ) (*pluginsdk.Interaction, error) {
-	responder, err := r.host.interactionWriteTarget()
-	if err != nil {
-		return nil, err
+	return nil, r.host.exactHumanResponseRequired()
+}
+
+func (h *pluginHost) exactHumanResponseRequired() error {
+	if !h.capabilities.CanWrite(resourceInteractions) {
+		return permissionDenied(apiWriteCapability(resourceInteractions))
 	}
-	if responder == nil {
-		return r.host.UnimplementedHostData.Interactions().CancelClarification(ctx, id, reason)
-	}
-	interaction, err := r.host.answerableInteraction(ctx, id, taskmodels.InteractionKindClarification)
-	if err != nil {
-		return nil, err
-	}
-	if err := responder.DeclineClarification(ctx, interaction.ID, reason); err != nil {
-		return nil, err
-	}
-	// Cancel is delivered as a decline of the bundle, so its terminal status is
-	// rejected rather than cancelled (see the DeclineClarification adapter).
-	return r.host.reloadInteraction(ctx, interaction, taskmodels.InteractionStatusRejected)
+	return status.Error(codes.PermissionDenied, "exact_human_response_receipt_required")
 }
 
 // interactionWriteTarget performs the checks every write shares: the
@@ -245,6 +177,13 @@ func (h *pluginHost) interactionResponder() interactionResponder {
 		return nil
 	}
 	return h.interactionDeps()
+}
+
+func (h *pluginHost) executionController() exactExecutionController {
+	if h.executionControllerDep == nil {
+		return nil
+	}
+	return h.executionControllerDep()
 }
 
 // answerableInteraction resolves id and enforces the terminal-once contract:

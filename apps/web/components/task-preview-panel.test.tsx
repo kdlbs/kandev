@@ -9,7 +9,10 @@ import type { Task } from "./kanban-card";
 const detachTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "task-1" }));
 const getSubtaskCountMock = vi.hoisted(() => vi.fn().mockResolvedValue({ count: 0 }));
 const getTaskDeletePreflightMock = vi.hoisted(() =>
-  vi.fn().mockResolvedValue({ requires_discard_consent: false }),
+  vi.fn().mockResolvedValue({
+    requires_discard_consent: false,
+    confirmation_id: "delete-confirmation-1",
+  }),
 );
 const archiveTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const deleteTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -36,7 +39,10 @@ afterEach(() => {
   getSubtaskCountMock.mockClear();
   getSubtaskCountMock.mockResolvedValue({ count: 0 });
   getTaskDeletePreflightMock.mockClear();
-  getTaskDeletePreflightMock.mockResolvedValue({ requires_discard_consent: false });
+  getTaskDeletePreflightMock.mockResolvedValue({
+    requires_discard_consent: false,
+    confirmation_id: "delete-confirmation-1",
+  });
   archiveTaskMock.mockClear();
   archiveTaskMock.mockResolvedValue(undefined);
   deleteTaskMock.mockClear();
@@ -301,13 +307,16 @@ describe("TaskPreviewPanel actions menu — closes on Archive/Delete success (AC
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     const dialog = await screen.findByRole("alertdialog");
-    await waitFor(() => expect(getTaskDeletePreflightMock).toHaveBeenCalledWith(["task-1"], false));
+    await waitFor(() =>
+      expect(getTaskDeletePreflightMock).toHaveBeenCalledWith(["task-1"], false, false),
+    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
     await waitFor(() =>
       expect(deleteTaskMock).toHaveBeenCalledWith("task-1", {
         cascade: false,
         discardWorktreeChanges: false,
+        confirmationId: "delete-confirmation-1",
       }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));

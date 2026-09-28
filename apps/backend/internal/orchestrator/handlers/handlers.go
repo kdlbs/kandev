@@ -259,9 +259,18 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	TaskID     string `json:"task_id"`
+	SessionID  string `json:"session_id"`
+	Action     string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	ErrorStamp string `json:"error_stamp,omitempty"`
+}
+
+func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var recoveryErr *orchestrator.ManagedCloneRelocationRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), recoveryErr.Details())
 }
 
 func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -322,12 +331,18 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" && req.Action != "relocate_and_resume" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery action", nil)
+	}
+	if req.Action == "relocate_and_resume" && req.ErrorStamp == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required for managed clone recovery", nil)
 	}
 
-	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
+	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action, req.ErrorStamp)
 	if err != nil {
+		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}

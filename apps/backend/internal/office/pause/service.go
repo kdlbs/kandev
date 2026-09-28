@@ -85,6 +85,17 @@ type RunExecutionStopper interface {
 	Stop(ctx context.Context, executionID string, reason string) error
 }
 
+// AssignmentReplayer replays every task assignment deferred while
+// workspaceID was paused (docs/specs/office/requirements/paused-assignment-replay.md).
+// Optional in fixtures and older startup compositions, but production
+// pause wiring supplies it via SetAssignmentReplayer; nil-safe when unset.
+// Declared locally (not importing office/service) per this package's own
+// constraint: pause must not import scheduler or service, to avoid an
+// import cycle back into this package.
+type AssignmentReplayer interface {
+	ReplayDeferredAssignments(ctx context.Context, workspaceID string) error
+}
+
 // WorkspaceChecker resolves a workspace by id, used only for the
 // existence check every pause/resume/read performs (AC-006.9). No Office
 // table carries a foreign key to workspaces(id), so this check-then-act is
@@ -101,6 +112,7 @@ type Service struct {
 	canceller  TaskCanceller
 	runStopper RunExecutionStopper
 	workspaces WorkspaceChecker
+	replayer   AssignmentReplayer
 	logger     *logger.Logger
 }
 
@@ -113,6 +125,12 @@ func NewService(repo Repository, canceller TaskCanceller, workspaces WorkspaceCh
 // workspace halt sweep for taskless Office sessions.
 func (s *Service) SetRunExecutionStopper(stopper RunExecutionStopper) {
 	s.runStopper = stopper
+}
+
+// SetAssignmentReplayer wires the deferred-assignment replay seam Resume
+// calls after a successful release.
+func (s *Service) SetAssignmentReplayer(replayer AssignmentReplayer) {
+	s.replayer = replayer
 }
 
 // PauseState is the exported gate predicate every launch site consults.
@@ -322,8 +340,25 @@ func (s *Service) Resume(ctx context.Context, workspaceID, reason, actorID, acto
 	}
 	if released {
 		pauseReleasedTotal.Add(1)
+		s.replayDeferredAssignments(ctx, workspaceID)
 	}
 	return &ResumeResult{Released: released}, nil
+}
+
+// replayDeferredAssignments best-effort replays workspaceID's deferred
+// assignments after a successful release. Errors are logged, not
+// propagated: Resume has already committed the release, and the recovery
+// tick's ReplayPendingDeferredAssignments backstop will pick up anything
+// missed here (a nil replayer, a transient failure, or a process restart
+// between release and this call).
+func (s *Service) replayDeferredAssignments(ctx context.Context, workspaceID string) {
+	if s.replayer == nil {
+		return
+	}
+	if err := s.replayer.ReplayDeferredAssignments(ctx, workspaceID); err != nil {
+		s.logger.Warn("replay deferred assignments after resume failed",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+	}
 }
 
 // checkWorkspaceExists is the AC-006.9 guard every one of the three

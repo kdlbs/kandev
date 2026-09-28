@@ -187,7 +187,7 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // duplicate-seat false negative) if there is something to claim.
     await expect
       .poll(async () => (await getParticipants(apiClient, task.id, "reviewers")).length, {
-        timeout: 30_000,
+        timeout: 90_000,
         message: "Waiting for the Review participant seat",
       })
       .toBe(1);

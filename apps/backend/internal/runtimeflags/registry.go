@@ -51,6 +51,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
+	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 }
 
 var registrations = []runtimeFlagRegistration{

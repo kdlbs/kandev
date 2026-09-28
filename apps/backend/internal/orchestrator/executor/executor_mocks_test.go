@@ -511,6 +511,19 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	return true, nil
 }
 
+func (m *mockRepository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
+	return m.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+}
+
 // UpdateTaskSessionStateIfCurrent mirrors the production narrow-CAS
 // semantics: only state/error_message/completed_at/updated_at change, so a
 // concurrent update to any other field on the stored session survives.

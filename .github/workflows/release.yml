@@ -10,16 +10,18 @@ name: release
 #   4. build-desktop     — package Tauri desktop installers from matching runtime bundles
 #   5. docker-{amd64,arm64} — native per-arch image builds (no QEMU), consuming
 #                          the prebuilt linux bundles from step 3
-#   6. docker-manifest   — stitch the two arch digests into the user-facing
+#   6. verify-release-assets — validate staged archives, desktop outputs, and helper assets
+#                          in parallel with the per-arch Docker builds
+#   7. docker-manifest   — stitch the two arch digests into the user-facing
 #                          multi-arch tags via `buildx imagetools create`
-#   7. docker-universal-{amd64,arm64} — native universal builds on top of
+#   8. docker-universal-{amd64,arm64} — native universal builds on top of
 #                          docker-manifest's per-arch base
-#   8. docker-universal-manifest — size-gate amd64 staging, then promote both
+#   9. docker-universal-manifest — size-gate amd64 staging, then promote both
 #                          arches to the user-facing :universal tags
-#   9. publish-release   — create GH release with runtime + desktop assets and release notes
-#  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
-#  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
-#  12. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
+#  10. publish-release   — promote slim Stable candidates, full offline assets, and desktop outputs
+#  11. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
+#  12. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#  13. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -95,12 +97,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '') && 'release' || 'release-validation' }}
     permissions:
-      contents: write       # push release branch + tag
-      pull-requests: write  # create + merge release PR (required by main ruleset)
+      contents: write # push release branch + tag
+      pull-requests: write # create + merge release PR (required by main ruleset)
     outputs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
       ref: ${{ steps.compute.outputs.ref }}
+      compact_runtime_contract: ${{ steps.compute.outputs.compact_runtime_contract }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -247,6 +250,13 @@ jobs:
             echo "version=$NEXT" >> "$GITHUB_OUTPUT"
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             echo "ref=$BACKFILL_REF" >> "$GITHUB_OUTPUT"
+            COMPACT_RUNTIME_CONTRACT=false
+            if git cat-file -e "${BACKFILL_REF}:scripts/check-agentctl-deps.sh" 2>/dev/null && \
+              git cat-file -e "${BACKFILL_REF}:scripts/release/remote-helper-assets.mjs" 2>/dev/null && \
+              git cat-file -e "${BACKFILL_REF}:apps/backend/internal/agent/runtime/lifecycle/remote_helper_manifest.go" 2>/dev/null; then
+              COMPACT_RUNTIME_CONTRACT=true
+            fi
+            echo "compact_runtime_contract=$COMPACT_RUNTIME_CONTRACT" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -302,6 +312,7 @@ jobs:
           else
             echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
           fi
+          echo "compact_runtime_contract=true" >> "$GITHUB_OUTPUT"
 
           # Sanity: tag must not already exist
           if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -800,11 +811,131 @@ jobs:
           echo "::error::web-bundle upload failed after 3 attempts." >&2
           exit 1
 
+  build-remote-helpers:
+    name: Build canonical remote helpers
+    needs: [prepare, nightly-prepare]
+    if: >-
+      ${{ !cancelled() && (
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.prepare.result == 'success' && !inputs.dry_run) ||
+        ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
+      ) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+      - name: Guard agentctl dependency graph
+        if: ${{ needs.nightly-prepare.result == 'success' || needs.prepare.outputs.compact_runtime_contract == 'true' }}
+        run: bash scripts/check-agentctl-deps.sh
+      - name: Build and verify canonical remote helpers
+        env:
+          KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
+          IS_STABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.compact_runtime_contract }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse HEAD)"
+          BUILD_TIME="$(git show -s --format=%cI HEAD)"
+          LDFLAGS="-s -w -X main.Version=${KANDEV_VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}"
+          FIRST="$RUNNER_TEMP/remote-helpers-first"
+          SECOND="$RUNNER_TEMP/remote-helpers-second"
+          mkdir -p "$FIRST" "$SECOND"
+          build_helpers() {
+            local output_dir="$1"
+            cd apps/backend
+            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-linux-amd64" ./cmd/agentctl
+            GOOS=linux GOARCH=arm64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-linux-arm64" ./cmd/agentctl
+            GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-darwin-amd64" ./cmd/agentctl
+            GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-darwin-arm64" ./cmd/agentctl
+            cd "$GITHUB_WORKSPACE"
+          }
+          build_helpers "$FIRST"
+          build_helpers "$SECOND"
+          for helper in agentctl-linux-amd64 agentctl-linux-arm64 agentctl-darwin-amd64 agentctl-darwin-arm64; do
+            cmp "$FIRST/$helper" "$SECOND/$helper"
+            test -x "$FIRST/$helper"
+          done
+          file -b "$FIRST/agentctl-linux-amd64" | grep -E 'ELF 64-bit.*x86-64'
+          file -b "$FIRST/agentctl-linux-arm64" | grep -E 'ELF 64-bit.*(ARM aarch64|aarch64)'
+          file -b "$FIRST/agentctl-darwin-amd64" | grep -E 'Mach-O 64-bit.*x86_64'
+          file -b "$FIRST/agentctl-darwin-arm64" | grep -E 'Mach-O 64-bit.*arm64'
+          if [ -f scripts/release/validate-darwin-arm64-helper.mjs ]; then
+            node scripts/release/validate-darwin-arm64-helper.mjs "$FIRST/agentctl-darwin-arm64"
+          fi
+          rm -rf dist/remote-helper-artifact
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ] && [ -f scripts/release/remote-helper-assets.mjs ]; then
+            node scripts/release/remote-helper-assets.mjs build \
+              --bin-dir "$FIRST" \
+              --output-dir dist/remote-helper-artifact \
+              --version "$KANDEV_VERSION" \
+              --commit "$COMMIT" \
+              --stable "$IS_STABLE"
+            node scripts/release/remote-helper-assets.mjs verify-artifact \
+              --artifact-dir dist/remote-helper-artifact \
+              --version "$KANDEV_VERSION" \
+              --commit "$COMMIT" \
+              --stable "$IS_STABLE"
+          else
+            mkdir -p dist/remote-helper-artifact/bin
+            cp "$FIRST"/agentctl-* dist/remote-helper-artifact/bin/
+          fi
+      - name: Upload canonical helper artifact (attempt 1)
+        id: upload_canonical_helpers_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canonical-remote-helpers
+          path: dist/remote-helper-artifact
+          if-no-files-found: error
+      - name: Wait before canonical helper upload retry (attempt 2)
+        if: steps.upload_canonical_helpers_1.outcome == 'failure'
+        run: |
+          echo "::warning::canonical helper upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+      - name: Upload canonical helper artifact (attempt 2)
+        id: upload_canonical_helpers_2
+        if: steps.upload_canonical_helpers_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canonical-remote-helpers
+          path: dist/remote-helper-artifact
+          if-no-files-found: error
+          overwrite: true
+      - name: Wait before canonical helper upload retry (attempt 3)
+        if: steps.upload_canonical_helpers_2.outcome == 'failure'
+        run: |
+          echo "::warning::canonical helper upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+      - name: Upload canonical helper artifact (attempt 3)
+        id: upload_canonical_helpers_3
+        if: steps.upload_canonical_helpers_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canonical-remote-helpers
+          path: dist/remote-helper-artifact
+          if-no-files-found: error
+          overwrite: true
+      - name: Fail after canonical helper upload retries
+        if: >-
+          steps.upload_canonical_helpers_1.outcome == 'failure' &&
+          steps.upload_canonical_helpers_2.outcome == 'failure' &&
+          steps.upload_canonical_helpers_3.outcome == 'failure'
+        run: |
+          echo "::error::canonical helper artifact upload failed after 3 attempts." >&2
+          exit 1
+
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
-    needs: [prepare, nightly-prepare, build-web]
+    needs: [prepare, nightly-prepare, build-web, build-remote-helpers]
     if: >-
-      ${{ !cancelled() && needs.build-web.result == 'success' && (
+      ${{ !cancelled() && needs.build-web.result == 'success' && needs.build-remote-helpers.result == 'success' && (
         (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.prepare.result == 'success' && !inputs.dry_run) ||
         ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
       ) }}
@@ -846,6 +977,14 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
+      - name: Guard agentctl dependency graph
+        if: ${{ needs.nightly-prepare.result == 'success' || needs.prepare.outputs.compact_runtime_contract == 'true' }}
+        run: bash scripts/check-agentctl-deps.sh
+      - name: Download canonical remote helpers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canonical-remote-helpers
+          path: dist/remote-helper-artifact
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: web-bundle
@@ -870,58 +1009,131 @@ jobs:
         env:
           CC: ${{ matrix.cc || '' }}
           KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
+          IS_STABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.compact_runtime_contract }}
         run: |
           test -f apps/backend/internal/webapp/embedded/generated/index.html
+          COMMIT="$(git rev-parse HEAD)"
+          BUILD_TIME="$(git show -s --format=%cI HEAD)"
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            node scripts/release/remote-helper-assets.mjs verify-artifact \
+              --artifact-dir dist/remote-helper-artifact \
+              --version "$KANDEV_VERSION" \
+              --commit "$COMMIT" \
+              --stable "$IS_STABLE"
+          fi
           cd apps/backend
           mkdir -p bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
-          COMMIT=$(git rev-parse --short HEAD)
-          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           LDFLAGS="-s -w -X main.Version=${KANDEV_VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}"
-          # Export to subsequent steps so the cross-compiled agentctl helper
-          # below gets the same version metadata (matches Makefile parity).
-          echo "LDFLAGS=${LDFLAGS}" >> "${GITHUB_ENV}"
-          go build -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
-          go build -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
-
-      # Cross-compile remote agentctl helpers regardless of the host platform.
-      # Remote executors upload or bind-mount these sidecars into Linux and
-      # macOS SSH hosts. CGO is off so this works from any host without extra
-      # toolchain setup.
-      - name: Build remote agentctl helpers
-        run: |
-          cd apps/backend
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-amd64 ./cmd/agentctl
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-arm64 ./cmd/agentctl
-          # darwin/arm64 is ad-hoc-signed by the Go linker at link time, which is
-          # what Apple Silicon (AMFI) requires; bundle validation enforces it.
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
+          go build -trimpath -buildvcs=false -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
+          go build -trimpath -buildvcs=false -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
 
       - name: Package bundle
+        env:
+          IS_STABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.compact_runtime_contract }}
         run: |
           rm -rf dist/kandev
           mkdir -p dist/kandev/bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
-          cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
-          cp apps/backend/bin/agentctl-linux-arm64 dist/kandev/bin/
-          cp apps/backend/bin/agentctl-darwin-arm64 dist/kandev/bin/
-          cp apps/backend/bin/agentctl-darwin-amd64 dist/kandev/bin/
-          bash scripts/release/package-bundle.sh --bundle-dir dist/kandev
-          cd dist
-          tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
-          shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
+          cp dist/remote-helper-artifact/bin/agentctl-linux-amd64 dist/kandev/bin/
+          cp dist/remote-helper-artifact/bin/agentctl-linux-arm64 dist/kandev/bin/
+          cp dist/remote-helper-artifact/bin/agentctl-darwin-amd64 dist/kandev/bin/
+          cp dist/remote-helper-artifact/bin/agentctl-darwin-arm64 dist/kandev/bin/
+          if [ "$IS_STABLE" = "true" ] && [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            cp dist/remote-helper-artifact/manifests/full/remote-helpers.json dist/kandev/remote-helpers.json
+            bash scripts/release/package-bundle.sh --bundle-dir dist/kandev --variant full
+          else
+            bash scripts/release/package-bundle.sh --bundle-dir dist/kandev
+          fi
+          rm -rf dist/runtime-candidates
+          mkdir -p dist/runtime-candidates
+          tar -czf "$GITHUB_WORKSPACE/dist/kandev-${{ matrix.platform }}.tar.gz" -C "$GITHUB_WORKSPACE/dist" kandev
+          (cd dist && shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256")
           # Windows package managers cannot consume the tarball: winget's
           # InstallerType enum accepts zip as its only archive format, and
           # Chocolatey's unzip helper needs two 7-Zip passes for a .tar.gz.
           # The zip is published alongside the tarball, not instead of it —
           # Homebrew and the npm runtime packages still read the tarball.
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -qr "kandev-${{ matrix.platform }}.zip" kandev
-            shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
+            (cd dist && zip -qr "kandev-${{ matrix.platform }}.zip" kandev)
+            (cd dist && shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256")
           fi
+          if [ "$IS_STABLE" = "true" ]; then
+            cp "dist/kandev-${{ matrix.platform }}.tar.gz" "dist/runtime-candidates/kandev-${{ matrix.platform }}-full.tar.gz"
+            (cd dist/runtime-candidates && shasum -a 256 "kandev-${{ matrix.platform }}-full.tar.gz" > "kandev-${{ matrix.platform }}-full.tar.gz.sha256")
+            if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+              rm -rf dist/runtime-candidate-bundle
+              mkdir -p dist/runtime-candidate-bundle/kandev/bin
+              cp dist/kandev/bin/kandev${EXT} dist/runtime-candidate-bundle/kandev/bin/
+              cp dist/kandev/bin/agentctl${EXT} dist/runtime-candidate-bundle/kandev/bin/
+              cp dist/remote-helper-artifact/manifests/standard/remote-helpers.json dist/runtime-candidate-bundle/kandev/remote-helpers.json
+              bash scripts/release/package-bundle.sh --bundle-dir dist/runtime-candidate-bundle/kandev --variant standard
+              tar -czf "$GITHUB_WORKSPACE/dist/runtime-candidates/kandev-${{ matrix.platform }}-slim.tar.gz" -C "$GITHUB_WORKSPACE/dist/runtime-candidate-bundle" kandev
+              (cd dist/runtime-candidates && shasum -a 256 "kandev-${{ matrix.platform }}-slim.tar.gz" > "kandev-${{ matrix.platform }}-slim.tar.gz.sha256")
+            fi
+            if [ "${{ matrix.goos }}" = "windows" ]; then
+              cp "dist/kandev-${{ matrix.platform }}.zip" "dist/runtime-candidates/kandev-${{ matrix.platform }}-full.zip"
+              (cd dist/runtime-candidates && shasum -a 256 "kandev-${{ matrix.platform }}-full.zip" > "kandev-${{ matrix.platform }}-full.zip.sha256")
+              if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+                (cd dist/runtime-candidate-bundle && zip -qr "../runtime-candidates/kandev-${{ matrix.platform }}-slim.zip" kandev)
+                (cd dist/runtime-candidates && shasum -a 256 "kandev-${{ matrix.platform }}-slim.zip" > "kandev-${{ matrix.platform }}-slim.zip.sha256")
+              fi
+              variants=(full)
+              if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then variants+=(slim); fi
+              for variant in "${variants[@]}"; do
+                rm -rf "$RUNNER_TEMP/runtime-tar-$variant" "$RUNNER_TEMP/runtime-zip-$variant"
+                mkdir -p "$RUNNER_TEMP/runtime-tar-$variant" "$RUNNER_TEMP/runtime-zip-$variant"
+                tar -xzf "dist/runtime-candidates/kandev-${{ matrix.platform }}-$variant.tar.gz" -C "$RUNNER_TEMP/runtime-tar-$variant"
+                unzip -q "dist/runtime-candidates/kandev-${{ matrix.platform }}-$variant.zip" -d "$RUNNER_TEMP/runtime-zip-$variant"
+                diff -r "$RUNNER_TEMP/runtime-tar-$variant/kandev" "$RUNNER_TEMP/runtime-zip-$variant/kandev"
+              done
+            fi
+          fi
+
+      - name: Verify staged runtime candidates
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+        env:
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.compact_runtime_contract }}
+        run: |
+          set -euo pipefail
+          platform="${{ matrix.platform }}"
+          expected=(
+            "kandev-${platform}-full.tar.gz"
+            "kandev-${platform}-full.tar.gz.sha256"
+          )
+          if [ "${COMPACT_RUNTIME_CONTRACT:-false}" = "true" ]; then
+            expected+=("kandev-${platform}-slim.tar.gz" "kandev-${platform}-slim.tar.gz.sha256")
+          fi
+          if [ "$platform" = "windows-x64" ]; then
+            expected+=(
+              "kandev-${platform}-full.zip"
+              "kandev-${platform}-full.zip.sha256"
+            )
+            if [ "${COMPACT_RUNTIME_CONTRACT:-false}" = "true" ]; then
+              expected+=("kandev-${platform}-slim.zip" "kandev-${platform}-slim.zip.sha256")
+            fi
+          fi
+          shopt -s nullglob
+          actual=(dist/runtime-candidates/*)
+          if [ "${#actual[@]}" -ne "${#expected[@]}" ]; then
+            echo "::error::${platform} staged runtime candidate set is incomplete or contains unexpected assets." >&2
+            exit 1
+          fi
+          for asset in "${expected[@]}"; do
+            if [ ! -s "dist/runtime-candidates/$asset" ]; then
+              echo "::error::Missing staged runtime candidate dist/runtime-candidates/$asset" >&2
+              exit 1
+            fi
+          done
+          for checksum in "${expected[@]}"; do
+            if [[ "$checksum" == *.sha256 ]]; then
+              (cd dist/runtime-candidates && shasum -a 256 -c "$checksum")
+            fi
+          done
 
       - name: Upload runtime bundle (attempt 1)
         id: upload_runtime_bundle_1
@@ -986,6 +1198,60 @@ jobs:
           steps.upload_runtime_bundle_3.outcome == 'failure'
         run: |
           echo "::error::${{ matrix.platform }} runtime bundle upload failed after 3 attempts." >&2
+          exit 1
+
+      - name: Upload staged runtime candidates (attempt 1)
+        id: upload_runtime_candidates_1
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-candidates-${{ matrix.platform }}
+          path: dist/runtime-candidates
+          if-no-files-found: error
+
+      - name: Wait before staged runtime candidate upload retry (attempt 2)
+        if: steps.upload_runtime_candidates_1.outcome == 'failure' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        run: |
+          echo "::warning::${{ matrix.platform }} candidate upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload staged runtime candidates (attempt 2)
+        id: upload_runtime_candidates_2
+        if: steps.upload_runtime_candidates_1.outcome == 'failure' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-candidates-${{ matrix.platform }}
+          path: dist/runtime-candidates
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Wait before staged runtime candidate upload retry (attempt 3)
+        if: steps.upload_runtime_candidates_2.outcome == 'failure' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        run: |
+          echo "::warning::${{ matrix.platform }} candidate upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload staged runtime candidates (attempt 3)
+        id: upload_runtime_candidates_3
+        if: steps.upload_runtime_candidates_2.outcome == 'failure' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-candidates-${{ matrix.platform }}
+          path: dist/runtime-candidates
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Fail after staged runtime candidate upload retries
+        if: >-
+          steps.upload_runtime_candidates_1.outcome == 'failure' &&
+          steps.upload_runtime_candidates_2.outcome == 'failure' &&
+          steps.upload_runtime_candidates_3.outcome == 'failure' &&
+          github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        run: |
+          echo "::error::${{ matrix.platform }} staged runtime candidate upload failed after 3 attempts." >&2
           exit 1
 
   build-desktop:
@@ -1112,18 +1378,28 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bundle-${{ matrix.platform }}
-          path: dist/desktop-runtime
+          name: runtime-candidates-${{ matrix.platform }}
+          path: dist/runtime-candidates
 
       - name: Prepare desktop runtime resources
+        env:
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
         run: |
           set -euo pipefail
+          RUNTIME_VARIANT=full
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then RUNTIME_VARIANT=slim; fi
           mkdir -p dist/desktop-runtime-src
-          tar -xzf "dist/desktop-runtime/kandev-${{ matrix.platform }}.tar.gz" -C dist/desktop-runtime-src
-          scripts/release/prepare-desktop-runtime.sh \
-            --bundle-dir "dist/desktop-runtime-src/kandev" \
-            --platform "${{ matrix.platform }}" \
-            --output-dir "apps/desktop/src-tauri/resources/kandev"
+          tar -xzf "dist/runtime-candidates/kandev-${{ matrix.platform }}-${RUNTIME_VARIANT}.tar.gz" -C dist/desktop-runtime-src
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            scripts/release/prepare-desktop-runtime.sh \
+              --bundle-dir "dist/desktop-runtime-src/kandev" \
+              --platform "${{ matrix.platform }}" \
+              --output-dir "apps/desktop/src-tauri/resources/kandev"
+          else
+            rm -rf apps/desktop/src-tauri/resources/kandev
+            mkdir -p apps/desktop/src-tauri/resources
+            cp -a dist/desktop-runtime-src/kandev apps/desktop/src-tauri/resources/kandev
+          fi
 
       - name: Configure macOS signing and notarization
         if: startsWith(matrix.platform, 'macos-')
@@ -1189,7 +1465,7 @@ jobs:
         run: |
           set -euo pipefail
           runtime_bin="apps/desktop/src-tauri/resources/kandev/bin"
-          for binary in kandev agentctl agentctl-darwin-arm64 agentctl-darwin-amd64; do
+          for binary in kandev agentctl; do
             path="$runtime_bin/$binary"
             if [ ! -f "$path" ]; then
               echo "::error::Missing macOS runtime binary at $path" >&2
@@ -1585,9 +1861,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Docker base image — split per arch onto native runners, then stitched into
-  # a multi-arch manifest list. Each arch consumes the matching linux bundle
-  # produced by build-bundles, so no Go/Vite/pnpm work happens inside the
-  # Docker build (the Dockerfile is reduced to apt-get + COPY).
+  # a multi-arch manifest list. Each arch consumes its matching full offline
+  # candidate, so no Go/Vite/pnpm work happens inside the Docker build.
   # ---------------------------------------------------------------------------
   docker-amd64:
     name: Build & push container image (amd64)
@@ -1616,16 +1891,16 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bundle-linux-x64
-          path: dist/bundle
+          name: runtime-candidates-linux-x64
+          path: dist/runtime-candidates
 
       - name: Prepare Docker build context
         run: |
           set -euo pipefail
           mkdir -p ctx/bundle
           # --strip-components=1 drops the top-level `kandev/` dir inside the
-          # tarball so ctx/bundle/ ends up with bin/ directly.
-          tar -xzf dist/bundle/kandev-linux-x64.tar.gz --strip-components=1 -C ctx/bundle
+          # full archive so ctx/bundle/ ends up with bin/ directly.
+          tar -xzf dist/runtime-candidates/kandev-linux-x64-full.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -1712,14 +1987,14 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bundle-linux-arm64
-          path: dist/bundle
+          name: runtime-candidates-linux-arm64
+          path: dist/runtime-candidates
 
       - name: Prepare Docker build context
         run: |
           set -euo pipefail
           mkdir -p ctx/bundle
-          tar -xzf dist/bundle/kandev-linux-arm64.tar.gz --strip-components=1 -C ctx/bundle
+          tar -xzf dist/runtime-candidates/kandev-linux-arm64-full.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -1769,9 +2044,225 @@ jobs:
           digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
+  verify-release-assets:
+    name: Verify staged Stable release assets
+    needs: [prepare, build-remote-helpers, build-bundles, build-desktop]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-remote-helpers.result == 'success' &&
+        needs.build-bundles.result == 'success' &&
+        needs.build-desktop.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: runtime-candidates-*
+          path: dist/runtime-candidates
+          merge-multiple: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-*
+          path: dist/desktop-artifacts
+          merge-multiple: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canonical-remote-helpers
+          path: dist/remote-helper-artifact
+
+      - name: Verify staged release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+        run: |
+          set -euo pipefail
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            COMMIT="$(git rev-parse HEAD)"
+            node scripts/release/remote-helper-assets.mjs verify-artifact \
+              --artifact-dir dist/remote-helper-artifact \
+              --version "$KANDEV_VERSION" \
+              --commit "$COMMIT" \
+              --stable true
+
+            existing_release="$RUNNER_TEMP/existing-release.json"
+            release_error="$RUNNER_TEMP/existing-release.err"
+            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "$existing_release" 2>"$release_error"; then
+              :
+            elif grep -Eq 'HTTP 404|Not Found' "$release_error"; then
+              printf '{"assets":[]}\n' > "$existing_release"
+            else
+              cat "$release_error" >&2
+              exit 1
+            fi
+            node scripts/release/remote-helper-assets.mjs verify-existing-release \
+              --release-json "$existing_release" \
+              --assets-dir dist/remote-helper-artifact/assets
+          fi
+
+          for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
+            variants=(full)
+            if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then variants+=(slim); fi
+            for variant in "${variants[@]}"; do
+              archive="dist/runtime-candidates/kandev-${platform}-${variant}.tar.gz"
+              if [ ! -s "$archive" ] || [ ! -s "${archive}.sha256" ]; then
+                echo "Missing required runtime candidate or checksum: $archive" >&2
+                exit 1
+              fi
+              (cd dist/runtime-candidates && sha256sum -c "$(basename "${archive}.sha256")")
+            done
+          done
+          windows_variants=(full)
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then windows_variants+=(slim); fi
+          for variant in "${windows_variants[@]}"; do
+            archive="dist/runtime-candidates/kandev-windows-x64-${variant}.zip"
+            if [ ! -s "$archive" ] || [ ! -s "${archive}.sha256" ]; then
+              echo "Missing required Windows runtime candidate or checksum: $archive" >&2
+              exit 1
+            fi
+            (cd dist/runtime-candidates && sha256sum -c "$(basename "${archive}.sha256")")
+          done
+
+          mkdir -p dist/release-assets
+          cp dist/desktop-artifacts/* dist/release-assets/
+          platforms=(linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64)
+          for platform in "${platforms[@]}"; do
+            for variant in "${variants[@]}"; do
+              candidate="kandev-${platform}-${variant}.tar.gz"
+              published="kandev-${platform}.tar.gz"
+              if [ "$variant" = "full" ] && [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+                published="kandev-${platform}-full.tar.gz"
+              fi
+              cp "dist/runtime-candidates/$candidate" "dist/release-assets/$published"
+              (cd dist/release-assets && sha256sum "$published" > "${published}.sha256")
+            done
+            if [ "$platform" = "windows-x64" ]; then
+              for variant in "${windows_variants[@]}"; do
+                candidate="kandev-${platform}-${variant}.zip"
+                published="kandev-${platform}.zip"
+                if [ "$variant" = "full" ] && [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+                  published="kandev-${platform}-full.zip"
+                fi
+                cp "dist/runtime-candidates/$candidate" "dist/release-assets/$published"
+                (cd dist/release-assets && sha256sum "$published" > "${published}.sha256")
+              done
+            fi
+          done
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            cp dist/remote-helper-artifact/assets/*.gz* dist/release-assets/
+            for asset in agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz; do
+              sidecar="dist/release-assets/$asset.sha256"
+              if [ ! -f "dist/release-assets/$asset" ] || [ ! -f "$sidecar" ]; then
+                echo "Missing required remote helper asset or checksum: $asset" >&2
+                exit 1
+              fi
+              (cd dist/release-assets && sha256sum -c "$asset.sha256")
+            done
+          fi
+          for platform in "${platforms[@]}"; do
+            archive="dist/release-assets/kandev-${platform}.tar.gz"
+            if [ ! -s "$archive" ] || [ ! -s "${archive}.sha256" ]; then
+              echo "Missing required release archive or checksum: $archive" >&2
+              exit 1
+            fi
+            (cd dist/release-assets && sha256sum -c "$(basename "${archive}.sha256")")
+            if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+              archive="dist/release-assets/kandev-${platform}-full.tar.gz"
+              if [ ! -s "$archive" ] || [ ! -s "${archive}.sha256" ]; then
+                echo "Missing required release archive or checksum: $archive" >&2
+                exit 1
+              fi
+              (cd dist/release-assets && sha256sum -c "$(basename "${archive}.sha256")")
+            fi
+          done
+          if [ ! -s dist/release-assets/kandev-windows-x64.zip ] || [ ! -s dist/release-assets/kandev-windows-x64.zip.sha256 ]; then
+            echo "Missing required Windows release zip or checksum." >&2
+            exit 1
+          fi
+          (cd dist/release-assets && sha256sum -c kandev-windows-x64.zip.sha256)
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            (cd dist/release-assets && sha256sum -c kandev-windows-x64-full.zip.sha256)
+          fi
+          bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
+
+      - name: Upload verified release assets (attempt 1)
+        id: upload_verified_release_assets_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-release-assets
+          path: dist/release-assets
+          if-no-files-found: error
+      - name: Wait before verified release asset upload retry (attempt 2)
+        if: steps.upload_verified_release_assets_1.outcome == 'failure'
+        run: |
+          echo "::warning::verified release asset upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+      - name: Upload verified release assets (attempt 2)
+        id: upload_verified_release_assets_2
+        if: steps.upload_verified_release_assets_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-release-assets
+          path: dist/release-assets
+          if-no-files-found: error
+          overwrite: true
+      - name: Wait before verified release asset upload retry (attempt 3)
+        if: steps.upload_verified_release_assets_2.outcome == 'failure'
+        run: |
+          echo "::warning::verified release asset upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+      - name: Upload verified release assets (attempt 3)
+        id: upload_verified_release_assets_3
+        if: steps.upload_verified_release_assets_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-release-assets
+          path: dist/release-assets
+          if-no-files-found: error
+          overwrite: true
+      - name: Fail after verified release asset upload retries
+        if: >-
+          steps.upload_verified_release_assets_1.outcome == 'failure' &&
+          steps.upload_verified_release_assets_2.outcome == 'failure' &&
+          steps.upload_verified_release_assets_3.outcome == 'failure'
+        run: |
+          echo "::error::verified release asset upload failed after 3 attempts." >&2
+          exit 1
+
   docker-manifest:
     name: Assemble multi-arch base manifest
-    needs: [prepare, docker-amd64, docker-arm64]
+    needs: [prepare, docker-amd64, docker-arm64, verify-release-assets]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -1780,7 +2271,8 @@ jobs:
         !inputs.desktop_validation_only &&
         needs.prepare.result == 'success' &&
         needs.docker-amd64.result == 'success' &&
-        needs.docker-arm64.result == 'success'
+        needs.docker-arm64.result == 'success' &&
+        needs.verify-release-assets.result == 'success'
       }}
     runs-on: ubuntu-latest
     permissions:
@@ -1991,7 +2483,13 @@ jobs:
     name: Gate size + promote universal manifest
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
-    needs: [prepare, docker-universal-amd64, docker-universal-arm64]
+    needs:
+      [
+        prepare,
+        docker-universal-amd64,
+        docker-universal-arm64,
+        verify-release-assets,
+      ]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -2000,7 +2498,8 @@ jobs:
         !inputs.desktop_validation_only &&
         needs.prepare.result == 'success' &&
         needs.docker-universal-amd64.result == 'success' &&
-        needs.docker-universal-arm64.result == 'success'
+        needs.docker-universal-arm64.result == 'success' &&
+        needs.verify-release-assets.result == 'success'
       }}
     runs-on: ubuntu-latest
     permissions:
@@ -2035,7 +2534,7 @@ jobs:
       # points directly at the image manifest (not an OCI index).
       - name: Enforce size budget
         env:
-          MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
+          MAX_COMPRESSED_BYTES: "2684354560" # 2.5 GiB
         run: |
           set -euo pipefail
           docker buildx imagetools inspect "$AMD64_REF" --raw > /tmp/manifest.json
@@ -2063,7 +2562,15 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
+    needs:
+      [
+        prepare,
+        build-remote-helpers,
+        build-bundles,
+        build-desktop,
+        verify-release-assets,
+        docker-universal-manifest,
+      ]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -2071,30 +2578,20 @@ jobs:
         !inputs.dry_run &&
         !inputs.desktop_validation_only &&
         needs.prepare.result == 'success' &&
+        needs.build-remote-helpers.result == 'success' &&
         needs.build-bundles.result == 'success' &&
         needs.build-desktop.result == 'success' &&
+        needs.verify-release-assets.result == 'success' &&
         needs.docker-universal-manifest.result == 'success'
       }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write    # softprops/action-gh-release creates the release
+      contents: write # softprops/action-gh-release creates the release
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
-
-      - name: Prepare desktop asset verifier
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
-          gh api \
-            --header "Accept: application/vnd.github.raw+json" \
-            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
-            > "$helper"
-          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
 
       - name: Install updater signature verifier toolchain
         run: rustup toolchain install 1.88.0 --profile minimal
@@ -2161,44 +2658,37 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: bundle-*
+          name: verified-release-assets
           path: dist/release-assets
-          merge-multiple: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: desktop-*
-          path: dist/release-assets
-          merge-multiple: true
-
-      - name: Verify release assets
+      - name: Record runtime asset sizes
+        env:
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
         run: |
           set -euo pipefail
-          required_platforms=(linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64)
-          for platform in "${required_platforms[@]}"; do
-            archive="dist/release-assets/kandev-${platform}.tar.gz"
-            checksum="${archive}.sha256"
-            if [ ! -f "$archive" ]; then
-              echo "Missing required archive: $archive" >&2
-              exit 1
-            fi
-            if [ ! -f "$checksum" ]; then
-              echo "Missing required checksum: $checksum" >&2
-              exit 1
-            fi
-          done
-          # The Windows zip is the only archive winget and Chocolatey can read.
-          # Losing it would break those channels while every other check here
-          # still passed, so it is verified explicitly.
-          for artifact in \
-            dist/release-assets/kandev-windows-x64.zip \
-            dist/release-assets/kandev-windows-x64.zip.sha256; do
-            if [ ! -f "$artifact" ]; then
-              echo "Missing required Windows artifact: $artifact" >&2
-              exit 1
-            fi
-          done
-          bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
+          report=dist/release-assets/runtime-size-report.md
+          if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
+            bash scripts/release/write-runtime-size-report.sh dist/release-assets "$report"
+          else
+            {
+              printf '# Runtime asset sizes\n\n'
+              printf 'Measured from this release build. Archive sizes are compressed download bytes.\n\n'
+              printf '| Variant | Platform | Bytes | MiB |\n| --- | --- | ---: | ---: |\n'
+              for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
+                asset="kandev-${platform}.tar.gz"
+                bytes="$(wc -c < "dist/release-assets/$asset" | tr -d ' ')"
+                mib="$(awk -v bytes="$bytes" 'BEGIN { printf "%.2f", bytes / 1048576 }')"
+                printf '| full | %s (`%s`) | %s | %s |\n' "$platform" "$asset" "$bytes" "$mib"
+                if [ "$platform" = "windows-x64" ]; then
+                  asset="kandev-${platform}.zip"
+                  bytes="$(wc -c < "dist/release-assets/$asset" | tr -d ' ')"
+                  mib="$(awk -v bytes="$bytes" 'BEGIN { printf "%.2f", bytes / 1048576 }')"
+                  printf '| full | %s (`%s`) | %s | %s |\n' "$platform" "$asset" "$bytes" "$mib"
+                fi
+              done
+            } > "$report"
+          fi
+          cat "$report"
           ls -lh dist/release-assets
 
       - name: Generate and verify updater manifest
@@ -2240,7 +2730,12 @@ jobs:
             dist/release-assets/kandev-windows-*.tar.gz.sha256
             dist/release-assets/kandev-windows-*.zip
             dist/release-assets/kandev-windows-*.zip.sha256
+            dist/release-assets/kandev-windows-*-full.zip
+            dist/release-assets/kandev-windows-*-full.zip.sha256
+            dist/release-assets/agentctl-*.gz
+            dist/release-assets/agentctl-*.gz.sha256
             dist/release-assets/kandev-desktop-*
+            dist/release-assets/runtime-size-report.md
             dist/release-assets/latest.json
           preserve_order: true
 
@@ -2258,7 +2753,7 @@ jobs:
       }}
     runs-on: ubuntu-latest
     permissions:
-      id-token: write    # Required for OIDC trusted publishing
+      id-token: write # Required for OIDC trusted publishing
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -2300,7 +2795,7 @@ jobs:
       }}
     runs-on: ubuntu-latest
     permissions:
-      id-token: write    # Required for OIDC trusted publishing
+      id-token: write # Required for OIDC trusted publishing
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

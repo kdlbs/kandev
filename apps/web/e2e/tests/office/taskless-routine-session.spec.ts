@@ -54,6 +54,7 @@ test.describe("Office taskless routine sessions", () => {
     officeApi,
     apiClient,
     officeSeed,
+    seedData,
   }) => {
     // A taskless launch has two asynchronous schedulers in front of the mock
     // agent (the wakeup dispatcher and the Office run scheduler). Under the
@@ -61,22 +62,35 @@ test.describe("Office taskless routine sessions", () => {
     // cycles before the runtime is admitted. Keep the test bounded, but allow
     // that startup window to complete without relying on Playwright retries.
     test.setTimeout(720_000);
-    // The worker resets the status before each test, but the status write and
-    // scheduler claim are asynchronous. Do not fire a routine while the
-    // previous run still holds the agent in a transient working state.
-    await waitForAgentIdle(officeApi, officeSeed.agentId);
+    // Use a new workspace-scoped agent for this test. The worker-scoped CEO is
+    // shared by many Office specs, so another test can still own a run when
+    // this routine starts and leave it working for the whole idle wait.
+    const createdAgent = await officeApi.createAgent(officeSeed.workspaceId, {
+      name: `Taskless E2E Agent ${Date.now()}`,
+      role: "worker",
+      agent_profile_id: seedData.agentProfileId,
+      executor_preference: '{"type":"local_pc"}',
+    });
+    const agentId = createdAgent.id;
+    if (typeof agentId !== "string" || agentId.length === 0) {
+      throw new Error("taskless routine agent was created without an id");
+    }
+
+    // The new agent starts idle, but confirm the backend projection before
+    // the first manual routine fire.
+    await waitForAgentIdle(officeApi, agentId);
     const before = await apiClient.listTasks(officeSeed.workspaceId);
     const routine = await officeApi.createRoutine(officeSeed.workspaceId, {
       name: `Taskless E2E ${Date.now()}`,
       description: "Taskless routine session smoke test",
-      assignee_agent_profile_id: officeSeed.agentId,
+      assignee_agent_profile_id: agentId,
       concurrency_policy: "always_create",
     });
     const routineId = routine.id as string;
 
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      await waitForAgentIdle(officeApi, officeSeed.agentId);
+      await waitForAgentIdle(officeApi, agentId);
       const response = await officeApi.runRoutine(routineId);
       if (response.status !== 200) {
         throw new Error(
@@ -129,7 +143,7 @@ test.describe("Office taskless routine sessions", () => {
             { cause: error },
           );
         });
-      const detailPath = `/agents/${officeSeed.agentId}/runs/${runId}`;
+      const detailPath = `/agents/${agentId}/runs/${runId}`;
       await expect
         .poll(
           async () => {

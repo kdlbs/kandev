@@ -108,6 +108,10 @@ By default, managed worktrees live under the configured task-data directory, com
 
 Additional branches are siblings of the primary repository worktree, not directories nested inside it. Multi-repository tasks have one worktree per repository. Kandev reuses a valid session/repository worktree; if its directory is missing, it attempts to recreate it from the recorded local or remote branch.
 
+Managed worktrees can remain registered to an older repository clone after the repository path changes. For supported GitHub and GitLab repositories, Kandev checks the provider origin, linked-worktree registration, branch, and commit. When the worktree is clean, Kandev moves it to the current workspace clone before it starts an agent. Kandev keeps the old checkout.
+
+If the worktree contains local changes, Kandev stops and offers **Move files and resume**. Before you confirm, note that Kandev keeps the original checkout and a file snapshot. Git staging state does not transfer. Review the moved changes before you commit. Kandev blocks worktrees with unsupported filters, sparse checkout, or submodules.
+
 For a new task branch, the repository default template is:
 
 ```text

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildKanbanCardMenuEntries, type KanbanCardMenuEntry } from "./kanban-card-menu-items";
+import { buildKanbanCardMenuEntries } from "./kanban-card-menu-builder";
+import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
 const PLUGIN_ID = "kandev-plugin-tags";

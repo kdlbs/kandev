@@ -1,6 +1,8 @@
 "use client";
 
 import { cloneElement, isValidElement, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { IconLoader2 } from "@tabler/icons-react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import {
   TaskMoveOptionsSurface,
@@ -21,6 +23,8 @@ import {
 } from "./task-switcher-context-menu-items";
 import { useMenuTouchDragCancel } from "./task-switcher-touch-drag-cancel";
 import { ChangeWorkflowDialog } from "./change-workflow-dialog";
+import { useTaskPRUnlinkMenu } from "@/hooks/domains/github/use-task-pr-unlink-menu";
+import type { KanbanCardMenuEntry } from "@/components/kanban-card-menu-items";
 
 export type { StepDef } from "./task-switcher-types";
 export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
@@ -113,22 +117,86 @@ function createChangeWorkflowOpenHandler(
   };
 }
 
+function buildTaskRowUnlinkEntries(
+  menu: ReturnType<typeof useTaskPRUnlinkMenu>,
+  translateChoice: (choice: (typeof menu.choices)[number]) => string,
+  loadingLabel: string,
+): KanbanCardMenuEntry[] {
+  const entries: KanbanCardMenuEntry[] = menu.choices.map((choice) => ({
+    kind: "item",
+    key: `unlink-task-pr-${choice.associationId}`,
+    testId: `task-row-unlink-task-pr-${choice.associationId}`,
+    label: translateChoice(choice),
+    disabled: !menu.canUnlink || choice.pending,
+    onSelect: () => void menu.unlink(choice.associationId),
+  }));
+  if (menu.isLoading) {
+    entries.push({
+      kind: "item",
+      key: "loading-pull-requests",
+      testId: "task-row-loading-pull-requests",
+      icon: <IconLoader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />,
+      label: loadingLabel,
+      disabled: true,
+    });
+  }
+  return entries;
+}
+
+function useTaskRowMoveMenu(
+  props: ContextMenuProps,
+  nestSources: OpenedNestSources,
+  closeMenu: () => void,
+) {
+  const { task, stepsByWorkflowId, steps, onRequestMoveOptions, onBeforeMoveOptionsOpen } = props;
+  const moveTasks = useTaskWorkflowMove();
+  const usesTouchDrawer = useTouchDrawer();
+  const moveOptions = useTaskMoveOptions({
+    taskId: task.id,
+    workflowId: task.workflowId,
+    steps: task.workflowId ? (stepsByWorkflowId?.[task.workflowId] ?? steps) : steps,
+    closeMenu,
+  });
+  const onMoveToStepWithOptions = (targetStepId: string) => {
+    if (onRequestMoveOptions && task.workflowId) {
+      closeMenu();
+      onRequestMoveOptions(task.id, task.workflowId, targetStepId);
+      return;
+    }
+    onBeforeMoveOptionsOpen?.();
+    moveOptions.openMoveOptions(targetStepId);
+  };
+  const onSubmitWithOptions =
+    !usesTouchDrawer && !onRequestMoveOptions ? moveOptions.submitMoveOptionsForStep : undefined;
+  return {
+    moveOptions,
+    contextMenuProps: buildTaskContextMenuItemsProps(props, nestSources, closeMenu, moveTasks, {
+      onMoveToStepWithOptions,
+      onSubmitWithOptions,
+      isMoving: moveOptions.isMoving,
+    }),
+  };
+}
+
 // This component coordinates the context menu and drag cancellation. Archive
 // state lives in its focused adapter so unavailable actions stay unavailable.
 export function TaskItemWithContextMenu(props: ContextMenuProps) {
   const { children, ...menuProps } = props;
-  const { task, stepsByWorkflowId, steps, onRequestMoveOptions, onBeforeMoveOptionsOpen } = props;
+  const { task } = props;
+  const { t } = useTranslation();
+  const prUnlinkMenu = useTaskPRUnlinkMenu(task.id, task.prInfo?.number);
   const { contextOpen, setContextOpen, openedNestSources, handleContextOpenChange } =
     useContextMenuOpenState(props);
   const [menuKey, setMenuKey] = useState(0);
   const [changeWorkflowOpen, setChangeWorkflowOpen] = useState(false);
   const taskIdRef = useRef(task.id);
   taskIdRef.current = task.id;
-  const moveTasks = useTaskWorkflowMove();
   const closeMenu = createCloseMenu(setContextOpen, setMenuKey);
-  const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(handleContextOpenChange);
+  const { handleOpenChange, triggerProps } = useMenuTouchDragCancel((open) => {
+    handleContextOpenChange(open);
+    prUnlinkMenu.onOpenChange(open);
+  });
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
-  const usesTouchDrawer = useTouchDrawer();
   const archive = useTaskSwitcherArchiveConfirmation({
     task: menuProps.task,
     onArchiveTask: menuProps.onArchiveTask,
@@ -138,33 +206,15 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
   const changeWorkflowTriggerRef = archive.archiveAnchorRef;
   const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
   const inlineArchiveConfirmation = isMobile || isFinePointer ? undefined : archiveConfirmation;
-  const moveOptions = useTaskMoveOptions({
-    taskId: task.id,
-    workflowId: task.workflowId,
-    steps: task.workflowId ? (stepsByWorkflowId?.[task.workflowId] ?? steps) : steps,
-    closeMenu,
-  });
-  const handleMoveToStepWithOptions = (targetStepId: string) => {
-    if (onRequestMoveOptions && task.workflowId) {
-      closeMenu();
-      onRequestMoveOptions(task.id, task.workflowId, targetStepId);
-      return;
-    }
-    onBeforeMoveOptionsOpen?.();
-    moveOptions.openMoveOptions(targetStepId);
-  };
-  const inlineSubmitWithOptions =
-    !usesTouchDrawer && !onRequestMoveOptions ? moveOptions.submitMoveOptionsForStep : undefined;
-  const contextMenuProps = buildTaskContextMenuItemsProps(
-    props,
-    openedNestSources,
-    closeMenu,
-    moveTasks,
-    {
-      onMoveToStepWithOptions: handleMoveToStepWithOptions,
-      onSubmitWithOptions: inlineSubmitWithOptions,
-      isMoving: moveOptions.isMoving,
-    },
+  const { moveOptions, contextMenuProps } = useTaskRowMoveMenu(props, openedNestSources, closeMenu);
+  const nativeUnlinkEntries = buildTaskRowUnlinkEntries(
+    prUnlinkMenu,
+    (choice) =>
+      t("github:removeFromTask", {
+        repo: choice.owner ? `${choice.owner}/${choice.repo}` : choice.repo,
+        prnumber: choice.number,
+      }),
+    t("github:loadingPullRequests"),
   );
 
   return (
@@ -187,6 +237,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
         >
           <TaskContextMenuItems
             {...contextMenuProps}
+            nativeUnlinkEntries={nativeUnlinkEntries}
             onArchiveTask={archive.requestArchive}
             onChangeWorkflow={createChangeWorkflowOpenHandler(
               task.id,
@@ -222,6 +273,7 @@ export type TaskContextMenuItemsProps = Omit<
   | "getNestCandidateTasks"
   | "getNestHierarchyTasks"
 > & {
+  nativeUnlinkEntries?: KanbanCardMenuEntry[];
   onChangeWorkflow?: () => void;
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;

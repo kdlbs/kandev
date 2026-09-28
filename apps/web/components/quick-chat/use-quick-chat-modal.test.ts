@@ -32,6 +32,7 @@ vi.mock("@/lib/agent-profile-recent-use", () => ({
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
+  deleteTaskAfterUserAction: (...args: unknown[]) => mockDeleteTask(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));
 

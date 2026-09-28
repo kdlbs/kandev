@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,7 +31,9 @@ func newCMTestWithHostFiles(t *testing.T, agentctlPath, mockAgentPath string) *C
 	t.Helper()
 	cm := newCMTest(t)
 	cm.kandevHomeDir = "/kandev-home"
-	cm.resolveAgentctlBinary = func() (string, error) { return agentctlPath, nil }
+	cm.resolveAgentctlBinary = func(context.Context, PrepareProgressCallback) (string, error) {
+		return agentctlPath, nil
+	}
 	cm.resolveMockAgentBinary = func() (string, error) { return mockAgentPath, nil }
 	return cm
 }
@@ -101,6 +104,43 @@ func TestLocalMountSetIncludesMockAgentWhenResolved(t *testing.T) {
 
 	if !containsPair(mountPairs(got.Mounts), "/host/bin/mock-agent->/usr/local/bin/mock-agent:ro") {
 		t.Errorf("mock-agent mount missing; mounts = %v", mountPairs(got.Mounts))
+	}
+}
+
+func TestBuildContainerConfigPassesLaunchContextAndProgressToAgentctlResolver(t *testing.T) {
+	cm := newCMTest(t)
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "launch")
+	var gotContext context.Context
+	var gotProgress []int
+	cm.resolveAgentctlBinary = func(resolverCtx context.Context, onProgress PrepareProgressCallback) (string, error) {
+		gotContext = resolverCtx
+		if onProgress == nil {
+			t.Fatal("agentctl resolver did not receive launch progress callback")
+		}
+		onProgress(PrepareStep{}, 0, 1)
+		return "/host/bin/agentctl", nil
+	}
+	config := ContainerConfig{
+		AgentConfig: newConfigStubAgent(),
+		InstanceID:  "0123456789abcdef",
+		OnProgress: func(_ PrepareStep, index, total int) {
+			gotProgress = append(gotProgress, index, total)
+		},
+	}
+
+	got, err := cm.buildContainerConfigWithContext(ctx, config)
+	if err != nil {
+		t.Fatalf("buildContainerConfigWithContext: %v", err)
+	}
+	if gotContext != ctx || gotContext.Value(contextKey{}) != "launch" {
+		t.Fatalf("resolver context = %v; want original launch context", gotContext)
+	}
+	if len(gotProgress) != 2 || gotProgress[0] != 1 || gotProgress[1] != 2 {
+		t.Fatalf("progress = %v; want forwarded step index 1 of 2", gotProgress)
+	}
+	if !containsPair(mountPairs(got.Mounts), "/host/bin/agentctl->/usr/local/bin/agentctl:ro") {
+		t.Fatalf("agentctl mount missing; mounts = %v", mountPairs(got.Mounts))
 	}
 }
 

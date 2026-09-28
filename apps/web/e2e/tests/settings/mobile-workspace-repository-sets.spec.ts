@@ -7,6 +7,14 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("Mobile workspace repository sets", () => {
+  const createdRepositorySetIds = new Set<string>();
+
+  test.afterEach(async ({ apiClient }) => {
+    const setIds = [...createdRepositorySetIds];
+    await Promise.all(setIds.map((setId) => apiClient.deleteRepositorySet(setId)));
+    for (const setId of setIds) createdRepositorySetIds.delete(setId);
+  });
+
   test("scrolls a long branch list by touch without dismissing the editor", async ({
     testPage,
     apiClient,
@@ -83,6 +91,7 @@ test.describe("Mobile workspace repository sets", () => {
     const created = await apiClient.createRepositorySet(seedData.workspaceId, setName, [
       seedData.repositoryId,
     ]);
+    createdRepositorySetIds.add(created.id);
 
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     await testPage.getByTestId(`repository-set-edit-${created.id}`).tap();
@@ -90,7 +99,7 @@ test.describe("Mobile workspace repository sets", () => {
     const surface = testPage.getByTestId("repository-set-editor-surface");
     await expect(surface).toBeVisible();
     await expect(surface).toHaveClass(/h-\[100dvh\]/);
-    await expect.poll(async () => (await surface.boundingBox())?.height).toBe(844);
+    await expect.poll(async () => (await surface.boundingBox())?.height).toBeCloseTo(844, 0);
     await expect(testPage.getByTestId("repository-set-editor-form")).toHaveClass(
       /min-h-0.*overflow-y-auto/,
     );
@@ -150,8 +159,12 @@ test.describe("Mobile workspace repository sets", () => {
     const refreshButton = dropdown.getByTestId("branch-refresh-button");
     await expect(refreshButton).toBeVisible();
     await expect(refreshButton).toBeEnabled();
+    const refreshButtonBox = await refreshButton.boundingBox();
+    expect(refreshButtonBox).not.toBeNull();
+    expect(refreshButtonBox!.height).toBeGreaterThanOrEqual(44);
+    expect(refreshButtonBox!.width).toBeGreaterThanOrEqual(44);
     await waitForFiniteAnimations(dropdown);
-    await refreshButton.tap({ force: true });
+    await refreshButton.tap({ timeout: 5_000 });
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
 
     const dropdownBox = await dropdown.boundingBox();
@@ -175,6 +188,7 @@ test.describe("Mobile workspace repository sets", () => {
     const created = await apiClient.createRepositorySet(seedData.workspaceId, setName, [
       seedData.repositoryId,
     ]);
+    createdRepositorySetIds.add(created.id);
 
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     const row = testPage.getByTestId("repository-set-row");

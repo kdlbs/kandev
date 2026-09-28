@@ -34,6 +34,7 @@ test.describe("Docker task-host LSP", () => {
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
     await expectFakeLspMarkerCount(testPage, 1, 30_000);
 
+    await testPage.keyboard.press("Escape");
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
     await testPage.keyboard.press("Control+Space");
@@ -211,6 +212,7 @@ test.describe("Docker task-host LSP", () => {
     );
     await expect.poll(activeModelUri).toBe(authoritativeModelUri);
 
+    await testPage.keyboard.press("Escape");
     const editorContent = testPage.locator(".monaco-editor:visible .view-lines");
     await editorContent.click();
     await testPage.keyboard.press("Control+End");
