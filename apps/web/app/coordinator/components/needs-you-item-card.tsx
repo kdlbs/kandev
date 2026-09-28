@@ -74,7 +74,9 @@ export function NeedsYouItemCard({
       data-testid={`needs-you-item-${item.id}`}
     >
       <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2">
+        {/* pr-2: the age ends this cell and Ask about this begins the next, so
+            without it the two sit 4px apart (mockup v2.1 `.itemhead` gap: 8px). */}
+        <CardTitle className="flex flex-wrap items-center gap-2 pr-2">
           <span>{head.identifier}</span>
           {head.stepName && (
             <span className="text-muted-foreground font-normal">{head.stepName}</span>
