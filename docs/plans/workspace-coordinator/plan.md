@@ -86,19 +86,23 @@ orders touch disjoint files except `internal/backendapp/coordinator.go`, where
 task 01 gives each later work order its own named registration function
 (conversation for task 03, subscribers for task 04, decisions for task 07).
 
-**G0 gates opening upstream PRs, not building.** Building starts when WP-0
-has passed Review, not when it merges. Work orders are built and reviewed on
-their branches while G0 is open; their upstream PRs open only after G0 is met,
-as the ADR's G0 Status section records. An objection at G0 re-plans the
-affected work orders.
+**One code PR.** Work orders are built and reviewed on their own branches,
+and each passed branch is merged into one integration branch,
+`coordinator/p1-integration`. Phase 1's code ships upstream as that one pull
+request ([#4029](https://github.com/kdlbs/kandev/pull/4029)); this design
+package ships as its own PR first. The owner chose one code PR on 2026-09-29:
+the feature is flagged off in prod, the repository squash-merges, and one
+branch avoids rebasing a dozen stacked branches after every merge.
 
-**Stacking while G0 is open.** WP-0's PR merges only once G0 is met, and CI
-requires a changed work order in a code PR, so until then tasks 01 and 05
-start from WP-0's branch and task 01's dependents start from task 01's branch.
-A work order with several predecessors starts from one of their branches with
-the others' reviewed branches merged in, as its Dependencies section says.
-When WP-0 merges, each branch rebases onto main, and again after each
-predecessor merges.
+**G0 gates leaving draft, not building.** Building starts when WP-0 has passed
+Review, not when it merges. The code PR stays a draft until G0 is met, as the
+ADR's G0 Status section records. An objection at G0 re-plans the affected
+work orders.
+
+**Branches.** Tasks 01 to 10 started from their predecessors' branches, as
+their Dependencies sections say. Tasks 11 and 12 start from the integration
+branch. The integration branch merges `main` and the design package's branch
+as they move; nothing is rebased onto `main` per work order.
 
 | Work order | Package | Size | Depends on | Result |
 | --- | --- | --- | --- | --- |
@@ -115,8 +119,7 @@ predecessor merges.
 | [task-12](task-12-review-follow-ups.md) | WP-4f | M | 08, 09 | The maintainer review's race, stale claim, approval guard and item reference are fixed |
 | [task-10](task-10-activity-display.md) | WP-4d | S | 11, 12 | The copilot panel shows a live status line and a collapsed tool chip; phase 1 complete |
 
-Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Each work order is its own
-PR, keeps `prod` off, and ships its tests. Every acceptance criterion of the
+Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Each work order is its own branch and review, keeps `prod` off, and ships its tests. Every acceptance criterion of the
 four requirement documents is owned by exactly one work order's frontmatter;
 where a criterion spans surfaces, the owner's body names the work orders that
 build the other surfaces.
