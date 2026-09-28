@@ -11,3 +11,12 @@ export function routePanelMouseDown(
   if (!target || target.closest(interactiveSelector)) return;
   ref.current?.focus({ preventScroll: true });
 }
+
+export function routePanelClick(
+  event: MouseEvent<HTMLDivElement>,
+  ref: RefObject<HTMLDivElement | null>,
+): void {
+  const target = event.target as HTMLElement | null;
+  if (!target || target.closest(interactiveSelector)) return;
+  requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
+}

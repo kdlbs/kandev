@@ -226,6 +226,14 @@ Timeout changes neither that fallback's semantics nor its separate initializatio
 Contention on `remoteInstanceLifecycleMu` or `streamWriteMu` is a separate wait from the unanswered request addressed here.
 Tests must establish that the peer received the request before measuring its response deadline.
 
+For a passthrough reset, lifecycle replaces the PTY under
+`passthroughLifecycleMu`, then releases that lock and waits for the replacement's
+first-idle callback to finish before returning. The callback needs the same
+lock. This keeps startup readiness from consuming the next workflow prompt's
+running state. The readiness wait honors caller cancellation and has a 60-second
+ceiling, matching initial stdin-prompt readiness. Failure returns through the
+existing reset-error path and prevents automatic prompt dispatch.
+
 ### Persist a visible failure
 
 The workflow reset returns an error through an error-bearing helper.

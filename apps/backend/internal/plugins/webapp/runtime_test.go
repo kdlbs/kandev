@@ -63,7 +63,7 @@ func TestRuntimeServesEntryWithSecurityHeadersAndCookiesDoNotReplaceCapability(t
 		t.Fatalf("CSP = %q", got)
 	}
 	for key, want := range map[string]string{
-		"Cache-Control":                "no-store",
+		"Cache-Control":                "no-store, no-transform",
 		"X-Content-Type-Options":       "nosniff",
 		"Referrer-Policy":              "no-referrer",
 		"Cross-Origin-Resource-Policy": "cross-origin",
@@ -75,6 +75,62 @@ func TestRuntimeServesEntryWithSecurityHeadersAndCookiesDoNotReplaceCapability(t
 	}
 	if got := response.Header().Get("Set-Cookie"); got != "" {
 		t.Fatalf("runtime set a cookie: %q", got)
+	}
+}
+
+// @covers AC-PLUGINS-ISOLATED-WEB-APPS-013.8
+func TestRuntimeNoTransformHeaders(t *testing.T) {
+	archive := canvasArchive(t, map[string]string{
+		"manifest.yaml": staticManifestYAML,
+		"ui/index.html": "<!doctype html><html><body>entry</body></html>",
+		"ui/app.js":     "window.__asset = true;",
+	})
+	pkg, err := ValidatePackage(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("ValidatePackage: %v", err)
+	}
+	artifacts, err := NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	artifact, err := artifacts.Put(pkg)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	manager := NewTokenManager(nil)
+	token, err := manager.Issue(CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", ReleaseID: "release-1", WebAppKey: "main",
+		Placement: "task-canvas", Artifact: artifact, Entry: "ui/index.html",
+	}, 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	runtime := NewRuntime(manager, artifacts, nil, nil)
+	runtime.SetProtocolHandler(func(w http.ResponseWriter, _ *http.Request, _ string, _ CapabilityBinding, _ string) {
+		SetProtocolHeaders(w, "")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	for _, test := range []struct {
+		name string
+		path string
+	}{
+		{name: "entry HTML", path: ""},
+		{name: "nested asset", path: "app.js"},
+		{name: "host bootstrap", path: "_kandev/host-runtime.js"},
+		{name: "protocol", path: "_kandev/v1/context"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			runtime.Serve(response, httptest.NewRequest(http.MethodGet, "/", nil), token, test.path)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %q", response.Code, response.Body.String())
+			}
+			if got := response.Header().Get("Cache-Control"); got != "no-store, no-transform" {
+				t.Errorf("Cache-Control = %q, want %q", got, "no-store, no-transform")
+			}
+		})
 	}
 }
 

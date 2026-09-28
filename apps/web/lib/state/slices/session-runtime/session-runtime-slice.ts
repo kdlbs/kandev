@@ -50,6 +50,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.promptUsage.bySessionId[sessionId];
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
+  delete state.launchWarning.bySessionId[sessionId];
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
 }
@@ -121,6 +122,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
+  launchWarning: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
@@ -533,6 +535,14 @@ export const createSessionRuntimeSlice: StateCreator<
   setSessionTodos: (sessionId, entries) =>
     set((draft) => {
       draft.sessionTodos.bySessionId[sessionId] = entries;
+    }),
+  setLaunchWarning: (sessionId, entry) =>
+    set((draft) => {
+      draft.launchWarning.bySessionId[sessionId] = entry;
+    }),
+  clearLaunchWarning: (sessionId) =>
+    set((draft) => {
+      delete draft.launchWarning.bySessionId[sessionId];
     }),
   ...buildUserShellActions(set),
 });

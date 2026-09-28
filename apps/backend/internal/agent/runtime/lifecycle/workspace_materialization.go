@@ -21,6 +21,8 @@ type WorkspaceRepositoryMaterialization struct {
 	Destination             string
 	BaseBranch              string
 	CheckoutBranch          string
+	PRNumber                int
+	QualifiedPRBase         *models.PRBase
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
 }
@@ -51,7 +53,13 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 		if name == "" || branchSlug == "" {
 			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
 		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution, CheckoutOptions: spec.CheckoutOptions, ContributionDestination: spec.ContributionDestination})
+		projection = append(projection, WorkspaceRepositoryMaterialization{
+			RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug,
+			BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch,
+			PRNumber: spec.PRNumber, QualifiedPRBase: spec.QualifiedPRBase,
+			RemoteContribution: spec.RemoteContribution, CheckoutOptions: spec.CheckoutOptions,
+			ContributionDestination: spec.ContributionDestination,
+		})
 	}
 	return projection, nil
 }
@@ -209,6 +217,8 @@ func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client w
 			Destination:             repository.Destination,
 			BaseBranch:              repository.BaseBranch,
 			CheckoutBranch:          repository.CheckoutBranch,
+			PRNumber:                repository.PRNumber,
+			QualifiedPRBase:         repository.QualifiedPRBase,
 			RemoteContribution:      repository.RemoteContribution,
 			CheckoutOptions:         repository.CheckoutOptions,
 			ContributionDestination: repository.ContributionDestination,

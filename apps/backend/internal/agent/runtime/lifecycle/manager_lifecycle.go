@@ -23,6 +23,57 @@ const (
 	containerStateRunning = "running"
 )
 
+type recoveryOutcomeSummary struct {
+	candidateCount          int
+	candidateCountKnown     bool
+	retrackedCount          int
+	notRetrackedDeadline    int
+	notRetrackedCanceled    int
+	notRetrackedTaskID      int
+	notRetrackedEnvironment int
+	notRetrackedAgent       int
+	notRetrackedTurnStatus  int
+	notRetrackedDuplicate   int
+}
+
+func (s recoveryOutcomeSummary) notRetrackedCount() int {
+	// retrackedCount should never exceed candidateCount; clamp to 0 defensively.
+	if !s.candidateCountKnown || s.candidateCount <= s.retrackedCount {
+		return 0
+	}
+	return s.candidateCount - s.retrackedCount
+}
+
+func (s recoveryOutcomeSummary) knownNotRetrackedCount() int {
+	return s.notRetrackedDeadline + s.notRetrackedCanceled + s.notRetrackedTaskID + s.notRetrackedEnvironment +
+		s.notRetrackedAgent + s.notRetrackedTurnStatus + s.notRetrackedDuplicate
+}
+
+func (s recoveryOutcomeSummary) unknownNotRetrackedCount() int {
+	unknown := s.notRetrackedCount() - s.knownNotRetrackedCount()
+	if unknown < 0 {
+		return 0
+	}
+	return unknown
+}
+
+func (s recoveryOutcomeSummary) logFields() []zap.Field {
+	return []zap.Field{
+		zap.Int("candidate_count", s.candidateCount),
+		zap.Bool("candidate_count_known", s.candidateCountKnown),
+		zap.Int("retracked_count", s.retrackedCount),
+		zap.Int("not_retracked_count", s.notRetrackedCount()),
+		zap.Int("not_retracked_deadline", s.notRetrackedDeadline),
+		zap.Int("not_retracked_canceled", s.notRetrackedCanceled),
+		zap.Int("not_retracked_task_identity", s.notRetrackedTaskID),
+		zap.Int("not_retracked_task_environment", s.notRetrackedEnvironment),
+		zap.Int("not_retracked_agent_identity", s.notRetrackedAgent),
+		zap.Int("not_retracked_turn_status", s.notRetrackedTurnStatus),
+		zap.Int("not_retracked_duplicate_execution", s.notRetrackedDuplicate),
+		zap.Int("not_retracked_unknown", s.unknownNotRetrackedCount()),
+	}
+}
+
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
 	if m.executorRegistry == nil {
@@ -50,11 +101,24 @@ func (m *Manager) Start(ctx context.Context) error {
 	// hypothetical re-Start) never leaks into this pass's outcome.
 	m.resetRetrackedSessions()
 
-	// Read the live standalone recovery-inventory records (startup step 3,
-	// AC-EXECUTORS-SURVIVAL-002.8) before recovery contacts any control
-	// server, and hand them to every runtime's RecoverInstances unchanged.
+	// Read every runtime-owned startup recovery record before contacting any
+	// endpoint. Remote plugin rows carry decrypted auth tokens only in memory.
 	startup.BeginStep(ctx, startup.StepSessionsRecovery)
 	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
+	pluginRecords, pluginListErr := m.ListLivePluginExecutorsRunning(ctx)
+	if listErr == nil && pluginListErr != nil {
+		listErr = pluginListErr
+	}
+	if listErr == nil {
+		for _, record := range pluginRecords {
+			if record == nil {
+				continue
+			}
+			record.TransientAuthToken = m.revealRuntimeSecret(ctx, record.Metadata, MetadataKeyAuthTokenSecret)
+		}
+		records = append(records, pluginRecords...)
+	}
+	recoveryOutcome := recoveryOutcomeSummary{candidateCountKnown: listErr == nil}
 	m.runRecoveryErr = listErr
 	if listErr != nil {
 		// A failed read leaves the record set unknown, which is not the same
@@ -68,7 +132,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		// adopted server that cannot be enumerated: report no recovered
 		// instances, stop no instance, and leave every record to the existing
 		// stale-execution repair path.
-		m.logger.Error("skipping recovery: live standalone recovery-inventory records could not be read, so no live instance can be correlated to a session",
+		m.logger.Error("skipping recovery: live executor recovery inventory could not be read, so no runtime can be correlated to a session",
 			zap.Error(listErr))
 		records = nil
 		// The corpus is unknown, not zero: a failed read is not the same as
@@ -103,6 +167,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// only backend that reads them, so this narrows nothing else.
 	records = recoverableRecords(records, guardedSessions)
 	if listErr == nil {
+		recoveryOutcome.candidateCount = len(records)
 		startup.SetTotal(ctx, startup.StepSessionsRecovery, int64(len(records)))
 	}
 
@@ -141,6 +206,11 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.logger.Warn("recovery deadline elapsed before this record could be reconstructed; treating as not re-tracked",
 					zap.String("instance_id", ri.InstanceID),
 					zap.String("session_id", ri.SessionID))
+				if errors.Is(recoveryCtx.Err(), context.DeadlineExceeded) {
+					recoveryOutcome.notRetrackedDeadline++
+				} else if errors.Is(recoveryCtx.Err(), context.Canceled) {
+					recoveryOutcome.notRetrackedCanceled++
+				}
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
@@ -154,6 +224,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				// execution-profile column, carried onto ri by
 				// buildRecoveredInstances -- never the adopted instance.
 				AgentProfileID:       ri.AgentProfileID,
+				ExecutorType:         getMetadataString(ri.Metadata, MetadataKeyExecutorType),
 				ContainerID:          ri.ContainerID,
 				ContainerIP:          ri.ContainerIP,
 				WorkspacePath:        ri.WorkspacePath,
@@ -193,6 +264,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.logger.Error("refusing to re-track recovered execution: task identity was not present in the recovery-inventory record",
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID))
+				recoveryOutcome.notRetrackedTaskID++
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
@@ -211,6 +283,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID),
 					zap.Error(err))
+				recoveryOutcome.notRetrackedEnvironment++
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
@@ -237,6 +310,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("session_id", execution.SessionID),
 					zap.String("agent_profile_id", execution.AgentProfileID),
 					zap.Error(err))
+				recoveryOutcome.notRetrackedAgent++
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
@@ -252,6 +326,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.logger.Error("refusing to re-track recovered execution: turn status could not be retrieved",
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID))
+				recoveryOutcome.notRetrackedTurnStatus++
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
@@ -278,6 +353,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("execution_id", execution.ID),
 					zap.String("session_id", execution.SessionID),
 					zap.Error(err))
+				recoveryOutcome.notRetrackedDuplicate++
 				if ri.Client != nil {
 					ri.Client.Close()
 				}
@@ -287,6 +363,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				continue
 			}
 			m.setRuntimeInterest(execution.SessionID, true)
+			recoveryOutcome.retrackedCount++
 			// AC-EXECUTORS-SURVIVAL-003.1: this execution is durably in the
 			// store as of the Add above, so its session is re-tracked from
 			// this point on regardless of which branch below applies the
@@ -361,6 +438,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// retained-unstoppable or stop-in-flight (AC-EXECUTORS-SURVIVAL-002.16,
 	// AC-EXECUTORS-SURVIVAL-003.7), which ReleaseAllExceptRetained leaves held.
 	m.recoveryGuard.ReleaseAllExceptRetained()
+	m.logger.Info("startup session recovery summary", recoveryOutcome.logFields()...)
 
 	// AC-EXECUTORS-SURVIVAL-003.6: this pass's recovery work (adoption,
 	// enumeration, and every recovered instance's reconstruction above) is

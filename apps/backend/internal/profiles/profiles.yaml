@@ -37,6 +37,14 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Retains supported language-server leases across browser disconnects. The
+  # bounded task-host lifecycle is enabled by default; this restart-required
+  # flag remains the operator kill switch.
+  KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
+
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.
   KANDEV_FEATURES_OFFICE:
@@ -91,20 +99,6 @@ features:
     prod: "false"
     dev:  "false"
     e2e:  "false"
-
-  # High-risk Office per-agent session identity: keys an Office task's session
-  # on the run's own agent instead of the runner seat, and binds an agent's
-  # decision re-evaluation to its own calling session. Default-on in every
-  # profile; it remains a high-risk, path-scoped change to durable session
-  # identity. A live (task_id, agent_profile_id) pair is guarded in-transaction
-  # on the office session creation path instead of by a table-level constraint.
-  # Pre-existing duplicate rows stay safe by selection, not migration. Disabling
-  # this toggle and restarting reverts to runner-seat binding and task-active-
-  # session decision re-evaluation.
-  KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
-    prod: "true"
-    dev:  "true"
-    e2e:  "true"
 
   # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
   # the answerable clarification bundles for the active workspace. Off in
@@ -220,6 +214,17 @@ ui:
 # don't belong in dev (would mask real interactions) and never in
 # prod (would leak test-only behaviour).
 e2eTuning:
+  # Holds a mock ACP cancellation through navigation and hydration without
+  # changing production cancellation behavior.
+  KANDEV_E2E_CANCEL_HOLD_DURATION:
+    prod: ""
+    dev:  ""
+    e2e:  "8s"
+  KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT:
+    prod: ""
+    dev:  ""
+    e2e:  "3s"
+
   # Auto-approve every permission request in agentctl so e2e specs
   # don't have to script the approval UI. Read by the agentctl child
   # process; the backend forwards its env to children, so setting it

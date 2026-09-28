@@ -1759,7 +1759,7 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 	}
 }
 
-func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(t *testing.T) {
+func TestService_DeleteTaskDefersResourceCleanupOnPartialStopFailure(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
@@ -1828,21 +1828,21 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 		t.Fatalf("unexpected StopExecution calls: %#v", calls)
 	}
 	waitForCleanupDone(t, svc)
-	if _, err := os.Stat(filepath.Join(quickChatDir, "session-ok")); !os.IsNotExist(err) {
-		t.Fatalf("successful session quick-chat directory should be removed, got %v", err)
+	if _, err := os.Stat(filepath.Join(quickChatDir, "session-ok")); err != nil {
+		t.Fatalf("successful session quick-chat directory should remain until retry, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
 		t.Fatalf("failed session quick-chat directory should remain: %v", err)
 	}
 	cleanedIDs := cleanup.cleanedIDs()
-	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-ok" {
-		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanedIDs)
+	if len(cleanedIDs) != 0 {
+		t.Fatalf("worktrees should remain until source capture can retry, got %#v", cleanedIDs)
 	}
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-failed"); err != nil {
 		t.Fatalf("failed session executor row should remain retryable: %v", err)
 	}
-	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-ok"); err == nil {
-		t.Fatal("successful session executor row should be removed")
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-ok"); err != nil {
+		t.Fatalf("successful session executor row should remain retryable until cleanup completes: %v", err)
 	}
 }
 
@@ -2816,6 +2816,23 @@ func (c *recordingWorktreeCleanup) GetAllByTaskID(_ context.Context, taskID stri
 		return c.worktreesByTaskID[taskID], nil
 	}
 	return c.worktrees, nil
+}
+
+func (c *recordingWorktreeCleanup) CaptureArchiveSourceManifests(
+	_ context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	manifests := make(map[string]worktree.ArchiveSourceManifest, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		manifests[wt.ID] = worktree.ArchiveSourceManifest{
+			TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID,
+			WorktreeID: wt.ID, RepositoryID: wt.RepositoryID,
+			HeadOID: "test-head", IndexStateSHA256: "test-index", PathPresent: true,
+		}
+	}
+	return manifests, nil
 }
 
 func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees []*worktree.Worktree) error {

@@ -331,3 +331,17 @@ acp/session-01/normalized-acp.jsonl
   description. The bootstrap route never waits for frontend collection.
   The task-context copy retains the existing 24-hour cleanup window so a newly
   launched agent can read it.
+
+## Expected setup-script omissions
+
+AC .12 applies the logging severity contract to
+`internal/agent/runtime/lifecycle/preparer_script.go`. Change the comment-only
+branch in `resolvePreparerSetupScript` to debug severity. Retain its current
+structured identity fields and omit script content. This includes both default
+and explicit comment-only scripts.
+
+Keep `isScriptEffectivelyEmpty`, placeholder resolution, returned values, and
+`runSetupScriptStep` failure warnings unchanged. No logger-wide filter or
+terminal HTTP suppression is part of this change.
+
+Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).

@@ -50,6 +50,7 @@ const (
 	CodePermissionDeniedByUser      Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
 	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
+	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
 )
@@ -152,14 +153,15 @@ func (e *Error) ShouldShortRetry() bool {
 
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	Phase         Phase
-	ProviderID    string
-	ExitCode      *int
-	StructuredErr error
-	HTTPStatus    int
-	ResetHint     *time.Time
-	Stderr        string
-	Stdout        string
+	Phase                     Phase
+	ProviderID                string
+	ExitCode                  *int
+	StructuredErr             error
+	HTTPStatus                int
+	ResetHint                 *time.Time
+	Stderr                    string
+	Stdout                    string
+	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -178,6 +180,12 @@ func Classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
+		return applyInvariants(e)
+	}
+	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
@@ -339,7 +347,7 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
-	case CodeManagedRuntimeNpmResolution:
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy:
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false

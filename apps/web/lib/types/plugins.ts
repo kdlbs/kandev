@@ -127,6 +127,61 @@ export interface PluginSettings {
   auto_update_default: boolean;
 }
 
+export type PluginCapabilityApprovalState = "active" | "revoked";
+
+export interface PluginCapabilityApproval {
+  installation_id: string;
+  workspace_id: string;
+  revision: number;
+  manifest_digest: string;
+  capability_ids: string[];
+  state: PluginCapabilityApprovalState;
+  human_actor: string;
+  human_policy_version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginCapabilityApprovalEvent {
+  audit_id: string;
+  installation_id: string;
+  workspace_id: string;
+  before_revision: number;
+  after_revision: number;
+  before_digest: string;
+  after_digest: string;
+  actor: string;
+  reason: string;
+  type: "grant" | "narrow" | "revoke" | "upgrade_review";
+  observed_at: string;
+}
+
+export interface PluginCapabilityApprovalContext {
+  installation_id: string;
+  workspace_id: string;
+  manifest_digest: string;
+  declared_capability_ids: string[];
+  approval: PluginCapabilityApproval | null;
+  audit_events: PluginCapabilityApprovalEvent[];
+  requires_review: boolean;
+}
+
+export interface UpdatePluginCapabilityApprovalInput {
+  workspace_id: string;
+  expected_revision: number;
+  manifest_digest: string;
+  capability_ids: string[];
+  reason: string;
+  audit_id: string;
+}
+
+export interface RevokePluginCapabilityApprovalInput {
+  workspace_id: string;
+  expected_revision: number;
+  reason: string;
+  audit_id: string;
+}
+
 /**
  * Derived install state of a marketplace catalog entry relative to what is
  * installed locally. Mirrors marketplace.InstallState

@@ -230,6 +230,7 @@ func (m *mockRepository) UpdateTaskRepositoryComparisonTarget(
 	string,
 	*models.ComparisonTarget,
 	*models.ComparisonTarget,
+	bool,
 ) (*models.TaskRepository, bool, error) {
 	return nil, false, nil
 }
@@ -237,6 +238,7 @@ func (m *mockRepository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	context.Context,
 	string,
 	string,
+	bool,
 ) (*models.TaskRepository, bool, error) {
 	return nil, false, nil
 }
@@ -272,6 +274,12 @@ func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Mess
 }
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
+}
+
+// RehydrateMessagePayload is a no-op for the mock repository: none of its
+// callers construct messages with an externalized PayloadDigest.
+func (m *mockRepository) RehydrateMessagePayload(ctx context.Context, message *models.Message) error {
+	return nil
 }
 
 // GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
@@ -605,6 +613,24 @@ func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessio
 	return nil
 }
 func (m *mockRepository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
+	return nil
+}
+func (m *mockRepository) ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error) {
+	return nil, models.ErrExecutorReachabilityNotFound
+}
+func (m *mockRepository) ListExecutorReachability(ctx context.Context) ([]*models.ExecutorReachability, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error {
+	return nil
+}
+func (m *mockRepository) ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error {
+	return nil
+}
+func (m *mockRepository) DeleteExecutorReachability(ctx context.Context, executorID string) error {
 	return nil
 }
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {

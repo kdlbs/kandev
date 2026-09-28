@@ -114,8 +114,9 @@ describe("usePRCIPopover refresh indicator", () => {
     rerender({ enabled: true });
     await flushOpen();
 
-    // The feedback fetch has already resolved; the summary sync has not.
-    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    // The feedback read waits for the summary sync so an explicit refresh
+    // cannot race with a stale Actions response.
+    expect(getPRFeedbackMock).not.toHaveBeenCalled();
     expect(result.current.isRefreshing).toBe(true);
 
     await act(async () => {
@@ -123,6 +124,8 @@ describe("usePRCIPopover refresh indicator", () => {
       await sync.promise;
     });
 
+    await waitFor(() => expect(getPRFeedbackMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 

@@ -281,6 +281,23 @@ describe("MobileIntegrationsSection", () => {
     expect(screen.getByTestId("plugin-nav-item-hello")).toBeTruthy();
   });
 
+  it("excludes separately customized plugins and omitted destinations from the built-in section", () => {
+    mockAvailability({ githubReady: true, jiraConfigured: false, linearConfigured: true });
+    registerHelloIntegrationItem();
+    render(
+      createElement(MobileIntegrationsSection, {
+        onNavigate: vi.fn(),
+        includePlugins: false,
+        omitDestinations: ["linear"],
+        showSetup: true,
+      }),
+    );
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe("/github");
+    expect(screen.queryByRole("link", { name: HELLO_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Linear" })).toBeNull();
+    expect(screen.getByTestId("mobile-integration-settings")).toBeTruthy();
+  });
+
   it("renders nothing when there are no links and no plugin items", () => {
     mockAvailability({ githubReady: false, jiraConfigured: false, linearConfigured: false });
 

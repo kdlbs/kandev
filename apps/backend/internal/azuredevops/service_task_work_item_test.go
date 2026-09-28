@@ -10,7 +10,7 @@ type taskWorkItemClient struct{ fakeDetailClient }
 func TestTaskWorkItemAssociation(t *testing.T) {
 	client := &taskWorkItemClient{fakeDetailClient: fakeDetailClient{detail: &WorkItemDetail{WorkItem: WorkItem{ID: 101, Title: "Ship it", Project: "project-1", WebURL: "https://dev.azure.com/acme/p/_workitems/edit/101"}}}}
 	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
-	if _, err := store.db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
+	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')`); err != nil {

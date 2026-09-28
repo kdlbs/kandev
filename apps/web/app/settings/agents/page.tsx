@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
@@ -93,47 +94,41 @@ function InstalledAgentsHeader({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-      <div>
-        <h3 className="text-lg font-semibold">{t("agents:installedAgents")}</h3>
-        <p className="text-sm text-muted-foreground">{t("agents:installedAgentsDescription")}</p>
-      </div>
-      <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
-        <Button
-          variant="outline"
-          onClick={onOpenShell}
-          className={installedAgentsActionClassName}
-          data-testid="open-host-shell"
-        >
-          <IconTerminal2 className="h-4 w-4 mr-2" />
-          {t("agents:terminal")}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={onRescan}
-          disabled={rescanning}
-          className={installedAgentsActionClassName}
-          data-testid="rescan-agents-button"
-        >
-          {rescanning ? (
-            <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <IconRefresh className="h-4 w-4 mr-2" />
-          )}
-          {t("agents:rescan")}
-        </Button>
-        {onOpenTuiDialog && (
-          <Button
-            variant="outline"
-            onClick={onOpenTuiDialog}
-            className={installedAgentsActionClassName}
-            data-testid="new-agent-button"
-          >
-            <IconPlus className="h-4 w-4 mr-2" />
-            {t("agents:addTuiAgent")}
-          </Button>
+    <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
+      <Button
+        variant="outline"
+        onClick={onOpenShell}
+        className={installedAgentsActionClassName}
+        data-testid="open-host-shell"
+      >
+        <IconTerminal2 className="h-4 w-4 mr-2" />
+        {t("agents:terminal")}
+      </Button>
+      <Button
+        variant="outline"
+        onClick={onRescan}
+        disabled={rescanning}
+        className={installedAgentsActionClassName}
+        data-testid="rescan-agents-button"
+      >
+        {rescanning ? (
+          <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <IconRefresh className="h-4 w-4 mr-2" />
         )}
-      </div>
+        {t("agents:rescan")}
+      </Button>
+      {onOpenTuiDialog && (
+        <Button
+          variant="outline"
+          onClick={onOpenTuiDialog}
+          className={installedAgentsActionClassName}
+          data-testid="new-agent-button"
+        >
+          <IconPlus className="h-4 w-4 mr-2" />
+          {t("agents:addTuiAgent")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -210,13 +205,20 @@ function InstalledAgentsSection({
   const dynamicAgent = savedAgentsByName.get(DYNAMIC_AGENT_NAME);
 
   return (
-    <div className="space-y-4">
-      <InstalledAgentsHeader
-        rescanning={rescanning}
-        onOpenShell={() => setShellOpen(true)}
-        onOpenTuiDialog={canManage ? () => setTuiDialogOpen(true) : undefined}
-        onRescan={() => void handleRescan()}
-      />
+    <SettingsGroup
+      title={t("agents:installedAgents")}
+      description={t("agents:installedAgentsDescription")}
+      action={
+        <InstalledAgentsHeader
+          rescanning={rescanning}
+          onOpenShell={() => setShellOpen(true)}
+          onOpenTuiDialog={canManage ? () => setTuiDialogOpen(true) : undefined}
+          onRescan={() => void handleRescan()}
+        />
+      }
+      contentClassName="space-y-4 divide-y-0"
+    >
+      <HideDisabledAgentProfilesSetting />
       <HostShellDialog
         open={shellOpen}
         onOpenChange={setShellOpen}
@@ -274,7 +276,7 @@ function InstalledAgentsSection({
           </InstalledAgentCard>
         ))}
       </div>
-    </div>
+    </SettingsGroup>
   );
 }
 
@@ -332,6 +334,7 @@ function useAgentPageState() {
     model?: string;
     command: string;
     mcp_strategy?: string;
+    protocol?: string;
   }) => {
     await createCustomTUIAgent(data);
     const [discoveryResp, agentsResp, availableResp] = await Promise.all([
@@ -420,8 +423,6 @@ export default function AgentsSettingsPage() {
       </div>
 
       <Separator />
-
-      <HideDisabledAgentProfilesSetting />
 
       <InstalledAgentsSection
         canManage={canManage}

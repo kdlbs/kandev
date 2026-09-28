@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Separator } from "@kandev/ui/separator";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
-import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import {
   SettingsTabs,
   SettingsTabsList,
@@ -21,17 +21,6 @@ import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system
 import { ToolPayloadRetentionCard } from "./tool-payload-retention-card";
 import { BACKUP_SQL_COMMAND, SystemRouteShell } from "./system-route-shell";
 
-function SectionHeading({ title, description }: { title: string; description?: string }) {
-  return (
-    <div>
-      <h3 className="text-lg font-semibold">{title}</h3>
-      {description && (
-        <p className="mt-1 break-words text-sm text-muted-foreground">{description}</p>
-      )}
-    </div>
-  );
-}
-
 const DATA_LOGS_TARGET_TO_TAB = {
   [SYSTEM_SETTINGS_TARGETS.database]: "database",
   [SYSTEM_SETTINGS_TARGETS.toolPayloadRetention]: "database",
@@ -44,32 +33,39 @@ function DatabasePanel() {
   const backupDirectory = useAppStore((s) => s.system.database?.backup_directory);
   return (
     <div className="space-y-8">
-      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.database} className="space-y-4">
-        <SectionHeading
-          title={t("system:navDatabase")}
-          description={t("system:databasePageDescription")}
-        />
+      <SettingsGroup
+        title={t("system:navDatabase")}
+        description={t("system:databasePageDescription")}
+        discoveryTargetId={SYSTEM_SETTINGS_TARGETS.database}
+        contentClassName="divide-y-0"
+      >
         <DatabaseStatsCard />
-      </SettingsTarget>
+      </SettingsGroup>
       <Separator />
-      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}>
+      <SettingsGroup
+        title={t("system:toolPayload.title")}
+        description={t("system:toolPayload.description")}
+        discoveryTargetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}
+        contentClassName="divide-y-0"
+      >
         <ToolPayloadRetentionCard />
-      </SettingsTarget>
+      </SettingsGroup>
       <Separator />
-      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.backups} className="space-y-4">
-        <SectionHeading
-          title={t("system:navBackups")}
-          description={
-            backupDirectory
-              ? t("system:backupsPageDescription", {
-                  command: BACKUP_SQL_COMMAND,
-                  path: backupDirectory,
-                })
-              : undefined
-          }
-        />
+      <SettingsGroup
+        title={t("system:navBackups")}
+        description={
+          backupDirectory
+            ? t("system:backupsPageDescription", {
+                command: BACKUP_SQL_COMMAND,
+                path: backupDirectory,
+              })
+            : undefined
+        }
+        discoveryTargetId={SYSTEM_SETTINGS_TARGETS.backups}
+        contentClassName="divide-y-0"
+      >
         <BackupsTable />
-      </SettingsTarget>
+      </SettingsGroup>
     </div>
   );
 }
@@ -77,10 +73,14 @@ function DatabasePanel() {
 function LogsPanel() {
   const { t } = useTranslation();
   return (
-    <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.logs} className="space-y-4">
-      <SectionHeading title={t("system:navLogs")} description={t("settings:logsPageDescription")} />
+    <SettingsGroup
+      title={t("system:navLogs")}
+      description={t("settings:logsPageDescription")}
+      discoveryTargetId={SYSTEM_SETTINGS_TARGETS.logs}
+      contentClassName="divide-y-0"
+    >
       <LogViewer />
-    </SettingsTarget>
+    </SettingsGroup>
   );
 }
 

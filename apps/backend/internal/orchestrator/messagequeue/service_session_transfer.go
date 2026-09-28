@@ -170,6 +170,14 @@ func (s *Service) prepareDurableSessionTransfer(
 	}
 	entryIDs = append(entryIDs, dispatchEntryIDs...)
 	attachmentIDs = append(attachmentIDs, dispatchAttachments...)
+	claimEntryIDs, claimAttachments, err := s.snapshotPendingSendNowClaimTransfer(
+		ctx, taskID, oldSessionID, seenEntryIDs, seenAttachmentIDs,
+	)
+	if err != nil {
+		return err
+	}
+	entryIDs = append(entryIDs, claimEntryIDs...)
+	attachmentIDs = append(attachmentIDs, claimAttachments...)
 	cleanupEntryIDs, cleanupAttachments, cleanupLocators, err := s.snapshotAttachmentCleanupTransfer(
 		ctx, taskID, oldSessionID, seenEntryIDs, seenAttachmentIDs,
 	)
@@ -206,6 +214,43 @@ func (s *Service) prepareDurableSessionTransfer(
 		}
 	}
 	return nil
+}
+
+func (s *Service) snapshotPendingSendNowClaimTransfer(
+	ctx context.Context,
+	taskID, sessionID string,
+	seenEntryIDs, seenAttachmentIDs map[string]struct{},
+) ([]string, []string, error) {
+	if !s.PendingSendNowClaimPersistenceAvailable() {
+		return nil, nil, nil
+	}
+	claims, err := s.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot pending Send Now claims for transfer: %w", err)
+	}
+	entryIDs := make([]string, 0)
+	attachmentIDs := make([]string, 0)
+	for _, pending := range claims {
+		claim := pending.Claim
+		if claim.Dispatch.SessionID != sessionID ||
+			(taskID != "" && claim.Dispatch.TaskID != "" && claim.Dispatch.TaskID != taskID) {
+			continue
+		}
+		for _, source := range claim.Sources {
+			if source.SessionID != sessionID || (taskID != "" && source.TaskID != taskID) {
+				continue
+			}
+			if source.ID != "" {
+				if _, seen := seenEntryIDs[source.ID]; !seen {
+					entryIDs = append(entryIDs, source.ID)
+					seenEntryIDs[source.ID] = struct{}{}
+				}
+			}
+			attachmentIDs = appendTransferAttachmentIDs(attachmentIDs, seenAttachmentIDs, source.Attachments)
+		}
+		attachmentIDs = appendTransferAttachmentIDs(attachmentIDs, seenAttachmentIDs, claim.Dispatch.Attachments)
+	}
+	return entryIDs, attachmentIDs, nil
 }
 
 func (s *Service) snapshotPendingDispatchTransfer(

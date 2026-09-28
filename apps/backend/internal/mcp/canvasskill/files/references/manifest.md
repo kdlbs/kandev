@@ -67,10 +67,11 @@ the old direct requests cannot continue under the old binding.
 
 Capabilities are declarations, not grants. Use `api_read` for `tasks` and
 `workflows`, `api_write` for `tasks` and `messages`, `events` for event
-subscriptions, and `state: true` for instance state. The owner-authorized
-first release can receive only these supported task-scoped grants. The
-operator reviews a later permission increase, an imported package, or a
-workspace promotion. Request only the capabilities used by the application.
+subscriptions, and `state: true` for instance state. The first owner-authorized
+release can receive only its declared supported permissions, with Kandev data
+limited to the current workspace. The canvas remains placed in its creating
+task until promotion. Imported packages and later permission increases need
+human review. Request only the capabilities used by the application.
 
 The package must include the declared entry document and every local asset it
 references. Bundle executable dependencies. A build tool, package manager, or

@@ -7,6 +7,7 @@ import {
   restoreSessionCapacitySettings,
   SESSION_CAPACITY_SETTINGS_PATH,
 } from "../../helpers/session-capacity-settings";
+import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
 
 let baseline: SessionCapacitySettingsValue | undefined;
 
@@ -33,6 +34,7 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
     .getByTestId("settings-index")
     .getByRole("link", { name: /^Task Behavior/ })
     .click();
+  await openTaskBehaviorRuntime(testPage);
 
   const card = testPage.getByTestId("session-capacity-settings");
   await expect(card).toBeVisible();
@@ -71,6 +73,7 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
   await expect(saveBar).not.toBeVisible();
 
   await testPage.reload();
+  await openTaskBehaviorRuntime(testPage);
   await expect(card.getByTestId("session-capacity-enabled")).toHaveAttribute(
     "aria-checked",
     "true",
@@ -85,6 +88,7 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
     .tap();
   await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
   await testPage.reload();
+  await openTaskBehaviorRuntime(testPage);
   await expect(card.getByTestId("session-capacity-enabled")).toHaveAttribute(
     "aria-checked",
     "false",

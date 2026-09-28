@@ -49,6 +49,8 @@ type fakeStore struct {
 	nextAgentID          int
 	nextProfID           int
 	getByNameErr         error
+	createAgentErr       error
+	createAgentHook      func()
 	listAgentsErr        error
 	listProfErr          map[string]error
 	duplicateProfErr     error
@@ -146,6 +148,12 @@ func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	if a.ID == "" {
 		f.nextAgentID++
 		a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	}
+	if f.createAgentHook != nil {
+		f.createAgentHook()
+	}
+	if f.createAgentErr != nil {
+		return f.createAgentErr
 	}
 	stored := copyAgent(a)
 	f.agents[a.ID] = stored
@@ -291,6 +299,21 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 	}
 	f.updated = append(f.updated, copyProfile(stored))
 	return nil
+}
+
+func (f *fakeStore) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	profile, err := f.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model != "" {
+		return false, err
+	}
+	profile.Model = model
+	if err := f.UpdateAgentProfile(ctx, profile); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (f *fakeStore) UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error) {

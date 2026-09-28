@@ -265,7 +265,7 @@ describe("TaskItem queue status", () => {
 });
 
 describe("TaskItem interrupted icon", () => {
-  it("shows the red interrupted icon for a task marked interrupted after a restart", () => {
+  it("shows the warning triangle for a task marked interrupted after a restart", () => {
     renderTaskItem({
       state: "REVIEW",
       sessionState: "WAITING_FOR_INPUT",

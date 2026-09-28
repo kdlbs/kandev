@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { MouseEventHandler, PointerEventHandler, RefObject } from "react";
 import type {
+  ChatTopBarSlotProps as PublicChatTopBarSlotProps,
   ChatSubmitDecorationSlotProps as PublicChatSubmitDecorationSlotProps,
   HostReact as PublicHostReact,
   MainTopBarSlotProps as PublicMainTopBarSlotProps,
@@ -8,6 +10,9 @@ import type {
   PluginConversationMessage as PublicPluginConversationMessage,
   PluginConversationTurn as PublicPluginConversationTurn,
   PluginHostApi as PublicPluginHostApi,
+  PluginActionElement as PublicPluginActionElement,
+  PluginActionGroupProps as PublicPluginActionGroupProps,
+  PluginActionProps as PublicPluginActionProps,
   PluginNavSection as PublicPluginNavSection,
   PluginRegistry as PublicPluginRegistry,
   PluginSessionMessagesQuery as PublicPluginSessionMessagesQuery,
@@ -19,9 +24,12 @@ import type {
   RepositoryProviderRegistration as PublicRepositoryProviderRegistration,
   ReviewSummary as PublicReviewSummary,
   ReviewTaskAssociation as PublicReviewTaskAssociation,
+  TaskMenuActionRegistration as PublicTaskMenuActionRegistration,
+  TaskMenuSubItemRegistration as PublicTaskMenuSubItemRegistration,
   TaskPanelRegistration as PublicTaskPanelRegistration,
 } from "@kandev/plugin-sdk";
 import type {
+  ChatTopBarSlotProps as HostChatTopBarSlotProps,
   ChatSubmitDecorationSlotProps as HostChatSubmitDecorationSlotProps,
   MainTopBarSlotProps as HostMainTopBarSlotProps,
   PluginConversationApi,
@@ -29,6 +37,9 @@ import type {
   PluginConversationMessage,
   PluginConversationTurn,
   PluginHostApi,
+  PluginActionElement,
+  PluginActionGroupProps,
+  PluginActionProps,
   PluginNavSection,
   PluginRegistry,
   PluginSessionMessagesQuery,
@@ -39,6 +50,8 @@ import type {
   RepositoryProviderRegistration,
   ReviewItemSummary,
   ReviewTaskAssociation,
+  TaskMenuActionRegistration,
+  TaskMenuSubItemRegistration,
   TaskPanelRegistration,
 } from "./types";
 
@@ -51,6 +64,54 @@ type SameType<Left, Right> = Left extends Right ? (Right extends Left ? true : f
 type HasUseLayoutEffect = "useLayoutEffect" extends keyof PublicHostReact ? true : false;
 type HasPromptMentionText = "PromptMentionText" extends keyof PublicPluginUIApi ? true : false;
 type HasConversationApi = "conversation" extends keyof PublicPluginHostApi ? true : false;
+type HasTaskMenuItems = "items" extends keyof PublicTaskMenuActionRegistration ? true : false;
+type HasActionClassName = "className" extends keyof PublicPluginActionProps ? true : false;
+type ActionIsCallable = PublicPluginUIApi["Action"] extends (
+  props: PublicPluginActionProps,
+) => unknown
+  ? true
+  : false;
+type FeatureDetectablePluginUI = Pick<PublicPluginUIApi, "Button"> &
+  Partial<Pick<PublicPluginUIApi, "Action">>;
+
+const reactActionClick: MouseEventHandler<HTMLButtonElement> = (event) =>
+  event.currentTarget.click();
+const reactActionPointerDown: PointerEventHandler<HTMLButtonElement> = (event) =>
+  event.currentTarget.setPointerCapture(event.pointerId);
+const reactActionRef: RefObject<HTMLButtonElement | null> = { current: null };
+const pluginActionConsumerProps: PublicPluginActionProps = {
+  label: "Localized action name",
+  onClick: reactActionClick,
+  onPointerDown: reactActionPointerDown,
+  ref: reactActionRef,
+};
+
+const legacyHostUIConsumer: FeatureDetectablePluginUI = { Button: {} };
+const actionCapableHostUIConsumer: FeatureDetectablePluginUI = {
+  Button: {},
+  Action: (props) => props.label,
+};
+
+function hasStandardAction(ui: FeatureDetectablePluginUI): boolean {
+  return typeof ui.Action === "function";
+}
+
+// A registration that predates submenus must keep compiling unchanged, and the
+// submenu shape must be expressible: that pair is the whole compatibility story
+// of the optional `items` field.
+const flatOnlyTaskMenuAction: PublicTaskMenuActionRegistration = {
+  id: "legacy",
+  label: "Legacy",
+  group: "primary",
+  run: () => {},
+};
+const submenuTaskMenuAction: PublicTaskMenuActionRegistration = {
+  id: "submenu",
+  label: "Submenu",
+  group: "primary",
+  items: () => [{ id: "child", label: "Child", run: () => {} }],
+  run: () => {},
+};
 
 const legacyTaskPanelRegistration: PublicTaskPanelRegistration = {
   id: "legacy",
@@ -86,6 +147,10 @@ describe("public plugin SDK", () => {
     const mainTopBarSlotPropsAreCanonical: SameType<
       HostMainTopBarSlotProps,
       PublicMainTopBarSlotProps
+    > = true;
+    const chatTopBarSlotPropsAreCanonical: SameType<
+      HostChatTopBarSlotProps,
+      PublicChatTopBarSlotProps
     > = true;
     const chatSubmitDecorationSlotPropsAreCanonical: SameType<
       HostChatSubmitDecorationSlotProps,
@@ -138,6 +203,7 @@ describe("public plugin SDK", () => {
     expect(associationIsCanonical).toBe(true);
     expect(navSectionIsCanonical).toBe(true);
     expect(mainTopBarSlotPropsAreCanonical).toBe(true);
+    expect(chatTopBarSlotPropsAreCanonical).toBe(true);
     expect(chatSubmitDecorationSlotPropsAreCanonical).toBe(true);
     expect(conversationMessageIsCanonical).toBe(true);
     expect(conversationTurnIsCanonical).toBe(true);
@@ -155,5 +221,54 @@ describe("public plugin SDK", () => {
     expect(legacyTaskPanelRegistration.title).toBe("Legacy");
     expect(publicHostContract).toBeTypeOf("function");
     expect(publicRegistryContract).toBeTypeOf("function");
+  });
+});
+
+// The registrations this feature adds to the public SDK. A plugin author
+// imports these names verbatim, and the host's runtime-facing types must stay
+// identical to them, including the optional `items` field.
+describe("task menu submenu SDK contract", () => {
+  it("is canonical in both directions", () => {
+    const taskMenuActionRegistrationIsCanonical: SameType<
+      TaskMenuActionRegistration,
+      PublicTaskMenuActionRegistration
+    > = true;
+    const taskMenuSubItemRegistrationIsCanonical: SameType<
+      TaskMenuSubItemRegistration,
+      PublicTaskMenuSubItemRegistration
+    > = true;
+    const publicTaskMenuActionHasItems: HasTaskMenuItems = true;
+    expect(taskMenuActionRegistrationIsCanonical).toBe(true);
+    expect(taskMenuSubItemRegistrationIsCanonical).toBe(true);
+    expect(publicTaskMenuActionHasItems).toBe(true);
+    // A registration that predates submenus still compiles unchanged, and the
+    // submenu shape is expressible: that pair is the compatibility story of the
+    // optional `items` field.
+    expect(flatOnlyTaskMenuAction.run).toBeTypeOf("function");
+    expect(submenuTaskMenuAction.items).toBeTypeOf("function");
+  });
+});
+
+describe("plugin Action SDK contract", () => {
+  it("matches the host runtime and accepts standard React event handlers and refs", () => {
+    const actionPropsAreCanonical: SameType<PluginActionProps, PublicPluginActionProps> = true;
+    const actionGroupPropsAreCanonical: SameType<
+      PluginActionGroupProps,
+      PublicPluginActionGroupProps
+    > = true;
+    const actionElementIsCanonical: SameType<PluginActionElement, PublicPluginActionElement> = true;
+    const actionHasNoStyleOverride: HasActionClassName = false;
+    const actionIsAvailable: ActionIsCallable = true;
+    expect(actionPropsAreCanonical).toBe(true);
+    expect(actionGroupPropsAreCanonical).toBe(true);
+    expect(actionElementIsCanonical).toBe(true);
+    expect(actionHasNoStyleOverride).toBe(false);
+    expect(actionIsAvailable).toBe(true);
+    expect(pluginActionConsumerProps.onPointerDown).toBe(reactActionPointerDown);
+  });
+
+  it("supports runtime feature detection for hosts before Action was added", () => {
+    expect(hasStandardAction(legacyHostUIConsumer)).toBe(false);
+    expect(hasStandardAction(actionCapableHostUIConsumer)).toBe(true);
   });
 });

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/npmresolution"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -259,13 +260,28 @@ func (s *AgentUpdateJobStore) run(
 
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
+	useNative := spec.NativeBinaryOnPath()
 	prepareCommand := spec.CacheUpdateCommand()
 	if exactTarget {
 		prepareCommand = spec.CacheUpdateCommand(target)
 	}
-	err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-	flusher.flush()
-	if err != nil {
+	if useNative {
+		prepareCommand = spec.NativeUpdateCommand(target)
+	}
+	packageSpec := ""
+	if !useNative {
+		if exactTarget {
+			packageSpec = spec.PackageSpec(target)
+		} else {
+			packageSpec = spec.PackageSpec("")
+		}
+	}
+	err = runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
+	if err != nil && !useNative {
+		if isManagedRuntimeNpmPolicyError(err) {
+			s.finishFailed(job, ctx, err, ref)
+			return
+		}
 		flusher.append("managed runtime cache appears stale; repairing execution cache\n")
 		flusher.flush()
 		if repairErr := s.updater.InvalidateExecutionCache(ctx, spec.Package); repairErr != nil {
@@ -274,8 +290,7 @@ func (s *AgentUpdateJobStore) run(
 		}
 		flusher.append("retrying managed runtime update\n")
 		flusher.flush()
-		err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-		flusher.flush()
+		err = runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
 		if err != nil {
 			s.finishFailed(job, ctx, fmt.Errorf("update runtime after cache repair: %w", err), ref)
 			return
@@ -283,11 +298,7 @@ func (s *AgentUpdateJobStore) run(
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)
-	refreshCommand := spec.CachedACPCommand()
-	if exactTarget {
-		refreshCommand = spec.ACPCommand(target)
-	}
-	caps, refreshErr := s.updater.Refresh(ctx, job.AgentName, refreshCommand)
+	caps, refreshErr := s.updater.Refresh(ctx, job.AgentName, spec.RefreshCommand(target))
 	s.finishRefresh(job, ctx, caps, refreshErr, ref)
 }
 
@@ -346,10 +357,21 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 ) {
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
+	useNative := spec.NativeBinaryOnPath()
 	prepareCommand := spec.CacheUpdateCommand(target)
-	err := s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-	flusher.flush()
-	if err != nil {
+	if useNative {
+		prepareCommand = spec.NativeUpdateCommand(target)
+	}
+	packageSpec := ""
+	if !useNative {
+		packageSpec = spec.PackageSpec(target)
+	}
+	err := runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
+	if err != nil && !useNative {
+		if isManagedRuntimeNpmPolicyError(err) {
+			s.finishFailed(job, ctx, err, ref)
+			return
+		}
 		flusher.append("managed runtime cache appears stale; repairing exact execution cache\n")
 		flusher.flush()
 		var repairErr error
@@ -364,8 +386,7 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		}
 		flusher.append("retrying managed runtime update\n")
 		flusher.flush()
-		err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-		flusher.flush()
+		err = runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
 		if err != nil {
 			s.finishFailed(job, ctx, fmt.Errorf("update runtime after cache repair: %w", err), ref)
 			return
@@ -373,7 +394,7 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)
-	caps, probeErr := candidate.Probe(ctx, job.AgentName, spec.ACPCommand(target))
+	caps, probeErr := candidate.Probe(ctx, job.AgentName, spec.RefreshCommand(target))
 	if probeErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("probe runtime candidate: %w", probeErr), ref)
 		return
@@ -405,6 +426,45 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 	s.mu.Unlock()
 	candidate.PublishCapabilities(job.AgentName, caps)
 	s.finishActivated(job, target, ref)
+}
+
+const managedRuntimeUpdateDiagnosticLimit = 64 * 1024
+
+type managedRuntimeNpmPolicyError struct {
+	packageSpec string
+}
+
+func (e *managedRuntimeNpmPolicyError) Error() string {
+	return fmt.Sprintf(
+		"managed runtime package %s blocked by npm release-age policy (%s)",
+		e.packageSpec,
+		npmresolution.ReleaseDateMarker,
+	)
+}
+
+func isManagedRuntimeNpmPolicyError(err error) bool {
+	var policyErr *managedRuntimeNpmPolicyError
+	return errors.As(err, &policyErr)
+}
+
+func runManagedRuntimeUpdate(
+	ctx context.Context,
+	updater RuntimeUpdater,
+	command agents.Command,
+	packageSpec string,
+	flusher *updateOutputFlusher,
+) error {
+	diagnostic := newRingBuffer(managedRuntimeUpdateDiagnosticLimit)
+	err := updater.RunUpdate(ctx, command, func(chunk string) {
+		_, _ = diagnostic.Write([]byte(chunk))
+		flusher.append(chunk)
+	})
+	flusher.flush()
+	if err != nil && packageSpec != "" &&
+		npmresolution.MatchesRawReleaseAgePolicy(diagnostic.String(), packageSpec) {
+		return &managedRuntimeNpmPolicyError{packageSpec: packageSpec}
+	}
+	return err
 }
 
 func (s *AgentUpdateJobStore) setStatus(job *AgentUpdateJob, status dto.AgentUpdateJobStatus) {

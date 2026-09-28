@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -38,7 +39,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		t.Fatalf("upsert workflow sync config: %v", err)
 	}
 	updatedAt := time.Now().UTC().Truncate(time.Microsecond)
-	if err := replayed.RecordSyncStatus(ctx, "ws-1", true, "", []string{"warning"}, "hash-1", updatedAt); err != nil {
+	if err := replayed.RecordSyncStatus(ctx, "ws-1", true, "", []string{"warning"}, "hash-1", updatedAt, authcircuit.State{}); err != nil {
 		t.Fatalf("record workflow sync status: %v", err)
 	}
 	config, err := replayed.GetConfigForWorkspace(ctx, "ws-1")

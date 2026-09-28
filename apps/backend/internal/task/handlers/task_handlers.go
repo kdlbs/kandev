@@ -45,6 +45,7 @@ type TaskHandlers struct {
 	unarchiveRecoveryTimeout      time.Duration
 	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
 	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	logger                        *logger.Logger
 }
@@ -77,6 +78,10 @@ type agentProfileRecentUseRecorder interface {
 		contextValue usermodels.AgentProfileRecentUseContext,
 		profileID string,
 	) (*usermodels.AgentProfileRecentUse, error)
+}
+
+type sidebarTaskSettingsReader interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -113,6 +118,10 @@ func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsed
 
 func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
 	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) SetSidebarTaskSettingsReader(reader sidebarTaskSettingsReader) {
+	h.sidebarSettingsReader = reader
 }
 
 func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
@@ -190,12 +199,20 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
+	api.POST("/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
 	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
 	api.DELETE("/workspaces/:id/tasks/by-external-id", h.httpReleaseTaskExternalID)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/management-claim", h.httpGetTaskManagementClaim)
+	api.POST("/tasks/:id/management-claim", h.httpChangeTaskManagementClaim)
+	api.GET("/tasks/:id/completion-gate", h.httpGetTaskCompletionGate)
+	api.GET("/tasks/:id/completion-gate/history", h.httpListTaskCompletionGateHistory)
+	api.PUT("/tasks/:id/completion-gate/criteria", h.httpSetTaskCompletionCriteria)
+	api.PUT("/tasks/:id/completion-gate/criteria/:criterion_id/evidence", h.httpVerifyTaskCompletionCriterion)
+	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
@@ -208,6 +225,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
+	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
@@ -284,6 +302,11 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackDelete, h.wsDeleteTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackClear, h.wsClearTaskPreviewFeedback)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.

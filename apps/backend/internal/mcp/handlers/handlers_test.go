@@ -105,6 +105,7 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 		RepoEntities:     repo,
 		Executors:        repo,
 		Environments:     repo,
+		TaskEnvironments: repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
@@ -112,6 +113,30 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 }
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
+	t.Helper()
+	svc, repo, workflowCtrl, workflowRepo, _ := newTestTaskServiceWithWorkflowDB(t)
+	return svc, repo, workflowCtrl, workflowRepo
+}
+
+// newTestTaskServiceWithWorkflowDB is newTestTaskServiceWithWorkflow plus the
+// underlying shared *sqlx.DB, for tests that need to break one table
+// (workflow_steps, say) directly to force a genuine repository-layer error
+// without disturbing the rest of the fixture's tables.
+func newTestTaskServiceWithWorkflowDB(t *testing.T) (
+	*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository, *sqlx.DB,
+) {
+	svc, repo, workflowCtrl, workflowRepo, sqlxDB, _ := newTestTaskServiceWithWorkflowDBAndEventBus(t)
+	return svc, repo, workflowCtrl, workflowRepo, sqlxDB
+}
+
+func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
+	*service.Service,
+	*sqliterepo.Repository,
+	*workflowcontroller.Controller,
+	*workflowrepo.Repository,
+	*sqlx.DB,
+	*bus.MemoryEventBus,
+) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
@@ -150,7 +175,7 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
-	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
+	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB, eventBus
 }
 
 func TestHandleListWorkspacesAutomationIsScopedToPrincipalWorkspace(t *testing.T) {
@@ -2197,6 +2222,9 @@ func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string
 func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
 	return nil, nil
 }
+func (m *mockSessionLauncher) StartCreatedSessionForPeerMessage(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
+	return nil, nil
+}
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }
@@ -2601,6 +2629,89 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
 	assert.Equal(t, "develop", subtask.Repositories[0].BaseBranch,
 		"explicit per-repo base_branch must win over the top-level override")
+}
+
+// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.5
+func TestHandleCreateTask_InheritParentRejectsUnmatchedMaterializedRepository(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-admission",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-admission",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"repositories":     []map[string]interface{}{{"repository_id": "repo-parent", "base_branch": "main"}},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected admission must not create a child task")
+}
+
+func TestHandleCreateTask_InheritParentRejectsUnmatchedBaseBranchOverride(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-base-override",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-base-override",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"base_branch":      "main",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected branch override must not create a child task")
 }
 
 func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing.T) {

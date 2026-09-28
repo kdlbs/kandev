@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003
+  - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004
 created: 2026-08-30
 owners:
   - kandev
@@ -31,6 +32,7 @@ executor transition, and agent promotion or resume. It follows
 | `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001` | [Canonical environment and inventory](#canonical-environment-and-inventory) |
 | `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002` | [Recovery and path authority](#recovery-and-path-authority) |
 | `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003` | [Executor transition](#executor-transition), [Launch admission](#launch-admission) |
+| `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004` | [Concurrent session visibility](#concurrent-session-visibility) |
 
 ## Canonical environment and inventory
 
@@ -130,6 +132,39 @@ The lifecycle manager retains a defense-in-depth guard: if a repo-backed
 `WorkspaceInfo` reaches execution creation without the validated-environment
 marker and exact selected environment identity, it refuses to create the
 execution. It never treats a non-empty path as sufficient proof.
+
+## Concurrent session visibility
+
+Multiple sessions of one task attach to a single canonical environment and its
+single physical worktree. Concurrent writing is permitted by design; this
+section adds no lock, no refusal, and no ordering between those writers. It
+makes the condition observable.
+
+Two seams start an agent process against an already-attached workspace:
+`Executor.LaunchPreparedSession` when it is asked to start the agent, and
+`Executor.resumeSession`. Both already hold the per-session lock and both know
+the task ID. Immediately before the process starts, each reads the task's
+sessions and counts siblings in a working state, excluding the session being
+started. The existing `sessionstate.IsWorking` predicate defines that state, so
+observation and the executor's own review reconciliation agree on one
+definition.
+
+A non-zero count emits a structured warning naming the admitting site, the
+session being started, and the sibling session IDs, and increments an expvar
+counter under `session_coresidency_*`. Labels carry the admitting site and, for
+skips, the reason; identifiers stay in the log entry and never become label
+values, so counter cardinality is bounded.
+
+The sibling read can fail. A failed read records a skip with its reason instead
+of a zero count, so a degraded observer is distinguishable from a task that
+genuinely has one live session. The read never blocks admission: an observation
+error is logged and the launch proceeds.
+
+The workflow profile-switch park policy reaches this condition without any user
+request. Parking leaves the source session in `WAITING_FOR_INPUT` with its
+runtime stopped but its conversation answerable, while the destination step's
+session runs. A later message to the parked session starts a second agent in
+the shared worktree. That is the path this observation is calibrated for.
 
 ## Persistence and projection
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  SETTINGS_TARGET_DISCLOSURE_OPEN_EVENT,
   SETTINGS_TARGET_ATTRIBUTE,
   SETTINGS_TARGET_HIGHLIGHT_ATTRIBUTE,
   createSettingsTargetRegistry,
@@ -120,7 +121,30 @@ describe("revealSettingsTarget", () => {
     expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
     expect(document.activeElement).toBe(marked);
   });
+});
 
+describe("revealSettingsTarget disclosures", () => {
+  it("opens enclosing native details before focusing a discovered control", () => {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    const target = document.createElement("div");
+    const input = document.createElement("input");
+    target.appendChild(input);
+    details.append(summary, target);
+    document.body.appendChild(details);
+    target.scrollIntoView = vi.fn();
+    const opened = vi.fn();
+    details.addEventListener(SETTINGS_TARGET_DISCLOSURE_OPEN_EVENT, opened);
+
+    revealSettingsTarget(target, { reducedMotion: true });
+
+    expect(details.open).toBe(true);
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(input);
+  });
+});
+
+describe("revealSettingsTarget settling", () => {
   it("re-centers the target when surrounding content grows while settling", () => {
     vi.useFakeTimers();
     let callback: ResizeObserverCallback | undefined;
@@ -198,4 +222,13 @@ describe("revealSettingsTarget", () => {
     resize(400);
     expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
   });
+});
+
+it("focuses the setting control rather than its optional info button", () => {
+  const row = document.createElement("div");
+  row.innerHTML = '<button data-settings-info="true">Info</button><input type="number" />';
+  document.body.append(row);
+  revealSettingsTarget(row, { settleDurationMs: 0 });
+  expect(document.activeElement).toBe(row.querySelector("input"));
+  row.remove();
 });

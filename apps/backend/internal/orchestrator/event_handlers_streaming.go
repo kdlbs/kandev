@@ -1309,11 +1309,10 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.Error(err))
 		}
 	}
-	// Work has resumed: a session entering STARTING/RUNNING clears the
-	// startup interruption marker and republishes the task so open clients
-	// drop the red interruption icon. No-op when the marker is absent.
+	// Entering STARTING/RUNNING only records a recovery attempt. The durable
+	// interruption marker is cleared after the provider confirms boot/readiness,
+	// so failed or cancelled attempts remain visible to the user.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
-		s.clearTaskInterruptedMarker(ctx, taskID)
 		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
 	if authoritativeUpdatedAt == nil {
@@ -1433,6 +1432,7 @@ func (s *Service) logTaskSessionStateWriteError(
 func (s *Service) transitionTaskSessionState(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	nextState models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
@@ -1448,6 +1448,7 @@ func (s *Service) transitionTaskSessionState(
 					admittedCtx,
 					taskID,
 					sessionID,
+					expectedState,
 					nextState,
 					errorMessage,
 					onChanged,
@@ -1463,6 +1464,9 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if expectedState != nil && session.State != *expectedState {
+		return false, session.State, nil
 	}
 	if isTerminalSessionState(session.State) || session.State == nextState {
 		return false, session.State, nil
@@ -1508,6 +1512,7 @@ func (s *Service) transitionBootstrapFailure(
 	taskID, sessionID, agentExecutionID string,
 	expectedState models.TaskSessionState,
 	expectedStamp string,
+	expectedStartAttemptID string,
 	errorValue models.LastAgentError,
 ) (bool, models.TaskSessionState, error) {
 	if s.messageQueue != nil {
@@ -1524,6 +1529,7 @@ func (s *Service) transitionBootstrapFailure(
 					agentExecutionID,
 					expectedState,
 					expectedStamp,
+					expectedStartAttemptID,
 					errorValue,
 				)
 				return err
@@ -1532,21 +1538,30 @@ func (s *Service) transitionBootstrapFailure(
 		}
 	}
 
-	committer, ok := s.repo.(bootstrapFailureCommitter)
-	if !ok {
-		return false, expectedState, fmt.Errorf(
-			"bootstrap failure requires an execution-fenced repository commit",
+	var changed bool
+	var updatedAt time.Time
+	var err error
+	if expectedStartAttemptID != "" {
+		committer, ok := s.repo.(bootstrapFailureAttemptCommitter)
+		if !ok {
+			return false, expectedState, fmt.Errorf(
+				"bootstrap failure requires a startup-attempt-fenced repository commit",
+			)
+		}
+		changed, updatedAt, err = committer.CommitBootstrapFailureIfCurrentAttempt(
+			ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, expectedStartAttemptID, errorValue,
+		)
+	} else {
+		committer, ok := s.repo.(bootstrapFailureCommitter)
+		if !ok {
+			return false, expectedState, fmt.Errorf(
+				"bootstrap failure requires an execution-fenced repository commit",
+			)
+		}
+		changed, updatedAt, err = committer.CommitBootstrapFailureIfCurrentExecution(
+			ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, errorValue,
 		)
 	}
-	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
-		ctx,
-		taskID,
-		sessionID,
-		agentExecutionID,
-		expectedState,
-		expectedStamp,
-		errorValue,
-	)
 	if err != nil || !changed {
 		return changed, expectedState, err
 	}
@@ -1759,6 +1774,26 @@ type bootstrapFailureCommitter interface {
 		expectedStamp string,
 		errorValue models.LastAgentError,
 	) (changed bool, updatedAt time.Time, err error)
+}
+
+type bootstrapFailureAttemptCommitter interface {
+	CommitBootstrapFailureIfCurrentAttempt(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		expectedStartAttemptID string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
+type startAttemptSessionUpdater interface {
+	UpdateTaskSessionIfCurrentStateWithStartAttempt(
+		context.Context,
+		*models.TaskSession,
+		models.TaskSessionState,
+		string,
+	) (bool, error)
 }
 
 type conditionalTaskSessionStateUpdater interface {
@@ -2280,9 +2315,8 @@ func (s *Service) setSessionStartingWithOptions(
 	}
 
 	// The launch path moves a session to STARTING without going through
-	// updateTaskSessionStateWithHook, so clear the interruption marker here
-	// too (no-op when absent).
-	s.clearTaskInterruptedMarker(ctx, taskID)
+	// updateTaskSessionStateWithHook. It records an attempt only; the
+	// interruption marker is cleared after confirmed provider readiness.
 	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
@@ -2293,14 +2327,39 @@ func (s *Service) setSessionStartingWithOptions(
 
 // clearTaskInterruptedMarker removes the startup interruption marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the red interruption icon. Called from the session-start
-// funnel when a session enters STARTING/RUNNING — work has resumed, so the
-// task is no longer interrupted. No-op when the marker is absent.
-func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+// clients drop the warning icon. Callers invoke it only after provider
+// readiness confirms that recovery succeeded. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(
+	ctx context.Context,
+	taskID string,
+	expectedMarker string,
+) {
 	if taskID == "" {
 		return
 	}
-	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	var (
+		removed bool
+		err     error
+	)
+	if strings.TrimSpace(expectedMarker) == "" {
+		// A recovery callback without a valid immutable marker snapshot fails
+		// closed. There is no safe unconditional removal path.
+		return
+	}
+	if remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKeyIfValue(context.Context, string, string, string) (bool, error)
+	}); ok {
+		removed, err = remover.RemoveTaskMetadataKeyIfValue(
+			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker,
+		)
+	} else {
+		// A read followed by an unconditional legacy removal is not a
+		// compare-and-set. Refuse to clear when the adapter cannot provide the
+		// guarded primitive so a delayed callback cannot erase a newer marker.
+		s.logger.Warn("skipping interrupted-marker clear without compare-and-set support",
+			zap.String("task_id", taskID))
+		return
+	}
 	if err != nil {
 		s.logger.Warn("failed to clear interrupted marker",
 			zap.String("task_id", taskID),
@@ -2322,9 +2381,9 @@ func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string)
 
 // clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the failure badge. Called from the same session-start funnel
-// as clearTaskInterruptedMarker: a session entering STARTING/RUNNING means an
-// agent did launch, so any earlier auto-start failure no longer applies.
+// clients drop the failure badge. It shares the session-start funnel with the
+// interruption marker, but remains clear at launch admission because it means
+// the auto-start request itself was accepted.
 // No-op when the marker is absent.
 func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
 	if taskID == "" {
@@ -2355,7 +2414,17 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) error {
-	changed, err := s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	var changed bool
+	var err error
+	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
+		updater, ok := s.repo.(startAttemptSessionUpdater)
+		if !ok {
+			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
+		}
+		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
+	} else {
+		changed, err = s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	}
 	if err != nil {
 		return err
 	}
@@ -2371,6 +2440,24 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	}
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
+	}
+	if latest.State == models.TaskSessionStateRunning {
+		return fmt.Errorf(
+			"session %s state advanced from %s to %s before full-row persistence: %w",
+			session.ID,
+			expected,
+			latest.State,
+			errors.Join(executor.ErrExecutionAlreadyRunning, executor.ErrSessionAdvancedToRunning),
+		)
+	}
+	if latest.State == models.TaskSessionStateStarting {
+		return fmt.Errorf(
+			"session %s state changed from %s to %s before full-row persistence: %w",
+			session.ID,
+			expected,
+			latest.State,
+			executor.ErrExecutionAlreadyRunning,
+		)
 	}
 	return fmt.Errorf(
 		"session %s state changed from %s to %s before full-row persistence",
@@ -2805,7 +2892,6 @@ func (s *Service) setQueuedSessionRunningForIdentity(
 	session.UpdatedAt = updatedAt
 	if oldState != models.TaskSessionStateRunning {
 		s.reconcileRunningTaskStateLocked(ctx, identity.TaskID, identity.SessionID)
-		s.clearTaskInterruptedMarker(ctx, identity.TaskID)
 		s.clearTaskAutoStartFailedMarker(ctx, identity.TaskID)
 		s.publishTaskSessionStateChanged(
 			ctx,

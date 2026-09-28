@@ -384,15 +384,12 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	}
 
 	// Attribute to the agent that actually ran the turn, not the task's
-	// assignee — the two diverge for a reviewer/approver turn. The event
-	// carries the acting agent's own office identity directly
+	// assignee. The event carries the acting agent's office identity directly
 	// (execution.officeProfileID(), captured at launch before step/routing
-	// overrides mutate the profile). The session-row lookup only reflects
-	// the acting agent when features.officeSessionIdentity is on — off by
-	// default in every shipped profile, it stores the assignee for every
-	// participant's session — so it is kept only as a fallback for events
-	// published before this field existed. Final fallback is the assignee,
-	// mirroring handlePromptUsage's log-and-continue fallback below.
+	// overrides mutate the profile). The session-row lookup remains a fallback
+	// for events published before the agent identity field existed. Final
+	// fallback is the assignee, mirroring handlePromptUsage's log-and-continue
+	// fallback below.
 	authorID := fields.AssigneeAgentProfileID
 	if data.AgentProfileID != "" {
 		authorID = data.AgentProfileID
@@ -1294,6 +1291,11 @@ func (s *Service) queueTaskAssignedRun(
 	if fields == nil || !fields.IsFromOffice {
 		return nil
 	}
+	// The current step must accept an auto-started run before this wake is
+	// queued. See shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if !shared.IsAssignmentWakeEligible(ctx, s.logger, s.repo, s.workflowStepGetter, taskID, "event_subscribers.queue_task_assigned_run") {
+		return nil
+	}
 	fellBackToStoredRunner := false
 	if agentProfileID == "" && fallbackToStoredRunner {
 		agentProfileID = fields.AssigneeAgentProfileID
@@ -1309,7 +1311,19 @@ func (s *Service) queueTaskAssignedRun(
 	} else {
 		key = dedupkeys.AssignmentKey(taskID, agentProfileID, *assignmentGeneration)
 	}
-	_, err = s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
+	err = s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
+	if err == nil {
+		return nil
+	}
+	// A confirmed operator pause is not a subscriber failure — record the
+	// occurrence so pause.Service.Resume or the recovery tick replays it
+	// once the workspace resumes (paused-assignment-replay), instead of
+	// the assignment silently going nowhere.
+	var pe *pausedQueueError
+	if errors.As(err, &pe) && pe.pause != nil {
+		s.RecordDeferredAssignment(ctx, taskID, pe.pause.ID)
+		return nil
+	}
 	return err
 }
 

@@ -38,6 +38,23 @@ describe("formatRelative (en, timeAgo-compatible)", () => {
   });
 });
 
+describe("formatRelative (ja)", () => {
+  const now = new Date(FORMAT_NOW).getTime();
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  afterAll(async () => {
+    await activateLocale("en");
+  });
+
+  it("uses Japanese catalog buckets", async () => {
+    await activateLocale("ja");
+    expect(formatRelative(ago(30_000), now)).toBe("たった今");
+    expect(formatRelative(ago(5 * 60_000), now)).toBe("5分前");
+    expect(formatRelative(ago(3 * 3_600_000), now)).toBe("3時間前");
+    expect(formatRelative(ago(2 * 86_400_000), now)).toBe("2日前");
+  });
+});
+
 describe("formatSidebarElapsedTime", () => {
   const now = new Date(FORMAT_NOW).getTime();
   const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString();
@@ -75,6 +92,7 @@ describe("formatSidebarElapsedTime", () => {
     ["zh-cn", "3周"],
     ["zh-hk", "3週"],
     ["zh-tw", "3週"],
+    ["ja", "3週間"],
     ["pseudo", "3ŵ"],
   ] as const)("uses the %s compact unit catalog", async (locale, expected) => {
     await activateLocale(locale);
@@ -147,6 +165,30 @@ describe("locale-aware Intl wrappers", () => {
     );
     expect(formatDate(date, dateOptions)).toBe(
       new Intl.DateTimeFormat(locale, dateOptions).format(new Date(date)),
+    );
+    await activateLocale("en");
+  });
+
+  it("passes ja to number and date formatters", async () => {
+    await activateLocale("ja");
+    const numberOptions: Intl.NumberFormatOptions = {
+      style: "currency",
+      currency: "JPY",
+      currencyDisplay: "code",
+    };
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    };
+    const date = FORMAT_DATE;
+
+    expect(formatNumber(1234.5, numberOptions)).toBe(
+      new Intl.NumberFormat("ja", numberOptions).format(1234.5),
+    );
+    expect(formatDate(date, dateOptions)).toBe(
+      new Intl.DateTimeFormat("ja", dateOptions).format(new Date(date)),
     );
     await activateLocale("en");
   });
@@ -285,5 +327,12 @@ describe("formatRelativeTime (locale awareness)", () => {
     expect(portuguese).not.toBe(english);
     expect(portuguese).toContain("3");
     expect(portuguese).toMatch(/horas/i);
+  });
+
+  it("renders Japanese relative time once ja is active", async () => {
+    await activateLocale("ja");
+    const japanese = formatRelativeTime(threeHoursAgo, now);
+    expect(japanese).toContain("3");
+    expect(japanese).toMatch(/時間/);
   });
 });

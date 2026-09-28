@@ -43,7 +43,7 @@ describe("sidebar task command parity", () => {
       "task-link",
       "task-detach",
       "task-move",
-      "task-send-workflow",
+      "task-change-workflow",
       PLUGIN_ACTION,
       "task-delete",
     ]);
@@ -74,9 +74,37 @@ describe("sidebar task command parity", () => {
     expect(ctx.onPin).toHaveBeenCalledTimes(1);
     expect(ctx.onDelete).toHaveBeenCalledTimes(1);
   });
+  // Regression: this map used to stamp every command with the task title, which
+  // silently overwrote the trigger label a plugin submenu child carries, so the
+  // value pluginCommandChoices computed never reached the palette row.
+  it("keeps a plugin command's own context and defaults the rest to the task title", () => {
+    const ctx = context({
+      plugins: [
+        { ...child, id: PLUGIN_ACTION, context: "Add tag..." },
+        { ...child, id: "plugin-flat" },
+      ],
+    });
+    const commands = buildSidebarTaskCommands(ctx);
+    expect(commands.find((c) => c.id === PLUGIN_ACTION)?.context).toBe("Add tag...");
+    expect(commands.find((c) => c.id === "plugin-flat")?.context).toBe("Task A");
+  });
+
   it("removes vanished plugin actions and unavailable choices on rebuild", () => {
     const ctx = context({ plugins: [], links: [], steps: [], workflows: [] });
     expect(buildSidebarTaskCommands(ctx).map((c) => c.id)).not.toContain(PLUGIN_ACTION);
     expect(buildSidebarTaskCommands(ctx).map((c) => c.id)).not.toContain("task-move");
+  });
+
+  it("does not offer workflow moves for Office-owned tasks", () => {
+    const commands = buildSidebarTaskCommands(
+      context({
+        task: {
+          ...context().task,
+          isFromOffice: true,
+        },
+      }),
+    );
+    expect(commands.map((command) => command.id)).not.toContain("task-move");
+    expect(commands.map((command) => command.id)).not.toContain("task-change-workflow");
   });
 });

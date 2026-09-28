@@ -1,12 +1,11 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { StartupPage } from "@/lib/types/http";
-import { SettingsCard } from "./settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
+import { useSettingsTargetRegistration } from "./settings-target-provider";
 
 /**
  * Holds catalog KEYS, not copy. A module-scope table is evaluated once at import,
@@ -42,59 +41,59 @@ export function StartupPageSettingsCard({
   onChange: (value: StartupPage) => void;
 }) {
   const { t } = useTranslation();
+  const registerTarget = useSettingsTargetRegistration(GENERAL_SETTINGS_TARGETS.startupPage);
   return (
-    <SettingsCard
-      isDirty={isDirty}
-      discoveryTargetId={GENERAL_SETTINGS_TARGETS.startupPage}
+    <div
+      ref={registerTarget}
+      className="space-y-4 py-3"
       data-testid="startup-page-settings-card"
+      data-settings-dirty={isDirty}
     >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:openKandevTo")}</CardTitle>
-        <CardDescription>{t("settings:thisAppliesWhenKandevStarts")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <RadioGroup
-          aria-label={t("settings:startupPage")}
-          value={value}
-          onValueChange={(next) => onChange(next as StartupPage)}
-          data-settings-dirty={isDirty}
-          className="gap-3"
-        >
-          {OPTIONS.map((option) => {
-            const labelId = `startup-page-${option.value}-label`;
-            const descriptionId = `startup-page-${option.value}-description`;
-            const selected = value === option.value;
-            return (
-              <Label
-                key={option.value}
-                htmlFor={`startup-page-${option.value}`}
-                className={`flex min-h-11 w-full min-w-0 cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
-                  selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
-                }`}
-              >
-                <RadioGroupItem
-                  id={`startup-page-${option.value}`}
-                  value={option.value}
-                  aria-labelledby={labelId}
-                  aria-describedby={descriptionId}
-                  className="mt-0.5 border border-muted-foreground/80 data-[state=checked]:border-primary"
-                />
-                <span className="min-w-0 space-y-1">
-                  <span id={labelId} className="block text-sm font-medium">
-                    {t(option.labelKey)}
-                  </span>
-                  <span
-                    id={descriptionId}
-                    className="block whitespace-normal break-words text-xs text-muted-foreground"
-                  >
-                    {t(option.descriptionKey)}
-                  </span>
+      <div>
+        <h4 className="text-sm font-semibold">{t("settings:openKandevTo")}</h4>
+        <p className="text-xs text-muted-foreground">{t("settings:thisAppliesWhenKandevStarts")}</p>
+      </div>
+      <RadioGroup
+        aria-label={t("settings:startupPage")}
+        value={value}
+        onValueChange={(next) => onChange(next as StartupPage)}
+        data-settings-dirty={isDirty}
+        className="gap-3"
+      >
+        {OPTIONS.map((option) => {
+          const labelId = `startup-page-${option.value}-label`;
+          const descriptionId = `startup-page-${option.value}-description`;
+          const selected = value === option.value;
+          return (
+            <Label
+              key={option.value}
+              htmlFor={`startup-page-${option.value}`}
+              className={`flex min-h-11 w-full min-w-0 cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
+              }`}
+            >
+              <RadioGroupItem
+                id={`startup-page-${option.value}`}
+                value={option.value}
+                aria-labelledby={labelId}
+                aria-describedby={descriptionId}
+                className="mt-0.5 border border-muted-foreground/80 data-[state=checked]:border-primary"
+              />
+              <span className="min-w-0 space-y-1">
+                <span id={labelId} className="block text-sm font-medium">
+                  {t(option.labelKey)}
                 </span>
-              </Label>
-            );
-          })}
-        </RadioGroup>
-      </CardContent>
-    </SettingsCard>
+                <span
+                  id={descriptionId}
+                  className="block whitespace-normal break-words text-xs text-muted-foreground"
+                >
+                  {t(option.descriptionKey)}
+                </span>
+              </span>
+            </Label>
+          );
+        })}
+      </RadioGroup>
+    </div>
   );
 }

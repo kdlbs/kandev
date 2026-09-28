@@ -30,6 +30,19 @@ type workflowJobKey struct {
 	Attempt int
 }
 
+type workflowAttentionCollector func(context.Context, Client, string, string, *PR) (*WorkflowAttention, error)
+
+type workflowAttentionCollectorContextKey struct{}
+
+func withWorkflowAttentionCollector(ctx context.Context, collector workflowAttentionCollector) context.Context {
+	return context.WithValue(ctx, workflowAttentionCollectorContextKey{}, collector)
+}
+
+func workflowAttentionCollectorFromContext(ctx context.Context) workflowAttentionCollector {
+	collector, _ := ctx.Value(workflowAttentionCollectorContextKey{}).(workflowAttentionCollector)
+	return collector
+}
+
 // ghWorkflowRun and its nested values are shared by the gh CLI and PAT
 // clients because both consume the same Actions REST response shape.
 type ghWorkflowRun struct {
@@ -177,6 +190,9 @@ func workflowAttentionUnknown(headSHA string) *WorkflowAttention {
 func collectWorkflowAttention(
 	ctx context.Context, client Client, owner, repo string, pr *PR,
 ) (*WorkflowAttention, error) {
+	if collector := workflowAttentionCollectorFromContext(ctx); collector != nil {
+		return collector(ctx, client, owner, repo, pr)
+	}
 	if pr == nil {
 		return workflowAttentionUnknown(""), nil
 	}

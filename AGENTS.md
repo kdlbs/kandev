@@ -26,7 +26,7 @@ apps/
 - **E2E**: Playwright (`cd apps/web && pnpm e2e:run` or the guarded `pnpm e2e:raw`). Local runners enforce one worker per shard and a memory-aware shard budget; do not pass all-worker overrides or overlap full suites. The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
-- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path.
+- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path. When `functions.exec` starts parallel long-running commands, retain every returned `session_id` and poll each handle to completion; do not discard a handle and infer status from a duplicate run.
 
 ### Worktrees and commit hooks
 
@@ -73,7 +73,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts. Stable default runtime archives for npm, Homebrew, Scoop, winget, Chocolatey, and Desktop contain host binaries plus a helper manifest; use `-full` for offline CLI, while containers and npm Nightlies remain full.
 
 ### Code Quality
 
@@ -132,10 +132,10 @@ line-anchored and will not see one buried in a `/** */` block. The pseudo-locale
 (Settings → General → Appearance, dev/e2e builds) is still the completeness check
 for copy no literal scan can see.
 
-**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk` and `zh-tw` are
+**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` and `ja` are
 complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
 dropped placeholder, or a value left identical to English. Adding user-facing
-copy means adding it in five languages; for the Traditional Chinese pair run
+copy means adding it in six languages; for the Traditional Chinese pair run
 `pnpm run i18n:zh-hant` rather than hand-translating. When the correct
 translation genuinely IS the English word, declare it in
 `src/locales/<locale>/_verbatim.json` with a reason — brand nouns, acronyms and
@@ -151,7 +151,7 @@ history and remains immutable.
 
 ### Knowledge
 
-- **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
+- **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology. Follow `docs/public/README.md` for content structure and long-page readability.
 - **Specifications:** Durable product context, requirements, and system designs
   live under `docs/specs/**`. New work uses
   `docs/specs/<system>/requirements/` and
@@ -171,20 +171,22 @@ history and remains immutable.
 ### Observability
 
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
+- Task-owned browser LSP continuity exposes `lsp_lease_active`, `lsp_lease_detached`, `lsp_lease_evicted_total`, and `lsp_lease_released_total`. Release reasons are the closed set `stop`, `editor_idle`, `detached_timeout`, `capacity`, `server_exit`, `runtime_stop`, and `backend_stop`; lease, task, session, execution, user, and language identifiers are never metric labels. The feature is default-on in shipped profiles; its restart-required runtime flag remains an operable kill switch until the later retirement work order.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
 - Office stall detection (REQ-OFFICE-STALL-VISIBILITY) lives under `office_stall_*`: `office_stall_stranded_signal_total` (labelled by `gate`, which names which of the two watchdog gate sites saw it), `office_stall_decision_waiting_total`, and `office_stall_detector_skipped_total` (labelled by `reason`, so a detector that fails closed is visible rather than silent). Detection only: these counters never accompany a transition, a synthesized decision, or a queued run, because Office tasks are surfaced and never reclaimed. Also emitted as structured zap logs.
 - Office session-termination suppression (REQ-OFFICE-SESSION-TERM) lives under `office_session_term_suppressed_total`, labelled by `reason` (one of `task_reassigned`, `participant_removed`, `participant_seat_claimed`) and `outcome` (`runner` or `seat` when the agent still holds that capacity, `read_failed` when the capacity read itself failed). It counts guarded terminations that left a session live, so a suppression is distinguishable from a path that never ran. Both dimensions are closed sets; no task, agent, step or session identifier is ever a label. Also emitted as structured zap logs.
-- Task-level stall detection (issue #3712) runs in the session reconciliation sweep (`internal/task/service/`, one-minute tick shared with the archived-session pass): an unarchived task holding an active session with no live execution behind it and no events/messages past `tasks.stallDetectionThreshold` (default 2h) emits a `task.stalled` event plus a `stalled_task` WARN, once per stall episode. At or beyond twice the threshold the sweep cancels the orphaned sessions (`error_message` = "orphaned session") through the archived pass's `finalizeCancelledSessions` transition scoped to the classified session IDs; the heal runs only when every active session of the task is orphaned and past the grace window (a live or merely-stalled sibling cancels nothing), and liveness is re-checked at the cancellation boundary. A stall past the grace window can therefore emit `task.stalled` and a `session.state_changed` in the same sweep; the cancel never depends on the detection event.
+- Office assignment-wake rate limiting (REQ-OFFICE-ASSIGN-RATE) lives under `office_assignment_rate_limit_total`, labelled by `reason` — one of `allowance_exhausted` (the wake was refused), `count_read_failed` (fail-open: the window count query errored), or `task_unattributed` (fail-open: the wake's task could not be determined). The label set is closed; no task, agent, or run identifier is ever a label. Also emitted as structured zap logs.
+- Task-level stall detection (issue #3712) runs in the session reconciliation sweep (`internal/task/service/`, one-minute tick shared with the archived-session pass): an unarchived task holding a non-idle active session with no live execution behind it and no events/messages past `tasks.stallDetectionThreshold` (default 2h) emits a `task.stalled` event plus a `stalled_task` WARN, once per stall episode. At or beyond twice the threshold the sweep conditionally settles classified interrupted sessions to `WAITING_FOR_INPUT`, preserving the same conversation and abandoning only the observed turn without a completion event; the recovery runs only when every active session of the task is execution-less and past the grace window (an idle waiting sibling blocks it), and liveness is re-checked at the recovery boundary. A stall past the grace window can therefore emit `task.stalled` and a `session.state_changed` in the same sweep; recovery never depends on the detection event. The separate restart pass applies the same guarded settlement per stale `STARTING`/`RUNNING` session, including rows without an executor record.
 
 ### GitHub Operations
 
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
-For multiline Markdown issue or PR bodies, write the body to a file and pass it
-with the relevant `gh ... --body-file <path>` option. Do not send escaped
-newlines through `--body`; GitHub will render them literally.
+For multiline Markdown issue or PR bodies, use `gh ... --body-file <path>`; never send escaped
+newlines through `--body`. After body edits, verify the live body because `gh pr edit` can no-op with
+a Projects-classic warning; use REST PATCH if needed and refresh PR evidence because edits enqueue checks.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call. In a shared worktree, a stale or locked `refs/remotes/origin/*` is not authoritative; read the remote SHA with `git ls-remote` and use an explicit `--force-with-lease=refs/heads/<branch>:<remote-sha>`.
 
 A branch in GitHub's merge queue cannot be updated; before an authorized fixup
 push, dequeue it, push the exact head, wait for required checks, and restore

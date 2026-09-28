@@ -27,6 +27,7 @@ import {
   createReviewSlice,
   createNeedsYouInboxSlice,
   createFailedInboxSlice,
+  createPreviewFeedbackSlice,
   createInboxHistorySlice,
 } from "./slices";
 
@@ -64,8 +65,7 @@ export function createAppStore(initialState?: HydrationState) {
       ...createLinearSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createOfficeSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createFeaturesSlice(set as any, get as any, api as any),
+      ...createFeaturesSlice(set),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createAuthSlice(set as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,6 +86,7 @@ export function createAppStore(initialState?: HydrationState) {
       ...createReviewSlice(set as any),
       ...createNeedsYouInboxSlice(set),
       ...createFailedInboxSlice(set, get),
+      ...createPreviewFeedbackSlice(set),
       ...createInboxHistorySlice(set),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),

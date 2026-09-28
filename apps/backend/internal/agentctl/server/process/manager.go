@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
@@ -1435,27 +1436,20 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
-	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
-	for i, mcp := range m.cfg.McpServers {
-		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
-		}
+	mcpServers, err := m.adapterMCPServers()
+	if err != nil {
+		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
-		AutoApprove:               m.cfg.AutoApprovePermissions,
+		AutoApprove:               m.adapterAutoApprove(),
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
 	}
 
@@ -1519,7 +1513,23 @@ func (m *Manager) buildFinalCommand() error {
 	cmdArgs = append(cmdArgs, m.cfg.AgentArgs[1:]...)
 	cmdArgs = append(cmdArgs, extraArgs...)
 
-	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
+	finalArgs := append([]string{m.cfg.AgentArgs[0]}, cmdArgs...)
+	if err := managedruntime.PrepareNPMProjectPrefix(finalArgs); err != nil {
+		return errors.New("managed npm project prefix could not be prepared")
+	}
+	m.finalCommand = strings.Join(finalArgs, " ")
+	cmdArgs = finalArgs[1:]
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		oneShot := m.adapterCfg.OneShotConfig
+		oneShot.InitialArgs = append([]string(nil), oneShot.InitialArgs...)
+		oneShot.ContinueArgs = append([]string(nil), oneShot.ContinueArgs...)
+		if err := managedruntime.PrepareNPMProjectPrefix(oneShot.InitialArgs); err != nil {
+			return errors.New("managed npm project prefix could not be prepared")
+		}
+		if err := managedruntime.PrepareNPMProjectPrefix(oneShot.ContinueArgs); err != nil {
+			return errors.New("managed npm project prefix could not be prepared")
+		}
+	}
 
 	m.logger.Debug("final agent command",
 		zap.String("binary", m.cfg.AgentArgs[0]),
@@ -1730,6 +1740,13 @@ func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequ
 func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
 	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	if err != nil {
+		return req, err
+	}
+	req.Args = append([]string(nil), req.Args...)
+	if err := managedruntime.PrepareNPMProjectPrefix(req.Args); err != nil {
+		return req, errors.New("managed npm project prefix could not be prepared")
+	}
 	return req, err
 }
 
@@ -1833,12 +1850,14 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
 	base := environmentMapFromSlice(current)
+	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
 	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
-		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
+			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+		return nil, fmt.Errorf("remove generated Git credential helpers: %w", err)
 	}
 	if replaceIndexed {
 		// A complete environment owns the entire indexed block, including an
@@ -2757,6 +2776,20 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
+
+	if m.RequiresManagedToolPolicy() {
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
+		toolName := ""
+		if req.ToolName != nil {
+			toolName = *req.ToolName
+		}
+		m.logger.Warn("managed agent tool policy denied a native permission request",
+			zap.String("reason", "native_tool_denied"),
+			zap.String("tool_name", toolName))
+		return &adapter.PermissionResponse{Cancelled: true}, nil
+	}
 
 	// If auto-approve is enabled, immediately approve with the first "allow" option
 	if m.cfg.AutoApprovePermissions {

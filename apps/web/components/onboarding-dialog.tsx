@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +14,6 @@ import {
   IconArrowRight,
   IconArrowLeft,
   IconCheck,
-  IconFolder,
-  IconFolders,
-  IconBrandDocker,
   IconX,
   IconLoader2,
   IconCommand,
@@ -25,53 +22,61 @@ import {
   IconGitCommit,
   IconTerminal2,
   IconArrowDown,
-  IconCloud,
 } from "@tabler/icons-react";
 import { Kbd } from "@kandev/ui/kbd";
-import { type ProfileFormData } from "@/components/settings/profile-form-fields";
-import { permissionsToProfilePatch, profilePermissionValues } from "@/lib/agent-permissions";
+import { profilePermissionValues } from "@/lib/agent-permissions";
 import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
-import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
-import { isHandledApiError } from "@/lib/api/client";
+import { listAgentsAction } from "@/app/actions/agents";
 import { backendReloadCoordinator } from "@/lib/platform/backend-reload-coordinator";
 import { StepAgents, type AgentSetting } from "@/components/onboarding/step-agents";
+import {
+  TOTAL_ONBOARDING_STEPS,
+  useOnboardingActions,
+} from "@/components/onboarding/use-onboarding-actions";
 import type { AvailableAgent, ToolStatus, WorkflowTemplate, AgentProfile } from "@/lib/types/http";
 import { Trans, useTranslation } from "react-i18next";
+import { getExecutorIcon, getExecutorLabel } from "@/lib/executor-icons";
 
 interface OnboardingDialogProps {
   open: boolean;
   onComplete: () => void;
 }
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = TOTAL_ONBOARDING_STEPS;
 
 // Catalog keys, not resolved copy: `t()` at module scope would freeze at the
 // boot locale. `id` stays untranslated so the React key is locale-independent.
 const RUNTIMES = [
   {
-    id: "local",
-    nameKey: "common:runtimeLocal",
-    descriptionKey: "common:runtimeLocalDescription",
-    icon: IconFolder,
-  },
-  {
     id: "worktree",
-    nameKey: "common:runtimeGitWorktree",
-    descriptionKey: "common:runtimeGitWorktreeDescription",
-    icon: IconFolders,
+    descriptionKey: "common:onboardingExecutorWorktreeDescription",
+    setupKey: "common:onboardingExecutorBuiltIn",
+    recommendationKey: "common:onboardingExecutorRecommended",
   },
   {
-    id: "docker",
-    nameKey: "common:runtimeDocker",
-    descriptionKey: "common:runtimeDockerDescription",
-    icon: IconBrandDocker,
+    id: "local",
+    descriptionKey: "common:onboardingExecutorLocalDescription",
+    setupKey: "common:onboardingExecutorBuiltIn",
+  },
+  {
+    id: "local_docker",
+    descriptionKey: "common:onboardingExecutorDockerDescription",
+    setupKey: "common:onboardingExecutorDockerSetup",
+  },
+  {
+    id: "ssh",
+    descriptionKey: "common:onboardingExecutorSshDescription",
+    setupKey: "common:onboardingExecutorHostSetup",
   },
   {
     id: "sprites",
-    nameKey: "common:runtimeSprites",
-    descriptionKey: "common:runtimeSpritesDescription",
-    icon: IconCloud,
-    href: "https://sprites.dev",
+    descriptionKey: "common:onboardingExecutorSpritesDescription",
+    setupKey: "common:onboardingExecutorProviderSetup",
+  },
+  {
+    id: "k8s",
+    descriptionKey: "common:onboardingExecutorKubernetesDescription",
+    setupKey: "common:onboardingExecutorClusterSetup",
   },
 ];
 
@@ -131,11 +136,12 @@ type OnboardingFooterProps = {
   onBack: () => void;
   onNext: () => void;
   onGetStarted: () => void;
+  isBusy: boolean;
 };
 
 function OnboardingStepDots({ step }: { step: number }) {
   return (
-    <div className="flex justify-center gap-1.5 pb-2">
+    <div className="flex shrink-0 justify-center gap-1.5 pb-2">
       {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
         <div
           key={i}
@@ -184,7 +190,19 @@ function useOnboardingResources(open: boolean) {
           setAvailableAgents(agents);
           setTools(availRes.tools ?? []);
           if (savedRes) {
-            setAgentSettings(buildAgentSettings(agents, savedRes.agents ?? []));
+            const fetchedSettings = buildAgentSettings(agents, savedRes.agents ?? []);
+            setAgentSettings((currentSettings) => {
+              const nextSettings = { ...fetchedSettings };
+              for (const [agentName, currentSetting] of Object.entries(currentSettings)) {
+                if (
+                  currentSetting.dirty &&
+                  nextSettings[agentName]?.profileId === currentSetting.profileId
+                ) {
+                  nextSettings[agentName] = currentSetting;
+                }
+              }
+              return nextSettings;
+            });
           }
           lastSawProbing = agents.some((a) => a.model_config.status === "probing");
         })
@@ -228,29 +246,42 @@ function useOnboardingResources(open: boolean) {
   };
 }
 
-function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: OnboardingFooterProps) {
+function OnboardingFooter({
+  step,
+  onSkip,
+  onBack,
+  onNext,
+  onGetStarted,
+  isBusy,
+}: OnboardingFooterProps) {
   const { t } = useTranslation();
   return (
-    <DialogFooter>
+    <DialogFooter className="shrink-0">
       <div className="flex w-full items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={onSkip} className="cursor-pointer">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onSkip}
+          disabled={isBusy}
+          className="cursor-pointer"
+        >
           <IconX className="mr-1.5 h-3.5 w-3.5" />
           {t("common:skip")}
         </Button>
         <div className="flex gap-2">
           {step > 0 && (
-            <Button variant="outline" onClick={onBack} className="cursor-pointer">
+            <Button variant="outline" onClick={onBack} disabled={isBusy} className="cursor-pointer">
               <IconArrowLeft className="mr-1.5 h-4 w-4" />
               {t("common:back")}
             </Button>
           )}
           {step < TOTAL_STEPS - 1 ? (
-            <Button onClick={onNext} className="cursor-pointer">
+            <Button onClick={onNext} disabled={isBusy} className="cursor-pointer">
               {t("common:next")}
               <IconArrowRight className="ml-1.5 h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={onGetStarted} className="cursor-pointer">
+            <Button onClick={onGetStarted} disabled={isBusy} className="cursor-pointer">
               <IconCheck className="mr-1.5 h-4 w-4" />
               {t("common:getStarted")}
             </Button>
@@ -278,66 +309,29 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     loadingAgents,
     loadingTemplates,
   } = useOnboardingResources(open);
-
-  const saveAgentSettings = useCallback(async (): Promise<boolean> => {
-    try {
-      await Promise.all(
-        Object.values(agentSettings)
-          .filter((s) => s.dirty)
-          .map((s) =>
-            updateAgentProfileAction(s.profileId, {
-              model: s.formData.model,
-              ...permissionsToProfilePatch(s.formData),
-              cli_passthrough: s.formData.cli_passthrough,
-              cli_flags: s.formData.cli_flags,
-              command_prefix: s.formData.command_prefix,
-            }),
-          ),
-      );
-      return true;
-    } catch (error) {
-      if (isHandledApiError(error)) return false;
-      throw error;
-    }
-  }, [agentSettings]);
-
-  const handleSkip = () => {
-    onComplete();
-    setStep(0);
-  };
-  const handleNext = async () => {
-    if (step === 0 && !(await saveAgentSettings())) return;
-    if (step < TOTAL_STEPS - 1) setStep(step + 1);
-  };
-  const handleBack = () => {
-    if (step > 0) setStep(step - 1);
-  };
-  const handleGetStarted = async () => {
-    if (!(await saveAgentSettings())) return;
-    onComplete();
-    setStep(0);
-  };
-  const updateSetting = (agentName: string, formPatch: Partial<ProfileFormData>) => {
-    setAgentSettings((prev) => ({
-      ...prev,
-      [agentName]: {
-        ...prev[agentName],
-        formData: { ...prev[agentName].formData, ...formPatch },
-        dirty: true,
-      },
-    }));
-  };
+  const { handleSkip, handleNext, handleBack, handleGetStarted, updateSetting, isSaving } =
+    useOnboardingActions({ step, setStep, onComplete, agentSettings, setAgentSettings });
 
   return (
     <Dialog open={open && !reloadRequired} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-3xl" showCloseButton={false}>
-        <DialogHeader>
+      <DialogContent
+        className={
+          step === 1
+            ? "flex max-h-[calc(100dvh_-_2rem)] flex-col overflow-hidden sm:max-w-3xl"
+            : "sm:max-w-3xl"
+        }
+        showCloseButton={false}
+      >
+        <DialogHeader className="shrink-0">
           <DialogTitle className="text-center text-2xl">{t(STEP_TITLE_KEYS[step])}</DialogTitle>
           <DialogDescription className="text-center">
             {t(STEP_DESCRIPTION_KEYS[step])}
           </DialogDescription>
         </DialogHeader>
-        <div className="py-4 min-h-[220px]">
+        <div
+          data-testid={step === 1 ? "onboarding-executor-body" : undefined}
+          className={step === 1 ? "min-h-0 flex-1 overflow-y-auto py-4" : "py-4 min-h-[220px]"}
+        >
           {step === 0 && (
             <StepAgents
               availableAgents={availableAgents}
@@ -358,6 +352,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           onBack={handleBack}
           onNext={handleNext}
           onGetStarted={handleGetStarted}
+          isBusy={isSaving}
         />
       </DialogContent>
     </Dialog>
@@ -368,37 +363,57 @@ function StepEnvironments() {
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <div className="grid gap-2">
+      <div data-testid="onboarding-executor-grid" className="grid grid-cols-2 gap-2">
         {RUNTIMES.map((runtime) => {
-          const Icon = runtime.icon;
-          const nameEl = runtime.href ? (
-            <a
-              href={runtime.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-medium hover:underline cursor-pointer"
-            >
-              {t(runtime.nameKey)}
-            </a>
-          ) : (
-            <p className="text-sm font-medium">{t(runtime.nameKey)}</p>
-          );
+          const Icon = getExecutorIcon(runtime.id);
           return (
-            <div key={runtime.id} className="flex items-start gap-3 rounded-lg border p-3">
-              <div className="h-8 w-8 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
-                <Icon className="h-4.5 w-4.5 text-muted-foreground" />
+            <div
+              key={runtime.id}
+              data-testid={`onboarding-executor-card-${runtime.id}`}
+              data-executor-id={runtime.id}
+              className="min-w-0 rounded-lg border bg-card p-3"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-muted">
+                  <Icon className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <p className="text-sm font-medium">{getExecutorLabel(runtime.id)}</p>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">
+                      {t(runtime.setupKey)}
+                    </span>
+                  </div>
+                  {runtime.recommendationKey && (
+                    <p className="mt-0.5 break-words text-[11px] leading-tight text-primary">
+                      {t(runtime.recommendationKey)}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="min-w-0">
-                {nameEl}
-                <p className="text-xs text-muted-foreground">{t(runtime.descriptionKey)}</p>
-              </div>
+              <p className="mt-2 break-words text-xs text-muted-foreground">
+                {t(runtime.descriptionKey)}
+              </p>
             </div>
           );
         })}
       </div>
-      <p className="text-xs text-muted-foreground">
-        {t("common:configureExecutorsInSettingsToControl")}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {t("common:onboardingExecutorProfileNote", {
+            settings: t("common:settings"),
+            executors: t("common:executors"),
+          })}
+        </p>
+        <a
+          href="https://kandev.ai/docs/executors"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 text-sm font-medium text-primary underline-offset-4 hover:underline cursor-pointer"
+        >
+          {t("common:onboardingExecutorGuide")}
+        </a>
+      </div>
     </div>
   );
 }

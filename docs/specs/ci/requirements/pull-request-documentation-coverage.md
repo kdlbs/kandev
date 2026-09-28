@@ -2,7 +2,7 @@
 status: draft
 system: ci
 created: 2026-09-10
-updated: 2026-09-16
+updated: 2026-09-27
 owners:
   - kandev
 ---
@@ -29,12 +29,14 @@ Contributors can write the artifacts manually; use of the repository harness is 
 #### Acceptance criteria
 
 - **AC-CI-PR-DOCS-001.1:** Every open pull request shall receive a documentation coverage result, including drafts and forks.
-- **AC-CI-PR-DOCS-001.2:** A pull request containing only recognized documentation, tests, translation catalogs, dependency lock, or harness changes shall pass without a delivery package.
+- **AC-CI-PR-DOCS-001.2:** A pull request containing only recognized documentation, tests, translation catalogs, dependency lock, harness, or CI workflow, script, or action changes shall pass without a delivery package.
 - **AC-CI-PR-DOCS-001.3:** Other changes shall require an added or modified work order, its plan, and linked requirements and system designs. Changing the title to `fix`, `chore`, or `refactor` shall not exempt the change.
 - **AC-CI-PR-DOCS-001.4:** Existing plans and specifications shall qualify when the work order references them and they exist in the proposed revision. Contributors shall update contracts when behavior changes, but shall not need meaningless edits to unchanged contracts.
 - **AC-CI-PR-DOCS-001.5:** A deleted artifact, empty file, unresolved reference, unrelated unlinked document, or work order without requirement and acceptance references shall not satisfy coverage.
 - **AC-CI-PR-DOCS-001.6:** The result shall identify triggering paths, accepted references, missing artifacts, and corrective steps. Structural coverage shall not claim semantic completeness or prove that planning preceded coding.
 - **AC-CI-PR-DOCS-001.7:** A pull request that changes only `plugin-registry/plugins.yaml` and other already exempt paths shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
+- **AC-CI-PR-DOCS-001.8:** A pull request that changes only recognized CI infrastructure paths under `.github/workflows/**`, `.github/scripts/**`, or `.github/actions/**` shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
+- **AC-CI-PR-DOCS-001.9:** A pull request that changes only architecture-lint tooling under `scripts/architecture_lint/**`, `scripts/architecture_lint_tests/**`, or `config/architecture-lint/**`, the exact entrypoints `scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`, and already exempt paths shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
 
 ### REQ-CI-PR-DOCS-002: Explicit documentation exception
 
@@ -46,6 +48,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-002.2:** Adding or removing the label shall reevaluate the current pull request without requiring a new commit. Removal shall restore normal evaluation.
 - **AC-CI-PR-DOCS-002.3:** The label shall remain effective across pushes until removed. The workflow shall not add, remove, or grant permission to apply it.
 - **AC-CI-PR-DOCS-002.4:** The exception shall affect only documentation coverage. Other validation and merge requirements shall remain independent.
+- **AC-CI-PR-DOCS-002.5:** When an exception-label change targets a branch without a configured merge queue, reevaluation shall finish using the pull request's own coverage result without requiring a merge-group result.
 
 ### REQ-CI-PR-DOCS-003: Reliable enforcement
 
@@ -60,6 +63,9 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-003.5:** Required-check rollout shall include evidence that ordinary PRs, label changes, forks, and merge groups report the expected result.
 - **AC-CI-PR-DOCS-003.6:** When a GitHub request has a transient failure, the evaluator shall retry a bounded number of times. It shall honor usable server wait guidance. For a secondary rate limit without usable guidance, it shall wait at least 60 seconds before retrying.
 - **AC-CI-PR-DOCS-003.7:** When a GitHub request has a permanent failure, requires an excessive wait, or exhausts its retries, the result shall be an infrastructure error. The bounded diagnostic shall identify the request class, response status, and retry outcome. It shall not expose credentials or document contents.
+- **AC-CI-PR-DOCS-003.8:** A failed coverage job shall identify its result category and a bounded failure reason in the runner log without exposing credentials or document contents.
+- **AC-CI-PR-DOCS-003.9:** A label-triggered run shall not publish success on the pull request revision before it finishes the affected merge-group lookup and evaluation. If required queue data cannot be read, the pull request revision shall receive an error result. An affected group's policy failure shall remain on that group's status and shall not change the pull request's own coverage decision.
+- **AC-CI-PR-DOCS-003.10:** Label-triggered group reevaluation shall publish group results in a status context distinct from the pull request coverage context, so results cannot overwrite each other when they share a commit revision.
 
 ### REQ-CI-PR-DOCS-004: Request-efficient evaluation
 
@@ -68,9 +74,10 @@ Contributors can write the artifacts manually; use of the repository harness is 
 #### Acceptance criteria
 
 - **AC-CI-PR-DOCS-004.1:** Within one pull request revision or merge-group member evaluation, the system shall reuse the initial pull request snapshot and each repeated artifact lookup.
-- **AC-CI-PR-DOCS-004.2:** When a changed requirement keeps its trusted base identity, the system shall resolve it from the exact-head and base documents. It shall not make a GitHub code-search request for that requirement.
-- **AC-CI-PR-DOCS-004.3:** When a requirement is new, moved, unresolved, or ambiguous, the system shall use bounded fallback lookup and shall preserve missing-definition and duplicate-definition failures.
+- **AC-CI-PR-DOCS-004.2:** For every referenced requirement, the evaluator shall locate candidate definitions in that pull request's exact head revision, including files absent from the changed-file list, without making GitHub code-search requests.
+- **AC-CI-PR-DOCS-004.3:** A new or moved requirement shall qualify when it has one valid definition at the exact head. If deletion leaves no definition, or more than one definition remains, coverage shall fail, including when a duplicate is in an unchanged file.
 - **AC-CI-PR-DOCS-004.4:** A full evaluation shall run after pull request creation, reopening, revision changes, base-branch retargets, exact exception-label transitions, manual retries, and merge-group checks. It shall not run after title or description edits, draft-readiness changes, or unrelated label changes.
+- **AC-CI-PR-DOCS-004.5:** An unavailable, incomplete, or over-limit exact-revision lookup shall produce an infrastructure error rather than a coverage success or a missing-definition result.
 
 ## Out of scope
 
@@ -83,3 +90,5 @@ Contributors can write the artifacts manually; use of the repository harness is 
 
 - [PR documentation coverage](../../../plans/pr-documentation-coverage/plan.md)
 - [GitHub API resilience](../../../plans/github-api-resilience/plan.md)
+- [Absent merge queue label reevaluation fix](../../../plans/pr-docs-absent-queue/plan.md)
+- [Git object requirement lookup](../../../plans/pr-documentation-git-lookup/plan.md)

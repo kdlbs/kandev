@@ -4,12 +4,18 @@ import { IconDots } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
-import { CanvasPromotionDialog, CanvasReleaseDialog } from "./canvas-lifecycle-dialogs";
+import {
+  CanvasPromotionDialog,
+  CanvasReleaseDialog,
+  CanvasWorkspaceDataDialog,
+} from "./canvas-lifecycle-dialogs";
 
 export function CanvasHostDialogs({
   canvas,
   promotionOpen,
   onPromotionOpenChange,
+  workspaceDataOpen,
+  onWorkspaceDataOpenChange,
   releasesOpen,
   onReleasesOpenChange,
   onPromotionCompleted,
@@ -18,6 +24,8 @@ export function CanvasHostDialogs({
   canvas: Canvas | null;
   promotionOpen: boolean;
   onPromotionOpenChange: (open: boolean) => void;
+  workspaceDataOpen: boolean;
+  onWorkspaceDataOpenChange: (open: boolean) => void;
   releasesOpen: boolean;
   onReleasesOpenChange: (open: boolean) => void;
   onPromotionCompleted: () => void;
@@ -30,6 +38,12 @@ export function CanvasHostDialogs({
         open={promotionOpen}
         onOpenChange={onPromotionOpenChange}
         onCompleted={onPromotionCompleted}
+      />
+      <CanvasWorkspaceDataDialog
+        canvas={canvas?.scope_kind === "task" ? canvas : null}
+        open={workspaceDataOpen}
+        onOpenChange={onWorkspaceDataOpenChange}
+        onCompleted={onChanged}
       />
       <CanvasReleaseDialog
         canvas={canvas}

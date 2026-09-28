@@ -27,12 +27,13 @@ core bundle again during the same authoring task.
    ID and source path. Read validation diagnostics and correct rejected source
    before publishing again.
 
-The first valid release of a new owner-created task canvas uses the returned
+The first valid release of a new owner-authorized task canvas uses the returned
 initial permission policy. It can activate without a second approval for its
-declared supported task-scoped data, event, state, and exact HTTPS-origin
-permissions. A later permission increase, imported package, or workspace
-promotion still requires human review. Do not add a trust flag to the
-manifest, and do not request permissions outside the policy.
+declared supported permissions. Kandev data access is limited to the current
+workspace, while the canvas remains placed in its creating task. Imported
+packages and later permission increases need human review. Promotion changes
+workspace navigation. Do not add a trust flag to the manifest, and do not
+request permissions outside the policy.
 
 ## Core application contract
 
@@ -66,7 +67,8 @@ Use the returned `manifest_scaffold` as the starting point. New manifests use
 least one `task-canvas` or `workspace-canvas` placement. Declare only the
 `api_read`, `api_write`, `events`, `state`, and `network_origins` permissions
 that the application needs. The owner-authorized first release can receive
-only these supported task-scoped grants. The entry and all relative assets
+only its declared supported permissions, with Kandev data limited to the
+current workspace. The entry and all relative assets
 must be in the published package.
 
 ## Browser protocol summary

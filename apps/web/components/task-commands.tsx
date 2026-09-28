@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "./state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
@@ -13,12 +13,18 @@ import { buildSidebarTaskCommands } from "./task-command-items";
 import { useTaskCommandChoices } from "./task-command-choices";
 import type { TaskSwitcherItem } from "./task/task-switcher-types";
 import type { CommandItem } from "@/lib/commands/types";
+import { ChangeWorkflowDialog } from "@/components/task/change-workflow-dialog";
+import type { Task } from "@/lib/types/http";
+import { taskCommandItemFromDetail } from "./task-command-task";
 
 /** One task action host, shared by desktop and phone and independent of sessions. */
-export function TaskCommands() {
+export function TaskCommands({ task: detailTask }: { task: Task | null }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const data = useSidebarData(workspaceId);
-  const task = data.tasksWithRepositories.find((item) => item.id === data.activeTaskId);
+  const sidebarTask = data.tasksWithRepositories.find((item) => item.id === data.activeTaskId);
+  const task =
+    sidebarTask ??
+    (detailTask?.id === data.activeTaskId ? taskCommandItemFromDetail(detailTask) : undefined);
   if (!workspaceId || !task || data.workspaceContextAccessDenied) return null;
   return (
     <TaskCommandsForTask
@@ -43,6 +49,7 @@ function TaskCommandsForTask({ task, workspaceId, data }: TaskCommandsForTaskPro
   const prefs = useSidebarTaskPrefs();
   const linkHandlers = useSidebarTaskLinking(workspaceId, actions);
   const repositories = useAppStore((state) => state.repositories.itemsByWorkspaceId[workspaceId]);
+  const [changeWorkflowOpen, setChangeWorkflowOpen] = useState(false);
   const move = useTaskMoveOptions({
     taskId: task.id,
     workflowId: task.workflowId,
@@ -54,6 +61,7 @@ function TaskCommandsForTask({ task, workspaceId, data }: TaskCommandsForTaskPro
     stepsByWorkflowId: data.stepsByWorkflowId,
     linkHandlers,
     openMoveOptions: move.openMoveOptionsStep,
+    onChangeWorkflow: () => window.setTimeout(() => setChangeWorkflowOpen(true), 300),
     moveImmediately: (step) => {
       void move.moveImmediately(step);
     },
@@ -100,6 +108,12 @@ function TaskCommandsForTask({ task, workspaceId, data }: TaskCommandsForTaskPro
             return false;
           return move.submitMoveOptions(options);
         }}
+      />
+      <ChangeWorkflowDialog
+        open={changeWorkflowOpen}
+        onOpenChange={setChangeWorkflowOpen}
+        taskId={task.id}
+        workspaceId={workspaceId}
       />
     </>
   );

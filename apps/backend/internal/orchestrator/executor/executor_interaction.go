@@ -724,14 +724,28 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 			zap.Error(err))
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(promptWithAttachments, pt) {
-		if chunk.DelayBefore > 0 {
-			time.Sleep(chunk.DelayBefore)
+		if err := waitPassthroughChunkDelay(ctx, chunk.DelayBefore); err != nil {
+			return nil, err
 		}
 		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
 			return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 		}
 	}
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
+}
+
+func waitPassthroughChunkDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (string, error) {
@@ -1269,6 +1283,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	for _, repoInfo := range allRepos {
 		if repoInfo.RepositoryID == session.RepositoryID {
 			req.ComparisonTarget = repoInfo.ComparisonTarget
+			req.QualifiedPRBase = repoInfo.QualifiedPRBase
 			break
 		}
 	}

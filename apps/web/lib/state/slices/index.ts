@@ -116,6 +116,12 @@ export type {
   FailedInboxWorkspaceState,
   FailedInboxReadStatus,
 } from "./failed-inbox/types";
+export { createPreviewFeedbackSlice, defaultPreviewFeedbackState } from "./preview-feedback";
+export type {
+  PreviewFeedbackSlice,
+  PreviewFeedbackSliceActions,
+  PreviewFeedbackSliceState,
+} from "./preview-feedback";
 export type {
   InboxHistorySlice,
   InboxHistorySliceActions,

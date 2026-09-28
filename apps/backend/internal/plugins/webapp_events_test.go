@@ -10,9 +10,11 @@ import (
 )
 
 func TestProjectWebAppEventDropsInternalPayloadFields(t *testing.T) {
-	event := bus.NewEvent(events.CanvasReleaseActivated, "canvas", map[string]any{
+	event := bus.NewEvent(events.CanvasWorkspaceDataEnabled, "canvas", map[string]any{
 		"canvas_id":         "canvas-1",
 		"workspace_id":      "workspace-1",
+		"scope_kind":        "task",
+		"data_scope_kind":   "workspace",
 		"release_id":        "release-1",
 		"active_release_id": "release-1",
 		"secret":            strings.Repeat("s", 128),
@@ -35,6 +37,10 @@ func TestProjectWebAppEventDropsInternalPayloadFields(t *testing.T) {
 	}
 	if projected.Scope.WorkspaceID != "workspace-1" || projected.Scope.InstanceID != "" {
 		t.Fatalf("projected scope = %+v", projected.Scope)
+	}
+	projectedData, ok := projected.Data.(map[string]any)
+	if !ok || projectedData["data_scope_kind"] != "workspace" {
+		t.Fatalf("projected data = %#v, want workspace data scope", projected.Data)
 	}
 }
 

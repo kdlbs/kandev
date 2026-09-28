@@ -142,6 +142,8 @@ export type KanbanState = {
     foregroundActivity?: ForegroundActivity | null;
     /** True when the task's session was mid-turn when the backend died. */
     interrupted?: boolean;
+    /** Monotonic client generation for explicit interruption-marker updates. */
+    interruptedGeneration?: number;
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;
@@ -217,6 +219,8 @@ export type WorkflowSnapshotData = {
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
   isPlaceholder?: boolean;
+  /** A known-empty failed fetch is retryable after a task-page remount. */
+  fetchFailed?: boolean;
 };
 
 export type KanbanMultiState = {
@@ -330,6 +334,8 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   sidebarArchivedTasks: SidebarArchivedTasksState;
+  /** Fresh status projections for bounded sidebar pages, keyed by workspace then task. */
+  sidebarStatusSummaryByWorkspaceId: Record<string, Record<string, TaskStatusSummary>>;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;

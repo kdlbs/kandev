@@ -20,18 +20,22 @@ var ErrTaskDeletePreflightUnavailable = errors.New("task delete preflight unavai
 // TaskDeletePreflightResult contains the current local-change requirement for
 // the exact task scope requested by the caller.
 type TaskDeletePreflightResult struct {
-	RequiresDiscardConsent bool `json:"requires_discard_consent"`
+	RequiresDiscardConsent bool   `json:"requires_discard_consent"`
+	ConfirmationID         string `json:"confirmation_id"`
 }
 
-// TaskDeletePreflight inspects all worktrees that a delete would remove. It is
-// read-only and intentionally does not prepare cleanup, stop execution, or
-// mutate task rows. DeleteTaskWithOptions remains the authoritative recheck.
+// TaskDeletePreflight inspects all worktrees that a delete would remove and
+// records a short-lived Human-bound ticket for the exact task-tree snapshot.
+// It does not prepare cleanup, stop execution, or mutate task rows.
 func (s *Service) TaskDeletePreflight(
-	ctx context.Context, taskIDs []string, cascade bool,
+	ctx context.Context, taskIDs []string, cascade bool, discardConsent ...bool,
 ) (TaskDeletePreflightResult, error) {
 	roots := normalizeTaskDeletePreflightIDs(taskIDs)
 	if len(roots) == 0 {
 		return TaskDeletePreflightResult{}, fmt.Errorf("%w: task_ids is required", ErrTaskDeletePreflightInvalid)
+	}
+	if _, ok := taskDeletePreviewUserID(ctx); !ok {
+		return TaskDeletePreflightResult{}, ErrTaskDeleteConfirmationIdentity
 	}
 	if s.tasks == nil {
 		return TaskDeletePreflightResult{}, fmt.Errorf("%w: task repository is not configured", ErrTaskDeletePreflightUnavailable)
@@ -60,7 +64,12 @@ func (s *Service) TaskDeletePreflight(
 			"%w: inspect worktrees before delete: %v", ErrTaskDeletePreflightUnavailable, err,
 		)
 	}
-	return TaskDeletePreflightResult{RequiresDiscardConsent: len(dirty) > 0}, nil
+	discardWorktreeChanges := len(discardConsent) > 0 && discardConsent[0]
+	confirmationID, err := s.issueTaskDeletePreview(ctx, roots, cascade, discardWorktreeChanges)
+	if err != nil {
+		return TaskDeletePreflightResult{}, err
+	}
+	return TaskDeletePreflightResult{RequiresDiscardConsent: len(dirty) > 0, ConfirmationID: confirmationID}, nil
 }
 
 func normalizeTaskDeletePreflightIDs(taskIDs []string) []string {

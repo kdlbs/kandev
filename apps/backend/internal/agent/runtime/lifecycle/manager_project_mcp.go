@@ -12,13 +12,22 @@ import (
 
 // materializeRuntimeProjectMCP writes project-local MCP config for protocol-mode
 // agents whose underlying CLI does not consume ACP session/new mcpServers.
-func (m *Manager) materializeRuntimeProjectMCP(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) error {
+func (m *Manager) materializeRuntimeProjectMCP(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+) error {
 	if execution == nil || agentConfig == nil {
 		return nil
 	}
 	rt := agentConfig.Runtime()
 	if rt == nil || rt.ProjectMCPStrategy == nil {
 		return nil
+	}
+	if err := m.prepareCursorMCPAuth(execution, profileInfo, executorType, rt.ProjectMCPStrategy); err != nil {
+		return err
 	}
 	servers, err := m.runtimeProjectMCPServers(ctx, execution, agentConfig)
 	if err != nil {

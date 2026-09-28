@@ -588,8 +588,15 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		s.logger.Debug("reset MCP backend client for new session")
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
+	mcpServers, err := s.procMgr.MCPServersForSession(req.McpServers)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		return resp
+	}
+	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "managed conversation MCP broker is unavailable", nil)
+		return resp
+	}
 	if s.mcpServer != nil {
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
@@ -639,8 +646,15 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		s.logger.Debug("reset MCP backend client for loaded session")
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
+	mcpServers, err := s.procMgr.MCPServersForSession(req.McpServers)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		return resp
+	}
+	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "managed conversation MCP broker is unavailable", nil)
+		return resp
+	}
 	if s.mcpServer != nil {
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
@@ -937,8 +951,15 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		return resp
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
+	mcpServers, err := s.procMgr.MCPServersForSession(req.McpServers)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		return resp
+	}
+	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "managed conversation MCP broker is unavailable", nil)
+		return resp
+	}
 	if s.mcpServer != nil {
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}

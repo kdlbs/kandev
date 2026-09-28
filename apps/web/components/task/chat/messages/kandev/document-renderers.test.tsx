@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { GetTaskPlanRenderer, UpdateTaskPlanRenderer } from "./document-renderers";
 
-function plan(content: string | undefined) {
+function plan(content: string | undefined, status: "complete" | "running" = "complete") {
   return renderToStaticMarkup(
-    <GetTaskPlanRenderer args={{ task_id: "t1" }} result={{ content }} status="complete" />,
+    <GetTaskPlanRenderer args={{ task_id: "t1" }} result={{ content }} status={status} />,
   );
 }
 
@@ -34,5 +34,12 @@ describe("document summary", () => {
 
   it("falls back to the empty label when there is no content", () => {
     expect(updatedPlan(undefined)).toContain("empty");
+  });
+});
+
+// @covers AC-UI-MARKDOWN-MATH-001.3
+describe("document Markdown math", () => {
+  it("renders formulas in task plan content", () => {
+    expect(plan("Energy: $E = mc^2$", "running")).toContain('class="katex"');
   });
 });

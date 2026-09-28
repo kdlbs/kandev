@@ -34,7 +34,7 @@ function isFetchTransportError(error: unknown): boolean {
   return error instanceof TypeError && /fetch failed|network error/i.test(error.message);
 }
 
-async function runWithBackendRecovery<T>(
+export async function runWithBackendRecovery<T>(
   backend: BackendContext,
   operation: () => Promise<T>,
 ): Promise<T> {

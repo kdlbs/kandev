@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { IconTicket } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { PageShell } from "@/components/page-shell";
 import { getJiraConfig, listJiraProjects, searchJiraTickets } from "@/lib/api/domains/jira-api";
-import type { JiraProject, JiraTicket } from "@/lib/types/jira";
+import type { JiraProject, JiraStatus, JiraTicket } from "@/lib/types/jira";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import { TicketRow } from "@/components/jira/my-jira/ticket-row";
 import { useJiraSearch } from "@/components/jira/my-jira/use-jira-search";
@@ -17,14 +17,11 @@ import {
   QuickTaskLauncher,
   type JiraLaunchPayload,
 } from "@/components/jira/my-jira/quick-task-launcher";
+import { DEFAULT_FILTERS } from "@/components/jira/my-jira/filter-model";
+import { isInitialJiraSearchLoading } from "@/components/jira/my-jira/jira-default-view";
+import { useJiraFilterState } from "@/components/jira/my-jira/use-jira-filter-state";
 import {
-  DEFAULT_FILTERS,
-  filtersToJql,
-  type FilterState,
-} from "@/components/jira/my-jira/filter-model";
-import { DEFAULT_VIEW, useSavedViews } from "@/components/jira/my-jira/use-saved-views";
-import {
-  reconcileStatuses,
+  reconcileStatusesForQuery,
   useProjectStatuses,
 } from "@/components/jira/my-jira/use-project-statuses";
 import { ListToolbar } from "@/components/jira/my-jira/list-toolbar";
@@ -33,6 +30,7 @@ import { ResultsPagination } from "@/components/jira/my-jira/results-pagination"
 import { JqlEditor } from "@/components/jira/my-jira/jql-editor";
 import { useJiraTaskPresets } from "@/components/jira/my-jira/use-task-presets";
 import type { JiraTaskPreset } from "@/components/jira/my-jira/presets";
+import { useToast } from "@/components/toast-provider";
 
 type JiraPageClientProps = {
   workspaceId?: string;
@@ -94,12 +92,13 @@ function useJiraPageData(workspaceId?: string) {
         setConfigured(ok);
         setDefaultProjectKey(cfg?.defaultProjectKey ?? "");
         if (ok) {
-          try {
-            const list = await loadUserProjects(workspaceId);
-            if (!cancelled) setProjects(list);
-          } catch {
-            // Non-fatal: pill will just show empty list. Users can still filter by other dims.
-          }
+          void loadUserProjects(workspaceId)
+            .then((list) => {
+              if (!cancelled) setProjects(list);
+            })
+            .catch(() => {
+              // Non-fatal: the project pill can stay empty while users search other fields.
+            });
         }
       } finally {
         if (!cancelled) setLoaded(true);
@@ -112,15 +111,6 @@ function useJiraPageData(workspaceId?: string) {
   }, [workspaceId]);
 
   return { loaded, configured, projects, defaultProjectKey };
-}
-
-// initialFilters seeds the ticket list with the workspace's default project
-// (issue #1588 follow-up) so opening /jira lands on that project pre-selected.
-// An empty defaultProjectKey keeps the historical "no project" default.
-function initialFilters(defaultProjectKey: string): FilterState {
-  const key = defaultProjectKey.trim();
-  if (!key) return DEFAULT_VIEW.filters;
-  return { ...DEFAULT_VIEW.filters, projectKeys: [key] };
 }
 
 function TicketResults({
@@ -177,35 +167,28 @@ type AuthenticatedViewProps = {
   onOpenTicket: (ticket: JiraTicket) => void;
 };
 
-function AuthenticatedView({
-  workspaceId,
+type JiraFilterState = ReturnType<typeof useJiraFilterState>;
+type JiraSearchState = ReturnType<typeof useJiraSearch>;
+
+function AuthenticatedJiraContent({
+  state,
+  search,
+  statusOptions,
   projects,
-  defaultProjectKey,
   presets,
   onStartTask,
   onOpenTicket,
-}: AuthenticatedViewProps) {
-  const state = useFilterState(defaultProjectKey);
-  const search = useJiraSearch(workspaceId ?? null, state.effectiveJql);
-  const { options: statusOptions, loaded: statusesLoaded } = useProjectStatuses(
-    state.filters.projectKeys,
-    workspaceId,
-  );
-
-  // When the available status union changes (project selection changed, or
-  // statuses finished loading), drop any selected statuses that are no longer
-  // offered so the JQL never references a status absent from the selection.
-  // Gate on statusesLoaded so a saved view's statuses aren't stripped on the
-  // first render, before useProjectStatuses has fetched the current project's
-  // statuses (options is still [] until then).
-  const { filters, updateFilters } = state;
-  useEffect(() => {
-    if (!statusesLoaded) return;
-    const reconciled = reconcileStatuses(filters.statuses, statusOptions);
-    if (reconciled !== filters.statuses) {
-      updateFilters({ ...filters, statuses: reconciled });
-    }
-  }, [statusesLoaded, statusOptions, filters, updateFilters]);
+}: {
+  state: JiraFilterState;
+  search: JiraSearchState;
+  statusOptions: JiraStatus[];
+  projects: JiraProject[];
+  presets: JiraTaskPreset[];
+  onStartTask: AuthenticatedViewProps["onStartTask"];
+  onOpenTicket: AuthenticatedViewProps["onOpenTicket"];
+}) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
 
   return (
     <>
@@ -214,9 +197,30 @@ function AuthenticatedView({
         onSearchChange={(searchText) => state.updateFilters({ ...state.filters, searchText })}
         views={state.views}
         activeViewId={state.activeViewId}
+        defaultViewId={state.defaultViewId}
+        viewsReady={state.viewsReady}
+        defaultMutationPending={state.defaultMutationPending}
+        viewMutationPending={state.viewMutationPending}
         onSelectView={state.selectView}
-        onDeleteView={state.deleteView}
-        onSaveView={state.saveCurrentAsView}
+        onSetDefaultView={(id) => {
+          void state.setDefaultView(id).catch(() => {
+            toast({ description: t("jira:defaultViewSaveFailed"), variant: "error" });
+          });
+        }}
+        onDeleteView={(id) => {
+          void state.deleteView(id).catch(() => {
+            toast({ description: t("jira:defaultViewDeleteFailed"), variant: "error" });
+          });
+        }}
+        onSaveView={(name) => {
+          void state.saveCurrentAsView(name).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            toast({
+              description: t("jira:saveFailed", { error: message }),
+              variant: "error",
+            });
+          });
+        }}
         count={search.items.length}
         loading={search.loading}
         sort={state.filters.sort}
@@ -266,63 +270,66 @@ function AuthenticatedView({
   );
 }
 
-function useFilterState(defaultProjectKey: string) {
-  const savedViews = useSavedViews();
-  const [filters, setFilters] = useState<FilterState>(() => initialFilters(defaultProjectKey));
-  const [activeViewId, setActiveViewId] = useState<string | null>(DEFAULT_VIEW.id);
-  const [customJql, setCustomJql] = useState<string | null>(null);
-  const [showJqlEditor, setShowJqlEditor] = useState(false);
-
-  const composedJql = useMemo(() => filtersToJql(filters), [filters]);
-  const effectiveJql = customJql ?? composedJql;
-
-  const updateFilters = useCallback((next: FilterState) => {
-    setFilters(next);
-    setActiveViewId(null);
-    setCustomJql(null);
-  }, []);
-
-  const selectView = useCallback(
-    (id: string) => {
-      const v = savedViews.views.find((x) => x.id === id);
-      if (!v) return;
-      setFilters(v.filters);
-      setActiveViewId(id);
-      const savedCustomJql = v.customJql ?? null;
-      setCustomJql(savedCustomJql);
-      // Auto-open the JQL editor when restoring a JQL-backed view so the user
-      // can see what's running.
-      if (savedCustomJql !== null) setShowJqlEditor(true);
-    },
-    [savedViews.views],
+function AuthenticatedView({
+  workspaceId,
+  projects,
+  defaultProjectKey,
+  presets,
+  onStartTask,
+  onOpenTicket,
+}: AuthenticatedViewProps) {
+  const state = useJiraFilterState(defaultProjectKey);
+  const search = useJiraSearch(
+    workspaceId ?? null,
+    state.effectiveJql,
+    state.initialSelectionResolved,
   );
+  const searchState = isInitialJiraSearchLoading(search.loading, state.initialSelectionResolved)
+    ? { ...search, loading: true }
+    : search;
+  const {
+    options: statusOptions,
+    loaded: statusesLoaded,
+    authoritative: statusesAuthoritative,
+  } = useProjectStatuses(state.filters.projectKeys, workspaceId);
 
-  const saveCurrentAsView = useCallback(
-    (name: string) => {
-      const view = savedViews.save(name, filters, customJql);
-      setActiveViewId(view.id);
-    },
-    [savedViews, filters, customJql],
-  );
-
-  const resetCustomJql = useCallback(() => setCustomJql(null), []);
-
-  return {
+  // When the available status union changes (project selection changed, or
+  // statuses finished loading), drop unavailable selections from structured
+  // filters. Saved custom JQL remains the exact query the user chose.
+  // Gate on completed, authoritative lookups so a saved view's statuses aren't
+  // stripped before metadata arrives or when the status endpoint fails.
+  const { filters, updateFilters } = state;
+  useEffect(() => {
+    const reconciled = reconcileStatusesForQuery(
+      statusesLoaded,
+      state.customJql,
+      filters.statuses,
+      statusOptions,
+      statusesAuthoritative,
+    );
+    if (reconciled !== filters.statuses) {
+      updateFilters({ ...filters, statuses: reconciled });
+    }
+  }, [
+    statusesLoaded,
+    statusesAuthoritative,
+    statusOptions,
     filters,
+    state.customJql,
     updateFilters,
-    views: savedViews.views,
-    activeViewId,
-    selectView,
-    deleteView: savedViews.remove,
-    saveCurrentAsView,
-    composedJql,
-    customJql,
-    effectiveJql,
-    applyCustomJql: setCustomJql,
-    resetCustomJql,
-    showJqlEditor,
-    setShowJqlEditor,
-  };
+  ]);
+
+  return (
+    <AuthenticatedJiraContent
+      state={state}
+      search={searchState}
+      statusOptions={statusOptions}
+      projects={projects}
+      presets={presets}
+      onStartTask={onStartTask}
+      onOpenTicket={onOpenTicket}
+    />
+  );
 }
 
 export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClientProps) {

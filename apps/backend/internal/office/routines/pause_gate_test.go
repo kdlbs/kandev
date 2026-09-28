@@ -83,7 +83,7 @@ func (f *fakeGateWorkflowEnsurer) EnsureRoutineWorkflow(_ context.Context, _ str
 type fakeGateTaskCreator struct{}
 
 func (f *fakeGateTaskCreator) CreateOfficeTaskInWorkflow(
-	_ context.Context, _, _, _, _, _, _ string,
+	_ context.Context, _, _, _, _, _, _, _ string,
 ) (string, error) {
 	return "task-gated-routine", nil
 }

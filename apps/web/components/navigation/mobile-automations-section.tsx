@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight, IconListDetails } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -13,15 +13,17 @@ import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 export function MobileAutomationsSection({
   workspaceId,
   onNavigate,
+  children,
 }: {
   workspaceId: string;
   onNavigate: () => void;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   return (
     <section
-      className="flex flex-col gap-3 border-t border-border pt-4"
+      className="flex flex-col gap-2 border-t border-border pt-2"
       data-testid="mobile-automations-section"
     >
       <div className="flex items-center gap-2">
@@ -53,9 +55,14 @@ export function MobileAutomationsSection({
           </Link>
         </Button>
       </div>
-      {expanded && (
-        <MobileAutomationRows key={workspaceId} workspaceId={workspaceId} onNavigate={onNavigate} />
-      )}
+      {expanded &&
+        (children ?? (
+          <MobileAutomationRows
+            key={workspaceId}
+            workspaceId={workspaceId}
+            onNavigate={onNavigate}
+          />
+        ))}
     </section>
   );
 }

@@ -193,7 +193,7 @@ it("allows moves within the current hidden workflow without offering other hidde
   }));
   render(<Harness />);
   fireEvent.click(screen.getByText("Open A"));
-  expect(screen.queryByRole("button", { name: "Send to workflow" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Change workflow..." })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Move to" }));
   fireEvent.click(screen.getByRole("button", { name: "next" }));
   await waitFor(() =>

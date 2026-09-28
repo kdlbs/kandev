@@ -16,6 +16,8 @@ import {
   SessionRecoveryFeedback,
 } from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
+import { TaskManagementClaimRow } from "@/components/task/task-management-claim-row";
+import { TaskCompletionGateRow } from "@/components/task/task-completion-gate-row";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { TaskCommands } from "@/components/task-commands";
@@ -35,6 +37,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  resolveWorkflowCurrentStepId,
   useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
@@ -47,6 +50,7 @@ import type {
 } from "./task-page-content";
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
+import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -70,7 +74,54 @@ export type TaskPageInnerProps = {
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 };
+
+function TaskCoordinationControls({
+  task,
+  workflowSteps,
+  isMobile,
+}: {
+  task: Task;
+  workflowSteps: TaskPageInnerProps["workflowSteps"];
+  isMobile: boolean;
+}) {
+  if (isMobile) {
+    return (
+      <div
+        className="mt-14 flex shrink-0 items-center gap-1 border-b border-border px-2 py-1"
+        data-testid="mobile-task-control-toolbar"
+      >
+        <TaskManagementClaimRow taskId={task.id} taskUpdatedAt={task.updated_at} isMobile compact />
+        <TaskCompletionGateRow
+          taskId={task.id}
+          taskUpdatedAt={task.updated_at}
+          workflowId={task.workflow_id}
+          workflowStepId={task.workflow_step_id}
+          taskState={task.state}
+          workflowSteps={workflowSteps}
+          isMobile
+          compact
+        />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <TaskManagementClaimRow taskId={task.id} taskUpdatedAt={task.updated_at} isMobile={false} />
+      <TaskCompletionGateRow
+        taskId={task.id}
+        taskUpdatedAt={task.updated_at}
+        workflowId={task.workflow_id}
+        workflowStepId={task.workflow_step_id}
+        taskState={task.state}
+        workflowSteps={workflowSteps}
+        isMobile={false}
+      />
+    </>
+  );
+}
 
 type RemoteExecutorStatus = {
   is_remote_executor?: boolean;
@@ -103,12 +154,12 @@ function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
   };
 }
 
-// Prefer the session-level step (delivered direct via session.state_changed) over the task-level step (routed through the hub broadcast and slightly stale).
 function resolveCurrentStepId(
   sessionStepId: string | null,
   taskStepId: string | null,
+  workflowStepIds: readonly string[],
 ): string | null {
-  return sessionStepId || taskStepId || null;
+  return resolveWorkflowCurrentStepId(sessionStepId, taskStepId, workflowStepIds);
 }
 
 function buildTaskTopBarProps(params: {
@@ -131,10 +182,15 @@ function buildTaskTopBarProps(params: {
     activeSessionId: params.effectiveSessionId,
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
+    topbarRepository: taskProps.topbarRepository,
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,
-    currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
+    currentStepId: resolveCurrentStepId(
+      params.sessionWorkflowStepId,
+      taskProps.workflowStepId,
+      workflowSteps.map((step) => step.id),
+    ),
     workflowId: taskProps.workflowId,
     taskState: params.task?.state ?? null,
     workspaceId: taskProps.workspaceId,
@@ -168,6 +224,7 @@ function buildTaskLayoutProps(params: {
   initialLayout?: string | null;
   onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
@@ -180,9 +237,11 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
-    taskCanvases: params.taskCanvases ?? [],
+    taskCanvases: params.taskCanvases,
+    taskCanvasesStatus: params.taskCanvasesStatus,
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
+    topbarRepository: taskProps.topbarRepository,
     baseBranch: taskProps.baseBranch,
     worktreeBranch: params.merged.worktreeBranch,
     isRemoteExecutor: params.remote.isRemoteExecutor,
@@ -307,6 +366,7 @@ function useTaskPageDerivedProps({
   officeTaskHref,
   onTaskUnarchived,
   taskCanvases,
+  taskCanvasesStatus,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
@@ -355,6 +415,7 @@ function useTaskPageDerivedProps({
     initialLayout,
     onTaskUnarchived,
     taskCanvases,
+    taskCanvasesStatus,
   });
 
   return { taskProps, debugEntries, topBarProps, layoutProps };
@@ -407,6 +468,11 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 onMoveError={reportTaskMoveError}
               />
             )}
+            <TaskCoordinationControls
+              task={task}
+              workflowSteps={props.workflowSteps}
+              isMobile={isMobile}
+            />
             {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
             {ensureSession.status === "error" && (
               <EnsureSessionErrorBanner
@@ -416,7 +482,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               />
             )}
             <TaskArchivedProvider value={archivedValue}>
-              <TaskCommands />
+              <TaskCommands task={task} />
               <TaskLaunchErrorProvider
                 value={{
                   taskId: task.id,

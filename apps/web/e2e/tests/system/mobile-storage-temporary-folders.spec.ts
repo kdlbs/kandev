@@ -19,6 +19,8 @@ test.describe("Mobile system temporary folders", () => {
     await trigger.tap();
     const resource = testPage.getByTestId("storage-resource-system-temporary");
     await expect(resource).toContainText("Partial");
+    await expect(resource).toContainText("Scan timed out. Showing partial usage.");
+    await expect(resource).not.toContainText("context deadline exceeded");
     await expect(resource).toContainText(fixture.root);
     await expect(resource).toContainText(
       "Read-only. This footprint can overlap counted categories.",

@@ -20,6 +20,8 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 vi.mock("@/components/settings/settings-save-provider", () => ({
   useSettingsSaveContributor: vi.fn(),
+  SettingsSaveDirtyScope: ({ children }: { children: (isDirty: boolean) => React.ReactNode }) =>
+    children(false),
 }));
 
 vi.mock("@/components/settings/settings-target", () => ({

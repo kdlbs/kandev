@@ -72,6 +72,8 @@ test.describe("System temporary folders", () => {
     await trigger.click();
     const resource = testPage.getByTestId("storage-resource-system-temporary");
     await expect(resource).toContainText("Partial");
+    await expect(resource).toContainText("Scan timed out. Showing partial usage.");
+    await expect(resource).not.toContainText("context deadline exceeded");
     await expect(resource).toContainText(fixture.root);
     await expect(resource).toContainText("One fixture entry was skipped.");
     await prCapture.screenshot("system-temporary-partial", {

@@ -359,6 +359,39 @@ describe("pluginRegistry — task panels and task menu actions", () => {
     expect(pluginRegistry.getTaskMenuActions()).toHaveLength(2);
   });
 
+  it("skips unreadable task menu registrations without hiding healthy actions", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn();
+    scoped.registerTaskMenuAction({
+      id: "broken-group",
+      label: "Broken group",
+      get group(): never {
+        throw new Error("group failed");
+      },
+      run,
+    });
+    scoped.registerTaskMenuAction({
+      id: "broken-label",
+      get label(): never {
+        throw new Error("label failed");
+      },
+      group: "primary",
+      run,
+    });
+    scoped.registerTaskMenuAction({ id: "healthy", label: "Healthy", group: "primary", run });
+
+    try {
+      expect(pluginRegistry.getTaskMenuActions("primary")).toEqual([
+        { pluginId: "plugin-a", id: "healthy", label: "Healthy", group: "primary", run },
+      ]);
+      expect(pluginRegistry.getTaskMenuActions("primary")).toHaveLength(1);
+      expect(error).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("bulk-revokes task panels and task menu actions on unregisterPlugin", () => {
     const scopedA = pluginRegistry.forPlugin("plugin-a");
     const scopedB = pluginRegistry.forPlugin("plugin-b");

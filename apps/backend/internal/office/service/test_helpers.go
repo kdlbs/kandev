@@ -315,3 +315,14 @@ func BudgetMetricValueForTest(t *testing.T, name, label string) int64 {
 func (s *Service) GetWakeReceiptForTest(ctx context.Context, parentTaskID string) (*sqlite.WakeReceipt, error) {
 	return s.repo.GetWakeReceipt(ctx, parentTaskID)
 }
+
+// QueueTaskAssignedRunForTest exposes queueTaskAssignedRun for external
+// test packages, so a paused-workspace assignment-replay regression can
+// drive the exact production entry point handleTaskCreated /
+// handleTaskUpdated call (queueTaskAssignedRun) without standing up the
+// full event bus.
+func (s *Service) QueueTaskAssignedRunForTest(
+	ctx context.Context, taskID, agentProfileID string, assignmentGeneration *int64,
+) error {
+	return s.queueTaskAssignedRun(ctx, taskID, agentProfileID, assignmentGeneration, false)
+}

@@ -390,14 +390,15 @@ func (r *ProfileReconciler) seedDefaultProfile(
 	caps hostutility.AgentCapabilities,
 ) {
 	profile := &models.AgentProfile{
-		AgentID:          dbAgent.ID,
-		Name:             profileNameFromCaps(ag, caps),
-		AgentDisplayName: ag.DisplayName(),
-		Model:            caps.CurrentModelID,
-		Mode:             caps.CurrentModeID,
-		AllowIndexing:    ag.ID() == "auggie",
-		CLIPassthrough:   false,
-		UserModified:     false,
+		AgentID:              dbAgent.ID,
+		Name:                 profileNameFromCaps(ag, caps),
+		AgentDisplayName:     ag.DisplayName(),
+		Model:                caps.CurrentModelID,
+		Mode:                 caps.CurrentModeID,
+		AllowIndexing:        ag.ID() == "auggie",
+		CLIPassthrough:       false,
+		CursorMCPAuthEnabled: true,
+		UserModified:         false,
 	}
 	if err := r.store.CreateAgentProfile(ctx, profile); err != nil {
 		r.logReconcileError("seed default profile failed", err,

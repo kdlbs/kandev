@@ -142,7 +142,10 @@ func TestResolveProviderCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
 	if !ok {
 		t.Fatal("resolveProviderCommand returned !ok")
 	}
-	if got := args[3]; got != "opencode-ai@1.18.5" {
+	if len(args) < 6 || args[3] != "--prefix" || args[4] != managedruntime.NPMProjectPrefix {
+		t.Fatalf("command args = %#v, want managed npm project prefix", args)
+	}
+	if got := args[5]; got != "opencode-ai@1.18.5" {
 		t.Fatalf("package arg = %q, want exact active version", got)
 	}
 	if agent.opts.Runtime != agentruntime.RuntimeStandalone {

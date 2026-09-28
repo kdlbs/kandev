@@ -30,7 +30,7 @@ func TestWebAppProtocolContextDoesNotExposeCredentials(t *testing.T) {
 	binding := webapp.CapabilityBinding{
 		UserID: "user-1", InstanceID: "instance-1", PluginID: "plugin-1",
 		ReleaseID: "release-1", WebAppKey: "board", Placement: "task-canvas",
-		ScopeKind: "task", WorkspaceID: "workspace-1", TaskID: "task-1",
+		ScopeKind: "task", DataScopeKind: "workspace", WorkspaceID: "workspace-1", TaskID: "task-1",
 		Permissions: []string{"api_read:tasks", "state"},
 	}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -49,7 +49,7 @@ func TestWebAppProtocolContextDoesNotExposeCredentials(t *testing.T) {
 	if _, ok := body["token"]; ok {
 		t.Fatal("context exposed token")
 	}
-	if body["instance_id"] != "instance-1" || body["protocol_version"] != float64(1) {
+	if body["instance_id"] != "instance-1" || body["protocol_version"] != float64(1) || body["scope_kind"] != "task" || body["data_scope_kind"] != "workspace" {
 		t.Fatalf("context = %#v", body)
 	}
 }

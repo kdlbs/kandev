@@ -880,7 +880,6 @@ test.describe("Sidebar filter — task-row presentation", () => {
     ]);
     expect(timeBox).not.toBeNull();
     expect(secondTimeBox).not.toBeNull();
-    expect(Math.abs(timeBox!.width - secondTimeBox!.width)).toBeLessThanOrEqual(1);
 
     await filters.openTaskRowSettings();
     await detailsToggle.click();

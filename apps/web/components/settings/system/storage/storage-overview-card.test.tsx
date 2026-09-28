@@ -68,6 +68,9 @@ const DATABASE_BACKUP_PATH = "/data/backups";
 const DATABASE_TRIGGER_TEST_ID = "storage-resource-database-trigger";
 const DATABASE_BACKUPS_TRIGGER_TEST_ID = "storage-resource-database-backups-trigger";
 const STORAGE_ANALYSIS_TOTAL_TEST_ID = "storage-analysis-total";
+const SYSTEM_TEMPORARY_RESOURCE_TEST_ID = "storage-resource-system-temporary";
+const SYSTEM_TEMPORARY_TRIGGER_TEST_ID = "storage-resource-system-temporary-trigger";
+const PERMISSION_DENIED_WARNING = "permission denied";
 
 afterEach(cleanup);
 
@@ -208,18 +211,61 @@ describe("StorageOverviewCard system temporary resources", () => {
 
     render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
 
-    const trigger = screen.getByTestId("storage-resource-system-temporary-trigger");
+    const trigger = screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID);
     expect(trigger.textContent).toContain("100 GB");
     fireEvent.click(trigger);
-    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain("/tmp");
-    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain(
-      "Partial",
-    );
-    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain(
+    expect(screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID).textContent).toContain("/tmp");
+    expect(screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID).textContent).toContain("Partial");
+    expect(screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID).textContent).toContain(
       "2 entries skipped",
     );
     expect(screen.getByTestId(STORAGE_ANALYSIS_TOTAL_TEST_ID).textContent).toContain(
       "Total counted: 14 GB",
+    );
+  });
+
+  it("shows one localized timeout and preserves unrelated older diagnostics", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        system_temporary: {
+          status: "partial",
+          size_bytes: 24,
+          included_in_total: false,
+          reason: "deadline",
+          roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              status: "partial",
+              size_bytes: 24,
+              skipped_count: 1,
+              warnings: [
+                "context deadline exceeded",
+                "context deadline exceeded\ncontext deadline exceeded",
+                PERMISSION_DENIED_WARNING,
+              ],
+            },
+          ],
+          warnings: [
+            "context deadline exceeded",
+            PERMISSION_DENIED_WARNING,
+            PERMISSION_DENIED_WARNING,
+          ],
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID));
+    const resource = screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID);
+    expect(resource.textContent).toContain("Scan timed out. Showing partial usage.");
+    expect(resource.textContent).toContain(PERMISSION_DENIED_WARNING);
+    expect(resource.textContent).not.toContain("context deadline exceeded");
+    expect(resource.textContent?.match(/Scan timed out\. Showing partial usage\./g)).toHaveLength(
+      1,
     );
   });
 });

@@ -70,15 +70,6 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
-
-	// OfficeSessionIdentity keys an Office task's session identity on the
-	// run's own agent instead of the task's runner seat. Off by default
-	// because it is an experimental, high-risk, path-scoped change to durable
-	// session identity and existing rows are not migrated. A live
-	// (task_id, agent_profile_id) pair is guarded in-transaction on the
-	// office session creation path, and pre-existing duplicate rows are
-	// deliberately retained and resolved by selection.
-	OfficeSessionIdentity bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -696,6 +687,7 @@ type Service struct {
 
 	// Message queue service for queueing messages while agent is running
 	messageQueue                   *messagequeue.Service
+	managedInputStorage            messagequeue.ManagedInputStorage
 	passthroughDispatchMu          sync.Mutex
 	passthroughDispatches          map[string]map[*passthroughDispatchToken]struct{}
 	initialCreatePromptMu          sync.Mutex
@@ -1018,6 +1010,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
+	// prDiscoveryWait is nil in production and overridable by package tests so
+	// retry diagnostics can be exercised without real-time delays.
+	prDiscoveryWait func(context.Context, time.Duration) bool
 	// ciAutomationInFlight serializes each PR's evaluation and coalesces one
 	// follow-up request instead of dropping an event that arrives mid-run.
 	ciAutomationInFlight ciAutomationCoordinator
@@ -1138,6 +1133,11 @@ type Service struct {
 	// orchestrator instances) leave it nil and startIdleSessionReaper
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
+
+	// lspLeases pins an execution while a browser-independent language-server
+	// lease owns its task-host stream. The gateway is wired through this narrow
+	// interface to avoid importing its WebSocket package here.
+	lspLeases LSPLeaseLifecycle
 
 	// sessionCeiling is the instance-wide admission controller for agent
 	// session launches. Its initial effective capacity is resolved by the
@@ -2095,6 +2095,12 @@ func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
 
+// SetManagedInputStorage wires the durable receipt store that shares the
+// message queue's FIFO repository.
+func (s *Service) SetManagedInputStorage(storage messagequeue.ManagedInputStorage) {
+	s.managedInputStorage = storage
+}
+
 // SetTaskEventPublisher wires the publisher used for task.updated events.
 //
 // The task service is the canonical publisher: it loads session counts,
@@ -3040,6 +3046,18 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	return lock.Unlock
 }
 
+func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil, false
+	}
+	return lock.Unlock, true
+}
+
 // acquireTurnCompletionLock serializes on_turn_complete processing for a
 // single session — see turnCompletionLocks' field comment for the race it
 // closes. A caller with no session ID (defensive callers pass "" rather than
@@ -3671,20 +3689,34 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	}
 
 	// Mark the task interrupted when its session was mid-turn when the backend
-	// died (STARTING/RUNNING) so task-list surfaces can show the red
-	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// died (STARTING/RUNNING) so task-list surfaces can show the warning
+	// indicator. WAITING_FOR_INPUT sessions were idle, not interrupted.
 	// A re-tracked session's task was never actually interrupted -- its agent
 	// kept running across the restart -- so this is skipped for it per
 	// AC-EXECUTORS-SURVIVAL-003.2.
 	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
 	// archive that commits after this check cannot leave a stale marker on an
-	// archived task. The marker is cleared when a session of the task next
-	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
+	// archived task. The marker is cleared after the provider confirms recovery
+	// (see markRecoveryResolved).
 	if !retracked && running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
-		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
+		changed, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339))
+		if setErr != nil {
 			s.logger.Warn("failed to mark task interrupted on startup",
 				zap.String("task_id", running.TaskID),
 				zap.Error(setErr))
+		} else if changed {
+			// Startup reconciliation writes the marker directly because it runs
+			// before the task service's periodic sweep. Publish the committed
+			// task projection so already-connected clients show the warning
+			// without waiting for a reload or unrelated task update.
+			task, taskErr := s.repo.GetTask(ctx, running.TaskID)
+			if taskErr != nil || task == nil {
+				s.logger.Warn("failed to load task after startup interruption marker",
+					zap.String("task_id", running.TaskID),
+					zap.Error(taskErr))
+			} else {
+				s.publishTaskUpdated(ctx, task)
+			}
 		}
 	}
 
@@ -4086,7 +4118,7 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 		go func(profileID string) {
 			_, launchErr := s.startCreatedSessionWithComposedPrompt(
 				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", true, false, false, false, nil, nil,
+				"", "", "", true, false, false, false, nil, nil,
 			)
 			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
 				s.logger.Warn("failed to start session for durable queued prompt",

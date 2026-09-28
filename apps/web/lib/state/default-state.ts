@@ -19,6 +19,7 @@ import {
   defaultReviewState,
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
+  defaultPreviewFeedbackState,
   defaultInboxHistoryState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
@@ -86,6 +87,7 @@ export const defaultState = {
   taskReview: defaultReviewState.taskReview,
   needsYouInbox: defaultNeedsYouInboxState.needsYouInbox,
   failedInbox: defaultFailedInboxState.failedInbox,
+  previewFeedback: defaultPreviewFeedbackState.previewFeedback,
   inboxHistory: defaultInboxHistoryState.inboxHistory,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
@@ -101,6 +103,7 @@ export const defaultState = {
   sessionMode: defaultSessionRuntimeState.sessionMode,
   userShells: defaultSessionRuntimeState.userShells,
   prepareProgress: defaultSessionRuntimeState.prepareProgress,
+  launchWarning: defaultSessionRuntimeState.launchWarning,
   sessionTodos: defaultSessionRuntimeState.sessionTodos,
   agentCapabilities: defaultSessionRuntimeState.agentCapabilities,
   sessionModels: defaultSessionRuntimeState.sessionModels,
@@ -515,6 +518,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
     userShells: { ...defaultState.userShells, ...initialState.userShells },
     prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
+    launchWarning: { ...defaultState.launchWarning, ...initialState.launchWarning },
     sessionTodos: { ...defaultState.sessionTodos, ...initialState.sessionTodos },
     agentCapabilities: { ...defaultState.agentCapabilities, ...initialState.agentCapabilities },
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },

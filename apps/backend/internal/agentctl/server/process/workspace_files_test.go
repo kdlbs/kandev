@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/workspacepath"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 )
@@ -506,6 +507,45 @@ func TestGetFileTree_HidesOnlyRootOwnershipMarker(t *testing.T) {
 	repository := requireChild(t, tree, "repository")
 	if findChild(repository, storageworkspaces.OwnershipMarkerFilename) == nil {
 		t.Errorf("nested repository file %q should remain visible", storageworkspaces.OwnershipMarkerFilename)
+	}
+}
+
+func TestGetFileTree_RejectsAbsolutePathBeforeFilesystemAccess(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = (&WorkspaceTracker{workDir: workspace, logger: log}).GetFileTree(external, 1)
+	if !errors.Is(err, workspacepath.ErrTreePathNotRelative) {
+		t.Fatalf("GetFileTree error = %v, want %v", err, workspacepath.ErrTreePathNotRelative)
+	}
+}
+
+func TestGetFileTree_AllowsLiteralColonInRelativePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not permit literal colons in path components")
+	}
+	workspace := t.TempDir()
+	directory := filepath.Join(workspace, "config:dev")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := (&WorkspaceTracker{workDir: workspace}).GetFileTree("config:dev", 1)
+	if err != nil {
+		t.Fatalf("GetFileTree failed: %v", err)
+	}
+	if tree.Path != "config:dev" {
+		t.Fatalf("GetFileTree root path = %q, want %q", tree.Path, "config:dev")
+	}
+	if findChild(tree, "settings.json") == nil {
+		t.Fatal("file beneath colon-containing directory should be visible")
 	}
 }
 

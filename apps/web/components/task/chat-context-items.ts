@@ -9,6 +9,7 @@ import type {
   WalkthroughComment,
   AgentMessageComment,
 } from "@/lib/state/slices/comments";
+import type { TaskPreviewFeedback } from "@/lib/types/http";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -27,6 +28,7 @@ export type BuildContextItemsParams = {
   onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   planComments: PlanComment[];
   handleClearPlanComments: () => void;
+  previewFeedback?: TaskPreviewFeedback[];
   pendingPRFeedback: PRFeedbackComment[];
   handleRemovePRFeedback: (commentId: string) => void;
   handleClearPRFeedback: () => void;
@@ -36,6 +38,7 @@ export type BuildContextItemsParams = {
   messageComments: AgentMessageComment[];
   handleClearMessageComments: () => void;
   taskId: string | null;
+  onOpenPreviewFeedback?: () => void;
 };
 
 type FileItemHelpers = {
@@ -219,10 +222,11 @@ const KIND_ORDER: Record<string, number> = {
   prompt: 2,
   comment: 3,
   "plan-comment": 4,
-  "walkthrough-comment": 5,
-  "agent-message-comment": 6,
-  image: 7,
-  "pr-feedback": 8,
+  "preview-feedback": 5,
+  "walkthrough-comment": 6,
+  "agent-message-comment": 7,
+  image: 8,
+  "pr-feedback": 9,
 };
 
 export function contextItemSortFn(a: ContextItem, b: ContextItem): number {
@@ -252,6 +256,17 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
       label: t("task:planCommentCount", { count: params.planComments.length }),
       comments: params.planComments,
       onOpen: params.addPlan,
+    });
+  }
+
+  const previewFeedback = params.previewFeedback ?? [];
+  if (previewFeedback.length > 0) {
+    items.push({
+      kind: "preview-feedback",
+      id: "preview-feedback",
+      label: t("task:previewFeedbackCount", { count: previewFeedback.length }),
+      items: previewFeedback,
+      onOpen: params.onOpenPreviewFeedback,
     });
   }
 

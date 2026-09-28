@@ -132,6 +132,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 }
 
 func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	mgr := newTestManager(t)
 	tests := []struct {
 		name  string
@@ -162,11 +163,30 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			want := strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+			if tt.name == "opencode" {
+				want = strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().NativeCommand().Args(), " ")
+			}
 			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
 			require.Equal(t, want, cmds.initial)
 		})
 	}
+
+	// opencode-acp opts into NativeBinaryAgent: when the lifecycle probe finds
+	// the standalone binary on PATH the launch uses it directly (the same
+	// binary-first pattern as CodeNomad), and falls back to the managed npx
+	// runtime when it is absent (containers, remotes, fresh hosts).
+	t.Run("opencode-native", func(t *testing.T) {
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), true)
+		require.NoError(t, err)
+		require.Equal(t, "opencode acp --print-logs --log-level ERROR", cmds.initial)
+	})
+	t.Run("opencode-npx-fallback", func(t *testing.T) {
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), false)
+		require.NoError(t, err)
+		want := strings.Join(agents.NewOpenCodeACP().ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+		require.Equal(t, want, cmds.initial)
+	})
 }
 
 // cliFlagTestAgent is a minimal BuildCommand that produces a stable prefix

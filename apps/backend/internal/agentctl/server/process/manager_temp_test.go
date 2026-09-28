@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -88,6 +90,138 @@ func TestManager_BuildFinalCommandLeavesUnsetTempEnvironmentUnset(t *testing.T) 
 		}
 	}
 	assertNoAgentTempRoot(t, serviceTemp)
+}
+
+func TestManager_BuildFinalCommandPreparesManagedNpmPrefixOutsideAgentHome(t *testing.T) {
+	home := t.TempDir()
+	workDir := t.TempDir()
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: workDir,
+		AgentArgs: []string{
+			"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+			"@scope/managed-acp@1.2.3",
+		},
+		AgentEnv: []string{"HOME=" + home},
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+
+	if err := manager.buildFinalCommand(); err != nil {
+		t.Fatalf("buildFinalCommand() error = %v", err)
+	}
+	prefix := manager.cmd.Args[4]
+	if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("managed npm prefix = %q, want an absolute path under %q", prefix, os.TempDir())
+	}
+	info, err := os.Stat(prefix)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("managed npm prefix stat = (%v, %v), want an existing directory", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("managed npm prefix was created under agent home, stat error = %v", err)
+	}
+	if manager.cmd.Dir != workDir {
+		t.Fatalf("managed runtime working directory = %q, want workspace %q", manager.cmd.Dir, workDir)
+	}
+}
+
+func TestManager_BuildFinalCommandPreparesOneShotNpmPrefixesWithoutChangingArgs(t *testing.T) {
+	initialArgs := []string{"npx", "--prefix", managedruntime.NPMProjectPrefix, "pkg@1.2.3", "--initial-only"}
+	continueArgs := []string{"npx", "--prefix", managedruntime.NPMProjectPrefix, "pkg@1.2.3", "--continue-only"}
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir:   t.TempDir(),
+		AgentArgs: []string{"persistent-agent", "--persistent-only"},
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+	manager.adapterCfg = &adapter.Config{OneShotConfig: &adapter.OneShotConfig{
+		InitialArgs:  initialArgs,
+		ContinueArgs: continueArgs,
+	}}
+
+	if err := manager.buildFinalCommand(); err != nil {
+		t.Fatalf("buildFinalCommand() error = %v", err)
+	}
+	oneShot := manager.adapterCfg.OneShotConfig
+	for name, args := range map[string][]string{
+		"initial":  oneShot.InitialArgs,
+		"continue": oneShot.ContinueArgs,
+	} {
+		if len(args) != 5 || args[4] != "--"+name+"-only" {
+			t.Errorf("one-shot %s args = %#v, want its original command arguments", name, args)
+			continue
+		}
+		prefix := args[2]
+		if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+			t.Errorf("one-shot %s prefix = %q, want an absolute path under %q", name, prefix, os.TempDir())
+		}
+	}
+	if initialArgs[2] != managedruntime.NPMProjectPrefix || continueArgs[2] != managedruntime.NPMProjectPrefix {
+		t.Fatalf("preparing one-shot args mutated source command slices: initial=%#v continue=%#v", initialArgs, continueArgs)
+	}
+}
+
+func TestManager_BuildPipedProcessRequestPreparesManagedNpmPrefixOutsideAgentHome(t *testing.T) {
+	home := t.TempDir()
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir:  t.TempDir(),
+		AgentEnv: []string{"HOME=" + home},
+	}, newTestLogger(t))
+	args := append(managedruntime.NPMProjectPrefixArgs(), "config", "get", "cache")
+
+	req, err := manager.buildPipedProcessRequest(PipedStartRequest{Command: "npm", Args: args})
+	if err != nil {
+		t.Fatalf("buildPipedProcessRequest() error = %v", err)
+	}
+	prefix := req.Args[1]
+	if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("managed npm prefix = %q, want an absolute path under %q", prefix, os.TempDir())
+	}
+	if _, err := os.Stat(prefix); err != nil {
+		t.Fatalf("managed npm prefix was not provisioned: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("managed npm prefix was created under agent home, stat error = %v", err)
+	}
+}
+
+func TestManager_BuildFinalCommandFailsSafelyWhenManagedNpmPrefixIsUnavailable(t *testing.T) {
+	tempFile := filepath.Join(t.TempDir(), "not-a-temp-directory")
+	if err := os.WriteFile(tempFile, []byte("temp"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Setenv("TEMP", tempFile)
+		t.Setenv("TMP", tempFile)
+	} else {
+		t.Setenv("TMPDIR", tempFile)
+	}
+	workDir := t.TempDir()
+	agentEnv := []string{"HOME=" + t.TempDir(), "KEEP_THIS=unchanged"}
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: workDir,
+		AgentArgs: []string{
+			"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+			"@scope/managed-acp@1.2.3",
+		},
+		AgentEnv: agentEnv,
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+
+	err := manager.buildFinalCommand()
+	if err == nil {
+		t.Fatal("buildFinalCommand() succeeded without an available npm prefix")
+	}
+	if strings.Contains(err.Error(), tempFile) {
+		t.Fatalf("prefix preparation error exposed temp path: %q", err)
+	}
+	if manager.cmd != nil {
+		t.Fatal("agent command was constructed despite unavailable npm prefix")
+	}
+	if got := envValue(manager.cfg.AgentEnv, "KEEP_THIS"); got != "unchanged" {
+		t.Fatalf("agent environment changed: KEEP_THIS=%q", got)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".kandev")); !os.IsNotExist(err) {
+		t.Fatalf("workspace received npm state, stat error = %v", err)
+	}
 }
 
 func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {

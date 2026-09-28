@@ -321,6 +321,9 @@ type Config struct {
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
 
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
+
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
@@ -355,6 +358,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpHttp:             c.AssumeMcpHttp,
 		RequiresProcessKill:       c.RequiresProcessKill,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:       c.ProviderGatewayAuth,
 	}
 }

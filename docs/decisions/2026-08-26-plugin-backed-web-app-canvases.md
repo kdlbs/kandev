@@ -7,6 +7,8 @@
 
 The initial-grant rule is amended by
 [owner-authorized canvas creation](2026-09-10-canvas-creation-authority.md).
+Task placement and data scope are separated for owner-authorized canvases by
+[task canvas workspace data](2026-09-23-task-canvas-workspace-data.md).
 The bounded startup acknowledgement is specified in the
 [runtime design](../specs/plugins/system-design/isolated-web-app-contributions.md#runtime-startup-protocol);
 it adds no privileged host API.

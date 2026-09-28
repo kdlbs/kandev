@@ -2,13 +2,22 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Fake store API exposed by the mock below. Tests drive it directly to simulate
 // the dockview store's setPendingChatScrollTop / subscribe / getState surface.
+type PendingScroll = { scrollTop: number; sessionId: string | null; token: number };
 type Listener = (state: { isRestoringLayout: boolean }) => void;
 const fakeStore = {
   isRestoringLayout: false,
-  pendingChatScrollTop: null as number | null,
+  pendingChatScrollTop: null as PendingScroll | null,
+  completedChatScrollRestore: null as { sessionId: string | null; token: number } | null,
   pendingChatInitialPlacement: null as { sessionId: string; token: number } | null,
-  setPendingChatScrollTop: vi.fn((v: number | null) => {
+  setPendingChatScrollTop: vi.fn((v: PendingScroll) => {
     fakeStore.pendingChatScrollTop = v;
+    fakeStore.completedChatScrollRestore = null;
+  }),
+  completePendingChatScrollTop: vi.fn((token: number, applied: boolean) => {
+    const pending = fakeStore.pendingChatScrollTop;
+    if (!pending || pending.token !== token) return;
+    fakeStore.pendingChatScrollTop = null;
+    fakeStore.completedChatScrollRestore = applied ? { sessionId: pending.sessionId, token } : null;
   }),
   listeners: new Set<Listener>(),
   emit() {
@@ -34,9 +43,10 @@ function flushRaf(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 16));
 }
 
-function makeChatList(scrollTop: number): HTMLElement {
+function makeChatList(scrollTop: number, sessionId: string | null = "session-1"): HTMLElement {
   const el = document.createElement("div");
   el.className = "chat-message-list";
+  if (sessionId) el.dataset.sessionId = sessionId;
   // happy-dom does not enforce overflow; assign scrollTop directly.
   Object.defineProperty(el, "scrollTop", {
     value: scrollTop,
@@ -52,9 +62,11 @@ describe("preserveChatScrollDuringLayout", () => {
     document.body.innerHTML = "";
     fakeStore.isRestoringLayout = false;
     fakeStore.pendingChatScrollTop = null;
+    fakeStore.completedChatScrollRestore = null;
     fakeStore.pendingChatInitialPlacement = null;
     fakeStore.listeners.clear();
     fakeStore.setPendingChatScrollTop.mockClear();
+    fakeStore.completePendingChatScrollTop.mockClear();
   });
 
   it("captures the current scrollTop and stores it as pending", () => {
@@ -62,13 +74,20 @@ describe("preserveChatScrollDuringLayout", () => {
 
     preserveChatScrollDuringLayout();
 
-    expect(fakeStore.setPendingChatScrollTop).toHaveBeenCalledWith(250);
-    expect(fakeStore.pendingChatScrollTop).toBe(250);
+    expect(fakeStore.setPendingChatScrollTop).toHaveBeenCalledWith(
+      expect.objectContaining({ scrollTop: 250, sessionId: "session-1" }),
+    );
+    expect(fakeStore.pendingChatScrollTop).toMatchObject({
+      scrollTop: 250,
+      sessionId: "session-1",
+    });
   });
 
   it("uses 0 when no chat list element is present", () => {
     preserveChatScrollDuringLayout();
-    expect(fakeStore.setPendingChatScrollTop).toHaveBeenCalledWith(0);
+    expect(fakeStore.setPendingChatScrollTop).toHaveBeenCalledWith(
+      expect.objectContaining({ scrollTop: 0, sessionId: null }),
+    );
   });
 
   it("restores scrollTop and clears pending after isRestoringLayout flips to false", async () => {
@@ -80,17 +99,20 @@ describe("preserveChatScrollDuringLayout", () => {
     // While restoring, the listener should not act.
     fakeStore.emit();
     expect(el.scrollTop).toBe(250);
-    expect(fakeStore.pendingChatScrollTop).toBe(250);
+    expect(fakeStore.pendingChatScrollTop?.scrollTop).toBe(250);
 
     // Layout restore completes — listener fires and schedules the rAF restore.
     el.scrollTop = 0; // simulate dockview wiping the position during rebuild
+    const restoreToken = fakeStore.pendingChatScrollTop?.token;
     fakeStore.isRestoringLayout = false;
     fakeStore.emit();
 
     await flushRaf();
 
     expect(el.scrollTop).toBe(250);
-    expect(fakeStore.setPendingChatScrollTop).toHaveBeenLastCalledWith(null);
+    expect(restoreToken).toEqual(expect.any(Number));
+    expect(fakeStore.completePendingChatScrollTop).toHaveBeenLastCalledWith(restoreToken, true);
+    expect(fakeStore.pendingChatScrollTop).toBeNull();
     expect(fakeStore.listeners.size).toBe(0);
   });
 
@@ -112,6 +134,23 @@ describe("preserveChatScrollDuringLayout", () => {
     expect(replacement.scrollTop).toBe(180);
   });
 
+  it("does not apply an old session's offset to a replacement transcript", async () => {
+    const original = makeChatList(180, "session-a");
+    fakeStore.isRestoringLayout = true;
+    preserveChatScrollDuringLayout();
+
+    original.remove();
+    const replacement = makeChatList(35, "session-b");
+    fakeStore.isRestoringLayout = false;
+    fakeStore.emit();
+
+    await flushRaf();
+
+    expect(replacement.scrollTop).toBe(35);
+    expect(fakeStore.pendingChatScrollTop).toBeNull();
+    expect(fakeStore.completedChatScrollRestore).toBeNull();
+  });
+
   it("does not fire prematurely when set() runs before isRestoringLayout becomes true", async () => {
     // Mirrors the maximizeGroup() call sequence: caller invokes the helper while
     // isRestoringLayout is still false, then a non-layout set() (e.g.
@@ -124,7 +163,7 @@ describe("preserveChatScrollDuringLayout", () => {
     // Premature emit while isRestoringLayout is still false. Must not restore.
     fakeStore.emit();
     expect(fakeStore.listeners.size).toBe(1);
-    expect(fakeStore.pendingChatScrollTop).toBe(250);
+    expect(fakeStore.pendingChatScrollTop?.scrollTop).toBe(250);
 
     // Real maximize sequence: flip to true, then back to false.
     fakeStore.isRestoringLayout = true;
@@ -136,7 +175,7 @@ describe("preserveChatScrollDuringLayout", () => {
     await flushRaf();
 
     expect(el.scrollTop).toBe(250);
-    expect(fakeStore.setPendingChatScrollTop).toHaveBeenLastCalledWith(null);
+    expect(fakeStore.pendingChatScrollTop).toBeNull();
     expect(fakeStore.listeners.size).toBe(0);
   });
 });

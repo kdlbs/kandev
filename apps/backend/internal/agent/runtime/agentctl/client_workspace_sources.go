@@ -19,6 +19,8 @@ type MaterializeRepositoryRequest struct {
 	Destination             string                            `json:"destination"`
 	BaseBranch              string                            `json:"base_branch"`
 	CheckoutBranch          string                            `json:"checkout_branch,omitempty"`
+	PRNumber                int                               `json:"pr_number,omitempty"`
+	QualifiedPRBase         *models.PRBase                    `json:"qualified_pr_base,omitempty"`
 	RemoteContribution      *models.RemoteContribution        `json:"remote_contribution,omitempty"`
 	ContributionDestination *models.ContributionDestination   `json:"contribution_destination,omitempty"`
 }

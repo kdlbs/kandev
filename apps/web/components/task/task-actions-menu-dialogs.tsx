@@ -4,12 +4,14 @@ import { useRef, type RefObject } from "react";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import { TaskExternalLinkDialog } from "@/components/task/task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
+import { ChangeWorkflowDialog } from "@/components/task/change-workflow-dialog";
 import type { Task } from "@/components/kanban-card";
 import type { useTaskActionsMenu, TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { hydrateEditedTask } from "@/hooks/domains/kanban/use-kanban-actions";
@@ -122,6 +124,20 @@ function useLastResolvedBoardRow(
   return ref.current.boardRow;
 }
 
+function buildConfirmationTarget(
+  taskId: string,
+  taskTitle: string,
+  triggerRef: RefObject<HTMLElement | null>,
+) {
+  return {
+    taskId,
+    taskTitle,
+    anchorRef: triggerRef,
+    focusReturnRef: triggerRef,
+    restoreFocusOnConfirm: true,
+  };
+}
+
 /**
  * Mounts every dialog a task actions menu entry can open. Hosted per surface
  * so a dialog outlives the menu that opened it.
@@ -140,13 +156,7 @@ export function TaskActionsMenuDialogs({
   const editBoardRow = useLastResolvedBoardRow(taskId, boardRow);
   if (!taskId) return null;
   const linkDialogTask = buildLinkDialogTask(taskId, taskTitle, boardRow);
-  const confirmationTarget = {
-    taskId,
-    taskTitle,
-    anchorRef: menu.triggerRef,
-    focusReturnRef: menu.triggerRef,
-    restoreFocusOnConfirm: true,
-  };
+  const confirmationTarget = buildConfirmationTarget(taskId, taskTitle, menu.triggerRef);
 
   return (
     <>
@@ -161,6 +171,7 @@ export function TaskActionsMenuDialogs({
           menu={menu}
         />
       )}
+      <ChangeWorkflowDialogSurface taskId={taskId} workspaceId={workspaceId} menu={menu} />
       <TaskArchiveConfirmation
         {...confirmationTarget}
         open={menu.showArchiveConfirm}
@@ -175,6 +186,7 @@ export function TaskActionsMenuDialogs({
         taskTitle={taskTitle}
         taskId={taskId}
         executorType={boardRow?.primaryExecutorType ?? subjectExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(boardRow?.workspaceMode)}
         isDeleting={isDeleting}
         onConfirm={(opts) => menu.onConfirmDelete(opts)}
         focusReturnRef={menu.triggerRef}
@@ -225,5 +237,21 @@ export function TaskActionsMenuDialogs({
         />
       )}
     </>
+  );
+}
+
+function ChangeWorkflowDialogSurface({
+  taskId,
+  workspaceId,
+  menu,
+}: Pick<TaskActionsMenuDialogsProps, "taskId" | "workspaceId" | "menu">) {
+  return (
+    <ChangeWorkflowDialog
+      open={menu.showChangeWorkflow}
+      onOpenChange={menu.setShowChangeWorkflow}
+      taskId={taskId}
+      workspaceId={workspaceId}
+      focusReturnRef={menu.triggerRef}
+    />
   );
 }

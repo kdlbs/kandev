@@ -86,7 +86,9 @@ Grok ACP currently exposes neither per-turn cost nor subscription quota/reset va
 
 ## ACP Protocol
 
-JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
+JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
+
+The adapter prefers advertised `session/resume` for any agent to restore the saved conversation without replaying its history. Both resume and load responses preserve typed configuration and legacy model state. If an agent advertises resume but returns method-not-found, the adapter uses `session/load` only when advertised and the context is still active. Other errors preserve the saved identity. Restore traces contain separate `session.resume` and `session.load` spans for the actual requests.
 
 ### ACP permission identity and injected MCP approval
 
@@ -193,6 +195,16 @@ ordering.
 
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
+
+## Standalone instance port leases
+
+`instance.PortAllocator` reservations are `PortLease` values containing the
+owner, port, and allocator-local generation. Release and mark-unavailable must
+compare the full lease. A pre-registration instance remains in the manager's
+provisional map until its listener and process resources stop successfully;
+failed cleanup keeps the bundle and lease for a serialized retry, and the same
+instance ID cannot bind another listener while that bundle remains. Shutdown
+drains in-flight cleanup and retries retained bundles before returning.
 
 ## Env stripping for credential-mode agents (`StripEnv`)
 

@@ -82,9 +82,20 @@ function ProfileRowActions({
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
         <Button
           ref={deleteAnchorRef}
           variant="ghost"

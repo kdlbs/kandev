@@ -30,12 +30,12 @@ func (c *annotationTaskCreator) GetTaskProjectID(context.Context, string) (strin
 	return "", nil
 }
 func (c *annotationTaskCreator) CreateOfficeTaskAsAgent(
-	context.Context, string, string, string, string, string, string,
+	context.Context, string, string, string, string, string, string, string,
 ) (string, error) {
 	return "", nil
 }
 func (c *annotationTaskCreator) CreateOfficeSubtaskAsAgent(
-	context.Context, string, string, string, string, string,
+	context.Context, string, string, string, string, string, string,
 ) (string, error) {
 	return "", nil
 }

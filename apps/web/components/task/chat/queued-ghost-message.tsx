@@ -29,7 +29,7 @@ import {
   workflowMessageInfoFromMetadata,
   type WorkflowStepMessageInfo,
 } from "@/components/task/chat/messages/workflow-step-message-badge";
-import { remarkPlugins } from "@/components/shared/markdown-components";
+import { rehypePlugins, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import {
@@ -259,7 +259,11 @@ function DisplayView({
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
             renderContent={(preview) => (
-              <ReactMarkdown remarkPlugins={remarkPlugins} components={referenceMarkdownComponents}>
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
+                components={referenceMarkdownComponents}
+              >
                 {preview}
               </ReactMarkdown>
             )}

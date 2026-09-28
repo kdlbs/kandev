@@ -328,6 +328,10 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	}
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID) {
+		s.logger.Debug("idle reclaim skipped; language-server lease is active", zap.String("session_id", sessionID))
+		return nil
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {

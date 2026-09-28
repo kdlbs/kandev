@@ -17,6 +17,28 @@ import (
 	"github.com/kandev/kandev/internal/startup"
 )
 
+// migrateMessagePayloadStorage adds digest-backed external storage for large
+// tool-message payloads (currently shell command stdout/stderr) so
+// task_session_messages.metadata stays bounded while preserving lazy,
+// integrity-verified detail loading. See externalizeMessagePayload (write
+// path) and RehydrateMessagePayload (explicit authorized read path) in
+// message_payload.go. task_message_payloads is content-addressed by SHA-256
+// digest, so an identical payload referenced by more than one message is
+// stored exactly once.
+func (r *Repository) migrateMessagePayloadStorage() {
+	_ = r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
+	_ = r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS task_message_payloads (
+			digest TEXT PRIMARY KEY,
+			compressed_content %s NOT NULL,
+			uncompressed_size INTEGER NOT NULL,
+			compressed_size INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`, dialect.BlobType(r.db.DriverName())))
+}
+
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
 func (r *Repository) migrateExecutorProfiles() error {
 	r.migrate.Apply("executor_profiles.mcp_policy", `ALTER TABLE executor_profiles ADD COLUMN mcp_policy TEXT DEFAULT ''`)
@@ -406,6 +428,18 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return err
 	}
 
+	// Bounded operational payload storage (PR-watch/storage-bounds plan,
+	// wave 2): digest-backed external storage for large tool-message
+	// payloads (currently shell command stdout/stderr - see
+	// externalizeMessagePayload/RehydrateMessagePayload) and a content
+	// digest on git snapshots so content-equivalent rows become
+	// identifiable via ListDuplicateGitSnapshotCandidates for a later,
+	// explicit maintenance pass to prune.
+	r.migrateMessagePayloadStorage()
+	if err := r.migrateGitSnapshotContentDigest(); err != nil {
+		return err
+	}
+
 	// Workflow step display snapshot on plan revisions, same pattern as
 	// author_name: the step a task was on when the revision was written.
 	// Pre-existing revisions get empty strings, matching the fresh-DB default.
@@ -423,11 +457,164 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// allocated.
 	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
 
+	// One row per SSH executor holding observed reachability — deliberately
+	// not columns on executors, which holds user-authored config and a
+	// user-controlled status switch. No foreign key: deletion is explicit
+	// (DeleteExecutor deletes the row in the same transaction as the soft
+	// delete), not a cascade.
+	_ = r.migrate.Apply("executor_reachability.table", `
+		CREATE TABLE IF NOT EXISTS executor_reachability (
+			executor_id          TEXT PRIMARY KEY,
+			state                TEXT NOT NULL DEFAULT 'unknown',
+			reason               TEXT NOT NULL DEFAULT '',
+			message              TEXT NOT NULL DEFAULT '',
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			host                 TEXT NOT NULL DEFAULT '',
+			checked_at           TIMESTAMP,
+			last_success_at      TIMESTAMP,
+			updated_at           TIMESTAMP NOT NULL
+		)`)
+
+	// Exact task command identity shares the task commit boundary. It has no
+	// foreign key because retained operation identities must survive task
+	// deletion and prevent an old command from being replayed after recovery.
+	_ = r.migrate.Apply("exact_task_command_operations.table", `
+		CREATE TABLE IF NOT EXISTS exact_task_command_operations (
+			operation_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			payload_digest TEXT NOT NULL,
+			result_resource_version TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`)
+	_ = r.migrate.Apply("exact_task_command_operations.task", `
+		CREATE INDEX IF NOT EXISTS idx_exact_task_command_operations_task
+			ON exact_task_command_operations(workspace_id, task_id, created_at)`)
+
+	// A task has at most one current management claim. Released claims remain
+	// as rows with an empty owner so the monotonically increasing generation
+	// cannot be reset by a later acquisition. The append-only history is kept
+	// separately so human takeover remains inspectable after owner changes.
+	_ = r.migrate.Apply("task_management_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_management_claims (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			owner_kind TEXT NOT NULL DEFAULT '' CHECK (owner_kind IN ('', 'plugin', 'human')),
+			owner_actor_id TEXT NOT NULL DEFAULT '',
+			installation_id TEXT NOT NULL DEFAULT '',
+			instance_key TEXT NOT NULL DEFAULT '',
+			generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+			resource_version TEXT NOT NULL,
+			acquired_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL,
+			updated_by_actor TEXT NOT NULL DEFAULT '',
+			CHECK ((owner_kind = '' AND owner_actor_id = '' AND installation_id = '' AND instance_key = '' AND acquired_at IS NULL) OR
+				(owner_kind = 'plugin' AND owner_actor_id = '' AND installation_id <> '' AND instance_key <> '' AND acquired_at IS NOT NULL) OR
+				(owner_kind = 'human' AND owner_actor_id <> '' AND installation_id = '' AND instance_key = '' AND acquired_at IS NOT NULL)),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_management_claims.workspace", `
+		CREATE INDEX IF NOT EXISTS idx_task_management_claims_workspace
+			ON task_management_claims(workspace_id, task_id)`)
+	_ = r.migrate.Apply("task_management_claim_history.table", `
+		CREATE TABLE IF NOT EXISTS task_management_claim_history (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			action TEXT NOT NULL CHECK (action IN ('acquired', 'released', 'transferred', 'human_superseded')),
+			previous_owner_kind TEXT NOT NULL DEFAULT '',
+			previous_owner_actor_id TEXT NOT NULL DEFAULT '',
+			previous_installation_id TEXT NOT NULL DEFAULT '',
+			previous_instance_key TEXT NOT NULL DEFAULT '',
+			installation_id TEXT NOT NULL DEFAULT '',
+			instance_key TEXT NOT NULL DEFAULT '',
+			owner_kind TEXT NOT NULL DEFAULT '' CHECK (owner_kind IN ('', 'plugin', 'human')),
+			owner_actor_id TEXT NOT NULL DEFAULT '',
+			generation INTEGER NOT NULL CHECK (generation >= 0),
+			actor_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			resource_version TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_management_claim_history.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_management_claim_history_task
+			ON task_management_claim_history(workspace_id, task_id, created_at, id)`)
+
+	// Task completion criteria remain task-owned and revisioned even when the
+	// current set is empty. Criterion evidence is replaced only by exact verify
+	// commands; history is append-only and is deleted with its task.
+	_ = r.migrate.Apply("task_completion_sets.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_sets (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_criteria.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_criteria (
+			task_id TEXT NOT NULL,
+			criterion_id TEXT NOT NULL,
+			description TEXT NOT NULL,
+			criterion_revision BIGINT NOT NULL CHECK (criterion_revision > 0),
+			subject_kind TEXT NOT NULL,
+			subject_id TEXT NOT NULL,
+			verified_revision BIGINT NOT NULL DEFAULT 0,
+			evidence_kind TEXT NOT NULL DEFAULT '',
+			evidence_id TEXT NOT NULL DEFAULT '',
+			evidence_revision TEXT NOT NULL DEFAULT '',
+			evidence_summary TEXT NOT NULL DEFAULT '',
+			evidence_reference TEXT NOT NULL DEFAULT '',
+			verifier_kind TEXT NOT NULL DEFAULT '',
+			verifier_id TEXT NOT NULL DEFAULT '',
+			verified_at TIMESTAMP,
+			PRIMARY KEY (task_id, criterion_id),
+			FOREIGN KEY (task_id) REFERENCES task_completion_sets(task_id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_gate_history.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_gate_history (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			action TEXT NOT NULL,
+			actor_kind TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			details TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_gate_history.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_history_task
+			ON task_completion_gate_history(workspace_id, task_id, created_at, id)`)
+	// Exact plugin completion commands retain their applied result so a retry
+	// after a lost receipt can return the same gate snapshot without replaying a
+	// criteria mutation under a stale revision.
+	_ = r.migrate.Apply("task_completion_gate_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_gate_operations (
+			operation_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			payload_digest TEXT NOT NULL,
+			result_json TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		) `)
+	_ = r.migrate.Apply("task_completion_gate_operations.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_operations_task
+			ON task_completion_gate_operations(workspace_id, task_id, created_at)`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required task migration: %w", err)
+	}
+
+	if _, err := r.db.ExecContext(ctx, kubernetesEnvironmentSchemaDDL); err != nil {
+		return fmt.Errorf("create Kubernetes environment inventory: %w", err)
 	}
 
 	return nil

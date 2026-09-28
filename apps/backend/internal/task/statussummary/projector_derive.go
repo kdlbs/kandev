@@ -1,9 +1,11 @@
 package statussummary
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
@@ -20,7 +22,23 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
+		CompletionGate:      cloneCompletionGate(state.completionGate),
 	}
+}
+
+func cloneCompletionGate(gate *CompletionGateSummary) *CompletionGateSummary {
+	if gate == nil {
+		return nil
+	}
+	copy := *gate
+	return &copy
+}
+
+func equalCompletionGate(left, right *CompletionGateSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {
@@ -225,14 +243,8 @@ func isGoneTaskPersistErr(err error) bool {
 		strings.Contains(msg, "violates foreign key")
 }
 
-// isMissingTaskResolveErr reports whether workspace resolution failed because
-// the task no longer exists. Transient repository errors must not match.
-func isMissingTaskResolveErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "no rows") ||
-		strings.Contains(msg, "sql: no rows in result set")
+// isMissingTaskLookupErr reports whether a task lookup returned the repository's
+// authoritative missing-task sentinel. Transient repository errors must not match.
+func isMissingTaskLookupErr(err error) bool {
+	return errors.Is(err, repoerrors.ErrTaskNotFound)
 }

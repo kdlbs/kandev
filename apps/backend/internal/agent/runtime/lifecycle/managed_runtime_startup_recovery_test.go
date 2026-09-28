@@ -43,13 +43,13 @@ func TestOnlineManagedRuntimeArgsPreserveTrustedLaunchIdentity(t *testing.T) {
 		Package: "@scope/managed-acp",
 		ACPArgs: []string{"--acp", "--model", "fast"},
 	}
-	initial := []string{"greywall", "--", "npx", "--yes", "--prefer-offline", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	initial := []string{"greywall", "--", "npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
 
 	got, packageSpec, ok := onlineManagedRuntimeArgs(initial, spec)
 	if !ok {
 		t.Fatal("expected managed runtime recovery command")
 	}
-	want := []string{"greywall", "--", "npx", "--yes", "--prefer-online", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	want := []string{"greywall", "--", "npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("online args = %#v, want %#v", got, want)
 	}
@@ -62,8 +62,9 @@ func TestOnlineManagedRuntimeArgsRejectsNonManagedCommands(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{Package: "managed-acp"}
 	for _, args := range [][]string{
 		{"native-agent", "--acp"},
-		{"npx", "--yes", "--prefer-offline", "other-agent@1.2.3"},
-		{"npx", "--yes", "--prefer-online", "managed-acp@1.2.3"},
+		{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "other-agent@1.2.3"},
+		{"npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+		{"npx", "--yes", "--prefer-offline", "managed-acp@1.2.3"},
 	} {
 		if _, _, ok := onlineManagedRuntimeArgs(args, spec); ok {
 			t.Fatalf("command %#v should not be eligible for managed runtime recovery", args)
@@ -73,7 +74,7 @@ func TestOnlineManagedRuntimeArgsRejectsNonManagedCommands(t *testing.T) {
 
 func TestOnlineManagedRuntimeArgsRejectsUnversionedPackage(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{Package: "managed-acp"}
-	args := []string{"npx", "--yes", "--prefer-offline", "managed-acp", "--acp"}
+	args := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp", "--acp"}
 
 	if _, _, ok := onlineManagedRuntimeArgs(args, spec); ok {
 		t.Fatal("unversioned managed runtime command should not be eligible")
@@ -154,7 +155,7 @@ func newManagedRuntimeRetryFixture(t *testing.T, failSessionNew bool) (*Manager,
 		AgentID:       agentConfig.ID(),
 		RuntimeName:   agentruntime.RuntimeStandalone,
 		AgentCommand:  "npx",
-		AgentArgs:     []string{"npx", "--yes", "--prefer-offline", "opencode-ai@1.2.3", "acp", "--print-logs", "--log-level", "ERROR"},
+		AgentArgs:     []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.2.3", "acp", "--print-logs", "--log-level", "ERROR"},
 		WorkspacePath: "/workspace",
 		Status:        v1.AgentStatusStarting,
 		agentctl:      client,
@@ -165,6 +166,96 @@ func newManagedRuntimeRetryFixture(t *testing.T, failSessionNew bool) (*Manager,
 	}
 	execution.beginStartupAttempt()
 	return mgr, execution, mock, agentConfig
+}
+
+func TestManagedRuntimeReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	initialErr := errors.New("ACP session initialization failed")
+	mgr, execution, mock, _ := newManagedRuntimeRetryFixture(t, false)
+	agentConfig := agents.NewClaudeACP()
+	execution.AgentID = agentConfig.ID()
+	execution.AgentArgs = []string{
+		"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+		"@agentclientprotocol/claude-agent-acp@0.81.0", "acp",
+	}
+	mock.stderrLines = []string{
+		"npm error code ETARGET",
+		"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.",
+	}
+
+	attempted, err := mgr.retryManagedRuntimeStartup(
+		context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
+	)
+	if !attempted {
+		t.Fatal("policy failure should be handled as a managed runtime failure")
+	}
+	var startupErr *routingerr.ManagedRuntimeStartupError
+	if !errors.As(err, &startupErr) {
+		t.Fatalf("error = %v, want structured policy startup failure", err)
+	}
+	if got, want := startupErr.Code, routingerr.Code("managed_runtime_npm_policy"); got != want {
+		t.Fatalf("failure code = %q, want %q", got, want)
+	}
+	if !strings.Contains(startupErr.Details, "<release-date>") {
+		t.Fatalf("failure details = %q, want sanitized release-date marker", startupErr.Details)
+	}
+	if got := mock.getHTTPActions(); len(got) != 0 {
+		t.Fatalf("policy failure triggered repair or restart actions: %#v", got)
+	}
+	if execution.FailureCode != string(startupErr.Code) {
+		t.Fatalf("persisted failure code = %q, want %q", execution.FailureCode, startupErr.Code)
+	}
+}
+
+func TestManagedRuntimeReleaseAgePolicyIsClassifiedWithoutRepairSupport(t *testing.T) {
+	initialErr := errors.New("ACP session initialization failed")
+	for _, runtime := range []agentruntime.Runtime{agentruntime.RuntimeKubernetes, agentruntime.RuntimeSprites} {
+		t.Run(string(runtime), func(t *testing.T) {
+			mgr, execution, mock, _ := newManagedRuntimeRetryFixture(t, false)
+			agentConfig := agents.NewClaudeACP()
+			execution.AgentID = agentConfig.ID()
+			execution.RuntimeName = runtime
+			execution.AgentArgs = []string{
+				"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+				"@agentclientprotocol/claude-agent-acp@0.81.0", "acp",
+			}
+			mock.stderrLines = []string{
+				"npm error code ETARGET",
+				"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.",
+			}
+
+			attempted, err := mgr.retryManagedRuntimeStartup(
+				context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
+			)
+			if !attempted {
+				t.Fatal("policy failure should be classified without cache-repair support")
+			}
+			var startupErr *routingerr.ManagedRuntimeStartupError
+			if !errors.As(err, &startupErr) || startupErr.Code != routingerr.CodeManagedRuntimeNpmPolicy {
+				t.Fatalf("error = %v, want structured npm policy startup failure", err)
+			}
+			if actions := mock.getHTTPActions(); len(actions) != 0 {
+				t.Fatalf("unsupported runtime policy failure called repair endpoint: %#v", actions)
+			}
+
+			genericMgr, genericExecution, genericMock, _ := newManagedRuntimeRetryFixture(t, false)
+			genericExecution.AgentID = agentConfig.ID()
+			genericExecution.RuntimeName = runtime
+			genericExecution.AgentArgs = append([]string(nil), execution.AgentArgs...)
+			genericMock.stderrLines = []string{
+				"npm error code ETARGET",
+				"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0.",
+			}
+			attempted, err = genericMgr.retryManagedRuntimeStartup(
+				context.Background(), genericExecution, initialErr, agentConfig, "", "", nil, nil,
+			)
+			if attempted || !errors.Is(err, initialErr) {
+				t.Fatalf("ordinary resolution failure result = (%v, %v), want original generic error", attempted, err)
+			}
+			if actions := genericMock.getHTTPActions(); len(actions) != 0 {
+				t.Fatalf("unsupported runtime ordinary failure called repair endpoint: %#v", actions)
+			}
+		})
+	}
 }
 
 func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {

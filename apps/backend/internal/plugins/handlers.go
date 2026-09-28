@@ -40,6 +40,9 @@ const (
 	maxPluginActionEnvelopeBytes = manifest.MaxActionBodyBytes + 4096
 	maxPluginActionResponseBytes = 1 << 20 // 1 MiB
 	contentTypeHeader            = "Content-Type"
+	webhookOriginHostLifecycle   = "host_lifecycle"
+	webhookOriginHostRPC         = "host_rpc"
+	webhookOriginPluginResponse  = "plugin_response"
 )
 
 var pluginActionTimeout = 15 * time.Second
@@ -107,11 +110,16 @@ func RegisterRoutes(
 	// tree versions reject a static sibling added after an existing wildcard for
 	// the same method.
 	ctrl.registerMarketplaceRoutes(api)
+	api.GET("/workspaces/:workspace_id/managed-conversation-destinations", ctrl.managedConversationDestinations)
 	api.GET("/settings", ctrl.getSettings)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)
+	api.POST("/host/interactions/response-receipts", ctrl.issueHumanInteractionResponseReceipt)
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
+	api.GET("/:id/capability-approvals", ctrl.getCapabilityApprovals)
+	api.PUT("/:id/capability-approvals", ctrl.updateCapabilityApprovals)
+	api.DELETE("/:id/capability-approvals", ctrl.revokeCapabilityApprovals)
 	api.PATCH("/:id", authn.RequireAdmin(), ctrl.updateConfig)
 	api.PUT("/:id/auto-update", authn.RequireAdmin(), ctrl.setAutoUpdate)
 	api.DELETE("/:id", authn.RequireAdmin(), ctrl.uninstall)
@@ -128,6 +136,25 @@ func RegisterRoutes(
 	registerConversationRoutes(api, ctrl)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
+}
+
+func (c *Controller) managedConversationDestinations(ctx *gin.Context) {
+	workspaceID := ctx.Param("workspace_id")
+	authorize := c.svc.capabilityApprovalWorkspaceAuthorizer
+	if authorize == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace authorization unavailable"})
+		return
+	}
+	if err := authorize(ctx.Request.Context(), workspaceID); err != nil {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "workspace access denied"})
+		return
+	}
+	destinations, err := c.svc.ListManagedConversationDestinations(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "managed conversation targets unavailable"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"destinations": destinations})
 }
 
 // --- Management ---
@@ -272,11 +299,15 @@ func (c *Controller) enable(ctx *gin.Context) {
 }
 
 func (c *Controller) disable(ctx *gin.Context) {
-	if err := c.svc.Disable(ctx.Param("id")); err != nil {
+	result, err := c.svc.DisableWithResult(ctx.Param("id"))
+	if err != nil {
 		c.writeLookupError(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"disabled": true})
+	ctx.JSON(http.StatusOK, gin.H{
+		"disabled":                    result.Disabled,
+		"remote_resources_may_remain": result.RemoteResourcesMayRemain,
+	})
 }
 
 // --- Auto-update settings ---
@@ -454,6 +485,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 
 	leasedRecord, release, err := c.svc.beginPluginDispatch(id, dispatchGeneration(record))
 	if err != nil {
+		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostLifecycle, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
@@ -461,10 +493,37 @@ func (c *Controller) webhook(ctx *gin.Context) {
 
 	resp, err := c.webhookInvoker.InvokeWebhook(ctx.Request.Context(), id, req)
 	if err != nil {
+		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostRPC, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
 	c.writeWebhookResponse(ctx, leasedRecord, resp)
+}
+
+func (c *Controller) logWebhookFailure(pluginID string, status int, origin string, err error) {
+	if c == nil || c.log == nil {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("plugin_id", pluginID),
+		zap.Int("status", status),
+		zap.String("origin", origin),
+	}
+	if err != nil {
+		fields = append(fields, zap.String("error_class", webhookHostErrorClass(err)))
+	}
+	c.log.Warn("plugin webhook failed", fields...)
+}
+
+func webhookHostErrorClass(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "host_error"
+	}
 }
 
 // webhookCallerAuthorized requires a caller identity unless the declaration
@@ -577,6 +636,7 @@ func webhookStatusForResponse(status int32) (int, bool) {
 func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record, resp *pluginsdk.WebhookResponse) {
 	status, ok := webhookStatusForResponse(resp.Status)
 	if !ok {
+		c.logWebhookFailure(record.ID, http.StatusBadGateway, webhookOriginPluginResponse, nil)
 		ctx.JSON(http.StatusBadGateway, gin.H{
 			"error": fmt.Sprintf("plugin returned invalid webhook status %d", resp.Status),
 		})
@@ -596,6 +656,9 @@ func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "auth login rejected"})
 			return
 		}
+	}
+	if status >= http.StatusInternalServerError {
+		c.logWebhookFailure(record.ID, status, webhookOriginPluginResponse, nil)
 	}
 	for k, v := range resp.Headers {
 		if http.CanonicalHeaderKey(k) == "Set-Cookie" {

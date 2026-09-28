@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useEffect, useMemo, useRef } from "react";
-import { IconRefresh, IconExternalLink, IconClick } from "@tabler/icons-react";
+import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
@@ -13,11 +13,11 @@ import {
 } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
-import { InspectButton } from "./inspector/inspect-button";
-import { AnnotationsPanel } from "./inspector/annotations-panel";
-import { useInspectMode } from "@/hooks/use-inspect-mode";
+import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
+import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { previewSourceLabel } from "@/lib/preview-feedback-source";
 import { useTranslation } from "react-i18next";
 
 function BrowserPanelContent({
@@ -68,7 +68,7 @@ type BrowserPanelProps = {
   params: Record<string, unknown>;
 };
 
-function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
+function useBrowserPanelUrl(initialUrl: string) {
   const [userUrl, setUserUrl] = useState(initialUrl);
   const [urlDraft, setUrlDraft] = useState(initialUrl);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -98,12 +98,9 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
     return rewritePreviewUrlForProxy(directUrl, activeSessionId);
   }, [directUrl, activeSessionId]);
 
-  // Default to the direct URL so the page renders normally; clicking Inspect
-  // switches to the proxied src so the inspector script can be injected. The
-  // gateway port-proxy rewrites root-absolute asset references and patches the
-  // network-facing browser APIs at runtime, so the proxied page works for SPA
-  // routers and dynamic asset URLs too.
-  const iframeSrc = useProxy && proxiedUrl ? proxiedUrl : directUrl;
+  // Eligible local pages stay behind the proxy so task markers and the capture
+  // bridge survive route changes even while selection mode is inactive.
+  const iframeSrc = proxiedUrl ?? directUrl;
 
   // Key the loading-spinner gate to the underlying URL (and the refresh key),
   // NOT to `iframeSrc`. Toggling Inspect mode flips `iframeSrc` between the
@@ -150,20 +147,29 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
 
 export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const inspect = useInspectMode(iframeRef);
   usePreviewConsoleForwarder(iframeRef);
-  // Inspect mode = "load this page through the proxy so the inspector script
-  // can be injected". Toggling Inspect remounts the iframe with a different src.
-  const url = useBrowserPanelUrl((params.url as string) || "", inspect.isInspectMode);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const url = useBrowserPanelUrl((params.url as string) || "");
   const showInspect = url.canProxy;
+  const capture = usePreviewCapture({
+    taskId: activeTaskId,
+    iframeRef,
+    enabled: showInspect && !!activeTaskId,
+    source: {
+      kind: "browser",
+      sessionId: activeSessionId ?? undefined,
+      label: previewSourceLabel(url.directUrl),
+    },
+  });
+
   return (
     <PanelRoot data-testid="browser-panel">
-      <BrowserPanelHeader url={url} inspect={inspect} showInspect={showInspect} />
-
-      <AnnotationsPanel
-        annotations={inspect.annotations}
-        onRemove={inspect.handleRemoveAnnotation}
-        onClear={inspect.handleClearAnnotations}
+      <BrowserPanelHeader
+        url={url}
+        capture={capture}
+        showInspect={showInspect}
+        enabled={!!activeTaskId}
       />
 
       <PanelBody padding={false} scroll={false}>
@@ -172,7 +178,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
           iframeSrc={url.iframeSrc}
           refreshKey={url.refreshKey}
           iframeRef={iframeRef}
-          onIframeLoad={inspect.handleIframeLoad}
+          onIframeLoad={capture.handleIframeLoad}
         />
       </PanelBody>
     </PanelRoot>
@@ -181,12 +187,14 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
 
 function BrowserPanelHeader({
   url,
-  inspect,
+  capture,
   showInspect,
+  enabled,
 }: {
   url: ReturnType<typeof useBrowserPanelUrl>;
-  inspect: ReturnType<typeof useInspectMode>;
+  capture: ReturnType<typeof usePreviewCapture>;
   showInspect: boolean;
+  enabled: boolean;
 }) {
   const { t } = useTranslation();
   const directActions = (
@@ -213,13 +221,7 @@ function BrowserPanelHeader({
       >
         <IconRefresh className="h-4 w-4" />
       </Button>
-      {showInspect && (
-        <InspectButton
-          active={inspect.isInspectMode}
-          count={inspect.annotations.length}
-          onToggle={inspect.toggleInspect}
-        />
-      )}
+      {showInspect && <PreviewFeedbackControls capture={capture} enabled={enabled} />}
     </>
   );
   const overflowActions = (
@@ -240,12 +242,6 @@ function BrowserPanelHeader({
         <IconRefresh className="size-4" />
         {t("task:refresh")}
       </DropdownMenuItem>
-      {showInspect && (
-        <DropdownMenuItem className="cursor-pointer gap-2" onSelect={inspect.toggleInspect}>
-          <IconClick className="size-4" />
-          {inspect.isInspectMode ? t("task:exitInspectMode") : t("task:enterInspectMode")}
-        </DropdownMenuItem>
-      )}
     </PanelHeaderOverflowMenu>
   );
 
@@ -268,6 +264,10 @@ function BrowserPanelHeader({
         />
       }
       right={directActions}
+      rightClassName="overflow-visible"
+      rightWhenOverflow={
+        showInspect ? <PreviewFeedbackControls capture={capture} enabled={enabled} /> : undefined
+      }
       overflow={overflowActions}
       overflowAt={420}
     />

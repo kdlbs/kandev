@@ -42,10 +42,12 @@ import (
 	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
+	dockerremote "github.com/kandev/kandev/internal/dockerremote"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 	"github.com/kandev/kandev/internal/failedinbox"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
@@ -644,18 +646,34 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 }
 
 func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
+	snapshot, hasSnapshot := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	var replayState lifecycle.CachedModelState
 	if modelState == nil {
-		return result
+		if !hasSnapshot {
+			return result
+		}
+		replayState = lifecycle.CachedModelState{
+			CurrentModelID:       snapshot.CurrentModelID,
+			Models:               snapshot.Models,
+			ConfigOptions:        snapshot.ConfigOptions,
+			ConfigOptionsSettled: snapshot.ConfigOptionsSettled,
+		}
+	} else {
+		replayState = *modelState
+		if len(replayState.Models) == 0 &&
+			len(replayState.ConfigOptions) == 0 &&
+			!replayState.ConfigOptionsSettled {
+			if len(snapshot.Models) > 0 {
+				replayState.Models = snapshot.Models
+				if replayState.CurrentModelID == "" {
+					replayState.CurrentModelID = snapshot.CurrentModelID
+				}
+			}
+		}
 	}
-	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
-	replayState := *modelState
-	if len(replayState.Models) == 0 &&
-		len(replayState.ConfigOptions) == 0 &&
-		!replayState.ConfigOptionsSettled &&
-		len(snapshot.Models) > 0 {
-		replayState.Models = snapshot.Models
-	}
-	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 {
+	replayState.ConfigOptionsSettled = replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled
+	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled {
 		return result
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
@@ -720,6 +738,7 @@ type routeParams struct {
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
+	commit                        string
 	webInternalURL                string
 	webTitlePrefix                string
 	devMode                       bool
@@ -729,6 +748,7 @@ type routeParams struct {
 	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
+	sshReachabilityPoller         *reachabilitypkg.Poller
 	log                           *logger.Logger
 	progress                      *startup.Reporter
 }
@@ -744,6 +764,10 @@ func registerRoutes(p routeParams) {
 	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	if attachments := p.taskSvc.AttachmentService(); attachments != nil {
+		planService.SetPreviewAttachmentCleaner(attachments)
+		planService.SetPreviewScreenshotValidator(attachments)
+	}
 	// Stamps each plan revision with the task's workflow step at write time.
 	planService.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: p.services.Workflow})
 	clarificationStore := clarification.NewStore(2 * time.Hour)
@@ -1312,6 +1336,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
 		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
+		taskH.SetSidebarTaskSettingsReader(p.services.User)
 	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
@@ -1467,16 +1492,31 @@ func registerSecondaryRoutes(
 		)
 		p.log.Debug("Registered Kubernetes handlers (HTTP + WebSocket)")
 
+		// A nil *reachabilitypkg.Poller must not be passed directly as the
+		// sshhandlers.ReachabilityProber interface parameter — that would
+		// produce a non-nil interface holding a nil pointer, defeating the
+		// handler's own nil check and panicking on first use.
+		var reachabilityPoller sshhandlers.ReachabilityProber
+		if p.sshReachabilityPoller != nil {
+			reachabilityPoller = p.sshReachabilityPoller
+		}
 		sshhandlers.RegisterRoutes(
 			p.router,
 			p.gateway.Dispatcher,
 			p.taskRepo,
 			p.services.Task,
 			p.agentRegistry,
-			lifecycle.NewAgentctlResolver(p.log),
+			newSSHAgentctlResolver(p),
 			p.log,
+			p.taskRepo,
+			reachabilityPoller,
 		)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
+
+		// The remote Docker connection test rides the same SSH transport, so
+		// it is mounted alongside the SSH routes.
+		dockerremote.RegisterRoutes(p.router, p.taskRepo, p.log)
+		p.log.Debug("Registered remote Docker handlers (HTTP)")
 	}
 
 	if p.services.GitHub != nil {
@@ -1540,6 +1580,12 @@ func registerSecondaryRoutes(
 		conversationReaders := make([]plugins.ConversationReader, 0, 1)
 		if p.services.Task != nil {
 			conversationReaders = append(conversationReaders, p.services.Task)
+			p.services.Plugins.SetCapabilityApprovalWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
+				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage)
+			})
+			p.services.Plugins.SetHumanInteractionResponseAuthorizer(func(ctx context.Context, workspaceID string) error {
+				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSessionControl)
+			})
 		}
 		plugins.RegisterRoutes(
 			p.router,
@@ -1621,9 +1667,28 @@ func registerSecondaryRoutes(
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, p.log)
+		handoffDeps := buildHandoffDependencies(
+			p.taskSvc,
+			p.taskRepo,
+			workflowCtrl,
+			p.agentSettingsController,
+			p.orchestratorSvc,
+			p.services.OfficeSvcs.Dashboard,
+			p.authSvc,
+			p.log,
+		)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
+}
+
+func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
+	return lifecycle.NewAgentctlResolverWithOptions(p.log, lifecycle.AgentctlResolverOptions{
+		Version:   p.version,
+		Commit:    p.commit,
+		BundleDir: os.Getenv("KANDEV_BUNDLE_DIR"),
+		HomeDir:   p.homeDir,
+	})
 }
 
 // integrationWorkspacePrefixes are the workspace-scoped third-party
@@ -1799,9 +1864,14 @@ func registerHealthRoutes(p routeParams) {
 		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
 		5*time.Minute,
 	)
+	var workflowSyncProvider health.WorkflowSyncStatusProvider
+	if p.services.WorkflowSync != nil {
+		workflowSyncProvider = workflowSyncHealthAdapter{svc: p.services.WorkflowSync}
+	}
 	checkers := []health.Checker{
 		health.NewGitExecutableChecker(),
 		githubChecker,
+		health.NewWorkflowSyncChecker(workflowSyncProvider),
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,
 	}
@@ -1813,6 +1883,32 @@ func registerHealthRoutes(p routeParams) {
 	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
+}
+
+// workflowSyncHealthAdapter bridges workflowsync.Service's own circuit
+// summary type to the structural shape consumed by the health package
+// without importing health into workflowsync (cycle), matching
+// githubWorkspaceHealthAdapter below.
+type workflowSyncHealthAdapter struct {
+	svc *workflowsync.Service
+}
+
+func (a workflowSyncHealthAdapter) WorkflowSyncCircuitSummary(
+	ctx context.Context,
+) (health.WorkflowSyncCircuitSummary, error) {
+	if a.svc == nil {
+		return health.WorkflowSyncCircuitSummary{}, nil
+	}
+	summary, err := a.svc.WorkflowSyncCircuitSummary(ctx)
+	if err != nil {
+		return health.WorkflowSyncCircuitSummary{}, err
+	}
+	return health.WorkflowSyncCircuitSummary{
+		Total:         summary.Total,
+		OpenAuth:      summary.OpenAuth,
+		OpenConfig:    summary.OpenConfig,
+		OpenTransient: summary.OpenTransient,
+	}, nil
 }
 
 type githubWorkspaceHealthAdapter struct {
@@ -2057,7 +2153,6 @@ func registerMCPAndDebugRoutes(
 	if handoffSvc != nil {
 		mcpHandlers.SetHandoffService(handoffSvc)
 	}
-
 	// Native code review. The runner owns background review passes, so it is
 	// started here and drained on shutdown; the orchestrator gets it too, which
 	// is what enables the run_code_review workflow step action.

@@ -50,7 +50,7 @@ test.describe("authenticated same-origin canvas runtime", () => {
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
       canvasId = seeded.canvas.id;
-      proxy = await startCanvasAuthenticatedProxy(backend.baseUrl);
+      proxy = await startCanvasAuthenticatedProxy(backend.baseUrl, { injectRuntimeHtml: true });
       const opened = await openAuthenticatedCanvas(browser, proxy, canvasId);
       context = opened.context;
       const page = opened.page;
@@ -71,11 +71,12 @@ test.describe("authenticated same-origin canvas runtime", () => {
       await expect.poll(() => proxy?.count("context", true) ?? 0).toBeGreaterThan(0);
       await expect.poll(() => proxy?.count("data", true) ?? 0).toBeGreaterThan(0);
       await expect.poll(() => proxy?.count("events", true) ?? 0).toBeGreaterThan(0);
+      expect(proxy?.injectedRuntimeDocuments()).toBe(0);
       expect(proxy?.observations().every((observation) => observation.host === proxy?.host)).toBe(
         true,
       );
 
-      await frame.getByTestId("canvas-fixture-continue").click();
+      await frame.getByTestId("canvas-fixture-continue").dispatchEvent("click");
       await expect(frame.getByTestId("canvas-fixture-message-status")).toHaveText("accepted");
       await expect
         .poll(async () =>
@@ -83,6 +84,45 @@ test.describe("authenticated same-origin canvas runtime", () => {
         )
         .toBeGreaterThan(0);
       await expect.poll(() => proxy?.count("write", true) ?? 0).toBeGreaterThan(0);
+    } finally {
+      await context?.close();
+      await proxy?.close();
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      await releaseFeature();
+    }
+  });
+
+  test("surfaces a runtime startup failure when a proxy ignores no-transform", async ({
+    browser,
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    let proxy: CanvasAuthenticatedProxy | undefined;
+    let context: BrowserContext | undefined;
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
+      canvasId = seeded.canvas.id;
+      proxy = await startCanvasAuthenticatedProxy(backend.baseUrl, {
+        injectRuntimeHtml: true,
+        stripNoTransform: true,
+      });
+      const opened = await openAuthenticatedCanvas(browser, proxy, canvasId);
+      context = opened.context;
+
+      await expect(opened.page.getByTestId("canvas-host-state")).toHaveText(
+        "Canvas runtime failed to start",
+        { timeout: 30_000 },
+      );
+      await expect(opened.page.getByTestId("web-app-frame")).toHaveCount(0);
+      await expect(
+        opened.page.getByRole("button", { name: "Try again", exact: true }),
+      ).toBeVisible();
+      expect(proxy.injectedRuntimeDocuments()).toBeGreaterThan(0);
     } finally {
       await context?.close();
       await proxy?.close();
@@ -175,9 +215,10 @@ test.describe("authenticated same-origin canvas runtime", () => {
 
       await proxy.clearAuthentication(context);
       await page.reload();
-      await expect(page.getByTestId("canvas-host-state")).toHaveText("Canvas unavailable", {
-        timeout: 30_000,
-      });
+      await expect(page.getByTestId("canvas-host-state")).toHaveText(
+        "Canvas runtime failed to start",
+        { timeout: 30_000 },
+      );
       await expect(page.getByTestId("web-app-frame")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
 

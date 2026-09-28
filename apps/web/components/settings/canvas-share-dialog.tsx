@@ -25,17 +25,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@kandev/ui/textarea";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useCanvasShare } from "@/hooks/domains/canvas/use-canvas-share";
-import type { DistributionMetadata } from "@/lib/api/domains/canvas-distribution-api";
+import { useCanvasExportDefaults } from "@/hooks/domains/canvas/use-canvas-export-defaults";
+import {
+  type DistributionMetadata,
+  type ExportDefaults,
+} from "@/lib/api/domains/canvas-distribution-api";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { formatNumber } from "@/lib/i18n/formats";
 import { CanvasShareHelp } from "./canvas-share-help";
 
-type ShareMetadata = DistributionMetadata & { source_mode: "static" | "project" };
+type ShareMetadata = Omit<DistributionMetadata, "source_mode"> & {
+  source_mode: "" | "static" | "project";
+};
 
 // eslint-disable-next-line complexity -- Seeding each editable distribution field keeps the form independent from API shape changes.
 function seedShareMetadata(canvas: Canvas | null): ShareMetadata {
   const release = canvas?.active_release;
-  const sourceMode = release?.source_mode === "project" ? "project" : "static";
+  const sourceMode =
+    release?.source_mode === "project" || release?.source_mode === "static"
+      ? release.source_mode
+      : "";
   return {
     package_id: release?.package_id ?? "",
     version: release?.version ?? "",
@@ -64,14 +73,37 @@ export function CanvasShareDialog({
   const share = useCanvasShare(canvas);
   const { reset, cancel, invalidate } = share;
   const [metadata, setMetadata] = useState<ShareMetadata>(() => seedShareMetadata(canvas));
+  const {
+    defaults,
+    loading: defaultsLoading,
+    error: defaultsError,
+    retry,
+  } = useCanvasExportDefaults(
+    canvas?.id,
+    canvas?.active_release_id,
+    open && canvas?.active_release_status === "valid",
+  );
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
+      invalidate();
       setMetadata(seedShareMetadata(canvas));
+      setDetailsOpen(false);
     } else {
       reset();
     }
-  }, [canvas?.active_release_id, canvas?.id, open, reset]);
+  }, [canvas?.active_release_id, canvas?.id, open, reset, invalidate]);
+
+  useEffect(() => {
+    if (!defaults) return;
+    const sourceMode = defaults.metadata.source_mode;
+    setMetadata({
+      ...seedShareMetadata(null),
+      ...defaults.metadata,
+      source_mode: sourceMode === "project" || sourceMode === "static" ? sourceMode : "",
+    });
+  }, [defaults]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) void cancel();
@@ -82,55 +114,55 @@ export function CanvasShareDialog({
     invalidate();
     setMetadata((current) => ({ ...current, [key]: value }));
   };
-  const prepare = () =>
-    void share.prepare({
-      ...metadata,
-      package_id: metadata.package_id?.trim(),
-      version: metadata.version?.trim(),
-      display_name: metadata.display_name?.trim(),
-      description: metadata.description?.trim(),
-      author: metadata.author?.trim(),
-      license: metadata.license?.trim(),
-      min_kandev_version: metadata.min_kandev_version?.trim(),
-      repo_url: metadata.repo_url?.trim() || undefined,
-    });
+  const prepare = () => {
+    const required = [
+      "package_id",
+      "version",
+      "display_name",
+      "description",
+      "author",
+      "license",
+      "source_mode",
+      "min_kandev_version",
+    ] as const;
+    const missing = required.find((key) => !String(metadata[key] ?? "").trim());
+    if (missing) {
+      setDetailsOpen(true);
+      const fieldId = defaults?.missing_required.includes(missing)
+        ? `canvas-share-required-${missing}`
+        : `canvas-share-${missing === "min_kandev_version" ? "min-version" : missing.replaceAll("_", "-")}`;
+      requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
+      return;
+    }
+    void share
+      .prepare({
+        ...metadata,
+        package_id: metadata.package_id?.trim(),
+        version: metadata.version?.trim(),
+        display_name: metadata.display_name?.trim(),
+        description: metadata.description?.trim(),
+        author: metadata.author?.trim(),
+        license: metadata.license?.trim(),
+        source_mode: metadata.source_mode || undefined,
+        min_kandev_version: metadata.min_kandev_version?.trim(),
+        repo_url: metadata.repo_url?.trim() || undefined,
+      })
+      .catch(() => undefined);
+  };
   const body = (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
-      {!canvas?.active_release_id || canvas.active_release_status !== "valid" ? (
-        <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-          {t("canvases:shareNoRelease")}
-        </p>
-      ) : (
-        <>
-          <p className="text-sm text-muted-foreground">
-            {t("canvases:prepareDownloadsDescription")}
-          </p>
-          <ShareMetadataForm metadata={metadata} onChange={updateMetadata} />
-          {!share.review && (
-            <Button
-              className="min-h-11 cursor-pointer md:min-h-7 [@media(pointer:coarse)]:min-h-11"
-              disabled={share.loading}
-              onClick={prepare}
-            >
-              {share.loading ? t("canvases:sharing") : t("canvases:prepareDownloads")}
-            </Button>
-          )}
-          {Boolean(share.error) && (
-            <p role="alert" className="text-sm text-destructive">
-              {t("canvases:shareFailed")}
-            </p>
-          )}
-          {share.review && (
-            <ExportReview
-              review={share.review}
-              loading={share.loading}
-              onDownload={share.download}
-            />
-          )}
-          <CanvasShareHelp review={share.review} />
-        </>
-      )}
-    </div>
+    <CanvasShareBody
+      canvas={canvas}
+      defaults={defaults}
+      defaultsLoading={defaultsLoading}
+      defaultsError={defaultsError}
+      onRetry={retry}
+      metadata={metadata}
+      onChange={updateMetadata}
+      detailsOpen={detailsOpen}
+      onDetailsOpenChange={setDetailsOpen}
+      onPrepare={prepare}
+      share={share}
+    />
   );
   const footer = (
     <div className="flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 md:flex-row md:justify-end">
@@ -169,6 +201,120 @@ export function CanvasShareDialog({
         <DialogFooter className="p-0">{footer}</DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type ShareBodyProps = {
+  canvas: Canvas | null;
+  defaults: ExportDefaults | null;
+  defaultsLoading: boolean;
+  defaultsError: boolean;
+  onRetry: () => void;
+  metadata: ShareMetadata;
+  onChange: <K extends keyof ShareMetadata>(key: K, value: ShareMetadata[K]) => void;
+  detailsOpen: boolean;
+  onDetailsOpenChange: (open: boolean) => void;
+  onPrepare: () => void;
+  share: ReturnType<typeof useCanvasShare>;
+};
+
+function CanvasShareBody({
+  canvas,
+  defaults,
+  defaultsLoading,
+  defaultsError,
+  onRetry,
+  metadata,
+  onChange,
+  detailsOpen,
+  onDetailsOpenChange,
+  onPrepare,
+  share,
+}: ShareBodyProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
+      {!canvas?.active_release_id || canvas.active_release_status !== "valid" ? (
+        <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          {t("canvases:shareNoRelease")}
+        </p>
+      ) : (
+        <>
+          {defaultsLoading && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {t("canvases:loadingShareDefaults")}
+            </p>
+          )}
+          {defaultsError && (
+            <div role="alert" className="space-y-2">
+              <p className="text-sm text-destructive">{t("canvases:shareDefaultsFailed")}</p>
+              <Button className="min-h-11" variant="outline" onClick={onRetry}>
+                {t("canvases:retry")}
+              </Button>
+            </div>
+          )}
+          {defaults && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                {t("canvases:sharingRelease", {
+                  name: metadata.display_name || canvas.title,
+                  version: metadata.version,
+                })}
+              </p>
+              {defaults.missing_required.length > 0 && (
+                <div
+                  className="rounded-lg border border-border/70 p-4"
+                  data-testid="canvas-share-required-gaps"
+                >
+                  <p className="mb-3 text-sm font-medium">{t("canvases:shareRequiredDetails")}</p>
+                  <ShareMissingFields
+                    fields={defaults.missing_required}
+                    metadata={metadata}
+                    onChange={onChange}
+                  />
+                </div>
+              )}
+              <details
+                open={detailsOpen}
+                onToggle={(event) => onDetailsOpenChange(event.currentTarget.open)}
+                className="rounded-lg border border-border/70"
+                data-testid="canvas-share-package-details"
+              >
+                <summary className="min-h-11 cursor-pointer px-4 py-3 font-medium">
+                  {t("canvases:packageDetails")}
+                </summary>
+                <ShareMetadataForm metadata={metadata} onChange={onChange} />
+              </details>
+            </>
+          )}
+          {!share.review && (
+            <Button
+              className="min-h-11 cursor-pointer md:min-h-7 [@media(pointer:coarse)]:min-h-11"
+              disabled={share.loading || !defaults || defaultsLoading}
+              onClick={onPrepare}
+            >
+              {t("canvases:prepareDownloads")}
+            </Button>
+          )}
+          <span role="status" className="sr-only">
+            {share.loading ? t("canvases:sharing") : ""}
+          </span>
+          {Boolean(share.error) && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("canvases:shareFailed")}
+            </p>
+          )}
+          {share.review && (
+            <ExportReview
+              review={share.review}
+              loading={share.loading}
+              onDownload={share.download}
+            />
+          )}
+          <CanvasShareHelp review={share.review} />
+        </>
+      )}
+    </div>
   );
 }
 
@@ -240,6 +386,66 @@ function ExportReview({
       </div>
       <p className="text-xs text-muted-foreground">{t("canvases:privateContentReminder")}</p>
     </section>
+  );
+}
+
+function ShareMissingFields({
+  fields,
+  metadata,
+  onChange,
+}: {
+  fields: string[];
+  metadata: ShareMetadata;
+  onChange: <K extends keyof ShareMetadata>(key: K, value: ShareMetadata[K]) => void;
+}) {
+  const { t } = useTranslation();
+  const labels: Record<string, string> = {
+    package_id: "packageId",
+    version: "packageVersion",
+    display_name: "displayName",
+    description: "description",
+    author: "author",
+    license: "license",
+    source_mode: "sourceMode",
+    min_kandev_version: "minKandevVersion",
+  };
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {fields
+        .filter((field) => field in labels)
+        .map((field) => {
+          const key = field as keyof ShareMetadata;
+          const id = `canvas-share-required-${field}`;
+          return (
+            <div key={field} className="space-y-2">
+              <Label htmlFor={id}>{t(`canvases:${labels[field]}`)}</Label>
+              {field === "source_mode" ? (
+                <Select
+                  value={metadata.source_mode}
+                  onValueChange={(value) =>
+                    onChange("source_mode", value as ShareMetadata["source_mode"])
+                  }
+                >
+                  <SelectTrigger id={id} className="min-h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="static">{t("canvases:sourceModeStatic")}</SelectItem>
+                    <SelectItem value="project">{t("canvases:sourceModeProject")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id={id}
+                  className="min-h-11"
+                  value={String(metadata[key] ?? "")}
+                  onChange={(event) => onChange(key, event.target.value)}
+                />
+              )}
+            </div>
+          );
+        })}
+    </div>
   );
 }
 

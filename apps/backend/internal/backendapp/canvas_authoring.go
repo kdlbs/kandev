@@ -351,17 +351,21 @@ func (s *canvasAuthoringService) PublishCanvas(ctx context.Context, request mcph
 		return nil, err
 	}
 	defer s.endPublish(request.Agent.SessionID, item.ID)
-	expectedAuthority := instances.PublishAuthority{
-		InstanceID: item.PluginInstanceID, ScopeKind: item.ScopeKind,
-		WorkspaceID: item.WorkspaceID, TaskID: item.TaskID,
-		Status: item.Status, ActiveReleaseID: item.ActiveReleaseID,
-		GrantGeneration: item.GrantGeneration,
-	}
+	expectedAuthority := canvasPublishAuthority(item)
 	expectedBaseReleaseID := ""
 	if editSession {
 		expectedBaseReleaseID = target.ReleaseID
 	}
 	return s.publishCanvasSource(ctx, execution, task, item, request, expectedAuthority, expectedBaseReleaseID)
+}
+
+func canvasPublishAuthority(item *canvas.Canvas) instances.PublishAuthority {
+	return instances.PublishAuthority{
+		InstanceID: item.PluginInstanceID, ScopeKind: item.ScopeKind,
+		DataScopeKind: item.DataScopeKind, WorkspaceID: item.WorkspaceID,
+		TaskID: item.TaskID, Status: item.Status,
+		ActiveReleaseID: item.ActiveReleaseID, GrantGeneration: item.GrantGeneration,
+	}
 }
 
 func validateCanvasPublishSource(item *canvas.Canvas, request mcphandlers.CanvasPublishRequest) error {

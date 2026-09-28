@@ -1,12 +1,17 @@
 "use client";
 
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
-  buildKanbanCardMenuEntries,
+  buildCardPluginEntries,
   useKanbanCardMoveTargets,
+  type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
+import { buildKanbanCardMenuEntries } from "@/components/kanban-card-menu-builder";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { ChangeWorkflowDialog } from "@/components/task/change-workflow-dialog";
 import {
   TaskExternalLinkDialog,
   type ExternalLinkProvider,
@@ -22,6 +27,7 @@ import { useTaskMenuDialogState } from "@/hooks/use-task-menu-dialog-state";
 import type { Repository, TaskPriority } from "@/lib/types/http";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { useTaskPRUnlinkMenu } from "@/hooks/domains/github/use-task-pr-unlink-menu";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { KanbanPresentation, Task, WorkflowStep } from "@/components/kanban-card";
 
@@ -34,12 +40,15 @@ export interface TaskCardMenuParams {
   steps?: WorkflowStep[];
   isDeleting?: boolean;
   isArchiving?: boolean;
-  /** Row-local in-flight move guard: disables move/send-to-workflow entries. */
+  /** Row-local in-flight move guard: disables move/change-workflow entries. */
   isMoving?: boolean;
   isSelected?: boolean;
   selectedIds?: Set<string>;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => void;
+  onDelete?: (
+    task: Task,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
+  ) => void;
   onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
   onMove?: (task: Task, targetStepId: string) => void;
 }
@@ -143,6 +152,51 @@ export function buildPluginMenuContext(
   };
 }
 
+function useCardPRUnlinkEntries(task: Task) {
+  const { t } = useTranslation();
+  const unlinkMenu = useTaskPRUnlinkMenu(task.id, task.statusSummary?.pull_request?.number);
+  const entries: KanbanCardMenuEntry[] = unlinkMenu.choices.map((choice) => ({
+    kind: "item",
+    key: `unlink-task-pr-${choice.associationId}`,
+    testId: `kanban-unlink-task-pr-${choice.associationId}`,
+    label: t("github:removeFromTask", {
+      repo: choice.owner ? `${choice.owner}/${choice.repo}` : choice.repo,
+      prnumber: choice.number,
+    }),
+    disabled: !unlinkMenu.canUnlink || choice.pending,
+    onSelect: () => void unlinkMenu.unlink(choice.associationId),
+  }));
+  return {
+    entries,
+    loadingLabel: unlinkMenu.isLoading ? t("github:loadingPullRequests") : undefined,
+    onOpenChange: unlinkMenu.onOpenChange,
+  };
+}
+
+function useTaskMenuConfirmations(
+  taskId: string,
+  detachTask: (taskId: string) => Promise<unknown>,
+  dialogs: ReturnType<typeof useTaskMenuDialogState>,
+) {
+  const handleDetachConfirm = async () => {
+    try {
+      await detachTask(taskId);
+      dialogs.setShowDetachConfirm(false);
+    } catch (error) {
+      console.error("Failed to detach task:", error);
+    }
+  };
+  const requestDetachConfirmation = () => {
+    // Radix must finish the menu pointer sequence before the confirmation opens.
+    window.setTimeout(() => dialogs.setShowDetachConfirm(true), 300);
+  };
+  const requestArchiveConfirmation = () => {
+    // Radix must finish the menu pointer sequence before the confirmation opens.
+    window.setTimeout(() => dialogs.setShowArchiveConfirm(true), 300);
+  };
+  return { handleDetachConfirm, requestDetachConfirmation, requestArchiveConfirmation };
+}
+
 export function useKanbanCardMenus({
   task,
   workspaceId,
@@ -169,33 +223,15 @@ export function useKanbanCardMenus({
   const dialogs = useTaskMenuDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
   const updateTaskPriority = useUpdateTaskPriority();
+  const prUnlinkMenu = useCardPRUnlinkEntries(task);
+  const { handleDetachConfirm, requestDetachConfirmation, requestArchiveConfirmation } =
+    useTaskMenuConfirmations(task.id, detachTask, dialogs);
   const detachAnchorRef = useRef<HTMLDivElement>(null);
   const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
   const disabled = Boolean(isDeleting || isArchiving || isDetaching);
   const moveDisabled = Boolean(disabled || isMoving);
   const actingOnMultiSelection = Boolean(isSelected && selectedIds && selectedIds.size > 1);
-
-  const handleDetachConfirm = async () => {
-    try {
-      await detachTask(task.id);
-      dialogs.setShowDetachConfirm(false);
-    } catch (error) {
-      console.error("Failed to detach task:", error);
-    }
-  };
-
-  const requestDetachConfirmation = () => {
-    // Let Radix finish the menu's pointer sequence before the non-modal
-    // popover opens; otherwise the initiating menu event is an outside click.
-    window.setTimeout(() => dialogs.setShowDetachConfirm(true), 300);
-  };
-
-  const requestArchiveConfirmation = () => {
-    // Let Radix finish the menu's pointer sequence before the local surface
-    // opens; otherwise the initiating menu event is treated as outside input.
-    window.setTimeout(() => dialogs.setShowArchiveConfirm(true), 300);
-  };
 
   const menuBase = {
     currentWorkflowId: moveMenu.moveTargets.currentWorkflowId,
@@ -215,25 +251,52 @@ export function useKanbanCardMenus({
     onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
     onDetach: task.parentTaskId && !actingOnMultiSelection ? requestDetachConfirmation : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
+    onChangeWorkflow: () => {
+      window.setTimeout(() => dialogs.setShowChangeWorkflow(true), 300);
+    },
     pluginLinkActions,
   };
 
   const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);
+  const nativeUnlinkEntries = prUnlinkMenu.entries;
+  const loadingUnlinkLabel = prUnlinkMenu.loadingLabel;
+  // Both variants below share every input the plugin entries depend on -- the
+  // processing flags, the edit handler and the context -- so build them once:
+  // passing one result to both keeps each plugin action's items() to a single
+  // evaluation per card per render (see buildCardPluginEntries).
+  const pluginEntries = buildCardPluginEntries({
+    disabled: menuBase.disabled,
+    isDeleting: menuBase.isDeleting,
+    isArchiving: menuBase.isArchiving,
+    isDetaching: menuBase.isDetaching,
+    onEdit: menuBase.onEdit,
+    nativeUnlinkEntries,
+    loadingUnlinkLabel,
+    pluginMenuContext,
+  });
 
   return {
     ...dialogs,
     dropdownMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveToStepFromDropdown,
-      onSendToWorkflow: moveMenu.sendTaskToWorkflow,
       pluginMenuContext,
+      pluginEntries,
+      nativeUnlinkEntries,
+      loadingUnlinkLabel,
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveSelectedToStep,
-      onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
+      onChangeWorkflow: actingOnMultiSelection ? undefined : menuBase.onChangeWorkflow,
+      onSendToWorkflow: actingOnMultiSelection ? moveMenu.sendSelectionToWorkflow : undefined,
+      isBulkSelection: actingOnMultiSelection,
       pluginMenuContext,
+      pluginEntries,
+      nativeUnlinkEntries,
+      loadingUnlinkLabel,
     }),
+    onPRMenuOpenChange: prUnlinkMenu.onOpenChange,
     isDetaching,
     detachAnchorRef,
     detachFocusReturnRef,
@@ -263,12 +326,20 @@ export function KanbanCardDialogs({
 }) {
   return (
     <>
+      <ChangeWorkflowDialog
+        open={menu.showChangeWorkflow}
+        onOpenChange={menu.setShowChangeWorkflow}
+        taskId={task.id}
+        workspaceId={workspaceId}
+        focusReturnRef={menu.detachFocusReturnRef}
+      />
       <TaskDeleteConfirmDialog
         open={menu.showDeleteConfirm}
         onOpenChange={menu.setShowDeleteConfirm}
         taskTitle={task.title}
         taskId={task.id}
         executorType={task.primaryExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(task.workspaceMode)}
         isDeleting={isDeleting}
         onConfirm={(opts) => onDelete?.(task, opts)}
       />

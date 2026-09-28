@@ -71,6 +71,9 @@ export type TaskSwitcherItem = {
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   parentTaskId?: string;
+  continuationParentTitle?: string;
+  /** Number of filtered descendants reported by the paged sidebar query. */
+  subtaskCount?: number;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */

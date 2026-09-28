@@ -301,6 +301,22 @@ func TestGHClient_GetPRStatus(t *testing.T) {
 	}
 }
 
+func TestGHClient_GetPR_NormalizesCLIRateLimitStderr(t *testing.T) {
+	for _, stderr := range []string{
+		"GraphQL: API rate limit already exceeded for user",
+		"gh: HTTP 429: Too Many Requests",
+	} {
+		t.Run(stderr, func(t *testing.T) {
+			newFakeGH(t, ghResponse{Prefix: "pr view", Stderr: stderr, Exit: 1})
+			_, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 42)
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests {
+				t.Fatalf("err = %v, want a typed 429 rate-limit error", err)
+			}
+		})
+	}
+}
+
 func TestGHClient_GetPRFeedback(t *testing.T) {
 	responses := append(ghPRStatusResponses(),
 		ghResponse{

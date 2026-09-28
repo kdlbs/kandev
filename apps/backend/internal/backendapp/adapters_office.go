@@ -149,11 +149,12 @@ func (a *childTaskCreatorAdapter) CreateChildTask(
 	ctx context.Context, parent *models.Task, spec officeengineadapters.ChildTaskCreateSpec,
 ) (string, error) {
 	return a.taskSvc.CreateChildTask(ctx, parent, taskservice.ChildTaskSpec{
-		Title:          spec.Title,
-		Description:    spec.Description,
-		WorkflowID:     spec.WorkflowID,
-		StepID:         spec.StepID,
-		AgentProfileID: spec.AgentProfileID,
+		Title:                 spec.Title,
+		Description:           spec.Description,
+		WorkflowID:            spec.WorkflowID,
+		StepID:                spec.StepID,
+		AgentProfileID:        spec.AgentProfileID,
+		OfficeCarrierMetadata: spec.OfficeCarrierMetadata,
 	})
 }
 
@@ -163,15 +164,24 @@ type taskCreatorAdapter struct {
 }
 
 func (a *taskCreatorAdapter) CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginOnboarding)
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginOnboarding, nil)
 }
 
-func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated)
+func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(
+	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
+	carrierMetadata map[string]interface{},
+) (string, error) {
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated, carrierMetadata)
 }
 
+// createOfficeTask persists carrierMetadata (already resolved server-side
+// from the causing run's record, or nil) through the trusted
+// OfficeCarrierMetadata field rather than the ordinary Metadata field, so
+// it survives create-time stripping the same way a request-body-forged
+// carrier does not (AC-OFFICE-RUN-CAUSATION-001.17).
 func (a *taskCreatorAdapter) createOfficeTask(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
+	carrierMetadata map[string]interface{},
 ) (string, error) {
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
@@ -180,6 +190,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Origin:                 origin,
+		OfficeCarrierMetadata:  carrierMetadata,
 	})
 	if err != nil {
 		return "", err
@@ -191,8 +202,16 @@ func (a *taskCreatorAdapter) createOfficeTask(
 // workflow id, bypassing the workspace's default office_workflow_id. Its
 // only production caller (as of WO-36) is the routines dispatcher, which
 // pins a materialized heavy-routine run to the dedicated Routine workflow.
+//
+// routineID is the firing routine's id, persisted as the task-boundary
+// causation carrier's routine attribution (AC-OFFICE-RUN-CAUSATION-001.14/.24):
+// a routine fire has no creating run, so the carrier's creating run
+// identifier, causation identifier, and depth are the AC.24 root values
+// (empty/empty/0), while the routine attribution, actor kind `system`,
+// and human-rooted `false` still apply, keeping the routine chargeable
+// for every run a later task-assigned wake queues off this task.
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
-	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
+	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string,
 ) (string, error) {
 	metadata := map[string]interface{}{
 		// The Routine workflow's start step carries on_enter:
@@ -209,6 +228,22 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		// heavy-routine task actually launch with the routine's assignee.
 		metadata[models.MetaKeyAgentProfileID] = assigneeAgentID
 	}
+	// The full carrier set is written explicitly, including the
+	// empty/zero root values, so the read side's carrierPresent can tell
+	// this task apart from one that never carried a carrier at all — an
+	// omitted key reads as a defect (AC-OFFICE-RUN-CAUSATION-001.10
+	// "absent"), not as this deliberate root. Carried through the trusted
+	// OfficeCarrierMetadata field (AC-OFFICE-RUN-CAUSATION-001.17), not
+	// Metadata, so it survives create-time stripping.
+	carrierMetadata := map[string]interface{}{
+		models.MetaKeyOfficeCarrierCausationID:    "",
+		models.MetaKeyOfficeCarrierCausationDepth: 0,
+		models.MetaKeyOfficeCarrierCreatingRunID:  "",
+		models.MetaKeyOfficeCarrierHumanRooted:    false,
+		models.MetaKeyOfficeCarrierRoutineID:      routineID,
+		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
+		models.MetaKeyOfficeCarrierActorID:        "",
+	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
@@ -217,6 +252,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Metadata:               metadata,
+		OfficeCarrierMetadata:  carrierMetadata,
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {
@@ -225,18 +261,25 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	return result.Task.ID, nil
 }
 
+// CreateOfficeSubtask receives carrierMetadata already resolved server-side
+// from the causing run's record (or nil), and forwards it through the
+// trusted ChildTaskSpec.OfficeCarrierMetadata field so it survives
+// create-time stripping the same way a request-body-forged carrier does
+// not (AC-OFFICE-RUN-CAUSATION-001.17).
 func (a *taskCreatorAdapter) CreateOfficeSubtask(
 	ctx context.Context,
 	parentTaskID, assigneeAgentID, title, description string,
+	carrierMetadata map[string]interface{},
 ) (string, error) {
 	parent, err := a.taskSvc.GetTask(ctx, parentTaskID)
 	if err != nil {
 		return "", err
 	}
 	return a.taskSvc.CreateChildTask(ctx, parent, taskservice.ChildTaskSpec{
-		Title:          title,
-		Description:    description,
-		AgentProfileID: assigneeAgentID,
+		Title:                 title,
+		Description:           description,
+		AgentProfileID:        assigneeAgentID,
+		OfficeCarrierMetadata: carrierMetadata,
 	})
 }
 

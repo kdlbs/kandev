@@ -298,6 +298,7 @@
   "limitsGithubPullRequestsAndIssues": "限制此工作區中顯示或匯入的 GitHub 提取要求和議題。",
   "loadingAccounts": "正在載入帳戶…",
   "loadingOrganizations": "正在載入組織…",
+  "loadingPullRequests": "正在載入提取要求…",
   "loadingRegisteredApps": "正在載入已註冊應用…",
   "loadingTaskAccess": "正在載入任務存取設定…",
   "localAndWorktreeTasksUseHost": "本地和工作樹任務使用主機可見的 Git 或 SSH 認證資訊。Docker、SSH 和雲端任務使用對應執行器中設定的認證資訊。",

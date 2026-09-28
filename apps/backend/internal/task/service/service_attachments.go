@@ -7,8 +7,93 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// PreviewFeedbackAttachments returns server-owned screenshot descriptors for
+// the exact visible snapshot submitted by the composer.
+func (s *Service) PreviewFeedbackAttachments(
+	ctx context.Context,
+	taskID string,
+	refs []models.TaskPreviewFeedbackRef,
+) ([]v1.MessageAttachment, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	if _, err := s.GetTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	repo, ok := s.messages.(interface {
+		ListTaskPreviewFeedback(context.Context, string) (*models.TaskPreviewFeedbackSnapshot, error)
+	})
+	if !ok {
+		return nil, errors.New("preview feedback repository is unavailable")
+	}
+	snapshot, err := repo.ListTaskPreviewFeedback(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	wanted, err := wantedPreviewFeedbackVersions(refs, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	attachments, matched, err := collectPreviewFeedbackAttachments(snapshot, wanted)
+	if err != nil {
+		return nil, err
+	}
+	if matched != len(refs) {
+		return nil, &previewfeedbacktx.FeedbackChangedError{Snapshot: snapshot}
+	}
+	return attachments, nil
+}
+
+func wantedPreviewFeedbackVersions(
+	refs []models.TaskPreviewFeedbackRef,
+	snapshot *models.TaskPreviewFeedbackSnapshot,
+) (map[string]int64, error) {
+	wanted := make(map[string]int64, len(refs))
+	for _, ref := range refs {
+		if ref.ID == "" || ref.Version <= 0 {
+			return nil, &previewfeedbacktx.FeedbackChangedError{Snapshot: snapshot}
+		}
+		if _, duplicate := wanted[ref.ID]; duplicate {
+			return nil, &previewfeedbacktx.FeedbackChangedError{Snapshot: snapshot}
+		}
+		wanted[ref.ID] = ref.Version
+	}
+	return wanted, nil
+}
+
+func collectPreviewFeedbackAttachments(
+	snapshot *models.TaskPreviewFeedbackSnapshot,
+	wanted map[string]int64,
+) ([]v1.MessageAttachment, int, error) {
+	attachments := make([]v1.MessageAttachment, 0)
+	matched := 0
+	for _, item := range snapshot.Items {
+		version, selected := wanted[item.ID]
+		if !selected {
+			continue
+		}
+		if item.Version != version {
+			return nil, 0, &previewfeedbacktx.FeedbackChangedError{Snapshot: snapshot}
+		}
+		matched++
+		if item.Kind != models.TaskPreviewFeedbackScreenshot {
+			continue
+		}
+		attachment := item.ScreenshotAttachment
+		if attachment == nil || attachment.ID != item.ScreenshotAttachmentID {
+			return nil, 0, models.ErrAttachmentClaimConflict
+		}
+		attachments = append(attachments, v1.MessageAttachment{
+			Type: attachment.Kind, AttachmentID: attachment.ID, MimeType: attachment.MimeType,
+			Name: attachment.Name, SizeBytes: attachment.SizeBytes, DeliveryMode: attachment.DeliveryMode,
+		})
+	}
+	return attachments, matched, nil
+}
 
 // ClaimMessageAttachments binds staged descriptors to a task/session after
 // the normal task and session authorization checks have completed.

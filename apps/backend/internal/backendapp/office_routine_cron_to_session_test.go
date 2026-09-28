@@ -27,6 +27,7 @@ import (
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -418,6 +419,7 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 	officeSvc := officeservice.NewService(officeservice.ServiceOptions{
 		Repo: h.officeRepo, Logger: log, EventBus: eventBus,
 	})
+	officeSvc.SetRunsService(runsservice.New(h.officeRepo.RunsRepository(), nil, log, nil))
 	// Synchronous handlers + a real event bus let this test simulate the
 	// first attempt's completion (AgentCompleted) between the two fires
 	// below, the same way an agent process reporting done would free the
@@ -434,6 +436,7 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 
 	wakeupDispatcher := officewakeup.NewDispatcher(h.officeRepo, h.officeRepo, log)
 	wakeupDispatcher.SetRoutineLookup(h.officeRepo)
+	wakeupDispatcher.SetRunQueuer(officeSvc)
 	h.routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{repo: h.officeRepo, dispatcher: wakeupDispatcher})
 
 	// agent_profiles.agent_id is a NOT NULL FK to agents (CLI tool

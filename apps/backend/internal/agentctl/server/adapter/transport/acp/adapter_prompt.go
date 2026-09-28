@@ -590,7 +590,7 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	}
 
 	turn := a.signalPromptTurnAbort()
-	if err := waitForPromptRPCAfterCancel(turn); err != nil {
+	if err := a.waitForPromptRPCAfterCancel(turn); err != nil {
 		span.RecordError(err)
 		a.logger.Warn("session/cancel sent but in-flight prompt did not end",
 			zap.String("session_id", sessionID),

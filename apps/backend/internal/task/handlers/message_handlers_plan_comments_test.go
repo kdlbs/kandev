@@ -13,11 +13,97 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func (r *messageAddSwitchRepo) ValidateMessageTaskFeedback(
+	_ context.Context,
+	_, _, content string,
+	planRefs []models.TaskPlanCommentRef,
+	previewRefs []models.TaskPreviewFeedbackRef,
+	requirePrimary bool,
+	_ models.TaskSessionState,
+) error {
+	if !requirePrimary || len(planRefs) != 0 || len(previewRefs) != 1 ||
+		previewRefs[0] != (models.TaskPreviewFeedbackRef{ID: "preview-handler", Version: 2}) ||
+		content != "" {
+		return errors.New("preview feedback preflight was not forwarded")
+	}
+	return nil
+}
+
+func (r *messageAddSwitchRepo) ListTaskPreviewFeedback(
+	context.Context,
+	string,
+) (*models.TaskPreviewFeedbackSnapshot, error) {
+	return handlerPreviewFeedbackSnapshot(), nil
+}
+
+func (r *messageAddSwitchRepo) CreateMessageWithTaskFeedback(
+	_ context.Context,
+	message *models.Message,
+	planRefs []models.TaskPlanCommentRef,
+	previewRefs []models.TaskPreviewFeedbackRef,
+	requirePrimary bool,
+	_ models.TaskSessionState,
+	_ *messagequeue.QueueAttachmentClaim,
+) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error) {
+	if !requirePrimary || len(planRefs) != 0 || len(previewRefs) != 1 ||
+		previewRefs[0] != (models.TaskPreviewFeedbackRef{ID: "preview-handler", Version: 2}) {
+		return nil, nil, errors.New("preview feedback request was not forwarded")
+	}
+	content, err := previewfeedback.AppendMarkdown(message.Content, handlerPreviewFeedbackSnapshot().Items)
+	if err != nil {
+		return nil, nil, err
+	}
+	message.Content = content
+	message.PromptIndex = 1
+	r.messagesMu.Lock()
+	r.messages = append(r.messages, message)
+	r.idempotentMessage = message
+	r.messagesMu.Unlock()
+	return nil, &models.TaskPreviewFeedbackSnapshot{TaskID: message.TaskID, Revision: 4, Items: []*models.TaskPreviewFeedback{}}, nil
+}
+
+func (r *messageAddSwitchRepo) CreateMessageWithTaskFeedbackAndQueue(
+	ctx context.Context,
+	message *models.Message,
+	queued *messagequeue.QueuedMessage,
+	planRefs []models.TaskPlanCommentRef,
+	previewRefs []models.TaskPreviewFeedbackRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+	claim *messagequeue.QueueAttachmentClaim,
+	_ int,
+) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error) {
+	planSnapshot, previewSnapshot, err := r.CreateMessageWithTaskFeedback(
+		ctx, message, planRefs, previewRefs, requirePrimary, expectedState, claim,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	queued.Content = message.Content
+	copy := *queued
+	r.queuedMessage = &copy
+	return planSnapshot, previewSnapshot, nil
+}
+
+func handlerPreviewFeedbackSnapshot() *models.TaskPreviewFeedbackSnapshot {
+	return &models.TaskPreviewFeedbackSnapshot{
+		TaskID: "t1", Revision: 3,
+		Items: []*models.TaskPreviewFeedback{{
+			ID: "preview-handler", TaskID: "t1", Version: 2,
+			Kind: models.TaskPreviewFeedbackText, Comment: "Generated copy is unclear",
+			SourceKind: models.TaskPreviewFeedbackBrowser, SourceLabel: "Local app",
+			PageRoute: "/generated", SelectedText: "Runtime label",
+			TextAnchor: json.RawMessage(`{"start":{"node_path":[0],"offset":0},"end":{"node_path":[0],"offset":13},"containing_element":{"tag":"span","outer_html":"<span>Runtime label</span>"}}`),
+		}},
+	}
+}
 
 func (r *messageAddSwitchRepo) ValidateMessagePlanComments(
 	_ context.Context,
@@ -134,6 +220,44 @@ func TestWSAddMessageAcceptsEmptyBodyWithPlanCommentsAndUsesResolvedContent(t *t
 	require.Contains(t, stored, "### Plan Comments")
 	require.Contains(t, stored, "> stored feedback")
 	require.False(t, strings.ContainsRune(stored, '\x00'))
+}
+
+func TestWSAddMessageAcceptsEmptyBodyWithPreviewFeedbackAndUsesResolvedContent(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: "IN_PROGRESS", UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+		},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := NewMessageHandlers(svc, &firstTurnCaptureOrchestrator{}, log)
+	req, err := ws.NewRequest("req-preview-feedback", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "content": "",
+		"client_message_id":       "message-handler-preview-feedback",
+		"preview_feedback_refs":   []map[string]interface{}{{"id": "preview-handler", "version": 2}},
+		"require_primary_session": true,
+	})
+	require.NoError(t, err)
+
+	response, err := h.wsAddMessage(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type, string(response.Payload))
+	stored := repo.firstMessageContent()
+	require.Contains(t, stored, "### Web Preview Feedback")
+	require.Contains(t, stored, "Runtime label")
+	require.Contains(t, stored, "containing_element")
 }
 
 func TestWSAddMessageRunRejectsPrimaryReplacedByOnTurnStart(t *testing.T) {

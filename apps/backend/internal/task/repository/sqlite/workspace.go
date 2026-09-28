@@ -107,9 +107,16 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 
 // UpdateWorkspace updates an existing workspace
 func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
-	workspace.UpdatedAt = time.Now().UTC()
+	return r.updateWorkspace(ctx, workspace, nil)
+}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+func (r *Repository) UpdateWorkspaceIfUnchanged(ctx context.Context, workspace *models.Workspace, expected time.Time) error {
+	return r.updateWorkspace(ctx, workspace, &expected)
+}
+
+func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Workspace, expected *time.Time) error {
+	workspace.UpdatedAt = time.Now().UTC()
+	query := `
 		UPDATE workspaces
 		SET name = ?,
 			description = ?,
@@ -119,14 +126,27 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 			default_agent_profile_id = ?,
 			default_config_agent_profile_id = ?,
 			updated_at = ?
-		WHERE id = ?
-	`), workspace.Name, workspace.Description, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID)
+		WHERE id = ?`
+	args := []interface{}{
+		workspace.Name, workspace.Description, workspace.UnitID,
+		workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID,
+		workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID,
+	}
+	if expected != nil {
+		query += optimisticUpdatedAtPredicate
+		args = append(args, *expected)
+	}
+
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if expected != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
 		return workspaceNotFoundError(workspace.ID)
 	}
 	return nil

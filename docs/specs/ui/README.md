@@ -12,7 +12,8 @@ owners:
 ## Scope
 
 UI owns responsive behavior and reusable presentation preferences, including
-task-listing modes and Home destination choices. Other systems retain task,
+task-listing modes, Home destination choices, and reusable client-side task
+navigation. Other systems retain task,
 runtime, and workspace lifecycle/state ownership.
 
 ## Related
