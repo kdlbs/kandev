@@ -249,6 +249,13 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
 - Undo column: **Undo** for managers on rows with `undoable` true, "No undo" on
   approved message and resume rows, "Undone by <name>, <time>" on undone
   rows, and the 409 `undo_conflict` message "It has moved since" inline.
+  The other two refusals: 409 `already_undone` (a double click, or another
+  manager undid it first) shows no error; the list refetches, so the row
+  shows "Undone by <name>, <time>" of whoever undid it. 409 `not_undoable`
+  (reachable only from a direct API call, since `undoable` is computed
+  from fields undo never changes; the UI handles it defensively) shows "This can no longer be undone" inline in place of
+  the button and refetches the list. Any other error (500, network) shows
+  "Undo failed. Try again." inline and keeps the Undo button.
 - Empty states from `002.5`. Readers see no Undo (`002.6`).
 - Phone width stacks each row as a card with the same fields.
 

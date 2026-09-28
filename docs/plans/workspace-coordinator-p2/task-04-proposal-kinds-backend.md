@@ -113,7 +113,12 @@ onto the task's current step settles `approved` with `noop: true` and no
 has since become a Done step settles `approved` with `noop: true`, not
 `step_is_done`. A second identical propose after the target was archived
 returns the open proposal. A retire committed before a citing propose makes
-the propose refuse naming `standing_order_ids`. The E2E spec drives the mock agent to propose a move and
+the propose refuse naming `standing_order_ids`. A move proposal stored with
+`starts_agent` true, whose task was then moved by hand onto the destination,
+is refused 409 `policy_denied` after `start_agent` flips to `denied`, with
+no claim and no `MoveTask` call. Two identical `propose_task_kandev` calls
+create two proposals, and a create call citing six ids, or one id twice, is
+refused naming `standing_order_ids` before any transaction. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.
 
 ## Likely files

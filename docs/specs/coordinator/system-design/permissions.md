@@ -323,7 +323,13 @@ policy: when the proposal's action (its kind's action, and `start_agent`
 too when `starts_agent` is true) is `denied`, it returns 409
 `{"error":"policy_denied","action":...}` and writes nothing (`002.6`). Reject
 has no such check. The card shows "Its May do settings no longer allow
-this" with Reject only.
+this" with Reject only. The re-check reads only the stored proposal and the
+policy, never the target, so it runs before any kind's `Execute` checks:
+a move proposal with `starts_agent` true is refused while `start_agent` is
+`denied` even when its task already sits on the destination and the move
+would have been a no-op ([proposal kinds](proposal-kinds.md#approve));
+`AC-COORDINATOR-PROPOSAL-KINDS-002.3` takes precedence over the no-op of
+`003.3`.
 Approve does not re-check Watches: Watches bounds what the coordinator reads
 and proposes, so a proposal made while its workflow was watched stays
 approvable after the workflow leaves scope, and the kind's executor still

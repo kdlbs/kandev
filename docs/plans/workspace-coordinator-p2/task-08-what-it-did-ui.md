@@ -40,9 +40,11 @@ managers, and the undone state.
   approver, "with edits", refused count) (`002.4`).
 - Empty and filtered-empty texts (`002.5`); reader view without Undo
   (`002.6`).
-- Undo button on undoable rows, confirmation, error texts for
-  `already_undone`, `not_undoable`, `undo_conflict`, and "Undone by <name>,
-  <time>" (`003.1`, `003.6`).
+- Undo button on undoable rows, confirmation, and the refusal handling of
+  the design's Undo column: `already_undone` refetches with no error text,
+  `not_undoable` shows "This can no longer be undone", `undo_conflict`
+  shows "It has moved since", other errors show "Undo failed. Try again."
+  and keep the button; "Undone by <name>, <time>" (`003.1`, `003.6`).
 - Refresh on `coordinator.updated`. Six locales.
 
 ## Out of scope
@@ -74,6 +76,10 @@ Phone: each row is a card; Undo is a full-width button.
 - Rows render every row kind the log can hold, in time order, with paging.
 - Undo is offered only where the server says it is undoable, and a conflict
   shows its text without removing the row.
+- A component test mocks each undo refusal: `already_undone` shows no error
+  and refetches to "Undone by", `not_undoable` and `undo_conflict` show
+  their texts, and a 500 shows "Undo failed. Try again." with the button
+  still there.
 
 ## Verification
 

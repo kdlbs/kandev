@@ -134,9 +134,16 @@ coordinator from the principal, passes the guard of
 3. Publish `coordinator.updated`.
 
 `propose_task_kandev` gains the `start_agent` branch of
-[Create with a start](#create-with-a-start) and `standing_order_ids`, whose
-active-order check likewise runs inside the phase-1 locked create
-transaction, after its external-id dedupe.
+[Create with a start](#create-with-a-start) and `standing_order_ids`. The
+create propose has no dedupe step: phase 1 has no propose-time
+deduplication key ([proposals](proposals.md#propose)), and the external id
+belongs to the task created at approval, not to the propose call. So its
+order is: the shape of `standing_order_ids` (at most 5, no duplicate) is
+checked with the other fields in phase-1 step 1, before the transaction;
+the active-order check runs inside the phase-1 locked transaction of step
+2, before the count against 25. A repeated create call is a new proposal,
+and a repeated call with malformed citations is refused naming
+`standing_order_ids` like the first.
 
 ## Create with a start
 
@@ -167,7 +174,7 @@ After the claim commits, `Execute` runs:
 | --- | --- |
 | `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not resumable: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)`; its error fails with the error text. Outcome `{session_id}`. |
 | `message` | Re-read the task and session (archived or not accepting: fail). Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
-| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. agent-starting (`EligibleStep` false) while the proposal's `starts_agent` is false: fail `step_starts_agent`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`. Otherwise record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
+| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. agent-starting (`EligibleStep` false) while the proposal's `starts_agent` is false: fail `step_starts_agent`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`, before the claim, so that refusal wins over check 4: a proposal stored with `starts_agent` true whose task has since reached the destination is refused 409 `policy_denied` while `start_agent` is `denied`, and the card offers Reject only ([permissions](permissions.md#approve-re-check)). Otherwise record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
 
 A move whose task already sits on the destination (check 4) makes no call,
 because it moves nothing and starts nothing, even when the step has since
