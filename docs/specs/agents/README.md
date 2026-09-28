@@ -18,7 +18,10 @@ provider capabilities, and agent-facing runtime contracts.
 
 This system owns agent profile data, role governance, profile-backed utility
 agents, provider model options, agent permissions, and the agent capability
-surface shared by task and Office consumers.
+surface shared by task and Office consumers. Provider-neutral background-work
+identity, observations, and capabilities belong here; task storage and UI consume
+them without owning protocol semantics. Existing prompt admission and public
+session-activity authority remain with Tasks and Platform.
 
 ## Exclusions
 

@@ -66,6 +66,7 @@ type childBinding struct {
 	description    string
 	subagentType   string
 	model          string
+	activeTurnID   string
 }
 
 // Adapter owns one app-server connection and one Codex thread at a time.
@@ -526,6 +527,12 @@ func (a *Adapter) handleNotification(_ context.Context, method string, raw json.
 func (a *Adapter) handleTurnStarted(threadID, rootThreadID, turnID string, isRootThread bool) {
 	a.beginProviderTurn(threadID, turnID)
 	if !isRootThread {
+		a.mu.Lock()
+		if binding, ok := a.children[threadID]; ok {
+			binding.activeTurnID = turnID
+			a.children[threadID] = binding
+		}
+		a.mu.Unlock()
 		a.emitChildStatus(threadID, childStatusRunning)
 		return
 	}

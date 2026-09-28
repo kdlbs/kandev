@@ -187,6 +187,13 @@ type TurnStartRecorder interface {
 	RecordedTurnStart(sessionID string) (time.Time, bool)
 }
 
+// BackgroundWorkProvider is an optional capability implemented by adapters that
+// support querying background workload snapshots or performing actions on workloads.
+type BackgroundWorkProvider interface {
+	BackgroundWorkSnapshot(ctx context.Context) (*streams.BackgroundWorkSnapshot, error)
+	PerformBackgroundWorkAction(ctx context.Context, req streams.BackgroundWorkActionRequest) (*streams.BackgroundWorkActionResponse, error)
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`

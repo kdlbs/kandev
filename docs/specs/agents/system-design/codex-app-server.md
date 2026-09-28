@@ -100,6 +100,10 @@ Every inventory entry is classified as supported or deliberately rejected by the
 Initialize with Kandev client identity, then send `initialized`.
 Map `thread/start`, `thread/resume`, `turn/start`, `turn/interrupt`, and `turn/steer` to adapter operations.
 Expose steering and forks through optional capability interfaces, not agent-name checks in the UI.
+The planned [explicit same-turn steering design](../../platform/system-design/explicit-turn-steering.md)
+defines the missing native turn/steer mapping, exact-turn targeting, acknowledgement,
+queue-bypass intent and composer behavior. Existing ACP steering is not evidence
+that this native path is implemented.
 Serialize session transitions and scope prompt completion to the matching root thread, turn, and prompt generation.
 
 Reuse Codex credential-copy and session-home policies from `codex_acp.go`.
@@ -136,6 +140,12 @@ Persist provider item and turn identity so history and streamed events reconcile
 Extend context provenance with `app_server`; do not label native context reports as ACP.
 
 ## Children and background work
+
+The planned [provider-neutral background-work contract](background-work.md)
+owns the shared inspection model, capability-driven controls, transport, and UI.
+Codex supplies one adapter mapping; the initial native implementation below
+remains the baseline until that package is implemented. Native terminal discovery
+must not be treated as ownership by Kandev's user-terminal shell manager.
 
 Reuse `task_session_subagents` for the observable child record and `ChildSessionID` for its native thread ID.
 That field is not a foreign key to a persistent Kandev child session.

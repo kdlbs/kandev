@@ -887,3 +887,17 @@ type UsageEventReader interface {
 	ListSessionUsageTurnCursors(ctx context.Context, sessionID string, afterID int64, limit int) ([]models.TaskUsageTurnCursor, error)
 	ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error)
 }
+
+// BackgroundWorkRepository stores the background workload and run inspection projection.
+type BackgroundWorkRepository interface {
+	UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error
+	GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error)
+	ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error)
+	DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error
+	UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error
+	GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error)
+	ListBackgroundRunsByWorkload(ctx context.Context, sessionID, workloadID string) ([]*models.BackgroundRun, error)
+	ReserveBackgroundActionReceipt(ctx context.Context, receipt *models.BackgroundActionReceipt) error
+	RecordBackgroundActionReceipt(ctx context.Context, receipt *models.BackgroundActionReceipt) error
+	GetBackgroundActionReceipt(ctx context.Context, sessionID, operationID string) (*models.BackgroundActionReceipt, error)
+}

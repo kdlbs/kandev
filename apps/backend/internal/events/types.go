@@ -340,6 +340,8 @@ const (
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
+	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
+	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -553,6 +555,26 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildBackgroundWorkUpdatedSubject creates a subject for background work update events for a session
+func BuildBackgroundWorkUpdatedSubject(sessionID string) string {
+	return BackgroundWorkUpdated + "." + sessionID
+}
+
+// BuildBackgroundWorkUpdatedWildcardSubject creates a wildcard subscription for background work update events
+func BuildBackgroundWorkUpdatedWildcardSubject() string {
+	return BackgroundWorkUpdated + ".*"
+}
+
+// BuildBackgroundWorkOutputSubject creates a subject for background work output events for a session
+func BuildBackgroundWorkOutputSubject(sessionID string) string {
+	return BackgroundWorkOutput + "." + sessionID
+}
+
+// BuildBackgroundWorkOutputWildcardSubject creates a wildcard subscription for background work output events
+func BuildBackgroundWorkOutputWildcardSubject() string {
+	return BackgroundWorkOutput + ".*"
 }
 
 // BuildSessionModelFallbackSubject creates a session-specific fallback-model

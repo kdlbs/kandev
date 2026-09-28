@@ -113,6 +113,7 @@ export const defaultState = {
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
   workspaceRestoration: defaultSessionRuntimeState.workspaceRestoration,
+  backgroundWork: defaultSessionRuntimeState.backgroundWork,
   githubStatus: defaultGitHubState.githubStatus,
   githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
@@ -530,6 +531,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     embeddedVscodeSupport: {
       ...defaultState.embeddedVscodeSupport,
       ...initialState.embeddedVscodeSupport,
+    },
+    backgroundWork: {
+      ...defaultState.backgroundWork,
+      ...initialState.backgroundWork,
     },
     ...mergeGitHubState(initialState),
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },

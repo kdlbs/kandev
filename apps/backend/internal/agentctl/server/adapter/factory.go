@@ -27,6 +27,11 @@ type codexAppServerAdapterWrapper struct {
 	*codexappserver.Adapter
 }
 
+var (
+	_ AgentAdapter           = (*codexAppServerAdapterWrapper)(nil)
+	_ BackgroundWorkProvider = (*codexAppServerAdapterWrapper)(nil)
+)
+
 func newCodexAppServerAdapterWrapper(a *codexappserver.Adapter) *codexAppServerAdapterWrapper {
 	return &codexAppServerAdapterWrapper{Adapter: a}
 }

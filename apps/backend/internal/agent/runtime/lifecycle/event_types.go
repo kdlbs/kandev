@@ -282,6 +282,12 @@ type AgentStreamEventData struct {
 
 	// MCPAttachmentAttempt starts a new backend-owned MCP evidence timeline.
 	MCPAttachmentAttempt *streams.MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
+
+	// BackgroundWork contains background workload observation data.
+	BackgroundWork *streams.WorkloadRunObservation `json:"background_work,omitempty"`
+
+	// BackgroundWorkOutput contains background workload output chunk data.
+	BackgroundWorkOutput *streams.WorkloadOutputChunk `json:"background_work_output,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 )
@@ -354,12 +356,13 @@ func (a *Adapter) refreshBackgroundTerminals(ctx context.Context, threadID strin
 	if client == nil || threadID == "" {
 		return
 	}
-	var response protocol.BackgroundTerminalsListResponse
-	if err := client.Call(ctx, protocol.MethodBackgroundTerminalsList, protocol.BackgroundTerminalsListParams{ThreadID: threadID}, &response); err != nil {
+	allTerminals, err := a.FetchAllBackgroundTerminals(ctx, threadID)
+	if err != nil {
+		a.log.Warn("failed to fetch background terminals", zap.String("thread_id", threadID), zap.Error(err))
 		return
 	}
-	next := make(map[string]protocol.BackgroundTerminal, len(response.Data))
-	for _, terminal := range response.Data {
+	next := make(map[string]protocol.BackgroundTerminal, len(allTerminals))
+	for _, terminal := range allTerminals {
 		if terminal.ItemID != "" {
 			next[terminal.ItemID] = terminal
 		}
@@ -369,7 +372,15 @@ func (a *Adapter) refreshBackgroundTerminals(ctx context.Context, threadID strin
 	initialized := a.backgroundSnapshotLoaded
 	a.backgrounds = next
 	a.backgroundSnapshotLoaded = true
+	cancelPoller := false
+	if len(next) == 0 && a.backgroundCancel != nil {
+		a.backgroundCancel()
+		a.backgroundCancel = nil
+		cancelPoller = true
+	}
 	a.mu.Unlock()
+	_ = cancelPoller
+
 	for itemID, terminal := range next {
 		if _, existed := previous[itemID]; !existed {
 			a.emitBackgroundStart(threadID, terminal)
@@ -378,7 +389,7 @@ func (a *Adapter) refreshBackgroundTerminals(ctx context.Context, threadID strin
 	if initialized {
 		for itemID := range previous {
 			if _, stillRunning := next[itemID]; !stillRunning {
-				a.emit(streams.AgentEvent{Type: streams.EventTypeBackgroundComplete, SessionID: threadID, ToolCallID: itemID})
+				a.emitBackgroundComplete(threadID, itemID)
 			}
 		}
 	}
@@ -390,6 +401,18 @@ func (a *Adapter) refreshBackgroundTerminals(ctx context.Context, threadID strin
 func (a *Adapter) emitBackgroundStart(threadID string, terminal protocol.BackgroundTerminal) {
 	payload := streams.NewShellExec(terminal.Command, terminal.CWD, "", 0, true)
 	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, terminal.ItemID, true, false)
+	now := time.Now().UTC()
+	obs := streams.WorkloadRunObservation{
+		SessionID:    threadID,
+		WorkID:       terminal.ItemID,
+		RunID:        terminal.ProcessID,
+		Kind:         streams.WorkloadKindShell,
+		Title:        terminal.Command,
+		State:        streams.RunStateRunning,
+		SourceCallID: terminal.ItemID,
+		Capabilities: codexBackgroundTerminalCapabilities(),
+		StartedAt:    &now,
+	}
 	a.emit(streams.AgentEvent{
 		Type:              streams.EventTypeToolCall,
 		SessionID:         threadID,
@@ -398,6 +421,26 @@ func (a *Adapter) emitBackgroundStart(threadID string, terminal protocol.Backgro
 		ToolTitle:         terminal.Command,
 		ToolStatus:        childStatusRunning,
 		NormalizedPayload: payload,
+		BackgroundWork:    &obs,
+	})
+}
+
+func (a *Adapter) emitBackgroundComplete(threadID, itemID string) {
+	now := time.Now().UTC()
+	obs := streams.WorkloadRunObservation{
+		SessionID:    threadID,
+		WorkID:       itemID,
+		Kind:         streams.WorkloadKindShell,
+		State:        streams.RunStateCompleted,
+		SourceCallID: itemID,
+		Capabilities: codexBackgroundTerminalCapabilities(),
+		FinishedAt:   &now,
+	}
+	a.emit(streams.AgentEvent{
+		Type:           streams.EventTypeBackgroundComplete,
+		SessionID:      threadID,
+		ToolCallID:     itemID,
+		BackgroundWork: &obs,
 	})
 }
 

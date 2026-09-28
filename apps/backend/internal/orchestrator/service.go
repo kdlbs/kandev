@@ -240,6 +240,12 @@ type TaskEventPublisher interface {
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
+// BackgroundWorkObserver records background workload observations and output stream chunks.
+type BackgroundWorkObserver interface {
+	RecordBackgroundWorkloadObservation(ctx context.Context, obs streams.WorkloadRunObservation, taskID, sessionID string) error
+	AppendBackgroundWorkloadOutput(ctx context.Context, chunk streams.WorkloadOutputChunk, sessionID string) error
+}
+
 // FeederPullReconciler wakes task-service feeder pulls after a manual move's
 // lifecycle has completed. The task service remains the owner of candidate
 // selection and promotion rules.
@@ -753,8 +759,9 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents  TaskEventPublisher
-	feederPulls FeederPullReconciler
+	taskEvents             TaskEventPublisher
+	feederPulls            FeederPullReconciler
+	backgroundWorkObserver BackgroundWorkObserver
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -2116,6 +2123,12 @@ func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 // after an admitted manual move lifecycle has completed.
 func (s *Service) SetFeederPullReconciler(reconciler FeederPullReconciler) {
 	s.feederPulls = reconciler
+}
+
+// SetBackgroundWorkObserver wires the task-service observer used to record
+// background workload and stream output observations.
+func (s *Service) SetBackgroundWorkObserver(observer BackgroundWorkObserver) {
+	s.backgroundWorkObserver = observer
 }
 
 // SetSessionAccessChecker installs the per-user workspace scoping check used by

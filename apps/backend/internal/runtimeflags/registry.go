@@ -198,6 +198,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.agentBackgroundWork",
+			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
+			Kind:            KindFeature,
+			Label:           "Agent background work",
+			Description:     "Enables normalized background work tracking, interactive controls, and subagent observation.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Background work lifecycle management and UI inspection are experimental.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,

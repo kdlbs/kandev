@@ -212,6 +212,8 @@ func provideOrchestrator(
 	// Wired unconditionally: dependencies are a core Kanban relationship, not an
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+	orchestratorSvc.SetBackgroundWorkObserver(taskSvc)
+	taskSvc.SetBackgroundWorkActionDispatcher(lifecycleMgr)
 
 	// Let the task service read the orchestrator's task-level
 	// parked_on_background_work OR-aggregate and its own monotonic revision so

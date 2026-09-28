@@ -386,6 +386,13 @@ const (
 	ActionSessionProcessOutput = "session.process.output"
 	ActionSessionProcessStatus = "session.process.status"
 
+	// Background work actions
+	ActionSessionBackgroundWorkList    = "session.background_work.list"
+	ActionSessionBackgroundWorkGet     = "session.background_work.get"
+	ActionSessionBackgroundWorkAction  = "session.background_work.action"
+	ActionSessionBackgroundWorkUsage   = "session.background_work.usage"
+	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
+	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote

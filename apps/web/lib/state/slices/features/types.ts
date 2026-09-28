@@ -19,6 +19,7 @@ export const defaultFeatureFlags = {
   agentSurvival: false,
   remoteExecutorPlugins: false,
   codexAppServer: false,
+  agentBackgroundWork: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

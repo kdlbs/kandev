@@ -47,24 +47,25 @@ type ToolRequestUserInputAnswer struct {
 }
 
 const (
-	MethodInitialize                  = "initialize"
-	MethodInitialized                 = "initialized"
-	MethodModelList                   = "model/list"
-	MethodExperimentalFeatureList     = "experimentalFeature/list"
-	MethodThreadStart                 = "thread/start"
-	MethodThreadRead                  = "thread/read"
-	MethodThreadResume                = "thread/resume"
-	MethodThreadFork                  = "thread/fork"
-	MethodBackgroundTerminalsList     = "thread/backgroundTerminals/list"
-	MethodTurnStart                   = "turn/start"
-	MethodTurnInterrupt               = "turn/interrupt"
-	MethodMCPStatusList               = "mcpServerStatus/list"
-	MethodMCPToolCall                 = "mcpServer/tool/call"
-	MethodAccountUsageRead            = "account/usage/read"
-	NotificationTurnComplete          = "turn/completed"
-	NotificationTokenUsage            = "thread/tokenUsage/updated"
-	NotificationRawResponse           = "rawResponse/completed"
-	NotificationServerRequestResolved = "serverRequest/resolved"
+	MethodInitialize                   = "initialize"
+	MethodInitialized                  = "initialized"
+	MethodModelList                    = "model/list"
+	MethodExperimentalFeatureList      = "experimentalFeature/list"
+	MethodThreadStart                  = "thread/start"
+	MethodThreadRead                   = "thread/read"
+	MethodThreadResume                 = "thread/resume"
+	MethodThreadFork                   = "thread/fork"
+	MethodBackgroundTerminalsList      = "thread/backgroundTerminals/list"
+	MethodBackgroundTerminalsTerminate = "thread/backgroundTerminals/terminate"
+	MethodTurnStart                    = "turn/start"
+	MethodTurnInterrupt                = "turn/interrupt"
+	MethodMCPStatusList                = "mcpServerStatus/list"
+	MethodMCPToolCall                  = "mcpServer/tool/call"
+	MethodAccountUsageRead             = "account/usage/read"
+	NotificationTurnComplete           = "turn/completed"
+	NotificationTokenUsage             = "thread/tokenUsage/updated"
+	NotificationRawResponse            = "rawResponse/completed"
+	NotificationServerRequestResolved  = "serverRequest/resolved"
 
 	ServerRequestCommandExecutionApproval = "item/commandExecution/requestApproval"
 	ServerRequestFileChangeApproval       = "item/fileChange/requestApproval"
@@ -181,7 +182,9 @@ type ThreadReadResponse struct {
 }
 
 type BackgroundTerminalsListParams struct {
-	ThreadID string `json:"threadId"`
+	ThreadID string  `json:"threadId"`
+	Cursor   *string `json:"cursor,omitempty"`
+	Limit    *int    `json:"limit,omitempty"`
 }
 
 type BackgroundTerminal struct {
@@ -192,7 +195,13 @@ type BackgroundTerminal struct {
 }
 
 type BackgroundTerminalsListResponse struct {
-	Data []BackgroundTerminal `json:"data"`
+	Data       []BackgroundTerminal `json:"data"`
+	NextCursor *string              `json:"nextCursor,omitempty"`
+}
+
+type BackgroundTerminalTerminateParams struct {
+	ThreadID  string `json:"threadId"`
+	ProcessID string `json:"processId"`
 }
 
 type ThreadForkParams struct {
@@ -219,7 +228,7 @@ type UserInput struct {
 
 type TurnInterruptParams struct {
 	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId"`
+	TurnID   string `json:"turnId,omitempty"`
 }
 
 type ThreadResponse struct {

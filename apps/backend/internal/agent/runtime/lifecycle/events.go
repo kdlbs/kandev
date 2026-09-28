@@ -359,6 +359,8 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		PlanContent:                 event.PlanContent,
 		MCPAttachment:               event.MCPAttachment,
 		MCPAttachmentAttempt:        event.MCPAttachmentAttempt,
+		BackgroundWork:              event.BackgroundWork,
+		BackgroundWorkOutput:        event.BackgroundWorkOutput,
 	}
 }
 

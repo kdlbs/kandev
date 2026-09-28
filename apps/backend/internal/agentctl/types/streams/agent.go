@@ -104,6 +104,12 @@ const (
 	// measurement. It is separate from turn completion because one turn can
 	// contain multiple model responses.
 	EventTypeUsageObservation = "usage_observation"
+
+	// EventTypeBackgroundWorkUpdated carries an update for an agent background workload.
+	EventTypeBackgroundWorkUpdated = "background_work_updated"
+
+	// EventTypeBackgroundWorkOutput carries a chunk of stdout/stderr from an active background workload.
+	EventTypeBackgroundWorkOutput = "background_work_output"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
@@ -391,6 +397,14 @@ type AgentEvent struct {
 	// UsageObservation is one immutable native response measurement or a
 	// documented estimated turn fallback.
 	UsageObservation *NativeUsageObservation `json:"usage_observation,omitempty"`
+
+	// --- Background work fields (for "background_work_updated" and "background_work_output") ---
+
+	// BackgroundWork contains a normalized workload observation.
+	BackgroundWork *WorkloadRunObservation `json:"background_work,omitempty"`
+
+	// BackgroundWorkOutput contains an incremental output stream chunk.
+	BackgroundWorkOutput *WorkloadOutputChunk `json:"background_work_output,omitempty"`
 }
 
 // NativeUsageObservation identifies the native protocol scope for one usage

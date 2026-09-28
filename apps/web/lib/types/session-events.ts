@@ -339,6 +339,14 @@ export type SessionBackendMessageMap = {
   "session.shell.output": BackendMessage<"session.shell.output", ShellOutputPayload>;
   "session.process.output": BackendMessage<"session.process.output", ProcessOutputPayload>;
   "session.process.status": BackendMessage<"session.process.status", ProcessStatusPayload>;
+  "session.background_work.updated": BackendMessage<
+    "session.background_work.updated",
+    import("@/lib/types/background-work").WorkloadRunObservation
+  >;
+  "session.background_work.output": BackendMessage<
+    "session.background_work.output",
+    import("@/lib/types/background-work").WorkloadOutputChunk
+  >;
   "message.queue.status_changed": BackendMessage<
     "message.queue.status_changed",
     QueueStatusChangedPayload

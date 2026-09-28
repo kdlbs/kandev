@@ -367,7 +367,7 @@
   "profileNotFound": "未找到設定",
   "profileSaved": "設定已儲存",
   "profiles": "設定",
-  "pluginProviders": "遠端執行提供者",
+  "pluginProviders": "遠端執行提供方",
   "provideSecret": "提供密鑰",
   "provideSecretForEnvVar": "為 {{envVar}} 提供密鑰",
   "quickPresets": "快速預設",

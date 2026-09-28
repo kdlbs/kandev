@@ -218,6 +218,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
+	case streams.EventTypeBackgroundWorkUpdated:
+		s.handleBackgroundWorkUpdatedEvent(ctx, payload)
+
+	case streams.EventTypeBackgroundWorkOutput:
+		s.handleBackgroundWorkOutputEvent(ctx, payload)
 
 	case streams.EventTypeForegroundIdle:
 		if !s.foregroundIdleOwnsCurrentPrompt(payload) {
@@ -226,6 +231,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldProviderIdle)
 
 	case streams.EventTypeBackgroundComplete:
+		s.recordBackgroundWorkObservationFromToolPayload(ctx, payload)
 		value := s.backgroundCompletionActivityValue(ctx, sessionID)
 		if publication, changed := s.completeBackgroundWorkSnapshot(
 			sessionID, payload.ExecutionID, payload.Data.ToolCallID, value,
@@ -639,6 +645,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	// a telemetry row) — use the non-creating lookup here even though
 	// message creation above may have legitimately started one already.
 	s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
+	s.recordBackgroundWorkObservationFromToolPayload(ctx, payload)
 
 	ownership := toolOwnershipForeground
 	if payload.Data.ParentToolCallID != "" {
@@ -856,6 +863,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	// Background-work bookkeeping runs regardless of message persistence so
 	// accounting remains available even when no messageCreator is wired.
 	s.trackBackgroundToolUpdate(ctx, payload, ownership)
+	s.recordBackgroundWorkObservationFromToolPayload(ctx, payload)
 
 	s.persistToolUpdateMessage(ctx, payload)
 }

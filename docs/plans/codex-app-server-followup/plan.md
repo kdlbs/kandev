@@ -107,3 +107,11 @@ The original Task 07 remains pending. Its live run did not observe an approval r
 - The internal-only response event can be absent. Keep honest fallback and incomplete states.
 - The generated schema may not enumerate every envelope method. Use the pinned full protocol source where needed and record that evidence explicitly.
 - PR head or merge-queue state can change. Follow the repository push and PR-fixup workflow; never force-push another session's changes.
+
+## Related background-work package
+
+The draft [Agent Background Work plan](../agent-background-work/plan.md) extends
+the shared observation/control/UI contract across protocols, with Codex as the
+first native mapping. It owns the new inspection persistence, capability-driven
+controls, and panel experience. This plan's recorded results are historical;
+they do not establish acceptance for that later package.

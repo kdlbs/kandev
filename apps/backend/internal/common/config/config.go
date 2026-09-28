@@ -565,6 +565,10 @@ type FeaturesConfig struct {
 	// remote task environments. It remains off in every embedded profile
 	// until the complete lifecycle, recovery, and cleanup path is available.
 	RemoteExecutorPlugins bool `mapstructure:"remote_executor_plugins" json:"remoteExecutorPlugins"`
+
+	// AgentBackgroundWork enables normalized background work tracking,
+	// interactive controls, and subagent observation.
+	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
 }
 
 // LoggingConfig holds logging configuration.
