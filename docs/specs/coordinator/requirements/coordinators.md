@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 ---
 
 # Coordinators in a workspace Requirements
@@ -216,7 +216,7 @@ Mockup:
   later phase (gate G2). Each coordinator has a scope and a setting per
   action, and each action is one of `denied`, `requires approval` or
   `automatic`. Phase 1 has no settings: it hardcodes one policy for every
-  coordinator. The five read tools of the phase-1 tool profile
+  coordinator. The six read tools of the phase-1 tool profile
   ([copilot](copilot.md#req-coordinator-copilot-003-kandev-tool-surface)) are
   `automatic`, `propose_task_kandev` is `requires approval` (a proposal
   becomes a task only when a manager approves it), and every other action is

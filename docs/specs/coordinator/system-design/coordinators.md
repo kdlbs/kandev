@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 requirements:
   - REQ-COORDINATOR-COORDINATORS-001
   - REQ-COORDINATOR-COORDINATORS-002
@@ -84,6 +84,7 @@ logger, SQLite and PostgreSQL. It is registered in
 | `executor_profile_id` | text not null | |
 | `context` | text not null default '' | stored trimmed, at most 4,000 characters |
 | `conversation_task_id` | text null | see [copilot](copilot.md) |
+| `config_revision` | integer not null default 0 | incremented by every PATCH that changes `context`, `agent_profile_id` or `executor_profile_id`; the conversation open checks it ([copilot](copilot.md#conversation-task)) |
 | `created_at`, `updated_at` | timestamp not null | UTC |
 
 The index `(workspace_id, created_at, id)` serves the list order. The proposal
@@ -121,7 +122,8 @@ is sent as `""`. Unknown fields are ignored.
 before validation and stored trimmed, on create and PATCH. When PATCH carries
 `context`, `agent_profile_id` or `executor_profile_id`, the transaction
 compares each field's trimmed (for `context`) new value with its stored value;
-when any of the three differ it clears `conversation_task_id`, and after
+when any of the three differ it clears `conversation_task_id` and increments
+`config_revision` in the same `UPDATE`, and after
 commit the service archives the old conversation task through the task
 service's `ArchiveTask`, which stops a running turn. The archived task is kept
 until the coordinator or the workspace is deleted

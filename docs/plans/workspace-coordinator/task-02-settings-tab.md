@@ -62,7 +62,7 @@ From [plan UI-06](plan.md#ui-06-the-coordinators-settings-tab):
 home > Settings > Workspaces > Software Factory > Coordinators
 Overview Repositories Workflows Canvases Integrations Automations Secrets [Coordinators]
 (o) Coordinators                                            [+ Add coordinator]
-Coordinators read this workspace's boards, tell you what needs you and why, and propose work you approve.
+Coordinators read this workspace's boards, tell you what needs you and why, and propose work that waits for your decision.
 +--------------------------------------+
 | Planner                              |
 | Agent profile: Claude . worktree     |

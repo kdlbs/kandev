@@ -65,7 +65,8 @@ WP-0 --+--> G0 (gates opening upstream PRs, not building)
                                        +--> task-07 approve/reject backend -----------------------------+
 
 task-06 --> task-09 conversation recovery --+
-task-08 ------------------------------------+--> task-11 panel swap --> task-10 activity display
+task-08 ------------------------------------+--> task-11 panel swap ---------+--> task-10 activity display
+                                            +--> task-12 review follow-ups --+
 ```
 
 Tasks 09 and 10 were added on 2026-09-28 from the real-agent check of the
@@ -110,7 +111,8 @@ predecessor merges.
 | [task-08](task-08-proposals-ui.md) | WP-5b | M | 06, 07 | Proposals approved, edited and rejected on both surfaces |
 | [task-09](task-09-conversation-recovery.md) | WP-4c | S | 06 | A conversation whose session ended or failed to start recovers from the copilot |
 | [task-11](task-11-panel-swap.md) | WP-4e | M | 08, 09 | The copilot is a right-side panel beside the list; the board preview is unchanged |
-| [task-10](task-10-activity-display.md) | WP-4d | S | 11 | The copilot panel shows a live status line and a collapsed tool chip; phase 1 complete |
+| [task-12](task-12-review-follow-ups.md) | WP-4f | M | 08, 09 | The maintainer review's race, stale claim, approval guard and item reference are fixed |
+| [task-10](task-10-activity-display.md) | WP-4d | S | 11, 12 | The copilot panel shows a live status line and a collapsed tool chip; phase 1 complete |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Each work order is its own
 PR, keeps `prod` off, and ships its tests. Every acceptance criterion of the
@@ -294,7 +296,7 @@ Rows open the task and have no other action. Criteria:
 home > Settings > Workspaces > Software Factory > Coordinators
 Overview Repositories Workflows Canvases Integrations Automations Secrets [Coordinators]
 (o) Coordinators                                            [+ Add coordinator]
-Coordinators read this workspace's boards, tell you what needs you and why, and propose work you approve.
+Coordinators read this workspace's boards, tell you what needs you and why, and propose work that waits for your decision.
 +--------------------------------------+
 | Planner                              |
 | Agent profile: Claude . worktree     |

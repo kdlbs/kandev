@@ -5,6 +5,7 @@ status: pending
 wave: 6
 depends_on:
   - "11-panel-swap"
+  - "12-review-follow-ups"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COPILOT-006

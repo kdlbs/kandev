@@ -51,7 +51,8 @@ see [Residual](#residual-external-surface).
   tasks, through the task service's internal create call.
 - `POST /api/v1/workspaces/:id/coordinators/:cid/conversation`
   (`workspace.manage`) returns `{task_id, session_id, archive_state}`:
-  1. Load the coordinator (404) and check both profiles with `profileStatus`
+  1. Load the coordinator (404), keeping its `config_revision`
+     ([coordinators](coordinators.md#store)), and check both profiles with `profileStatus`
      (409 with the `coordinator_profile_unavailable` body of
      [coordinators](coordinators.md#validation) when the agent profile is
      `missing` or `passthrough`, or the executor profile is `missing`).
@@ -68,9 +69,14 @@ see [Residual](#residual-external-surface).
      `start_agent`, no `prepare_session`, no external id and no
      `auto_start_on_create` marker, so `handleTaskCreated` starts nothing.
   4. Run `UPDATE coordinators SET conversation_task_id = ? WHERE id = ? AND
-     (conversation_task_id IS NULL OR conversation_task_id = ?)` with the stale
+     config_revision = ? AND (conversation_task_id IS NULL OR
+     conversation_task_id = ?)` with the revision read in step 1 and the stale
      value read in step 2. One row updated: go to step 6 with the new task.
-     Zero rows: re-read the coordinator row, delete the task just created
+     Zero rows: re-read the coordinator row. When its `config_revision`
+     differs from step 1's, a context or profile change was saved while this
+     open created its task under the earlier configuration, even if the
+     reference is NULL on both sides: delete the task just created and return
+     409 (`AC-COORDINATOR-COPILOT-001.11`). Otherwise delete the task just created
      through the task service and go to step 6 with the row's current task,
      so racing opens converge on one task with one session. When the re-read
      instead finds `conversation_task_id` NULL (a concurrent context or
@@ -226,13 +232,14 @@ editing the stored user message.
   recognise to `SurfaceKanbanTask`, the full task tool set. Adding
   `SurfaceCoordinator` to the `Surface` consts and to `Legacy` without also
   adding it here would leave the coordinator session on the full Kanban tool
-  set instead of the six-tool allowlist below, so this switch is a required
+  set instead of the phase-1 tool profile below, so this switch is a required
   touch point, not an incidental one.
 
 ## Tool surface
 
 `registerCoordinatorTools` in `internal/mcp/server` registers exactly these
-six tools, reusing the existing handlers unchanged:
+seven tools, the phase-1 tool profile, reusing the existing handlers
+unchanged except for the new two:
 
 | Tool | Why |
 | --- | --- |
@@ -241,6 +248,7 @@ six tools, reusing the existing handlers unchanged:
 | `list_workflows_kandev` | target workflow of a proposal |
 | `list_workflow_steps_kandev` | target step of a proposal |
 | `list_repositories_kandev` | repository of a proposal |
+| `get_coordinator_item_kandev` | new; the record behind an Ask about this reference: `{kind: "proposal", id}` returns the coordinator's own proposal row (spec, status, error, timestamps), `{kind: "stall", id}` the stall record of that task ([needs-you](needs-you.md#stall-records)) |
 | `propose_task_kandev` | new; sends the `coordinator.propose_task` action |
 
 It registers no other tool: in particular no `list_related_tasks_kandev`, no
@@ -255,7 +263,8 @@ argument must equal `principal.WorkspaceID`; `list_workflows_kandev` and
 `list_repositories_kandev` take a client-supplied `workspace_id` as their only
 scope (`internal/mcp/server/config_handlers.go`), so without this check they
 would enumerate any workspace. Every task, workflow, step and repository id
-must resolve inside the coordinator's workspace. A call failing either check is
+must resolve inside the coordinator's workspace, and a proposal id must belong
+to the calling coordinator. A call failing either check is
 refused with an error naming the argument, before the handler runs, and
 returns no data.
 `coordinator.propose_task` from a principal that is not a coordinator is
@@ -439,15 +448,24 @@ the same pattern as `hideSessionSelectors`, so every other chat is unchanged
 
 ## Ask about this
 
-- The copilot store (`{coordinatorId, open, chip: {id, label} | null, draft}`,
-  see [Panel](#panel)) holds the chip and the draft.
+- The copilot store (`{coordinatorId, open, chip: {id, label, ref: {kind, id}} | null, draft}`,
+  see [Panel](#panel)) holds the chip and the draft. `ref.kind` is `task`,
+  `proposal` or `stall`; `ref.id` is the proposal id for a proposal and the
+  task id otherwise, taken from the Needs you or Queue item, never parsed from
+  display text.
   **Ask about this** sets the chip and the draft `Why is <id> here?`, opens the
   panel and focuses the composer; a second call replaces both.
-- `transformOutgoing` prefixes `About <id>: ` while the chip is set; the hint
-  under the composer shows the stored form.
+- `transformOutgoing` prefixes `About <id> [<kind>:<ref>]: ` while the chip is
+  set; the hint under the composer shows the readable form `About <id>: ...`.
+  The standing instructions tell the agent that a bracketed reference names
+  the item and that `get_coordinator_item_kandev` (for `proposal` and
+  `stall`) or the task tools (for `task`) read its evidence. Context ids on
+  the wire as structured data stay phase 3 (decision D12); phase 1 carries
+  the reference in the message text.
 - `user-message-body.tsx` gains a coordinator branch: when the task origin is
   `coordinator` and the text starts with `About `, up to the first `: `, it
-  renders the remainder plus an `about <id>` tag. The stored text is unchanged.
+  renders the remainder plus an `about <id>` tag, dropping a trailing
+  `[<kind>:<ref>]` from the tag. The stored text is unchanged.
 
 ## Security
 

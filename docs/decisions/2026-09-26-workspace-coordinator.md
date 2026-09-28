@@ -52,7 +52,7 @@ requirements govern):
 | D1 | Where the product lives | A core Coordinator page for Kanban workspaces, behind `features.coordinator` so it can be tested before it is promoted. It may move to a plugin on the managed coordination platform later if needed. | agreed with the maintainer, 2026-09-28 |
 | D2 | The runner | An ordinary Kandev session on an ephemeral task, started like Configuration chat, one per coordinator. It needs no automation, run queue or plugin, and has no wake. The wake is decided at G4. | proposed, G0 |
 | D3 | Durable coordinator state | Its conversation task, its proposals and the stall records. No checkpoint, because nothing resumes it unattended. Revisited at G4. | proposed, G0 |
-| D4 | May a coordinator move or archive cards? | No, in every phase. Moving, archiving, deleting and stopping are not on its surface, and it can never merge or move a task to Done. This is a rule about the coordinator actor only; people, workflows and other actors keep their contracts. `product-constraints.md` records the rule. | proposed, G0 |
+| D4 | May a coordinator move or archive cards? | Not in phase 1. Moving, archiving, deleting, stopping and resuming tasks are `denied` actions under D17, not banned in every phase: a later phase may allow moving, resuming or stopping under an explicit per-coordinator permission. Merging and moving a task to Done are not D17 actions; allowing either would be its own decision. This is a rule about the coordinator actor only; people, workflows and other actors keep their contracts. `product-constraints.md` records the rule. | proposed, G0 |
 | D5 | How it asks a person | Through proposals, in its chat and on Needs you. `ask_user_question_kandev` is not on its surface. | proposed, G0 |
 | D6 | ADR 0004's coordination-task pattern | Not used, and left unchanged. | proposed, G0 |
 | D7 | The plugin's interim path | The v1 fence stays as ADR-2026-08-31 defines it. #3994 added the `managed-conversation` MCP surface and mode and the adapter-enforced managed tool policy; the `coordinator` surface, mode and origin coexist with them, and the agentctl permission handler checks the coordinator allowlist, then the managed tool policy, then the default. Other open PRs that touch `internal/mcp` are left to their own review: phase 1 needs none and blocks none, and whichever lands second rebases. Before adding a name, the implementation checks main for a name already taken. | proposed, G0 |
@@ -61,8 +61,8 @@ requirements govern):
 | D10 | External intake | Phase 4. | proposed, G4 |
 | P | The mockup's phone "Teammate" persona | Not planned. `features.auth` is off in every shipped profile and clarifications have no addressee. | proposed, G0 |
 | D14 | Kandev's Inbox | Keeps its row, count and tabs in every phase. The coordinator keeps its own count. | proposed, G0 |
-| D15 | Approval never starts an agent | A proposal may target only an eligible step: one without an `auto_start_agent` on-enter action, and not a feeder (directly or transitively) of a step that has one, so an automatic queue/WIP promotion after the create cannot reach an auto-starting step either. | proposed, G0 |
-| D17 | Coordinator permissions | Defined now, built in a later phase: each coordinator has a scope and a setting per action, each action `denied`, `requires approval` or `automatic`. Phase 1 hardcodes one policy for every coordinator: the five reads `automatic`, `propose_task_kandev` `requires approval`, everything else `denied`. See [Coordinator permission model](#coordinator-permission-model). Settles D16 in favour of per-coordinator settings. | proposed, G0 (implementation G2) |
+| D15 | Approval never starts an agent | A proposal may target only an eligible step: one without an `auto_start_agent` on-enter action, and not a feeder (directly or transitively) of a step that has one, so an automatic queue/WIP promotion after the create cannot reach an auto-starting step either. Creating a task and starting its agent are separate actions under D17: approving a create never authorizes a start, including a start that the target step's on-enter actions or a queue or WIP promotion would trigger. | proposed, G0 |
+| D17 | Coordinator permissions | Defined now, built in a later phase: each coordinator has a scope and a setting per action, each action `denied`, `requires approval` or `automatic`. Phase 1 hardcodes one policy for every coordinator: the six reads `automatic`, `propose_task_kandev` `requires approval`, everything else `denied`. See [Coordinator permission model](#coordinator-permission-model). Settles D16 in favour of per-coordinator settings. | proposed, G0 (implementation G2) |
 | F | Flag | `features.coordinator`: `prod` and `dev` `"false"`, `e2e` `"true"`. Dogfooding uses the runtime override. Restart required. | proposed, G0 |
 | N | Name | UI "Coordinator". Specifications say "workspace coordinator", and the Office glossary distinguishes it from Office's coordinator role. | proposed, G0 |
 
@@ -137,10 +137,25 @@ phase 2) and a setting per action, and each action is one of three values:
 `denied` (not on its surface; a call is refused), `requires approval` (the
 coordinator proposes; nothing happens until a manager approves) or
 `automatic` (it runs without asking). Phase 1 builds no settings and hardcodes
-one policy for every coordinator: the five read tools are `automatic`,
+one policy for every coordinator: the six read tools are `automatic`,
 `propose_task_kandev` is `requires approval`, and every other action is
-`denied`. The six tools are therefore the phase-1 tool profile, not a
+`denied`. The seven tools are therefore the phase-1 tool profile, not a
 permanent contract.
+
+Actions are fine-grained. Creating a task and starting its agent are two
+actions, so a policy can allow proposals while denying starts, and approving
+a create never authorizes a start, including a start that a workflow's
+on-enter actions or a queue or WIP promotion would trigger (D15). Moving,
+resuming and stopping tasks are actions too, `denied` in phase 1 (D4). The
+settings take the shape of the restricted agent tool policy of
+[ADR-2026-09-25](2026-09-25-plugin-coordination-platform.md): a list of
+allowed actions per principal, enforced where the tool call is checked. If the
+coordinator later moves to a plugin, its policy maps onto that contract
+instead of being migrated from a second model.
+
+A proposal is phase 1's only `requires approval` action. Later actions that
+require approval reuse the same record, decision routes and Needs you card
+rather than adding a queue per action.
 
 Three rules hold in every phase. Approving one proposal grants no permission
 for any later action; each approval decides one proposal. A coordinator's
@@ -176,7 +191,17 @@ more; its guarded MCP surface adds a proposal path with a person in the loop,
 but does not remove the agent's pre-existing, larger capability on the same
 host.
 
-This residual is **accepted, unmitigated, for phase 1**: nothing in this
+Phase 1 enforces the part it can. The approve and reject decisions are not
+on the coordinator's MCP surface, and the backend guard refuses them from a
+coordinator principal, failing closed when the principal cannot be resolved.
+The REST routes cannot tell a person's browser from the agent's shell while
+`features.auth` is off, so phase 1 does not claim they can: no user-facing
+text says that only a person can approve. The copilot's intro and the
+settings copy say that the coordinator proposes through Kandev and that a
+proposal waits for a manager's decision in Kandev, which the guard does
+enforce.
+
+The rest of this residual is **accepted for phase 1**: nothing in this
 design or in phase 1's containment stops a coordinator's agent from calling
 the Kandev API directly with a shell, and no phase-1 gate closes it. This is
 distinct from gate G4's requirement, which is about a *different* axis:
@@ -199,7 +224,7 @@ conversation text that any workspace member can write, so a title or message
 aimed at the coordinator's agent rather than at a person could steer its
 proposal or how it describes one, and nothing here distinguishes such content
 from a person's own, though every effect still routes through the same
-six-tool allowlist and the same manager approval. This residual is
+phase-1 tool profile and the same manager approval. This residual is
 **accepted, unmitigated, for phase 1**, and is not closed by G4, since G4 is
 about what an unattended turn's tools can reach, not whether the content
 those tools read is trustworthy. Mitigating it, for example by surfacing the

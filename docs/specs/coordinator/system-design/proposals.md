@@ -281,8 +281,16 @@ winner's row. A racing approve and reject cannot both succeed.
 
 ## Recovery
 
-A claim is stale after two minutes. Two callers run recovery on an
-`approving` row with a stale claim: the startup pass and an approve request.
+A claim is stale after two minutes. Three callers run recovery on an
+`approving` row with a stale claim: the startup pass, a sweep, and an approve
+request. The sweep runs in the proposal service once a minute while
+`features.coordinator` is on, selecting `approving` rows whose claim is stale,
+so a claim that goes stale while the process keeps running (for example a
+restart inside the two-minute window, which the startup pass skips) is
+recovered within a minute with no manager action
+(`AC-COORDINATOR-PROPOSALS-002.14`). The card of such a row shows **Retry**,
+which sends an approve without edits and so takes the same path
+(`AC-COORDINATOR-PROPOSALS-005.10`).
 A proposal read, single or list, never writes; it always returns rows as
 stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
 which refreshes `claimed_at` and sets a new `claim_token`, so of a startup
@@ -324,8 +332,8 @@ The prefix is enforced in the task service, so every entry point inherits it:
 
 Routes live under `/api/v1/workspaces/:id/`. A proposal of another
 coordinator or workspace is 404. Both reads need only `workspace.read` and
-never write: stale-claim recovery runs only in the startup pass and on
-approve ([Recovery](#recovery)). The coordinator list response carries
+never write: stale-claim recovery runs only in the startup pass, the sweep
+and on approve ([Recovery](#recovery)). The coordinator list response carries
 `open_proposals` per coordinator for the sidebar badge.
 
 ## Events
@@ -380,11 +388,21 @@ ever having been listed.
 - The decision toast reads the item count from the classification of
   [needs-you](needs-you.md#classification) after the store update.
 - Readers get the card without actions.
+- An `approving` card compares `claimed_at` with the two-minute threshold: not
+  stale shows "Approval in progress. Edits are locked."; stale shows
+  "Approval did not finish." with **Retry** for managers.
 
 ## Security
 
 - Decisions authorise at the backend by workspace scope; the principal of the
   MCP action is resolved server-side.
+- Approve and reject are not on the coordinator's MCP surface, and the MCP
+  guard refuses both from a coordinator principal and from a principal it
+  cannot resolve (`AC-COORDINATOR-PROPOSALS-002.15`). The REST routes cannot
+  tell a person's browser from an agent's shell while `features.auth` is
+  off; that residual is recorded in the
+  [ADR](../../../decisions/2026-09-26-workspace-coordinator.md#residual-risk-the-agents-own-tools),
+  and no user-facing copy claims more than the guard enforces.
 - A proposal read never writes, so no request, from any site, can trigger
   recovery or otherwise mutate a proposal through a read route.
 - Spec strings are untrusted and rendered as text.

@@ -98,6 +98,11 @@ Mockup:
   an open is about to return, whether that task was reused or just created,
   between the open reading it as current and the open's own response: the
   open shall return 409 rather than a task that is actually archived.
+- **AC-COORDINATOR-COPILOT-001.11:** When a context or profile change is saved
+  while an open is creating a conversation task, the open shall not attach a
+  task created under the earlier configuration: it shall delete that task and
+  return 409, even when the conversation reference is empty both before and
+  after the change.
 - **AC-COORDINATOR-COPILOT-001.10:** When the current conversation task's
   session has ended (failed, cancelled or completed), so it can no longer
   accept a message, the next open shall archive that task and return a new
@@ -139,9 +144,11 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-COPILOT-003.1:** In phase 1, a coordinator session shall
-  have exactly these six Kandev tools, the phase-1 tool profile: `list_tasks_kandev`, `get_task_conversation_kandev`,
+  have exactly these seven Kandev tools, the phase-1 tool profile:
+  `list_tasks_kandev`, `get_task_conversation_kandev`,
   `list_workflows_kandev`, `list_workflow_steps_kandev`,
-  `list_repositories_kandev` and `propose_task_kandev`. It shall have no other
+  `list_repositories_kandev`, `get_coordinator_item_kandev` and
+  `propose_task_kandev`. It shall have no other
   Kandev tool, including no `list_related_tasks_kandev`, no plan read, no
   user-question tool, no task-title tool and no plugin tool. The profile is
   phase 1's hardcoded policy, not a permanent contract: a later phase may give
@@ -203,8 +210,8 @@ Mockup:
   composer without a mode or model selector.
 - **AC-COORDINATOR-COPILOT-004.4:** When the conversation is empty, the panel
   shall show "Ask why something is on the list. I read the same facts the list
-  is derived from; the only change I can make is to propose a task, which you
-  approve." and one "Try asking" suggestion that fills the composer without
+  is derived from. Through Kandev I can only propose a task, and it waits for
+  your decision." and one "Try asking" suggestion that fills the composer without
   sending.
 - **AC-COORDINATOR-COPILOT-004.5:** When a turn is running and the panel
   closes, the turn shall continue and the launcher shall show it is busy; the
@@ -294,12 +301,22 @@ Mockup:
   an item, the panel shall open with a removable context chip naming the item
   and "Why is <id> here?" in the composer, focused and not sent; `<id>` is the
   card identifier, or the proposal title for a proposal without a source task.
+  The chip shall also carry the item's stable reference: its kind (`task`,
+  `proposal` or `stall`) and its id.
 - **AC-COORDINATOR-COPILOT-005.2:** While the chip is set, each message sent
-  shall be stored with the prefix "About <id>: ", and the composer shall show
-  `your message is sent as "About <id>: ..."`.
+  shall be stored with the prefix "About <id> [<kind>:<ref>]: ", where
+  `<ref>` is the proposal id for a proposal and the task id otherwise, and the
+  composer shall show `your message is sent as "About <id>: ..."`.
 - **AC-COORDINATOR-COPILOT-005.3:** In the coordinator's transcript, a message
-  beginning "About <id>: " shall render as the text without the prefix plus an
-  "about <id>" tag; the stored message shall keep the prefix.
+  beginning "About <id> [<kind>:<ref>]: " (or the reference-less
+  "About <id>: " of earlier messages) shall render as the text without the
+  prefix plus an "about <id>" tag; the stored message shall keep the prefix.
+- **AC-COORDINATOR-COPILOT-005.6:** When a coordinator session calls
+  `get_coordinator_item_kandev` with a `proposal` reference, it shall receive
+  that proposal of its own coordinator (spec, status, error and timestamps);
+  with a `stall` reference, the stall record of that task in its workspace.
+  A reference to another coordinator's proposal or another workspace's task
+  shall be refused like any foreign id (`AC-COORDINATOR-COPILOT-003.3`).
 - **AC-COORDINATOR-COPILOT-005.4:** When the chip is removed, the next message
   shall be sent without a prefix.
 - **AC-COORDINATOR-COPILOT-005.5:** Choosing **Ask about this** on another item

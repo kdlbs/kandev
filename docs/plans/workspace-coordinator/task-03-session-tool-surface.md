@@ -101,8 +101,9 @@ Deciding proposals is task 07. Backend only. On the critical path.
   `CoordinatorLookup`, the coordinator branches in
   `Executor.resolveTaskSessionMCPMode` and `resolveTaskSessionMCPProfile`, the
   agentctl mode cases, plugin tools skipped.
-- `registerCoordinatorTools` with exactly the six tools of
-  `AC-COORDINATOR-COPILOT-003.1`, reusing their existing handlers unchanged;
+- `registerCoordinatorTools` with the six tools built in phase 1's first cut
+  (task 12 adds `get_coordinator_item_kandev`, the seventh tool of
+  `AC-COORDINATOR-COPILOT-003.1`), reusing their existing handlers unchanged;
   `propose_task_kandev` (open-proposal cap under a per-coordinator lock)
   writing through task 01's proposal insert and publishing
   `coordinator.updated`; the `coordinator.propose_task` action; the guard in
