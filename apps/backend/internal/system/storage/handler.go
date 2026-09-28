@@ -52,6 +52,7 @@ type Summary struct {
 	TemporaryArtifacts any `json:"temporary_artifacts"`
 	SystemTemporary    any `json:"system_temporary"`
 	Docker             any `json:"docker"`
+	DockerNetworks     any `json:"docker_networks"`
 	Database           any `json:"database"`
 	DatabaseBackups    any `json:"database_backups"`
 }

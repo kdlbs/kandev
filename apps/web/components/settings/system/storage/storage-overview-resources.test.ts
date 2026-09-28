@@ -73,6 +73,7 @@ describe("storageResources relative measurements", () => {
       "docker-image-layers",
       "docker-build-cache",
       "docker-unused-images",
+      "docker-networks",
     ]);
 
     const byId = new Map(resources.map((resource) => [resource.id, resource]));
@@ -164,6 +165,7 @@ describe("storageResources relative measurements", () => {
         ["docker-image-layers", 2],
         ["docker-build-cache", 1],
         ["docker-unused-images", 0],
+        ["docker-networks", undefined],
       ]),
     );
   });

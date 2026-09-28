@@ -32,6 +32,16 @@ func TestDefaultSettingsDisablesWorkspaceDependencyCleanup(t *testing.T) {
 	}
 }
 
+func TestDefaultSettingsDisablesDockerNetworkReclamation(t *testing.T) {
+	raw, err := json.Marshal(DefaultSettings())
+	if err != nil {
+		t.Fatalf("marshal defaults: %v", err)
+	}
+	if !strings.Contains(string(raw), `"docker_networks":{"enabled":false,"stale_hours":168,"quarantine_hours":24,"orphan_grace_hours":1,"probe_enabled":true}`) {
+		t.Fatalf("defaults = %s, want disabled Docker-network reclamation defaults", raw)
+	}
+}
+
 func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 	store, _ := newTestStores(t)
 
@@ -60,6 +70,10 @@ func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 			BuildCacheUnusedHours:       168,
 			UnusedImagesEnabled:         false,
 			UnusedImagesHours:           168,
+		},
+		DockerNetworks: DockerNetworkSettings{
+			Enabled: false, StaleHours: 168, QuarantineHours: 24,
+			OrphanGraceHours: 1, ProbeEnabled: true,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -166,6 +180,10 @@ func TestNormalizeSettingsValidatesRangesAndDockerAcknowledgement(t *testing.T) 
 		{name: "image age too low", mutate: func(s *StorageMaintenanceSettings) { s.Docker.UnusedImagesHours = 23 }},
 		{name: "build cache without dedicated daemon", mutate: func(s *StorageMaintenanceSettings) { s.Docker.BuildCacheEnabled = true }},
 		{name: "images without dedicated daemon", mutate: func(s *StorageMaintenanceSettings) { s.Docker.UnusedImagesEnabled = true }},
+		{name: "network reclamation without dedicated daemon", mutate: func(s *StorageMaintenanceSettings) { s.DockerNetworks.Enabled = true }},
+		{name: "network stale age too low", mutate: func(s *StorageMaintenanceSettings) { s.DockerNetworks.StaleHours = 0 }},
+		{name: "network quarantine too low", mutate: func(s *StorageMaintenanceSettings) { s.DockerNetworks.QuarantineHours = 23 }},
+		{name: "network orphan grace too low", mutate: func(s *StorageMaintenanceSettings) { s.DockerNetworks.OrphanGraceHours = 0 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

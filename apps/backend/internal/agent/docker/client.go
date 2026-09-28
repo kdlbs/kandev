@@ -119,6 +119,7 @@ type imageBuilder interface {
 type Client struct {
 	cli      *client.Client
 	storage  storageAPI
+	networks networkAPI
 	remover  containerRemover
 	builder  imageBuilder
 	logger   *logger.Logger
@@ -156,12 +157,13 @@ func NewClient(cfg config.DockerConfig, log *logger.Logger) (*Client, error) {
 	)
 
 	return &Client{
-		cli:     cli,
-		storage: cli,
-		remover: cli,
-		builder: cli,
-		logger:  log,
-		config:  cfg,
+		cli:      cli,
+		storage:  cli,
+		networks: cli,
+		remover:  cli,
+		builder:  cli,
+		logger:   log,
+		config:   cfg,
 	}, nil
 }
 

@@ -7,6 +7,7 @@ import type {
   StorageSummaryPartial,
   StorageTemporaryArtifactsSummary,
 } from "@/lib/types/system";
+import { dockerNetworksResource } from "./storage-docker-networks-resource";
 import { formatGigabytes } from "./storage-units";
 
 /**
@@ -619,5 +620,6 @@ export function storageResources(
       progress.temporary_artifacts,
     ),
     ...dockerResources(t, summary.docker, progress.docker, overview.capabilities.docker_host),
+    dockerNetworksResource(t, summary.docker_networks),
   ]);
 }
