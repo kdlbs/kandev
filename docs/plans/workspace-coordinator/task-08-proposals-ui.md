@@ -22,6 +22,7 @@ acceptance_criteria:
   - AC-COORDINATOR-PROPOSALS-005.8
   - AC-COORDINATOR-PROPOSALS-005.9
 system_design:
+  - ../../specs/coordinator/system-design/proposal-cards.md
   - ../../specs/coordinator/system-design/proposals.md
 ---
 
@@ -39,14 +40,29 @@ transcript (task 06), on task 07's routes. Completes phase 1.
   decision's response applies at once; `coordinator.updated` refreshes, and
   also backfills by id any locally cached proposal the refreshed pending list
   no longer contains, per
-  [proposals design](../../specs/coordinator/system-design/proposals.md#client-store).
+  [proposals design](../../specs/coordinator/system-design/proposal-cards.md#client-store).
   The chat transcript's `ProposalCard` fetches its own `proposal_id` by id on
   mount and on every `coordinator.updated`, independent of the pending list.
+  One merge rule for every source (sticky settled, then later `updated_at`
+  wins, settled wins a tie) and the read-failure and 404 rules, per
+  [Client store](../../specs/coordinator/system-design/proposal-cards.md#client-store).
+- Replace `app/coordinator/use-coordinator-inputs.ts`'s own `listProposals`
+  read with `use-proposals.ts`, so Needs you, Queue and the toast count read
+  one proposal cache (needs-you.md#inputs).
+- `lib/coordinator/eligible-step.ts`: a TypeScript copy of the eligible-step
+  walk for the Edit form's step list; the approve route stays authoritative.
 - `ProposalCard` states (UI-03), Edit and Reject forms in place with focus
   handling, the chat card renderer for `propose_task_kandev` with navigation
   to the Needs-you form, decision toasts; six locales. One `failed` variant,
   keeping Approve, Edit and Reject with the "Could not create the task:
   <error>. Nothing was created." copy (`AC-COORDINATOR-PROPOSALS-005.3`).
+  Per [Cards](../../specs/coordinator/system-design/proposal-cards.md#cards): the
+  content-by-state table (including the no-error and no-reason copy and which
+  surface shows "Proposed by"), `<card>`/`<step>` derivation and fallbacks,
+  Edit form options, the per-card in-flight lock, the decision-outcome table
+  (200 approved/rejected/failed, 400, 403, 404, 409, network), the
+  `?proposal=<id>&form=edit|reject` navigation from the chat card, and focus
+  after a decision.
 - `docs/public/coordinator.md` through `/docs-maintainer`, including what the
   coordinator's agent can still do through its own tools; update
   `docs/public/feature-status.md` if the boundary changed.
@@ -123,6 +139,33 @@ the copilot transcript surface needs no separate coverage of its own, because
 `AC-COORDINATOR-COPILOT-004.1` already keeps the launcher, and so the popover
 the chat card renders inside, unreachable to a reader.
 
+Unit tests also pin the rules the design adds:
+
+- `use-proposals.test.ts`: each of the five merge rules, including a late
+  `pending` response after `approving` (kept) and an equal-`updated_at`
+  settled row (taken); a failed pending read keeps the cache, sets `error`
+  and skips backfill; a failed by-id read keeps the entry; a by-id 404
+  evicts it; backfill skips settled entries.
+- `use-coordinator-inputs.test.ts`: the proposals input comes from the store
+  and the hook makes no `listProposals` call of its own.
+- `eligible-step.test.ts`: the same cases as the Go `EligibleStep` table
+  (start step, manual move off, `auto_start_agent` on enter, a feeder of an
+  auto-start step directly and through a chain, unknown step).
+- Component tests for `ProposalCard`: the content-by-state table (with null
+  `error` and null `reject_reason`), "Proposed by" on Needs you only,
+  `<card>` from `identifier` and the title fallback when `fetchTask` fails
+  or the identifier is absent, `<step>` fallback to the id; the lock (a
+  second click sends one request); every row of the decision-outcome table,
+  including a 400 whose `field` is `step_id` (alert under Step, focus on
+  Step) and a 400 from plain Approve opening the Edit form; empty title
+  refused with no request; the chat card's tool-result parsing (error
+  result or no `proposal_id` renders no card), loading placeholder and 404
+  copy.
+- Needs-you page test: `?proposal=<id>&form=reject` opens that form with
+  focus on Reason and clears the query; an id that is not an item shows the
+  "no longer waiting" toast; focus after a decision goes to the next item's
+  heading, else the previous, else the empty state's heading.
+
 `proposals.spec.ts` also covers
 the rest of REQ-COORDINATOR-PROPOSALS-005 directly: the `pending` card's
 Approve/Edit/Reject set and copy (AC-005.1), the `approving` card's disabled,
@@ -137,6 +180,9 @@ the correct "Next: ..." count line (AC-005.7), and the chat card's settled
 ## Likely files
 
 - `apps/web/hooks/domains/coordinator/use-proposals.ts` and test
+- `apps/web/app/coordinator/use-coordinator-inputs.ts` and its test
+- `apps/web/lib/coordinator/eligible-step.ts` and test
+- `apps/web/lib/coordinator/links.ts` (the `proposal`/`form` query)
 - `apps/web/app/coordinator/proposal-card/`
 - `apps/web/components/task/chat/` tool-call renderer for `propose_task_kandev`
 - `apps/web/src/locales/*/`

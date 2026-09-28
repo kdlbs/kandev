@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 ---
 
 # Task proposals Requirements
@@ -229,7 +229,8 @@ Mockup:
   shall say "Approval in progress. Edits are locked." with no actions.
 - **AC-COORDINATOR-PROPOSALS-005.3:** A `failed` proposal shall say "Could not
   create the task: <error>. Nothing was created." and keep Approve, Edit and
-  Reject.
+  Reject. When the proposal carries no error text, it shall say "Could not
+  create the task. Nothing was created."
 - **AC-COORDINATOR-PROPOSALS-005.4:** **Edit** on the Needs-you card shall open
   title, description, workflow, step (eligible steps only) and repository in
   place with **Approve with edits** and **Cancel**; an empty title shall be
@@ -245,7 +246,8 @@ Mockup:
   created". Either toast is followed by "Next: <n> items still need you" or
   "Next: nothing needs you. That is the working state."
 - **AC-COORDINATOR-PROPOSALS-005.8:** A chat card shall show the settled state
-  "Approved: <card>" or "Rejected: <reason>".
+  "Approved: <card>" or "Rejected: <reason>". A reject that stored no reason
+  (`AC-COORDINATOR-PROPOSALS-003.1`) shall show "Rejected" with no reason.
 - **AC-COORDINATOR-PROPOSALS-005.9:** At a 390px-wide viewport the card actions
   and forms shall stack with touch targets of at least 44px and no horizontal
   scroll.
