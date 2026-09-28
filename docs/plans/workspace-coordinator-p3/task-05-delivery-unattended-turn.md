@@ -43,12 +43,17 @@ creates, archives or repoints a conversation.
   calling task 02's `Check` and task 03's `Spend`
   ([Admission](../../specs/coordinator/system-design/wake.md#admission)).
 - `internal/coordinator/delivery.go`: `Deliver` under a keyed mutex, `Kick`
-  on a coalescing bounded worker, the re-check of every pending wake and the
-  20-wake batch, the step 3 transaction under `WithWakeLock` (re-read
+  on a coalescing bounded worker, the per-kind episode re-check of every
+  pending wake at the step 2 read
+  ([Episode recheck](../../specs/coordinator/system-design/wake.md#episode-recheck))
+  and the 20-wake batch, the step 3 transaction under `WithWakeLock` (re-read
   autonomy, insert the turn row, mark wakes, roll back when none changed),
-  the send through the conversation message path with
-  `metadata.coordinator_wake_turn_id`, the lookup of the turn's message by
-  that key, and the `send_failed` rollback only for a refusal before dispatch
+  the send through `orchestrator.Service.PromptTask` directly (extended with
+  an options value for the system author and
+  `metadata.coordinator_wake_turn_id`; never the message queue), the lookup
+  of the turn's stored message by that key, and the `send_failed` rollback
+  only for a refusal before dispatch (`ErrAgentPromptInProgress`,
+  `ErrSessionNotPromptable`, invalid request)
   ([Delivery](../../specs/coordinator/system-design/wake.md#delivery)).
 - `internal/coordinator/turns.go`: `session_turn_id` from the stored
   message, turn end on `turn.completed` for that turn id, the backstop's
@@ -88,6 +93,18 @@ creates, archives or repoints a conversation.
 - More than 50 pending wakes with ended conditions are all `superseded` in
   one delivery; a stall wake whose task shows activity after the stall is
   `superseded` and not delivered (`AC-COORDINATOR-WAKE-005.6`).
+- Episode re-check per kind: a question wake whose `pending_id` was answered
+  and replaced by a new pending question, an error wake whose error was
+  replaced by a new one with a different `stamp`, and a stall wake whose row
+  has a newer `last_event_at` are each `superseded`, not delivered; a
+  completed wake of a task no longer `COMPLETED` is `superseded`; a read
+  error leaves the wake `pending` and undelivered. A condition that ends
+  after the step 2 read is still delivered.
+- A manager message that makes the session `RUNNING` between admission and
+  the send: `PromptTask` returns `ErrAgentPromptInProgress`, nothing is
+  queued, the turn is `send_failed`, its wakes are `pending`, and the next
+  delivery holds with `conversation_busy` until the session is idle
+  (`AC-COORDINATOR-WAKE-005.3`).
 - A refused send and a crash after marking with no stored message return the
   wakes to `pending` and record `send_failed` or `interrupted`; a send that
   times out after the message was stored is found by

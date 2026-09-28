@@ -56,10 +56,15 @@ type DecisionLog interface {
 ```
 
 `Outcome` is one of `approved`, `approved_with_edits`, `rejected`,
-`returned`. A **decided row** is a manager's decision: the adapter drops every
-row whose proposal has `decided_automatically = 1`, so automatic approvals
-count toward none of `history_30d`, `volume` and `unedited_rate`, before or
-after a lower and re-raise. `EarliestDecision` applies the same filter. When phase 2's log does not distinguish edits, the adapter
+`returned`. A **decided row** is a manager's decision: the adapter keys the
+filter on the log row itself, dropping every row whose decider is the
+automatic path (the adapter records a decision with the proposal's
+`claimed_automatically` at the time of that decision), so automatic approvals count toward none of
+`history_30d`, `volume` and `unedited_rate`, before or after a lower and
+re-raise. A manager's later decision on the same proposal (for example
+**Try again** on an automatic approval that ended `failed`) is its own log
+row with a manager decider and counts like any other.
+`EarliestDecision` applies the same filter. When phase 2's log does not distinguish edits, the adapter
 derives `approved_with_edits` from the proposal row: `final_spec_json`
 differs from `spec_json` in title, description, workflow, step or repository.
 
@@ -136,18 +141,35 @@ checked (`AC-COORDINATOR-AUTOMATIC-004.1`).
 `coordinator_proposals` gains `decided_automatically integer not null default
 0` and `automatic_at timestamp null`, both set once by the automatic claim's
 `UPDATE` and never rewritten by stale-claim recovery or a later manager
-approval. In `propose_task_kandev`'s handler, after the phase 1 validation and insert
+approval, and `claimed_automatically integer not null default 0`, written by
+every approve claim's `UPDATE` (1 by the automatic claim, 0 by a manager's
+claim) and kept by stale-claim recovery, which re-uses the claim it
+recovers. `decided_automatically` answers "was this proposal ever approved
+automatically" (the 24-hour count); `claimed_automatically` answers "was the
+current attempt, and so any task it created, automatic". In `propose_task_kandev`'s handler, after the phase 1 validation and insert
 of the `pending` row:
 
 1. Read the `create_task` setting. Not `automatic` (or an error): return the
-   phase 1 result.
-2. Take the coordinator's keyed automatic mutex. Count proposals with
+   phase 1 result. This read is a cheap filter; step 2 decides.
+2. Open one transaction and take the coordinator's automatic lock in it:
+   `pg_advisory_xact_lock(hashtextextended('coordinator_automatic:' ||
+   coordinator_id, 0))` on PostgreSQL; on SQLite the store's single writer
+   serialises the transaction. The lock is held until the claim commits, so
+   steps 2 to 4's count, re-read and claim are one critical section across
+   processes. Inside it, re-read the `create_task` setting and its
+   `ChangedBy` through `ActionSettings.Setting`; when it is no longer
+   `automatic`, commit nothing and return the phase 1 result, because a
+   lower that committed before this read wins
+   (`AC-COORDINATOR-AUTOMATIC-004.1`). A lower that commits after it takes
+   effect for the next proposal; this one was decided under the setting it
+   read. Then count proposals with
    `decided_automatically = 1 AND automatic_at >= now - 24h`, whatever their
    status: an automatic approval that ended `failed` counts toward the 10,
    because the limit bounds automatic attempts. At 10 or more,
    return `{proposal_id, status: "pending", note: "automatic limit reached; a
    manager will decide"}` (`AC-COORDINATOR-AUTOMATIC-003.2`).
-3. Resolve the raiser: the setting's `ChangedBy` must be an active user who
+3. Resolve the raiser from the setting re-read in step 2: its `ChangedBy`
+   must be an active user who
    holds `workspace.manage` on the coordinator's workspace, checked through
    the same authorisation the approve route uses (with auth disabled, the
    synthetic admin passes as it does on every route). When the user is
@@ -160,7 +182,10 @@ of the `pending` row:
 4. Call the phase 1 approve service function (the one behind the approve
    route, below its HTTP authorisation) with no edits, the setting's
    `ChangedBy` as the deciding user and a flag that sets
-   `decided_automatically = 1` and `automatic_at` in the claim's `UPDATE`. Every phase 1
+   `decided_automatically = 1`, `claimed_automatically = 1` and
+   `automatic_at` in the claim's `UPDATE`,
+   which runs inside step 2's transaction; the lock is released when it
+   commits, before the task create. Every phase 1
    guarantee holds: the claim, the frozen spec, the pre-create eligible-step
    check, the idempotent create by external id, and no agent start (D15).
    The task is created under the raising manager's identity.
@@ -169,7 +194,7 @@ of the `pending` row:
    for a manager (`AC-COORDINATOR-AUTOMATIC-003.3`).
 
 Phase 2's log records the decision as it records any approval; the adapter
-passes `decided_automatically` and `decided_by` so the row reads "Automatic,
+passes `claimed_automatically` and `decided_by` so the row reads "Automatic,
 raised by <manager>" (`AC-COORDINATOR-AUTOMATIC-003.4`). An improvement
 proposal never reaches step 1: the automatic path is only in the
 `propose_task_kandev` handler.
@@ -177,12 +202,14 @@ proposal never reaches step 1: the automatic path is only in the
 ## Lowering
 
 The coordinator registers `DecisionLog.OnUndo`. When the undone task is the
-`task_id` of one of the coordinator's proposals with
-`decided_automatically = 1`, it calls `ActionSettings.Lower(ctx,
+`task_id` of one of the coordinator's proposals and the decision that created
+that task was automatic (the proposal's `claimed_automatically = 1`; a
+manager's approval of a proposal whose automatic approval ended `failed`
+sets it to 0, so the task it creates is a manager's), it calls `ActionSettings.Lower(ctx,
 coordinatorID, "create_task", "undo of an automatic create")`. A failed lower
 is retried by the backstop tick of [wake](wake.md#backstop), which re-checks
-`UndoneTaskIDs` over the last 24 hours against automatic proposals while the
-setting is `automatic`.
+`UndoneTaskIDs` over the last 24 hours against proposals with
+`claimed_automatically = 1` while the setting is `automatic`.
 
 ## Screens
 

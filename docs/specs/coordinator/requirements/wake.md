@@ -187,14 +187,22 @@ that no person started it.
   condition has ended `superseded` (all of them, not only those before the
   twentieth delivered one), and start one unattended turn whose
   message lists the delivered wakes. When no pending wake still holds, it
-  shall start no turn.
+  shall start no turn. A condition still holds only when stored state shows
+  the same episode the wake recorded (the same pending question or
+  permission, the same error, the same stall, or the task still completed),
+  judged once when delivery reads the pending wakes; a condition that ends
+  after that read is still delivered, and the message tells the agent to read
+  current state.
 - **AC-COORDINATOR-WAKE-005.2:** A coordinator shall never have more than one
   unattended turn open, under concurrent delivery attempts from events, the
   backstop and settings changes.
 - **AC-COORDINATOR-WAKE-005.3:** When the turn's message cannot be sent, or the
   process stops after wakes were marked delivered and before the turn started,
   the system shall return those wakes to `pending` and record the turn as
-  failed or interrupted; no wake shall be lost or delivered twice. A send
+  failed or interrupted; no wake shall be lost or delivered twice. When the
+  conversation became busy after admission, the send shall be refused rather
+  than queued behind the other turn, and the wakes shall wait for the next
+  delivery. A send
   whose outcome is unknown (for example a timeout) shall count as sent when
   the turn's message is stored, and shall not be sent again.
 - **AC-COORDINATOR-WAKE-005.4:** An unattended turn shall use the same Kandev

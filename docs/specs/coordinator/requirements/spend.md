@@ -79,6 +79,8 @@ same usage ledger the task cost display uses.
 
 **Intent:** Unattended turns stop at the ceiling, with overshoot bounded by
 one usage report, or by one backstop period when a notification is missed.
+The bound depends on the agent honouring a cancel; when it does not, the
+failure is shown to the manager rather than hidden.
 
 #### Acceptance criteria
 
@@ -93,7 +95,12 @@ one usage report, or by one backstop period when a notification is missed.
   `stopped_at_ceiling`. The backstop pass shall apply the same check, so a
   missed usage notification delays the stop by at most one backstop period.
 - **AC-COORDINATOR-SPEND-003.3:** An attended turn shall never be cancelled or
-  refused because of the ceiling.
+  refused because of the ceiling, including a manager message that starts on
+  the session between the ceiling check and the cancel.
+- **AC-COORDINATOR-SPEND-003.4:** While a ceiling stop has been requested for
+  more than five minutes and the unattended turn is still open, the autonomy
+  strip shall show that the stop is not confirmed and offer Stop, and each
+  failed cancel shall be counted in a metric.
 
 ### REQ-COORDINATOR-SPEND-004: Showing spend
 

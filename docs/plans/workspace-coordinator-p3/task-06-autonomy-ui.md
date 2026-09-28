@@ -18,6 +18,7 @@ acceptance_criteria:
   - AC-COORDINATOR-WAKE-006.2
   - AC-COORDINATOR-WAKE-006.3
   - AC-COORDINATOR-WAKE-006.4
+  - AC-COORDINATOR-SPEND-003.4
   - AC-COORDINATOR-SPEND-004.1
   - AC-COORDINATOR-SPEND-004.2
   - AC-COORDINATOR-SPEND-004.3
@@ -44,7 +45,9 @@ permission count. Adds the public docs section.
   ([Autonomy read](../../specs/coordinator/system-design/wake.md#autonomy-read)),
   `coordinator.updated` with `autonomy_changed`, and
   `GET .../coordinators/:cid/runs/:runId` (used by task 10; built here with
-  the autonomy read).
+  the autonomy read), including `last_turn.stop_state` (`stop_failing` when
+  an open row's `stop_requested_at` is older than five minutes,
+  [Stopping](../../specs/coordinator/system-design/spend.md#stopping)).
 - Web: the autonomy input in `use-coordinator-inputs.ts`; the strip above the
   count strip; `attention.ts` emitting the `autonomy` item (kind rank 4, id
   `autonomy:<cid>`), counted in the coordinator count only, and the updated
@@ -84,6 +87,9 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
   coordinator count and not the Inbox; the settings section shows ceiling,
   spend, 7-day mean, last turn cost and the four conditions re-read on open
   and Check again.
+- An open unattended turn whose ceiling stop was requested more than five
+  minutes ago shows "Stop at ceiling not confirmed" with Stop on the strip;
+  at four minutes it does not (`synctest` on the read).
 - The transcript renders the unattended message as "Woken by N events" with
   the expandable list and the denied count, distinct from a manager message;
   the 390px layout matches the plan's phone views.

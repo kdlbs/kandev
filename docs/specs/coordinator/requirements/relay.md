@@ -133,7 +133,8 @@ Mockup:
   conversation first when there is none. When sending fails, the proposal
   shall stay `returned`, the card shall say "Reply saved, not delivered" with
   **Send again**, and Send again shall send the same message without changing
-  the proposal.
+  the proposal. However deliveries overlap, including a slow send outliving
+  its claim, the reply shall reach the conversation at most once.
 - **AC-COORDINATOR-RELAY-003.4:** `propose_task_kandev` shall accept an
   optional `in_reply_to` naming a `returned` proposal of the same coordinator;
   any other value shall be refused naming the field. A proposal with

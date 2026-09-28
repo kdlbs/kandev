@@ -47,10 +47,13 @@ confirming `create_task`.
 - `internal/coordinator/automatic.go`: the closed `raisableClasses`, the
   change validator (400 for other classes, 409 naming the first unmet
   condition), `Eligibility`, the class review store and routes, the automatic
-  branch in `propose_task_kandev` with the keyed mutex and the 10-per-24h
-  limit counted on `automatic_at` whatever the outcome, the raiser check
-  before the claim, `decided_automatically` and `automatic_at` on the claim,
-  the adapter's exclusion of automatic rows from decided rows, the
+  branch in `propose_task_kandev` with one transaction under
+  `pg_advisory_xact_lock(hashtextextended('coordinator_automatic:' || id, 0))`
+  (the SQLite single writer) holding the setting and raiser re-read, the
+  10-per-24h count on `automatic_at` whatever the outcome, and the claim;
+  `decided_automatically`, `claimed_automatically` and `automatic_at` on the
+  claim (`claimed_automatically` 0 on a manager's claim), the adapter's
+  exclusion of log rows decided by the automatic path, the
   server-computed review window and row count, and `OnUndo` lowering with the
   backstop retry ([automatic](../../specs/coordinator/system-design/automatic.md)).
 - Web: in phase 2's permission settings, "Cannot be raised", the eligibility
@@ -97,7 +100,14 @@ Merge           Cannot be raised
   now minus 30 days and `row_count` from the log, ignoring client fields; a
   log read error is 503 and stores nothing.
 - Undoing a task an automatic approval created lowers the class at once and
-  logs the reason; a failed lower is retried by the backstop.
+  logs the reason; a failed lower is retried by the backstop. Undoing a task
+  created by a manager's approval of a proposal whose automatic approval had
+  ended `failed` does not lower, and that manager approval counts as a
+  decided row.
+- Two processes proposing concurrently at 9 automatic approvals in 24 hours
+  on PostgreSQL produce exactly one tenth automatic approval (`-race` and a
+  two-connection PostgreSQL test); a lower committed between step 1's read
+  and the lock leaves the proposal `pending` and unclaimed.
 
 ## Verification
 

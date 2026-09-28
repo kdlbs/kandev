@@ -27,7 +27,8 @@ ordinary task and never starts an agent (D15).
   `create_task` is the class of `propose_task_kandev`.
 - **Decided row:** a log row recording a manager's decision on one proposal of
   the class (approved, approved with edits, rejected or returned). An
-  automatic approval is not a decided row.
+  automatic approval is not a decided row; a manager's later decision on a
+  proposal whose automatic approval failed is one.
 - **Evidence window:** the 30 days ending at the moment of the check.
 - **Class review:** a manager's record that they reviewed one coordinator's
   evidence window for one class.
@@ -126,8 +127,13 @@ wrong.
 
 - **AC-COORDINATOR-AUTOMATIC-004.1:** A manager shall be able to lower
   `create_task` to `requires approval` at any time, with no eligibility check.
+  Once the lower is stored, every proposal not yet claimed shall wait for a
+  manager: the automatic path re-reads the setting under its lock
+  immediately before the claim. At most the one claim already past that
+  re-read when the lower is stored completes automatically.
 - **AC-COORDINATOR-AUTOMATIC-004.2:** When a task created by an automatic
-  approval is undone through the log, the system shall lower that
+  approval (not a manager's approval of a proposal whose automatic approval
+  failed) is undone through the log, the system shall lower that
   coordinator's `create_task` to `requires approval` and record the lowering
   with the undo as its reason.
 - **AC-COORDINATOR-AUTOMATIC-004.3:** A coordinator's runtime session shall

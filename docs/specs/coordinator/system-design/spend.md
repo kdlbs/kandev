@@ -114,12 +114,27 @@ measurable or `WindowSubcents >= cost_ceiling_subcents` it:
    stop_requested_at = ? WHERE id = ? AND outcome IS NULL AND
    stop_requested_at IS NULL`, the retry marker; an unmeasurable reading
    stops the same way, because the ceiling can no longer be shown to hold;
-2. cancels the session's current turn through the orchestrator's cancel, the
-   path the panel's Stop uses;
+2. cancels the turn through `orchestrator.Service.CancelTurn(ctx, sessionID,
+   expectedTurnID)`, a new turn-fenced variant of `CancelAgent` (the path the
+   panel's Stop uses), passing the row's `session_turn_id`;
 3. when the cancel is confirmed (it returned without error), settles the turn
    `outcome='stopped_at_ceiling'`, `finished_at` and its
    [per-turn cost](#per-turn-cost) in `UPDATE ... WHERE id = ? AND outcome IS
    NULL`, and publishes `coordinator.updated` with `autonomy_changed`.
+
+`CancelTurn` runs `CancelAgent`'s sequence (the explicit-cancellation claim,
+then the cancel-in-flight guard) and, inside the guard, compares the captured
+`cancellationIdentity.turnID` with `expectedTurnID` before cancelling
+anything. When they differ, or no turn is active, it returns
+`ErrTurnNotActive` and cancels nothing; the agent cancel it issues is fenced
+to the captured prompt generation, so a prompt dispatched after the capture
+is never cancelled. The active-turn check before step 1 is therefore a cheap
+filter only; the fence is the comparison inside the guard. `CheckCeiling`
+treats `ErrTurnNotActive` as "the unattended turn already ended": it does
+not settle the row, which [turn end](wake.md#turn-end) settles as
+`stopped_at_ceiling`. A test pins the race: a manager's queued message
+drained onto the session between the pre-check and the cancel is not
+cancelled.
 
 When the cancel fails, the row stays open with `stop_requested_at` set: the
 turn stays unattended, so its permissions are still denied, and the next
@@ -127,21 +142,31 @@ observer call or [backstop](wake.md#backstop) tick cancels again, since an
 open row with `stop_requested_at` set is retried whatever the spend now reads.
 When the turn ends by itself first, [turn end](wake.md#turn-end) settles a row
 with `stop_requested_at` set as `stopped_at_ceiling`, whatever the session
-state. A retried cancel of a turn that has already ended finds a different or
-no active turn and does nothing.
+state. A retried cancel of a turn that has already ended gets `ErrTurnNotActive`
+and does nothing.
 
 The backstop runs `CheckCeiling` for every open unattended turn each tick, so
 a dropped observer call or a failed cancel delays the stop by at most 60
-seconds (`AC-COORDINATOR-SPEND-003.2`). Both acting paths require the
-session's active turn to be the unattended one, so an attended turn, including
-a manager's queued message drained on the same session, is never cancelled
-(`AC-COORDINATOR-SPEND-003.3`); the phase 1 message send path has no ceiling
+seconds (`AC-COORDINATOR-SPEND-003.2`). Both acting paths cancel only
+through `CancelTurn` fenced to the row's `session_turn_id`, so an attended
+turn, including a manager's queued message drained on the same session at any
+point before the cancel, is never cancelled (`AC-COORDINATOR-SPEND-003.3`); the phase 1 message send path has no ceiling
 check.
 
 The overshoot is bounded by one usage report, or by one backstop period when
-an observer call is dropped or a cancel fails: the ceiling is compared after
+an observer call is dropped or one cancel fails: the ceiling is compared after
 each recorded usage event, not before a model request, since Kandev does not
-mediate the agent CLI's model calls.
+mediate the agent CLI's model calls. The bound holds only while a cancel
+eventually succeeds. When cancels keep failing (the agent process ignores
+them), the turn keeps spending until it ends by itself; Kandev has no second
+stop below the agent cancel. That residual is made visible, not hidden: each
+failed cancel increments `coordinator_ceiling_cancel_failed_total`, and once
+a row has `stop_requested_at` older than five minutes and is still open, the
+autonomy read reports `last_turn.stop_state: "stop_failing"` and the autonomy strip
+shows "Stop at ceiling not confirmed: the turn is still running" with the
+panel's Stop, so a manager can act (`AC-COORDINATOR-SPEND-003.4`). Admission
+already holds new unattended turns while any turn is open, so the failing
+turn is the only one spending.
 
 ## Screens
 
@@ -165,6 +190,8 @@ mediate the agent CLI's model calls.
 | Unpriced usage in the window | Same, until the row leaves the window |
 | Observer queue full | Metric; the backstop applies the stop within 60 s |
 | Cancel fails | Row stays open with `stop_requested_at`; the next observer call or tick cancels again |
+| Cancel keeps failing for 5 minutes | Metric per failure; autonomy read and strip show `stop_failing` until the turn ends |
+| Unattended turn ended before the cancel | `ErrTurnNotActive`; nothing is cancelled; turn end settles the row |
 | Late usage row after settle | Per-turn cost corrected by the backstop within 10 minutes |
 
 ## Security
@@ -175,7 +202,8 @@ never per-message usage.
 
 ## Observability
 
-`coordinator_ceiling_stop_total`, `coordinator_spend_read_failed_total` and
+`coordinator_ceiling_stop_total`, `coordinator_ceiling_cancel_failed_total`,
+`coordinator_spend_read_failed_total` and
 `coordinator_usage_observer_dropped_total` counters, plus a structured zap log
 at info for each ceiling stop with the coordinator id, window and ceiling.
 

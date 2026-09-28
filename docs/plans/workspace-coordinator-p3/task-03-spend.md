@@ -43,7 +43,12 @@ backstop re-check.
 - `CheckCeiling(ctx, coordinatorID)`: for an open turn whose
   `session_turn_id` is the session's active turn, when not measurable or at
   or over the ceiling (or already marked), set `stop_requested_at`, cancel
-  through the orchestrator's cancel, and only after a confirmed cancel settle
+  through the new turn-fenced `orchestrator.Service.CancelTurn(ctx,
+  sessionID, expectedTurnID)` (compares the captured
+  `cancellationIdentity.turnID` inside the cancel-in-flight guard, returns
+  `ErrTurnNotActive` without cancelling on a mismatch), count each failed
+  cancel in `coordinator_ceiling_cancel_failed_total`, and only after a
+  confirmed cancel settle
   it `stopped_at_ceiling` with cost in one conditional update and publish
   `coordinator.updated` with `autonomy_changed`; a failed cancel leaves the
   marked row open for the next call
@@ -73,12 +78,20 @@ backstop re-check.
   queued message drained on the unattended turn's session, while the turn row
   is still open because its settle event was lost, runs as an attended turn:
   it is not cancelled and its permissions reach the panel.
+- Drain race: with the pre-check seeing the unattended turn active and a
+  manager's message becoming the active turn before `CancelTurn` enters the
+  guard, `CancelTurn` returns `ErrTurnNotActive`, the manager's turn keeps
+  running, and the row is not settled by `CheckCeiling`
+  (`AC-COORDINATOR-SPEND-003.3`). An orchestrator test covers `CancelTurn`'s
+  match, mismatch and no-active-turn cases.
+- Each failed cancel increments `coordinator_ceiling_cancel_failed_total`.
 
 ## Verification
 
 ```bash
 cd apps/backend && go test ./internal/coordinator/... -run 'Spend|Ceiling|TurnCost' -count=1
 cd apps/backend && go test ./internal/task/usage/... -count=1
+cd apps/backend && go test ./internal/orchestrator/... -run 'CancelTurn' -count=1
 make -C apps/backend lint
 ```
 

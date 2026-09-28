@@ -207,7 +207,8 @@ REST when auth is off) stays accepted for them, because a manager is present.
   that window in the last 7 days. Any read error refuses the raise.
 - **What automatic does.** Inside `propose_task_kandev`, a `create_task`
   proposal of a raised coordinator is approved through the phase 1 approve
-  service with `decided_automatically` set, so the log names the decider
+  service with `decided_automatically` and `claimed_automatically` set, so
+  the log names the decider
   `automatic` and the manager who raised the setting (stored as
   `decided_by`, whose identity creates the task), and every phase 1
   guarantee intact. At most 10
@@ -264,7 +265,11 @@ Accepted for phase 3, each named so a later phase can close it:
   returned by a failed or interrupted turn can take the pending count past it
   until the next delivery.
 - **Spend overshoot of one usage report, or one backstop period** when an
-  observer call is dropped or a cancel fails, as above.
+  observer call is dropped or one cancel fails, as above. The bound assumes
+  the agent honours a cancel. An agent that ignores repeated cancels keeps
+  spending until its turn ends; Kandev has no second stop below the agent
+  cancel. Each failed cancel is counted, and after five minutes the autonomy
+  strip shows the stop as not confirmed with Stop, so a manager sees it.
 
 ## G3 Status
 

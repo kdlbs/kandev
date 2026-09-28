@@ -42,7 +42,8 @@ Starts only after G3 is met.
 - `internal/coordinator/store.go`: `coordinators.autonomy_enabled`,
   `coordinators.cost_ceiling_subcents`; `coordinator_proposals.kind`,
   `reply_text`, `reply_delivered_at`, `reply_delivery_claimed_at`,
-  `in_reply_to`, `decided_automatically`, `automatic_at`; tables `coordinator_wakes`,
+  `in_reply_to`, `decided_automatically`, `claimed_automatically`,
+  `automatic_at`; tables `coordinator_wakes`,
   `coordinator_unattended_turns` (with the partial unique index,
   `session_turn_id` and `stop_requested_at`), `coordinator_unattended_denials`,
   `coordinator_class_reviews`, `coordinator_pending_changes`; deletion with

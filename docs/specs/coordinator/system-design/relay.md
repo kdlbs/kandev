@@ -173,9 +173,19 @@ the claim it returns 200 with the current proposal and sends nothing.
    <id>): <reply text>. If you still think a change is needed, propose a new
    improvement.` `propose_improvement_kandev` takes no `in_reply_to`, so an
    improvement card never shows "Revised after your reply".
-4. On success set `reply_delivered_at` and clear the claim. On any error, log
-   at warn, clear the claim and leave `reply_delivered_at` null; the card
-   shows "Reply saved, not delivered" with **Send again**.
+   The send runs under a 60-second context deadline, half the two-minute
+   claim expiry, so a live delivery always finishes its send before its claim
+   can be taken over.
+4. Finalise conditionally on the claim this delivery wrote: on success
+   `UPDATE ... SET reply_delivered_at = ?, reply_delivery_claimed_at = NULL
+   WHERE id = ? AND reply_delivery_claimed_at = <this claim's value>`; on any
+   error, log at warn and `UPDATE ... SET reply_delivery_claimed_at = NULL`
+   with the same condition, leaving `reply_delivered_at` null; the card shows
+   "Reply saved, not delivered" with **Send again**. Zero rows means another
+   delivery took the claim over after it expired: this delivery writes
+   nothing and returns the current proposal, and the other delivery's lookup
+   finds this one's message when it was stored, so the reply is still sent
+   at most once.
 
 A crash after the send and before step 4 leaves the claim set and
 `reply_delivered_at` null, so the card shows "Reply saved, not delivered".

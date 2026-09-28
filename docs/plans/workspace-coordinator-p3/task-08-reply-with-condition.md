@@ -35,7 +35,9 @@ control on both proposal card surfaces.
   through `OpenConversation` and the panel composer's message path as the
   replying manager, with the delivery claim on `reply_delivery_claimed_at`,
   `metadata.coordinator_reply_proposal_id` and the stored-or-queued message
-  lookup before each send, and the kind-specific delivery text; the guard's refused list gains both routes;
+  lookup before each send, the send under a 60-second deadline, the
+  finalisation conditional on this delivery's claim value, and the
+  kind-specific delivery text; the guard's refused list gains both routes;
   `in_reply_to` validation ([Revised proposals](../../specs/coordinator/system-design/relay.md#revised-proposals));
   the client store's never-unsettle rule treats `returned` as settled.
 - Web: the control, returned and revised card states and **Send again** in
@@ -71,6 +73,9 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
   send and before `reply_delivered_at` is followed, once the claim is two
   minutes old, by a Send again that finds the message by its metadata and
   sends nothing (`synctest`).
+- A send that blocks past 60 seconds is cancelled and clears only its own
+  claim; a delivery whose claim was taken over after expiry writes nothing
+  at step 4, and the reply is sent once (`synctest`).
 - A reply to an improvement is delivered with the improvement text, which
   names no `in_reply_to`.
 - `in_reply_to` naming a `returned` task proposal of the same coordinator is

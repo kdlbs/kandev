@@ -247,9 +247,13 @@ ceiling-releasing turn end, and each backstop tick.
    one (`AC-COORDINATOR-WAKE-003.1`).
 2. Read every `pending` wake ordered by `created_at`, `id`; the cap bounds
    this to 200 rows plus at most 20 returned by a failed turn. For each,
-   re-check its condition from stored state with the same readers the backstop
-   uses; mark every one whose condition ended `superseded`, and keep the first
-   20 that still hold. With none, return.
+   re-check its [episode](#episode-recheck) from stored state with the same
+   readers the backstop uses; mark every one whose episode ended
+   `superseded`, and keep the first 20 that still hold. With none, return.
+   This read is the evaluation point of "still holds"
+   (`AC-COORDINATOR-WAKE-005.1`): an episode that ends after it, before or
+   during the turn, is still delivered, and the turn message tells the agent
+   to read current state.
 3. In one transaction under the [wake lock](#wake-lock): re-read the
    coordinator row and roll back if `autonomy_enabled` is not 1; insert the
    turn row (`outcome` null, `message_id` null), where a unique violation
@@ -260,18 +264,44 @@ ceiling-releasing turn end, and each backstop tick.
    an autonomy-off PATCH that commits first makes this step roll back, and one
    that commits after it finds a running turn (`AC-COORDINATOR-WAKE-004.3`).
 4. Build the turn message ([Transcript](#transcript)) and send it through the
-   conversation's message path (`orchestrator` prompt send with the
-   coordinator's system author and `metadata.coordinator_wake_turn_id` set to
-   the turn row id).
+   orchestrator's direct prompt path (`orchestrator.Service.PromptTask`,
+   extended with an options value carrying the coordinator's system author
+   and `metadata.coordinator_wake_turn_id` set to the turn row id). Delivery
+   never uses the message queue (`orchestrator/messagequeue`), so a wake
+   message is never queued behind another turn: admission check 7 ran in
+   step 1, and a manager message that made the session busy since then makes
+   this send fail with `ErrAgentPromptInProgress` or
+   `ErrSessionNotPromptable`.
 5. On success, set `message_id` and `session_turn_id` from the stored
    message. On a send error, [find the turn's message](#finding-the-turns-message):
    when found, record it as on success, because the prompt was sent. When it
-   is not found and the error is a refusal before dispatch (the session is not
-   promptable, or the request is invalid), in one transaction set the turn
-   `outcome='send_failed'`, `finished_at`, and return its wakes to `pending`
-   with `turn_id` null. Any other error (timeout, cancelled context,
-   transport) leaves the turn open with `message_id` null for the backstop
-   (`AC-COORDINATOR-WAKE-005.3`).
+   is not found and the error is a refusal before dispatch
+   (`ErrAgentPromptInProgress`, `ErrSessionNotPromptable`, or an invalid
+   request), in one transaction set the turn `outcome='send_failed'`,
+   `finished_at`, and return its wakes to `pending` with `turn_id` null; the
+   next trigger holds at admission with `conversation_busy` until the session
+   is idle. Any other error (timeout, cancelled context, transport) leaves the
+   turn open with `message_id` null for the backstop
+   (`AC-COORDINATOR-WAKE-005.3`). Because nothing is queued, a message the
+   lookup cannot find within two minutes was never dispatched, which is what
+   makes the two-minute `send_failed` settle safe.
+
+### Episode recheck
+
+A pending wake still holds only when stored state shows the same episode, not
+merely a condition of the same kind:
+
+| Kind | Still holds when |
+| --- | --- |
+| `question` | the primary session's pending clarification bundle has `pending_id` equal to `episode_key` |
+| `permission` | a pending permission message on the primary session has `pending_id` equal to `episode_key` |
+| `stall` | the task's stall row is [current](#stall-currency) and its `last_event_at` equals `episode_key` |
+| `error` | the primary session's active error has `stamp` equal to `episode_key` |
+| `completed` | the task's state is `COMPLETED` |
+
+The task no longer being an own task (archived, deleted, ephemeral) ends
+every kind. A read error for one wake leaves it `pending`, excludes it from
+this delivery, and does not supersede it.
 
 ### Finding the turn's message
 
@@ -279,7 +309,7 @@ The lookup reads the conversation session's messages created at or after the
 turn's `started_at` and returns the one whose
 `metadata.coordinator_wake_turn_id` equals the turn id. It is the only test of
 whether a send reached the conversation; nothing re-sends a turn whose message
-exists.
+exists. Delivery never queues, so stored messages are the only place to look.
 
 The startup pass, and each backstop tick, examine turn rows with `outcome IS
 NULL` and `message_id` null. When the lookup finds the message, they record
@@ -328,7 +358,9 @@ Unattended turn. No person started this turn or is watching it.
 Events since your last turn (N):
 - question on <identifier> "<title, 80 characters>"
 - stall on <identifier> "<title>"
-Read what you need and propose what should happen. Proposals wait for a manager.
+These were current when this turn started and may have changed since; read
+current state before acting. Propose what should happen. Proposals wait for a
+manager.
 ```
 
 Titles are quoted, truncated and stripped of newlines; they are still board
@@ -349,13 +381,15 @@ returns:
   "admission": {"ok": false, "reason": "containment", "detail": "auth_enabled"},
   "pending_wakes": 3,
   "oldest_pending_at": "2026-09-29T09:00:00Z",
-  "last_turn": {"id": "...", "started_at": "...", "outcome": "completed", "cost_subcents": 5100, "denied_permissions": 0},
+  "last_turn": {"id": "...", "started_at": "...", "outcome": "completed", "cost_subcents": 5100, "denied_permissions": 0, "stop_state": null},
   "containment": {"conditions": [{"name": "executor_isolated", "met": true, "detail": ""}]},
   "spend": {"window_subcents": 64000, "mean_daily_subcents_7d": 58000, "measurable": true, "degraded": false, "ceiling_subcents": 100000}
 }
 ```
 
 It runs `Admit` read-only; `admission` is present only when autonomy is on.
+`last_turn.stop_state` is `null`, or `"stop_failing"` per
+[spend](spend.md#stopping).
 `coordinator.updated` gains optional `autonomy_changed: true`, published on
 every wake insert, delivery, turn settle and autonomy PATCH, so clients
 re-read.
