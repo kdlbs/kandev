@@ -263,6 +263,128 @@ func TestReclaimStale_OnlyWhenClaimedBeforeThreshold(t *testing.T) {
 	}
 }
 
+// TestClaimProposal_NonUTCClaimedAtStillOrdersCorrectly proves ClaimProposal
+// normalizes claimed_at to UTC before binding, so a genuinely-stale claim is
+// still found by ListApprovingClaimedBefore's cutoff comparison even when the
+// caller's time.Time carries a positive UTC offset
+// (docs/specs/coordinator/system-design/proposals.md#recovery). SQLite
+// compares DATETIME columns as TEXT: without normalization, a claim written
+// as "16:xx+08:00" (a UTC instant of 08:xx) sorts as greater than a UTC
+// cutoff of "08:yy+00:00" even when yy > xx, because the digits are compared
+// as text, not as instants.
+func TestClaimProposal_NonUTCClaimedAtStillOrdersCorrectly(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+
+	cutoff := time.Now().UTC()
+	staleInstant := cutoff.Add(-10 * time.Minute)
+	positiveOffsetZone := time.FixedZone("test+08:00", 8*60*60)
+	staleClaimedAt := staleInstant.In(positiveOffsetZone)
+
+	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+	if err := store.InsertProposal(ctx, p); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	if _, err := store.ClaimProposal(ctx, p.ID, "tok", sampleSpec(), "user-1", staleClaimedAt); err != nil {
+		t.Fatalf("ClaimProposal: %v", err)
+	}
+
+	got, err := store.ListApprovingClaimedBefore(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("ListApprovingClaimedBefore: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != p.ID {
+		t.Fatalf("ListApprovingClaimedBefore returned %+v, want [%s] (the stale row, correctly ordered despite its non-UTC claimedAt)", got, p.ID)
+	}
+	if got[0].ClaimedAt == nil || !got[0].ClaimedAt.Equal(staleInstant) {
+		t.Fatalf("ClaimedAt = %v, want the same instant as %v", got[0].ClaimedAt, staleInstant)
+	}
+}
+
+// TestReclaimStale_NonUTCStaleBeforeStillMatches proves ReclaimStale
+// normalizes staleBefore to UTC before binding, so a genuinely-stale claim
+// (correctly stored in UTC by ClaimProposal) is still recognized as stale
+// when the caller's staleBefore carries a negative UTC offset — the
+// direction that makes the cutoff's wall-clock digits look earlier than they
+// truly are, which would otherwise make a genuinely-earlier claimed_at
+// compare as "not less than" it (docs/specs/coordinator/system-design/
+// proposals.md#stale-re-claim).
+func TestReclaimStale_NonUTCStaleBeforeStillMatches(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+	if err := store.InsertProposal(ctx, p); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+
+	claimedInstant := time.Now().UTC().Add(-10 * time.Minute)
+	if _, err := store.ClaimProposal(ctx, p.ID, "token-1", sampleSpec(), "user-1", claimedInstant); err != nil {
+		t.Fatalf("ClaimProposal: %v", err)
+	}
+
+	negativeOffsetZone := time.FixedZone("test-05:00", -5*60*60)
+	staleBeforeInstant := time.Now().UTC().Add(-2 * time.Minute)
+	nowInstant := time.Now().UTC()
+	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", nowInstant, staleBeforeInstant.In(negativeOffsetZone))
+	if err != nil {
+		t.Fatalf("ReclaimStale: %v", err)
+	}
+	if !matched {
+		t.Fatal("ReclaimStale did not match a genuinely-stale claim against a staleBefore carrying a non-UTC offset")
+	}
+
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	if err != nil {
+		t.Fatalf("GetProposal: %v", err)
+	}
+	if got.ClaimToken == nil || *got.ClaimToken != "token-2" {
+		t.Fatalf("ClaimToken = %v, want %q", got.ClaimToken, "token-2")
+	}
+	if got.ClaimedAt == nil || !got.ClaimedAt.Equal(nowInstant) {
+		t.Fatalf("ClaimedAt = %v, want the same instant as %v", got.ClaimedAt, nowInstant)
+	}
+}
+
+// TestReclaimStale_NonUTCNowStillOrdersCorrectlyLater proves ReclaimStale
+// normalizes now to UTC before writing claimed_at, so a row it re-claims
+// remains correctly comparable by a later UTC cutoff (for example the
+// startup pass's T0) even when the caller's now carries a positive UTC
+// offset — mirroring TestClaimProposal_NonUTCClaimedAtStillOrdersCorrectly
+// for the re-claim write path.
+func TestReclaimStale_NonUTCNowStillOrdersCorrectlyLater(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+	if err := store.InsertProposal(ctx, p); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	if _, err := store.ClaimProposal(ctx, p.ID, "token-1", sampleSpec(), "user-1", time.Now().UTC().Add(-10*time.Minute)); err != nil {
+		t.Fatalf("ClaimProposal: %v", err)
+	}
+
+	positiveOffsetZone := time.FixedZone("test+08:00", 8*60*60)
+	reclaimInstant := time.Now().UTC()
+	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", reclaimInstant.In(positiveOffsetZone), time.Now().UTC().Add(-2*time.Minute))
+	if err != nil {
+		t.Fatalf("ReclaimStale: %v", err)
+	}
+	if !matched {
+		t.Fatal("ReclaimStale: no row matched")
+	}
+
+	laterCutoff := reclaimInstant.Add(time.Minute)
+	got, err := store.ListApprovingClaimedBefore(ctx, laterCutoff)
+	if err != nil {
+		t.Fatalf("ListApprovingClaimedBefore: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != p.ID {
+		t.Fatalf("ListApprovingClaimedBefore returned %+v, want [%s] (the re-claimed row, correctly ordered despite ReclaimStale's non-UTC now)", got, p.ID)
+	}
+}
+
 func TestCompleteProposal_FencedByToken(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -353,6 +475,44 @@ func TestFailProposal_TruncatesErrorAndFences(t *testing.T) {
 	}
 	if !matched {
 		t.Fatal("ClaimProposal did not match a failed row")
+	}
+}
+
+// TestFailProposal_FencedByToken is CompleteProposal's fencing test
+// (TestCompleteProposal_FencedByToken) for FailProposal: a wrong claim token
+// is a genuine zero-row CAS race and must return matched=false with the row
+// untouched, not an error (task-07 Verification: "genuine zero-row CAS races
+// on every mutating store method").
+func TestFailProposal_FencedByToken(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+	if err := store.InsertProposal(ctx, p); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := store.ClaimProposal(ctx, p.ID, "token-1", sampleSpec(), "user-1", now); err != nil {
+		t.Fatalf("ClaimProposal: %v", err)
+	}
+
+	matched, err := store.FailProposal(ctx, p.ID, "wrong-token", "boom", now)
+	if err != nil {
+		t.Fatalf("FailProposal (wrong token): %v", err)
+	}
+	if matched {
+		t.Fatal("FailProposal matched with the wrong claim token")
+	}
+
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	if err != nil {
+		t.Fatalf("GetProposal: %v", err)
+	}
+	if got.Status != ProposalStatusApproving {
+		t.Fatalf("Status = %q, want approving (unchanged by the fenced-out call)", got.Status)
+	}
+	if got.ClaimToken == nil || *got.ClaimToken != "token-1" {
+		t.Fatalf("ClaimToken = %v, want unchanged %q", got.ClaimToken, "token-1")
 	}
 }
 

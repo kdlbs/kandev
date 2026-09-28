@@ -95,7 +95,7 @@ func registerCoordinatorRoutes(p routeParams) {
 	hooks := []func(context.Context, time.Time){
 		registerCoordinatorConversation(p.router, p.eventBus, svc, p.log),
 		registerCoordinatorSubscribers(p.router, p.eventBus, svc, p.log),
-		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.log),
+		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.taskSvc, p.services.Workflow, p.log),
 	}
 	runCoordinatorBackgroundPass(p.ctx, t0, hooks)
 }
@@ -108,8 +108,8 @@ var runCoordinatorBackgroundPass = startCoordinatorBackgroundPass
 // startCoordinatorBackgroundPass runs each later work package's named
 // registration hook with the given T0, in the fixed order the spec
 // describes (Build decision 14): conversation (task 03), subscribers (task
-// 04), decisions (task 07). All three are no-ops in WP-1; later work orders
-// fill in their bodies without changing this call site or ordering.
+// 04), decisions (task 07). Conversation and subscribers remain no-ops until
+// their work packages land; decisions runs StartupRecoveryPass.
 func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
 	go func() {
 		for _, hook := range hooks {
@@ -182,7 +182,22 @@ func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *c
 }
 
 // registerCoordinatorDecisions is task 07's named registration function
-// (Build decision 14). No-op until that work package lands.
-func registerCoordinatorDecisions(_ *gin.Engine, _ bus.EventBus, _ *coordinator.Service, _ *logger.Logger) func(context.Context, time.Time) {
-	return func(context.Context, time.Time) {}
+// (Build decision 14). It wires the approve/reject dependencies (the task
+// service, the workflow step reader used for step-eligibility checks, and
+// the event bus coordinator.updated publishes on) via SetDecisionDeps before
+// the HTTP routes registered by registerCoordinatorHTTPRoutes above can serve
+// a request, then returns StartupRecoveryPass as the background-pass hook
+// (docs/specs/coordinator/system-design/proposals.md#recovery). *taskservice.
+// Service satisfies coordinator.DecisionTaskService and *workflowservice.
+// Service satisfies coordinator.WorkflowStepReader.
+func registerCoordinatorDecisions(
+	_ *gin.Engine,
+	eventBus bus.EventBus,
+	svc *coordinator.Service,
+	taskSvc *taskservice.Service,
+	steps coordinator.WorkflowStepReader,
+	_ *logger.Logger,
+) func(context.Context, time.Time) {
+	svc.SetDecisionDeps(taskSvc, steps, eventBus)
+	return svc.StartupRecoveryPass
 }

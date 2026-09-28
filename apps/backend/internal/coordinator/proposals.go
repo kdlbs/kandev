@@ -172,7 +172,7 @@ func (s *Service) validateProposalSourceTask(ctx context.Context, workspaceID, s
 	_, err = resolveWorkspaceScopedRef(
 		"source task", task, err, repoerrors.ErrTaskNotFound,
 		func(t *taskmodels.Task) string { return t.WorkspaceID }, workspaceID,
-		&FieldError{Field: "source_task_id", Message: "source task not found in this workspace"},
+		&FieldError{Field: fieldSourceTaskID, Message: "source task not found in this workspace"},
 	)
 	return err
 }
@@ -185,7 +185,7 @@ func (s *Service) validateProposalRepository(ctx context.Context, workspaceID, r
 	_, err = resolveWorkspaceScopedRef(
 		"repository", repository, err, repoerrors.ErrRepositoryNotFound,
 		func(r *taskmodels.Repository) string { return r.WorkspaceID }, workspaceID,
-		&FieldError{Field: "repository_id", Message: "repository not found in this workspace"},
+		&FieldError{Field: ApproveFieldRepositoryID, Message: "repository not found in this workspace"},
 	)
 	return err
 }

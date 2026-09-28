@@ -1,7 +1,10 @@
 package coordinator
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +44,8 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.DELETE("/coordinators/:cid", h.httpDeleteCoordinator)
 	workspace.GET("/coordinators/:cid/proposals", h.httpListProposals)
 	workspace.GET("/coordinators/:cid/proposals/:pid", h.httpGetProposal)
+	workspace.POST("/coordinators/:cid/proposals/:pid/approve", h.httpApproveProposal)
+	workspace.POST("/coordinators/:cid/proposals/:pid/reject", h.httpRejectProposal)
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 }
 
@@ -164,6 +169,55 @@ func (h *Handlers) httpGetProposal(c *gin.Context) {
 	c.JSON(http.StatusOK, NewProposalDTO(found))
 }
 
+// httpApproveProposal backs
+// POST /api/v1/workspaces/:id/coordinators/:cid/proposals/:pid/approve.
+func (h *Handlers) httpApproveProposal(c *gin.Context) {
+	ctx := c.Request.Context()
+	var edits ApproveProposalRequest
+	if err := decodeOptionalJSONBody(c, &edits); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("invalid request body"))
+		return
+	}
+	updated, err := h.service.ApproveProposal(ctx, c.Param("id"), c.Param("cid"), c.Param("pid"), edits)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, NewProposalDTO(updated))
+}
+
+// httpRejectProposal backs
+// POST /api/v1/workspaces/:id/coordinators/:cid/proposals/:pid/reject.
+func (h *Handlers) httpRejectProposal(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req RejectProposalRequest
+	if err := decodeOptionalJSONBody(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("invalid request body"))
+		return
+	}
+	updated, err := h.service.RejectProposal(ctx, c.Param("id"), c.Param("cid"), c.Param("pid"), req)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, NewProposalDTO(updated))
+}
+
+// decodeOptionalJSONBody reads c.Request.Body and, unless it is empty or
+// whitespace-only, JSON-decodes it into out. An empty body is left as out's
+// zero value rather than an error (proposals.md#approve and #reject: "An
+// empty body, or {}, approves/rejects unchanged"). out must be a pointer.
+func decodeOptionalJSONBody(c *gin.Context, out any) error {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	return json.Unmarshal(body, out)
+}
+
 // httpListStalls backs GET /api/v1/workspaces/:id/coordinator-stalls.
 func (h *Handlers) httpListStalls(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -180,14 +234,18 @@ func (h *Handlers) httpListStalls(c *gin.Context) {
 }
 
 // respondError maps a Service error to Build decision 4's response shapes: a
-// *FieldError is 400 naming its field; ErrNotFound or an unreadable
+// *FieldError is 400 naming its field; a *ProposalConflictError (approve and
+// reject only) is 409 with the current row; ErrNotFound or an unreadable
 // workspace is 404; a forbidden workspace scope is 403; anything else is
 // logged and returned as a plain 500.
 func (h *Handlers) respondError(c *gin.Context, err error) {
 	var fieldErr *FieldError
+	var conflictErr *ProposalConflictError
 	switch {
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
+	case errors.As(err, &conflictErr):
+		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal))
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse("not found"))
 	case errors.Is(err, service.ErrForbidden):

@@ -10,8 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
-
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
@@ -19,6 +17,9 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/startup"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func newCoordinatorTestTracker(t *testing.T) *requiredstores.Tracker {
@@ -367,5 +368,84 @@ func TestRegisterCoordinatorSubscribers_WiresStallSubscriptionAndPruneHook(t *te
 	}
 	if len(stalls) != 1 || stalls[0].TaskID != "task-1" {
 		t.Fatalf("ListStalls after hook = %+v, want only the fresh task-1 row (task-old pruned)", stalls)
+	}
+}
+
+func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: workspaces=%d err=%v", len(workspaces), err)
+	}
+	workspaceID := workspaces[0].ID
+
+	now := time.Now().UTC()
+	const workflowID = "decisions-wiring-wf"
+	const stepID = "decisions-wiring-step"
+	if err := harness.taskRepo.CreateWorkflow(ctx, &taskmodels.Workflow{
+		ID: workflowID, WorkspaceID: workspaceID, Name: "Decisions wiring WF", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := harness.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: workflowID, Name: "Start", Position: 0, IsStartStep: true,
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	tracker := newCoordinatorTestTracker(t)
+	pool := newCoordinatorTestPool(t)
+	svc, err := initCoordinatorWiring(ctx, pool, tracker, harness.taskSvc, harness.workflowSvc, nil, true, newTestLogger())
+	if err != nil {
+		t.Fatalf("initCoordinatorWiring: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("expected a non-nil service when features.coordinator is enabled")
+	}
+
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	coord := &coordinator.Coordinator{WorkspaceID: workspaceID, Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e"}
+	if err := store.CreateCoordinator(ctx, coord); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	proposal := &coordinator.Proposal{
+		WorkspaceID:   workspaceID,
+		CoordinatorID: coord.ID,
+		Spec:          coordinator.ProposalSpec{Title: "Proposed task", WorkflowID: workflowID, StepID: stepID},
+	}
+	if err := store.InsertProposal(ctx, proposal); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	staleClaimedAt := now.Add(-10 * time.Minute)
+	matched, err := store.ClaimProposal(ctx, proposal.ID, "stale-token", proposal.Spec, "", staleClaimedAt)
+	if err != nil || !matched {
+		t.Fatalf("ClaimProposal: matched=%v err=%v", matched, err)
+	}
+
+	hook := registerCoordinatorDecisions(gin.New(), nil, svc, harness.taskSvc, harness.workflowSvc, newTestLogger())
+	hook(ctx, now)
+
+	got, err := store.GetProposal(ctx, workspaceID, coord.ID, proposal.ID)
+	if err != nil {
+		t.Fatalf("GetProposal: %v", err)
+	}
+	if got.Status != coordinator.ProposalStatusApproved {
+		t.Fatalf("Status = %q, want approved (recovery hook did not wire real deps)", got.Status)
+	}
+	if got.TaskID == nil {
+		t.Fatal("expected TaskID to be set")
+	}
+	task, err := harness.taskSvc.GetTask(ctx, *got.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask(%s): %v", *got.TaskID, err)
+	}
+	if task.Title != "Proposed task" {
+		t.Errorf("Task.Title = %q, want %q", task.Title, "Proposed task")
 	}
 }
