@@ -63,6 +63,8 @@ WP-0 --+--> G0 (gates opening upstream PRs, not building)
                                        +--> task-03 session, surface -+--> task-06 copilot wired --> task-08 proposal UI
                                        +--> task-04 Needs you, Queue -+                                  ^
                                        +--> task-07 approve/reject backend -----------------------------+
+
+task-06 copilot wired --> task-09 session recovery (WP-4c, stacked on task 06's branch)
 ```
 
 Critical path: WP-0, task 01, task 03, task 06, task 08. At most three agents
@@ -95,6 +97,7 @@ predecessor merges.
 | [task-06](task-06-copilot-wired.md) | WP-4b | M | 03, 04, 05 | A manager asks the coordinator about the workspace from the Coordinator screens |
 | [task-07](task-07-proposals-backend.md) | WP-5a | M | 01 | A pending or failed proposal is approved exactly once or rejected through the API; recovery holds |
 | [task-08](task-08-proposals-ui.md) | WP-5b | M | 06, 07 | Proposals approved, edited and rejected on both surfaces; phase 1 complete |
+| [task-09](task-09-session-recovery.md) | WP-4c | S | 06 | A coordinator whose session ended shows recovery feedback, and Retry opens a fresh conversation |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Each work order is its own
 PR, keeps `prod` off, and ships its tests. Every acceptance criterion of the

@@ -51,7 +51,24 @@ see [Residual](#residual-external-surface).
      [coordinators](coordinators.md#validation) when the agent profile is
      `missing` or `passthrough`, or the executor profile is `missing`).
   2. When `conversation_task_id` names a live, unarchived task, ensure its
-     session (step 6) and return it.
+     session (step 6). When the ensured session's state is not terminal,
+     continue at step 7 with that task and return it. When it is `FAILED`,
+     `CANCELLED` or `COMPLETED` (`AC-COORDINATOR-COPILOT-001.10`), a
+     terminal session rejects every message, so the task is not reusable:
+     archive it through the task service's `ArchiveTask` and continue at
+     step 3, keeping this task's id as the stale value for step 4. A failed
+     archive (including `ErrTaskAlreadyArchived` from a racing open that
+     archived it first) is logged at warn with the coordinator id, task id
+     and session state, and the route still continues at step 3; step 4's
+     conditional update replaces the reference either way, and a task left
+     unarchived is archived by the [startup pass](#conversation-cleanup)
+     because it is no longer its coordinator's `conversation_task_id`. An
+     `EnsureSession` error on this path is handled exactly as step 6's error.
+     Two opens racing over the same ended task both reach step 4 with the
+     same stale value, so exactly one new task wins and the other open
+     deletes its own and converges on it. Terminal is the closed set of
+     those three `TaskSessionState` values; `CREATED`, `STARTING`,
+     `RUNNING`, `IDLE` and `WAITING_FOR_INPUT` are reusable.
   3. Otherwise create an ephemeral task through the task service's internal
      create call: origin `coordinator`, `IsEphemeral`, title
      `Coordinator: <name>`, no workflow and no workflow step, metadata
@@ -133,6 +150,7 @@ see [Residual](#residual-external-surface).
 | Event | Current conversation task | Earlier conversation tasks |
 | --- | --- | --- |
 | Context change ([coordinators](coordinators.md#routes)) | archived through the task service's `ArchiveTask`, which stops a running turn; the reference is cleared | unchanged (archived) |
+| Open over an ended session (`FAILED`, `CANCELLED`, `COMPLETED`; step 2) | archived through the task service's `ArchiveTask`; the reference moves to the new task at step 4 | unchanged (archived) |
 | Coordinator deletion | deleted through the task service, which stops a running turn | deleted |
 | Workspace deletion | deleted with the workspace's tasks | deleted with the workspace's tasks |
 

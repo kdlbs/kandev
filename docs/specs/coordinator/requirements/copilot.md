@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 ---
 
 # Coordinator copilot and tool surface Requirements
@@ -63,9 +63,10 @@ Mockup:
   conversation task with origin `coordinator`, using the coordinator's agent
   profile and executor, and return its `task_id`, `session_id` and archive
   state.
-- **AC-COORDINATOR-COPILOT-001.2:** When the conversation is opened again, the
-  system shall return the same task; when two opens race, both shall return the
-  same task and exactly one conversation task shall exist.
+- **AC-COORDINATOR-COPILOT-001.2:** When the conversation is opened again and
+  its session has not ended (`AC-COORDINATOR-COPILOT-001.10`), the system shall
+  return the same task; when two opens race, both shall return the same task
+  and exactly one conversation task shall exist.
 - **AC-COORDINATOR-COPILOT-001.3:** When the conversation task no longer exists,
   the next open shall create a new one.
 - **AC-COORDINATOR-COPILOT-001.4:** When a conversation starts, the agent shall
@@ -91,6 +92,16 @@ Mockup:
   an open is about to return, whether that task was reused or just created,
   between the open reading it as current and the open's own response: the
   open shall return 409 rather than a task that is actually archived.
+- **AC-COORDINATOR-COPILOT-001.10:** When the current conversation task's
+  session is `FAILED`, `CANCELLED` or `COMPLETED` (it has ended and can take no
+  further message), the next open shall archive that task and return a new
+  conversation task with a new session, created as in
+  `AC-COORDINATOR-COPILOT-001.1` and starting no agent
+  (`AC-COORDINATOR-COPILOT-001.7`). The archived task is never returned by an
+  open again, its transcript is not shown by the popover, and it is deleted
+  with the coordinator or the workspace. When two opens race over the same
+  ended task, both shall return the same new task and exactly one new
+  conversation task shall exist.
 
 ### REQ-COORDINATOR-COPILOT-002: Attended turns
 
@@ -186,9 +197,15 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-004.5:** When a turn is running and the popover
   closes, the turn shall continue and the launcher shall show it is busy; the
   composer's Stop shall end the turn.
-- **AC-COORDINATOR-COPILOT-004.6:** When the session cannot start or resume, the
-  popover shall show Kandev's session recovery feedback and the lists shall
-  keep working.
+- **AC-COORDINATOR-COPILOT-004.6:** While the popover shows a session that is
+  `FAILED`, `CANCELLED` or `COMPLETED` (including an agent that failed to
+  start after the manager's message), the popover shall show Kandev's session
+  recovery feedback above the transcript, carrying the session's error
+  message when it has one, and the lists shall keep working. Choosing the
+  feedback's Retry shall open the conversation again, which returns a new
+  conversation (`AC-COORDINATOR-COPILOT-001.10`); the popover then shows that
+  new, empty conversation without the feedback. Retry starts no agent and
+  sends no message.
 - **AC-COORDINATOR-COPILOT-004.7:** Escape shall close the popover and return
   focus to the launcher.
 - **AC-COORDINATOR-COPILOT-004.8:** At a 1200px-wide viewport the open popover
@@ -232,3 +249,13 @@ Mockup:
 - Enforced containment of the agent CLI's own tools: a gate G4 condition before
   any unattended turn. Phase 1 states the residual instead.
 - `ask_user_question` for coordinators: coordinators ask through proposals.
+- Showing an ended conversation's transcript after a new one replaces it
+  (`AC-COORDINATOR-COPILOT-001.10`): the archived task keeps its messages but
+  no surface lists or opens it. A later "past conversations" view would need a
+  read route over the coordinator's archived conversation tasks.
+- Resuming or restarting an ended coordinator session in place: Kandev
+  rejects messages to a terminal session, and the popover's recovery is a new
+  conversation, never a resume (`AC-COORDINATOR-COPILOT-002.2`).
+- Coordinator-specific recovery copy: the popover reuses Kandev's session
+  recovery feedback and its existing translated title, detail fallback and
+  Retry label.
