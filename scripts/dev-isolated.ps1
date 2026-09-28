@@ -51,7 +51,9 @@
   Health-wait timeout in seconds (default: 60).
 
 .PARAMETER HomeDir
-  Isolated KANDEV_HOME_DIR (default: %USERPROFILE%\.kandev-test).
+  Isolated KANDEV_HOME_DIR (default: %USERPROFILE%\.kandev-test). The script
+  refuses a value that resolves to the real user profile root, the production
+  ~/.kandev home, a drive/filesystem root, or a git workspace root.
 
 .EXAMPLE
   scripts\dev-isolated.ps1
@@ -132,9 +134,42 @@ function Assert-NotGuarded {
   }
 }
 
+# Fail closed when -HomeDir resolves to a boundary that holds live state.
+# Returns the resolved absolute path; refuses the real user profile root, the
+# production ~/.kandev home, a drive/filesystem root, or a git workspace root.
+function Resolve-SafeIsolatedHome {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [string]$ProfileRoot = $env:USERPROFILE,
+    [string]$ProductionHome = (Join-Path $env:USERPROFILE '.kandev')
+  )
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    throw 'dev-isolated: refusing an empty isolated home.'
+  }
+  $resolved = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+  $profile = [System.IO.Path]::GetFullPath($ProfileRoot).TrimEnd('\', '/')
+  $production = [System.IO.Path]::GetFullPath($ProductionHome).TrimEnd('\', '/')
+  $driveRoot = [System.IO.Path]::GetPathRoot($resolved).TrimEnd('\', '/')
+  $reasons = New-Object System.Collections.Generic.List[string]
+  if ($resolved -eq $profile) { $reasons.Add('the real user profile root') }
+  if ($resolved -eq $production) { $reasons.Add('the production kandev home') }
+  if ($resolved -eq $driveRoot) { $reasons.Add('a drive or filesystem root') }
+  if ((Test-Path -LiteralPath (Join-Path $resolved '.git')) -or (Test-Path -LiteralPath (Join-Path $resolved '.git\HEAD'))) {
+    $reasons.Add('a git workspace root')
+  }
+  if ($reasons.Count -gt 0) {
+    throw "dev-isolated: refusing -HomeDir '$resolved' because it is $($reasons -join ', '). Pass a dedicated isolated directory such as '$profile\.kandev-test'."
+  }
+  return $resolved
+}
+
 if ($BackendPort) { Assert-NotGuarded -Port $BackendPort -What 'backend' }
 if ($WebPort) { Assert-NotGuarded -Port $WebPort -What 'web' }
 if ($AgentctlPort) { Assert-NotGuarded -Port $AgentctlPort -What 'agentctl' }
+
+# --- Fail closed: the isolated home must not be a live-state boundary ---
+$RequestedHome = if ($HomeDir) { $HomeDir } else { Join-Path $env:USERPROFILE '.kandev-test' }
+$IsolatedHome = Resolve-SafeIsolatedHome -Path $RequestedHome
 
 $EffectiveBackendPort = if ($BackendPort) { $BackendPort } else { Select-FreePort -Base $BackendBase }
 $EffectiveWebPort = if ($WebPort) { $WebPort } else { Select-FreePort -Base $WebBase }
@@ -207,7 +242,6 @@ if ($Web -and -not (Test-Path -LiteralPath $NodeModules)) {
 }
 
 # --- Create the isolated home / data dir ---
-$IsolatedHome = if ($HomeDir) { $HomeDir } else { Join-Path $env:USERPROFILE '.kandev-test' }
 $DataDir = Join-Path $IsolatedHome 'data'
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 
