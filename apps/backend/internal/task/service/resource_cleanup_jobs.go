@@ -617,7 +617,12 @@ func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 	}
 	for _, job := range jobs {
 		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-			if current, reloadErr := s.resourceCleanups.GetTaskResourceCleanupJob(ctx, job.ID); reloadErr == nil && current != nil && current.State == models.TaskResourceCleanupStatePending {
+			current, reloadErr := s.resourceCleanups.GetTaskResourceCleanupJob(ctx, job.ID)
+			if reloadErr != nil {
+				s.logger.Warn("claim task resource cleanup job reload failed",
+					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
+					zap.Error(err), zap.String("reload_error", reloadErr.Error()))
+			} else if current != nil && current.State == models.TaskResourceCleanupStatePending {
 				s.logger.Warn("claim task resource cleanup job failed",
 					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
 			}
@@ -1413,6 +1418,9 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 		transitionCtx, job.ID, job.Attempts, state, cleanupErr.Error(), nextAttempt,
 	)
 	if err != nil {
+		s.logger.Warn("complete claimed task resource cleanup job failed during retry transition",
+			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
+			zap.Int("attempt", job.Attempts), zap.Error(err), zap.String("cleanup_error", cleanupErr.Error()))
 		return errors.Join(cleanupErr, err)
 	}
 	fields := []zap.Field{

@@ -47,9 +47,6 @@ func (e *CleanupInspectionError) Error() string {
 	if e == nil {
 		return ""
 	}
-	if e.Err != nil {
-		return fmt.Sprintf("worktree cleanup inspection failed at %s (%s): %v", e.Stage, e.Reason, e.Err)
-	}
 	return fmt.Sprintf("worktree cleanup inspection failed at %s (%s)", e.Stage, e.Reason)
 }
 
@@ -67,6 +64,12 @@ func classifyCleanupInspectionError(stage string, err error, repoPath ...string)
 	var existing *CleanupInspectionError
 	if errors.As(err, &existing) {
 		return err
+	}
+	if errors.Is(err, context.Canceled) {
+		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonContextCanceled, Err: err}
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
+		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonDeadlineExceeded, Err: err}
 	}
 	if len(repoPath) > 0 && repoPath[0] != "" {
 		if _, statErr := os.Stat(repoPath[0]); errors.Is(statErr, os.ErrNotExist) || os.IsNotExist(statErr) {

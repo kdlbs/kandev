@@ -180,6 +180,8 @@ func isRecordOwnedByBackend(backendName executor.Name, sessionID string, records
 			if rec.Runtime != "" {
 				return string(rec.Runtime) == string(backendName)
 			}
+			// Legacy fallback: records created before the Runtime column was populated
+			// default to standalone ownership.
 			return backendName == executor.NameStandalone
 		}
 	}

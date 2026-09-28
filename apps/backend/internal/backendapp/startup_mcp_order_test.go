@@ -227,6 +227,23 @@ func TestStartupMCPReadyBeforeRecoveryAndLaunch(t *testing.T) {
 	activated := activateOfficeServices(ctx, cfg, repos, services, eventBus, log)
 	require.True(t, activated)
 	require.NotNil(t, runProcessorSvc)
+
+	// 5. Run first-launch execution MCP dispatch through proxy
+	launchProxy := lifecycleMgr.MCPHandlerFor(&lifecycle.AgentExecution{
+		ID:        "exec-launch",
+		TaskID:    testTask.ID,
+		SessionID: "sess-test",
+	})
+	launchReq := &ws.Message{
+		ID:     "msg-launch-discover",
+		Action: ws.ActionMCPListWorkspaces,
+		Type:   ws.MessageTypeRequest,
+	}
+	launchResp, err := launchProxy.Dispatch(ctx, launchReq)
+	require.NoError(t, err)
+	require.NotNil(t, launchResp)
+	require.Equal(t, ws.MessageTypeResponse, launchResp.Type)
+	require.Equal(t, ws.ActionMCPListWorkspaces, launchResp.Action)
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.8

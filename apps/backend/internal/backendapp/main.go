@@ -1135,6 +1135,9 @@ func startGatewayAndServe(
 	// Composed before HTTP routes so the registration pass below can mount
 	// the /api/v1/system/* group; started before the listener so the
 	// updates poller is alive as soon as we accept connections.
+	// restoreQuiesceFn is assigned after scheduling runtime starts; systemSvc
+	// captures the outer closure and will only invoke it after StartBackground,
+	// so the nil guard below is exercised only during early startup error returns.
 	var restoreQuiesceFn func() error
 	restoreQuiesce := func() error {
 		if restoreQuiesceFn != nil {
@@ -1229,6 +1232,50 @@ func startGatewayAndServe(
 		return false
 	}
 
+	// Wire the Host data API's late write dependencies (ADR 0043 phase 2): the
+	// task-message delivery path backs SendMessage (api_write:messages), and
+	// the orchestrator backs CreateTask's start_agent.
+	//
+	// Deliberately wired here before session recovery: that ensures any recovered
+	// stream or first launch dispatching plugin tools or messaging has complete
+	// write dependencies installed.
+	if services.Plugins != nil {
+		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
+		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
+		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+			services.Plugins.SetPendingTaskTransitionSource(pluginsPendingTaskTransitionAdapter{queue: queue})
+			services.Plugins.SetExactExecutionController(pluginsExactExecutionController{
+				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue,
+			})
+		}
+	}
+
+	// Wire the managed conversation dispatcher, for the same boot-ordering
+	// reason as SetWriteDeps just above: AgentConversations was constructed
+	// during service initialization, but its dispatch path needs the
+	// orchestrator, which exists only here.
+	if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+		orchestratorSvc.SetManagedInputStorage(queue.ManagedInputStorage())
+	}
+	if services.AgentConversations != nil {
+		SetAgentConversationsDispatcher(services.AgentConversations, services.Task, orchestratorSvc, log)
+		services.AgentConversations.SetManagedExecutionStopper(func(ctx context.Context, taskID string) error {
+			_, err := orchestratorSvc.StopTaskForCoordinator(ctx, taskID)
+			return err
+		})
+		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+			services.AgentConversations.SetManagedInputStorage(
+				queue.ManagedInputStorage(), queue.ResolveSessionIdentity, queue.MaxPerSession,
+			)
+			services.AgentConversations.SetManagedInputNotifier(orchestratorSvc.NotifyQueuedUserPrompt)
+		}
+		services.AgentConversations.SetManagedInputExecutionStopper(func(
+			ctx context.Context, taskID, sessionID, expectedExecutionID string,
+		) (bool, error) {
+			return orchestratorSvc.StopManagedInputExecution(ctx, taskID, sessionID, expectedExecutionID)
+		})
+	}
+
 	// ============================================
 	// SESSION RECOVERY (Watcher + Lifecycle Manager)
 	// ============================================
@@ -1278,55 +1325,6 @@ func startGatewayAndServe(
 		return false
 	}
 	log.Info("Orchestrator initialized")
-
-	// Wire the Host data API's late write dependencies (ADR 0043 phase 2): the
-	// task-message delivery path backs SendMessage (api_write:messages), and
-	// the orchestrator backs CreateTask's start_agent. The orchestrator is
-	// constructed after StartActivePlugins spawns boot-active plugins, so the
-	// plugins service reads these live rather than snapshotting (see
-	// SetWriteDeps).
-	//
-	// Deliberately wired here rather than inside initOfficeServices: that
-	// function returns early when features.office=false (the production
-	// default), while plugins start whenever services.Plugins is non-nil.
-	// Wiring it there would leave every default production backend with
-	// Unimplemented SendMessage and a silently no-op start_agent.
-	if services.Plugins != nil {
-		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
-		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
-		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
-			services.Plugins.SetPendingTaskTransitionSource(pluginsPendingTaskTransitionAdapter{queue: queue})
-			services.Plugins.SetExactExecutionController(pluginsExactExecutionController{
-				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue,
-			})
-		}
-	}
-
-	// Wire the managed conversation dispatcher, for the same boot-ordering
-	// reason as SetWriteDeps just above: AgentConversations was constructed
-	// during service initialization, but its dispatch path needs the
-	// orchestrator, which exists only here.
-	if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
-		orchestratorSvc.SetManagedInputStorage(queue.ManagedInputStorage())
-	}
-	if services.AgentConversations != nil {
-		SetAgentConversationsDispatcher(services.AgentConversations, services.Task, orchestratorSvc, log)
-		services.AgentConversations.SetManagedExecutionStopper(func(ctx context.Context, taskID string) error {
-			_, err := orchestratorSvc.StopTaskForCoordinator(ctx, taskID)
-			return err
-		})
-		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
-			services.AgentConversations.SetManagedInputStorage(
-				queue.ManagedInputStorage(), queue.ResolveSessionIdentity, queue.MaxPerSession,
-			)
-			services.AgentConversations.SetManagedInputNotifier(orchestratorSvc.NotifyQueuedUserPrompt)
-		}
-		services.AgentConversations.SetManagedInputExecutionStopper(func(
-			ctx context.Context, taskID, sessionID, expectedExecutionID string,
-		) (bool, error) {
-			return orchestratorSvc.StopManagedInputExecution(ctx, taskID, sessionID, expectedExecutionID)
-		})
-	}
 
 	// ============================================
 	// OFFICE FEATURES + GLOBAL RUN SCHEDULING
