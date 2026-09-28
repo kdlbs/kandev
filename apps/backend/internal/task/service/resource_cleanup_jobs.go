@@ -617,8 +617,10 @@ func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 	}
 	for _, job := range jobs {
 		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-			s.logger.Warn("resumed task resource cleanup job failed",
-				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+			if current, reloadErr := s.resourceCleanups.GetTaskResourceCleanupJob(ctx, job.ID); reloadErr == nil && current != nil && current.State == models.TaskResourceCleanupStatePending {
+				s.logger.Warn("claim task resource cleanup job failed",
+					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+			}
 		}
 	}
 	return reconcileErr
@@ -1413,6 +1415,21 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 	if err != nil {
 		return errors.Join(cleanupErr, err)
 	}
+	fields := []zap.Field{
+		zap.String("job_id", job.ID),
+		zap.String("task_id", job.TaskID),
+		zap.Int("attempt", job.Attempts),
+		zap.String("state", string(state)),
+		zap.Error(cleanupErr),
+	}
+	var inspErr *worktree.CleanupInspectionError
+	if errors.As(cleanupErr, &inspErr) {
+		fields = append(fields,
+			zap.String("stage", inspErr.Stage),
+			zap.String("reason", inspErr.Reason),
+		)
+	}
+	s.logger.Warn("task resource cleanup job entered retry wait or failed", fields...)
 	return cleanupErr
 }
 

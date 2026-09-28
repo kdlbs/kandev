@@ -124,6 +124,12 @@ func (r *ExecutorRegistry) CloseAll() {
 // Returns all recovered instances and any error encountered.
 // If multiple runtimes fail, only the last error is returned.
 func (r *ExecutorRegistry) RecoverAll(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverAllDetailed(ctx, records)
+	return instances, err
+}
+
+// RecoverAllDetailed recovers instances and aggregates candidate-level outcomes across backends.
+func (r *ExecutorRegistry) RecoverAllDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
 	r.mu.RLock()
 	backends := make(map[executor.Name]ExecutorBackend, len(r.backends))
 	for name, rt := range r.backends {
@@ -133,9 +139,22 @@ func (r *ExecutorRegistry) RecoverAll(ctx context.Context, records []*models.Exe
 
 	var allInstances []*ExecutorInstance
 	var lastErr error
+	allOutcomes := make(map[string]RecoveryCandidateOutcome)
 
 	for name, rt := range backends {
-		instances, err := rt.RecoverInstances(ctx, records)
+		var instances []*ExecutorInstance
+		var err error
+		if detailed, ok := rt.(DetailedRecoveryBackend); ok {
+			var outcomes map[string]RecoveryCandidateOutcome
+			instances, outcomes, err = detailed.RecoverInstancesDetailed(ctx, records)
+			for sessionID, outcome := range outcomes {
+				if isRecordOwnedByBackend(name, sessionID, records) {
+					allOutcomes[sessionID] = outcome
+				}
+			}
+		} else {
+			instances, err = rt.RecoverInstances(ctx, records)
+		}
 		if err != nil {
 			r.logger.Error("failed to recover instances from runtime",
 				zap.String("runtime", string(name)),
@@ -152,5 +171,17 @@ func (r *ExecutorRegistry) RecoverAll(ctx context.Context, records []*models.Exe
 		}
 	}
 
-	return allInstances, lastErr
+	return allInstances, allOutcomes, lastErr
+}
+
+func isRecordOwnedByBackend(backendName executor.Name, sessionID string, records []*models.ExecutorRunning) bool {
+	for _, rec := range records {
+		if rec != nil && rec.SessionID == sessionID {
+			if rec.Runtime != "" {
+				return string(rec.Runtime) == string(backendName)
+			}
+			return backendName == executor.NameStandalone
+		}
+	}
+	return false
 }

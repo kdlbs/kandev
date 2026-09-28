@@ -359,14 +359,46 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 // rather than treating an enumeration failure as though every instance were
 // an orphan.
 func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
+}
+
+// RecoverInstancesDetailed performs standalone recovery and classifies per-candidate outcomes.
+func (r *StandaloneExecutor) RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+	outcomes := make(map[string]RecoveryCandidateOutcome)
 	instances, err := r.listInstancesWithRetry(ctx)
 	if err != nil {
 		r.logger.Warn("failed to enumerate standalone instances for recovery; leaving every record to the existing repair path",
 			zap.Error(err))
-		return nil, nil
+		for _, rec := range records {
+			if rec != nil && rec.SessionID != "" {
+				outcomes[rec.SessionID] = RecoveryOutcomeEnumerationFailed
+			}
+		}
+		return nil, outcomes, nil
 	}
 
 	correlation := CorrelateRecoveryInstances(records, instances)
+
+	// Classify outcomes for non-winning records
+	instancesBySession := make(map[string]bool)
+	for _, inst := range instances {
+		if inst != nil && inst.SessionID != "" {
+			instancesBySession[inst.SessionID] = true
+		}
+	}
+	for _, rec := range records {
+		if rec == nil || rec.SessionID == "" {
+			continue
+		}
+		if _, isWinner := correlation.Winners[rec.SessionID]; !isWinner {
+			if !instancesBySession[rec.SessionID] {
+				outcomes[rec.SessionID] = RecoveryOutcomeNoMatchingInstance
+			} else {
+				outcomes[rec.SessionID] = RecoveryOutcomeUnknown
+			}
+		}
+	}
 
 	// winnersBySession is a stable snapshot of every session's recovered
 	// winner, independent of correlation.Winners (which this call mutates
@@ -384,7 +416,7 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 	tracker := &jointFailureTracker{exec: r, winners: winnersBySession}
 	r.collectRecoveryStops(ctx, results, correlation.Winners, pending, tracker)
 
-	return r.buildRecoveredInstances(correlation.Winners, indexRecordsBySession(records)), nil
+	return r.buildRecoveredInstances(correlation.Winners, indexRecordsBySession(records)), outcomes, nil
 }
 
 // recoveryStopOutcome is one instance's bounded stop attempt result.

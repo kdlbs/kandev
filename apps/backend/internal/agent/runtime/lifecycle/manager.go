@@ -553,6 +553,14 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.setMCPHandler(handler)
 }
 
+// MCPHandlerFor returns the execution-bound MCP handler for one execution's stream.
+func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	if m == nil || m.streamManager == nil {
+		return nil
+	}
+	return m.streamManager.mcpHandlerFor(execution)
+}
+
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
 // tool calls.
 //

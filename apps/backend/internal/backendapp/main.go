@@ -968,22 +968,6 @@ func startAgentInfrastructure(
 		return false
 	}
 
-	// The phase transition must happen here, immediately before
-	// lifecycleMgr.Start below (which is what actually runs
-	// sessions.recovery's BeginStep/Advance/EndStep sequence) rather than
-	// later at HTTP listener bind time in startGatewayAndServe: that point
-	// runs well after this recovery work has already completed.
-	startup.SetPhase(ctx, startup.RecoveringSessions)
-	if err := orchestratorSvc.StartEventWatcher(ctx); err != nil {
-		log.Error("Failed to start orchestrator event watcher for agent recovery", zap.Error(err))
-		return false
-	}
-	if err := lifecycleMgr.Start(ctx); err != nil {
-		_ = orchestratorSvc.StopEventWatcher()
-		log.Error("Failed to recover agent manager", zap.Error(err))
-		return false
-	}
-
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
 		sessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
@@ -1145,6 +1129,125 @@ func startGatewayAndServe(
 	handler, server, listeners := bootstrap.handler, bootstrap.server, bootstrap.listeners
 	bindListeners := func() error { return ctx.Err() }
 
+	// ============================================
+	// SYSTEM PAGES, STORAGE, RETENTION & REQUIRED STORES
+	// ============================================
+	// Composed before HTTP routes so the registration pass below can mount
+	// the /api/v1/system/* group; started before the listener so the
+	// updates poller is alive as soon as we accept connections.
+	var restoreQuiesceFn func() error
+	restoreQuiesce := func() error {
+		if restoreQuiesceFn != nil {
+			return restoreQuiesceFn()
+		}
+		return nil
+	}
+	persistenceHealth := requiredstores.NewHealth(repos.RequiredStores, dbPool, log)
+	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
+		Version:   Version,
+		Commit:    Commit,
+		BuildTime: BuildTime,
+	}, systemsvc.Wiring{
+		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
+		DatabaseQuiesce:            databaseQuiesce,
+		RestoreQuiesce:             restoreQuiesce,
+		SystemSettings:             repos.SystemSettings,
+		RequiredStores:             repos.RequiredStores,
+		PersistenceHealth:          persistenceHealth,
+		MessageQueue:               orchestratorSvc.GetMessageQueue(),
+		MessageQueueConfig:         queueConfiguration(cfg),
+		SessionCapacity:            orchestratorSvc,
+		SessionCapacityEnvironment: sessionCapacityEnvironment,
+		TaskSessions:               repos.Task,
+		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
+			for _, id := range ids {
+				message, err := services.Task.GetMessage(eventCtx, id)
+				if err != nil {
+					log.Warn("failed to load retained tool message for publication", zap.Error(err))
+					continue
+				}
+				if err := services.Task.PublishMessageEvent(eventCtx, events.MessageUpdated, message); err != nil {
+					log.Warn("failed to publish retained tool message", zap.Error(err))
+				}
+			}
+		},
+	})
+	storageComposition, err := provideStorageCompositionWithDependencies(
+		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
+		log,
+		func(message string, err error) { log.Error(message, zap.Error(err)) },
+		storageStore, repos.SystemSettings,
+	)
+	if err != nil {
+		log.Error("Failed to initialize storage maintenance", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+
+	// Assign Storage & StorageRuntime BEFORE router construction so routes & settings operations capture them.
+	systemSvc.Storage = storageComposition.handler
+	systemSvc.StorageRuntime = storageComposition.runtime
+
+	// Construct Retention BEFORE router construction so /api/v1/system/retention and health checkers capture it.
+	services.Retention = retention.NewRuntime(dbPool, repos.SystemSettings,
+		func(message string, err error) { log.Error(message, zap.Error(err)) })
+	addCleanup(func() error { services.Retention.Stop(); return nil })
+
+	// Construct Office services BEFORE router construction so Office routes and callbacks are captured.
+	runProcessorSvc, ok := constructOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry)
+	if !ok {
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+
+	if err := repos.RequiredStores.ValidateComplete(); err != nil {
+		log.Error("Required-store bootstrap is incomplete", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	if err := persistenceHealth.Check(ctx); err != nil {
+		log.Error("Required-store health check failed", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	addCleanup(persistenceHealth.Start(ctx))
+	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
+
+	// ============================================
+	// HTTP SERVER (Router & MCP Route Registration)
+	// ============================================
+	// Build the real router and register all handlers, which wires the real
+	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
+	// BEFORE lifecycleMgr.Start recovers sessions.
+	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
+	if err != nil {
+		log.Error("Failed to build HTTP server", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+
+	// ============================================
+	// SESSION RECOVERY (Watcher + Lifecycle Manager)
+	// ============================================
+	startup.SetPhase(ctx, startup.RecoveringSessions)
+	if err := orchestratorSvc.StartEventWatcher(ctx); err != nil {
+		log.Error("Failed to start orchestrator event watcher for agent recovery", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	if err := lifecycleMgr.Start(ctx); err != nil {
+		_ = orchestratorSvc.StopEventWatcher()
+		log.Error("Failed to recover agent manager", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+
+	// ============================================
+	// ORCHESTRATOR & AUTOMATION CONSUMERS
+	// ============================================
 	if err := startOrchestratorAndAutomationConsumers(
 		bindListeners,
 		func() error { return orchestratorSvc.Start(ctx) },
@@ -1228,8 +1331,7 @@ func startGatewayAndServe(
 	// ============================================
 	// OFFICE FEATURES + GLOBAL RUN SCHEDULING
 	// ============================================
-	runProcessorSvc, ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry)
-	if !ok {
+	if !activateOfficeServices(ctx, cfg, repos, services, eventBus, log) {
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
@@ -1246,7 +1348,7 @@ func startGatewayAndServe(
 	addCleanup(scheduling.Stop)
 	var restoreQuiesceOnce sync.Once
 	var restoreQuiesceErr error
-	restoreQuiesce := func() error {
+	restoreQuiesceFn = func() error {
 		restoreQuiesceOnce.Do(func() {
 			workers := make([]func() error, 0, len(restoreCleanups))
 			for i := len(restoreCleanups) - 1; i >= 0; i-- {
@@ -1276,65 +1378,6 @@ func startGatewayAndServe(
 	services.Task.StartSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
-	// ============================================
-	// SYSTEM PAGES
-	// ============================================
-	// Composed before HTTP routes so the registration pass below can mount
-	// the /api/v1/system/* group; started before the listener so the
-	// updates poller is alive as soon as we accept connections.
-	persistenceHealth := requiredstores.NewHealth(repos.RequiredStores, dbPool, log)
-	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
-		Version:   Version,
-		Commit:    Commit,
-		BuildTime: BuildTime,
-	}, systemsvc.Wiring{
-		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
-		DatabaseQuiesce:            databaseQuiesce,
-		RestoreQuiesce:             restoreQuiesce,
-		SystemSettings:             repos.SystemSettings,
-		RequiredStores:             repos.RequiredStores,
-		PersistenceHealth:          persistenceHealth,
-		MessageQueue:               orchestratorSvc.GetMessageQueue(),
-		MessageQueueConfig:         queueConfiguration(cfg),
-		SessionCapacity:            orchestratorSvc,
-		SessionCapacityEnvironment: sessionCapacityEnvironment,
-		TaskSessions:               repos.Task,
-		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
-			for _, id := range ids {
-				message, err := services.Task.GetMessage(eventCtx, id)
-				if err != nil {
-					log.Warn("failed to load retained tool message for publication", zap.Error(err))
-					continue
-				}
-				if err := services.Task.PublishMessageEvent(eventCtx, events.MessageUpdated, message); err != nil {
-					log.Warn("failed to publish retained tool message", zap.Error(err))
-				}
-			}
-		},
-	})
-	storageComposition, err := provideStorageCompositionWithDependencies(
-		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
-		log,
-		func(message string, err error) { log.Error(message, zap.Error(err)) },
-		storageStore, repos.SystemSettings,
-	)
-	if err != nil {
-		log.Error("Failed to initialize storage maintenance", zap.Error(err))
-		closeBoundListeners(server, listeners, log)
-		return false
-	}
-	if err := repos.RequiredStores.ValidateComplete(); err != nil {
-		log.Error("Required-store bootstrap is incomplete", zap.Error(err))
-		closeBoundListeners(server, listeners, log)
-		return false
-	}
-	if err := persistenceHealth.Check(ctx); err != nil {
-		log.Error("Required-store health check failed", zap.Error(err))
-		closeBoundListeners(server, listeners, log)
-		return false
-	}
-	addCleanup(persistenceHealth.Start(ctx))
-	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	var hostUtilityWG sync.WaitGroup
 	hostUtilityWG.Add(1)
@@ -1368,18 +1411,10 @@ func startGatewayAndServe(
 		hostUtilityWG.Wait()
 		return nil
 	})
-	systemSvc.Storage = storageComposition.handler
-	systemSvc.StorageRuntime = storageComposition.runtime
 
-	// Office run history retention: bounds office_routine_runs, runs, and
-	// their satellites on its own interval, separate from the 5s Office
-	// tick. Kept regardless of the Office feature flag — see Services.Retention.
-	services.Retention = retention.NewRuntime(dbPool, repos.SystemSettings,
-		func(message string, err error) { log.Error(message, zap.Error(err)) })
 	if err := services.Retention.Start(ctx); err != nil {
 		log.Warn("office run retention scheduler failed to start", zap.Error(err))
 	}
-	addCleanup(func() error { services.Retention.Stop(); return nil })
 	if systemSvc.LogBundles != nil {
 		systemSvc.LogBundles.SetNotifier(gateway.Hub)
 		systemSvc.LogBundles.SetSessionProvider(newDiagnosticSessionProvider(services.Task))
@@ -1411,24 +1446,6 @@ func startGatewayAndServe(
 		snapshot, ok := agentRuntimeAvailability.Snapshot()
 		return snapshot, ok
 	}, log)
-
-	// ============================================
-	// HTTP SERVER
-	// ============================================
-	// The listener was already bound (and is serving the bootstrap handler)
-	// by bindListeners above, before orchestratorSvc.Start ran its startup
-	// recovery sweeps. Build the real router now and swap it in on the same,
-	// already-bound handler and listeners — no second bind, no window where
-	// the socket is closed and reopened.
-	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
-	if err != nil {
-		log.Error("Failed to build HTTP server", zap.Error(err))
-		closeBoundListeners(server, listeners, log)
-		return false
-	}
 
 	log.Info("API configured",
 		zap.String("websocket", websocketRoutePath),
@@ -1498,11 +1515,10 @@ func serverListenAddr(host string, port int) string {
 	return net.JoinHostPort(host, fmt.Sprint(port))
 }
 
-// initOfficeServices constructs the run processor service for every backend and
-// adds Office-only services, reconciliation, and subscribers when the feature
-// is enabled. Global run and cron scheduling starts separately so this feature
-// gate cannot disable workflow-generic queue_run dispatch.
-func initOfficeServices(
+// constructOfficeServices builds the run processor service for every backend and
+// adds Office-only service definitions, repository wirings, and feature services
+// so that HTTP routes and MCP handlers can mount them before runtime activation.
+func constructOfficeServices(
 	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
@@ -1588,6 +1604,34 @@ func initOfficeServices(
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
 
+	// System skill sync. Upserts every embedded SKILL.md (the ones written
+	// to disk by EnsureBundledSkills above) into office_skills as
+	// is_system = true rows for each known workspace, removing system
+	// rows that no longer have a matching embed. Per-agent
+	// desired_skills references are preserved.
+	syncSystemSkills(ctx, repos.Office, services, log)
+	// Backfill default skills onto agents that pre-date the system-skill
+	// rollout. Idempotent: only agents whose `desired_skills` is empty
+	// receive defaults; curated lists are left alone.
+	backfillAgentDefaultSkills(ctx, services, log)
+
+	return runProcessorSvc, true
+}
+
+// activateOfficeServices reconciles office infrastructure, starts startup routine scan,
+// and registers office event subscribers once MCP dispatcher and recovery are complete.
+func activateOfficeServices(
+	ctx context.Context,
+	cfg *config.Config,
+	repos *Repositories,
+	services *Services,
+	eventBus bus.EventBus,
+	log *logger.Logger,
+) bool {
+	if !cfg.Features.Office || services.Office == nil {
+		return true
+	}
+
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)
 	reconcileSignal := reconciler.ReconcileAll(ctx)
@@ -1600,25 +1644,14 @@ func initOfficeServices(
 	// block startup and cannot affect its result.
 	go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC())
 
-	// System skill sync. Upserts every embedded SKILL.md (the ones written
-	// to disk by EnsureBundledSkills above) into office_skills as
-	// is_system = true rows for each known workspace, removing system
-	// rows that no longer have a matching embed. Per-agent
-	// desired_skills references are preserved.
-	syncSystemSkills(ctx, repos.Office, services, log)
-	// Backfill default skills onto agents that pre-date the system-skill
-	// rollout. Idempotent: only agents whose `desired_skills` is empty
-	// receive defaults; curated lists are left alone.
-	backfillAgentDefaultSkills(ctx, services, log)
-
 	// Register Office-only event subscribers. Global scheduling starts after
 	// this initializer returns, regardless of the feature flag.
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
 		log.Error("Failed to register office event subscribers", zap.Error(err))
-		return nil, false
+		return false
 	}
 
-	return runProcessorSvc, true
+	return true
 }
 
 // newRunProcessorService constructs the office run-processor service, wiring
