@@ -87,6 +87,19 @@ describe("bulk session removal", () => {
       ),
     ).toBe(false);
   });
+
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 invalidates Remove Others when its selected session disappears", () => {
+    const snapshot = buildBulkSessionRemovalSnapshot(
+      "others",
+      "selected",
+      [taskSession("selected", "COMPLETED"), taskSession("other", "COMPLETED")],
+      false,
+    );
+
+    expect(
+      isBulkSessionRemovalSnapshotCurrent(snapshot, [taskSession("other", "COMPLETED")], false),
+    ).toBe(false);
+  });
 });
 
 describe("bulk session removal execution", () => {
@@ -132,7 +145,9 @@ describe("bulk session removal execution", () => {
     });
     expect(remove).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("bulk confirmation revalidation", () => {
   it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 refreshes stale Remove All before deleting the promoted primary", async () => {
     const remove = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
     const primary = taskSession("primary", "CREATED", true);
@@ -161,5 +176,53 @@ describe("bulk session removal execution", () => {
       });
     });
     expect(remove).toHaveBeenCalledWith("primary");
+  });
+
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 dismisses stale Remove Others without deleting survivors", async () => {
+    const remove = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
+    const onInvalidSnapshot = vi.fn();
+    const selected = taskSession("selected", "COMPLETED");
+    const other = taskSession("other", "COMPLETED");
+    const hook = renderHook(() =>
+      useBulkSessionRemoval({
+        sessions: [selected, other],
+        isLoading: false,
+        remove,
+        getLatestSnapshot: async () => ({ sessions: [other], isLoading: false }),
+        onInvalidSnapshot,
+      }),
+    );
+
+    act(() => hook.result.current.request("others", "selected"));
+    await act(async () => {
+      expect(await hook.result.current.confirm()).toEqual({ stale: true });
+    });
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(hook.result.current.snapshot).toBeNull();
+    expect(hook.result.current.wasRefreshed).toBe(false);
+    expect(onInvalidSnapshot).toHaveBeenCalledWith(null);
+  });
+
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 reports a failed refresh as loading, not a missing selection", async () => {
+    const onInvalidSnapshot = vi.fn();
+    const remove = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
+    const hook = renderHook(() =>
+      useBulkSessionRemoval({
+        sessions: [taskSession("selected", "COMPLETED"), taskSession("other", "COMPLETED")],
+        isLoading: false,
+        remove,
+        getLatestSnapshot: async () => {
+          throw new Error("offline");
+        },
+        onInvalidSnapshot,
+      }),
+    );
+
+    act(() => hook.result.current.request("others", "selected"));
+    await act(async () => hook.result.current.confirm());
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(onInvalidSnapshot).toHaveBeenCalledWith("loading");
   });
 });

@@ -88,4 +88,37 @@ describe("useTaskBulkRemovalController", () => {
       variant: "error",
     });
   });
+
+  it("dismisses Remove Others and reports a changed session when its selection disappears", async () => {
+    const state = {
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-1": sessions },
+        loadingByTaskId: { "task-1": false },
+        errorByTaskId: { "task-1": null },
+      },
+    };
+    getState.mockReturnValue(state);
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => {
+          state.taskSessionsByTask.itemsByTaskId["task-1"] = sessions.filter(
+            (session) => session.id !== "first",
+          );
+        }),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("others", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(result.current.bulkRemoval.snapshot).toBeNull();
+    expect(removeById).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith({ title: "task:sessionsChangedReviewAgain" });
+  });
 });

@@ -63,12 +63,25 @@ export function buildBulkSessionRemovalSnapshot(
   };
 }
 
+function didSelectedSessionDisappear(
+  snapshot: BulkSessionRemovalSnapshot,
+  latest: { sessions: TaskSession[]; isLoading: boolean; hasError?: boolean },
+): boolean {
+  return (
+    snapshot.scope === "others" &&
+    !latest.isLoading &&
+    !latest.hasError &&
+    !latest.sessions.some((session) => session.id === snapshot.selectedSessionId)
+  );
+}
+
 export function isBulkSessionRemovalSnapshotCurrent(
   snapshot: BulkSessionRemovalSnapshot,
   sessions: TaskSession[],
   isLoading: boolean,
   hasError = false,
 ): boolean {
+  if (didSelectedSessionDisappear(snapshot, { sessions, isLoading, hasError })) return false;
   const current = buildBulkSessionRemovalSnapshot(
     snapshot.scope,
     snapshot.selectedSessionId,
@@ -192,13 +205,15 @@ export function useBulkSessionRemoval({
     } catch {
       latest = { sessions: [], isLoading: true };
     }
+    const selectedSessionMissing = didSelectedSessionDisappear(snapshot, latest);
     const refreshed = refreshInvalidSnapshot(snapshot, latest);
     if (refreshed) {
-      setSnapshot(refreshed.eligible ? refreshed : null);
-      setWasRefreshed(refreshed.eligible);
+      const canReviewAgain = refreshed.eligible && !selectedSessionMissing;
+      setSnapshot(canReviewAgain ? refreshed : null);
+      setWasRefreshed(canReviewAgain);
       setPending(false);
       pendingRef.current = false;
-      onInvalidSnapshot?.(refreshed.reason);
+      onInvalidSnapshot?.(selectedSessionMissing ? null : refreshed.reason);
       return { stale: true } satisfies BulkSessionRemovalConfirmationResult;
     }
     if (snapshot.scope === "all") onRemoveAllConfirmed?.();

@@ -151,3 +151,11 @@ test failed before the fix and passed afterward.
 
 Verification: 62 focused Vitest tests, web typecheck, specification validators,
 phone bulk-removal E2E (1/1), and desktop session-tab E2E (14/14) passed.
+
+## Review remediation (2026-09-28)
+
+Remove Others now rejects a confirmation if its selected session disappeared
+before submission, even when the remaining target IDs are unchanged. The
+confirmation closes with the existing changed-sessions message and sends no
+delete request. Focused snapshot and controller regressions failed before the
+fix and passed afterward; web typecheck passed.

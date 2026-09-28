@@ -47,7 +47,9 @@ not need.
   `RUNNING` or `STARTING`; the control shall expose the reason and require the
   user to stop active sessions first. The client shall take a fresh eligible
   snapshot before confirmation and shall require a new confirmation when a
-  state change invalidates the pending snapshot.
+  state change invalidates the pending snapshot. If the selected session for
+  Remove Others disappears, the pending confirmation shall close without
+  deleting any remaining sessions.
 - **AC-TASKS-BULK-SESSION-REMOVAL-001.4:** Before deletion, the user shall see
   a destructive confirmation that names the action and exact singular or
   plural target count, states that conversation histories are permanently

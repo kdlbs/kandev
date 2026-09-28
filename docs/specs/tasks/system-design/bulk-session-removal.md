@@ -38,9 +38,12 @@ because the single-session deletion contract permits it.
 Opening confirmation captures target IDs, their state eligibility, action
 scope, selected session ID, and count. Immediately before submission, the
 owner rebuilds the set and compares it with that snapshot. A changed set or
-state closes the old confirmation and requires the user to confirm the new
-count. The task ID and selected session ID are fixed inputs, so session IDs
-from another task and non-session panels cannot enter the request set.
+state invalidates the old confirmation and requires the user to confirm the
+new count. If the selected session for Remove Others is gone, the confirmation
+closes and reports that sessions changed; unchanged target IDs cannot authorize
+deleting every survivor. The task ID and selected session ID are fixed inputs,
+so session IDs from another task and non-session panels cannot enter the request
+set.
 
 ## Deletion orchestration
 

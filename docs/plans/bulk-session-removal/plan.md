@@ -145,6 +145,11 @@ auto-provisioning fence active. The New Session success path now clears it;
 the regression test, 62 focused unit tests, typecheck, spec validators, and
 desktop/phone browser flows passed.
 
+The 2026-09-28 review found that Remove Others could submit after its selected
+session disappeared. The confirmation now closes with a changed-sessions
+message and sends no delete requests. Focused regression tests and web
+typecheck passed.
+
 ## Risks
 
 - `session.delete` is non-atomic across targets; a server refusal after an
