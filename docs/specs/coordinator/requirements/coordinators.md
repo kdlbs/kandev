@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 ---
 
 # Coordinators in a workspace Requirements
@@ -153,8 +153,9 @@ Mockup:
 - **AC-COORDINATOR-COORDINATORS-004.2:** The Coordinators list shall show one
   card per coordinator, in the order of `AC-COORDINATOR-COORDINATORS-003.1`,
   with its name, agent profile, executor and context, an **Open** action to its
-  Needs you and a **Configure** action to its page, and a note that Watches,
-  May do and Standing orders arrive in a later phase.
+  Needs you and a **Configure** action to its page, and, while the phase-2
+  flag is off, a note that Watches, May do and Standing orders arrive in a
+  later phase.
 - **AC-COORDINATOR-COORDINATORS-004.3:** When a manager opens **+ Add
   coordinator**, the page shall show Name, Agent profile, Executor and Context,
   shall list CLI-passthrough profiles disabled with their reason, and shall
@@ -209,9 +210,98 @@ Mockup:
   other tasks; a repeated deletion event for the same workspace shall change
   nothing and report no error.
 
+### REQ-COORDINATOR-COORDINATORS-007: Phase 2 release toggle
+
+**Intent:** Phase 2 ships dark on top of phase 1 and can be enabled per
+install.
+
+#### Acceptance criteria
+
+- **AC-COORDINATOR-COORDINATORS-007.1:** The runtime flag
+  `features.coordinatorPhase2` (`KANDEV_FEATURES_COORDINATOR_PHASE2`) shall
+  default to `"false"` in the `prod` and `dev` profiles and to `"true"` in the
+  `e2e` profile, shall be restart-required, and shall take effect only while
+  `features.coordinator` is also on.
+- **AC-COORDINATOR-COORDINATORS-007.2:** While the phase-2 flag is off, the
+  coordinator shall behave exactly as phase 1 specifies: the phase-2 routes
+  shall return 404, no phase-2 section, launcher, card kind, action or note
+  shall render, conversations shall open with the phase-1 tool profile and
+  instructions, and the phase-2 propose tools shall not be registered.
+- **AC-COORDINATOR-COORDINATORS-007.3:** While the phase-2 flag is off, stored
+  phase-2 data (settings, Watches, standing orders, goals, activity rows and
+  non-create proposals) shall be kept unchanged; open non-create proposals
+  shall not show and shall not count toward Needs you; reading, approving or
+  rejecting a non-create proposal by its id shall return 404 as for an
+  unknown proposal, change nothing and run nothing; turning the flag on again
+  after a restart shall show the same data.
+- **AC-COORDINATOR-COORDINATORS-007.4:** While the phase-2 flag is off, the
+  guard shall enforce the phase-1 policy for every coordinator, whatever its
+  stored settings.
+
+### REQ-COORDINATOR-COORDINATORS-008: Guided setup
+
+**Intent:** A manager adds a coordinator by answering a few questions in
+order.
+
+**User story:** As a workspace manager, I want to be walked through adding a
+coordinator, so that it starts with a scope, a purpose and the permissions I
+chose.
+
+#### Acceptance criteria
+
+- **AC-COORDINATOR-COORDINATORS-008.1:** While the phase-2 flag is on, **+ Add
+  coordinator** shall open a setup with the steps Who runs it, What it
+  watches, What it is for, What it knows, What it may do and Review, with the
+  step list visible, **Back** and **Next** on each step, and the current step
+  marked.
+- **AC-COORDINATOR-COORDINATORS-008.2:** Who runs it shall ask for the name,
+  agent profile and executor under the phase-1 rules; What it watches shall
+  offer the Watches choice of
+  [permissions](permissions.md#req-coordinator-permissions-003-watches) with
+  `all` chosen; What it is for shall offer the goal form of
+  [goals](goals.md#req-coordinator-goals-001-setting-a-goal) and **Skip this
+  step**; What it knows shall offer the context and **Skip this step**; What
+  it may do shall show the May do rows with `create_task`, `message`, `move`
+  and `resume` set to Requires approval and `start_agent` and `stop` Denied.
+- **AC-COORDINATOR-COORDINATORS-008.3:** Review shall show a "What it wrote"
+  table with the columns Setting, Value and Owned from now on by, one row per
+  chosen value, each naming the Configure section that owns it; **Change**
+  on a row shall return to its step with the values kept.
+- **AC-COORDINATOR-COORDINATORS-008.4:** **Finish** shall be enabled only while
+  the name is valid, both profiles are chosen and Watches is `all` or has at
+  least one workflow; the system shall create the coordinator, its settings,
+  its Watches and its goal in one transaction, or none of them, and open the
+  new coordinator's Configure page.
+- **AC-COORDINATOR-COORDINATORS-008.5:** When a manager leaves the setup before
+  Finish, nothing shall be created. The setup shall be available only to
+  managers.
+
+### REQ-COORDINATOR-COORDINATORS-009: Configure sections and list summary
+
+**Intent:** Each coordinator's page has one section per kind of setting.
+
+Mockup:
+
+- [`docs/plans/workspace-coordinator-p2/assets/p2-02-settings-coordinator-sections.png`](../../../plans/workspace-coordinator-p2/assets/p2-02-settings-coordinator-sections.png): the Sections row.
+
+#### Acceptance criteria
+
+- **AC-COORDINATOR-COORDINATORS-009.1:** While the phase-2 flag is on, a
+  coordinator's page shall show a Sections row with Identity, Watches, May
+  do, Standing orders and Goal, each with a one-line help text; Identity
+  shall hold the phase-1 fields, and the chosen section shall be kept in the
+  page address.
+- **AC-COORDINATOR-COORDINATORS-009.2:** While the phase-2 flag is on, each
+  list card shall replace the later-phase note with a summary line: the
+  number of watched boards or "Every board", the number of actions that
+  require approval, and the number of active standing orders.
+
 ## Out of scope
 
-- Watches, May do, Standing orders and guided setup (phase 2, gate G2).
+- Watches, May do, Standing orders and guided setup in phase 1; phase 2
+  specifies them in [permissions](permissions.md),
+  [standing orders](standing-orders.md) and
+  `REQ-COORDINATOR-COORDINATORS-008`.
 - The coordinator permission model (decision D17), defined now and built in a
   later phase (gate G2). Each coordinator has a scope and a setting per
   action, and each action is one of `denied`, `requires approval` or
