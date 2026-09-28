@@ -1,8 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import TaskLink from "@/components/routing/task-link";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import { cn } from "@/lib/utils";
 import type { AttentionStall, AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import { StallEvidenceContent } from "./stall-evidence-content";
@@ -56,14 +58,47 @@ export function NeedsYouItemPrimaryActions({ item }: NeedsYouItemPrimaryActionsP
   );
 }
 
+export type AskAboutThisButtonProps = {
+  coordinatorId: string;
+  /** The card's derived `<id>` (`lib/coordinator/copilot-id.ts`). */
+  id: string;
+  canManage: boolean;
+};
+
 /**
- * Renders on every item as a native disabled button with no click handler
- * (out of scope here; task 06 enables and wires it).
+ * Opens the copilot with a chip and a pre-filled question for this item's
+ * `<id>` (docs/specs/coordinator/system-design/copilot-popover.md#ask-about-this).
+ * A reader sees the same disabled button with a tooltip and no handler
+ * (AC-COORDINATOR-COPILOT-004.8).
  */
-export function AskAboutThisButton() {
+export function AskAboutThisButton({ coordinatorId, id, canManage }: AskAboutThisButtonProps) {
   const { t } = useTranslation();
+  const askAboutThis = useCopilotStore((s) => s.askAboutThis);
+
+  if (!canManage) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="inline-flex">
+            <Button variant="ghost" size="sm" disabled>
+              {t("coordinator:askAboutThis")}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{t("coordinator:copilotReaderTooltip")}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
   return (
-    <Button variant="ghost" size="sm" disabled>
+    <Button
+      variant="ghost"
+      size="sm"
+      className="cursor-pointer"
+      onClick={() =>
+        askAboutThis(coordinatorId, id, t("coordinator:copilotQuestionForItem", { id }))
+      }
+    >
       {t("coordinator:askAboutThis")}
     </Button>
   );

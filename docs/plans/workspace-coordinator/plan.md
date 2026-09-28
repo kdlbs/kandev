@@ -30,6 +30,7 @@ system_design:
   - ../../specs/coordinator/system-design/coordinators.md
   - ../../specs/coordinator/system-design/needs-you.md
   - ../../specs/coordinator/system-design/copilot.md
+  - ../../specs/coordinator/system-design/copilot-popover.md
   - ../../specs/coordinator/system-design/proposals.md
 legacy_specs: []
 ---

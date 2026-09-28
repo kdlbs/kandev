@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import type { ClassifyResult, NeedsYouItem } from "@/lib/coordinator/attention";
 import type {
@@ -79,9 +80,17 @@ beforeEach(() => {
   readyContext = readyContextWith([]);
 });
 
+function renderPage() {
+  return render(
+    <TooltipProvider>
+      <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+    </TooltipProvider>,
+  );
+}
+
 describe("NeedsYouPageClient", () => {
   it("renders the Needs you page shell and passes the needs-you view", () => {
-    render(<NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />);
+    renderPage();
     expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Needs you");
     expect(capturedProps?.view).toBe("needs-you");
     expect(capturedProps?.workspaceId).toBe("ws-1");
@@ -89,7 +98,7 @@ describe("NeedsYouPageClient", () => {
   });
 
   it("shows the empty state when there is nothing needing attention", () => {
-    render(<NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />);
+    renderPage();
     expect(screen.getByTestId("empty-needs-you-state")).not.toBeNull();
     expect(screen.queryByTestId("needs-you-item-list")).toBeNull();
   });
@@ -105,7 +114,7 @@ describe("NeedsYouPageClient", () => {
         pendingAction: "clarification",
       },
     ]);
-    render(<NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />);
+    renderPage();
     expect(screen.getByTestId("needs-you-item-list")).not.toBeNull();
     expect(screen.getByTestId("needs-you-item-task-1")).not.toBeNull();
     expect(screen.queryByTestId("empty-needs-you-state")).toBeNull();

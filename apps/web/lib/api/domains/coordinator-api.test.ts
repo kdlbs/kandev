@@ -5,6 +5,7 @@ import {
   createCoordinator,
   deleteCoordinator,
   getCoordinator,
+  getCoordinatorProfileUnavailable,
   getProposal,
   getProposalConflict,
   listCoordinators,
@@ -378,5 +379,78 @@ describe("openConversation", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(409);
     expect((error as ApiError).body).toMatchObject({ error: "coordinator_profile_unavailable" });
+  });
+});
+
+describe("getCoordinatorProfileUnavailable", () => {
+  it("reads the two statuses from a 409 coordinator_profile_unavailable body", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          error: "coordinator_profile_unavailable",
+          agent_profile_status: "missing",
+          executor_profile_status: "ok",
+        },
+        409,
+      ),
+    );
+
+    let error: unknown;
+    try {
+      await openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(getCoordinatorProfileUnavailable(error)).toEqual({
+      error: "coordinator_profile_unavailable",
+      agent_profile_status: "missing",
+      executor_profile_status: "ok",
+    });
+  });
+
+  it("returns null for a 409 conversation_conflict", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ error: "conversation_conflict", error_code: "conversation_conflict" }, 409),
+    );
+
+    let error: unknown;
+    try {
+      await openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(getCoordinatorProfileUnavailable(error)).toBeNull();
+  });
+
+  it("returns null for a non-409 error", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404));
+
+    let error: unknown;
+    try {
+      await openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(getCoordinatorProfileUnavailable(error)).toBeNull();
+  });
+
+  it("returns null for a non-ApiError", () => {
+    expect(getCoordinatorProfileUnavailable(new Error("network down"))).toBeNull();
+  });
+
+  it("returns null when the profile statuses are missing from the body", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "coordinator_profile_unavailable" }, 409));
+
+    let error: unknown;
+    try {
+      await openConversation(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(getCoordinatorProfileUnavailable(error)).toBeNull();
   });
 });

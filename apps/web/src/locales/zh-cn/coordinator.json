@@ -89,5 +89,22 @@
   "failedToAddCoordinator": "无法添加协调员。",
   "failedToSaveCoordinator": "无法保存协调员。",
   "failedToDeleteCoordinator": "无法删除协调员。",
-  "addACoordinator": "添加协调员"
+  "addACoordinator": "添加协调员",
+  "copilotTitle": "协调员:{{name}}",
+  "copilotClose": "关闭",
+  "copilotLauncherIdle": "与 {{name}} 对话",
+  "copilotLauncherBusy": "{{name}} 正在工作",
+  "copilotAgentMissingMessage": "代理配置文件已被移除,请在设置中选择另一个。",
+  "copilotAgentPassthroughMessage": "该代理配置文件使用 CLI 透传,协调员无法使用,请在设置中选择另一个。",
+  "copilotExecutorMissingMessage": "执行器已被移除,请在设置中选择另一个。",
+  "copilotGoneMessage": "此协调员已不存在。",
+  "copilotLoadFailedMessage": "无法加载协调员。",
+  "copilotConflictMessage": "打开期间对话发生了变化。",
+  "copilotOpenFailedMessage": "无法打开对话。",
+  "copilotIntro": "可以向协调员询问此页面上的任何内容。",
+  "copilotTryAsking": "试试这样问",
+  "copilotSuggestionQuestion": "现在最需要我处理的是什么,为什么?",
+  "copilotQuestionForItem": "为什么 {{id}} 出现在此处?",
+  "copilotRemoveChip": "移除",
+  "copilotReaderTooltip": "只有工作区管理员才能向协调员提问。"
 }

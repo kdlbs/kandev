@@ -25,7 +25,7 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
         coordinatorId={coordinatorId}
         view="needs-you"
       >
-        {({ coordinator, attention }) => {
+        {({ coordinator, attention, canManage }) => {
           const items = attention.classification.needsYou;
           if (items.length === 0) {
             return (
@@ -47,6 +47,8 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
                   stepNameByWorkflowStep={attention.stepNameByWorkflowStep}
                   openTasksById={attention.openTasksById}
                   coordinatorName={coordinator.name}
+                  coordinatorId={coordinator.id}
+                  canManage={canManage}
                 />
               ))}
             </div>

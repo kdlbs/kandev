@@ -89,5 +89,22 @@
   "failedToAddCoordinator": "Couldn't add the coordinator.",
   "failedToSaveCoordinator": "Couldn't save the coordinator.",
   "failedToDeleteCoordinator": "Couldn't delete the coordinator.",
-  "addACoordinator": "Add a coordinator"
+  "addACoordinator": "Add a coordinator",
+  "copilotTitle": "Coordinator: {{name}}",
+  "copilotClose": "Close",
+  "copilotLauncherIdle": "Chat with {{name}}",
+  "copilotLauncherBusy": "{{name}} is working",
+  "copilotAgentMissingMessage": "The agent profile was removed. Choose another in Settings.",
+  "copilotAgentPassthroughMessage": "The agent profile uses CLI passthrough, which a coordinator cannot use. Choose another in Settings.",
+  "copilotExecutorMissingMessage": "The executor was removed. Choose another in Settings.",
+  "copilotGoneMessage": "This coordinator no longer exists.",
+  "copilotLoadFailedMessage": "Could not load the coordinator.",
+  "copilotConflictMessage": "The conversation changed while opening.",
+  "copilotOpenFailedMessage": "Could not open the conversation.",
+  "copilotIntro": "Ask the coordinator about anything on this screen.",
+  "copilotTryAsking": "Try asking",
+  "copilotSuggestionQuestion": "What needs me first, and why?",
+  "copilotQuestionForItem": "Why is {{id}} here?",
+  "copilotRemoveChip": "Remove",
+  "copilotReaderTooltip": "Only workspace managers can ask the coordinator."
 }

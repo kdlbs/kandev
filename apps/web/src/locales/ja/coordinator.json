@@ -89,5 +89,22 @@
   "failedToAddCoordinator": "コーディネーターを追加できませんでした。",
   "failedToSaveCoordinator": "コーディネーターを保存できませんでした。",
   "failedToDeleteCoordinator": "コーディネーターを削除できませんでした。",
-  "addACoordinator": "コーディネーターを追加"
+  "addACoordinator": "コーディネーターを追加",
+  "copilotTitle": "コーディネーター: {{name}}",
+  "copilotClose": "閉じる",
+  "copilotLauncherIdle": "{{name}} とチャットする",
+  "copilotLauncherBusy": "{{name}} は作業中です",
+  "copilotAgentMissingMessage": "エージェントプロファイルは削除されました。設定で別のプロファイルを選択してください。",
+  "copilotAgentPassthroughMessage": "このエージェントプロファイルはCLIパススルーを使用しているため、コーディネーターでは使用できません。設定で別のプロファイルを選択してください。",
+  "copilotExecutorMissingMessage": "エグゼキュータは削除されました。設定で別のエグゼキュータを選択してください。",
+  "copilotGoneMessage": "このコーディネーターはもう存在しません。",
+  "copilotLoadFailedMessage": "コーディネーターを読み込めませんでした。",
+  "copilotConflictMessage": "開いている間に会話が変更されました。",
+  "copilotOpenFailedMessage": "会話を開けませんでした。",
+  "copilotIntro": "この画面に表示されている内容についてコーディネーターに質問できます。",
+  "copilotTryAsking": "こんな質問はいかがですか",
+  "copilotSuggestionQuestion": "最初に対応すべきものは何ですか、その理由も教えてください。",
+  "copilotQuestionForItem": "{{id}} はなぜここに表示されていますか。",
+  "copilotRemoveChip": "削除",
+  "copilotReaderTooltip": "コーディネーターへの質問はワークスペース管理者のみ行えます。"
 }
