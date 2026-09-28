@@ -159,7 +159,7 @@ the same pattern as `hideSessionSelectors`, so every other chat is unchanged
   The standing instructions tell the agent that a bracketed reference names
   the item and that `get_coordinator_item_kandev` (for `proposal` and
   `stall`) or the task tools (for `task`) read its evidence. Context ids on
-  the wire as structured data stay phase 3 (decision D12); phase 1 carries
+  the wire as structured data stay phase 2 (decision D12); phase 1 carries
   the reference in the message text.
 - `user-message-body.tsx` gains a coordinator branch: when the task origin is
   `coordinator` and the text starts with `About `, up to the first `: `, it

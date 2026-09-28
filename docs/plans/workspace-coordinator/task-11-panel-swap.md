@@ -78,7 +78,7 @@ chip, proposal card, recovery feedback) moves into the panel unchanged.
   05, 06, 08 and 09.
 - The activity display (task 10).
 - A maximize or Expand action, the launcher on other pages, a Quick Chat tab
-  (phase 3).
+  (phase 2).
 - Any backend change.
 
 ## ASCII UI preview

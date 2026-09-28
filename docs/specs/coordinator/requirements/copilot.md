@@ -336,10 +336,10 @@ Mockup:
 ## Out of scope
 
 - The launcher on other pages, the settings header switch, Expand and a Quick
-  Chat tab of kind `coordinator` (phase 3, decision D11).
-- Context ids on the wire (phase 3, decision D12); phase 1 sends text only.
-- Waking the coordinator on events, schedules or backstops (phase 4, gate G4).
-- Enforced containment of the agent CLI's own tools: a gate G4 condition before
+  Chat tab of kind `coordinator` (phase 2, decision D11).
+- Context ids on the wire (phase 2, decision D12); phase 1 sends text only.
+- Waking the coordinator on events, schedules or backstops (phase 3, gate G3).
+- Enforced containment of the agent CLI's own tools: a gate G3 condition before
   any unattended turn. Phase 1 states the residual instead.
 - `ask_user_question` for coordinators: coordinators ask through proposals.
 - Showing an ended conversation's transcript after a new one replaces it

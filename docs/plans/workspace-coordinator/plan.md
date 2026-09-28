@@ -370,7 +370,7 @@ surfaces, not agent wording.
 | --- | --- |
 | A maintainer prefers the plugin placement of ADR-2026-08-31 | G0 before any upstream PR opens; the ADR supersedes one clause openly and keeps the Host half; an objection re-plans the affected work orders |
 | A tool slips past the guard | Task 03's table test walks every registered Kandev MCP action for a coordinator principal |
-| The agent reaches past its Kandev surface through its own tools | Phase 1 is attended; the ADR records the residual; containment is a G4 condition |
+| The agent reaches past its Kandev surface through its own tools | Phase 1 is attended; the ADR records the residual; containment is a G3 condition |
 | A `coordinator` surface, mode or origin name is taken on main when task 03 starts | Task 03 checks first and renames if taken (D7) |
 | Open PRs touching `internal/mcp` land first | Whichever lands second rebases; no dependency either way |
 

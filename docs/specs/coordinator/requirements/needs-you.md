@@ -294,9 +294,9 @@ technology.
 
 ## Out of scope
 
-- Answering a question or permission on the card (phase 4, gate G4).
-- Resume on a stall card, merge prompts, the "What it did" log and "Came in"
-  (phases 2 and 4).
+- Answering a question or permission on the card (phase 3, gate G3).
+- Resume on a stall card, PR-ready prompts and the "What it did" log (phase 2),
+  and "Came in" (phase 4).
 - A workspace-wide Needs you across coordinators: each coordinator has its own
   list; the stall records are shared.
 - Stall classes beyond `task.stalled`: one class is supported by current data.

@@ -173,7 +173,7 @@ route's 409 and the session-start check are the enforcement.
 - Approve and reject routes, claim, recovery, the reserved external-id prefix
   (task 07).
 - Any UI (tasks 02, 04, 05, 06, 08).
-- Containment of the agent CLI's own tools (gate G4).
+- Containment of the agent CLI's own tools (gate G3).
 
 ## Mockup screenshots and scenarios
 

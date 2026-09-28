@@ -504,7 +504,7 @@ Kandev does not register or proxy the agent CLI's own tools (its shell, MCP
 servers and permission rules), so the guard does not see them; and board
 content returned by the allowed tools can steer the coordinator. The
 [ADR](../../../decisions/2026-09-26-workspace-coordinator.md#residual-risk-the-agents-own-tools)
-records both: containment is a gate G4 condition, and content steering is
+records both: containment is a gate G3 condition, and content steering is
 accepted for phase 1.
 
 ## Security

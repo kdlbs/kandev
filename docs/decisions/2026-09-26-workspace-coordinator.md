@@ -50,15 +50,15 @@ requirements govern):
 | # | Decision | Phase 1 answer | Status |
 | --- | --- | --- | --- |
 | D1 | Where the product lives | A core Coordinator page for Kanban workspaces, behind `features.coordinator` so it can be tested before it is promoted. It may move to a plugin on the managed coordination platform later if needed. | agreed with the maintainer, 2026-09-28 |
-| D2 | The runner | An ordinary Kandev session on an ephemeral task, started like Configuration chat, one per coordinator. It needs no automation, run queue or plugin, and has no wake. The wake is decided at G4. | proposed, G0 |
-| D3 | Durable coordinator state | Its conversation task, its proposals and the stall records. No checkpoint, because nothing resumes it unattended. Revisited at G4. | proposed, G0 |
+| D2 | The runner | An ordinary Kandev session on an ephemeral task, started like Configuration chat, one per coordinator. It needs no automation, run queue or plugin, and has no wake. The wake is decided at G3. | proposed, G0 |
+| D3 | Durable coordinator state | Its conversation task, its proposals and the stall records. No checkpoint, because nothing resumes it unattended. Revisited at G3. | proposed, G0 |
 | D4 | May a coordinator move or archive cards? | Not in phase 1. Moving, archiving, deleting, stopping and resuming tasks are `denied` actions under D17, not banned in every phase: a later phase may allow moving, resuming or stopping under an explicit per-coordinator permission. Merging and moving a task to Done are not D17 actions; allowing either would be its own decision. This is a rule about the coordinator actor only; people, workflows and other actors keep their contracts. `product-constraints.md` records the rule. | proposed, G0 |
 | D5 | How it asks a person | Through proposals, in its chat and on Needs you. `ask_user_question_kandev` is not on its surface. | proposed, G0 |
 | D6 | ADR 0004's coordination-task pattern | Not used, and left unchanged. | proposed, G0 |
 | D7 | The plugin's interim path | The v1 fence stays as ADR-2026-08-31 defines it. #3994 added the `managed-conversation` MCP surface and mode and the adapter-enforced managed tool policy; the `coordinator` surface, mode and origin coexist with them, and the agentctl permission handler checks the coordinator allowlist, then the managed tool policy, then the default. Other open PRs that touch `internal/mcp` are left to their own review: phase 1 needs none and blocks none, and whichever lands second rebases. Before adding a name, the implementation checks main for a name already taken. | proposed, G0 |
 | D8 | Scope and cardinality | Workspace scope. Several coordinators per workspace, each reading the whole workspace until Watches narrows it in phase 2. Each proposal belongs to one coordinator. | proposed, G0 |
-| D9 | Autonomy and approval | Phase 1 is attended: every turn starts from a manager's message. The coordinator's Kandev surface can only read and propose, enforced by the MCP guard and by auto-approving exactly those tools. The agent CLI's own tools are governed by its profile and settings, as in any Kandev chat; see [Residual risk](#residual-risk-the-agents-own-tools). Enforced containment of those tools is a condition of G4, before any unattended turn. | proposed, G0 |
-| D10 | External intake | Phase 4. | proposed, G4 |
+| D9 | Autonomy and approval | Phase 1 is attended: every turn starts from a manager's message. The coordinator's Kandev surface can only read and propose, enforced by the MCP guard and by auto-approving exactly those tools. The agent CLI's own tools are governed by its profile and settings, as in any Kandev chat; see [Residual risk](#residual-risk-the-agents-own-tools). Enforced containment of those tools is a condition of G3, before any unattended turn. | proposed, G0 |
+| D10 | External intake (Jira, Linear, Sentry) and tracker write-back | Phase 4. | proposed, G4 |
 | P | The mockup's phone "Teammate" persona | Not planned. `features.auth` is off in every shipped profile and clarifications have no addressee. | proposed, G0 |
 | D14 | Kandev's Inbox | Keeps its row, count and tabs in every phase. The coordinator keeps its own count. | proposed, G0 |
 | D15 | Approval never starts an agent | A proposal may target only an eligible step: one without an `auto_start_agent` on-enter action, and not a feeder (directly or transitively) of a step that has one, so an automatic queue/WIP promotion after the create cannot reach an auto-starting step either. Creating a task and starting its agent are separate actions under D17: approving a create never authorizes a start, including a start that the target step's on-enter actions or a queue or WIP promotion would trigger. | proposed, G0 |
@@ -70,9 +70,9 @@ requirements govern):
 
 | # | Decision | Status |
 | --- | --- | --- |
-| D11 | Expand opens a Quick Chat tab of kind `"coordinator"`, an ordinary persisted session. | proposed, G3 |
-| D12 | Page context is ids only (`{kind, id}`), validated to the workspace. | proposed, G3 |
-| D13 | No `automatic` write class before the phase 2 "What it did" log; the first is chosen in phase 4 from recorded approvals. | proposed, G2 |
+| D11 | Expand opens a Quick Chat tab of kind `"coordinator"`, or is dropped now that the copilot is a panel. | open, G2 |
+| D12 | Page context is ids only (`{kind, id}`), validated to the workspace. | proposed, G2 |
+| D13 | No `automatic` write class before the phase 2 "What it did" log; the first is chosen in phase 3 from recorded approvals. | proposed, G2 |
 | D16 | Per-coordinator action tiers, or one policy per workspace. | superseded by D17 (per coordinator) |
 
 ### Supersession of ADR-2026-08-31's placement clause
@@ -204,11 +204,11 @@ enforce.
 The rest of this residual is **accepted for phase 1**: nothing in this
 design or in phase 1's containment stops a coordinator's agent from calling
 the Kandev API directly with a shell, and no phase-1 gate closes it. This is
-distinct from gate G4's requirement, which is about a *different* axis:
-before any turn can start **unattended** (no person present at all), G4 must
+distinct from gate G3's requirement, which is about a *different* axis:
+before any turn can start **unattended** (no person present at all), G3 must
 record enforced containment: an executor without a shell or network path to
 the host, or `features.auth` on with a coordinator-scoped token, or an
-equivalent decided there. G4's containment, once it lands, will also close
+equivalent decided there. G3's containment, once it lands, will also close
 this attended-turn residual as a side effect, but until then this risk is
 carried, not deferred to a gate that names it. The settings page says that
 the profile's auto-approve is ignored for coordinators; that setting narrows
@@ -225,7 +225,7 @@ aimed at the coordinator's agent rather than at a person could steer its
 proposal or how it describes one, and nothing here distinguishes such content
 from a person's own, though every effect still routes through the same
 phase-1 tool profile and the same manager approval. This residual is
-**accepted, unmitigated, for phase 1**, and is not closed by G4, since G4 is
+**accepted, unmitigated, for phase 1**, and is not closed by G3, since G3 is
 about what an unattended turn's tools can reach, not whether the content
 those tools read is trustworthy. Mitigating it, for example by surfacing the
 source task link next to the coordinator's paraphrase so a manager can check
@@ -257,12 +257,16 @@ behind it.
 | Phase | Ships | Work packages | Gate |
 | --- | --- | --- | --- |
 | 1. Core flow | Coordinators in workspace settings; a sidebar entry per coordinator beside the Inbox; Needs you and Queue with the count strip; item cards for stalls, questions and permissions, errors, and task proposals (Approve, Edit, Reject); Ask about this; the copilot chat panel on the right side of the Coordinator screens, which reads the workspace and proposes tasks | WP-0 to WP-5b (WP-0, WP-1, WP-1b, WP-2, WP-3, WP-4a, WP-4b, WP-4c, WP-4d, WP-4e, WP-5a, WP-5b) | G0 |
-| 2. Config | Watches, May do and Standing orders per coordinator; the "What it did" log with undo; guided setup; Resume on stall cards; merge prompts; a second proposal class (message a running agent) | WP-6, WP-7 | G2 |
-| 3. Copilot everywhere | The launcher on every page, the page context chip, one launcher with Configuration chat on `/settings`, Expand into a Quick Chat tab | WP-8, WP-9 | G3 |
-| 4. Relay and intake | Wake on its tasks' events; questions and permissions answered in place; Came in (Jira, Linear); tracker write-back as a proposal | WP-10 to WP-12 | G4 |
-| 5. Progress | Goal, baselines and cost against a ceiling; the goal note; improvement proposals | WP-13, WP-14 | G5 |
+| 2. Control (a person approves everything) | The permission settings of D17; the "What it did" log with undo; Watches, May do and Standing orders per coordinator; guided setup; a goal, the goal note and baselines; resume, message and move as proposals (Resume on stall cards, PR-ready prompts); the launcher on every page and the page context chip | WP-6 to WP-10 | G2 |
+| 3. Autonomy (it may act on its own) | Wake on its tasks' events with a level-triggered backstop; enforced containment for unattended turns; questions and permissions answered in place; cost against a ceiling; improvement proposals; the first `automatic` action | WP-11, WP-12 | G3 |
+| 4. Integrations | Came in from Jira, Linear and Sentry; tracker write-back as a proposal | WP-13, WP-14 | G4 |
 
-Gate N (G2 to G5) is met when all four hold:
+Few phases, one theme each (owner, 2026-09-29): control with a person approving,
+then autonomy, then external integrations. Autonomy cannot fold into control:
+its first `automatic` action is chosen from at least 30 days of phase 2's log,
+and unattended turns need containment and a cost ceiling first.
+
+Gate N (G2 to G4) is met when all four hold:
 
 1. Every work package of phase N-1 is merged with its exit met, and the repo
    ports of the mockup's phase N-1 view pass in CI.
@@ -276,10 +280,9 @@ Gate N (G2 to G5) is met when all four hold:
 
 | Gate | Opens | Decision to record |
 | --- | --- | --- |
-| G2 | WP-6, WP-7 | D13; the log's storage and retention; D16 |
-| G3 | WP-8, WP-9 | D11, D12 |
-| G4 | WP-10 to WP-12 | The wake design (a level-triggered backstop, no replacement fork); enforced containment for unattended turns; D10; the first `automatic` class, from at least 30 days of log rows |
-| G5 | WP-13, WP-14 | The goal and cost-ceiling model |
+| G2 | WP-6 to WP-10 | Storage and editing of D17's settings; D13; the log's storage and retention; D11; D12; the goal and baseline model |
+| G3 | WP-11, WP-12 | The wake design (a level-triggered backstop, no replacement fork); enforced containment for unattended turns; the cost-ceiling model; the first `automatic` class, from at least 30 days of log rows |
+| G4 | WP-13, WP-14 | D10: which trackers, the de-duplication key, write-back as a proposal |
 
 ## G0 Status
 
@@ -341,7 +344,7 @@ package.
 - The MCP guard's allowlist is the single place new coordinator abilities
   join, one decision at a time.
 - The residual risk of the agent's own tools is accepted for attended turns
-  only, and blocks unattended turns until G4.
+  only, and blocks unattended turns until G3.
 - The Inbox, Office and Configuration chat keep their behaviour.
 
 ## Alternatives considered
@@ -359,6 +362,6 @@ package.
   budgets and heartbeats; Kanban workspaces would inherit an autonomy model
   they did not ask for. Rejected.
 - **Run the coordinator on the automation runner.** Adds a wake, run queue and
-  unattended turns before containment exists. Deferred to the G4 wake design.
+  unattended turns before containment exists. Deferred to the G3 wake design.
 - **Let the coordinator create tasks directly.** Removes the person from the
   only write. Rejected; D13 governs any future automatic class.

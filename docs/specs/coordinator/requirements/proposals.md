@@ -270,7 +270,7 @@ Mockup:
 - Undo of an approval (needs the phase 2 "What it did" log).
 - Proposal classes other than creating a task, including messaging a running
   agent (phase 2).
-- Replying to a proposal with a condition (phase 4).
-- Any `automatic` write class (decision D13, gate G2 and phase 4).
+- Replying to a proposal with a condition (phase 3).
+- Any `automatic` write class (decision D13, gate G2 and phase 3).
 - Expiry of pending proposals: they stay until decided or their coordinator is
   deleted.

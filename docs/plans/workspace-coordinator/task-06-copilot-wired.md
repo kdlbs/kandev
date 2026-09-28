@@ -105,7 +105,7 @@ critical path.
 
 ## Out of scope
 
-- The launcher on other pages, Expand, a Quick Chat tab (phase 3).
+- The launcher on other pages, Expand, a Quick Chat tab (phase 2).
 - Proposal decisions on the chat card (task 08; the card renders read-only).
 
 ## ASCII UI preview
