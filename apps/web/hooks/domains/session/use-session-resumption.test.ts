@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- session resumption cases share one lifecycle harness. */
 
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
 import { sanitizeWorkspaceRestorationDetails } from "@/lib/state/slices/session-runtime/workspace-restoration";
@@ -64,6 +64,7 @@ const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   mockRequest.mockReset();
   mockWorkspaceRestorationEnabled = false;
@@ -1101,6 +1102,7 @@ describe("useSessionResumption completed-session admission", () => {
   );
 });
 
+// eslint-disable-next-line max-lines-per-function -- startup and focus share deferred recovery barriers.
 describe("idle-suspended session focus recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1154,6 +1156,72 @@ describe("idle-suspended session focus recovery", () => {
       );
     });
     expect(mockSetResumeSkipped).not.toHaveBeenCalledWith(SESSION_ID, true);
+  });
+
+  it("joins an in-flight startup recovery when the selected session receives focus", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const startupStatus = Promise.withResolvers<unknown>();
+    const launchResponse = Promise.withResolvers<unknown>();
+    let statusRequestCount = 0;
+    const suspendedStatus = {
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+      updated_at: STARTED_AT,
+    };
+    mockRequest.mockImplementation((action: string) => {
+      if (action === STATUS_ACTION) {
+        statusRequestCount += 1;
+        if (statusRequestCount === 1) return startupStatus.promise;
+        return Promise.resolve({
+          session_id: SESSION_ID,
+          task_id: TASK_ID,
+          state: "RUNNING",
+          is_agent_running: true,
+          is_resumable: false,
+          needs_resume: false,
+        });
+      }
+      if (action === LAUNCH_ACTION) return launchResponse.promise;
+      return Promise.resolve(undefined);
+    });
+
+    try {
+      const { unmount } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+
+      await waitFor(() => expect(statusRequestCount).toBe(1));
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(statusRequestCount).toBe(1);
+
+      await act(async () => startupStatus.resolve(suspendedStatus));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          LAUNCH_ACTION,
+          expect.objectContaining({ intent: "resume" }),
+          expect.any(Number),
+        ),
+      );
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+
+      await act(async () => launchResponse.resolve({ success: true, state: "STARTING" }));
+      await waitFor(() => expect(statusRequestCount).toBe(2));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+      unmount();
+    } finally {
+      visibility.mockRestore();
+    }
   });
 
   it("does not resume an idle-suspended session from a hidden task view", async () => {

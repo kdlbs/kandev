@@ -143,6 +143,8 @@ Implementation validation passed:
 The Chromium test observed a persisted stop, a focus-only resume without provider prompting, and a later stop after another full idle interval. The mobile test observed a message-triggered resume while the session remained parked in the UI, followed by exactly-once delivery from both the message API and the touch composer.
 Issue #4006 remains assigned to `carlosflorencio`.
 
+PR fixup closed a startup-status/focus overlap by making focus join the pending startup recovery for the same request generation. A deferred frontend regression proves the overlap produces one status request and one `session.launch`; the fix satisfies the existing concurrent-resume design rule, so no durable contract changed. The workspace policy card and session-resumption suites passed together (40 tests), along with changed-file ESLint, web typecheck, documentation catalog validation, specification lint, and whitespace checks. No new mobile E2E was needed because this is shared lifecycle state with no change to layout, touch, navigation, or scrolling; existing mobile idle-suspension coverage remains applicable.
+
 ## Risks
 
 - ACP does not expose every provider-internal activity. The opt-in policy uses Kandev-observed state and protects known work.

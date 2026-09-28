@@ -96,7 +96,8 @@ Run PostgreSQL parity tests with the repository's existing database fixture conf
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'IdleParking|IdleReaper|IdleReclaim' -count=1)
 (cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'IdleParking' -count=1)
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run components/settings/workspaces/workspace-idle-policy.test.tsx hooks/domains/session/use-session-resumption.test.ts)
+(cd apps/web && pnpm exec vitest run components/settings/workspaces/workspace-idle-policy-card.test.tsx hooks/domains/session/use-session-resumption.test.ts)
+(cd apps/web && pnpm exec eslint hooks/domains/session/use-session-resumption.ts hooks/domains/session/use-session-resumption.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:check)
@@ -139,4 +140,16 @@ Added workspace-scoped enabled and timeout settings with disabled/120-minute def
 
 The workspace settings card is localized, follows the existing save flow, and uses the same controls on desktop and phone. Focus and actionable message recovery use the existing resume ownership path; explicit focus is provenance-bound and does not dispatch a prompt. A focus recovery restarts the idle clock.
 
-Regression coverage includes `TestWorkspaceIdlePolicyDefaultsAndPartialUpdates`, `TestWorkspaceIdlePolicyMigrationDefaultsExistingRows`, `TestPostgresIdleSuspensionPolicyAndProvenance`, `TestIdleParkingSuspendsSettledSessionsAcrossACPProviders`, `TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning`, `TestFocusTaskSessionResumesIdleSuspensionWithNewLSPLease`, and localized component/hook tests. The full backend suite and build, focused PostgreSQL 16 migration/CAS tests, web typecheck, i18n checks, and 39 focused web tests passed.
+Regression coverage includes `TestWorkspaceIdlePolicyDefaultsAndPartialUpdates`, `TestWorkspaceIdlePolicyMigrationDefaultsExistingRows`, `TestPostgresIdleSuspensionPolicyAndProvenance`, `TestIdleParkingSuspendsSettledSessionsAcrossACPProviders`, `TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning`, `TestFocusTaskSessionResumesIdleSuspensionWithNewLSPLease`, and localized component/hook tests. The full backend suite and build, focused PostgreSQL 16 migration/CAS tests, web typecheck, i18n checks, and 40 focused web tests passed.
+
+PR fixup added a deferred focus/startup overlap regression. Browser focus now joins the startup recovery promise for the same request generation, so an overlapping status response cannot issue a second launch from stale suspended state. This implements the existing design rule that concurrent callers join one resume; no requirements or design contract changed. Test cleanup unmounts hooks after each case so focus listeners cannot leak between tests.
+
+Post-fixup validation passed:
+
+```bash
+(cd apps/web && pnpm exec vitest run components/settings/workspaces/workspace-idle-policy-card.test.tsx hooks/domains/session/use-session-resumption.test.ts) # 40 passed
+(cd apps/web && pnpm exec eslint hooks/domains/session/use-session-resumption.ts hooks/domains/session/use-session-resumption.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd . && python3 scripts/list-docs.py validate) # 322 decisions and 1222 specifications
+(cd . && python3 scripts/lint-spec-files.py --all)
+```

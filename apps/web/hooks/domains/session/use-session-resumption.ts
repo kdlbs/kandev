@@ -531,6 +531,7 @@ function useSessionResetAndCheck({
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
   const requestGenerationRef = useRef(0);
+  const startupRecoveryInFlightRef = useRef(new Map<string, Promise<void>>());
   const focusRequestInFlightRef = useRef(false);
   const lastFocusRequestAtRef = useRef(0);
   const activeRequestRef = useRef<SessionRequestIdentity>({ key: requestKey, generation: 0 });
@@ -572,7 +573,8 @@ function useSessionResetAndCheck({
     const capturedRequest = activeRequestRef.current;
     const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
     const canContinue = () => isCurrentRequest(activeRequestRef.current, capturedRequest);
-    checkAndResume({
+    const recoveryKey = JSON.stringify([capturedRequest.key, capturedRequest.generation]);
+    const promise = checkAndResume({
       taskId,
       sessionId,
       session,
@@ -586,6 +588,13 @@ function useSessionResetAndCheck({
       },
       setters: guardedSetters,
     });
+    startupRecoveryInFlightRef.current.set(recoveryKey, promise);
+    const clearIfCurrent = () => {
+      if (startupRecoveryInFlightRef.current.get(recoveryKey) === promise) {
+        startupRecoveryInFlightRef.current.delete(recoveryKey);
+      }
+    };
+    void promise.then(clearIfCurrent, clearIfCurrent);
   }, [taskId, sessionId, connectionStatus, session, preventAutoStart, taskArchiveState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -608,6 +617,12 @@ function useSessionResetAndCheck({
       lastFocusRequestAtRef.current = now;
       focusRequestInFlightRef.current = true;
       try {
+        const recoveryKey = JSON.stringify([capturedRequest.key, capturedRequest.generation]);
+        const startupRecovery = startupRecoveryInFlightRef.current.get(recoveryKey);
+        if (startupRecovery) {
+          await startupRecovery;
+          return;
+        }
         const client = getWebSocketClient();
         if (!client) return;
         const status = await requestSessionStatusWithRetry({
