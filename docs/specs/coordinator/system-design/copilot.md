@@ -20,18 +20,16 @@ requirements:
 
 ## Purpose and boundaries
 
-Panel and Ask about this: [copilot panel](copilot-panel.md).
+Panel: [copilot panel](copilot-panel.md).
 
 The copilot is an ordinary Kandev session on an ephemeral task whose origin is
 `coordinator`. This design adds one task origin, one MCP surface, one mcpmode,
 one authorization guard and one right-side panel shared with the board
-preview. It reuses the session
-lifecycle, the agentctl MCP server, the permission UI and the Quick Chat
-session view unchanged in behaviour for every other origin.
+preview. Every other origin keeps its session lifecycle, MCP server,
+permission UI and Quick Chat view.
 
-Kandev controls which Kandev MCP tools a session has and which permission
-requests Kandev auto-approves. It does not control the agent CLI's own tools;
-see [Residual](#residual-external-surface).
+Kandev controls the session's Kandev tools and auto-approvals, not the agent
+CLI's own tools ([Residual](#residual-external-surface)).
 
 ## Requirement mapping
 
@@ -58,12 +56,25 @@ see [Residual](#residual-external-surface).
      (409 with the `coordinator_profile_unavailable` body of
      [coordinators](coordinators.md#validation) when the agent profile is
      `missing` or `passthrough`, or the executor profile is `missing`).
-  2. When `conversation_task_id` names a live, unarchived task whose primary
-     session is not terminal, ensure its session (step 6) and return it. When
-     that session is `FAILED`, `CANCELLED` or `COMPLETED` it rejects every
-     message, so the task is not reusable: archive it through the task
-     service's `ArchiveTask`, clear the reference with the same conditional
-     update as step 4, and continue at step 3 (`AC-COORDINATOR-COPILOT-001.10`).
+  2. When `conversation_task_id` names a live, unarchived task, ensure its
+     session (step 6). When the ensured session's state is not terminal,
+     continue at step 7 with that task and return it. When it is `FAILED`,
+     `CANCELLED` or `COMPLETED` (`AC-COORDINATOR-COPILOT-001.10`), a
+     terminal session rejects every message, so the task is not reusable:
+     archive it through the task service's `ArchiveTask` and continue at
+     step 3, keeping this task's id as the stale value for step 4. A failed
+     archive (including `ErrTaskAlreadyArchived` from a racing open that
+     archived it first) is logged at warn with the coordinator id, task id
+     and session state, and the route still continues at step 3; step 4's
+     conditional update replaces the reference either way, and a task left
+     unarchived is archived by the [startup pass](#conversation-cleanup)
+     because it is no longer its coordinator's `conversation_task_id`. An
+     `EnsureSession` error on this path is handled exactly as step 6's error.
+     Two opens racing over the same ended task both reach step 4 with the
+     same stale value, so exactly one new task wins and the other open
+     deletes its own and converges on it. Terminal is the closed set of
+     those three `TaskSessionState` values; `CREATED`, `STARTING`,
+     `RUNNING`, `IDLE` and `WAITING_FOR_INPUT` are reusable.
   3. Otherwise create an ephemeral task through the task service's internal
      create call: origin `coordinator`, `IsEphemeral`, title
      `Coordinator: <name>`, no workflow and no workflow step, metadata
@@ -150,7 +161,7 @@ see [Residual](#residual-external-surface).
 | Event | Current conversation task | Earlier conversation tasks |
 | --- | --- | --- |
 | Context change ([coordinators](coordinators.md#routes)) | archived through the task service's `ArchiveTask`, which stops a running turn; the reference is cleared | unchanged (archived) |
-| Current session ended (`FAILED`, `CANCELLED`, `COMPLETED`) | archived by the next open (step 2); a new task is created | unchanged (archived) |
+| Open over an ended session (`FAILED`, `CANCELLED`, `COMPLETED`; step 2) | archived through the task service's `ArchiveTask`; the reference moves to the new task at step 4 | unchanged (archived) |
 | Coordinator deletion | deleted through the task service, which stops a running turn | deleted |
 | Workspace deletion | deleted with the workspace's tasks | deleted with the workspace's tasks |
 
@@ -489,26 +500,12 @@ the messages built from them.
 
 ## Residual external surface
 
-The agent CLI keeps its own tools and settings: a shell on its executor, its
-own MCP servers and its own permission configuration. Kandev does not register
-or proxy them, so the guard above does not see them. Phase 1 is attended, so a
-person is present for each turn and sees permission requests the CLI raises.
-Enforced containment of these tools is a gate G4 condition before any
-unattended turn. The [ADR](../../../decisions/2026-09-26-workspace-coordinator.md)
-records this risk.
-
-A second, distinct residual is the content the six allowed tools themselves
-return: task titles, descriptions and conversation text written by any
-workspace member. Nothing in the tool surface or the guard distinguishes
-ordinary board content from content aimed at steering the coordinator's
-proposal reasoning or its explanation to the approving manager, and the "a
-person decides" containment argument for `propose_task_kandev` assumes that
-what the manager is shown about a proposal is trustworthy. This is not closed
-by the allowlist or by G4, since the agent needs no disallowed tool and no
-unattended turn to be steered this way. The
-[ADR](../../../decisions/2026-09-26-workspace-coordinator.md) records this
-risk as accepted and unmitigated for phase 1.
-
+Kandev does not register or proxy the agent CLI's own tools (its shell, MCP
+servers and permission rules), so the guard does not see them; and board
+content returned by the allowed tools can steer the coordinator. The
+[ADR](../../../decisions/2026-09-26-workspace-coordinator.md#residual-risk-the-agents-own-tools)
+records both: containment is a gate G4 condition, and content steering is
+accepted for phase 1.
 
 ## Security
 

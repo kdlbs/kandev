@@ -114,7 +114,7 @@ as they move; nothing is rebased onto `main` per work order.
 | [task-06](task-06-copilot-wired.md) | WP-4b | M | 03, 04, 05 | A manager asks the coordinator about the workspace from the Coordinator screens, in the popover (built) |
 | [task-07](task-07-proposals-backend.md) | WP-5a | M | 01 | A pending or failed proposal is approved exactly once or rejected through the API; recovery holds |
 | [task-08](task-08-proposals-ui.md) | WP-5b | M | 06, 07 | Proposals approved, edited and rejected on both surfaces |
-| [task-09](task-09-conversation-recovery.md) | WP-4c | S | 06 | A conversation whose session ended or failed to start recovers from the copilot |
+| [task-09](task-09-session-recovery.md) | WP-4c | S | 06 | A coordinator whose session ended shows recovery feedback, and Retry opens a fresh conversation |
 | [task-11](task-11-panel-swap.md) | WP-4e | M | 08, 09 | The copilot is a right-side panel beside the list; the board preview is unchanged |
 | [task-12](task-12-review-follow-ups.md) | WP-4f | M | 08, 09 | The maintainer review's race, stale claim, approval guard and item reference are fixed |
 | [task-10](task-10-activity-display.md) | WP-4d | S | 11, 12 | The copilot panel shows a live status line and a collapsed tool chip; phase 1 complete |

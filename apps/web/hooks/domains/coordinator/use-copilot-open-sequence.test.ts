@@ -260,3 +260,62 @@ describe("useCopilotOpenSequence", () => {
     expect(mocks.openConversation).toHaveBeenCalledTimes(2);
   });
 });
+
+// Review round 4 Finding D2 / TS-002: a consumer needs to tell whether its
+// own open()/retry() call is what produced the current `state`, as opposed
+// to a call that joined an already in-flight sequence and never started an
+// attempt of its own. `settledAttemptId` names the attempt that produced the
+// current `state`; `open()`/`retry()` return the id of the attempt they
+// actually started, or `null` when they joined one.
+describe("useCopilotOpenSequence settledAttemptId attribution", () => {
+  it("returns null when a second open joins an in-flight call, and settledAttemptId reports only the joined attempt", async () => {
+    let resolveGet: ((value: Coordinator) => void) | undefined;
+    mocks.getCoordinator.mockImplementation(
+      () =>
+        new Promise<Coordinator>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+    mocks.openConversation.mockResolvedValue(conversation);
+
+    const { result } = renderHook(() => useCopilotOpenSequence(WORKSPACE_ID, COORDINATOR_ID));
+
+    let firstAttempt: number | null = null;
+    let secondAttempt: number | null = null;
+    act(() => {
+      firstAttempt = result.current.open();
+    });
+    act(() => {
+      secondAttempt = result.current.open();
+    });
+
+    expect(typeof firstAttempt).toBe("number");
+    expect(secondAttempt).toBeNull();
+    expect(result.current.settledAttemptId).toBeNull();
+
+    resolveGet?.(coordinator());
+    await waitFor(() => expect(result.current.state.kind).toBe("ready"));
+    expect(result.current.settledAttemptId).toBe(firstAttempt);
+  });
+
+  it("gives each non-overlapping open() call a distinct attempt id matching settledAttemptId at resolution", async () => {
+    mocks.getCoordinator.mockResolvedValue(coordinator());
+    mocks.openConversation.mockResolvedValue(conversation);
+
+    const { result } = renderHook(() => useCopilotOpenSequence(WORKSPACE_ID, COORDINATOR_ID));
+
+    let firstAttempt: number | null = null;
+    act(() => {
+      firstAttempt = result.current.open();
+    });
+    await waitFor(() => expect(result.current.settledAttemptId).toBe(firstAttempt));
+
+    let secondAttempt: number | null = null;
+    act(() => {
+      secondAttempt = result.current.open();
+    });
+    await waitFor(() => expect(result.current.settledAttemptId).toBe(secondAttempt));
+    expect(secondAttempt).not.toBeNull();
+    expect(secondAttempt).not.toBe(firstAttempt);
+  });
+});

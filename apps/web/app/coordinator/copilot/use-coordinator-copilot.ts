@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
   useCopilotEntry,
@@ -37,6 +37,79 @@ export type UseCoordinatorCopilotResult = {
 };
 
 /**
+ * Tracks the ready session handed back by the open sequence, scoped to
+ * `coordinatorId`, and distinguishes a stale replacement (Retry, or
+ * anything else that swaps sessions without this hook itself having just
+ * reopened) from a replacement produced by this hook's own chip/open-driven
+ * reopen. `openSequence.retry` (wired directly to the popover's retry
+ * action) never touches `entry.open`/`entry.chip`, so only the latter can
+ * legitimately hand back a different `session_id` for a draft that was only
+ * just seeded for this same open (a terminal session replaced by the very
+ * "Ask about this" that reopened it) — that case must keep the draft.
+ *
+ * Ownership is tracked by attempt id, not an optimistic boolean: the caller
+ * marks `markSelfInitiatedOpen(attemptId)` only with the id `open()` itself
+ * returned for a call it actually started, and this hook attributes a ready
+ * state to "self-initiated" only when `settledAttemptId` is that exact id.
+ * A call that joined an in-flight sequence never receives an id to mark, and
+ * a marked id that later settles as an error is never reused by a
+ * subsequent, unrelated attempt — so no explicit reset on error or no-op is
+ * needed for correct attribution.
+ */
+function useReadySessionForCoordinator(
+  state: UseCopilotOpenSequenceResult["state"],
+  settledAttemptId: number | null,
+  coordinatorId: string,
+  onStaleReplacement: () => void,
+) {
+  const [ownedRouteSession, setOwnedRouteSession] = useState<{
+    coordinatorId: string;
+    session: ConversationResponse;
+  } | null>(null);
+  const selfInitiatedAttemptIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setOwnedRouteSession(null);
+    selfInitiatedAttemptIdRef.current = null;
+  }, [coordinatorId]);
+
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    const nextSession = state.session;
+    const priorSession =
+      ownedRouteSession && ownedRouteSession.coordinatorId === coordinatorId
+        ? ownedRouteSession.session
+        : null;
+    const resolvedFromSelfInitiatedOpen =
+      settledAttemptId !== null && settledAttemptId === selfInitiatedAttemptIdRef.current;
+    if (
+      priorSession &&
+      priorSession.session_id !== nextSession.session_id &&
+      !resolvedFromSelfInitiatedOpen
+    ) {
+      onStaleReplacement();
+    }
+    setOwnedRouteSession({ coordinatorId, session: nextSession });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedRouteSession is read for its current value only; adding it would re-run this effect on every ready-session update rather than just on an actual incoming state change.
+  }, [state, settledAttemptId, coordinatorId]);
+
+  // Guards against a coordinator switch: this hook's own state (not just the
+  // `[coordinatorId]` effect above) must never hand a previous coordinator's
+  // session to a render that already reflects the new `coordinatorId`.
+  const routeSession =
+    ownedRouteSession && ownedRouteSession.coordinatorId === coordinatorId
+      ? ownedRouteSession.session
+      : null;
+
+  return {
+    routeSession,
+    markSelfInitiatedOpen: (attemptId: number) => {
+      selfInitiatedAttemptIdRef.current = attemptId;
+    },
+  };
+}
+
+/**
  * Composes the coordinator launcher, coordinator read, open sequence and the
  * copilot store's per-coordinator entry into what `CoordinatorCopilot` needs
  * to render (docs/specs/coordinator/system-design/copilot-popover.md).
@@ -57,30 +130,24 @@ export function useCoordinatorCopilot(
   const removeEntry = useCopilotStore((s) => s.removeEntry);
   const clearChipAndDraft = useCopilotStore((s) => s.clearChipAndDraft);
 
-  const [ownedRouteSession, setOwnedRouteSession] = useState<{
-    coordinatorId: string;
-    session: ConversationResponse;
-  } | null>(null);
   const [pendingDraft, setPendingDraft] = useState<string | undefined>(undefined);
   const [askKey, setAskKey] = useState(0);
 
-  // Guards against a coordinator switch: this hook's own state (not just the
-  // `[coordinatorId]` effect below) must never hand a previous coordinator's
-  // session to a render that already reflects the new `coordinatorId`.
-  const routeSession =
-    ownedRouteSession && ownedRouteSession.coordinatorId === coordinatorId
-      ? ownedRouteSession.session
-      : null;
+  const openSequence = useCopilotOpenSequence(workspaceId, effectiveId);
+  const { routeSession, markSelfInitiatedOpen } = useReadySessionForCoordinator(
+    openSequence.state,
+    openSequence.settledAttemptId,
+    coordinatorId,
+    () => setPendingDraft(undefined),
+  );
 
   const launcher = useCoordinatorLauncher(
     workspaceId,
     effectiveId,
     routeSession?.session_id ?? null,
   );
-  const openSequence = useCopilotOpenSequence(workspaceId, effectiveId);
 
   useEffect(() => {
-    setOwnedRouteSession(null);
     setPendingDraft(undefined);
   }, [coordinatorId]);
 
@@ -92,15 +159,17 @@ export function useCoordinatorCopilot(
     // `coordinatorId`, so a coordinator switch always remounts this hook
     // fresh; this effect's own initial-mount run is what opens the
     // newly-viewed coordinator, not a `coordinatorId` dependency here.
-    if (entry.open) openSequence.open();
+    if (entry.open) {
+      const attemptId = openSequence.open();
+      // Only a call that (a) started its own attempt, not one that joined an
+      // in-flight Retry, and (b) came from an actual chip-seeded ask, not a
+      // plain chip removal re-triggering this effect, counts as self-initiated.
+      if (entry.chip && attemptId !== null) {
+        markSelfInitiatedOpen(attemptId);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- openSequence.open reads workspaceId/effectiveId itself; including the whole object would re-open on every state transition.
   }, [entry.open, entry.chip]);
-
-  useEffect(() => {
-    if (openSequence.state.kind === "ready") {
-      setOwnedRouteSession({ coordinatorId, session: openSequence.state.session });
-    }
-  }, [openSequence.state, coordinatorId]);
 
   useEffect(() => {
     if (openSequence.state.kind === "gone") clearChipAndDraft(coordinatorId);

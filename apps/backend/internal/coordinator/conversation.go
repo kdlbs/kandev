@@ -261,7 +261,11 @@ func (s *Service) handleConversationSessionFailure(ctx context.Context, coordina
 
 // confirmConversationTask implements step 7: a coordinator that is now gone
 // is deleted and 404; a mismatch (a race archived or replaced this task) is
-// ErrConversationConflict.
+// ErrConversationConflict. A concurrent opener can archive this exact task
+// (its own EnsureSession call observed a terminal session) without yet having
+// repointed ConversationTaskID, since that only happens on its later
+// create+CAS: the ConversationTaskID match alone cannot see that, so the task
+// is re-read too and an archived result is treated the same as a mismatch.
 func (s *Service) confirmConversationTask(ctx context.Context, coordinatorID, taskID, sessionID string) (*ConversationResult, error) {
 	reread, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
 	if errors.Is(err, ErrNotFound) {
@@ -272,6 +276,13 @@ func (s *Service) confirmConversationTask(ctx context.Context, coordinatorID, ta
 		return nil, err
 	}
 	if reread.ConversationTaskID == nil || *reread.ConversationTaskID != taskID {
+		return nil, ErrConversationConflict
+	}
+	task, err := s.conversationTasks.GetTask(ctx, taskID)
+	if err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return nil, err
+	}
+	if err != nil || task == nil || task.ArchivedAt != nil {
 		return nil, ErrConversationConflict
 	}
 	return &ConversationResult{TaskID: taskID, SessionID: sessionID}, nil

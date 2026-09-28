@@ -2,7 +2,9 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session-view";
+import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
 import { MessageTaskOriginProvider } from "@/components/task/chat/messages/message-task-origin-context";
+import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 import type { CopilotChip } from "@/hooks/domains/coordinator/copilot-store";
 import type { OpenSequenceState } from "@/hooks/domains/coordinator/use-copilot-open-sequence";
 import type { ConversationResponse } from "@/lib/api/domains/coordinator-api";
@@ -68,6 +70,8 @@ function ReadyBody({
   askKey,
   onRemoveChip,
   onSuggest,
+  onRetry,
+  retryDisabled,
 }: {
   routeSession: ConversationResponse;
   workspaceId: string;
@@ -76,10 +80,20 @@ function ReadyBody({
   askKey: number;
   onRemoveChip: () => void;
   onSuggest: (text: string) => void;
+  onRetry: () => void;
+  retryDisabled: boolean;
 }) {
+  const { t } = useTranslation();
   const isEmpty = useAppStore(
     (state) => (state.messages.bySession[routeSession.session_id]?.length ?? 0) === 0,
   );
+  const sessionState = useAppStore(
+    (state) => state.taskSessions.items[routeSession.session_id]?.state,
+  );
+  const errorMessage = useAppStore(
+    (state) => state.taskSessions.items[routeSession.session_id]?.error_message,
+  );
+  const ended = isTerminalSessionState(sessionState);
   const session: QuickChatSession = {
     kind: "chat",
     sessionId: routeSession.session_id,
@@ -91,10 +105,20 @@ function ReadyBody({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {chip && <CoordinatorCopilotChipRow chip={chip} onRemove={onRemoveChip} />}
-      {isEmpty && <CoordinatorCopilotEmptyIntro onSuggest={onSuggest} />}
+      {ended && (
+        <SessionRecoveryFeedback
+          error={errorMessage?.trim() || t("task:backendRejectedSessionRequest")}
+          notice={null}
+          onRetry={onRetry}
+          workspaceId={workspaceId}
+          retryDisabled={retryDisabled}
+          testId="session-recovery-error"
+        />
+      )}
+      {isEmpty && !ended && <CoordinatorCopilotEmptyIntro onSuggest={onSuggest} />}
       <MessageTaskOriginProvider value="coordinator">
         <QuickChatSessionView
-          key={askKey}
+          key={`${routeSession.session_id}-${askKey}`}
           session={session}
           automaticRecovery={false}
           hideSessionSelectors
@@ -157,6 +181,8 @@ export function CoordinatorCopilotBody({
         askKey={askKey}
         onRemoveChip={onRemoveChip}
         onSuggest={onSuggest}
+        onRetry={onRetry}
+        retryDisabled={state.kind === "loading"}
       />
     );
   }

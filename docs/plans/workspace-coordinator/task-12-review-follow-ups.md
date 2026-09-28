@@ -5,7 +5,7 @@ status: pending
 wave: 5
 depends_on:
   - "08-proposals-ui"
-  - "09-conversation-recovery"
+  - "09-session-recovery"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COPILOT-001

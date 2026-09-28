@@ -27,7 +27,7 @@ starts are designed in [copilot](copilot.md); the profile messages are in
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-COORDINATOR-COPILOT-004` | [Popover](#popover), [Coordinator read](#coordinator-read), [Launcher busy state](#launcher-busy-state), [Opening the conversation](#opening-the-conversation), [Empty conversation](#empty-conversation) |
+| `REQ-COORDINATOR-COPILOT-004` | [Popover](#popover), [Coordinator read](#coordinator-read), [Launcher busy state](#launcher-busy-state), [Opening the conversation](#opening-the-conversation), [Empty conversation](#empty-conversation), [Ended session](#ended-session) |
 | `REQ-COORDINATOR-COPILOT-005` | [Ask about this](#ask-about-this) |
 
 ## Popover
@@ -114,9 +114,9 @@ is discarded. There is no automatic retry. Every outcome maps to one body:
 Every error body keeps the header and Close, and Escape still works; no
 composer renders, `SessionRecoveryFeedback` is not shown (it needs a
 session), and the Coordinator lists are unaffected. `SessionRecoveryFeedback`
-is shown only inside `QuickChatSessionView`, once a session exists and cannot
-start or resume (`AC-COORDINATOR-COPILOT-004.6`). The four messages and
-**Try again** are translated copy.
+is shown only on the route-200 body, once a session exists and has ended
+([Ended session](#ended-session), `AC-COORDINATOR-COPILOT-004.6`). The four
+messages and **Try again** are translated copy.
 
 ### Empty conversation
 
@@ -128,6 +128,69 @@ same on both screens and with an empty list. Choosing it replaces the
 composer's text with the suggestion and focuses the composer; it sets no chip
 and sends nothing. The intro and suggestion disappear once the transcript
 has a message.
+
+### Ended session
+
+`QuickChatSessionView` runs with `automaticRecovery={false}`
+([Attended only](copilot.md#attended-only)), so `useSessionResumption` never
+sets the `error` or `notice` that its own `SessionRecoveryFeedback` renders
+from, and its non-passthrough branch does not mount that feedback at all.
+The popover therefore owns its ended-session display. Neither
+`useSessionResumption` nor `QuickChatSessionView` changes: both are shared
+with the task page, mobile and the Settings chat.
+
+- **Detection.** The route-200 body (`ReadyBody`) reads the session row
+  `taskSessions.items[session_id]` from the store for the route's
+  `session_id`. The row is loaded by `QuickChatSessionView`'s
+  `useEnsureTaskSession` and kept live by the launcher's `useSession`
+  subscription ([Launcher busy state](#launcher-busy-state)). The session
+  has ended exactly when `isTerminalSessionState(row.state)`
+  (`lib/ws/handlers/agent-session.ts`: `FAILED`, `CANCELLED`, `COMPLETED`)
+  holds. A missing row, or any other state, has not ended. An agent that
+  fails to start after the manager's message ends in `FAILED` with the
+  launch error in `error_message`, so a start failure needs no separate
+  signal.
+- **Display.** While the session has ended, the body renders Kandev's
+  `SessionRecoveryFeedback` (`components/task/ensure-session-error.tsx`)
+  directly above `QuickChatSessionView`, below the chip row, with: `error` =
+  the row's `error_message` trimmed, or, when that is empty or absent, the
+  existing translated `task:backendRejectedSessionRequest`; `notice` =
+  `null`; `recoveryFailure` = `null`; `workspaceId` = the popover's
+  workspace; `onRetry` = the open sequence's `retry`; `retryDisabled` =
+  `true` while the open sequence is `loading`; the default test id
+  `session-recovery-error`. The banner's title, detail and Retry label are
+  its existing translated copy; this design adds no copy. The empty-state
+  intro and suggestion ([Empty conversation](#empty-conversation)) are not
+  shown while the session has ended, even when the transcript is empty. The
+  transcript stays visible. The composer is unchanged Kandev behaviour: a
+  send into an ended session is refused client-side
+  (`requireSessionInputMode`, "Session has ended...") and nothing is sent.
+- **Retry.** Retry runs the same open sequence as **Try again** (GET, then
+  the route), joining one already in flight. The route replaces the ended
+  task ([copilot](copilot.md#conversation-task) step 2), so a 200 carries a
+  new `session_id`; the controller stores it as the held route session, the
+  launcher follows it, and `QuickChatSessionView` is keyed on the session id
+  as well as `askKey`, so no view state of the ended session carries over —
+  including the controller's own one-shot chip-seeded draft
+  (`useCoordinatorCopilot`'s `pendingDraft`): the controller clears it
+  whenever the incoming ready session's id differs from the one it
+  previously held for this coordinator, so a question seeded into the ended
+  session cannot reappear in the composer of its replacement.
+  The new session is `CREATED` and not ended, so the feedback disappears and
+  the empty state shows. Any other outcome replaces the body with that
+  outcome's row of [Opening the conversation](#opening-the-conversation), as
+  for any open. Retry starts no agent and sends no message. The chip entry
+  is kept; unsent composer text belongs to the ended session's draft
+  storage and does not carry over.
+  A new conversation whose agent also fails to start ends the same way and
+  shows the feedback again; each Retry archives one ended task. Phase 1 sets
+  no cap: every such task needed a manager's message, and all of them are
+  deleted with the coordinator or the workspace.
+- **Next open and reload.** Every open already runs the open sequence, so
+  closing and reopening the popover, **Ask about this** on any item, or
+  reloading the page returns the new conversation directly and shows no
+  feedback. The feedback appears only
+  while the popover holds a session that ended after it was returned.
 
 ## Ask about this
 
