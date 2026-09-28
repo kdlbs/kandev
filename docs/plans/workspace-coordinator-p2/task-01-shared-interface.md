@@ -10,12 +10,16 @@ requirements:
   - REQ-COORDINATOR-PERMISSIONS-001
   - REQ-COORDINATOR-PERMISSIONS-003
   - REQ-COORDINATOR-PROPOSAL-KINDS-001
+  - REQ-COORDINATOR-ACTIVITY-LOG-001
 acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-007.1
   - AC-COORDINATOR-COORDINATORS-007.3
   - AC-COORDINATOR-PERMISSIONS-001.1
   - AC-COORDINATOR-PERMISSIONS-003.1
   - AC-COORDINATOR-PROPOSAL-KINDS-001.6
+  - AC-COORDINATOR-ACTIVITY-LOG-001.3
+  - AC-COORDINATOR-ACTIVITY-LOG-001.4
+  - AC-COORDINATOR-ACTIVITY-LOG-001.6
 system_design:
   - ../../specs/coordinator/system-design/coordinators.md
   - ../../specs/coordinator/system-design/permissions.md
@@ -66,6 +70,13 @@ screen.
 - `resetConversation(tx, coordinatorID)` in the service: clear
   `conversation_task_id`, increment `config_revision`, archive after commit
   ([permissions design](../../specs/coordinator/system-design/permissions.md#conversation-reset)).
+- `internal/coordinator/activity.go`, the one log writer every later work
+  order calls: `Record(tx, row)` in the caller's transaction, a failed
+  insert failing the caller (`AC-COORDINATOR-ACTIVITY-LOG-001.6`), and
+  `RecordRefusal(...)` with 60-second coalescing under the per-coordinator
+  lock and the `unknown` class (`001.3`); rows are only ever marked undone
+  or counted (`001.4`)
+  ([design](../../specs/coordinator/system-design/activity-log.md#refusals)).
 - Store methods (no routes) for activity insert, standing-order reads
   (`ActiveStandingOrders`) and goal reads, so later work orders share one
   store surface.
@@ -75,8 +86,9 @@ screen.
 
 ## Out of scope
 
-- Routes other than the GET and list additions (tasks 02, 03, 05, 07).
-- Guard, registration and auto-approval changes (task 02).
+- Routes other than the GET and list additions (tasks 02, 03, 05, 07, 12).
+- Guard, registration and auto-approval changes (task 02); the guard's
+  `RecordRefusal` call is task 02's.
 - Any screen.
 
 ## Acceptance
@@ -103,7 +115,10 @@ Tests: store conformance and upgrade on both dialects; `ParsePolicy` with
 NULL, a partial map and garbage; the flag-off list filter hides a stored
 `resume` proposal and `open_proposals` excludes it
 (`AC-COORDINATOR-COORDINATORS-007.3`); the registry completeness test for
-the new flag (`007.1`).
+the new flag (`007.1`); a fault-injected row insert fails the caller's
+transaction (`001.6`); 10 concurrent refusals give one row with count 10
+and an unnamed action records as `unknown` (`001.3`); the store exposes no
+update other than the undo marker and the count (`001.4`).
 
 ## Likely files
 
@@ -116,7 +131,12 @@ the new flag (`007.1`).
 
 ## Dependencies
 
-- Phase 1 merged (the coordinator package and store exist).
+- Phase 1 merged (the coordinator package and store exist). Built ahead of
+  that merge, it starts from the phase-1 integration branch after phase-1
+  [task 12](../workspace-coordinator/task-12-review-follow-ups.md) has
+  passed review: that task adds `config_revision`, which
+  `resetConversation` increments, a migration this one follows, and the
+  stale-claim sweep task 04 extends.
 
 ## Risks
 

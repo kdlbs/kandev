@@ -2,7 +2,7 @@
 id: "04-proposal-kinds-backend"
 title: "Resume, message and move proposals backend"
 status: pending
-wave: 4
+wave: 3
 depends_on:
   - "02-policy-enforcement"
   - "03-activity-log-backend"
@@ -92,6 +92,11 @@ creates, and `standing_order_ids` on every propose tool.
 - No path merges a pull request or moves a task to a Done step.
 
 ## Verification
+
+Write the interleaving table first, before code: two concurrent approves of
+one proposal; the stale-claim sweep during an execution; a crash after the
+execution and before the settle; a reject racing an approve. Each row names
+the order of the operations and the expected result: one execution at most.
 
 ```bash
 make -C apps/backend test PKG=./internal/coordinator/...
