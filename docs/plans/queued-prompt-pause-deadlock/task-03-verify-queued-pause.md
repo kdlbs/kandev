@@ -159,3 +159,14 @@ Current-base merge verification (2026-09-28):
 - Mobile-chrome queued-pause, cancellation reload, and queue-reorder specs passed all 3 tests using
   those freshly built artifacts.
 - `pnpm run typecheck` and Prettier check for `type-while-busy.ts` passed.
+
+Latest-main integration verification (2026-09-28):
+
+- The newer base adds a 15-second editor-readiness check before the retry loop. The helper keeps
+  that single initial gate and the existing 5-second check for later retries.
+- Managed Chromium queued-pause, task-switch, and queue-reorder specs passed all 4 tests on the
+  latest merged tree. The run rebuilt the backend, Vite assets, and fixture plugin.
+- Mobile-chrome queued-pause, cancellation-reload, and queue-reorder specs passed all 3 tests using
+  those artifacts.
+- Web typecheck and Prettier check passed. The catalog validated 326 decisions and 1241
+  specifications; 36 specification-linter tests and all specification lint passed.

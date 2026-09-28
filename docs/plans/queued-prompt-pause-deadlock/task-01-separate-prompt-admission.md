@@ -147,3 +147,12 @@ Current-base merge verification (2026-09-28):
 - After that compatibility update, `go test -race ./internal/agent/runtime/lifecycle -count=1
   -timeout=600s` passed (93.582s). In the same merged-tree run, orchestrator passed in 441.001s,
   executor in 3.522s, and backendapp in 119.762s.
+
+Latest-main integration verification (2026-09-28):
+
+- Focused orchestrator race regressions for stream boundaries, completed-pause model switches,
+  cancellation guard handoff, rollback ownership, queued-task admission, and workflow promotion
+  passed in 2.340s.
+- After merging main at `0122427efabc03aef015af1287f8b19ce7f33a2c`, the full lifecycle race suite
+  passed in 77.527s and the backendapp race suite passed in 93.816s. The newer base adds
+  per-generation prompt-turn attribution to the lifecycle execution.

@@ -278,3 +278,23 @@ Verification on the merged tree:
 - Merge markers and unmerged index entries: none. `git diff --check`, staged diff check, and `gofmt -l` on staged Go files reported no issues.
 - `python3 scripts/list-docs.py validate`: passed with 323 decisions and 1229 specifications; `python3 scripts/lint-spec-files.test.py`: 36 passed; `python3 scripts/lint-spec-files.py --all`: passed.
 - `pnpm run typecheck` and `pnpm exec prettier --check e2e/helpers/type-while-busy.ts`: passed.
+
+## Latest-main integration verification (2026-09-28)
+
+While resolving PR #4034's conflict, `main` advanced through
+`0122427efabc03aef015af1287f8b19ce7f33a2c`. The second merge was clean. Its overlapping lifecycle
+updates add per-generation turn attribution, so the lifecycle race suite was rerun. The editor
+helper now uses one 15-second readiness check before its retry loop and keeps the 5-second check
+for retries; this avoids duplicating the initial wait added on `main`.
+
+- Focused orchestrator race regressions for stream boundaries, completed-pause model switches,
+  cancellation guard handoff, prompt-claim rollback, queued-task admission, and workflow promotion
+  passed in 2.340s.
+- `go test -race ./internal/agent/runtime/lifecycle -count=1 -timeout=600s`: passed in 77.527s.
+- `go test -race ./internal/backendapp -count=1 -timeout=600s`: passed in 93.816s.
+- Managed Chromium queued-pause, task-switch, and queue-reorder specs: 4 passed; backend, web
+  assets, and fixture plugin built from the latest merged tree.
+- Mobile-chrome queued-pause, cancellation-reload, and queue-reorder specs: 3 passed using those
+  newly built artifacts.
+- `pnpm run typecheck`, Prettier check, catalog validation (326 decisions and 1241 specifications),
+  36 specification-linter tests, and full specification lint: passed.
