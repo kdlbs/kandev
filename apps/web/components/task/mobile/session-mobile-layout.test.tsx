@@ -74,6 +74,7 @@ vi.mock("../prompt-history-panel-content", () => ({
 
 import {
   MobilePanelArea,
+  mobilePanelTopNavHeight,
   resolveMobilePluginPanel,
   resolveMobileReviewSource,
   terminalPaddingBottom,
@@ -100,6 +101,15 @@ const OTHER_FILE: OpenFileTab = {
 
 const CHAT_LINK_PATH = "src/chat-link.ts";
 const REPO = "frontend";
+
+describe("mobilePanelTopNavHeight", () => {
+  it("reserves the fixed header only when no earlier page feedback owns the offset", () => {
+    expect(mobilePanelTopNavHeight(false)).toBe("3.5rem");
+    expect(mobilePanelTopNavHeight(true)).toBe("0px");
+    expect(mobilePanelTopNavHeight(false, true)).toBe("0px");
+    expect(mobilePanelTopNavHeight(true, true)).toBe("0px");
+  });
+});
 
 function renderHandlers(initialSid: string | null = "s1") {
   const handlePanelChange = vi.fn();

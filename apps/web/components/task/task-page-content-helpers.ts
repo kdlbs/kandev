@@ -31,6 +31,26 @@ export function selectWorkspaceRepositories(
   return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
 }
 
+export function shouldReservePageLevelMobileFeedbackOffset(params: {
+  isMobile: boolean;
+  hasTaskMoveError: boolean;
+  hasEnsureSessionError: boolean;
+  hasBootstrapRecoveryError: boolean;
+  effectiveSessionId: string | null;
+  isSessionPassthrough: boolean;
+  hasResumptionError: boolean;
+  hasResumptionNotice: boolean;
+  hasStatusUnavailable: boolean;
+}): boolean {
+  const hasPageRecoveryFeedback = params.hasBootstrapRecoveryError
+    ? Boolean(params.effectiveSessionId && params.isSessionPassthrough)
+    : params.hasResumptionError || params.hasResumptionNotice || params.hasStatusUnavailable;
+  return (
+    params.isMobile &&
+    (params.hasTaskMoveError || params.hasEnsureSessionError || hasPageRecoveryFeedback)
+  );
+}
+
 type ACPDebugInfo = {
   sessionId: unknown;
   updatedAt: unknown;
