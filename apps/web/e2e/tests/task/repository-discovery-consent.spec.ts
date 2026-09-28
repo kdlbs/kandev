@@ -275,9 +275,7 @@ test.describe("Desktop repository discovery consent", () => {
           response.request().method() === "POST" &&
           response.ok(),
       );
-      await controls
-        .getByRole("button", { name: "Choose folders to discover repositories" })
-        .click();
+      await controls.getByTestId("folder-picker-trigger").click();
       expect((await addResponse).status()).toBe(201);
       rootSaved = true;
 
