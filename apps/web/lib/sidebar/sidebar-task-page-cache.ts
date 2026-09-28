@@ -87,8 +87,24 @@ export class SidebarTaskPageCache {
   }
 
   get(key: string): SidebarTaskPageResponse | null {
-    this.synchronize();
-    return this.pages.get(key)?.page ?? null;
+    const state = this.store.getState();
+    const workspaceId = state.workspaces.activeId ?? "";
+    const entry = this.pages.get(key);
+    if (
+      !entry ||
+      sidebarTaskPageScope(state) !== this.scope ||
+      (state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId] ?? 0) !== this.revision ||
+      Date.now() - entry.fetchedAt >= MAX_AGE_MS
+    )
+      return null;
+    const summaries = state.sidebarStatusSummaryByWorkspaceId?.[workspaceId];
+    if (
+      entry.page.entries.some(
+        (row) => row.task && summaries?.[row.task.id] !== this.summaries?.[row.task.id],
+      )
+    )
+      return null;
+    return entry.page;
   }
 
   private retain(key: string, page: SidebarTaskPageResponse) {

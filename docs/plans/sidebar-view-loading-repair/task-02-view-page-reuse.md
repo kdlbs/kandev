@@ -146,3 +146,12 @@ page to remain displayed until the fresh requested page arrives, then scroll onc
 after its committed render. A separate
 regression proves transient errors still expose Retry after a corrected filter;
 the reported missing-Retry scenario did not reproduce on the original head.
+
+Additional review follow-up: reproduced render-time cache lookup aborting a live
+request when observing a workspace generation that is subsequently discarded.
+Cache reads now validate scope, revision, summary references, and age without
+mutating retained pages or pending requests; request acquisition and settlement
+own synchronization. The regression first failed on the aborted signal and now
+passes, including preservation of the original page and pending response.
+Focused cache, hook, query-status, and pagination suites passed 32 tests across
+four files; targeted ESLint and frontend typecheck passed.

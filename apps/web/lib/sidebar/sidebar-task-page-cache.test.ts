@@ -186,3 +186,25 @@ it("invalidates only snapshots containing a changed task summary", async () => {
   expect(cache.get("a")).toBeNull();
   expect(cache.get("unaffected")).not.toBeNull();
 });
+
+it("keeps render-time lookups read-only across a discarded workspace change", async () => {
+  const { store, cache } = setup();
+  await load(cache, "a");
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const request = cache.request("ws", query, "b");
+  const signal = vi.mocked(querySidebarTasks).mock.calls.at(-1)?.[2]?.init?.signal;
+  store.setState({ workspaceContextGeneration: 2 });
+  expect(cache.get("a")).toBeNull();
+  expect(signal?.aborted).toBe(false);
+  store.setState({ workspaceContextGeneration: 1 });
+  expect(cache.get("a")).not.toBeNull();
+  resolve(page("b"));
+  await request.promise;
+  request.release();
+  expect(cache.get("b")).not.toBeNull();
+});
