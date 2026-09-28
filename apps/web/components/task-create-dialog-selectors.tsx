@@ -202,7 +202,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   );
 });
 
-type ExecutorProfileSelectorProps = {
+export type ExecutorProfileSelectorProps = {
   options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
   value: string;
   onValueChange: (value: string) => void;

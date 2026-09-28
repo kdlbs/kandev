@@ -20,7 +20,7 @@ export function NoCoordinatorState({ workspaceId, canManage }: NoCoordinatorStat
       <p className="text-sm">{t("coordinator:noCoordinatorBody")}</p>
       {canManage && (
         <Button asChild variant="outline" size="sm">
-          <Link href={linkToCoordinatorAdd(workspaceId)}>{t("coordinator:addCoordinator")}</Link>
+          <Link href={linkToCoordinatorAdd(workspaceId)}>{t("coordinator:addACoordinator")}</Link>
         </Button>
       )}
     </div>
