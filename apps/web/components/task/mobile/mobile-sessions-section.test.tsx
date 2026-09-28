@@ -31,6 +31,7 @@ vi.mock("@/components/state-provider", () => ({
       taskSessionsByTask: {
         itemsByTaskId: { [TASK_ID]: mocks.sessions },
         loadingByTaskId: { [TASK_ID]: false },
+        loadedByTaskId: { [TASK_ID]: true },
         errorByTaskId: {},
       },
     }),
@@ -42,6 +43,7 @@ vi.mock("@/components/state-provider", () => ({
       taskSessionsByTask: {
         itemsByTaskId: { [TASK_ID]: mocks.sessions },
         loadingByTaskId: { [TASK_ID]: false },
+        loadedByTaskId: { [TASK_ID]: true },
         errorByTaskId: {},
       },
       agentProfiles: { items: mocks.agentProfiles },

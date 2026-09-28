@@ -150,6 +150,12 @@ session disappeared. The confirmation now closes with a changed-sessions
 message and sends no delete requests. Focused regression tests and web
 typecheck passed.
 
+QA on 2026-09-28 found that an event-projected session list could appear before
+its first authoritative load completed. Bulk removal now treats that list as
+loading and rechecks the loaded state before dispatch. Two regressions failed
+before the fix. The affected 68 frontend tests, typecheck, desktop session-tab
+E2E (14/14), and phone bulk-removal E2E (1/1) passed afterward.
+
 ## Risks
 
 - `session.delete` is non-atomic across targets; a server refusal after an

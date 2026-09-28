@@ -35,6 +35,9 @@ export function useTaskBulkRemovalController({
   const hasError = useAppStore((state) =>
     taskId ? !!state.taskSessionsByTask.errorByTaskId?.[taskId] : false,
   );
+  const isLoaded = useAppStore((state) =>
+    taskId ? !!state.taskSessionsByTask.loadedByTaskId[taskId] : false,
+  );
   const reportIneligible = useCallback(
     (reason: BulkSessionRemovalReason) => {
       if (!reason) return;
@@ -47,13 +50,16 @@ export function useTaskBulkRemovalController({
     const state = store.getState();
     return {
       sessions: taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
-      isLoading: !taskId || !!state.taskSessionsByTask.loadingByTaskId[taskId],
+      isLoading:
+        !taskId ||
+        !state.taskSessionsByTask.loadedByTaskId[taskId] ||
+        !!state.taskSessionsByTask.loadingByTaskId[taskId],
       hasError: taskId ? !!state.taskSessionsByTask.errorByTaskId?.[taskId] : false,
     };
   }, [loadSessions, store, taskId]);
   const bulkRemoval = useBulkSessionRemoval({
     sessions,
-    isLoading,
+    isLoading: isLoading || !isLoaded,
     hasError,
     remove: removeById,
     getLatestSnapshot,

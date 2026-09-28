@@ -159,3 +159,11 @@ before submission, even when the remaining target IDs are unchanged. The
 confirmation closes with the existing changed-sessions message and sends no
 delete request. Focused snapshot and controller regressions failed before the
 fix and passed afterward; web typecheck passed.
+
+## QA loaded-state remediation (2026-09-28)
+
+Bulk removal now requires the task session list to be loaded, including when
+event projections make sessions visible before the first authoritative fetch.
+Confirmation rechecks that state before sending deletes. Two controller
+regressions failed before the fix; 68 affected frontend tests, typecheck,
+desktop session-tab E2E (14/14), and phone bulk-removal E2E (1/1) passed after it.

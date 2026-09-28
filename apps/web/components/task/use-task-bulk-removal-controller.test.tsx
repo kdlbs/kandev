@@ -26,18 +26,72 @@ const sessions = [
   { id: "second", state: "COMPLETED", task_id: "task-1", is_primary: true },
 ] as TaskSession[];
 
-describe("useTaskBulkRemovalController", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    getState.mockReturnValue({
-      taskSessionsByTask: {
-        itemsByTaskId: { "task-1": sessions },
-        loadingByTaskId: { "task-1": false },
-        errorByTaskId: { "task-1": null },
-      },
+beforeEach(() => {
+  vi.clearAllMocks();
+  getState.mockReturnValue({
+    taskSessionsByTask: {
+      itemsByTaskId: { "task-1": sessions },
+      loadingByTaskId: { "task-1": false },
+      loadedByTaskId: { "task-1": true },
+      errorByTaskId: { "task-1": null },
+    },
+  });
+});
+
+describe("useTaskBulkRemovalController eligibility", () => {
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 waits for an authoritative session list", () => {
+    const state = getState();
+    state.taskSessionsByTask.loadedByTaskId["task-1"] = false;
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("others", "first"));
+
+    expect(result.current.bulkRemoval.snapshot).toBeNull();
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_loading",
+      variant: "error",
     });
+    expect(removeById).not.toHaveBeenCalled();
   });
 
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 cancels confirmation if the list becomes incomplete", async () => {
+    const state = getState();
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("others", "first"));
+    state.taskSessionsByTask.loadedByTaskId["task-1"] = false;
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById).not.toHaveBeenCalled();
+    expect(result.current.bulkRemoval.snapshot).toBeNull();
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_loading",
+      variant: "error",
+    });
+  });
+});
+
+describe("useTaskBulkRemovalController", () => {
   it("clears the Remove All auto-provisioning fence after a partial failure", async () => {
     const removeById = vi.fn(async (id: string) => id !== "first");
     const { result } = renderHook(() =>
@@ -64,6 +118,7 @@ describe("useTaskBulkRemovalController", () => {
       taskSessionsByTask: {
         itemsByTaskId: { "task-1": sessions },
         loadingByTaskId: { "task-1": false },
+        loadedByTaskId: { "task-1": true },
         errorByTaskId: { "task-1": null as string | null },
       },
     };
@@ -94,6 +149,7 @@ describe("useTaskBulkRemovalController", () => {
       taskSessionsByTask: {
         itemsByTaskId: { "task-1": sessions },
         loadingByTaskId: { "task-1": false },
+        loadedByTaskId: { "task-1": true },
         errorByTaskId: { "task-1": null },
       },
     };
