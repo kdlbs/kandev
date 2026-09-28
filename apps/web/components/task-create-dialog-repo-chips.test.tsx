@@ -14,12 +14,25 @@ const mockBranches = vi.hoisted(
   }),
 );
 const mockPolicies = vi.hoisted((): { value: RepositoryBranchPolicy[] } => ({ value: [] }));
+const mockDiscovery = vi.hoisted(() => ({
+  desktopRuntime: true,
+  isLoading: false,
+  isRefreshing: false,
+  repositories: [],
+  rootStates: [],
+  homeConfirmationRequired: false,
+  failedRoots: [],
+}));
 type CreationSurfaceProps = {
   open: boolean;
   onCreated: (repository: Repository) => boolean | void;
   onOpenChange: (open: boolean) => void;
 };
 const creationSurface = vi.hoisted(() => ({ props: null as CreationSurfaceProps | null }));
+
+vi.mock("@/hooks/domains/workspace/use-repository-discovery", () => ({
+  useRepositoryDiscovery: () => mockDiscovery,
+}));
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: (source: unknown) => {
@@ -52,8 +65,12 @@ vi.mock("./task-create-dialog-remote-repo-chip", () => ({
   selectedRemoteRepositoryIdentity: () => null,
 }));
 
+vi.mock("@/app/actions/workspaces", () => ({
+  addDesktopDiscoveryRootAction: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("@/components/repository-discovery-controls", () => ({
-  RepositoryDiscoveryControls: () => <div data-testid="repository-discovery-controls" />,
+  RepositoryDiscoveryControls: () => <div data-testid={REPO_DISCOVERY_CONTROLS_TEST_ID} />,
 }));
 
 vi.mock("@/components/create-local-repository-surface", () => ({
@@ -76,6 +93,8 @@ const REPO_FRONT_ID = "repo-front";
 const REPO_BACK_ID = "repo-back";
 const REPO_CHIP_TRIGGER = "repo-chip-trigger";
 const BRANCH_CHIP_TRIGGER = "branch-chip-trigger";
+const REPO_DISCOVERY_SETTINGS_TRIGGER = "repository-discovery-settings-button";
+const REPO_DISCOVERY_CONTROLS_TEST_ID = "repository-discovery-controls";
 const DISCOVERED_REPO_PATH = "/home/me/projects/local-project";
 
 function makeRepo(id: string, name: string): Repository {
@@ -133,7 +152,7 @@ const renderInProvider = (ui: Parameters<typeof render>[0]) =>
   render(<TooltipProvider>{ui}</TooltipProvider>);
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
-  it("mounts discovery controls only inside the open repository selector", () => {
+  it("opens discovery controls dialog via the settings button in the repository selector", () => {
     renderInProvider(
       <RepoChipsRow
         fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
@@ -145,9 +164,50 @@ describe("RepoChipsRow", () => {
       />,
     );
 
-    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
+    expect(screen.queryByTestId(REPO_DISCOVERY_CONTROLS_TEST_ID)).toBeNull();
     fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
-    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+    expect(screen.getByTestId(REPO_DISCOVERY_SETTINGS_TRIGGER)).toBeTruthy();
+    expect(screen.queryByTestId(REPO_DISCOVERY_CONTROLS_TEST_ID)).toBeNull();
+
+    fireEvent.click(screen.getByTestId(REPO_DISCOVERY_SETTINGS_TRIGGER));
+    expect(screen.getByTestId(REPO_DISCOVERY_CONTROLS_TEST_ID)).toBeTruthy();
+  });
+
+  it("hides discovery settings button when desktop runtime is disabled", () => {
+    mockDiscovery.desktopRuntime = false;
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    expect(screen.queryByTestId(REPO_DISCOVERY_SETTINGS_TRIGGER)).toBeNull();
+    mockDiscovery.desktopRuntime = true;
+  });
+
+  it("adds home folder and opens discovery dialog when scan home folder hint is clicked", () => {
+    mockDiscovery.desktopRuntime = true;
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0" })] })}
+        repositories={[]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    expect(screen.getByTestId("scan-home-folder-hint-button")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("scan-home-folder-hint-button"));
+    expect(screen.getByTestId(REPO_DISCOVERY_CONTROLS_TEST_ID)).toBeTruthy();
   });
 
   it("keeps the compact Repo, Remote, and None source-mode controls and test IDs", () => {
