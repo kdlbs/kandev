@@ -59,6 +59,13 @@ const (
 	createdAtField                = "created_at"
 )
 
+const (
+	ExecutorIdleSuspensionNone         = ""
+	ExecutorIdleSuspensionInProgress   = "suspending"
+	ExecutorIdleSuspensionAgentStopped = "agent_stopped"
+	ExecutorIdleSuspensionSuspended    = "suspended"
+)
+
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
 	Limit      int
@@ -1684,6 +1691,8 @@ type Workspace struct {
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 
@@ -2632,17 +2641,18 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID                 string               `json:"id"`
-	SessionID          string               `json:"session_id"`
-	TaskID             string               `json:"task_id"`
-	ExecutionProfileID string               `json:"execution_profile_id"`
-	ExecutorID         string               `json:"executor_id"`
-	Runtime            agentruntime.Runtime `json:"runtime,omitempty"`
-	Status             string               `json:"status"`
-	Resumable          bool                 `json:"resumable"`
-	ResumeToken        string               `json:"resume_token,omitempty"`
-	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
-	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
+	ID                  string               `json:"id"`
+	SessionID           string               `json:"session_id"`
+	TaskID              string               `json:"task_id"`
+	ExecutionProfileID  string               `json:"execution_profile_id"`
+	ExecutorID          string               `json:"executor_id"`
+	Runtime             agentruntime.Runtime `json:"runtime,omitempty"`
+	Status              string               `json:"status"`
+	IdleSuspensionState string               `json:"-" db:"idle_suspension_state"`
+	Resumable           bool                 `json:"resumable"`
+	ResumeToken         string               `json:"resume_token,omitempty"`
+	LastMessageUUID     string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID    string               `json:"agent_execution_id,omitempty"`
 	// TransientAuthToken carries a decrypted agentctl token only between the
 	// lifecycle recovery inventory read and the matching remote runtime. It is
 	// excluded from JSON and database persistence.

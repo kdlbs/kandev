@@ -99,6 +99,83 @@ func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
 	}
 }
 
+// TestPostgresIdleSuspensionPolicyAndProvenance covers the PostgreSQL schema
+// columns and conditional transitions added for workspace idle suspension.
+// Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresIdleSuspensionPolicyAndProvenance(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	workspace := &models.Workspace{ID: "ws-pg-idle-parking", Name: "Idle parking"}
+	if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	loadedWorkspace, err := repo.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("load workspace defaults: %v", err)
+	}
+	if loadedWorkspace.ACPIdleSuspensionEnabled || loadedWorkspace.ACPIdleTimeoutMinutes != 120 {
+		t.Fatalf("workspace defaults = enabled:%v timeout:%d, want disabled/120",
+			loadedWorkspace.ACPIdleSuspensionEnabled, loadedWorkspace.ACPIdleTimeoutMinutes)
+	}
+	loadedWorkspace.ACPIdleSuspensionEnabled = true
+	loadedWorkspace.ACPIdleTimeoutMinutes = 45
+	if err := repo.UpdateWorkspace(ctx, loadedWorkspace); err != nil {
+		t.Fatalf("update workspace policy: %v", err)
+	}
+	loadedWorkspace, err = repo.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("reload workspace policy: %v", err)
+	}
+	if !loadedWorkspace.ACPIdleSuspensionEnabled || loadedWorkspace.ACPIdleTimeoutMinutes != 45 {
+		t.Fatalf("updated workspace policy = enabled:%v timeout:%d, want enabled/45",
+			loadedWorkspace.ACPIdleSuspensionEnabled, loadedWorkspace.ACPIdleTimeoutMinutes)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-pg-idle-parking", workspace.ID, "Idle parking", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-pg-idle-parking", TaskID: "task-pg-idle-parking", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-pg-idle-parking", SessionID: "session-pg-idle-parking", TaskID: "task-pg-idle-parking",
+		AgentExecutionID: "execution-pg-idle-parking", Status: models.ExecutorRunningStatusRunning,
+		Resumable: true, ResumeToken: "resume-pg-idle-parking", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create executor inventory: %v", err)
+	}
+	for _, transition := range [][2]string{
+		{models.ExecutorIdleSuspensionNone, models.ExecutorIdleSuspensionInProgress},
+		{models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionAgentStopped},
+		{models.ExecutorIdleSuspensionAgentStopped, models.ExecutorIdleSuspensionSuspended},
+	} {
+		if err := repo.CompareAndSetExecutorRunningIdleSuspension(
+			ctx, "session-pg-idle-parking", "execution-pg-idle-parking", time.Time{}, transition[0], transition[1],
+		); err != nil {
+			t.Fatalf("idle suspension transition %q -> %q: %v", transition[0], transition[1], err)
+		}
+	}
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "session-pg-idle-parking")
+	if err != nil {
+		t.Fatalf("load executor inventory: %v", err)
+	}
+	if running.IdleSuspensionState != models.ExecutorIdleSuspensionSuspended ||
+		running.Status != models.ExecutorRunningStatusStopped || running.ResumeToken != "resume-pg-idle-parking" {
+		t.Fatalf("suspended inventory = state:%q status:%q token:%q", running.IdleSuspensionState, running.Status, running.ResumeToken)
+	}
+}
+
 func TestPostgresTaskTitleCASAndStaleUpdate(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

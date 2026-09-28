@@ -404,6 +404,8 @@ const infraSchemaDDL = `
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
 		default_config_agent_profile_id TEXT DEFAULT '',
+		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -447,6 +449,7 @@ const infraSchemaDDL = `
 		executor_id TEXT NOT NULL,
 		runtime TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'starting',
+		idle_suspension_state TEXT NOT NULL DEFAULT '',
 		resumable INTEGER NOT NULL DEFAULT 0,
 		resume_token TEXT DEFAULT '',
 		agent_execution_id TEXT DEFAULT '',

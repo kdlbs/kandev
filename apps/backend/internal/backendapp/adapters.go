@@ -310,6 +310,8 @@ var _ interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	SuspendIdle(ctx context.Context, identity runtimeapi.IdleSuspensionIdentity) error
+	CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 	PreparePassthroughRunning(sessionID string) (func(), error)
 } = (*lifecycleAdapter)(nil)
@@ -749,6 +751,14 @@ func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, gen
 
 func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
 	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) SuspendIdle(ctx context.Context, identity runtimeapi.IdleSuspensionIdentity) error {
+	return a.mgr.SuspendIdle(ctx, identity)
+}
+
+func (a *lifecycleAdapter) CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error {
+	return a.mgr.CancelIdleSuspension(ctx, sessionID, executionID)
 }
 
 func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {

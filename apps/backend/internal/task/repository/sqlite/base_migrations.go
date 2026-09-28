@@ -299,6 +299,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
 	r.migrate.Apply("workspaces.task_sequence", `ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("workspaces.acp_idle_suspension_enabled", `ALTER TABLE workspaces ADD COLUMN acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.acp_idle_timeout_minutes", `ALTER TABLE workspaces ADD COLUMN acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0)`)
+	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,

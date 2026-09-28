@@ -43,6 +43,8 @@ type WorkspaceDTO struct {
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
 	TaskPrefix                  string    `json:"task_prefix,omitempty"`
 	TaskSequence                int       `json:"task_sequence,omitempty"`
 	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
@@ -744,6 +746,8 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
 		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: workspace.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:    workspace.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:       workspace.ACPIdleTimeoutMinutes,
 		TaskPrefix:                  workspace.TaskPrefix,
 		TaskSequence:                workspace.TaskSequence,
 		OfficeWorkflowID:            workspace.OfficeWorkflowID,

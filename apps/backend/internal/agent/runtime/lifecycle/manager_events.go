@@ -885,6 +885,12 @@ func (m *Manager) handleAgentEventAtContextResetBoundary(
 	attemptID string,
 ) {
 	event.AttemptID = attemptID
+	if execution.idleSuspensionInProgress.Load() {
+		m.logger.Debug("ignoring agent event during idle suspension",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return
+	}
 	// A terminal event that was already applied from a retained turn outcome
 	// can be redelivered when the live stream attaches. Drop that exact event
 	// instead of applying the completion a second time.

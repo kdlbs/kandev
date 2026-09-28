@@ -283,8 +283,10 @@ type AgentExecution struct {
 	// promptMu keeps exactly one SendPrompt completion waiter and one set of
 	// response buffers active for an execution. Agentctl accepts prompt requests
 	// asynchronously, so its transport-level gate alone cannot provide this.
-	promptMu                sync.Mutex
-	dispatchedPromptPending atomic.Bool
+	promptMu                   sync.Mutex
+	dispatchedPromptPending    atomic.Bool
+	idleSuspensionInProgress   atomic.Bool
+	idleSuspensionAgentStopped atomic.Bool
 	// Initial-prompt callbacks are installed before StartAgentProcess for
 	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
 	// so they must be captured before startup begins and consumed once that
@@ -553,6 +555,13 @@ func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
 	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+func (e *AgentExecution) markLifecycleActivity() {
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = time.Now()
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }

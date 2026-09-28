@@ -3059,6 +3059,16 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		// only through the narrow permission above.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
+	if options.RequireIdleSuspensionProvenance {
+		shortcut, provenanceErr := s.idleSuspensionResumeShortcut(ctx, taskID, sessionID, session, running)
+		if provenanceErr != nil {
+			return nil, provenanceErr
+		}
+		if shortcut != nil {
+			return shortcut, nil
+		}
+		options.AllowCompletedSessionResume = session.State == models.TaskSessionStateCompleted
+	}
 	attempt, owner, err := s.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil {
 		return nil, err
@@ -3280,6 +3290,31 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 
 	return execution, nil
+}
+
+func (s *Service) idleSuspensionResumeShortcut(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+	running *models.ExecutorRunning,
+) (*executor.TaskExecution, error) {
+	if running != nil && running.IdleSuspensionState == models.ExecutorIdleSuspensionNone && idleTaskSessionState(session.State) {
+		if execution, exists := s.executor.GetExecutionBySession(sessionID); exists && execution != nil {
+			return execution, nil
+		}
+	}
+	if running == nil || running.IdleSuspensionState != models.ExecutorIdleSuspensionSuspended ||
+		!idleTaskSessionState(session.State) || !running.Resumable || strings.TrimSpace(running.ResumeToken) == "" {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.ArchivedAt != nil {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
+	if allowed, _ := s.autoResumeEligibility(ctx, task, session); !allowed {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
+	return nil, nil
 }
 
 func (s *Service) captureBranchRecoveryBeforeResume(
@@ -4275,7 +4310,16 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	// 2. Check if this session's agent is running
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		resp.IsAgentRunning = true
+		resp.IsIdleSuspended = false
 		resp.NeedsResume = false
+		return resp, nil
+	}
+	if running != nil && running.IdleSuspensionState == models.ExecutorIdleSuspensionSuspended &&
+		idleTaskSessionState(session.State) {
+		resp.IsIdleSuspended = true
+		resp.IsResumable = running.Resumable && strings.TrimSpace(running.ResumeToken) != ""
+		resp.NeedsResume = resp.IsResumable
+		resp.ResumeReason = "idle_suspension"
 		return resp, nil
 	}
 

@@ -102,6 +102,8 @@ export async function updateWorkspaceAction(
     default_environment_id?: string;
     default_agent_profile_id?: string;
     default_config_agent_profile_id?: string;
+    acp_idle_suspension_enabled?: boolean;
+    acp_idle_timeout_minutes?: number;
   },
 ) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {

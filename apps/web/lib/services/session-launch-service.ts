@@ -9,7 +9,7 @@ export type SessionIntent =
   | "workflow_step"
   | "restore_workspace";
 
-export type LaunchActivationSource = "user_action" | "session_open";
+export type LaunchActivationSource = "user_action" | "session_open" | "session_focus";
 
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";

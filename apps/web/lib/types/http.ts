@@ -312,6 +312,8 @@ export type Workspace = {
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
   default_config_agent_profile_id?: AgentProfileId | null;
+  acp_idle_suspension_enabled: boolean;
+  acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;

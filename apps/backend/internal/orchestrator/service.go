@@ -49,9 +49,10 @@ func isNoActiveTurnError(err error) bool {
 
 // Common errors
 var (
-	ErrServiceAlreadyRunning = errors.New("service is already running")
-	ErrServiceNotRunning     = errors.New("service is not running")
-	ErrRouteActionActiveTurn = errors.New("route actions require a settled turn")
+	ErrServiceAlreadyRunning            = errors.New("service is already running")
+	ErrServiceNotRunning                = errors.New("service is not running")
+	ErrRouteActionActiveTurn            = errors.New("route actions require a settled turn")
+	ErrIdleSuspensionProvenanceRequired = errors.New("session is not suspended by the workspace idle policy")
 )
 
 const maxStartupTransferReconcileAttempts = 30
@@ -1133,6 +1134,11 @@ type Service struct {
 	// orchestrator instances) leave it nil and startIdleSessionReaper
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
+
+	idleParkingMu         sync.Mutex
+	idleParkingCandidates map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt    map[string]time.Time
+	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
 
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow
