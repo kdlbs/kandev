@@ -1052,6 +1052,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 			env[key] = val
 		}
 	}
+	// Keep an explicit profile configuration path intact. Mode application no
+	// longer creates or redirects this directory.
+	if configDir := req.Env["CLAUDE_CONFIG_DIR"]; configDir != "" {
+		env["CLAUDE_CONFIG_DIR"] = configDir
+	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
 	}

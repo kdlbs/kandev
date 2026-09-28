@@ -196,6 +196,21 @@ ordering.
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
 
+## Permission auto-approval has one carrier
+
+`auto_approve` on an agent profile reaches agentctl through
+`CreateInstanceRequest.AutoApprovePermissions` (and its explicit
+`AutoApprovePermissionsOverride`), which `applyApprovalOverrides` resolves onto
+`config.InstanceConfig.AutoApprovePermissions`. `process.Manager` reads that one
+field. `AGENTCTL_AUTO_APPROVE_PERMISSIONS` exists for tests and container
+bootstrap only; an explicit request override wins over it.
+
+The `/agent/configure` request still accepts an `approval_policy` string so an
+older backend can configure a newer agentctl, but nothing reads it. It was
+transmitted, stored and logged for years while no code path consulted it, which
+made the wire contract actively misleading during a permission investigation. Do
+not reintroduce a second permission field here.
+
 ## Standalone instance port leases
 
 `instance.PortAllocator` reservations are `PortLease` values containing the

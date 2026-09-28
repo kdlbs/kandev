@@ -21,6 +21,7 @@
   "closeRepositoryEditor": "リポジトリエディタを閉じる",
   "confirmDelete": "削除を確認",
   "copyFiles": "ファイルをコピー",
+  "copyFilesDestination": "エントリはこのリポジトリのワークツリーのルートに配置されます。タスクが 2 つ以上のリポジトリを持つ場合、エージェントの作業ディレクトリは 1 階層上のタスクルートになるため、エージェント向けのファイルはそこには届きません。",
   "copyFilesHelp": "Gitignore 対象のパスを新しい worktree にコピーします。項目に <0>{{symlink}}</0> を付けると、メインリポジトリへのシンボリックリンクとして扱います。<2>{{symlink}}</2> で終わるリテラルのファイル名には <1>{{escapedSymlink}}</1> を使います。",
   "copyFilesPathsResolved": "パスはリポジトリのルートを基準に解決され、各新しい worktree にその相対位置を保ったまま反映されます。worktree 内の既存ファイルは上書きされません。",
   "copyFilesPatternBraces": "<0>{{braces}}</0> の中括弧によるオルタネーション。例: <1>{{example}}</1>",

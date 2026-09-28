@@ -46,6 +46,8 @@
   "adding": "追加中…",
   "advanced": "詳細",
   "advancedSettings": "詳細設定",
+  "sessionModeNotApplied": "{{requested}} を要求しましたが、{{effective}} で動作しています。エージェントは要求されたモードを確認しませんでした。",
+  "sessionModeUnconfirmed": "{{requested}} を要求しました。エージェントは現在のモードを確認していません。",
   "workflowAgents": "ワークフローエージェント",
   "workflowAgentsTaskOnly": "このタスクだけ固定ステップのプロファイルを置き換える。",
   "workflowAgentsAffectedSteps": "ステップ: {{steps}}",

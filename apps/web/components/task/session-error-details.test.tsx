@@ -79,7 +79,7 @@ it("copies sanitized details through the shared insecure-context fallback", asyn
     fireEvent.click(screen.getByText(DETAILS_LABEL));
     fireEvent.click(screen.getByRole("button", { name: COPY_LABEL }));
     await waitFor(() => expect(copied).toEqual(["***\nconnection refused"]));
-    expect(screen.getByRole("status").textContent).toMatch(/copied/i);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/copied/i));
   } finally {
     if (original) Object.defineProperty(document, "execCommand", original);
     else Reflect.deleteProperty(document, "execCommand");

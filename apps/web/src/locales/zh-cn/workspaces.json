@@ -21,6 +21,7 @@
   "closeRepositoryEditor": "关闭仓库编辑器",
   "confirmDelete": "确认删除",
   "copyFiles": "复制文件",
+  "copyFilesDestination": "条目会放入该仓库工作树的根目录。当一个任务包含两个或更多仓库时，智能体的工作目录是上一级的任务根目录，因此面向智能体的文件无法在那里被读取。",
   "copyFilesHelp": "复制到新工作树的 gitignored 路径。在条目后追加 <0>{{symlink}}</0> 可链接回主仓库。使用 <1>{{escapedSymlink}}</1> 表示以 <2>{{symlink}}</2> 结尾的字面文件名。",
   "copyFilesPathsResolved": "路径相对于仓库根解析，并植入每个新工作树，保持相对位置。工作树中已有文件不会被覆盖。",
   "copyFilesPatternBraces": "<0>{{braces}}</0> 大括号交替，例如 <1>{{example}}</1>",

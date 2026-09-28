@@ -46,6 +46,8 @@
   "adding": "Àďďĩńĝ…",
   "advanced": "Àďvàńćēď",
   "advancedSettings": "Àďvàńćēď śēţţĩńĝś",
+  "sessionModeNotApplied": "Ŕēqũēśţēď {{requested}}, ŕũńńĩńĝ ĩń {{effective}}. Ţĥē àĝēńţ ďĩď ńōţ ćōńƒĩŕḿ ţĥē ŕēqũēśţēď ḿōďē.",
+  "sessionModeUnconfirmed": "Ŕēqũēśţēď {{requested}}. Ţĥē àĝēńţ ďĩď ńōţ ćōńƒĩŕḿ ţĥē ćũŕŕēńţ ḿōďē.",
   "workflowAgents": "Ŵōŕķƒĺōŵ àĝēńţś",
   "workflowAgentsTaskOnly": "Ŕēƥĺàćē ƒĩxēď śţēƥ ƥŕōƒĩĺēś ƒōŕ ţĥĩś ţàśķ ōńĺŷ.",
   "workflowAgentsAffectedSteps": "Śţēƥś: {{steps}}",

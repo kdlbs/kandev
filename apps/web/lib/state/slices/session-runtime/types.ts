@@ -231,6 +231,11 @@ export type SessionModeState = {
     {
       currentModeId: string;
       availableModes: SessionModeEntry[];
+      /**
+       * The mode Kandev asked for when the session did not end up in it. Set
+       * so a clamped mode is distinguishable from an applied one.
+       */
+      requestedModeId?: string;
     }
   >;
 };
@@ -542,7 +547,12 @@ export type SessionRuntimeSliceActions = {
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
+  setSessionMode: (
+    sessionId: string,
+    modeId: string,
+    availableModes?: SessionModeEntry[],
+    requestedModeId?: string,
+  ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
   setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
