@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,6 +100,22 @@ func newHangingSSHListener(t *testing.T) (addr string, acceptCount *int32) {
 	return listener.Addr().String(), &count
 }
 
+// stubSSHAgentSocket points SSH_AUTH_SOCK at a listening unix socket for the
+// duration of the test, mirroring the "agent identity connects to the
+// socket" fixture in executor_ssh_dial_test.go. buildAuthMethods only needs
+// net.Dial("unix", sock) to succeed; it never calls the agent's Signers()
+// until a real handshake asks for them.
+func stubSSHAgentSocket(t *testing.T) {
+	t.Helper()
+	sock := filepath.Join(t.TempDir(), "agent.sock")
+	listener, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("unix sockets unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	t.Setenv("SSH_AUTH_SOCK", sock)
+}
+
 func slowDialExecutor(id, addr string) *models.Executor {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -119,6 +136,16 @@ func slowDialExecutor(id, addr string) *models.Executor {
 
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.13
 func TestOrphanSweepSchedulerCoalescesConcurrentTriggersForSameExecutor(t *testing.T) {
+	// slowDialExecutor selects the ssh-agent identity source, so dialSSH must
+	// resolve a real agent socket before it ever reaches the network — without
+	// this, buildAuthMethods fails closed on a missing SSH_AUTH_SOCK and the
+	// sweep never dials, so acceptCount stays 0 and the test times out on an
+	// ambient-environment difference rather than the coalescing behavior it
+	// means to cover. The socket only needs to accept the connection: the
+	// agent protocol itself is never exercised because newHangingSSHListener
+	// never completes the handshake that would call its Signers().
+	stubSSHAgentSocket(t)
+
 	addr, acceptCount := newHangingSSHListener(t)
 	executor := slowDialExecutor("executor-1", addr)
 	store := &schedulerTestStore{executor: executor}
