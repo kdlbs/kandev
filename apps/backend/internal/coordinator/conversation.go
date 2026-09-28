@@ -128,12 +128,9 @@ func (s *Service) OpenConversation(ctx context.Context, workspaceID, coordinator
 	staleTaskID := ""
 	if found.ConversationTaskID != nil {
 		staleTaskID = *found.ConversationTaskID
-		task, err := s.conversationTasks.GetTask(ctx, staleTaskID)
-		if err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
-			return nil, err
-		}
-		if err == nil && task != nil && task.ArchivedAt == nil {
-			return s.finishConversationOpen(ctx, coordinatorID, staleTaskID)
+		result, reusable, err := s.reuseCurrentConversation(ctx, coordinatorID, staleTaskID)
+		if err != nil || reusable {
+			return result, err
 		}
 	}
 
@@ -163,6 +160,52 @@ func (s *Service) OpenConversation(ctx context.Context, workspaceID, coordinator
 		return s.resolveConversationCreateRace(ctx, coordinatorID, newTaskID)
 	}
 	return s.finishConversationOpen(ctx, coordinatorID, newTaskID)
+}
+
+// reuseCurrentConversation returns the current task's conversation when the
+// task still exists, is unarchived and its session can take a message;
+// reusable is false when the caller must create a fresh task instead.
+func (s *Service) reuseCurrentConversation(ctx context.Context, coordinatorID, taskID string) (*ConversationResult, bool, error) {
+	task, err := s.conversationTasks.GetTask(ctx, taskID)
+	if err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return nil, false, err
+	}
+	if err != nil || task == nil || task.ArchivedAt != nil {
+		return nil, false, nil
+	}
+	return s.reuseConversationTask(ctx, coordinatorID, taskID)
+}
+
+// reuseConversationTask ensures the current conversation task's session. A
+// session in a terminal state can never take another message, so the task is
+// archived and reusable is false: the caller then creates a fresh task.
+func (s *Service) reuseConversationTask(ctx context.Context, coordinatorID, taskID string) (*ConversationResult, bool, error) {
+	autoStart := false
+	resp, err := s.conversationSessions.EnsureSession(ctx, taskID, orchestrator.EnsureSessionOptions{
+		AutoStart:        &autoStart,
+		ActivationSource: orchestrator.LaunchActivationSourceSessionOpen,
+	})
+	if err != nil {
+		return nil, false, s.handleConversationSessionFailure(ctx, coordinatorID, taskID, err)
+	}
+	if !isTerminalSessionState(resp.State) {
+		result, err := s.confirmConversationTask(ctx, coordinatorID, taskID, resp.SessionID)
+		return result, true, err
+	}
+	if err := s.conversationTasks.ArchiveTask(ctx, taskID); err != nil {
+		s.logger.Warn("archive conversation task with ended session failed",
+			zap.String("coordinator_id", coordinatorID), zap.String("task_id", taskID),
+			zap.String("session_state", resp.State), zap.Error(err))
+	}
+	return nil, false, nil
+}
+
+func isTerminalSessionState(state string) bool {
+	switch taskmodels.TaskSessionState(state) {
+	case taskmodels.TaskSessionStateFailed, taskmodels.TaskSessionStateCancelled, taskmodels.TaskSessionStateCompleted:
+		return true
+	}
+	return false
 }
 
 // resolveConversationCreateRace implements step 4's zero-rows-updated branch:

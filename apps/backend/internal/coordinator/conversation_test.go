@@ -114,12 +114,13 @@ func (f *fakeConversationTasks) ListCoordinatorOriginTasks(_ context.Context, wo
 type fakeSessionEnsurer struct {
 	err      error
 	sessions map[string]string // taskID -> sessionID
+	states   map[string]string // taskID -> session state reported by EnsureSession
 	calls    []string
 	lastOpts orchestrator.EnsureSessionOptions
 }
 
 func newFakeSessionEnsurer() *fakeSessionEnsurer {
-	return &fakeSessionEnsurer{sessions: map[string]string{}}
+	return &fakeSessionEnsurer{sessions: map[string]string{}, states: map[string]string{}}
 }
 
 func (f *fakeSessionEnsurer) EnsureSession(_ context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
@@ -135,7 +136,7 @@ func (f *fakeSessionEnsurer) EnsureSession(_ context.Context, taskID string, opt
 		sessionID = "session-" + taskID
 		f.sessions[taskID] = sessionID
 	}
-	return &orchestrator.EnsureSessionResponse{TaskID: taskID, SessionID: sessionID}, nil
+	return &orchestrator.EnsureSessionResponse{TaskID: taskID, SessionID: sessionID, State: f.states[taskID]}, nil
 }
 
 // conversationTestDeps bundles a real Store-backed Service with fake
@@ -227,6 +228,46 @@ func TestOpenConversationReusesLiveUnarchivedTask(t *testing.T) {
 	}
 	if len(deps.tasks.createdIDs) != 1 {
 		t.Errorf("created %d tasks across two opens, want exactly 1 (reuse)", len(deps.tasks.createdIDs))
+	}
+}
+
+// A conversation task whose session has ended (failed, cancelled or
+// completed) can never take another message, so reopening must archive it and
+// start a fresh conversation task rather than hand the dead session back.
+func TestOpenConversationReplacesTaskWithTerminalSession(t *testing.T) {
+	for _, state := range []taskmodels.TaskSessionState{
+		taskmodels.TaskSessionStateFailed,
+		taskmodels.TaskSessionStateCancelled,
+		taskmodels.TaskSessionStateCompleted,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			deps := newConversationTestDeps(t)
+			ctx := context.Background()
+
+			first, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+			if err != nil {
+				t.Fatalf("first OpenConversation() unexpected error: %v", err)
+			}
+			deps.sessions.states[first.TaskID] = string(state)
+
+			second, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+			if err != nil {
+				t.Fatalf("second OpenConversation() unexpected error: %v", err)
+			}
+			if second.TaskID == first.TaskID {
+				t.Fatalf("second open reused task %q whose session is %s", first.TaskID, state)
+			}
+			if len(deps.tasks.archivedIDs) != 1 || deps.tasks.archivedIDs[0] != first.TaskID {
+				t.Errorf("archived = %v, want [%s]", deps.tasks.archivedIDs, first.TaskID)
+			}
+			reread, err := deps.svc.store.GetCoordinatorByID(ctx, deps.coordinator.ID)
+			if err != nil {
+				t.Fatalf("GetCoordinatorByID: %v", err)
+			}
+			if reread.ConversationTaskID == nil || *reread.ConversationTaskID != second.TaskID {
+				t.Errorf("current conversation task = %v, want %q", reread.ConversationTaskID, second.TaskID)
+			}
+		})
 	}
 }
 
