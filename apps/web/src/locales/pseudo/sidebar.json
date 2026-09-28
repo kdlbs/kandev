@@ -121,5 +121,14 @@
   "newViewNumbered": "Ńēŵ vĩēŵ {{suffix}}",
   "untitledView": "Ũńţĩţĺēď vĩēŵ",
   "workspaceContextRefreshFailed": "Ćōũĺď ńōţ ŕēƒŕēśĥ ţàśķś.",
-  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē."
+  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē.",
+  "continuedFrom": "Ćōńţĩńũēď ƒŕōḿ {{title}}",
+  "continuationLabel": "ćōńţĩńũēď",
+  "selectedTaskCount_one": "{{count}} ţàśķ śēĺēćţēď",
+  "selectedTaskCount_other": "{{count}} ţàśķś śēĺēćţēď",
+  "clearSelection": "Ćĺēàŕ śēĺēćţĩōń",
+  "nextPage": "Ńēxţ",
+  "pageLoadFailed": "Ćōũĺď ńōţ ĺōàď ţĥĩś ƥàĝē.",
+  "pageStatus": "Ƥàĝē {{page}} ōƒ {{total}}",
+  "previousPage": "Ƥŕēvĩōũś"
 }

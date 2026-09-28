@@ -12,10 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const executorProviderAvailabilityFeatureDisabled = "feature_disabled"
-
 var (
-	ErrExecutorProvidersDisabled   = errors.New("plugins: remote executor providers are disabled")
 	ErrExecutorProviderUnavailable = errors.New("plugins: executor provider is unavailable")
 )
 
@@ -34,7 +31,6 @@ func (s *Service) ListExecutorProviders(ctx context.Context) ([]models.ExecutorP
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	enabled := s.remoteExecutorProvidersEnabled()
 	providers := make([]models.ExecutorProvider, 0)
 	for _, record := range s.List() {
 		for _, declared := range record.ExecutorProviders {
@@ -68,8 +64,6 @@ func (s *Service) ListExecutorProviders(ctx context.Context) ([]models.ExecutorP
 				},
 			}
 			switch {
-			case !enabled:
-				entry.AvailabilityCause = executorProviderAvailabilityFeatureDisabled
 			case record.Status != StatusActive:
 				entry.AvailabilityCause = "plugin_disabled"
 			default:
@@ -230,10 +224,7 @@ func (s *Service) invokeExecutorProvider(
 	})
 }
 
-func validateExecutorProviderAdmission(enabled bool, record *store.Record, key string) (*manifest.ExecutorProvider, error) {
-	if !enabled {
-		return nil, ErrExecutorProvidersDisabled
-	}
+func validateExecutorProviderAdmission(record *store.Record, key string) (*manifest.ExecutorProvider, error) {
 	if record == nil || record.Status != StatusActive || !record.Capabilities.ExecutorProvider {
 		return nil, ErrExecutorProviderUnavailable
 	}
@@ -287,11 +278,6 @@ func (s *Service) withExecutorProvider(
 	if call == nil {
 		return errors.New("plugins: executor provider callback is required")
 	}
-	enabled := s.remoteExecutorProvidersEnabled()
-	if !enabled {
-		return ErrExecutorProvidersDisabled
-	}
-
 	lock := s.dispatchLocks.lockFor(pluginID)
 	lock.RLock()
 	defer lock.RUnlock()
@@ -299,7 +285,7 @@ func (s *Service) withExecutorProvider(
 	if err != nil {
 		return err
 	}
-	provider, err := validateExecutorProviderAdmission(enabled, record, providerKey)
+	provider, err := validateExecutorProviderAdmission(record, providerKey)
 	if err != nil {
 		return err
 	}
@@ -318,14 +304,8 @@ func (s *Service) withExecutorProvider(
 	return call(callCtx, remote, provider)
 }
 
-func (s *Service) remoteExecutorProvidersEnabled() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.remoteExecutorPluginsEnabled
-}
-
 func (s *Service) validateExecutorProviderRuntime(ctx context.Context, record *store.Record) error {
-	if !s.remoteExecutorProvidersEnabled() || record == nil || len(record.ExecutorProviders) == 0 {
+	if record == nil || len(record.ExecutorProviders) == 0 {
 		return nil
 	}
 	remote, ok := s.pluginRemote(record.ID)

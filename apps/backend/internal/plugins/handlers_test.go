@@ -331,6 +331,7 @@ func TestEnableDisableHandlersTransitionStatus(t *testing.T) {
 
 func TestDisableHandlerWarnsThatRemoteExecutorResourcesMayRemain(t *testing.T) {
 	router, svc := newAdminTestRouter(t)
+	prepareExecutorProviderTestRuntime(t, svc.Runtime().(*fakeRuntime))
 	if _, err := svc.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1})); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}

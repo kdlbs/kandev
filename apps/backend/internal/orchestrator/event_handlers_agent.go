@@ -926,6 +926,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// returns, by which point completeTurnForSession below has already
 	// removed it from activeTurns. See markReadyTurn's doc comment.
 	s.markReadyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration, turnAtEventFire)
+	if err := s.settleManagedInputTurn(
+		ctx, data.TaskID, data.SessionID, turnAtEventFire, data.AgentExecutionID,
+		messagequeue.ManagedInputStateCompleted, "",
+	); err != nil {
+		s.logger.Warn("failed to settle completed managed input",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", turnAtEventFire), zap.Error(err))
+	}
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
@@ -1551,12 +1559,15 @@ func (s *Service) executeQueuedMessageWithReservation(
 ) {
 	promptCtx := context.Background() // Use a fresh context for async execution
 	reservedSessionID := queuedMsg.SessionID
+	allowFollowupDrain := true
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
 	}
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
-		s.drainQueuedDispatchIfPending(reservedSessionID)
+		if allowFollowupDrain {
+			s.drainQueuedDispatchIfPending(reservedSessionID)
+		}
 		if s.onQueuedMessageExecutionComplete != nil {
 			s.onQueuedMessageExecutionComplete()
 		}
@@ -1588,6 +1599,31 @@ func (s *Service) executeQueuedMessageWithReservation(
 			)
 			return
 		}
+	}
+	if _, managed := managedInputIDFromQueueMessage(queuedMsg); managed && queuedMsg.IsDeliveryAttempted() {
+		var identity messagequeue.QueueSessionIdentity
+		if reservation != nil {
+			identity = reservation.identity
+		}
+		var identityErr error
+		if identity.SessionIncarnationID == "" && s.messageQueue != nil {
+			identity, identityErr = s.messageQueue.ResolveSessionIdentity(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID)
+		}
+		if identityErr != nil || identity.SessionIncarnationID == "" {
+			allowFollowupDrain = false
+			s.logger.Warn("managed input has a prior dispatch attempt but its queue identity cannot be resolved",
+				zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+				zap.String("queue_id", queuedMsg.ID), zap.Error(identityErr))
+			return
+		}
+		reconciled, reconcileErr := s.reconcileAttemptedManagedInput(promptCtx, identity, queuedMsg)
+		if reconcileErr != nil || !reconciled {
+			allowFollowupDrain = false
+			s.logger.Warn("managed input dispatch attempt could not be reconciled; retaining it without replay",
+				zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+				zap.String("queue_id", queuedMsg.ID), zap.Error(reconcileErr))
+		}
+		return
 	}
 
 	if s.isSessionResetInProgress(queuedMsg.SessionID) {
@@ -1660,7 +1696,27 @@ func (s *Service) executeQueuedMessageWithReservation(
 	)
 	afterDispatch := s.queuedMessageAfterDispatch(promptCtx, queuedMsg, lifecyclePrompt)
 	var beforeDispatch func() error
-	if queuedMsg.IsDurablePlanComment() {
+	managedInputID, managedInput := managedInputIDFromQueueMessage(queuedMsg)
+	if managedInput {
+		afterDispatch = nil
+	}
+	managedInputRecorded := false
+	if managedInput {
+		beforeDispatch = func() error {
+			if s.messageQueue == nil || dispatchIdentity.SessionIncarnationID == "" {
+				return errors.New("managed input dispatch requires an exact queue identity")
+			}
+			if err := s.messageQueue.MarkDeliveryAttemptedForSession(
+				promptCtx, dispatchIdentity, []messagequeue.QueuedMessage{*queuedMsg},
+			); err != nil {
+				return err
+			}
+			deliveryAttempted = true
+			queuedMsg.Metadata[messagequeue.MetadataDeliveryAttempted] = true
+			markQueuedUserMessageRecorded(queuedMsg)
+			return nil
+		}
+	} else if queuedMsg.IsDurablePlanComment() {
 		beforeDispatch = s.planCommentDeliveryBoundary(
 			promptCtx, dispatchIdentity, queuedMsg, &deliveryAttempted,
 		)
@@ -1671,10 +1727,26 @@ func (s *Service) executeQueuedMessageWithReservation(
 		afterClaim:           afterClaim,
 		afterDispatch:        afterDispatch,
 		beforeDispatch:       beforeDispatch,
-		disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
+		disableDispatchRetry: queuedMsg.IsDurablePlanComment() || managedInput,
 		configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
 		onAccepted: func(turnID string) {
 			s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
+			if !managedInput {
+				return
+			}
+			identity := dispatchIdentity
+			if identity.SessionIncarnationID == "" && s.messageQueue != nil {
+				identity, _ = s.messageQueue.ResolveSessionIdentity(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID)
+			}
+			var recordErr error
+			managedInputRecorded, recordErr = s.recordManagedInputAcceptance(promptCtx, identity, queuedMsg, turnID)
+			if recordErr != nil {
+				s.logger.Error("failed to record accepted managed input execution",
+					zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+					zap.String("input_id", managedInputID), zap.String("turn_id", turnID), zap.Error(recordErr))
+			} else if managedInputRecorded {
+				s.publishQueueStatusEventForIdentity(promptCtx, identity)
+			}
 		},
 	}
 	if preparedPromptContent != nil {
@@ -1698,6 +1770,25 @@ func (s *Service) executeQueuedMessageWithReservation(
 				0,
 			)
 		}
+	}
+	if managedInput && deliveryAttempted {
+		identity := dispatchIdentity
+		if identity.SessionIncarnationID == "" && s.messageQueue != nil {
+			identity, _ = s.messageQueue.ResolveSessionIdentity(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID)
+		}
+		if !managedInputRecorded {
+			reconciled, reconcileErr := s.reconcileAttemptedManagedInput(promptCtx, identity, queuedMsg)
+			if reconcileErr != nil || !reconciled {
+				allowFollowupDrain = false
+				s.logger.Error("accepted managed input could not be reconciled; retaining its attempted queue entry",
+					zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+					zap.String("input_id", managedInputID), zap.Error(reconcileErr))
+			}
+			return
+		}
+		// The receipt transition atomically removed this managed row from the
+		// shared FIFO. Ordinary acknowledgement could race a successor input.
+		return
 	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
@@ -2946,6 +3037,21 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// this same turn instead of lazily opening a second empty turn — otherwise
 	// both turns would emit a spurious empty-turn notice.
 	failedTurnID := s.markTurnErrorTerminated(ctx, data.SessionID)
+	if failedTurnID != "" && data.AgentExecutionID != "" {
+		state := messagequeue.ManagedInputStateUncertain
+		outcome := "execution_failed_effects_unknown"
+		if data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved {
+			state = messagequeue.ManagedInputStateFailed
+			outcome = "execution_failed_without_observed_effects"
+		}
+		if err := s.settleManagedInputTurn(
+			ctx, data.TaskID, data.SessionID, failedTurnID, data.AgentExecutionID, state, outcome,
+		); err != nil {
+			s.logger.Warn("failed to settle failed managed input",
+				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+				zap.String("turn_id", failedTurnID), zap.Error(err))
+		}
+	}
 
 	// Complete the current turn.
 	if !completionFollowUp {
@@ -3754,13 +3860,17 @@ func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, te
 // Start fresh becomes the primary action and Resume is kept but flagged as
 // likely-to-fail, since the agent's persisted state is poisoned.
 func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError, resumeCorrupted bool) []map[string]interface{} {
-	resumeTooltip := "Re-launch with resume flag — keeps all previous messages and context"
+	resumeTooltip := "Resuming keeps your previous messages and context."
+	resumeTooltipKey := "sessionRecoveryResumeDescription"
 	if resumeCorrupted {
-		resumeTooltip = "Resume will likely fail again — this session's saved state is corrupted. Prefer Start fresh."
+		resumeTooltip = "Resuming will likely fail again because this session's saved state is corrupted. Start a fresh session instead."
+		resumeTooltipKey = "sessionRecoveryCorruptedDescription"
 	}
 	resume := func() map[string]interface{} {
-		return wsRecoveryAction(taskID, sessionID, "resume",
+		action := wsRecoveryAction(taskID, sessionID, "resume",
 			"Resume session", "refresh", resumeTooltip, recoveryResumeButtonTestID)
+		action["tooltip_key"] = resumeTooltipKey
+		return action
 	}
 
 	freshLabel, freshTestID := "Start fresh session", recoveryFreshButtonTestID
@@ -3768,7 +3878,8 @@ func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError,
 		freshLabel, freshTestID = "Restart session", recoveryRestartButtonTestID
 	}
 	fresh := wsRecoveryAction(taskID, sessionID, "fresh_start", freshLabel, "player-play",
-		"New agent process on the same workspace — no previous conversation context", freshTestID)
+		"Starting fresh uses the same workspace without previous conversation context.", freshTestID)
+	fresh["tooltip_key"] = "sessionRecoveryFreshDescription"
 
 	actions := []map[string]interface{}{}
 	if resumeCorrupted {

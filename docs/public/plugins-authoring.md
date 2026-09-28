@@ -102,12 +102,12 @@ directory.
 
 ## Choose a plugin shape
 
-| Shape             | Package contents                                           | Typical contract                                                        | Minimal capability set                                 |
-| ----------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
-| Backend plugin    | Go binary and manifest                                     | events, webhooks, Host data, state, secrets, or utility-agent calls     | only the capabilities used by the backend              |
-| UI-focused plugin | no-op managed binary, ui/bundle.js, optional styles/assets | routes, nav, named slots, WebSocket handlers, keybindings, shared store | ui.bundle; add ui.keybindings when declaring shortcuts |
-| Combined plugin   | Go binary plus UI bundle                                   | UI calls a declared webhook or backend API; backend uses Host           | union of the two surfaces, kept least-privilege        |
-| Isolated web app  | manifest plus static HTML, CSS, JS, and assets             | task or workspace canvas inside a sandboxed iframe                     | only the Kandev data, event, state, and network access it needs |
+| Shape             | Package contents                                           | Typical contract                                                        | Minimal capability set                                          |
+| ----------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Backend plugin    | Go binary and manifest                                     | events, webhooks, Host data, state, secrets, or utility-agent calls     | only the capabilities used by the backend                       |
+| UI-focused plugin | no-op managed binary, ui/bundle.js, optional styles/assets | routes, nav, named slots, WebSocket handlers, keybindings, shared store | ui.bundle; add ui.keybindings when declaring shortcuts          |
+| Combined plugin   | Go binary plus UI bundle                                   | UI calls a declared webhook or backend API; backend uses Host           | union of the two surfaces, kept least-privilege                 |
+| Isolated web app  | manifest plus static HTML, CSS, JS, and assets             | task or workspace canvas inside a sandboxed iframe                      | only the Kandev data, event, state, and network access it needs |
 
 ## Build an isolated web application
 
@@ -243,10 +243,42 @@ underscore. Very long names receive a short stable hash suffix after the slug
 is truncated. Tool names are host-owned; the plugin-local `name` is used for
 the gRPC dispatch.
 
-Tools may target `kanban-task`, `office-task`, or both. They are not exposed to
-configuration or external MCP clients. Kandev validates the input and optional
-output JSON Schemas, supplies task/session/workspace/surface context, enforces
-a 30-second deadline and 1 MiB result limit, and does not retry calls.
+For a managed conversation, declare the restricted surface and its capability:
+
+```yaml
+capabilities:
+  api_write: [managed_agent_tools]
+agent_tools:
+  - name: read_task
+    description: Read the current task summary.
+    surfaces: [managed-conversation]
+    input_schema:
+      type: object
+      additionalProperties: false
+```
+
+Tools may target `kanban-task`, `office-task`, or both. A tool that targets
+`managed-conversation` is separate: the manifest must include
+`capabilities.api_write: [managed_agent_tools]`, and each retained conversation
+selects up to 16 declared tools through `ManagedAgentConversationSpec.AgentToolNames`.
+The workspace must grant `host.v2.write:managed_agent_tools`. The broker exposes
+only that instance's selected tools and rejects native tools, ambient MCP
+servers, and other plugins for the restricted turn.
+
+Managed tool calls are not available on any agent provider yet. Kandev rejects
+the launch before creating an execution until an adapter passes the complete
+restriction tests and a real provider smoke. Do not treat the manifest surface
+or an approved capability as evidence that a provider is supported.
+
+Tools are not exposed to configuration or external MCP clients. Kandev validates
+the input and optional output JSON Schemas, supplies task/session/workspace/surface
+context, enforces a 30-second deadline and 1 MiB result limit, and does not retry
+calls. For managed calls, Kandev also supplies the current installation,
+conversation and approval revisions, manifest digest, selected names, and
+execution ID from the authenticated broker context. Tool arguments cannot set
+these values. Approval changes invalidate retained policy and request normal
+runtime cancellation; the plugin must refresh the conversation policy before a
+new managed turn can start.
 
 The optional SDK method is:
 
@@ -255,9 +287,13 @@ InvokeAgentTool(context.Context, *pluginsdk.AgentToolRequest) (*pluginsdk.AgentT
 ```
 
 The request includes immutable invocation, task, session, workspace, and
-surface context. Return required fallback text, optional structured content,
-and `IsError` when the operation failed. Declaring a tool does not grant Host
-API capabilities; use the existing `capabilities` fields for those permissions.
+surface context. Managed calls also include installation ID, conversation and
+approval revisions, manifest digest, selected tool names, and the current
+execution ID. Kandev derives these fields from its authenticated broker and
+retained task state; the agent cannot set them in tool arguments. Return required
+fallback text, optional structured content, and `IsError` when the operation
+failed. Declaring a tool does not grant Host API capabilities; use the existing
+`capabilities` fields for those permissions.
 
 ## Security and capabilities
 
@@ -271,7 +307,7 @@ curated React, UI, and app-store surface.
   internal/... packages or call undocumented REST endpoints.
 - state gates Host state; secrets gates RevealSecret and plugin-owned secret
   methods; each api_read resource gates its reader; api_write gates
-  task/message mutations and interaction responses; agent_invoke gates
+  task/message mutations, interaction responses, and linked issue writeback; agent_invoke gates
   utility-agent calls; and capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
@@ -287,11 +323,13 @@ curated React, UI, and app-store surface.
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
 - Plugin installations also carry a host-minted opaque installation identity
-  and a generic capability-approval ledger. That ledger records approval
-  history, exact approval revisions, and revocation tombstones for the host
-  boundary, but there is no public mutation UI in this release. Future exact
-  Host adapters consume the approval receipt/query surface; they do not derive
-  authority from plugin IDs, package digests, or workspace state.
+  and a workspace-scoped capability-approval ledger. A workspace manager can
+  grant a subset of declared Host v2 capabilities from Settings > Plugins >
+  the installed plugin's Workspace access section. Each change needs a reason,
+  uses an exact approval revision, and appears in the audit history. Revoking
+  access blocks later Host v2 commands. A plugin cannot grant or renew its own
+  access. After an upgrade changes the declared capabilities, a workspace
+  manager must review and save the approval again.
 
 An isolated web app has a separate iframe and sandbox boundary. Kandev loads it
 same-origin with the host, so its trusted source can use the viewing user's
@@ -303,15 +341,15 @@ for the runtime boundary.
 
 ## Storage decision table
 
-| Need                                      | Use                                                                  | Scope/lifecycle                                                                                       | Capability or rule                                                              |
-| ----------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars             |
-| Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                              | Canvas instance; survives restart while the instance remains                 | `state` grant, store app-specific shared values, not duplicate task data       |
-| Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
-| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Use browser storage for user-scoped client data; keep shared app values in canvas state |
-| Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess             |
-| Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                    |
-| Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations    |
+| Need                                      | Use                                                                  | Scope/lifecycle                                                                                       | Capability or rule                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars                     |
+| Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                               | Canvas instance; survives restart while the instance remains                                          | `state` grant, store app-specific shared values, not duplicate task data                |
+| Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId         |
+| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                                                 | Use browser storage for user-scoped client data; keep shared app values in canvas state |
+| Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess                     |
+| Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                            |
+| Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations            |
 
 Host state is not host.storage: Host state is plugin-scoped backend state with
 no transaction primitive, so design updates to be idempotent; host.storage
@@ -437,12 +475,59 @@ The turns hook follows the same scope and lifecycle rules, favorites remain
 read-only and reactive, and `session.removed` retains visible rows while
 closing future reads.
 
-| Need | Browser facade | Go Host API |
-| --- | --- | --- |
-| Surface | `host.conversation` or `conversation.history` | `host.Messages().List` |
-| Runtime | Native UI bundle | Plugin server process |
-| Data | Sanitized browser DTOs and revision-bound updates | Typed paginated reader |
-| Forbidden shortcut | `host.store`, raw WS, `/api/v1` | Private application imports |
+| Need               | Browser facade                                    | Go Host API                 |
+| ------------------ | ------------------------------------------------- | --------------------------- |
+| Surface            | `host.conversation` or `conversation.history`     | `host.Messages().List`      |
+| Runtime            | Native UI bundle                                  | Plugin server process       |
+| Data               | Sanitized browser DTOs and revision-bound updates | Typed paginated reader      |
+| Forbidden shortcut | `host.store`, raw WS, `/api/v1`                   | Private application imports |
+
+### Managed conversation and task surfaces
+
+Use the shared Host components for an installation-owned conversation. Import
+the prop and controller types from `@kandev/plugin-sdk`; the plugin owns the
+controller adapter and calls its declared workspace actions.
+
+```tsx
+return host.jsx(host.ui.WorkspaceAgentChat, {
+  conversation: status,
+  controller,
+  instances,
+  tasksPanel: host.jsx(host.ui.WorkspaceTaskStatus, { taskId: status.taskId }),
+});
+```
+
+`WorkspaceAgentChat` renders a desktop chat/task split and phone Chat, Tasks,
+and Outcomes tabs. It owns the ordered transcript, stable retry identity,
+durable input queue controls, instance drawer, pause/resume, native permission
+and clarification controls, and guarded-recovery confirmation. Supply optional
+`tasksPanel` and `outcomesPanel` nodes. After uninstall, opening the retained
+task's native `/t/<task-id>` route shows a host-owned, read-only transcript
+without loading the removed plugin's UI.
+
+`WorkspaceTaskStatus` and `WorkspaceTaskUsage` use Kandev's authenticated
+first-party reads. Plugins can use `host.queries?.useTaskStatus(taskId)` and
+`host.queries?.useTaskUsage(taskId, sessionId)` for their own layouts. These
+facades return bounded projections; task status includes the canonical task
+state and safe summary fields. Usage keeps token totals, estimated and unpriced
+counts, output completeness, and integer `costSubcents` distinct. Divide
+`costSubcents` by 10,000 to display USD. Do not describe missing usage as a
+measured free run.
+
+The optional `host.interactions?.issueResponseReceipt(...)` method obtains a
+short-lived, single-use receipt for the signed-in person's pending response.
+The Host checks native `session.control` access and the interaction's observed
+resource version. Pass the receipt unchanged to your controller's exact
+permission or clarification action. A plugin cannot approve an interaction by
+calling its action without a human response receipt.
+
+For recovery, show the control only when the current provider and Host operation
+support it and the exact session observation includes both its resource version
+and execution ID. `ListSessionsExact` returns those fences to a Go plugin with
+`host.v2.read:sessions`; `RecoverSessionExact` also requires
+`host.v2.write:execution`. The Host checks both values again before resuming, so
+a replacement execution is not affected. Use the native confirmation dialog
+before submitting the request.
 
 ### Frontend hook/API matrix
 
@@ -636,23 +721,23 @@ display-only until Kandev calls the plugin again to authorize it for submission.
 registerComponent currently has these mounted slots. The source type is open
 to strings, but an unmounted name renders nowhere.
 
-| Slot                      | Mounted location                                                                           | slotProps                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| task-sidebar              | Bottom of task-detail sidebar                                                              | none                                                             |
-| settings-nav              | Settings navigation tree                                                                   | none                                                             |
-| chat-input-actions        | Task or Quick Chat composer toolbar                                                        | PluginComposerSlotProps                                          |
-| task-create-input-actions | Task creation composer toolbar                                                             | PluginComposerSlotProps                                          |
-| new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
-| chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
-| chat-top-bar              | Session top bar or phone Plugins menu                                                      | ChatTopBarSlotProps                                              |
-| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu; a task toolbar from the same plugin takes precedence | MainTopBarSlotProps                                              |
-| app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
-| app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
-| plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
-| task-card-indicators      | Kanban card, beside the PR status icon                                                     | { taskId, workspaceId, workflowStepId }                          |
-| task-card-tags            | Kanban card, its own row below the badges row                                              | { taskId, workspaceId, workflowStepId }                          |
-| task-row-metadata         | Sidebar task tree and `/tasks` rows                                                        | TaskRowMetadataSlotProps                                         |
-| sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps                                 |
+| Slot                      | Mounted location                                                                                      | slotProps                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| task-sidebar              | Bottom of task-detail sidebar                                                                         | none                                                          |
+| settings-nav              | Settings navigation tree                                                                              | none                                                          |
+| chat-input-actions        | Task or Quick Chat composer toolbar                                                                   | PluginComposerSlotProps                                       |
+| task-create-input-actions | Task creation composer toolbar                                                                        | PluginComposerSlotProps                                       |
+| new-session-input-actions | New-session composer toolbar                                                                          | PluginComposerSlotProps                                       |
+| chat-submit-decoration    | Layer over the composer's send button                                                                 | ChatSubmitDecorationSlotProps                                 |
+| chat-top-bar              | Session top bar or phone Plugins menu                                                                 | ChatTopBarSlotProps                                           |
+| main-top-bar              | Home/Kanban/Tasks top bar or phone Plugins menu; a task toolbar from the same plugin takes precedence | MainTopBarSlotProps                                           |
+| app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                               | AppStatusBarSlotProps                                         |
+| app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                              | AppStatusBarSlotProps                                         |
+| plugin-settings           | Top of this plugin's Settings > Plugins page                                                          | { pluginId, status }; owner-scoped to the plugin being viewed |
+| task-card-indicators      | Kanban card, beside the PR status icon                                                                | { taskId, workspaceId, workflowStepId }                       |
+| task-card-tags            | Kanban card, its own row below the badges row                                                         | { taskId, workspaceId, workflowStepId }                       |
+| task-row-metadata         | Sidebar task tree and `/tasks` rows                                                                   | TaskRowMetadataSlotProps                                      |
+| sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat            | SidebarWorkspaceActionsSlotProps                              |
 
 ### Standard actions in component slots
 
@@ -816,29 +901,157 @@ subscription vocabulary and wildcard rules are in the
 
 ### Host API matrix
 
-| Host surface          | Methods                                                                        | Required manifest capability                                                | Notes                                                                                                                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| State                 | GetState, SetState, DeleteState, ListState                                     | state: true                                                                 | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                      |
-| Config                | GetConfig                                                                      | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
-| Secrets               | RevealSecret, GetSecret, SetSecret, DeleteSecret                               | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
-| Tasks                 | Tasks().List, Tasks().Get                                                      | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
-| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Create and Update support priority. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
-| Sessions              | Sessions().List, Sessions().CodeStats                                          | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
-| Workspaces            | Workspaces().List                                                              | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
-| Workflows             | Workflows().List, Workflows().ListSteps                                        | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
-| Agent profiles        | AgentProfiles().List                                                           | api_read: agent_profiles                                                    | Global agent profiles exposed by the Host data API                                                                                                                                          |
-| Repositories          | Repositories().List                                                            | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
-| Messages              | Messages().List                                                                | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
-| Message send          | Messages().Send                                                                | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
-| Interactions          | Interactions().ListPending, Interactions().Get                                 | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
-| Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions                                                     | Routed through the services the native UI drives; first terminal response wins                                                                                                              |
-| Agent invocation      | InvokeUtilityAgent(ctx, prompt, options...)                                    | agent_invoke: true                                                          | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
-| Agent conversations   | AgentConversations(host): Ensure, Dispatch, Delete                             | agent_conversation: true                                                    | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin |
+| Host surface               | Methods                                                                                                                          | Required manifest capability                                                                                                                      | Notes                                                                                                                                                                                                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| State                      | GetState, SetState, DeleteState, ListState                                                                                       | state: true                                                                                                                                       | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                                                                                                                    |
+| Config                     | GetConfig                                                                                                                        | None                                                                                                                                              | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                                                                                                                         |
+| Secrets                    | RevealSecret, GetSecret, SetSecret, DeleteSecret                                                                                 | secrets: true                                                                                                                                     | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                                                                                                                       |
+| Tasks                      | Tasks().List, Tasks().Get                                                                                                        | api_read: tasks                                                                                                                                   | Typed DTOs and opaque pagination cursor                                                                                                                                                                                                                                                   |
+| Tasks writes               | Tasks().Create, Tasks().Update, Tasks().Move                                                                                     | api_write: tasks                                                                                                                                  | Implemented; routed through Kandev services so events/WS updates fire. Create and Update support priority. Update rejects a workflow step change; Move is the only path that moves a task between steps                                                                                   |
+| Exact task update          | `HostV2(host)` and `ExactHost.UpdateTaskExact`                                                                                   | Declared `api_write: tasks` plus active workspace grant for `host.v2.write:tasks`                                                                 | Optional Host v2 extension; requires task `resource_version`, approval revision, manifest digest, and idempotency key. Writes title, description, state, or priority                                                                                                                      |
+| Exact task commands        | `HostTaskCommands(host)`, `CreateTask`, `SetLabels`, `Assign`, `Move`, `Archive`, `AddRelation`, `RemoveRelation`, `SendMessage` | Task writes require `api_write: tasks` plus `host.v2.write:tasks`; messages require `api_write: messages` plus `host.v2.write:messages`           | Version-checked commands return durable receipts; when a management claim is active, task mutations and message admission also require the current manager instance key and claim generation                                                                                           |
+| Workspace administration  | `HostWorkspaceAdministration(host)`, `Apply`                                                                                   | Defaults: `api_write: workspaces` plus `host.v2.write:workspaces`; workflows and steps: `api_write: workflows` plus `host.v2.write:workflows`; repositories: `api_write: repositories` plus `host.v2.write:repositories` | One typed operation per call. Commands use observed versions, approval revision, manifest digest, and an idempotency key. Only supported non-destructive settings are available.                                                                                                      |
+| Task management claims    | `HostTaskManagementClaims(host)`, `Acquire`, `Transfer`, `Release`                                                               | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Optional task owner, independent of worker assignment; claim changes compare task and claim versions and create an audit entry; claims never time out into another owner                                                                                                                  |
+| Completion gates          | `HostTaskCompletionGates(host)`, `SetCriteria`, `Verify`                                                                         | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Task-version, criteria-revision, claim-generation, and idempotency fenced; returns typed criteria, evidence, and blockers; weakening unmet requirements and one-move overrides remain native human actions                                                                                 |
+| Task directives            | `IssueDirective`, `ResolveDirective`                                                                                             | `api_write: task_directives` plus `host.v2.write:task_directives`; delegated capability must also be approved for the target                      | Short-lived, version-fenced request records; instruction and resolution bodies are represented by digests                                                                                                                                                                                 |
+| Native task deletion       | `PluginOwnedTaskTrees().Preview`; legacy `Delete` remains in the v1 SDK                                                          | Preview is source-scoped; native deletion is a Human-only task UI action                                                                          | The current Host denies plugin `Delete` with `PermissionDenied` and `native_human_confirmation_required`; see [deletion consent](#native-task-deletion-consent)                                                                                                                           |
+| Exact execution controls   | `HostExecutionCommands(host)`: `EnsureTaskRun`, `StopTaskRun`, `RecoverSession`, `CancelPendingTaskTransition`, `GetSessionModeContext`, `SetSessionMode` | Writes require `api_write: execution` plus `host.v2.write:execution`; mode reads require `api_read: sessions` plus `host.v2.read:sessions` | Exact task/session versions, execution IDs, and the observed management claim generation fence controls; the Host derives the caller installation and serializes effects with ownership changes. Recovery uses normal launch admission; unsafe provider modes are filtered |
+| Managed conversations      | `ExactHost.ManagedAgentConversations()`                                                                                          | `api_read` and/or `api_write: managed_agent_conversations`, plus matching Host v2 workspace grant                                                 | Installation-owned hidden conversations with revisioned launch settings, pause state, retained lifecycle, and durable mutation receipts                                                                                                                                                   |
+| Managed conversation input | `EnqueueInput`, `GetInput`, `ListInputs`, `CancelInput`, `Dispatch`                                                              | Reads use `api_read: managed_agent_conversations`; writes use `api_write: managed_agent_conversations`, plus the matching Host v2 workspace grant | Durable FIFO receipts, bounded sequence reads, exact active cancellation, and immediate dispatch whose `busy` result never queues                                                                                                                                                         |
+| Managed conversation schedules | `HostManagedConversationSchedules(host)`: `List`, `Create`, `Update`, `SetEnabled`, `Delete`                              | Reads require `api_read: automations` plus `host.v2.read:automations`; writes require `api_write: automations` plus `host.v2.write:automations` | Installation-owned schedules use revisioned commands and durable receipts; delivery reauthorizes the retained destination and retries by occurrence ID                                                                                                                                   |
+| Sessions                   | Sessions().List, Sessions().CodeStats                                                                                            | api_read: sessions                                                                                                                                | Typed session and computed code-stat records                                                                                                                                                                                                                                              |
+| Workspaces                 | Workspaces().List                                                                                                                | api_read: workspaces                                                                                                                              | Instance-visible workspaces                                                                                                                                                                                                                                                               |
+| Workflows                  | Workflows().List, Workflows().ListSteps                                                                                          | api_read: workflows                                                                                                                               | List steps by workflow id                                                                                                                                                                                                                                                                 |
+| Agent profiles             | AgentProfiles().List                                                                                                             | api_read: agent_profiles                                                                                                                          | Global agent profiles exposed by the Host data API                                                                                                                                                                                                                                        |
+| Repositories               | Repositories().List                                                                                                              | api_read: repositories                                                                                                                            | List by workspace id                                                                                                                                                                                                                                                                      |
+| Messages                   | Messages().List                                                                                                                  | api_read: messages                                                                                                                                | Historical user/agent content; Kandev system blocks are stripped                                                                                                                                                                                                                          |
+| Message send               | Messages().Send                                                                                                                  | api_write: messages                                                                                                                               | Sends a prompt to a task session and records plugin:<id> author                                                                                                                                                                                                                           |
+| Interactions               | Interactions().ListPending, Interactions().Get                                                                                   | api_read: interactions                                                                                                                            | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                                                                                                                |
+| Exact interaction responses | `HostExactInteractionCommands(host)`: `RespondPermission`, `AnswerClarification`                                                | `api_write: interactions` plus `host.v2.write:interactions` and a Host-issued human response receipt                                              | The authenticated native UI issues a short-lived receipt for one interaction revision and exact response; legacy v1 response methods return `PermissionDenied`                                                                                                                             |
+| Exact observations         | `pluginsdk.HostExactQueries(host)`                                                                                               | Resource declaration plus matching `host.v2.read:<resource>` workspace grant                                                                      | Snapshot-bound workspace, task, session, interaction, message, inbox, relation, pending-transition, PR-evidence, and usage reads; use capability discovery for per-host support                                                                                                           |
+| Linked issue writeback      | `pluginsdk.HostSourceIssueWriteback(host)`: `GetCapabilities`, `Comment`, `Transition`                                          | `api_read: source_issues` and `host.v2.read:source_issues` for reads; `api_write: source_issues` and `host.v2.write:source_issues` for writes          | Resolves the task's existing Jira/Linear link and uses workspace credentials; commands carry task/source versions and durable receipts, and ambiguous outcomes return `UNCERTAIN` without automatic resend                                                                                     |
+| Agent invocation           | InvokeUtilityAgent(ctx, prompt, options...)                                                                                      | agent_invoke: true                                                                                                                                | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
+| Agent conversations        | AgentConversations(host): Ensure, Dispatch, Delete                                                                               | agent_conversation: true                                                                                                                          | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin                                                                                     |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
 methods are implemented in the current branch; do not repeat older docs that
 call them reserved.
+
+### Build an independent coordination policy
+
+Use the same public SDK for different policies. Kandev scopes approvals and
+plugin data to each installed plugin. A coordinator can keep role and memory
+records in its own `KANDEV_PLUGIN_DATA_DIR`; an observer can keep revisioned
+proposals in its own directory. Neither package receives another plugin's
+approval, data, or conversation.
+
+Check both support and authorization for each exact operation before showing an
+action. An approval does not make an operation available when the host does not
+support it. For example, a proposal-first plugin can read canonical task
+revisions, save a proposal in its own database, then create a task only after a
+human approves it:
+
+```go
+func operationAllowed(capability *pluginsdk.CapabilityContext, method string) bool {
+    for _, operation := range capability.Operations {
+        if operation.Method == method {
+            return operation.Supported && operation.Authorized
+        }
+    }
+    return false
+}
+
+exact, ok := pluginsdk.HostV2(host)
+if !ok {
+    return errors.New("exact Host operations are unavailable")
+}
+capability, err := exact.GetCapabilityContext(ctx, workspaceID)
+if err != nil {
+    return err
+}
+if !operationAllowed(capability, "CreateTaskExact") {
+    return errors.New("task creation is unsupported or not approved")
+}
+commands, ok := pluginsdk.HostTaskCommands(host)
+if !ok {
+    return errors.New("exact task commands are unavailable")
+}
+result, task, err := commands.CreateTask(ctx, pluginsdk.ExactTaskCreate{
+    RequestID: proposal.RequestID,
+    WorkspaceID: workspaceID,
+    IdempotencyKey: proposal.RequestID,
+    ExternalID: "observer:" + proposal.ID,
+    ApprovalRevision: capability.ApprovalRevision,
+    ManifestDigest: capability.ManifestDigest,
+    Task: pluginsdk.CreateTaskInput{
+        WorkspaceID: workspaceID,
+        Title: proposal.Title,
+        Description: proposal.Description,
+        StartAgent: false,
+    },
+})
+if err != nil {
+    return err
+}
+_ = result // Inspect the typed status before recording the task receipt.
+_ = task
+```
+
+`CreateTaskExact` deduplicates the external identity within the workspace. Use
+the same request and identity after an uncertain result. Do not call a separate
+run or recovery operation unless the user approves that policy. A coordinator
+that adopts existing work instead uses `HostTaskManagementClaims`; task claims
+are separate from worker assignment and the host rejects stale claim
+generations.
+
+The browser uses a declared action for plugin-owned policy and data. It does not
+call exact Host methods directly:
+
+```ts
+const snapshot = await host.api.invokeAction("observe.scan", {
+  workspaceId,
+  body: {},
+});
+```
+
+An observer manifest can declare `api_version: 2`, `api_read: ["tasks"]`, and
+`api_write: ["tasks"]`. For workflow creation, use the typed
+`HostWorkspaceAdministration` manager with `api_write: ["workflows"]` and the
+`host.v2.write:workflows` workspace grant. The workspace command remains
+version-fenced and limited to operations Kandev advertises. Do not add a
+separate `workspace_admin` resource or private Host route.
+
+The public Go and browser contracts are additive. Existing v1 Host calls keep
+their semantics. A manifest should set `min_kandev_version` only after the
+release that first contains every API used by the package is known; a checkout
+smoke does not establish a released minimum. Providers are usable only when
+the Host reports their exact operation as supported.
+
+### Linked Jira and Linear issue writeback
+
+Use `pluginsdk.HostSourceIssueWriteback(host)` to read a task's linked source
+operations, add a comment, or request one of the issue's currently available
+transitions. Declare `source_issues` in `api_read` for the capability read and
+in `api_write` for comments or transitions. Each call also needs its active
+workspace grant. Read the current task and source versions with
+`GetCapabilities`, then pass both versions and a stable idempotency key to the
+write command.
+
+The Host resolves the issue from its persisted task-source association and
+checks that the task's source metadata agrees. Do not pass an issue URL or
+credential. Jira and Linear credentials remain in their workspace integration
+settings. The Host rechecks the association and available provider operations
+before sending the request.
+
+The Host stores the write intent and source receipt before the provider call.
+It returns `APPLIED`, `CONFLICT`, `DENIED`, `NOT_FOUND`, `UNSUPPORTED`, or
+`RATE_LIMITED` for known outcomes. An ambiguous timeout returns `UNCERTAIN`.
+Retry the same idempotency key to read that saved result; the Host will not send
+the same comment or transition again. A new key is appropriate only after a
+known no-effect result, such as `RATE_LIMITED`. Receipts identify the actor,
+task, linked issue, operation, and provider receipt ID when available. The
+stored intent contains a payload digest, not the comment text.
 
 Host calls are request-scoped rather than registrations: pass the handler
 context, handle cancellation, and close any files or external clients created
@@ -849,6 +1062,555 @@ by the plugin. There is no Host cleanup callback. Typical calls are
 `host.Messages().Send(ctx, taskID, sessionID, text)`, and
 `host.InvokeUtilityAgent(ctx, prompt)`; each fails with `PermissionDenied`
 when its manifest capability is absent.
+
+### Exact Host v2 task updates
+
+The Go SDK keeps its existing `Host` methods as v1 compatibility APIs. Use
+`pluginsdk.HostV2(host)` to detect the optional exact-command extension. The
+frontend `PluginHostApi` does not expose privileged Host RPCs; its
+`PluginHostV2*` types describe data a plugin may pass between its own backend
+and UI.
+
+`GetCapabilityContext` reports which exact methods this host supports and the
+current workspace approval revision. It does not grant permission. An exact
+task update also needs the installed manifest digest and the task's
+`ResourceVersion`. Keep the idempotency key stable when retrying the same
+operation. A changed payload with that key and a stale task version return a
+typed conflict. A revoked or missing workspace grant returns `DENIED` without
+starting a task mutation.
+
+Workspace managers select access in the host's plugin settings. The approval
+applies to one installation and one workspace. Users without the workspace
+management scope can inspect the plugin but cannot grant, narrow, or revoke its
+Host v2 access. The Host rechecks each command against the active approval, so
+a saved grant in the plugin UI or its local settings cannot create authority.
+
+```go
+if exact, supported := pluginsdk.HostV2(host); supported {
+	capability, err := exact.GetCapabilityContext(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	task, err := host.Tasks().Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	result, _, err := exact.UpdateTaskExact(ctx, pluginsdk.ExactTaskUpdate{
+		RequestID: "request-1", WorkspaceID: workspaceID, TaskID: task.ID,
+		IdempotencyKey: "stable-update-key",
+		ExpectedResourceVersion: task.ResourceVersion,
+		ApprovalRevision: capability.ApprovalRevision,
+		ManifestDigest: capability.ManifestDigest,
+		Title: &newTitle,
+	})
+	if err != nil {
+		return err
+	}
+	switch result.Status {
+	case pluginsdk.CommandApplied, pluginsdk.CommandAlreadyApplied:
+		// The command is complete.
+	case pluginsdk.CommandConflict, pluginsdk.CommandDenied:
+		// Re-read context/task state before deciding whether to retry.
+	}
+}
+```
+
+The Host persists command admission before calling the task service. Task data
+and the operation identity commit together. This lets a retry recover a task
+change if the process stops before it stores the completed command receipt.
+
+Use `pluginsdk.HostTaskCommands(host)` for the additive task command manager.
+`CreateTask` requires an external source identity so a retry after a lost reply
+can resolve the original task, including an archived task. `SetLabels` replaces
+the complete label list at the task's observed resource version. Keep each
+idempotency key unchanged when retrying the same payload. `Assign` changes only
+the human assignee; worker-agent assignment remains a separate native action.
+`Move` uses shared workflow validation and WIP admission, and does not bypass
+pending-transition rules. It returns the canonical task after the move or the
+recovered task for a retry.
+`Archive` uses the native task cleanup lifecycle and commits its operation
+identity with the archive marker and queue purge.
+
+Use `pluginsdk.HostTaskManagementClaims(host)` to acquire, transfer, or release
+an optional manager claim. Keep claims separate from the task's worker
+assignment. Pass both the task resource version and the claim resource version
+observed from Host reads. The Host binds each claim to the authenticated plugin
+installation; use an opaque instance key when several coordinator instances
+share that installation. A transfer advances the fencing generation, so a
+former owner cannot commit later task writes. Versioned task updates, labels,
+assignment, moves, archive, relations, and message admissions include the
+instance key and expected claim generation while a claim is active. Do not
+silently reacquire a claim after a conflict; reload the owner and request an
+explicit transfer.
+
+Claims do not change the worker agent assignment. Native task detail shows the
+manager and its audit history and allows a human to transfer the claim to
+themselves or release it, including when the plugin is disabled or removed.
+Human actions require a reason and compare the same task and claim versions.
+No timeout silently replaces the manager.
+
+Use `pluginsdk.HostTaskCompletionGates(host)` to set task-owned completion
+criteria or record typed evidence. Both commands require the task resource
+version, completion-set revision, a stable idempotency key, the workspace grant,
+and the current management instance key and generation. The Host derives the
+plugin actor from its authenticated installation and returns the canonical gate
+snapshot. Supported evidence subjects are task revisions, completed execution
+IDs, immutable artifact revisions, and GitHub pull-request heads. A plugin
+cannot remove or weaken a currently unmet requirement without the human
+confirmation available in native task detail, and it cannot issue the
+one-move completion override. Completion rechecks evidence in the final task
+transition, so stale evidence remains blocked even after a previous verification.
+
+```go
+gates, supported := pluginsdk.HostTaskCompletionGates(host)
+if !supported {
+    return errors.New("task completion gates are unavailable")
+}
+result, gate, err := gates.SetCriteria(ctx, pluginsdk.ExactTaskCompletionCriteria{
+    RequestID: "request-criteria-1", WorkspaceID: workspaceID, TaskID: task.ID,
+    IdempotencyKey: "task-42-criteria-v1",
+    ExpectedTaskResourceVersion: task.ResourceVersion,
+    ExpectedRevision: storedGateRevision,
+    ApprovalRevision: capability.ApprovalRevision,
+    ManifestDigest: capability.ManifestDigest,
+    ManagementInstanceKey: instanceKey,
+    ExpectedClaimGeneration: claimGeneration,
+    Criteria: []pluginsdk.TaskCompletionCriterionInput{{
+        ID: "tests-pass", Description: "Required checks pass",
+        EvidenceSubject: pluginsdk.TaskCompletionEvidenceSubject{
+            Kind: "artifact_revision", ID: "test-run-42",
+        },
+    }},
+})
+if err != nil {
+    return err
+}
+_ = result.Status
+_ = gate.Blockers
+```
+
+`AddRelation` and `RemoveRelation` add or remove one dependency between tasks
+in the same workspace. Pass both task resource versions and a stable
+idempotency key. The Host checks task scope and relation validity, including
+cycles. A parent-child relation does not give a plugin authority to delete
+either task.
+
+```go
+relation, err := commands.AddRelation(ctx, pluginsdk.ExactTaskRelation{
+    RequestID: "request-8", WorkspaceID: workspaceID,
+    TaskID: task.ID, RelatedTaskID: relatedTask.ID,
+    ExpectedTaskResourceVersion: task.ResourceVersion,
+    ExpectedRelatedTaskResourceVersion: relatedTask.ResourceVersion,
+    IdempotencyKey: "proposal-17-blocks-api-v1",
+    ApprovalRevision: capability.ApprovalRevision,
+    ManifestDigest: capability.ManifestDigest,
+})
+if err != nil {
+    return err
+}
+_ = relation.Status // APPLIED or ALREADY_APPLIED
+```
+
+### Exact workspace administration
+
+Use `pluginsdk.HostWorkspaceAdministration(host)` for typed workspace,
+workflow, step, and repository changes. Use `pluginsdk.HostV2(host)` to read
+the current approval revision and manifest digest. The manifest must declare
+the matching `capabilities.api_write` resource. A workspace manager must also
+grant the matching `host.v2.write:<resource>` capability for that workspace.
+Read resource versions from exact Host observations. Legacy workspace and
+workflow readers do not return these versions.
+
+Each call carries one operation. It also carries the resource versions that the
+plugin read, a request ID, and a stable idempotency key. The Host stores a
+receipt before it calls Kandev's shared service layer. A retry with the same
+key and payload returns the recorded result. If a version changed, read the
+current resource and create a new command with a new key.
+
+The supported operations are:
+
+- Update workspace name, description, and default executor, environment, or
+  agent profiles.
+- Create, update, or reorder workflows. Update and reorder reject workflows
+  managed by sync or reserved by the Improve Kandev workspace.
+- Create, update, or reorder workflow steps through workflow validation. The
+  typed action fields support four `on_enter` actions and move actions for
+  turn-start and turn-complete events. An update preserves native actions that
+  the plugin API cannot represent.
+- Register a repository, or update its name, default branch, branch prefix,
+  branch template, and pull-before-worktree setting.
+
+These commands cannot delete workflows, steps, or repositories. They cannot
+set repository scripts, copy-file rules, or secret bindings. The Host checks
+that each target belongs to the approved workspace. Use native Kandev settings
+for unsupported or destructive changes.
+
+```go
+exact, ok := pluginsdk.HostV2(host)
+if !ok {
+    return errors.New("exact Host commands are unavailable")
+}
+queries, ok := pluginsdk.HostExactQueries(host)
+if !ok {
+    return errors.New("exact Host reads are unavailable")
+}
+admin, ok := pluginsdk.HostWorkspaceAdministration(host)
+if !ok {
+    return errors.New("workspace administration is unavailable")
+}
+capability, err := exact.GetCapabilityContext(ctx, workspaceID)
+if err != nil {
+    return err
+}
+page, err := queries.ListWorkspaces(ctx, pluginsdk.ExactWorkspaceQuery{
+    RequestID: "request-workspace-read-1", WorkspaceID: workspaceID,
+    Page: pluginsdk.ExactReadPage{Limit: 1},
+})
+if err != nil {
+    return err
+}
+if len(page.Items) != 1 {
+    return errors.New("workspace was not found")
+}
+result, err := admin.Apply(ctx, pluginsdk.WorkspaceAdminCommand{
+    RequestID: "request-workflow-1", WorkspaceID: workspaceID,
+    IdempotencyKey: "workspace-workflow-build-v1",
+    ApprovalRevision: capability.ApprovalRevision,
+    ManifestDigest: capability.ManifestDigest,
+    CreateWorkflow: &pluginsdk.WorkspaceWorkflowCreate{
+        ExpectedWorkspaceResourceVersion: page.Items[0].ResourceVersion,
+        Name: "Build",
+    },
+})
+if err != nil {
+    return err
+}
+_ = result.Status // APPLIED, ALREADY_APPLIED, or a typed non-success result
+```
+
+`IssueDirective` and `ResolveDirective` operate on a versioned, short-lived
+task directive. Issuance identifies one task and session, a workspace-approved
+delegated capability, an instruction digest, and an expiry. It does not claim
+that an agent has acted. Resolution uses the directive's current resource
+version and stores a digest of the outcome.
+
+`SendMessage` uses the observed task and session versions and a stable
+idempotency key. It appends one entry to the durable session FIFO and returns
+the accepted queue receipt ID. `APPLIED` means accepted by the queue; it does
+not mean an agent has received or acted on the message. A retry with the same
+key recovers the same queue receipt, including after a lost Host response.
+
+### Native task deletion consent
+
+Task deletion uses a separate native confirmation flow. The UI requests a
+one-use preview bound to the current Human, selected task roots, cascade and
+worktree-discard choices, and task-tree snapshot. The preview expires after
+five minutes, and any tree change requires a new preview. Plugins can inspect
+their source-owned task tree, but `PluginOwnedTaskTrees().Delete` is denied
+with `PermissionDenied` and `native_human_confirmation_required`; the plugin
+Host does not accept or mint native deletion confirmations. Send the user to
+the native task UI. A task's plugin provenance, chat text, or a plugin dialog
+does not count as human consent.
+
+```go
+commands, supported := pluginsdk.HostTaskCommands(host)
+if !supported {
+	return errors.New("exact task commands are unavailable")
+}
+created, task, err := commands.CreateTask(ctx, pluginsdk.ExactTaskCreate{
+	RequestID: "request-2", WorkspaceID: workspaceID,
+	IdempotencyKey: "proposal-17-create", ExternalID: "coordinator:proposal-17",
+	ApprovalRevision: capability.ApprovalRevision,
+	ManifestDigest: capability.ManifestDigest,
+	Task: pluginsdk.CreateTaskInput{
+		WorkspaceID: workspaceID, WorkflowID: workflowID, Title: "Add coordinator API",
+	},
+})
+if err != nil {
+	return err
+}
+_ = created.Status // APPLIED or ALREADY_APPLIED
+
+labelsResult, labeledTask, err := commands.SetLabels(ctx, pluginsdk.ExactTaskLabels{
+	RequestID: "request-3", WorkspaceID: workspaceID, TaskID: task.ID,
+	IdempotencyKey: "task-42-labels-v2", ExpectedResourceVersion: task.ResourceVersion,
+	ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+	Labels: []string{"coordination", "urgent"},
+})
+if err != nil {
+	return err
+}
+_ = labelsResult.Status
+
+moved, movedTask, err := commands.Move(ctx, pluginsdk.ExactTaskMove{
+	RequestID: "request-5", WorkspaceID: workspaceID, TaskID: task.ID,
+	IdempotencyKey: "task-42-move-review-v1",
+	ExpectedResourceVersion: labeledTask.ResourceVersion,
+	WorkflowID: workflowID, WorkflowStepID: reviewStepID, Position: 0,
+	ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+if err != nil {
+	return err
+}
+_ = moved.Status
+_ = movedTask.ResourceVersion
+
+accepted, err := commands.SendMessage(ctx, pluginsdk.ExactTaskMessage{
+    RequestID: "request-7", WorkspaceID: workspaceID, TaskID: task.ID,
+    SessionID: session.ID, IdempotencyKey: "proposal-17-follow-up-v1",
+    ExpectedTaskResourceVersion: task.ResourceVersion,
+    ExpectedSessionResourceVersion: session.ResourceVersion,
+    ApprovalRevision: capability.ApprovalRevision,
+    ManifestDigest: capability.ManifestDigest,
+    Content: "Implement the accepted proposal and report the resulting task state.",
+})
+if err != nil {
+    return err
+}
+if accepted.Status != pluginsdk.CommandApplied && accepted.Status != pluginsdk.CommandAlreadyApplied {
+    return errors.New("message was not accepted")
+}
+queueReceiptID := accepted.Receipt.TargetID
+_ = queueReceiptID
+```
+
+### Exact managed conversations
+
+Use `pluginsdk.HostV2(host)` to access conversations that retain identity and
+history across ordinary plugin lifecycle events. A conversation belongs to one
+installation, workspace, and opaque instance key. Declare
+`api_read: ["managed_agent_conversations"]` for reads and
+`api_write: ["managed_agent_conversations"]` for ensure, pause, or delete.
+Workspace managers grant the corresponding exact Host v2 read and write
+capabilities separately.
+
+`Ensure` creates a conversation when `ExpectedRevision` is zero. To update its
+profile, executor, or instructions, pass the revision returned by the previous
+call. The Host rejects stale revisions and launch-setting changes while a turn
+is active. `SetPaused` also checks a revision. Pause state blocks future starts;
+stopping a running generation is a separate operation. `Delete` is explicit and
+removes only the selected conversation owned by the current installation.
+
+```go
+if exact, ok := pluginsdk.HostV2(host); ok {
+    capability, err := exact.GetCapabilityContext(ctx, workspaceID)
+    if err != nil {
+        return err
+    }
+    result, conversation, err := exact.ManagedAgentConversations().Ensure(ctx,
+        pluginsdk.ManagedAgentConversationSpec{
+            RequestID: "request-1", IdempotencyKey: "instance-lead-v1",
+            WorkspaceID: workspaceID, InstanceKey: "lead", ExpectedRevision: 0,
+            ApprovalRevision: capability.ApprovalRevision,
+            ManifestDigest: capability.ManifestDigest,
+        AgentProfileID: profileID, ExecutorProfileID: executorProfileID,
+        AgentToolNames: []string{"read_task"},
+            BasePrompt: instructions, InstructionVersion: "prompt-v1",
+        })
+    if err != nil {
+        return err
+    }
+    if result.Status != pluginsdk.CommandApplied && result.Status != pluginsdk.CommandNoChange {
+        return fmt.Errorf("ensure managed conversation: %s", result.Status)
+    }
+    _ = conversation.TaskID // opaque Host handle; do not access the backing row
+}
+```
+
+An in-place upgrade retains the installation identity and rechecks its manifest
+approval. Disable closes Host admission, pauses retained conversations, stops
+active runs, and preserves history. Enabling the plugin does not silently
+unpause them. A host restart preserves their identity and lets normal session
+reconciliation handle interrupted runs. Uninstall revokes the old identity,
+stops active runs, pauses and detaches each transcript, and removes plugin-owned
+state; the host can expose a detached transcript without loading the plugin.
+Reinstall creates a new identity and cannot silently read or claim the previous
+installation's conversations. These exact lifecycle methods are separate from
+v1 `Host.AgentConversations`, whose hidden conversations retain their older
+delete-on-disable cleanup behavior.
+
+Creating a managed conversation does not itself authorize agent turns, access
+to arbitrary repositories, or a tool-policy bypass. Use the managed input
+methods and restricted execution capability when the Host advertises them. The
+exact method registry reports supported operations and current
+workspace grants; a missing or revoked grant does not fall back to v1 authority.
+Workflow changes still use `Tasks().Move`.
+
+### Durable input and immediate dispatch
+
+Use `EnqueueInput` when a managed conversation must keep work while its session
+is busy. The Host stores the input receipt and its FIFO row in one transaction.
+The receipt starts in `accepted`, and queue delivery can begin as soon as
+admission succeeds. Retry with the same occurrence key and request to recover
+the original receipt. A different payload for that occurrence returns a
+conflict.
+
+`ListInputs` returns a bounded page after an exclusive sequence cursor. Receipts
+use `accepted`, `running`, `completed`, `failed`, `cancelled`, or `uncertain`.
+The Host assigns a new sequence to each receipt and keeps managed inputs in FIFO order.
+If a dispatch outcome cannot be tied to a known turn and execution, the Host
+returns `uncertain` and does not replay the input automatically.
+
+`CancelInput` removes accepted input from the queue. To cancel a running input,
+pass its exact observed execution ID. The Host stops that generation and marks
+the receipt cancelled only after the stop succeeds. A stale execution ID does
+not stop the current execution. A periodic input with a non-empty coalesce key
+can replace an unreserved pending periodic input. The old receipt becomes
+cancelled and its `SupersededBy` field names the replacement.
+
+`Dispatch` attempts an immediate turn without creating an input receipt. It
+returns `busy` when the session or its queue already has work. A `busy` result
+never means the Host queued the payload. Use `EnqueueInput` for durable delivery
+while another turn runs. Pausing prevents queue drain but preserves accepted
+inputs. Resuming wakes the queue.
+
+### Managed-conversation schedules
+
+Use `pluginsdk.HostManagedConversationSchedules(host)` to manage schedules
+owned by the current installation. Declare `api_read: [automations]` for list
+access and `api_write: [automations]` for create, update, enable/disable, or
+delete. Each operation also needs the corresponding `host.v2.read:automations`
+or `host.v2.write:automations` approval for that workspace.
+
+Writes carry the approval revision, manifest digest, a stable idempotency key,
+and the observed schedule revision for update, enable/disable, and delete. The
+Host binds schedule ownership to the current installation and validates the
+managed-conversation destination before saving. It resolves private
+installation and conversation identifiers itself, then rechecks destination
+authorization at each delivery. Run IDs are stable occurrence keys, so retry
+and restart recovery read or enqueue the same input instead of creating a
+duplicate. Deleting a schedule does not delete its shared conversation.
+
+The native automation editor supports this destination for retained managed
+conversations. Portable exports include the plugin ID and logical instance
+key, not internal IDs. When importing a managed schedule into another
+workspace, select its destination explicitly before creating the schedule.
+
+### Exact execution controls and human interaction responses
+
+Use `pluginsdk.HostExecutionCommands(host)` for run and provider operations.
+Writes require `api_write: ["execution"]` and the workspace grant
+`host.v2.write:execution`. `GetSessionModeContext` reads require
+`api_read: ["sessions"]` and `host.v2.read:sessions`.
+
+`EnsureTaskRun` checks the task version and enters through normal task launch
+admission. `StopTaskRun` requires the observed session version and execution
+ID; it cannot stop a replacement execution. `RecoverSession` currently
+supports only `resume` for an execution-less interrupted session and uses the
+normal orchestrator launch path. `CancelPendingTaskTransition` requires the
+exact transition ID and resource version. Commands return typed outcomes such
+as `APPLIED`, `ALREADY_APPLIED`, `CONFLICT`, `UNAVAILABLE`, and `UNSUPPORTED`.
+An uncertain outcome is not replayed as a new operation.
+
+Each execution command also carries the task's observed management instance key
+and claim generation. The Host supplies the caller installation identity; the
+command fields only assert which claim the caller observed. For a never-claimed
+task, send an empty instance key and generation zero. After a claim is released,
+send an empty key and the current positive generation. A competing installation,
+stale generation, or former owner is rejected at the effect boundary. Claim
+changes wait for an admitted effect to finish, so transfer or release cannot
+race a run, stop, recovery, transition cancellation, or mode change.
+
+`GetSessionModeContext` returns only provider-advertised modes. The Host
+filters mode IDs associated with permission bypass or credential repair.
+`SetSessionMode` checks the observed session and execution versions and rejects
+modes the provider does not currently advertise. These commands do not change
+the managed conversation's restricted tool policy.
+
+For permission and clarification responses, use
+`pluginsdk.HostExactInteractionCommands(host)`. The shared native UI asks
+Kandev for a response receipt after a person chooses an option or submits an
+answer. It sends an authenticated request to
+`POST /api/plugins/host/interactions/response-receipts` with the workspace,
+interaction ID, observed resource version, response kind, and exact response
+payload. The user must have native `session.control` access to the workspace.
+Kandev verifies the interaction is pending at that revision. The receipt
+expires after five minutes and binds one response payload to that interaction
+and revision. It is single-use.
+
+The plugin backend relays that user decision without changing the payload:
+
+```go
+responses, ok := pluginsdk.HostExactInteractionCommands(host)
+if !ok {
+    return errors.New("exact interaction responses are unsupported")
+}
+result, interaction, err := responses.RespondPermission(ctx, pluginsdk.ExactPermissionResponse{
+    RequestID: "request-12", WorkspaceID: workspaceID,
+    InteractionID: observed.Interaction.ID,
+    ExpectedResourceVersion: observed.ResourceVersion,
+    OptionID: selectedOptionID, HumanResponseReceiptID: receiptID,
+    ApprovalRevision: capability.ApprovalRevision,
+    ManifestDigest: capability.ManifestDigest,
+})
+```
+
+`AnswerClarification` uses the same receipt flow. The first valid response
+wins. A stale revision or changed payload is denied or conflicted and cannot
+answer a replacement interaction.
+
+### Exact workspace observations
+
+Use `pluginsdk.HostExactQueries(host)` when a backend plugin must rebuild a
+workspace view after a missed event. The extension returns authoritative,
+workspace-scoped snapshots. It is a Go backend API; browser code cannot call the
+privileged Host RPCs directly.
+
+```go
+queries, ok := pluginsdk.HostExactQueries(host)
+if !ok {
+    return errors.New("exact workspace observations are unsupported")
+}
+page, err := queries.ListTasks(ctx, pluginsdk.ExactTaskQuery{
+    RequestID: "reconcile-workspace-01",
+    WorkspaceID: workspaceID,
+    Filter: pluginsdk.TaskFilter{IncludeArchived: true},
+    Page: pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+for _, task := range page.Items {
+	_ = task.CanonicalStatus
+	_ = task.ResourceVersion
+}
+if page.PageInfo.HasMore {
+	nextPage, err := queries.ListTasks(ctx, pluginsdk.ExactTaskQuery{
+		RequestID: "reconcile-workspace-02",
+		WorkspaceID: workspaceID,
+		Filter: pluginsdk.TaskFilter{IncludeArchived: true},
+		Page: pluginsdk.ExactReadPage{
+			Limit: 100, Cursor: page.PageInfo.NextCursor,
+			SnapshotVersion: page.PageInfo.SnapshotVersion,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	_ = nextPage
+}
+```
+
+Pass the same filters, workspace, and snapshot version with the opaque cursor
+to read the next page. Cursors bind to installation, method, filter, and
+approval revision. They expire after five minutes. A stale snapshot returns
+`FailedPrecondition`; start a new reconciliation instead of combining it with
+newer rows. Each page is limited to 200 entries, and one snapshot is limited to
+5,000 entries and 8 MiB.
+
+Exact task observations include the stored task status and resource version,
+plus activity, execution, and blocker projections when the status summary is
+available. Message content uses the existing system-content sanitizer. Change
+request evidence reports cached GitHub head/check/review aggregates and sync
+time. A head or cached update changes its resource version. Usage reports use
+integer hundredths-of-a-cent `cost_subcents`, USD currency, token counts, and
+explicit estimated, unpriced, and no-observation states. No observations do not
+mean a measured zero-cost run.
+
+`ListTaskInbox` currently contains pending human interactions and queued
+workflow moves. Directive reads stay unsupported until the Host advertises a
+durable directive source. Read `GetCapabilityContext` and use each method's
+`Supported` and `Authorized` values before depending on an optional operation.
 
 ## Remote executor providers
 
@@ -891,9 +1653,9 @@ uninstall, or upgrade actions can be blocked while cleanup or compatibility is
 unresolved. Kandev retains cleanup inventory until the provider confirms that a
 resource is absent.
 
-The rollout flag is `features.remoteExecutorPlugins`. It is disabled in shipped
-profiles and requires a Kandev restart after an administrator enables it. A
-disabled flag prevents provider operations.
+After installation, an active plugin with a compatible provider contract can
+create and use provider profiles without a separate feature flag or restart.
+Disabled, incompatible, or unavailable providers cannot accept new operations.
 
 The maintained fixture's [provider implementation](../../apps/backend/cmd/plugin-fixture/executor_provider.go)
 and [contract tests](../../apps/backend/cmd/plugin-fixture/executor_provider_test.go)
@@ -1250,29 +2012,10 @@ ones. That is how an event-driven cache reconciles: an id from an event you
 replayed or a snapshot you took before a restart still resolves to its current
 state instead of vanishing.
 
-Responding requires `api_write: ["interactions"]` and goes through the same
-services the native UI drives, so the agent actually unblocks:
-
-```go
-_, err := interactions.RespondToPermission(ctx, pluginsdk.PermissionResponse{
-    InteractionID: interaction.ID,
-    OptionID:      interaction.Options[0].OptionID,
-})
-```
-
-`OptionID` must name one of the interaction's declared options; Kandev derives
-the approve/deny outcome from that option's `Kind`, so you cannot report an
-outcome the agent never offered. Set `Cancelled: true` (with an empty
-`OptionID`) to dismiss the request instead. `AnswerClarification` takes one
-answer per question in the bundle; `CancelClarification(ctx, id, reason)`
-declines the bundle on the user's behalf and works whether or not the original
-waiter is still parked.
-
-Writes are terminal-once. The first response wins; a later attempt against an
-already-resolved interaction returns gRPC `FailedPrecondition`, and an unknown
-id returns `NotFound`. Branch on those two to tell "someone else answered
-first" apart from "my cached id is stale". Do not retry a
-`FailedPrecondition`.
+The v1 response methods remain in the SDK for source compatibility, but the
+Host returns `PermissionDenied` because those requests cannot carry the
+observed revision or a human response receipt. Use the exact response manager
+described in [Exact execution controls and human interaction responses](#exact-execution-controls-and-human-interaction-responses).
 
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
 completion using the platform default profile configured in **Settings >
@@ -1892,7 +2635,9 @@ Separator, Sheet, Skeleton, Spinner, Switch, Table, Tabs, Textarea, Tooltip
 first-party app UI: `Combobox` (the app's picker), `PageTopbar` (the title
 bar a route gets by default via `registerRoute`'s `options.topbar`, exposed
 here for routes that opt out and render their own chrome), and
-`TaskCreateDialog`, so a plugin can hand off task creation to kandev's real
+`TaskCreateDialog`, `WorkspaceAgentChat`, `WorkspaceTaskStatus`, and
+`WorkspaceTaskUsage`. These provide native managed conversation, task status,
+and usage surfaces. A plugin can also hand off task creation to kandev's real
 create-task flow (repo/branch/agent pickers, validation) instead of POSTing
 directly. Code-host plugins also receive `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
@@ -2051,20 +2796,20 @@ slot. The host renders every plugin's component for that slot (each isolated
 behind an error boundary), so a slot may hold contributions from several
 plugins at once. Available slots:
 
-| Slot                        | Where it renders                                                                                       | `slotProps`                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `task-sidebar`              | Bottom of the task-detail sidebar                                                                      | none                                                              |
-| `settings-nav`              | Settings navigation tree                                                                               | none                                                              |
-| `main-nav-footer`           | Footer of the main sidebar                                                                             | none                                                              |
-| `chat-input-actions`        | Task or Quick Chat composer toolbar                                                                    | `PluginComposerSlotProps`                                         |
-| `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`                                         |
-| `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
-| `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
-| `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`                                             |
-| `main-top-bar`              | Default app top bar on desktop; phone Plugins menu unless the same plugin supplies task controls | `MainTopBarSlotProps`                                             |
-| `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
-| `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
-| `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
+| Slot                        | Where it renders                                                                                       | `slotProps`                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| `task-sidebar`              | Bottom of the task-detail sidebar                                                                      | none                            |
+| `settings-nav`              | Settings navigation tree                                                                               | none                            |
+| `main-nav-footer`           | Footer of the main sidebar                                                                             | none                            |
+| `chat-input-actions`        | Task or Quick Chat composer toolbar                                                                    | `PluginComposerSlotProps`       |
+| `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`       |
+| `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`       |
+| `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps` |
+| `chat-top-bar`              | Session top bar on desktop; shared Plugins menu section on phones                                      | `ChatTopBarSlotProps`           |
+| `main-top-bar`              | Default app top bar on desktop; phone Plugins menu unless the same plugin supplies task controls       | `MainTopBarSlotProps`           |
+| `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`         |
+| `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`         |
+| `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`          |
 
 `plugin-settings` is the one exception to "every plugin's component renders":
 it is **owner-scoped**, so the host renders only the component registered by the

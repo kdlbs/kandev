@@ -24,9 +24,9 @@ runtime:
     windows-amd64: "server/plugin-windows-amd64.exe"
 
 capabilities:
-  api_read: ["messages"]
+  api_read: ["messages", "managed_agent_conversations", "tasks", "sessions", "interactions", "automations"]
   events: ["task.created"]
-  api_write: ["tasks"]
+  api_write: ["tasks", "managed_agent_conversations", "execution", "interactions", "automations"]
   agent_invoke: true
   state: true
   secrets: true
@@ -113,6 +113,42 @@ actions:
   - key: "watch-create-task"
     scope: "workspace"
     max_body_bytes: 4096
+  - key: "exact-task-create"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "task-tree-delete"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-ensure"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-status"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-inputs"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-enqueue"
+    scope: "workspace"
+    max_body_bytes: 65536
+  - key: "managed-conversation-cancel"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-pause"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-resume"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-recover"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-permission-response"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-clarification-response"
+    scope: "workspace"
+    max_body_bytes: 16384
 
 reference_sources:
   - source: "fixture-pull-requests"

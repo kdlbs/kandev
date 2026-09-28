@@ -41,7 +41,9 @@ test.describe("Mobile sidebar task actions", () => {
     await targetRow.tap();
 
     await expect(drawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${target.id}$`));
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${target.id}\\?sessionId=${target.clarificationSessionId}$`),
+    );
     await expect.poll(() => activeSessionId(testPage)).toBe(target.clarificationSessionId);
     await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationOverlay()).toContainText(

@@ -10,7 +10,10 @@ import {
   causeLabel,
   operationLabel,
 } from "./session-bootstrap-recovery-model";
-import { isSessionRecoveryBusy } from "@/lib/session-recovery-presentation";
+import {
+  isSessionRecoveryBusy,
+  type SessionRecoveryOwner,
+} from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
 
 function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
@@ -33,6 +36,11 @@ function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTran
           : t("chat:providerQuotaResetUnknown"),
     };
   }
+  if (model.kind === "managed_clone_relocation_required")
+    return {
+      title: t("task:managedCloneRelocationTitle"),
+      summary: t("task:managedCloneRelocationBody"),
+    };
   const summary = model.summary?.trim();
   const safe = summary && summary.length <= 240 && sanitizeSessionErrorDetails(summary) === summary;
   return {
@@ -48,6 +56,11 @@ function recoveryActionCopy(kind: string, t: ReturnType<typeof useTranslation>["
     return { label: t("task:startFreshSession"), testId: "recovery-fresh-button" };
   if (kind === "resume_new_branch")
     return { label: t("task:continueOnNewBranch"), testId: "recovery-new-branch-button" };
+  if (kind === "relocate_and_resume")
+    return {
+      label: t("task:managedCloneRelocateResume"),
+      testId: "managed-clone-relocate-button",
+    };
   return { label: t("task:resumeSession"), testId: "recovery-resume-button" };
 }
 
@@ -56,28 +69,32 @@ export function useRecoveryChoices(
   actions: SessionRecoveryActions,
   profileExists: boolean,
   onNewSession: () => void,
+  onRelocateRequested: () => void,
 ) {
   const { t } = useTranslation();
   const supplied = model.metadata?.actions
     ?.map(sessionRecoveryAction)
     .filter((kind) => kind !== null);
-  let kinds = supplied ?? ["resume" as const, "fresh_start" as const];
-  if (model.kind === "provider_quota_limited" && !supplied) kinds = ["resume"];
-  if (isManagedRuntimeFailure(model.kind)) kinds = ["runtime_retry"];
-  if (model.kind === "missing_pr_branch" && !supplied) kinds = [];
-  const choices: RecoveryChoice[] = kinds.map((kind) => ({
-    kind,
-    label: recoveryActionCopy(kind, t).label,
-    testId: recoveryActionCopy(kind, t).testId,
-    disabled: kind === "resume" && !profileExists,
-    tooltip: model.metadata?.actions?.find((action) => sessionRecoveryAction(action) === kind)
-      ?.tooltip,
-    onClick: () => {
-      if (kind === "fresh_start" && !profileExists) onNewSession();
-      else void actions.handleRecover(kind);
-    },
-  }));
-  if (!isManagedRuntimeFailure(model.kind) && (actions.recoveryError || isBootstrapRecovery(model)))
+  const managedCloneRelocation =
+    model.kind === "managed_clone_relocation_required" ||
+    Boolean(actions.managedCloneRecoveryStamp);
+  const kinds = recoveryActionKinds(model, supplied, managedCloneRelocation);
+  const choices: RecoveryChoice[] = kinds.map((kind) =>
+    createRecoveryChoice({
+      kind,
+      model,
+      actions,
+      profileExists,
+      onNewSession,
+      onRelocateRequested,
+      t,
+    }),
+  );
+  if (
+    !managedCloneRelocation &&
+    !isManagedRuntimeFailure(model.kind) &&
+    (actions.recoveryError || isBootstrapRecovery(model))
+  )
     choices.push({
       kind: "restore",
       label: t("task:restoreReadOnlyWorkspace"),
@@ -94,6 +111,57 @@ export function useRecoveryChoices(
   return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
 }
 
+function recoveryActionKinds(
+  model: ActiveSessionRecovery,
+  supplied: NonNullable<ReturnType<typeof sessionRecoveryAction>>[] | undefined,
+  managedCloneRelocation: boolean,
+) {
+  if (managedCloneRelocation) return ["relocate_and_resume"] as const;
+  if (model.kind === "provider_quota_limited" && !supplied) return ["resume"] as const;
+  if (isManagedRuntimeFailure(model.kind)) return ["runtime_retry"] as const;
+  if (model.kind === "missing_pr_branch" && !supplied) return [] as const;
+  return supplied ?? (["resume", "fresh_start"] as const);
+}
+
+function createRecoveryChoice({
+  kind,
+  model,
+  actions,
+  profileExists,
+  onNewSession,
+  onRelocateRequested,
+  t,
+}: {
+  kind: NonNullable<ReturnType<typeof sessionRecoveryAction>>;
+  model: ActiveSessionRecovery;
+  actions: SessionRecoveryActions;
+  profileExists: boolean;
+  onNewSession: () => void;
+  onRelocateRequested: () => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}): RecoveryChoice {
+  const copy = recoveryActionCopy(kind, t);
+  return {
+    kind,
+    label: copy.label,
+    testId: copy.testId,
+    disabled: kind === "resume" && !profileExists,
+    tooltip: model.metadata?.actions?.find((action) => sessionRecoveryAction(action) === kind)
+      ?.tooltip,
+    onClick: () => {
+      if (kind === "fresh_start" && !profileExists) {
+        onNewSession();
+        return;
+      }
+      if (kind === "relocate_and_resume") {
+        onRelocateRequested();
+        return;
+      }
+      void actions.handleRecover(kind);
+    },
+  };
+}
+
 export function useRecoveryPresentation(
   model: ActiveSessionRecovery,
   actions: SessionRecoveryActions,
@@ -101,33 +169,67 @@ export function useRecoveryPresentation(
 ) {
   const { t } = useTranslation();
   const automatic = matchingAutomaticRecovery(context, model.sessionId);
-  const bootstrap = isBootstrapRecovery(model)
-    ? buildRecoveryCardModel({
-        error: {
-          stamp: model.stamp ?? "",
-          occurred_at: "",
-          preview: model.summary ?? "",
-          details: model.details,
-          causes: model.error?.causes,
-        },
-        automaticRecovery: automatic,
-        manualFailure: actions.manualRecoveryFailure,
-        manualError: actions.recoveryError,
-        recoveryNotice: actions.recoveryNotice,
-        translate: t,
-      })
-    : null;
-  const copy = bootstrap
-    ? { title: t(bootstrap.titleKey), summary: bootstrap.summary }
-    : recoveryCopy(model, t);
+  const managedCloneRelocation =
+    model.kind === "managed_clone_relocation_required" ||
+    Boolean(actions.managedCloneRecoveryStamp);
+  const bootstrap = managedCloneRelocation
+    ? null
+    : buildBootstrapRecoveryModel(model, actions, automatic, t);
+  const copy = recoveryPresentationCopy(model, bootstrap, managedCloneRelocation, t);
   const busy =
     Boolean(model.loading) ||
     isSessionRecoveryBusy(automatic?.resumptionState ?? "idle") ||
     actions.busyAction !== null;
   const busyAction = automatic?.resumptionState === "resuming" ? "resume" : actions.busyAction;
-  const details = [
+  const details = recoveryPresentationDetails(model, bootstrap?.causes ?? [], actions, t);
+  const failure = recoveryFailureCopy(actions, t);
+  return { copy, busy, busyAction, details, failure };
+}
+
+function buildBootstrapRecoveryModel(
+  model: ActiveSessionRecovery,
+  actions: SessionRecoveryActions,
+  automatic: SessionRecoveryOwner | null | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (!isBootstrapRecovery(model)) return null;
+  return buildRecoveryCardModel({
+    error: {
+      stamp: model.stamp ?? "",
+      occurred_at: "",
+      preview: model.summary ?? "",
+      details: model.details,
+      causes: model.error?.causes,
+    },
+    automaticRecovery: automatic,
+    manualFailure: actions.manualRecoveryFailure,
+    manualError: actions.recoveryError,
+    recoveryNotice: actions.recoveryNotice,
+    translate: t,
+  });
+}
+
+function recoveryPresentationCopy(
+  model: ActiveSessionRecovery,
+  bootstrap: ReturnType<typeof buildRecoveryCardModel> | null,
+  managedCloneRelocation: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (managedCloneRelocation)
+    return recoveryCopy({ ...model, kind: "managed_clone_relocation_required" }, t);
+  if (bootstrap) return { title: t(bootstrap.titleKey), summary: bootstrap.summary };
+  return recoveryCopy(model, t);
+}
+
+function recoveryPresentationDetails(
+  model: ActiveSessionRecovery,
+  causes: NonNullable<ReturnType<typeof buildRecoveryCardModel>>["causes"],
+  actions: SessionRecoveryActions,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  return [
     model.details,
-    ...(bootstrap?.causes ?? []).map((cause) =>
+    ...causes.map((cause) =>
       [operationLabel(cause.operation, t), causeLabel(cause.code, t), cause.detail]
         .filter(Boolean)
         .join("\n"),
@@ -136,8 +238,6 @@ export function useRecoveryPresentation(
   ]
     .filter(Boolean)
     .join("\n\n");
-  const failure = recoveryFailureCopy(actions, t);
-  return { copy, busy, busyAction, details, failure };
 }
 
 function recoveryFailureCopy(
@@ -158,7 +258,8 @@ function isBootstrapRecovery(model: ActiveSessionRecovery) {
   return (
     model.error?.phase === "bootstrap" &&
     !isManagedRuntimeFailure(model.kind) &&
-    model.kind !== "provider_quota_limited"
+    model.kind !== "provider_quota_limited" &&
+    model.kind !== "managed_clone_relocation_required"
   );
 }
 

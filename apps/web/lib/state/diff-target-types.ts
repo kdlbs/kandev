@@ -22,6 +22,12 @@ export type GitHubCommitDetailTarget = {
 
 export type CommitDetailTarget = LocalCommitDetailTarget | GitHubCommitDetailTarget;
 
+/** A repeatable request to reveal a file inside an already-open commit detail. */
+export type CommitFileNavigationRequest = {
+  path: string;
+  token: number;
+};
+
 export type OpenDiffOptions = {
   source?: DiffSource;
   repositoryName?: string;
@@ -39,4 +45,8 @@ export type DiffSheetMode =
       prKey?: string;
       changeLayer?: ChangeLayer;
     }
-  | { kind: "commit"; target: CommitDetailTarget };
+  | {
+      kind: "commit";
+      target: CommitDetailTarget;
+      fileNavigation?: CommitFileNavigationRequest | null;
+    };

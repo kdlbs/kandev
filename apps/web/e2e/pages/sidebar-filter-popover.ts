@@ -28,7 +28,7 @@ export class SidebarFilterPopoverPage {
   constructor(private readonly page: Page) {
     this.bar = page.getByTestId("tasks-view-picker");
     this.viewPicker = page.getByTestId("tasks-view-picker");
-    this.gear = page.getByTestId("sidebar-filter-gear");
+    this.gear = page.getByTestId("app-sidebar-content").getByTestId("sidebar-filter-gear");
   }
 
   get popover(): Locator {
@@ -48,7 +48,11 @@ export class SidebarFilterPopoverPage {
 
   async open(): Promise<void> {
     if (!(await this.popover.isVisible())) {
-      await this.gear.click();
+      const mobileTrigger = this.page
+        .getByRole("dialog", { name: "Tasks" })
+        .getByRole("button", { name: "Sidebar filters" });
+      const trigger = (await this.gear.isVisible()) ? this.gear : mobileTrigger;
+      await trigger.click();
       await expect(this.popover).toBeVisible();
     }
   }
@@ -144,9 +148,7 @@ export class SidebarFilterPopoverPage {
   }
 
   async setClauseBooleanValue(index: number, value: boolean): Promise<void> {
-    const trigger = this.clauseRow(index).getByTestId("filter-value-select");
-    await trigger.click();
-    await this.page.getByRole("option", { name: value ? "true" : "false", exact: true }).click();
+    await this.setClauseOp(index, value ? "Show" : "Hide");
   }
 
   async setClauseTextValue(index: number, value: string): Promise<void> {

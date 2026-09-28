@@ -4,6 +4,21 @@ import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 
+type UpdateNotification = {
+  version: string;
+  title: string;
+  body: string;
+  occurrence_id: string;
+};
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      setUpdateAvailableNotification: (notification: UpdateNotification | null) => void;
+    };
+  };
+};
+
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
  * device Enter inserts a newline instead of submitting, and the send affordance is
@@ -64,7 +79,49 @@ test.describe("Mobile clarification multiline answer", () => {
     await composer.pressSequentially("Queue this from phone 1", { timeout: 30_000 });
     await expect(composer).toContainText("Queue this from phone 1");
     await expect(session.clarificationOverlay()).toBeVisible();
-    await testPage.getByTestId("submit-message-button").tap();
+    await testPage.evaluate(
+      (notification) => {
+        const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E app store is unavailable");
+        store.getState().setUpdateAvailableNotification(notification);
+      },
+      {
+        version: "e2e-mobile-toast",
+        title: "Kandev update available",
+        body: "A newer Kandev release is available.",
+        occurrence_id: "e2e-mobile-toast",
+      },
+    );
+    const updateToast = testPage
+      .getByTestId("toast-message")
+      .filter({ hasText: "Kandev update available" })
+      .last();
+    await expect(updateToast).toContainText("Kandev update available");
+    await expect(updateToast).toContainText("A newer Kandev release is available.");
+    const submit = testPage.getByTestId("submit-message-button");
+    const nav = testPage.getByTestId("session-mobile-bottom-nav");
+    const [submitBox, navBox, toastBox] = await Promise.all([
+      submit.boundingBox(),
+      nav.boundingBox(),
+      updateToast.boundingBox(),
+    ]);
+    if (!submitBox || !navBox || !toastBox) {
+      throw new Error("expected mobile send controls and update toast to be measurable");
+    }
+    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(navBox.y);
+    const toastOverlapsSubmit =
+      toastBox.x < submitBox.x + submitBox.width &&
+      toastBox.x + toastBox.width > submitBox.x &&
+      toastBox.y < submitBox.y + submitBox.height &&
+      toastBox.y + toastBox.height > submitBox.y;
+    expect(toastOverlapsSubmit).toBe(false);
+    const submitOwnsHitTarget = await submit.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return target === button || button.contains(target);
+    });
+    expect(submitOwnsHitTarget).toBe(true);
+    await submit.tap();
 
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();

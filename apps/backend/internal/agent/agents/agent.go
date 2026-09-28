@@ -254,23 +254,26 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
-	Image           string
-	Tag             string
-	Cmd             Command
-	Entrypoint      Command
-	WorkingDir      string
-	Env             map[string]string
-	RequiredEnv     []string
-	Mounts          []MountTemplate
-	ResourceLimits  ResourceLimits
-	SessionConfig   SessionConfig
-	Protocol        agent.Protocol
-	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
-	WorkspaceFlag   string // e.g. "--workspace-root"
-	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
-	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
-	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
-	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	Image          string
+	Tag            string
+	Cmd            Command
+	Entrypoint     Command
+	WorkingDir     string
+	Env            map[string]string
+	RequiredEnv    []string
+	Mounts         []MountTemplate
+	ResourceLimits ResourceLimits
+	SessionConfig  SessionConfig
+	Protocol       agent.Protocol
+	ModelFlag      Param  // e.g. NewParam("--model", "{model}")
+	WorkspaceFlag  string // e.g. "--workspace-root"
+	AssumeMcpSse   bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	AssumeMcpHttp  bool   // Override: assume agent supports HTTP MCP servers even if not advertised
+	// SupportsManagedToolPolicy is true only when this adapter can disable all
+	// native and ambient tool paths for managed conversations.
+	SupportsManagedToolPolicy bool
+	ProjectSkillDir           string // CWD-relative path for project-level skills (e.g. ".claude/skills")
+	UserSkillDir              string // home-relative path for user-level skills (e.g. ".claude/skills")
 	// ProjectMCPStrategy materializes resolved MCP servers into a project-local
 	// config file before a protocol-mode agent subprocess starts. Use this for
 	// agents whose ACP adapter does not wire session/new mcpServers through to

@@ -65,7 +65,7 @@ function ProfileNameAndRetention({
           value={name}
           disabled={disabled}
           aria-invalid={!name.trim()}
-          className="min-h-11 w-full"
+          className="w-full"
           onChange={(event) => onNameChange(event.target.value)}
         />
         {!name.trim() && (
@@ -198,7 +198,7 @@ function ProfileEditorForm({
             type="button"
             variant="destructive"
             disabled={data.loading || save.saving || deletion.deleting}
-            className={settingsActionClassName("min-h-11 cursor-pointer")}
+            className={settingsActionClassName("cursor-pointer")}
             onClick={() => deletion.setDeleteOpen(true)}
           >
             {t("executors:deleteProfile")}
@@ -251,7 +251,7 @@ export function PluginExecutorProfilePage({
           <Button
             type="button"
             variant="outline"
-            className={settingsActionClassName("min-h-11 cursor-pointer")}
+            className={settingsActionClassName("cursor-pointer")}
             onClick={() => router.push("/settings/executors")}
           >
             {t("executors:backToExecutors")}

@@ -4,11 +4,13 @@ import type { SeedData } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   snapshotPersistedLayouts,
   waitForPersistedLayoutChange,
 } from "../../helpers/dockview-persistence";
 import { dwell } from "../../helpers/causal-waits";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
 
@@ -167,7 +169,17 @@ test.describe("Terminals — dockview UI", () => {
     await firstClose.click();
     const closeConfirmation = tabletTestPage.getByTestId("terminal-close-confirm-popover");
     await expect(closeConfirmation).toBeVisible();
-    await closeConfirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+    await waitForFiniteAnimations(closeConfirmation);
+    expect(await tabletTestPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    const tabletCancel = closeConfirmation.getByRole("button", { name: "Cancel", exact: true });
+    const tabletClose = closeConfirmation.getByRole("button", {
+      name: "Close terminal",
+      exact: true,
+    });
+    // @covers AC-UI-CONTROL-SIZING-001.4, AC-UI-CONTROL-SIZING-001.8
+    await expectControlHeight(tabletCancel, 44);
+    await expectControlHeight(tabletClose, 44);
+    await tabletCancel.click();
     await expect(firstClose).toBeFocused();
     await expect(firstTab).toBeVisible();
 
@@ -581,6 +593,7 @@ test.describe("Terminals — dockview UI", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const destroyPause = await pauseNextTerminalDestroy(testPage);
@@ -618,14 +631,23 @@ test.describe("Terminals — dockview UI", () => {
 
     const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
     await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await waitForFiniteAnimations(confirmation);
+    await prCapture.screenshot("desktop-close-confirmation", {
+      caption: "Terminal close confirmation with standard desktop action sizing",
+    });
     await expect(confirmation).toHaveRole("dialog");
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await expect(targetTab).toBeVisible();
+    const cancelButton = confirmation.getByRole("button", { name: "Cancel", exact: true });
+    const closeButton = confirmation.getByRole("button", { name: "Close terminal", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancelButton, 28);
+    await expectControlHeight(closeButton, 28);
     const confirmationBox = await confirmation.boundingBox();
     expect(confirmationBox).not.toBeNull();
     expect(confirmationBox!.width).toBeLessThanOrEqual(320);
     expect(confirmationBox!.height).toBeLessThanOrEqual(220);
-    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await closeButton.click();
     await destroyPause.waitForRequest();
 
     // The transport is deliberately paused: disappearance must be optimistic,

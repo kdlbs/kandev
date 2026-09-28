@@ -289,6 +289,8 @@ function useTaskPageData(
   const agent = useSessionAgent(task);
   const ensureSession = useEnsureTaskSession({
     id: task?.id,
+    isArchived: task?.archived_at != null,
+    archiveStateKnown: task !== null,
     workflowStepId: task?.workflow_step_id,
     workflowId: task?.workflow_id,
   });

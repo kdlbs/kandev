@@ -18,6 +18,7 @@
   "attachmentPreviewAlt": "プレビュー",
   "attachmentPreviewFullAlt": "全サイズのプレビュー",
   "attachmentUploadFailed": "添付ファイルのアップロードに失敗しました",
+  "attachmentWorkspaceUnavailable": "このタスクのワークスペースを確認できません。ファイルは下書きに残っています。",
   "attachmentUploadPending": "添付ファイルをアップロード中…",
   "attachmentUploadPendingSubmit": "送信前に添付ファイルのアップロードを完了してください。",
   "chatTabName": "チャット {{index}}",

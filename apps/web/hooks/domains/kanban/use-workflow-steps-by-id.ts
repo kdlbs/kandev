@@ -19,6 +19,7 @@ function mapStep(step: StoreStep): WorkflowStepperStep {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    complete_task_on_enter: step.complete_task_on_enter,
   };
 }
 

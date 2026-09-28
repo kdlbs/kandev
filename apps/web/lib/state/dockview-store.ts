@@ -226,7 +226,11 @@ type DockviewStore = {
   ) => void;
   addCommitDetailPanel: (
     target: CommitDetailTarget | string,
-    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+    opts?: OpenPanelOpts & {
+      groupId?: string;
+      repo?: string;
+      fileNavigation?: import("@/lib/state/diff-target-types").CommitFileNavigationRequest;
+    },
   ) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;

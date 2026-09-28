@@ -209,7 +209,10 @@ jobs:
       # bundles the pseudo QA catalog, and tests/i18n/pseudo-coverage.spec.ts
       # needs it. See apps/web/lib/i18n/bundling.ts.
       - name: Build backend and web
-        run: make build-backend build-web-e2e
+        run: |
+          # PR merge refs are untagged; helper manifests require a SemVer version.
+          VERSION="0.0.0-e2e.${GITHUB_SHA}" make build-backend
+          make build-web-e2e
 
       # Fixture plugin package consumed by the plugin E2E specs. Built here
       # (the build job has the Go toolchain) and shipped to the shards as its
@@ -1119,7 +1122,7 @@ jobs:
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # The desktop image contains the Rust toolchain, Tauri dependencies, and
-    # Xvfb. This job does not depend on hosted-runner apt mirrors.
+    # Xvfb. Go is installed below for the packaged-launcher smoke.
     container:
       image: ghcr.io/kdlbs/kandev-ci:desktop-latest
       options: --ipc=host
@@ -1133,6 +1136,12 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

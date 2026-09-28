@@ -138,6 +138,42 @@ func TestStopTaskForCoordinator_NotRunningDisarmsTransientRetry(t *testing.T) {
 	require.Empty(t, history, "not_running stop must not change task state")
 }
 
+func TestStopManagedInputExecutionTargetsObservedGeneration(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-managed-input-stop", "session-managed-input-stop", models.TaskSessionStateRunning)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-current", nil
+		},
+	}
+	stopped := make(chan string, 1)
+	manager.stopAgentWithReasonFunc = func(_ context.Context, executionID, _ string, _ bool) error {
+		stopped <- executionID
+		return nil
+	}
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), manager)
+
+	stoppedExact, err := svc.StopManagedInputExecution(ctx, "task-managed-input-stop", "session-managed-input-stop", "execution-old")
+	require.Error(t, err, "a replacement execution must not be stopped through an older input receipt")
+	require.False(t, stoppedExact)
+	select {
+	case executionID := <-stopped:
+		t.Fatalf("stopped execution %q after generation mismatch", executionID)
+	default:
+	}
+
+	stoppedExact, err = svc.StopManagedInputExecution(ctx, "task-managed-input-stop", "session-managed-input-stop", "execution-current")
+	require.NoError(t, err)
+	require.True(t, stoppedExact)
+	select {
+	case executionID := <-stopped:
+		require.Equal(t, "execution-current", executionID)
+	case <-time.After(time.Second):
+		t.Fatal("exact execution was not stopped")
+	}
+}
+
 func TestStopTaskForCoordinator_ReleasesSessionGuardBeforeTeardown(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

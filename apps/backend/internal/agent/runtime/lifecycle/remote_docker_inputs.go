@@ -52,8 +52,12 @@ func newRemoteContainerInputs(
 	platform SSHRemotePlatform,
 	commandBuilder *CommandBuilder,
 	log *logger.Logger,
+	resolvers ...*AgentctlResolver,
 ) *remoteContainerInputs {
 	resolver := NewAgentctlResolver(log)
+	if len(resolvers) > 0 && resolvers[0] != nil {
+		resolver = resolvers[0]
+	}
 	return &remoteContainerInputs{
 		client:         client,
 		platform:       platform,

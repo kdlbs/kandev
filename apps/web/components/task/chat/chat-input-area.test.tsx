@@ -6,6 +6,7 @@ import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
+const fetchTaskMock = vi.hoisted(() => vi.fn());
 const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
 const MESSAGE_NOT_SENT_TITLE = "Message not sent";
 let mockProceedStepName: string | null = null;
@@ -17,6 +18,7 @@ const mockState = {
   kanban: { workflowId: null, tasks: [], steps: [] },
   kanbanMulti: { snapshots: {} },
   workflows: { items: [] },
+  office: { tasks: { items: [] } },
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -51,6 +53,11 @@ vi.mock("@/components/task/share/share-button", () => ({
 
 vi.mock("@/components/task/chat/chat-input-container", () => ({
   ChatInputContainer: () => <textarea aria-label="Draft" />,
+}));
+
+vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/kanban-api")>()),
+  fetchTask: fetchTaskMock,
 }));
 
 vi.mock("@/components/task/chat/queued-ghost-list", () => ({
@@ -147,6 +154,7 @@ beforeEach(() => {
   handleSendMessageMock.mockReset();
   handleSendMessageMock.mockResolvedValue(undefined);
   useKeyboardShortcutMock.mockReset();
+  fetchTaskMock.mockReset().mockResolvedValue({ workspace_id: "task-workspace" });
 });
 
 afterEach(() => {

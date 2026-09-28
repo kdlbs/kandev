@@ -93,12 +93,13 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 
 // Task is the Go-native mirror of kandev.plugin.v1.Task.
 type Task struct {
-	ID          string
-	WorkspaceID string
-	WorkflowID  string
-	Title       string
-	Description string
-	State       string
+	ID              string
+	WorkspaceID     string
+	WorkflowID      string
+	ResourceVersion string
+	Title           string
+	Description     string
+	State           string
 	// Priority is one of critical, high, medium, or low.
 	Priority     string
 	CreatedBy    string
@@ -267,23 +268,24 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		}
 	}
 	return &pluginv1.Task{
-		Id:           t.ID,
-		WorkspaceId:  t.WorkspaceID,
-		WorkflowId:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		CreatedBy:    t.CreatedBy,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		StartedAt:    t.StartedAt,
-		CompletedAt:  t.CompletedAt,
-		ParentId:     t.ParentID,
-		Identifier:   t.Identifier,
-		IsEphemeral:  t.IsEphemeral,
-		Repositories: repos,
-		Metadata:     metadata,
+		Id:              t.ID,
+		WorkspaceId:     t.WorkspaceID,
+		WorkflowId:      t.WorkflowID,
+		ResourceVersion: t.ResourceVersion,
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           t.State,
+		Priority:        t.Priority,
+		CreatedBy:       t.CreatedBy,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		StartedAt:       t.StartedAt,
+		CompletedAt:     t.CompletedAt,
+		ParentId:        t.ParentID,
+		Identifier:      t.Identifier,
+		IsEphemeral:     t.IsEphemeral,
+		Repositories:    repos,
+		Metadata:        metadata,
 
 		ArchivedAt:             t.ArchivedAt,
 		PullRequests:           taskPullRequestsToProto(t.PullRequests),
@@ -346,23 +348,24 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		}
 	}
 	return Task{
-		ID:           p.GetId(),
-		WorkspaceID:  p.GetWorkspaceId(),
-		WorkflowID:   p.GetWorkflowId(),
-		Title:        p.GetTitle(),
-		Description:  p.GetDescription(),
-		State:        p.GetState(),
-		Priority:     p.GetPriority(),
-		CreatedBy:    p.GetCreatedBy(),
-		CreatedAt:    p.GetCreatedAt(),
-		UpdatedAt:    p.GetUpdatedAt(),
-		StartedAt:    p.StartedAt,
-		CompletedAt:  p.CompletedAt,
-		ParentID:     p.ParentId,
-		Identifier:   p.GetIdentifier(),
-		IsEphemeral:  p.GetIsEphemeral(),
-		Repositories: repos,
-		Metadata:     metadata,
+		ID:              p.GetId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		WorkflowID:      p.GetWorkflowId(),
+		ResourceVersion: p.GetResourceVersion(),
+		Title:           p.GetTitle(),
+		Description:     p.GetDescription(),
+		State:           p.GetState(),
+		Priority:        p.GetPriority(),
+		CreatedBy:       p.GetCreatedBy(),
+		CreatedAt:       p.GetCreatedAt(),
+		UpdatedAt:       p.GetUpdatedAt(),
+		StartedAt:       p.StartedAt,
+		CompletedAt:     p.CompletedAt,
+		ParentID:        p.ParentId,
+		Identifier:      p.GetIdentifier(),
+		IsEphemeral:     p.GetIsEphemeral(),
+		Repositories:    repos,
+		Metadata:        metadata,
 
 		ArchivedAt:             p.ArchivedAt,
 		PullRequests:           taskPullRequestsFromProto(p.GetPullRequests()),

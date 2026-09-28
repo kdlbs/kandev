@@ -169,6 +169,10 @@ export function collectImplementPlanInput(
   };
 }
 
+export function planAttachmentsAreReady(attachments: MessageAttachment[]): boolean {
+  return attachments.every((attachment) => Boolean(attachment.attachment_id));
+}
+
 export async function markPlanImplementationStartedBestEffort(
   taskId: string,
   sessionId: string,
@@ -205,6 +209,7 @@ function useImplementPlan(
       chatInputRef?.current,
       resolvedSessionId,
     );
+    if (!planAttachmentsAreReady(attachments)) return false;
 
     const content = buildImplementPlanContent(userText);
 
@@ -324,7 +329,9 @@ export function usePlanActions(opts: {
 
   const showImplement = opts.planModeEnabled;
   const implementPlanHandler = showImplement
-    ? (fresh: boolean) => {
+    ? async (fresh: boolean) => {
+        const attachments = opts.chatInputRef.current?.getAttachments() ?? [];
+        if (!planAttachmentsAreReady(attachments)) return false;
         if (nextStepIsWorkStep) return proceed();
         return implementPlan(fresh);
       }

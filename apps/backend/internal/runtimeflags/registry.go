@@ -53,6 +53,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
+	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 }
 
 var registrations = []runtimeFlagRegistration{
@@ -266,22 +267,6 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:             "features.remoteExecutorPlugins",
-			EnvVar:          "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS",
-			Kind:            KindFeature,
-			Label:           "Remote executor plugins",
-			Description:     "Enables plugin-provided remote task execution environments.",
-			Stability:       StabilityExperimental,
-			RiskLevel:       RiskHigh,
-			RiskDescription: "A provider plugin can allocate remote compute and receive scoped bootstrap data. Enable only while provider admission, authenticated transport, durable cleanup inventory, and recovery are available.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.RemoteExecutorPlugins },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.RemoteExecutorPlugins = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

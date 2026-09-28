@@ -36,7 +36,7 @@ func TestPluginExecutorAdmission(t *testing.T) {
 		Status: StatusActive,
 	}
 
-	provider, err := validateExecutorProviderAdmission(true, record, "lambda")
+	provider, err := validateExecutorProviderAdmission(record, "lambda")
 	if err != nil {
 		t.Fatalf("validateExecutorProviderAdmission() error = %v", err)
 	}
@@ -44,11 +44,40 @@ func TestPluginExecutorAdmission(t *testing.T) {
 		t.Fatalf("admitted provider = %+v, identity = %q", provider, ExecutorProviderIdentity(record.ID, provider.Key))
 	}
 
-	if _, err := validateExecutorProviderAdmission(true, record, "missing"); !errors.Is(err, ErrExecutorProviderUnavailable) {
+	if _, err := validateExecutorProviderAdmission(record, "missing"); !errors.Is(err, ErrExecutorProviderUnavailable) {
 		t.Fatalf("undeclared provider error = %v, want unavailable", err)
 	}
-	if _, err := validateExecutorProviderAdmission(false, record, "lambda"); !errors.Is(err, ErrExecutorProvidersDisabled) {
-		t.Fatalf("disabled provider error = %v, want disabled", err)
+	disabledRecord := *record
+	disabledRecord.Status = StatusDisabled
+	if _, err := validateExecutorProviderAdmission(&disabledRecord, "lambda"); !errors.Is(err, ErrExecutorProviderUnavailable) {
+		t.Fatalf("disabled plugin admission error = %v, want unavailable", err)
+	}
+}
+
+func TestPluginExecutorDispatchRejectsWhenProcessIsNotRunning(t *testing.T) {
+	service, _, _ := newTestService(t)
+	record := &store.Record{
+		Manifest: manifest.Manifest{
+			ID:           "example-provider",
+			Capabilities: manifest.Capabilities{ExecutorProvider: true},
+			ExecutorProviders: []manifest.ExecutorProvider{{
+				Key:             "lambda",
+				ContractVersion: manifest.CurrentExecutorProviderContractVersion,
+			}},
+		},
+		Status: StatusActive,
+	}
+	service.registry.Add(record)
+	called := false
+	err := service.withExecutorProvider(context.Background(), record.ID, "lambda", func(context.Context, *pluginsdk.RemotePlugin, *manifest.ExecutorProvider) error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrExecutorProviderUnavailable) {
+		t.Fatalf("withExecutorProvider() error = %v, want unavailable", err)
+	}
+	if called {
+		t.Fatal("provider callback ran without an active plugin process")
 	}
 }
 
@@ -73,39 +102,5 @@ func TestPluginExecutorContractProbeRequiresCompleteProvider(t *testing.T) {
 	probe.err = status.Error(codes.Unimplemented, "unsupported")
 	if err := validateExecutorProviderContracts(context.Background(), record, probe); !errors.Is(err, ErrExecutorProviderUnavailable) {
 		t.Fatalf("missing provider contract error = %v, want unavailable", err)
-	}
-}
-
-func TestPluginExecutorDisabledNoDispatch(t *testing.T) {
-	service := NewService(store.NewFSStore(t.TempDir()), NewRegistry(), nil, nil)
-	record := &store.Record{
-		Manifest: manifest.Manifest{
-			ID:           "example-provider",
-			Capabilities: manifest.Capabilities{ExecutorProvider: true},
-			ExecutorProviders: []manifest.ExecutorProvider{{
-				Key:             "lambda",
-				ContractVersion: manifest.CurrentExecutorProviderContractVersion,
-			}},
-		},
-		Status: StatusActive,
-	}
-	service.registry.Add(record)
-	service.SetRemoteExecutorPluginsEnabled(false)
-	if err := service.validateExecutorProviderRuntime(context.Background(), record); err != nil {
-		t.Fatalf("disabled contract probe = %v, want no-op", err)
-	}
-	dispatched := false
-	err := service.withExecutorProvider(context.Background(), record.ID, "lambda", func(context.Context, *pluginsdk.RemotePlugin, *manifest.ExecutorProvider) error {
-		dispatched = true
-		return nil
-	})
-	if !errors.Is(err, ErrExecutorProvidersDisabled) {
-		t.Fatalf("withExecutorProvider() error = %v, want disabled", err)
-	}
-	if dispatched {
-		t.Fatal("provider callback ran while remote executor plugins were disabled")
-	}
-	if _, err := service.Get(record.ID); err != nil {
-		t.Fatalf("disabled provider inventory became unreadable: %v", err)
 	}
 }

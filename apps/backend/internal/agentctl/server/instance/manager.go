@@ -39,6 +39,7 @@ type Manager struct {
 	config        *config.Config
 	logger        *logger.Logger
 	instances     map[string]*Instance
+	provisional   map[string]*provisionalInstance
 	portAlloc     *PortAllocator
 	serverFactory ServerFactory
 	mu            sync.RWMutex
@@ -82,6 +83,19 @@ type Manager struct {
 	turnIDSeq atomic.Int64
 }
 
+type provisionalInstance struct {
+	id       string
+	lease    PortLease
+	listener net.Listener
+	procMgr  processManager
+
+	cleanupMu      sync.Mutex
+	listenerClosed bool
+	processStopped bool
+	cleaned        bool
+	lastCleanupErr error
+}
+
 // NewManager creates a new instance manager.
 // If cfg.IdleTimeout > 0, a background goroutine periodically reaps
 // instances that have been idle (no in-flight HTTP requests and no
@@ -91,11 +105,12 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 	process.CleanupOrphanedCodeServers(log)
 
 	m := &Manager{
-		config:     cfg,
-		logger:     log.WithFields(zap.String("component", "instance-manager")),
-		instances:  make(map[string]*Instance),
-		portAlloc:  NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
-		reaperStop: make(chan struct{}),
+		config:      cfg,
+		logger:      log.WithFields(zap.String("component", "instance-manager")),
+		instances:   make(map[string]*Instance),
+		provisional: make(map[string]*provisionalInstance),
+		portAlloc:   NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
+		reaperStop:  make(chan struct{}),
 	}
 
 	if cfg.IdleTimeout > 0 {
@@ -169,11 +184,32 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	if _, exists := m.instances[id]; exists {
 		return nil, fmt.Errorf("instance with ID %s already exists", id)
 	}
+	if _, exists := m.provisional[id]; exists {
+		return nil, fmt.Errorf("instance with ID %s is still cleaning up", id)
+	}
 
-	port, listener, err := m.allocatePortAndListener(id)
+	lease, listener, err := m.allocatePortAndListener(id)
 	if err != nil {
 		return nil, err
 	}
+	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
+	m.provisional[id] = bundle
+	cleanupPending := true
+	defer func() {
+		if !cleanupPending {
+			return
+		}
+		m.abandonWG.Add(1)
+		go func() {
+			defer m.abandonWG.Done()
+			if err := m.abandonPartialInstance(bundle); err != nil {
+				m.logger.Warn("error cleaning up abandoned instance",
+					zap.String("instance_id", bundle.id),
+					zap.Error(err))
+			}
+		}()
+	}()
+	port := lease.Port
 
 	agentCmd := m.resolveAgentCommand(req)
 	autoStart := req.AutoStart
@@ -223,6 +259,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	bundle.procMgr = procMgr
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
 	// process.TurnOutcomeRecorder via RetainTurnOutcome above, and nothing
@@ -243,21 +280,6 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// Starting the trackers is the slow part of creation, so re-check: a caller
 	// that was still waiting when we took the lock can time out during it.
 	if err := ctx.Err(); err != nil {
-		// Teardown runs off this goroutine because it must not happen under
-		// m.mu. stopWorkspaceTrackers stops trackers one at a time, and
-		// WorkspaceTracker.Stop takes no context — it waits on its own
-		// stopTimeout timer — so a workspace with a dozen repositories could
-		// pin the creation mutex for the better part of a minute, lengthening
-		// the very queue this abandonment exists to drain.
-		//
-		// Nothing can observe the instance meanwhile: it was never added to
-		// m.instances, and PortAllocator carries its own mutex. The wait group
-		// lets Shutdown drain these before it returns.
-		m.abandonWG.Add(1)
-		go func() {
-			defer m.abandonWG.Done()
-			m.abandonPartialInstance(id, port, listener, procMgr)
-		}()
 		return nil, fmt.Errorf("create instance abandoned during startup: %w", err)
 	}
 
@@ -265,6 +287,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	inst := &Instance{
 		ID:            id,
 		Port:          port,
+		lease:         lease,
 		Status:        "running",
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  agentCmd,
@@ -273,13 +296,16 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		SessionID:     req.SessionID,
 		TaskID:        req.TaskID,
 		manager:       procMgr,
+		listenerDone:  make(chan struct{}),
 	}
 	inst.MarkActivity()
 
 	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
-	httpServer := m.startHTTPServer(port, listener, handler, id)
+	httpServer := m.startHTTPServer(inst, listener, handler)
 	inst.server = httpServer
 	m.instances[id] = inst
+	delete(m.provisional, id)
+	cleanupPending = false
 
 	// Clamp to a minimum of 1ms so a genuinely sub-millisecond creation can't
 	// be stored as 0, which CreateReadyMillis's zero value reserves to mean
@@ -308,64 +334,86 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 // teardown runs off the creation mutex rather than under it.
 const abandonPartialInstanceTimeout = 5 * time.Second
 
-// abandonPartialInstance unwinds the pieces CreateInstance built before it
-// noticed the caller had gone: the tracker goroutines, the bound listener and
-// the allocated port. It must be called WITHOUT m.mu held — the tracker stops
-// are slow and uninterruptible — and it does not route through StopInstance,
-// which would take that lock. The instance was never registered in
-// m.instances, so there is nothing there to remove.
-func (m *Manager) abandonPartialInstance(id string, port int, listener net.Listener, procMgr *process.Manager) {
-	// The request context is already cancelled, so teardown needs its own.
+// abandonPartialInstance unwinds one unregistered instance. Failed cleanup
+// keeps the bundle and its lease available for a later retry.
+func (m *Manager) abandonPartialInstance(bundle *provisionalInstance) error {
 	ctx, cancel := context.WithTimeout(context.Background(), abandonPartialInstanceTimeout)
 	defer cancel()
+	return m.cleanupProvisionalInstance(ctx, bundle)
+}
 
-	// Give the port back first. Nothing was ever published on this listener, and
-	// stopping the trackers below can take seconds — holding the port for that
-	// long shrinks the pool exactly when creations are already piling up.
-	if listener != nil {
-		_ = listener.Close()
+func (m *Manager) cleanupProvisionalInstance(ctx context.Context, bundle *provisionalInstance) error {
+	bundle.cleanupMu.Lock()
+	defer bundle.cleanupMu.Unlock()
+	if bundle.cleaned {
+		return nil
 	}
-	m.portAlloc.Release(port)
 
-	if procMgr != nil {
-		procMgr.CloseAdmission()
-		if err := procMgr.StopForTeardown(ctx); err != nil {
-			m.logger.Warn("error stopping process manager for abandoned instance",
-				zap.String("instance_id", id),
-				zap.Error(err))
+	var cleanupErr error
+	if bundle.procMgr != nil {
+		bundle.procMgr.CloseAdmission()
+	}
+	if bundle.listener == nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("listener missing for abandoned instance %s", bundle.id))
+	} else if !bundle.listenerClosed {
+		if err := bundle.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close listener for abandoned instance %s: %w", bundle.id, err))
+		} else {
+			bundle.listenerClosed = true
 		}
 	}
+	if bundle.procMgr != nil && !bundle.processStopped {
+		if err := bundle.procMgr.StopForTeardown(ctx); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop process manager for abandoned instance %s: %w", bundle.id, err))
+		} else {
+			bundle.processStopped = true
+		}
+	}
+	if cleanupErr != nil {
+		bundle.lastCleanupErr = cleanupErr
+		return cleanupErr
+	}
+
+	bundle.lastCleanupErr = nil
+	m.portAlloc.Release(bundle.lease)
+	bundle.cleaned = true
+	m.mu.Lock()
+	if m.provisional[bundle.id] == bundle {
+		delete(m.provisional, bundle.id)
+	}
+	m.mu.Unlock()
 
 	m.logger.Warn("abandoned partially created instance",
-		zap.String("instance_id", id),
-		zap.Int("port", port))
+		zap.String("instance_id", bundle.id),
+		zap.Int("port", bundle.lease.Port))
+	return nil
 }
 
 // allocatePortAndListener allocates a free port and binds a TCP listener to it.
-func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) {
+func (m *Manager) allocatePortAndListener(id string) (PortLease, net.Listener, error) {
 	maxAttempts := m.config.Ports.Max - m.config.Ports.Base + 1
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		allocated, err := m.portAlloc.Allocate(id)
+		lease, err := m.portAlloc.Allocate(id)
 		if err != nil {
-			return 0, nil, fmt.Errorf("failed to allocate port: %w", err)
+			return PortLease{}, nil, fmt.Errorf("failed to allocate port: %w", err)
 		}
 		// Bind loopback-only when auth is disabled (no token); otherwise bind
 		// all interfaces so Docker/remote executors can reach the instance.
-		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), allocated))
+		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), lease.Port))
 		if err != nil {
 			if netutil.IsAddrInUse(err) {
-				m.portAlloc.MarkUnavailable(allocated)
+				m.portAlloc.MarkUnavailable(lease)
 				m.logger.Warn("port already in use; retrying",
 					zap.String("instance_id", id),
-					zap.Int("port", allocated))
+					zap.Int("port", lease.Port))
 				continue
 			}
-			m.portAlloc.Release(allocated)
-			return 0, nil, fmt.Errorf("failed to bind instance port %d: %w", allocated, err)
+			m.portAlloc.Release(lease)
+			return PortLease{}, nil, fmt.Errorf("failed to bind instance port %d: %w", lease.Port, err)
 		}
-		return allocated, ln, nil
+		return lease, ln, nil
 	}
-	return 0, nil, fmt.Errorf("failed to allocate an available port for instance %s", id)
+	return PortLease{}, nil, fmt.Errorf("failed to allocate an available port for instance %s", id)
 }
 
 // resolveAgentCommand returns the effective agent command for a create request.
@@ -460,15 +508,18 @@ func (m *Manager) buildHTTPHandler(instanceCfg *config.InstanceConfig, procMgr *
 }
 
 // startHTTPServer creates and starts an HTTP server on the given listener.
-func (m *Manager) startHTTPServer(port int, listener net.Listener, handler http.Handler, id string) *http.Server {
+func (m *Manager) startHTTPServer(inst *Instance, listener net.Listener, handler http.Handler) *http.Server {
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", inst.Port),
 		Handler: handler,
 	}
+	inst.listenerActive.Store(true)
 	go func() {
+		defer close(inst.listenerDone)
+		defer inst.listenerActive.Store(false)
 		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			m.logger.Error("instance server error",
-				zap.String("instance_id", id),
+				zap.String("instance_id", inst.ID),
 				zap.Error(err))
 		}
 	}()
@@ -562,7 +613,7 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		zap.Int("port", inst.Port))
 	m.mu.Lock()
 	if !inst.portReleased {
-		m.portAlloc.Release(inst.Port)
+		m.portAlloc.Release(inst.lease)
 		inst.portReleased = true
 	}
 	if stopErr == nil {
@@ -628,19 +679,31 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	for id := range m.instances {
 		ids = append(ids, id)
 	}
+	provisional := make([]*provisionalInstance, 0, len(m.provisional))
+	for _, bundle := range m.provisional {
+		provisional = append(provisional, bundle)
+	}
 	m.mu.Unlock()
 
-	var lastErr error
+	var shutdownErr error
+	for _, bundle := range provisional {
+		if err := m.cleanupProvisionalInstance(ctx, bundle); err != nil {
+			m.logger.Error("error retrying abandoned instance cleanup during shutdown",
+				zap.String("instance_id", bundle.id),
+				zap.Error(err))
+			shutdownErr = errors.Join(shutdownErr, err)
+		}
+	}
 	for _, id := range ids {
 		if err := m.StopInstance(ctx, id); err != nil {
 			m.logger.Error("error stopping instance during shutdown",
 				zap.String("instance_id", id),
 				zap.Error(err))
-			lastErr = err
+			shutdownErr = errors.Join(shutdownErr, err)
 		}
 	}
 
-	return lastErr
+	return shutdownErr
 }
 
 // stopReaperOnce closes the reaper stop channel exactly once and waits for

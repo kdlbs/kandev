@@ -40,7 +40,11 @@ import {
   type ReviewProgressPRSource,
   type PRCommitForMerge,
 } from "./changes-panel-helpers";
-import type { CommitDetailTarget, OpenDiffOptions } from "@/lib/state/diff-target-types";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
@@ -130,7 +134,10 @@ export type ChangesPanelBodyProps = {
   dialogs: DialogsType;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onStageAll: () => void;
@@ -474,7 +481,10 @@ export function useChangesPanelData() {
 type ChangesPanelCallbacks = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onOpenReview?: () => void;
 };
 

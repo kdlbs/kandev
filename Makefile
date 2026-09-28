@@ -565,7 +565,7 @@ test-cli:
 test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
-	@node --test .github/scripts/pr-docs.test.cjs
+	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh

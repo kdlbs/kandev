@@ -26,6 +26,18 @@ func actionByTestID(actions []map[string]interface{}, testID string) map[string]
 	return nil
 }
 
+func TestBuildRecoveryActions_LocalizedTooltips(t *testing.T) {
+	for _, corrupted := range []bool{false, true} {
+		actions := buildRecoveryActions("t1", "s1", true, false, corrupted)
+		resumeKey := "sessionRecoveryResumeDescription"
+		if corrupted {
+			resumeKey = "sessionRecoveryCorruptedDescription"
+		}
+		require.Equal(t, resumeKey, actionByTestID(actions, recoveryResumeButtonTestID)["tooltip_key"])
+		require.Equal(t, "sessionRecoveryFreshDescription", actionByTestID(actions, recoveryFreshButtonTestID)["tooltip_key"])
+	}
+}
+
 func TestBuildRecoveryActions_NormalOrdering(t *testing.T) {
 	// Regression: ordinary failures keep Resume first, then Start fresh.
 	actions := buildRecoveryActions("t1", "s1", true /*hasResumeToken*/, false /*auth*/, false /*resumeCorrupted*/)

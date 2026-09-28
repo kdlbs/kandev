@@ -2,9 +2,11 @@ package executor
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -118,6 +120,22 @@ func TestWorktreeRecoveryResumeIntegration(t *testing.T) {
 		t.Fatalf("selected recovery admission calls = %d, want 1", admissionCalls)
 	}
 	assertSelectedWorktreeRecoveryRequest(t, admissionRequest, taskID, sessionID)
+}
+
+func TestManagedCloneRelocationProofIncludesLegacyOwnerNamePath(t *testing.T) {
+	root := t.TempDir()
+	cloner := repoclone.NewCloner(repoclone.Config{BasePath: root}, repoclone.ProtocolHTTPS, "", nil)
+	repository := &models.Repository{
+		ID: "repo-legacy", WorkspaceID: "workspace-legacy", SourceType: "provider", Provider: "github",
+		ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget",
+	}
+	proof := managedCloneRelocationProof(cloner, repository, "", "")
+	if proof == nil {
+		t.Fatal("managedCloneRelocationProof() returned nil for a managed provider repository")
+	}
+	if want := filepath.Join(root, "acme", "widget"); proof.LegacyOwnerNameSourcePath != want {
+		t.Fatalf("legacy owner/name source = %q, want %q", proof.LegacyOwnerNameSourcePath, want)
+	}
 }
 
 func assertSelectedWorktreeRecoveryRequest(

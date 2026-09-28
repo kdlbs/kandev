@@ -45,6 +45,7 @@ type TaskHandlers struct {
 	unarchiveRecoveryTimeout      time.Duration
 	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
 	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	backgroundWorkEnabled         bool
 	logger                        *logger.Logger
@@ -88,6 +89,10 @@ type agentProfileRecentUseRecorder interface {
 	) (*usermodels.AgentProfileRecentUse, error)
 }
 
+type sidebarTaskSettingsReader interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
+}
+
 // SetHandoffService wires the office task-handoffs service used by the
 // Kanban subtask path. The task service uses the same instance to attach
 // workspace-group membership before any create route returns.
@@ -122,6 +127,10 @@ func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsed
 
 func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
 	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) SetSidebarTaskSettingsReader(reader sidebarTaskSettingsReader) {
+	h.sidebarSettingsReader = reader
 }
 
 func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
@@ -199,12 +208,19 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
+	api.POST("/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
 	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
 	api.DELETE("/workspaces/:id/tasks/by-external-id", h.httpReleaseTaskExternalID)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/management-claim", h.httpGetTaskManagementClaim)
+	api.POST("/tasks/:id/management-claim", h.httpChangeTaskManagementClaim)
+	api.GET("/tasks/:id/completion-gate", h.httpGetTaskCompletionGate)
+	api.GET("/tasks/:id/completion-gate/history", h.httpListTaskCompletionGateHistory)
+	api.PUT("/tasks/:id/completion-gate/criteria", h.httpSetTaskCompletionCriteria)
+	api.PUT("/tasks/:id/completion-gate/criteria/:criterion_id/evidence", h.httpVerifyTaskCompletionCriterion)
 	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)

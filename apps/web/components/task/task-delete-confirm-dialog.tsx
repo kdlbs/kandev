@@ -60,7 +60,11 @@ type TaskDeleteConfirmDialogProps = {
   executorTypes?: Array<string | null | undefined>;
   /** Whether the single task borrows its workspace from its parent. */
   sharesParentWorkspace?: boolean;
-  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
+  onConfirm: (opts: {
+    cascade: boolean;
+    discardWorktreeChanges: boolean;
+    confirmationId: string;
+  }) => void;
   confirmTestId?: string;
   /** Overrides default focus restoration when the original trigger may disappear. */
   onCloseAutoFocus?: (event: Event) => void;
@@ -134,7 +138,12 @@ type TaskDeleteActionProps = {
   confirmTestId?: string;
   cascade: boolean;
   discardWorktreeChanges: boolean;
-  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
+  confirmationId: string;
+  onConfirm: (opts: {
+    cascade: boolean;
+    discardWorktreeChanges: boolean;
+    confirmationId: string;
+  }) => void;
   onClose: () => void;
 };
 
@@ -144,6 +153,7 @@ function TaskDeleteAction({
   confirmTestId,
   cascade,
   discardWorktreeChanges,
+  confirmationId,
   onConfirm,
   onClose,
 }: TaskDeleteActionProps) {
@@ -156,7 +166,7 @@ function TaskDeleteAction({
       data-testid={confirmTestId}
       onClick={() => {
         if (isDeleting) return;
-        onConfirm({ cascade, discardWorktreeChanges });
+        onConfirm({ cascade, discardWorktreeChanges, confirmationId });
         onClose();
       }}
     >
@@ -284,6 +294,7 @@ function TaskDeleteDialogOptions({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- The confirmation dialog keeps preview, cleanup, and submit state in one guarded flow.
 export function TaskDeleteConfirmDialog({
   open,
   onOpenChange,
@@ -326,15 +337,18 @@ export function TaskDeleteConfirmDialog({
   } = useTaskDeleteDialogState(onOpenChange);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open);
-  const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade);
+  const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade, discardWorktreeChanges);
   const requiresDiscardConsent =
     preflight.status === "resolved" && preflight.requiresDiscardConsent;
   const preflightReady = preflight.status === "resolved";
 
-  useResetDiscardWorktreeChanges(preflight.requestKey, setDiscardWorktreeChanges);
+  useResetDiscardWorktreeChanges(preflight.scopeKey, setDiscardWorktreeChanges);
 
   const deleteDisabled =
-    isDeleting || !preflightReady || (requiresDiscardConsent && !discardWorktreeChanges);
+    isDeleting ||
+    !preflightReady ||
+    !preflight.confirmationId ||
+    (requiresDiscardConsent && !discardWorktreeChanges);
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
@@ -380,6 +394,7 @@ export function TaskDeleteConfirmDialog({
             confirmTestId={confirmTestId}
             cascade={cascade}
             discardWorktreeChanges={discardWorktreeChanges}
+            confirmationId={preflight.confirmationId}
             onConfirm={onConfirm}
             onClose={() => handleOpenChange(false)}
           />

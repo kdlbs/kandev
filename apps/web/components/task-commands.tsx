@@ -14,12 +14,17 @@ import { useTaskCommandChoices } from "./task-command-choices";
 import type { TaskSwitcherItem } from "./task/task-switcher-types";
 import type { CommandItem } from "@/lib/commands/types";
 import { ChangeWorkflowDialog } from "@/components/task/change-workflow-dialog";
+import type { Task } from "@/lib/types/http";
+import { taskCommandItemFromDetail } from "./task-command-task";
 
 /** One task action host, shared by desktop and phone and independent of sessions. */
-export function TaskCommands() {
+export function TaskCommands({ task: detailTask }: { task: Task | null }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const data = useSidebarData(workspaceId);
-  const task = data.tasksWithRepositories.find((item) => item.id === data.activeTaskId);
+  const sidebarTask = data.tasksWithRepositories.find((item) => item.id === data.activeTaskId);
+  const task =
+    sidebarTask ??
+    (detailTask?.id === data.activeTaskId ? taskCommandItemFromDetail(detailTask) : undefined);
   if (!workspaceId || !task || data.workspaceContextAccessDenied) return null;
   return (
     <TaskCommandsForTask

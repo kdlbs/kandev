@@ -293,6 +293,14 @@ prove which cache generation is currently live.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 
+Archived Git worktrees use the task cleanup worker, not the optional storage schedule. A clean
+worktree can be removed during archive. A worktree with tracked or untracked Git changes remains
+on disk and gets a durable recheck after about 24 hours. The worker removes it after Git reports it
+clean, even when scheduled storage cleanup is disabled. Git-ignored files are outside this check.
+Active archived worktree paths protect their task workspace from storage quarantine and purge,
+including **Force clear all**. An older Kandev version can move an active worktree into quarantine.
+If this happens, choose **Restore** to return the workspace to its original path.
+
 The Workspaces policy includes an off-by-default **Remove dependencies from archived or deleted
 task workspaces** option. When enabled, a scheduled cleanup or the matching manual action can
 recursively remove only these directories from eligible, unprotected Kandev task workspaces:
@@ -465,6 +473,14 @@ Kandev keeps the current default and does not merge the databases. Use a
 verified snapshot or a later deliberate recovery procedure to reconcile them.
 
 Open **Settings > System > Data & Logs > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
+
+Logical storage totals are measured in the background and shown with their last
+measurement time. During the first scan, the page still shows database details
+and available maintenance actions. If a refresh fails, the last complete totals
+remain visible as stale; select **Retry measurement** when the page offers it.
+The logical snapshot is held by the backend for 15 minutes and is lost when the
+backend restarts. The page reports the metadata measurement time separately if
+the live metadata read could not refresh.
 
 - **Optimize** runs `PRAGMA optimize`. It is quick and updates planner statistics.
 - **Vacuum** runs `VACUUM`, compacts the file, and reports bytes reclaimed. It can need substantial temporary disk and can block writes, so run it during a quiet period.
@@ -693,7 +709,7 @@ When reporting an incident, record timestamp/timezone, Kandev version and commit
 
 **Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and the default `data/backups` directory. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. Backup files outside the resolved home are not included in the total. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
 
-Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive can remove a managed worktree directory, but it keeps the local task branch and environment identity. Delete can also remove the local task branch. Other cleanup can remove a container, delete the exact Kubernetes Pod and Kandev-managed PVC while retaining an existing claim, destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
+Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive removes a Git worktree only when Git reports it clean. A worktree with tracked or untracked Git changes stays on disk and receives a task-lifecycle recheck after about 24 hours. This recheck runs independently of the optional scheduled storage cleanup. When Git reports a worktree clean, Kandev removes its directory. Unpublished and ambiguous local branches remain. Kandev can remove an integrated managed branch. The environment identity remains for later recovery. Delete can also remove the local task branch. Other cleanup can remove a container, the exact Kubernetes Pod, and a Kandev-managed PVC. It keeps an existing claim. It can destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
 
 **Reset Environment** uses a separate teardown path. For Sprites, the current reset request can lose the profile credential context and report success while leaving the provider sandbox behind. After a Sprites reset, inspect **Settings > Executors > Sprites.dev** and explicitly destroy the old sandbox there if it remains. See [Executors](executors.md#spritesdev) for the executor-specific lifecycle.
 

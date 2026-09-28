@@ -972,7 +972,7 @@ func (e *Executor) switchModel(
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
 

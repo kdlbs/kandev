@@ -110,13 +110,15 @@ type CreateInstanceResponse struct {
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
-	ID            string            `json:"id"`
-	Port          int               `json:"port"`
-	Status        string            `json:"status"`
-	WorkspacePath string            `json:"workspace_path"`
-	AgentCommand  string            `json:"agent_command"`
-	Env           map[string]string `json:"env,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	ID              string            `json:"id"`
+	Port            int               `json:"port"`
+	LeaseGeneration uint64            `json:"lease_generation"`
+	ListenerActive  bool              `json:"listener_active"`
+	Status          string            `json:"status"`
+	WorkspacePath   string            `json:"workspace_path"`
+	AgentCommand    string            `json:"agent_command"`
+	Env             map[string]string `json:"env,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
 	// TaskID is the task ID this instance was created for, if any.

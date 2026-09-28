@@ -64,6 +64,19 @@ type TaskStatusSummary struct {
 	// LaunchQueue is the live task-level projection for automatic session work
 	// waiting on admission. It is independent of the selected transcript.
 	LaunchQueue *LaunchQueueSummary `json:"launch_queue,omitempty"`
+	// CompletionGate is a bounded task-owned progress projection. Detailed
+	// criterion descriptions and evidence remain available from the task API.
+	CompletionGate *CompletionGateSummary `json:"completion_gate,omitempty"`
+}
+
+// CompletionGateSummary keeps task-list transport bounded while exposing the
+// current criteria revision and blocker counts.
+type CompletionGateSummary struct {
+	Revision      int64 `json:"revision"`
+	CriteriaCount int   `json:"criteria_count"`
+	VerifiedCount int   `json:"verified_count"`
+	BlockerCount  int   `json:"blocker_count"`
+	Blocked       bool  `json:"blocked"`
 }
 
 type LaunchQueueSummary struct {
@@ -171,7 +184,45 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validatePullRequest(s.PullRequest); err != nil {
 		return err
 	}
-	return validateLaunchQueue(s.LaunchQueue)
+	if err := validateLaunchQueue(s.LaunchQueue); err != nil {
+		return err
+	}
+	return validateCompletionGate(s.CompletionGate)
+}
+
+func validateCompletionGate(gate *CompletionGateSummary) error {
+	if gate == nil {
+		return nil
+	}
+	if gate.Revision < 0 || gate.CriteriaCount < 0 || gate.VerifiedCount < 0 || gate.BlockerCount < 0 {
+		return fmt.Errorf("completion gate counts and revision cannot be negative")
+	}
+	if gate.VerifiedCount > gate.CriteriaCount || gate.BlockerCount > gate.CriteriaCount ||
+		gate.VerifiedCount+gate.BlockerCount != gate.CriteriaCount {
+		return fmt.Errorf("completion gate counts are inconsistent")
+	}
+	if gate.Blocked != (gate.BlockerCount > 0) {
+		return fmt.Errorf("completion gate blocked state is inconsistent")
+	}
+	return nil
+}
+
+// CompletionGateSummaryFromSnapshot maps detailed task-owned gate data to its
+// bounded task-list projection. Evidence and criterion text are never copied.
+func CompletionGateSummaryFromSnapshot(snapshot *models.TaskCompletionGateSnapshot) *CompletionGateSummary {
+	if snapshot == nil || (snapshot.Revision == 0 && len(snapshot.Criteria) == 0) {
+		return nil
+	}
+	blockers := len(snapshot.Blockers)
+	criteria := len(snapshot.Criteria)
+	verified := criteria - blockers
+	if verified < 0 {
+		verified = 0
+	}
+	return &CompletionGateSummary{
+		Revision: snapshot.Revision, CriteriaCount: criteria, VerifiedCount: verified,
+		BlockerCount: blockers, Blocked: blockers > 0,
+	}
 }
 
 func validatePrimarySession(session *PrimarySessionSummary) error {
@@ -321,6 +372,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		PullRequest:         s.PullRequest,
 		QueuedPromptCount:   s.QueuedPromptCount,
 		LaunchQueue:         s.LaunchQueue,
+		CompletionGate:      s.CompletionGate,
 	})
 }
 
@@ -336,4 +388,5 @@ type semanticPayload struct {
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
+	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
 }

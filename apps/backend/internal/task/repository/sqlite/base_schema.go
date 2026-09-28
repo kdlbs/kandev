@@ -1246,6 +1246,8 @@ const sessionWorktreeSchemaDDL = `
 		worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
 		worktree_integration_ref TEXT NOT NULL DEFAULT '',
 		worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+		worktree_source_clone_path TEXT NOT NULL DEFAULT '',
+		worktree_source_common_dir TEXT NOT NULL DEFAULT '',
 		worktree_branch_compacted_at TIMESTAMP,
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',

@@ -32,6 +32,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -4694,6 +4695,42 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	}
 
 	return nil
+}
+
+// StopManagedInputExecution stops only the execution generation named by a
+// durable managed-input receipt. It never resolves a replacement execution as
+// the stop target.
+func (s *Service) StopManagedInputExecution(ctx context.Context, taskID, sessionID, expectedExecutionID string) (bool, error) {
+	if taskID == "" || sessionID == "" || expectedExecutionID == "" {
+		return false, errors.New("managed input stop: task, session, and execution IDs are required")
+	}
+	if s.executor == nil || s.agentManager == nil {
+		return false, errors.New("managed input stop: executor is not configured")
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("managed input stop: load session %q: %w", sessionID, err)
+	}
+	if session.TaskID != taskID {
+		return false, fmt.Errorf("managed input stop: session %q does not belong to task %q", sessionID, taskID)
+	}
+
+	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) || (err == nil && currentExecutionID == "") {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("managed input stop: resolve current execution for session %q: %w", sessionID, err)
+	}
+	if currentExecutionID != expectedExecutionID {
+		return false, fmt.Errorf("managed input stop: execution changed for session %q: expected %q, found %q", sessionID, expectedExecutionID, currentExecutionID)
+	}
+
+	if err := s.StopExecution(ctx, expectedExecutionID, coordinatorMCPStopReason, false); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // StopTaskForCoordinator gracefully halts every currently-observed live
@@ -10027,6 +10064,17 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, identity 
 func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	s.logger.Info("completing task",
 		zap.String("task_id", taskID))
+	if gateReader, ok := s.taskRepo.(interface {
+		GetTaskCompletionGate(context.Context, string) (*models.TaskCompletionGateSnapshot, error)
+	}); ok {
+		gate, err := gateReader.GetTaskCompletionGate(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("failed to check task completion requirements: %w", err)
+		}
+		if gate != nil && gate.Blocked {
+			return repoerrors.ErrTaskCompletionGateBlocked
+		}
+	}
 
 	// Stop all agents for this task (which will trigger AgentCompleted events and update session states)
 	if s.lspLeases != nil {

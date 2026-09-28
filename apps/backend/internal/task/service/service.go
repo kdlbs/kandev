@@ -80,8 +80,9 @@ type WorktreeArchiveSourceManifestProvider interface {
 	CaptureArchiveSourceManifests(ctx context.Context, worktrees []*worktree.Worktree) (map[string]worktree.ArchiveSourceManifest, error)
 }
 
-// WorktreeDirtyInspector reports local changes before a task deletion mutates
-// task rows or persists a cleanup job.
+// WorktreeDirtyInspector reports local changes before a destructive worktree
+// operation. The delete preflight uses it before task mutation, and archive
+// cleanup uses it before branch-preserving cleanup.
 type WorktreeDirtyInspector interface {
 	InspectDirtyWorktrees(ctx context.Context, worktrees []*worktree.Worktree) ([]worktree.DirtyWorktree, error)
 }
@@ -527,6 +528,9 @@ type Service struct {
 	workspaceSourceMaterializer     WorkspaceSourceMaterializer
 	workspaceSourceLocksMu          sync.Mutex
 	workspaceSourceLocks            map[string]*sync.Mutex
+	taskDeletePreviewMu             sync.Mutex
+	taskDeletePreviews              map[string]taskDeletePreview
+	managementClaimLocks            parentMutex
 	providerProber                  ProviderDefaultBranchProber
 	gitArchiveCapture               GitArchiveCapture
 	workflowStepCreator             WorkflowStepCreator
@@ -619,13 +623,15 @@ type Service struct {
 	// tasks to a different source step in that window and prove the lock
 	// acquisition re-reads and corrects for it instead of locking a step the
 	// task has already left. Nil in production.
-	bulkMoveBeforeLockForTest func()
-	cleanupWorkerMu           sync.Mutex
-	cleanupWorkerCancel       context.CancelFunc
-	cleanupWorkerWG           sync.WaitGroup
-	cleanupWorkerWake         chan struct{}
-	cleanupRunsMu             sync.Mutex
-	cleanupRuns               map[*taskResourceCleanupRun]struct{}
+	bulkMoveBeforeLockForTest             func()
+	cleanupWorkerMu                       sync.Mutex
+	archiveReclaimBackfillMu              sync.Mutex
+	archiveReclaimBackfillAfterWorktreeID string
+	cleanupWorkerCancel                   context.CancelFunc
+	cleanupWorkerWG                       sync.WaitGroup
+	cleanupWorkerWake                     chan struct{}
+	cleanupRunsMu                         sync.Mutex
+	cleanupRuns                           map[*taskResourceCleanupRun]struct{}
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
@@ -816,6 +822,8 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		lastTaskActivity:              make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount:         make(map[string]int),
 		stallNotifiedSessions:         make(map[string]map[string]struct{}),
+		taskDeletePreviews:            make(map[string]taskDeletePreview),
+		managementClaimLocks:          parentMutex{locks: make(map[string]*sync.Mutex)},
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",

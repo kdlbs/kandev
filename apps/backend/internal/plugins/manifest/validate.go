@@ -170,7 +170,30 @@ func (m *Manifest) validateAgentTools() []error {
 		prefix := fmt.Sprintf("agent_tools[%d]", i)
 		errs = append(errs, validateAgentTool(prefix, tool, seen)...)
 	}
+	if manifestDeclaresSurface(m.AgentTools, AgentToolSurfaceManaged) && !hasCapabilityResource(m.Capabilities.APIWrite, "managed_agent_tools") {
+		errs = append(errs, errors.New("agent_tools using managed-conversation surface require capabilities.api_write: managed_agent_tools"))
+	}
 	return errs
+}
+
+func manifestDeclaresSurface(tools []AgentTool, surface string) bool {
+	for _, tool := range tools {
+		for _, declared := range tool.Surfaces {
+			if declared == surface {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasCapabilityResource(resources []string, wanted string) bool {
+	for _, resource := range resources {
+		if strings.TrimSpace(resource) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func validateAgentTool(prefix string, tool AgentTool, seen map[string]struct{}) []error {
@@ -207,7 +230,7 @@ func validateAgentToolSurfaces(prefix string, surfaces []string) []error {
 	var errs []error
 	seen := map[string]struct{}{}
 	for _, surface := range surfaces {
-		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice {
+		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice && surface != AgentToolSurfaceManaged {
 			errs = append(errs, fmt.Errorf("%s.surfaces contains unsupported surface %q", prefix, surface))
 		}
 		if _, ok := seen[surface]; ok {

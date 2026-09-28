@@ -811,6 +811,52 @@ export type ListTasksResponse = {
   total: number;
 };
 
+export type SidebarTaskQuery = {
+  filters: Array<{
+    dimension: string;
+    op: string;
+    value: string | string[] | boolean;
+  }>;
+  sort: { key: string; direction: string };
+  group: string;
+  collapsed_group_keys: string[];
+  collapsed_task_ids: string[];
+  page: number;
+  page_size: number;
+  locale: string;
+};
+
+export type SidebarTaskPageEntry = {
+  kind: "task" | "group" | "continuation";
+  task_id?: string;
+  task?: Task;
+  group_key?: string;
+  group_label?: string;
+  workflow_name?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
+  depth?: number;
+  parent_id?: string;
+  parent_title?: string;
+  continuation?: boolean;
+  matching_count?: number;
+  wip_queue_position?: number;
+  wip_queue_total?: number;
+  subtask_count?: number;
+};
+
+export type SidebarTaskPageResponse = {
+  query_key: string;
+  page: number;
+  page_size: number;
+  total_entries: number;
+  total_tasks: number;
+  total_visible_tasks: number;
+  has_previous: boolean;
+  has_next: boolean;
+  entries: SidebarTaskPageEntry[];
+};
+
 export type ListRepositorySetsResponse = {
   repository_sets: RepositorySet[];
   total: number;

@@ -1179,7 +1179,7 @@ func (e *Executor) resumeSession(
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
 	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
@@ -1722,6 +1722,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 		return "", nil, nil, err
 	}
 	applyResumeRepositoryFlags(req, allRepos)
+	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
 		return "", existingEnv, nil, err
 	}

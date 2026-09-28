@@ -162,7 +162,7 @@ else
 endif
 
 VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
-COMMIT := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo unknown)
+COMMIT := $(shell git rev-parse HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 

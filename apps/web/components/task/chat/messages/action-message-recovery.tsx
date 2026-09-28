@@ -22,6 +22,7 @@ export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAct
     case "resume_new_branch":
     case "fresh_start":
     case "runtime_retry":
+    case "relocate_and_resume":
       return recoveryAction;
     default:
       return null;
@@ -35,7 +36,21 @@ function recoveryActionLabel(
   if (action === "resume") return t("task:resumeSession");
   if (action === "fresh_start") return t("task:startFreshSession");
   if (action === "resume_new_branch") return t("task:continueOnNewBranch");
+  if (action === "relocate_and_resume") return t("task:managedCloneRelocateResume");
   return t("chat:managedRuntimeRetry");
+}
+
+function recoveryActionTooltip(action: MessageAction, t: ReturnType<typeof useTranslation>["t"]) {
+  switch (action.tooltip_key) {
+    case "sessionRecoveryResumeDescription":
+      return t("task:sessionRecoveryResumeDescription");
+    case "sessionRecoveryFreshDescription":
+      return t("task:sessionRecoveryFreshDescription");
+    case "sessionRecoveryCorruptedDescription":
+      return t("task:sessionRecoveryCorruptedDescription");
+    default:
+      return action.tooltip;
+  }
 }
 
 export function SessionRecoveryActionButtons({
@@ -77,7 +92,7 @@ export function SessionRecoveryActionButtons({
             kind,
             label: recoveryActionLabel(kind, t),
             testId: action.test_id,
-            tooltip: action.tooltip,
+            tooltip: recoveryActionTooltip(action, t),
             onClick: () => void onRecoveryAction(kind),
           },
         ]

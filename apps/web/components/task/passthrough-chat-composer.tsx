@@ -3,7 +3,7 @@
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { buildSubmitMessage } from "./chat/chat-input-area";
@@ -25,7 +25,7 @@ import {
 } from "@/hooks/use-message-handler";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import type { AppState } from "@/lib/state/store";
-import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspace";
 import { useTranslation } from "react-i18next";
 import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import type { TaskPlanCommentRef } from "@/lib/types/http";
@@ -63,17 +63,7 @@ export function PassthroughComposerPanel({
     panelState.pendingPRFeedback.length > 0 ||
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;
-  const workspaceId = useAppStore((state) =>
-    resolveComposerWorkspaceId({
-      sessionId: panelState.resolvedSessionId,
-      taskId,
-      quickChatSessions: state.quickChat.sessions,
-      activeWorkflowId: state.kanban.workflowId,
-      activeTasks: state.kanban.tasks,
-      snapshots: Object.values(state.kanbanMulti.snapshots),
-      workflows: state.workflows.items,
-    }),
-  );
+  const composerWorkspace = useComposerWorkspace(panelState.resolvedSessionId, taskId);
   return (
     <div
       data-testid="passthrough-composer"
@@ -99,7 +89,9 @@ export function PassthroughComposerPanel({
         onSubmit={onSubmit}
         sessionId={panelState.resolvedSessionId}
         taskId={taskId}
-        workspaceId={workspaceId}
+        workspaceId={composerWorkspace.workspaceId}
+        workspaceResolutionFailed={composerWorkspace.status === "failed"}
+        onRetryWorkspaceResolution={composerWorkspace.retry}
         entityReferencesEnabled={false}
         taskTitle={panelState.task?.title}
         taskDescription={panelState.taskDescription ?? ""}

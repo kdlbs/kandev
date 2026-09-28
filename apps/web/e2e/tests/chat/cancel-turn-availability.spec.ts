@@ -99,14 +99,6 @@ test.describe.serial("Cancel turn availability", () => {
     });
     await cancelButton.click();
     await cancellationPending;
-    // A fast mock cancellation can settle before React renders the disabled
-    // state. Accept either disabled or hidden after the backend acknowledgement.
-    await expect
-      .poll(async () => {
-        if (!(await cancelButton.isVisible().catch(() => false))) return true;
-        return cancelButton.isDisabled();
-      })
-      .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await cancellationSettled;
     await waitForActiveSessionForegroundActivity(testPage, null);

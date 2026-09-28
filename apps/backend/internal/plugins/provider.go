@@ -103,15 +103,17 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 	}
 
 	svc := NewService(pluginStore, registry, eventBus, log)
-	svc.SetRemoteExecutorPluginsEnabled(cfg.Features.RemoteExecutorPlugins)
 	if cfg.Features.Canvases {
 		svc.subscribeWebAppEvents()
 	}
 	svc.warnLoadedWebhookAccessIssues()
 
-	stateStore, userStateStore, instanceStore, instanceState, sourceStore, settingsStore, storeErrors := initializeRequiredStores(dbPool)
+	stateStore, commandStore, userStateStore, instanceStore, instanceState, sourceStore, settingsStore, storeErrors := initializeRequiredStores(dbPool)
 	if stateStore != nil {
 		svc.SetState(stateStore)
+	}
+	if commandStore != nil {
+		svc.SetExactCommandStore(commandStore)
 	}
 	if userStateStore != nil {
 		svc.SetUserState(userStateStore)
@@ -148,20 +150,22 @@ func recordStoreError(storeErrors StoreInitErrors, id string, err error) {
 	}
 }
 
-func initializeRequiredStores(dbPool *db.Pool) (*state.Store, *state.UserStore, *instances.Store, *state.InstanceStore, *marketplace.SourceStore, *settingsStore, StoreInitErrors) {
+func initializeRequiredStores(dbPool *db.Pool) (*state.Store, *state.CommandStore, *state.UserStore, *instances.Store, *state.InstanceStore, *marketplace.SourceStore, *settingsStore, StoreInitErrors) {
 	storeErrors := make(StoreInitErrors)
 	if dbPool == nil || dbPool.Writer() == nil || dbPool.Reader() == nil {
 		err := errors.New("database pool is unavailable")
 		for _, id := range []string{
-			"plugin-instances", "plugin-marketplace", "plugin-settings",
+			"plugin-instances", "plugin-marketplace", "plugin-settings", "plugin-command-receipts",
 			"plugin-state", "plugin-instance-state", "plugin-user-state",
 		} {
 			storeErrors[id] = err
 		}
-		return nil, nil, nil, nil, nil, nil, storeErrors
+		return nil, nil, nil, nil, nil, nil, nil, storeErrors
 	}
 	stateStore, err := state.NewStore(dbPool)
 	recordStoreError(storeErrors, "plugin-state", err)
+	commandStore, err := state.NewCommandStore(dbPool)
+	recordStoreError(storeErrors, "plugin-command-receipts", err)
 	userStateStore, err := state.NewUserStore(dbPool)
 	recordStoreError(storeErrors, "plugin-user-state", err)
 	instanceStore, err := instances.NewStore(dbPool)
@@ -172,7 +176,7 @@ func initializeRequiredStores(dbPool *db.Pool) (*state.Store, *state.UserStore, 
 	recordStoreError(storeErrors, "plugin-marketplace", err)
 	settingsStore, err := newSettingsStore(dbPool)
 	recordStoreError(storeErrors, "plugin-settings", err)
-	return stateStore, userStateStore, instanceStore, instanceState, sourceStore, settingsStore, storeErrors
+	return stateStore, commandStore, userStateStore, instanceStore, instanceState, sourceStore, settingsStore, storeErrors
 }
 
 func configureWebAppStorage(cfg *config.Config, svc *Service, instanceStore *instances.Store, instanceState *state.InstanceStore, log *logger.Logger) {

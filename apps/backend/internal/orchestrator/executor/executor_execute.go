@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -42,12 +43,21 @@ func isConfigModeSession(session *models.TaskSession) bool {
 // ownership and session purpose. Config mode wins because those sessions need
 // config tools even if their backing task is Office-owned.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
-	if isConfigModeSession(session) {
-		return McpModeConfig, nil
-	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return "", fmt.Errorf("load task for MCP mode: %w", err)
+	}
+	if task != nil {
+		_, managed, policyErr := models.ManagedToolPolicyFromTask(task)
+		if policyErr != nil {
+			return "", fmt.Errorf("resolve managed conversation MCP policy: %w", policyErr)
+		}
+		if managed {
+			return McpModeManagedConversation, nil
+		}
+	}
+	if isConfigModeSession(session) {
+		return McpModeConfig, nil
 	}
 	if task != nil && task.Origin == models.TaskOriginAutomationRun {
 		return McpModeAutomation, nil
@@ -62,16 +72,25 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+	}
+	if task != nil {
+		policy, managed, policyErr := models.ManagedToolPolicyFromTask(task)
+		if policyErr != nil {
+			return mcpprofile.Context{}, fmt.Errorf("resolve managed conversation MCP policy: %w", policyErr)
+		}
+		if managed {
+			return mcpprofile.New(mcpprofile.SurfaceManagedConversation, nil, nil).WithManagedToolPolicy(*policy), nil
+		}
+	}
 	if isConfigModeSession(session) {
 		capabilities := []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}
 		if session.IsPassthrough {
 			capabilities = nil
 		}
 		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
-	}
-	task, err := e.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
 	}
 	if task == nil {
 		// A few lifecycle paths can prepare a request from a session snapshot
@@ -1379,7 +1398,7 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 
 	createCtx := ctx
 	if recoveryAdmission != nil {
-		createCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
@@ -1809,7 +1828,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.McpMode = opts.McpMode
 	}
 	if opts.McpProfile != nil {
-		profileContext := *opts.McpProfile
+		profileContext := mcpprofile.Normalize(*opts.McpProfile)
 		profileContext.Providers = deriveMCPProviders(allRepos)
 		req.McpProfile = &profileContext
 	}
@@ -1856,7 +1875,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
 
@@ -3313,12 +3332,17 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 	}
 	worktreeID, worktreePath, worktreeBranch := "", "", ""
 	worktreeBranchOwner, worktreeIntegrationRef := "", ""
+	worktreeSourceClonePath, worktreeSourceCommonDir := "", ""
 	if resp.WorktreeID != "" {
 		worktreeID = resp.WorktreeID
 		worktreePath = resp.WorktreePath
 		worktreeBranch = resp.WorktreeBranch
 		worktreeBranchOwner = resp.WorktreeBranchOwner
 		worktreeIntegrationRef = resp.WorktreeIntegrationRef
+		if resp.PrepareResult != nil && resp.PrepareResult.MainRepoGitDir != "" {
+			worktreeSourceCommonDir = resp.PrepareResult.MainRepoGitDir
+			worktreeSourceClonePath = filepath.Dir(worktreeSourceCommonDir)
+		}
 	}
 	return []*models.TaskEnvironmentRepo{{
 		RepositoryID: req.RepositoryID,
@@ -3327,12 +3351,14 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		// for reuse validation. It is not a physical worktree, so do not copy
 		// the environment-level workspace path (which may be the host's seed
 		// checkout) into the physical-worktree fields.
-		WorktreeID:             worktreeID,
-		WorktreePath:           worktreePath,
-		WorktreeBranch:         worktreeBranch,
-		WorktreeBranchOwner:    worktreeBranchOwner,
-		WorktreeIntegrationRef: worktreeIntegrationRef,
-		Position:               0,
+		WorktreeID:              worktreeID,
+		WorktreePath:            worktreePath,
+		WorktreeBranch:          worktreeBranch,
+		WorktreeBranchOwner:     worktreeBranchOwner,
+		WorktreeIntegrationRef:  worktreeIntegrationRef,
+		WorktreeSourceClonePath: worktreeSourceClonePath,
+		WorktreeSourceCommonDir: worktreeSourceCommonDir,
+		Position:                0,
 	}}
 }
 
@@ -3341,16 +3367,22 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnvironmentRepo {
 	out := make([]*models.TaskEnvironmentRepo, 0, len(worktrees))
 	for i, w := range worktrees {
+		sourceClonePath := ""
+		if w.MainRepoGitDir != "" {
+			sourceClonePath = filepath.Dir(w.MainRepoGitDir)
+		}
 		out = append(out, &models.TaskEnvironmentRepo{
-			RepositoryID:           w.RepositoryID,
-			BranchSlug:             w.BranchSlug,
-			WorktreeID:             w.WorktreeID,
-			WorktreePath:           w.WorktreePath,
-			WorktreeBranch:         w.WorktreeBranch,
-			WorktreeBranchOwner:    w.WorktreeBranchOwner,
-			WorktreeIntegrationRef: w.WorktreeIntegrationRef,
-			Position:               i,
-			ErrorMessage:           w.ErrorMessage,
+			RepositoryID:            w.RepositoryID,
+			BranchSlug:              w.BranchSlug,
+			WorktreeID:              w.WorktreeID,
+			WorktreePath:            w.WorktreePath,
+			WorktreeBranch:          w.WorktreeBranch,
+			WorktreeBranchOwner:     w.WorktreeBranchOwner,
+			WorktreeIntegrationRef:  w.WorktreeIntegrationRef,
+			WorktreeSourceClonePath: sourceClonePath,
+			WorktreeSourceCommonDir: w.MainRepoGitDir,
+			Position:                i,
+			ErrorMessage:            w.ErrorMessage,
 		})
 	}
 	return out
@@ -3432,16 +3464,18 @@ func (e *Executor) persistOneTaskEnvironmentRepoTransition(
 		return e.refreshTaskEnvironmentRepo(ctx, row, w, position, replacePhysical)
 	}
 	row = &models.TaskEnvironmentRepo{
-		TaskEnvironmentID:      envID,
-		RepositoryID:           w.RepositoryID,
-		BranchSlug:             w.BranchSlug,
-		WorktreeID:             w.WorktreeID,
-		WorktreePath:           w.WorktreePath,
-		WorktreeBranch:         w.WorktreeBranch,
-		WorktreeBranchOwner:    w.WorktreeBranchOwner,
-		WorktreeIntegrationRef: w.WorktreeIntegrationRef,
-		Position:               position,
-		ErrorMessage:           w.ErrorMessage,
+		TaskEnvironmentID:       envID,
+		RepositoryID:            w.RepositoryID,
+		BranchSlug:              w.BranchSlug,
+		WorktreeID:              w.WorktreeID,
+		WorktreePath:            w.WorktreePath,
+		WorktreeBranch:          w.WorktreeBranch,
+		WorktreeBranchOwner:     w.WorktreeBranchOwner,
+		WorktreeIntegrationRef:  w.WorktreeIntegrationRef,
+		WorktreeSourceClonePath: w.WorktreeSourceClonePath,
+		WorktreeSourceCommonDir: w.WorktreeSourceCommonDir,
+		Position:                position,
+		ErrorMessage:            w.ErrorMessage,
 	}
 	if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
 		e.logger.Warn("failed to persist task environment repo",
@@ -3494,6 +3528,10 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 	if w.WorktreeIntegrationRef != "" || w.WorktreeID == "" || replacePhysical {
 		row.WorktreeIntegrationRef = w.WorktreeIntegrationRef
 	}
+	if w.WorktreeSourceClonePath != "" {
+		row.WorktreeSourceClonePath = w.WorktreeSourceClonePath
+		row.WorktreeSourceCommonDir = w.WorktreeSourceCommonDir
+	}
 	row.Position = position
 	row.ErrorMessage = w.ErrorMessage
 	if replacePhysical {
@@ -3524,6 +3562,8 @@ func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, positio
 				row.WorktreeBranch != w.WorktreeBranch)) ||
 		(w.WorktreeBranchOwner != "" && row.WorktreeBranchOwner != w.WorktreeBranchOwner) ||
 		((w.WorktreeIntegrationRef != "" || replacePhysical) && row.WorktreeIntegrationRef != w.WorktreeIntegrationRef) ||
+		(w.WorktreeSourceClonePath != "" &&
+			(row.WorktreeSourceClonePath != w.WorktreeSourceClonePath || row.WorktreeSourceCommonDir != w.WorktreeSourceCommonDir)) ||
 		row.Position != position ||
 		row.ErrorMessage != w.ErrorMessage
 }

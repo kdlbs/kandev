@@ -996,6 +996,58 @@ describe("useNativeScrollManagement transcript pagination", () => {
     }
   });
 
+  it("restores the persisted disabled position when the in-memory offset is stale", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    transcriptScrollTopBySessionId.set("session-b", 0);
+    window.sessionStorage.setItem("kandev.transcript-auto-scroll-top.session-b", "320");
+    const metrics = { scrollHeight: 900, scrollTop: 210, clientHeight: 400 };
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "session-b", token: 12 };
+    try {
+      const { rerender } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled={false}
+          hasUnreadDivider
+          historyRefreshPending
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(metrics.scrollTop).toBe(320);
+      expect(mockDockviewState.pendingChatInitialPlacement).toEqual({
+        sessionId: "session-b",
+        token: 12,
+      });
+
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(SETTLED_MESSAGE_ID)]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled={false}
+          hasUnreadDivider
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(metrics.scrollTop).toBe(320);
+      expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+    } finally {
+      window.sessionStorage.removeItem("kandev.transcript-auto-scroll-top.session-b");
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("leaves final placement to an unread-divider target when refresh settles", () => {
     const frames: Array<FrameRequestCallback> = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

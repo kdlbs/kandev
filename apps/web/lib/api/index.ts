@@ -3,6 +3,8 @@ export { fetchJson, type ApiRequestOptions } from "./client";
 
 // Re-export domain APIs
 export * from "./domains/kanban-api";
+export * from "./domains/task-management-claims-api";
+export * from "./domains/task-completion-gates-api";
 export * from "./domains/session-api";
 export * from "./domains/conversation-usage-api";
 export * from "./domains/workspace-api";

@@ -672,6 +672,9 @@ const McpModeOffice = mcpmode.Office
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
 
+// McpModeManagedConversation selects the isolated managed-conversation MCP surface.
+const McpModeManagedConversation = "managed-conversation"
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID       string

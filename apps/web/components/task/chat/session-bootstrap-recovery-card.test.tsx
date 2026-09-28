@@ -10,9 +10,11 @@ const recoveryActionState = vi.hoisted(() => ({
   branchDetails: null,
   guardDetails: null as { retryable: boolean } | null,
   recoveryNotice: null as string | null,
+  managedCloneRecoveryStamp: null as string | null,
   handleRecover: vi.fn().mockResolvedValue(true),
   handleRestore: vi.fn().mockResolvedValue(undefined),
   handleNewBranch: vi.fn().mockResolvedValue(true),
+  handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -65,6 +67,7 @@ afterEach(() => {
   recoveryActionState.branchDetails = null;
   recoveryActionState.guardDetails = null;
   recoveryActionState.recoveryNotice = null;
+  recoveryActionState.managedCloneRecoveryStamp = null;
   vi.clearAllMocks();
 });
 
@@ -205,6 +208,25 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(screen.getByTestId("recovery-fresh-button").getAttribute("disabled")).not.toBeNull();
     expect(recoveryActionState.handleRecover).not.toHaveBeenCalled();
     expect(automaticResume).not.toHaveBeenCalled();
+  });
+
+  it("offers only a confirmed relocation for a managed clone mismatch", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{ ...error, category: "managed_clone_relocation_required" }}
+      />,
+    );
+
+    expect(screen.getByText("task:managedCloneRelocationTitle")).toBeTruthy();
+    expect(screen.getByTestId("managed-clone-relocate-button")).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
+    fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
+    expect(recoveryActionState.handleManagedCloneRelocation).toHaveBeenCalledOnce();
   });
 });
 
