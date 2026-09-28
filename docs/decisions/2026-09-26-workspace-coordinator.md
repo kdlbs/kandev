@@ -285,10 +285,10 @@ Gate N (G2 to G5) is met when all four hold:
 
 **Status:** pending.
 
-G0 gates the phase 1 code PR leaving draft, not building. Phase 1's work
-packages are built and reviewed on their branches once WP-0 has passed Review
-and ship together as one code PR
-([#4029](https://github.com/kdlbs/kandev/pull/4029)), which stays a draft
+G0 gates merging phase 1, not building it. Phase 1's work packages are built
+and reviewed on their branches once WP-0 has passed Review and ship together
+with this design package as one pull request
+([#3981](https://github.com/kdlbs/kandev/pull/3981)), which does not merge
 until G0 is met. The phase 1
 requirements, this ADR, the plan's ASCII previews and the mockup's phase 1
 screenshots are posted on [#3752](https://github.com/kdlbs/kandev/issues/3752).
@@ -300,8 +300,9 @@ objection re-plans the affected work packages before their upstream PRs open.
 2026-09-28: the maintainer agreed to D1 (core, behind a feature flag, may move
 to a plugin later). G0 stays pending until the maintainer has reviewed this
 design package.
-2026-09-29: the owner chose to ship phase 1's code as one pull request
-(#4029) instead of one per work package; this design package stays its own PR.
+2026-09-29: the owner chose to ship phase 1 as one pull request, #3981,
+carrying this design package and all of its code, instead of one PR per work
+package.
 
 ## Prior art
 

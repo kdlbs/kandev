@@ -86,16 +86,16 @@ orders touch disjoint files except `internal/backendapp/coordinator.go`, where
 task 01 gives each later work order its own named registration function
 (conversation for task 03, subscribers for task 04, decisions for task 07).
 
-**One code PR.** Work orders are built and reviewed on their own branches,
-and each passed branch is merged into one integration branch,
-`coordinator/p1-integration`. Phase 1's code ships upstream as that one pull
-request ([#4029](https://github.com/kdlbs/kandev/pull/4029)); this design
-package ships as its own PR first. The owner chose one code PR on 2026-09-29:
-the feature is flagged off in prod, the repository squash-merges, and one
-branch avoids rebasing a dozen stacked branches after every merge.
+**One PR.** Work orders are built and reviewed on their own branches, and
+each passed branch is merged into one integration branch,
+`coordinator/p1-integration`. Phase 1 ships upstream as one pull request,
+[#3981](https://github.com/kdlbs/kandev/pull/3981), carrying this design
+package and all of its code. The owner chose one PR on 2026-09-29: the
+feature is flagged off in prod, the repository squash-merges, and one branch
+avoids rebasing a dozen stacked branches after every merge.
 
-**G0 gates leaving draft, not building.** Building starts when WP-0 has passed
-Review, not when it merges. The code PR stays a draft until G0 is met, as the
+**G0 gates merging, not building.** Building starts when WP-0 has passed
+Review, not when it merges. The PR does not merge until G0 is met, as the
 ADR's G0 Status section records. An objection at G0 re-plans the affected
 work orders.
 
