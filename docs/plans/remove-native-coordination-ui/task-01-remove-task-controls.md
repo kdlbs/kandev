@@ -157,22 +157,27 @@ The review found that page-level ensure and session-recovery feedback rendered
 before `TaskLayout`, so restoring padding inside the mobile panel did not keep
 those earlier siblings below the fixed phone header. `TaskPageInner` now gives
 the shared feedback-and-content parent one header plus safe-area offset when a
-page-level error or recovery notice is visible. The panel and task-summary error
-surface disable their own offset in that state, avoiding double spacing. The
-ordinary phone panel and shared-task-error-only layout retain their existing
-clearance ownership.
+page-level error or recovery notice is visible. The ordinary phone panel and
+shared-task-error-only layout retain their existing clearance ownership.
+
+A later PR review found that the panel still added a safe-area inset after the
+parent reserved it, and that the recovery card could use a newer live task
+status than the offset predicate. Page-level feedback now sets panel top padding
+to zero, including the inset. The task page resolves the bootstrap recovery
+error from the live task-status summary once and uses that value both to show
+the recovery card and to reserve header clearance.
 
 Regression and validation:
 
-- The mobile-layout and task-page helper Vitest files passed 74 tests. They
-  cover ensure failure without a task-summary error, page-level recovery
-  feedback, ordinary pages, and desktop behavior.
-- The managed mobile E2E run rebuilt backend and web assets and passed 15 tests
-  across task coordination removal, launch-failure recovery, and clarification.
-  The status-unavailable case asserts feedback and retry geometry at or below
-  the measured fixed-header bottom, taps Retry, and confirms no shared task
-  error. The ordinary chat case includes the missing lower-bound assertion.
-- The desktop coordination-removal E2E passed 1 test. Web typecheck passed.
-- The shared task-error mobile recovery case passed again with a lower-bound
-  assertion against the measured fixed header.
-- `git diff --check` passed. Changes remain unstaged.
+- The final focused frontend Vitest run passed 81 tests across four files. The
+  cases cover ensure failure without a task-summary error, each page-feedback
+  branch, live bootstrap status, duplicated safe-area clearance, ordinary
+  pages, shared errors, and desktop behavior.
+- The managed mobile E2E run rebuilt backend and web assets and passed five
+  targeted tests across coordination removal and launch recovery. It measured
+  feedback, retry, and shared-error controls against the fixed header and
+  confirmed the retry is tappable.
+- The desktop coordination-removal E2E passed 1 test on the reviewed changes.
+  Web typecheck and scoped ESLint passed.
+- `pnpm run i18n:check`, documentation catalog validation, all specification
+  lint, and `git diff --check` passed.

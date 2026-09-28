@@ -88,6 +88,14 @@ export function mobilePanelTopNavHeight(
   return hasSharedTaskError || hasPageLevelFeedback ? "0px" : TOP_NAV_HEIGHT;
 }
 
+export function mobilePanelTopPadding(
+  hasSharedTaskError: boolean,
+  hasPageLevelFeedback = false,
+): string {
+  if (hasPageLevelFeedback) return "0px";
+  return `calc(${mobilePanelTopNavHeight(hasSharedTaskError)} + env(safe-area-inset-top, 0px))`;
+}
+
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
   workflowId: string | null;
@@ -186,7 +194,7 @@ type MobilePanelAreaProps = {
   onNavigateToPrompt: (messageId: string) => PluginOpenMessageResult;
   onScrollTargetConsumed?: (messageId: string) => void;
   mobileScrollTarget: PendingMessageScrollTarget | null;
-  topNavHeight: string;
+  topPadding: string;
   bottomNavHeight: string;
   reviews: readonly ReviewItemSummary[];
   selectedReview: ReviewItemSummary | null;
@@ -242,7 +250,7 @@ export function MobilePanelArea({
   onNavigateToPrompt,
   onScrollTargetConsumed = () => {},
   mobileScrollTarget,
-  topNavHeight,
+  topPadding,
   bottomNavHeight,
   reviews,
   selectedReview,
@@ -253,7 +261,7 @@ export function MobilePanelArea({
     <div
       className="flex flex-col"
       style={{
-        paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
+        paddingTop: topPadding,
         paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
         height: "100%",
       }}
@@ -766,7 +774,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
         mobileScrollTarget={mobileScrollTarget}
-        topNavHeight={mobilePanelTopNavHeight(
+        topPadding={mobilePanelTopPadding(
           Boolean(props.hasSharedTaskError),
           Boolean(props.hasPageLevelFeedback),
         )}

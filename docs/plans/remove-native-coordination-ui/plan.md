@@ -191,23 +191,27 @@ Implementation validation on September 28, 2026:
 Review follow-up on September 28, 2026 fixed phone feedback that could begin
 under the fixed task header after the toolbar was removed. Page-level move,
 ensure-session, and recovery feedback now reserve the header and safe-area space
-at their shared parent; the mobile panel and shared task-error surface suppress
-their own offset while that parent owns it. Ordinary chat and shared-task-error
-layouts retain one clearance owner.
+at their shared parent. Ordinary chat and shared-task-error layouts retain one
+clearance owner.
 
-- Focused frontend Vitest passed 74 tests across the mobile-layout and task-page
-  helper files. The page-feedback cases cover ensure failure without a
-  task-summary error, page-level recovery feedback, ordinary pages, and desktop
-  behavior.
-- The managed mobile E2E run rebuilt the backend and web app, then passed all 15
-  tests across coordination removal, mobile launch recovery, and clarification.
-  It measured feedback and retry controls against the fixed header, tapped the
-  status-unavailable retry, confirmed no shared task error, and checked that
-  ordinary chat does not overlap the header.
-- The desktop coordination-removal E2E passed 1 test. Web typecheck passed.
-- The shared task-error mobile recovery case was rerun with an added lower-bound
-  assertion against the measured fixed header; it passed.
-- `git diff --check` passed. Changes remain unstaged.
+The subsequent PR review found that the panel still added its safe-area inset
+after the parent reserved it, and that the recovery card could use a newer live
+task status than the page-level offset predicate. The panel now has zero top
+padding when page-level feedback owns clearance. The page resolves the bootstrap
+recovery error from the latest task-status summary once and uses that value for
+both the recovery card and the clearance predicate.
+
+- The final focused frontend Vitest run passed 81 tests across four files,
+  covering the feedback branches, live bootstrap status, safe-area ownership,
+  ordinary pages, shared errors, and desktop behavior.
+- The managed mobile E2E run rebuilt backend and web assets and passed five
+  targeted tests across coordination removal and launch recovery. It measured
+  feedback, retry, and shared-error controls against the fixed header and
+  confirmed the retry is tappable.
+- The desktop coordination-removal E2E passed 1 test on the reviewed changes.
+  Web typecheck and scoped ESLint passed.
+- `pnpm run i18n:check`, documentation catalog validation, all specification
+  lint, and `git diff --check` passed.
 
 ## Risks
 

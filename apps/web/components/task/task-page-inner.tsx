@@ -24,18 +24,15 @@ import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
-import {
-  TaskLaunchErrorProvider,
-  useTaskLaunchErrorContext,
-} from "@/components/task/task-launch-error-context";
+import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
 import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
-import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 import { TaskSharedError } from "@/components/task/task-shared-error";
 import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
   resolveWorkflowCurrentStepId,
+  resolveTaskPageBootstrapRecoveryError,
   useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
   shouldReservePageLevelMobileFeedbackOffset,
@@ -50,6 +47,7 @@ import type {
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 const PAGE_LEVEL_MOBILE_FEEDBACK_STYLE = {
   paddingTop: "calc(3.5rem + 1px + env(safe-area-inset-top, 0px))",
@@ -253,24 +251,17 @@ function TaskPageRecoveryFeedback({
   taskId,
   sessionId,
   resumption,
+  bootstrapRecoveryError,
   workspaceId,
   isPassthrough,
 }: {
   taskId: string;
   sessionId: string | null;
   resumption: TaskPageInnerProps["resumption"];
+  bootstrapRecoveryError: ReturnType<typeof resolveTaskPageBootstrapRecoveryError>;
   workspaceId: string | null;
   isPassthrough: boolean;
 }) {
-  const launchErrorContext = useTaskLaunchErrorContext();
-  const sessionMetadata = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId]?.metadata ?? null) : null,
-  );
-  const bootstrapRecoveryError = selectSessionRecoveryError(
-    launchErrorContext?.statusSummary?.active_error,
-    sessionId,
-    sessionMetadata,
-  );
   if (bootstrapRecoveryError && sessionId && isPassthrough) {
     return (
       <SessionBootstrapRecoveryCard
@@ -392,27 +383,32 @@ function TaskPageDesktopTopBar({
  * props plus the three prop bundles handed to the debug overlay, top bar, and
  * layout. Kept out of `TaskPageInner` so that component stays a wiring shell.
  */
-function useTaskPageDerivedProps({
-  task,
-  effectiveSessionId,
-  repository,
-  merged,
-  resumption,
-  sessionPanel,
-  agentctlStatus,
-  connectionStatus,
-  workflowSteps,
-  showDebugOverlay,
-  onToggleDebugOverlay,
-  initialScripts,
-  initialTerminals,
-  defaultLayouts,
-  initialLayout,
-  officeTaskHref,
-  onTaskUnarchived,
-  taskCanvases,
-  taskCanvasesStatus,
-}: TaskPageInnerProps) {
+function useTaskPageDerivedProps(
+  {
+    task,
+    effectiveSessionId,
+    ensureSession,
+    isMobile,
+    repository,
+    merged,
+    resumption,
+    sessionPanel,
+    agentctlStatus,
+    connectionStatus,
+    workflowSteps,
+    showDebugOverlay,
+    onToggleDebugOverlay,
+    initialScripts,
+    initialTerminals,
+    defaultLayouts,
+    initialLayout,
+    officeTaskHref,
+    onTaskUnarchived,
+    taskCanvases,
+    taskCanvasesStatus,
+  }: TaskPageInnerProps,
+  taskMoveError: unknown,
+) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
@@ -423,6 +419,22 @@ function useTaskPageDerivedProps({
   const activeSessionMetadata = useAppStore((state) =>
     effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.metadata ?? null) : null,
   );
+  const bootstrapRecoveryError = resolveTaskPageBootstrapRecoveryError(
+    useTaskStatusSummary(task?.id, task?.status_summary),
+    effectiveSessionId,
+    activeSessionMetadata,
+  );
+  const hasPageLevelMobileFeedback = shouldReservePageLevelMobileFeedbackOffset({
+    isMobile,
+    hasTaskMoveError: taskMoveError !== null,
+    hasEnsureSessionError: ensureSession.status === "error",
+    hasBootstrapRecoveryError: bootstrapRecoveryError !== null,
+    effectiveSessionId,
+    isSessionPassthrough: sessionPanel.isSessionPassthrough,
+    hasResumptionError: Boolean(resumption.error),
+    hasResumptionNotice: Boolean(resumption.notice),
+    hasStatusUnavailable: resumption.recoveryFailure?.outcome === "status_unavailable",
+  });
   const debugEntries = maybeBuildDebugEntries({
     isVisible: isDebugUI() && showDebugOverlay,
     connectionStatus,
@@ -463,7 +475,14 @@ function useTaskPageDerivedProps({
     taskCanvasesStatus,
   });
 
-  return { taskProps, debugEntries, topBarProps, layoutProps, activeSessionMetadata };
+  return {
+    taskProps,
+    debugEntries,
+    topBarProps,
+    layoutProps,
+    bootstrapRecoveryError,
+    hasPageLevelMobileFeedback,
+  };
 }
 
 export function TaskPageInner(props: TaskPageInnerProps) {
@@ -475,25 +494,15 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   useEffect(() => {
     setTaskMoveError(null);
   }, [task?.id]);
-  const { taskProps, debugEntries, topBarProps, layoutProps, activeSessionMetadata } =
-    useTaskPageDerivedProps(props);
+  const {
+    taskProps,
+    debugEntries,
+    topBarProps,
+    layoutProps,
+    bootstrapRecoveryError,
+    hasPageLevelMobileFeedback,
+  } = useTaskPageDerivedProps(props, taskMoveError);
   if (!task) return null;
-  const bootstrapRecoveryError = selectSessionRecoveryError(
-    task.status_summary?.active_error,
-    effectiveSessionId,
-    activeSessionMetadata,
-  );
-  const hasPageLevelMobileFeedback = shouldReservePageLevelMobileFeedbackOffset({
-    isMobile,
-    hasTaskMoveError: taskMoveError !== null,
-    hasEnsureSessionError: ensureSession.status === "error",
-    hasBootstrapRecoveryError: bootstrapRecoveryError !== null,
-    effectiveSessionId,
-    isSessionPassthrough: sessionPanel.isSessionPassthrough,
-    hasResumptionError: Boolean(props.resumption.error),
-    hasResumptionNotice: Boolean(props.resumption.notice),
-    hasStatusUnavailable: props.resumption.recoveryFailure?.outcome === "status_unavailable",
-  });
 
   return (
     <TooltipProvider>
@@ -550,6 +559,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                   taskId={task.id}
                   sessionId={effectiveSessionId}
                   resumption={props.resumption}
+                  bootstrapRecoveryError={bootstrapRecoveryError}
                   workspaceId={task?.workspace_id ?? null}
                   isPassthrough={sessionPanel.isSessionPassthrough}
                 />
