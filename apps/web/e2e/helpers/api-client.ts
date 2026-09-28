@@ -481,7 +481,12 @@ export class ApiClient {
     method: string,
     body?: unknown,
   ): Promise<Record<string, string> | undefined> {
-    const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {};
+    // This client is worker-scoped, but its backend can restart during a test.
+    // Do not let fetch reuse an idle keep-alive socket from the previous process.
+    const headers: Record<string, string> = {
+      Connection: "close",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    };
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) {
       headers["X-Kandev-Interim-Settings-Interlock"] = await loadInterimSettingsInterlockToken(
         this.baseUrl,

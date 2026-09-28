@@ -22,6 +22,7 @@ describe("ApiClient.createAgentProfile", () => {
           cli_passthrough: true,
         });
         expect(init?.headers).toMatchObject({
+          Connection: "close",
           "Content-Type": "application/json",
           "X-Kandev-Interim-Settings-Interlock": "test-token",
         });
