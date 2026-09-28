@@ -14,11 +14,31 @@ import (
 	"time"
 )
 
+// processAlive reports whether pid is still running. kill(pid, 0) still
+// succeeds for an unreaped zombie, so a zombie is treated as not alive here
+// too — this test's target process dies via SIGKILL and gets reparented
+// away the moment its own parent (the target bash process) exits, so
+// reaping is entirely up to whatever the new parent (commonly the
+// container's init) happens to be, on whatever schedule it gets around to
+// calling wait(). That is exactly the situation sshOrphanStopCommand's own
+// final liveness check already treats as "gone" (see the STATE case in
+// sshOrphanStopCommand's doc comment): the stop command's job is done once
+// the process is terminated, not once some unrelated process reaps it. A ps
+// failure (state read races the reaper, or ps itself can't be spawned) is
+// read the same way ps failure is inside the generated script — as "not
+// evidence the pid is still alive" — rather than fatal to the assertion.
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 
 // waitForPIDFile polls path until it contains a parseable positive pid,
