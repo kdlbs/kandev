@@ -128,6 +128,13 @@ test.describe("Coordinator copilot", () => {
     const aboutTag = popover.getByTestId("coordinator-about-tag").last();
     await expect(aboutTag).toContainText(title);
     await expect(popover.getByText(`Why is ${title} here?`, { exact: true }).last()).toBeVisible();
+    // This prompt has no /e2e: scenario prefix, so the mock agent's generic
+    // fallback runs (randomized steps, deterministic closing line). The
+    // session stays RUNNING until it finishes and rejects a concurrent
+    // prompt, so wait for turn 1 to complete before sending a second message.
+    await expect(popover.getByText("Everything looks good!", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
 
     await popover.getByRole("button", { name: "Remove" }).click();
     await expect(popover.getByText(`about ${title}`, { exact: false })).not.toBeVisible();
