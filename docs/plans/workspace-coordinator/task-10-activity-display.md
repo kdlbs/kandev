@@ -2,10 +2,9 @@
 id: "10-activity-display"
 title: "Copilot activity display"
 status: pending
-wave: 5
+wave: 6
 depends_on:
-  - "08-proposals-ui"
-  - "09-conversation-recovery"
+  - "11-panel-swap"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COPILOT-006
@@ -89,8 +88,9 @@ cd apps/web && pnpm e2e:run tests/coordinator
 
 ## Dependencies
 
-- Tasks 08 and 09 have passed Review, since all three touch the panel. The
-  branch stacks on task 08's branch with task 09's branch merged in.
+- Task 11 has passed Review: the activity display is built on the right-side
+  panel, not the popover. Task 11 itself follows tasks 08 and 09, so the
+  branch stacks on task 11's branch.
 
 ## Risks
 

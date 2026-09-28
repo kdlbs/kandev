@@ -123,7 +123,10 @@ Mockup:
   shall reappear with that state: a turn still running shows as running, an
   idle session shows as idle. The
   reload shall send no resume or restore request; an idle agent starts again
-  only when the manager sends a message.
+  only when the manager sends a message. While the panel is closed, the
+  launcher's state shall come from reads that create nothing, never from an
+  open: when the coordinator has no current conversation task, or its state
+  cannot be read, the launcher shows idle.
 
 ### REQ-COORDINATOR-COPILOT-003: Kandev tool surface
 
@@ -135,12 +138,15 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-COPILOT-003.1:** A coordinator session shall have exactly
-  these six Kandev tools: `list_tasks_kandev`, `get_task_conversation_kandev`,
+- **AC-COORDINATOR-COPILOT-003.1:** In phase 1, a coordinator session shall
+  have exactly these six Kandev tools, the phase-1 tool profile: `list_tasks_kandev`, `get_task_conversation_kandev`,
   `list_workflows_kandev`, `list_workflow_steps_kandev`,
   `list_repositories_kandev` and `propose_task_kandev`. It shall have no other
   Kandev tool, including no `list_related_tasks_kandev`, no plan read, no
-  user-question tool, no task-title tool and no plugin tool.
+  user-question tool, no task-title tool and no plugin tool. The profile is
+  phase 1's hardcoded policy, not a permanent contract: a later phase may give
+  a coordinator more tools, only through the coordinator permission model
+  recorded as out of scope in [coordinators](coordinators.md#out-of-scope).
 - **AC-COORDINATOR-COPILOT-003.2:** When a coordinator session calls any other
   Kandev tool or action, the system shall refuse it with an error naming the
   tool and change nothing.
@@ -237,7 +243,9 @@ Mockup:
   shall stay as they are when the manager switches between the same
   coordinator's Needs you and Queue. Leaving that coordinator's screens (to
   another coordinator or any other page) shall close the panel and clear the
-  chip and the draft. A reload shall leave the panel closed.
+  chip and the draft. Closing the panel (Close, Escape or the backdrop) and
+  opening it again on the same coordinator's screens shall keep the chip and
+  the draft. A reload shall leave the panel closed with no chip and no draft.
 - **AC-COORDINATOR-COPILOT-004.13:** The board's task preview panel shall
   behave as before: the same layout rule, resize bounds, persisted width,
   Escape and backdrop close, and maximize action.

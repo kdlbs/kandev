@@ -103,6 +103,9 @@ All routes authorise through the task service's `AuthorizeWorkspaceScope`:
 | `PATCH /api/v1/workspaces/:id/coordinators/:cid` | the updated coordinator; see PATCH body below |
 | `DELETE /api/v1/workspaces/:id/coordinators/:cid` | 204 |
 
+Every coordinator in a GET or list response carries all the columns above,
+including `conversation_task_id` (JSON `null` when there is none).
+
 A coordinator whose `workspace_id` differs from `:id` is treated as absent
 (404). PATCH runs in one transaction that reads the row, validates, and writes
 it with `UPDATE ... WHERE id = ? AND workspace_id = ?`. There is no version

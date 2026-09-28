@@ -62,6 +62,7 @@ requirements govern):
 | P | The mockup's phone "Teammate" persona | Not planned. `features.auth` is off in every shipped profile and clarifications have no addressee. | proposed, G0 |
 | D14 | Kandev's Inbox | Keeps its row, count and tabs in every phase. The coordinator keeps its own count. | proposed, G0 |
 | D15 | Approval never starts an agent | A proposal may target only an eligible step: one without an `auto_start_agent` on-enter action, and not a feeder (directly or transitively) of a step that has one, so an automatic queue/WIP promotion after the create cannot reach an auto-starting step either. | proposed, G0 |
+| D17 | Coordinator permissions | Defined now, built in a later phase: each coordinator has a scope and a setting per action, each action `denied`, `requires approval` or `automatic`. Phase 1 hardcodes one policy for every coordinator: the five reads `automatic`, `propose_task_kandev` `requires approval`, everything else `denied`. See [Coordinator permission model](#coordinator-permission-model). Settles D16 in favour of per-coordinator settings. | proposed, G0 (implementation G2) |
 | F | Flag | `features.coordinator`: `prod` and `dev` `"false"`, `e2e` `"true"`. Dogfooding uses the runtime override. Restart required. | proposed, G0 |
 | N | Name | UI "Coordinator". Specifications say "workspace coordinator", and the Office glossary distinguishes it from Office's coordinator role. | proposed, G0 |
 
@@ -72,7 +73,7 @@ requirements govern):
 | D11 | Expand opens a Quick Chat tab of kind `"coordinator"`, an ordinary persisted session. | proposed, G3 |
 | D12 | Page context is ids only (`{kind, id}`), validated to the workspace. | proposed, G3 |
 | D13 | No `automatic` write class before the phase 2 "What it did" log; the first is chosen in phase 4 from recorded approvals. | proposed, G2 |
-| D16 | Per-coordinator action tiers, or one policy per workspace. | open, G2 |
+| D16 | Per-coordinator action tiers, or one policy per workspace. | superseded by D17 (per coordinator) |
 
 ### Supersession of ADR-2026-08-31's placement clause
 
@@ -127,6 +128,26 @@ If the coordinator later moves to a plugin, its conversation would run on the
 managed conversation surface with its tools declared by the plugin, and the
 core page, store and routes would be removed or reduced to what the plugin
 cannot provide.
+
+### Coordinator permission model
+
+A coordinator's authority is a permission model, not a fixed tool list. Each
+coordinator has a scope (phase 1: its whole workspace; Watches narrows it in
+phase 2) and a setting per action, and each action is one of three values:
+`denied` (not on its surface; a call is refused), `requires approval` (the
+coordinator proposes; nothing happens until a manager approves) or
+`automatic` (it runs without asking). Phase 1 builds no settings and hardcodes
+one policy for every coordinator: the five read tools are `automatic`,
+`propose_task_kandev` is `requires approval`, and every other action is
+`denied`. The six tools are therefore the phase-1 tool profile, not a
+permanent contract.
+
+Three rules hold in every phase. Approving one proposal grants no permission
+for any later action; each approval decides one proposal. A coordinator's
+runtime session can never change or raise its own permissions: the settings
+are written only by a manager through the settings routes, never through the
+coordinator's surface. Decision D13 governs when a write action may first be
+`automatic`. Storing and editing the settings is phase 2 work (gate G2).
 
 ### Residual risk: the agent's own tools
 
@@ -210,7 +231,7 @@ behind it.
 
 | Phase | Ships | Work packages | Gate |
 | --- | --- | --- | --- |
-| 1. Core flow | Coordinators in workspace settings; a sidebar entry per coordinator beside the Inbox; Needs you and Queue with the count strip; item cards for stalls, questions and permissions, errors, and task proposals (Approve, Edit, Reject); Ask about this; the copilot chat panel on the right side of the Coordinator screens, which reads the workspace and proposes tasks | WP-0 to WP-5b (WP-0, WP-1, WP-1b, WP-2, WP-3, WP-4a, WP-4b, WP-5a, WP-5b) | G0 |
+| 1. Core flow | Coordinators in workspace settings; a sidebar entry per coordinator beside the Inbox; Needs you and Queue with the count strip; item cards for stalls, questions and permissions, errors, and task proposals (Approve, Edit, Reject); Ask about this; the copilot chat panel on the right side of the Coordinator screens, which reads the workspace and proposes tasks | WP-0 to WP-5b (WP-0, WP-1, WP-1b, WP-2, WP-3, WP-4a, WP-4b, WP-4c, WP-4d, WP-4e, WP-5a, WP-5b) | G0 |
 | 2. Config | Watches, May do and Standing orders per coordinator; the "What it did" log with undo; guided setup; Resume on stall cards; merge prompts; a second proposal class (message a running agent) | WP-6, WP-7 | G2 |
 | 3. Copilot everywhere | The launcher on every page, the page context chip, one launcher with Configuration chat on `/settings`, Expand into a Quick Chat tab | WP-8, WP-9 | G3 |
 | 4. Relay and intake | Wake on its tasks' events; questions and permissions answered in place; Came in (Jira, Linear); tracker write-back as a proposal | WP-10 to WP-12 | G4 |

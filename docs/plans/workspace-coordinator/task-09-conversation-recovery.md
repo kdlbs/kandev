@@ -20,10 +20,10 @@ system_design:
 
 ## Summary
 
-A coordinator whose agent fails to start must be recoverable from the panel.
+A coordinator whose agent fails to start must be recoverable from the popover.
 The real-agent check of the integrated build found two gaps: the conversation
 route reused a task whose session had ended, which rejects every message, and
-the panel's recovery feedback was unreachable because `useSessionResumption`
+the popover's recovery feedback was unreachable because `useSessionResumption`
 sets its error only on the automatic path the copilot turns off.
 
 ## In scope
@@ -33,7 +33,7 @@ sets its error only on the automatic path the copilot turns off.
   and creates a fresh task
   ([copilot design](../../specs/coordinator/system-design/copilot.md#conversation-task),
   step 2).
-- Frontend: a coordinator-local recovery state in the panel. It reads the
+- Frontend: a coordinator-local recovery state in the popover. It reads the
   session state from the store; when the session is terminal or its start
   failed, it shows the session recovery feedback with an action that re-runs
   the conversation open. The shared `useSessionResumption` hook is unchanged.
@@ -49,7 +49,7 @@ sets its error only on the automatic path the copilot turns off.
 
 - An open of a coordinator whose session failed returns a new task and
   session; the old task is archived; the open starts no agent.
-- In the panel, a failed start shows the recovery feedback, its action opens
+- In the popover, a failed start shows the recovery feedback, its action opens
   a fresh conversation, and the Needs you and Queue lists keep working.
 
 ## Verification
