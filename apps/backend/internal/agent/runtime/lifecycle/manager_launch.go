@@ -1053,6 +1053,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build launch environment: %w", err)
 	}
+	applyContainerAgentEnvironment(env, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType))
 
 	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(reqWithWorktree), reqWithWorktree.Metadata, agentConfig)
 	if err != nil {
@@ -1192,6 +1193,21 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func applyContainerAgentEnvironment(env map[string]string, agentConfig agents.Agent, executorType models.ExecutorType) {
+	if env == nil || agentConfig == nil || !executorType.Runtime().IsContainerized() {
+		return
+	}
+	runtimeConfig := agentConfig.Runtime()
+	if runtimeConfig == nil {
+		return
+	}
+	for key, value := range runtimeConfig.ContainerEnv {
+		if _, exists := env[key]; !exists {
+			env[key] = value
+		}
+	}
 }
 
 func isDockerExecutorType(executorType string) bool {
@@ -1352,6 +1368,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				RepositoryID:               r.RepositoryID,
 				RepositoryPath:             r.RepositoryPath,
 				RepoName:                   r.RepoName,
+				CopyFiles:                  r.CopyFiles,
 				BaseBranch:                 r.BaseBranch,
 				IntegrationRef:             r.IntegrationRef,
 				DefaultBranch:              r.DefaultBranch,
@@ -2440,30 +2457,21 @@ func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot p
 	return refreshErr
 }
 
-// resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name
-// from the execution's agent profile and registry.
-func (m *Manager) resolveApprovalPolicyAndDisplayName(ctx context.Context, execution *AgentExecution) (string, string) {
-	approvalPolicy := ""
-	agentDisplayName := ""
+// resolveAgentDisplayName resolves the agent display name from the execution's
+// agent profile and registry.
+func (m *Manager) resolveAgentDisplayName(ctx context.Context, execution *AgentExecution) string {
 	if execution.AgentProfileID == "" || m.profileResolver == nil {
-		return approvalPolicy, agentDisplayName
+		return ""
 	}
 	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	if err != nil {
-		return approvalPolicy, agentDisplayName
-	}
-	if profileInfo.AutoApprove {
-		approvalPolicy = "never"
-	} else {
-		approvalPolicy = "untrusted"
+		return ""
 	}
 	// Look up display name from registry (e.g. "Claude", "Auggie", "Codex")
 	if agentCfg, ok := m.registry.Get(profileInfo.AgentName); ok && agentCfg.DisplayName() != "" {
-		agentDisplayName = agentCfg.DisplayName()
-	} else {
-		agentDisplayName = profileInfo.AgentName
+		return agentCfg.DisplayName()
 	}
-	return approvalPolicy, agentDisplayName
+	return profileInfo.AgentName
 }
 
 // createBootMessage creates a boot message and starts the stderr polling goroutine.
@@ -2512,7 +2520,7 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
-func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
+func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution) (string, error) {
 	runtimeSnapshot := execution.RuntimeEnvironment()
 	metadata := execution.MetadataSnapshot()
 	metadataEnv := runtimeEnvFromMetadata(metadata)
@@ -2559,7 +2567,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 
 	// Starting with stale agent configuration could expose an old credential
 	// set, so the subprocess must not start when configuration delivery fails.
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
+	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
@@ -2605,7 +2613,7 @@ func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {
 
 // initializeAgentSession handles post-startup initialization: boot message, ACP session,
 // MCP servers. It finalizes the boot message on success or failure.
-func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription, approvalPolicy string) error {
+func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription string) error {
 	bootMsg, bootStopCh := m.createBootMessage(ctx, execution, bootCommand, agentDisplayName)
 
 	// Give the agent process a moment to initialize
@@ -2631,7 +2639,6 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 			execution,
 			err,
 			agentConfig,
-			approvalPolicy,
 			taskDescription,
 			attachments,
 			mcpServers,

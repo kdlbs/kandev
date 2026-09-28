@@ -262,3 +262,19 @@ Final verification passed:
 The PR checks that originally failed were reproduced and corrected: the MCP readiness fake now
 implements the admission callback, and the queue-reorder helper waits for editor readiness before
 clicking. No runtime restart or live-session mutation was performed.
+
+## Current-base merge verification (2026-09-28)
+
+PR #4034 conflicted with current `main` at `a5b344b03685c732186ad2da72ee507b47448a9f`.
+The merge preserved the queue-editor readiness check and its 15-second timeout. Two lifecycle
+tests introduced on the newer base were updated to pass the new optional admission callback as
+`nil`; this leaves their dispatch behavior unchanged and restores their compile-time compatibility.
+
+Verification on the merged tree:
+
+- `go test -json -race ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1 -timeout=600s`: orchestrator passed (441.001s), executor passed (3.522s), and backendapp passed (119.762s). Lifecycle did not compile because two newer-base tests still used the old callback setter signature; after updating those test call sites, `go test -race ./internal/agent/runtime/lifecycle -count=1 -timeout=600s` passed (93.582s).
+- Managed `pnpm e2e:run --project chromium tests/chat/queued-prompt-cancel.spec.ts tests/chat/cancel-progress-task-switch.spec.ts tests/chat/message-queue-reorder.spec.ts`: backend, web assets, and fixture plugin built; all 4 tests passed.
+- `pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-queued-prompt-cancel.spec.ts tests/chat/mobile-cancel-progress-reload.spec.ts tests/chat/mobile-message-queue-reorder.spec.ts`: all 3 tests passed using the artifacts from the managed Chromium build.
+- Merge markers and unmerged index entries: none. `git diff --check`, staged diff check, and `gofmt -l` on staged Go files reported no issues.
+- `python3 scripts/list-docs.py validate`: passed with 323 decisions and 1229 specifications; `python3 scripts/lint-spec-files.test.py`: 36 passed; `python3 scripts/lint-spec-files.py --all`: passed.
+- `pnpm run typecheck` and `pnpm exec prettier --check e2e/helpers/type-while-busy.ts`: passed.

@@ -262,10 +262,15 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		}
 	}
 
+	flagDestination := dto.FlagDestinationACPBridge
+	if req.CLIPassthrough {
+		flagDestination = dto.FlagDestinationAgentCLI
+	}
 	return &dto.CommandPreviewResponse{
-		Supported:     true,
-		Command:       cmd.Args(),
-		CommandString: buildCommandString(cmd.Args()),
+		Supported:       true,
+		Command:         cmd.Args(),
+		CommandString:   buildCommandString(cmd.Args()),
+		FlagDestination: flagDestination,
 	}, nil
 }
 

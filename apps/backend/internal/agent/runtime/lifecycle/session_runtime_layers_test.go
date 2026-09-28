@@ -59,11 +59,15 @@ func configOptionRecorder(mock *mockAgentServer, failID string) *sync.Map {
 
 // connectAgentStream opens the agent updates WebSocket so SetConfigOption calls
 // can round-trip, then waits until the mock observes the connection.
-func connectAgentStream(t *testing.T, mock *mockAgentServer, client *agentctl.Client) {
+func connectAgentStream(t *testing.T, mock *mockAgentServer, client *agentctl.Client) <-chan struct{} {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
-	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+	disconnected := make(chan struct{})
+	var disconnectOnce sync.Once
+	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, func(error) {
+		disconnectOnce.Do(func() { close(disconnected) })
+	}); err != nil {
 		t.Fatalf("connect agent stream: %v", err)
 	}
 	select {
@@ -71,6 +75,7 @@ func connectAgentStream(t *testing.T, mock *mockAgentServer, client *agentctl.Cl
 	case <-time.After(5 * time.Second):
 		t.Fatal("agent stream never connected")
 	}
+	return disconnected
 }
 
 // TestApplyRuntimeSessionLayersFiltersUnadvertisedOptions verifies that the

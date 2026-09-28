@@ -149,3 +149,13 @@ PR fixup verification (2026-09-28):
   `typeWhileBusy` began waiting for the editor's `contenteditable=true` transition before click.
 - Web typecheck and final documentation/coverage checks passed after updating the test helpers and
   package results. Catalog validation counted 321 decisions and 1223 specifications.
+
+Current-base merge verification (2026-09-28):
+
+- The conflicting editor-readiness hunk was resolved by retaining the `contenteditable=true`
+  check with the PR's explanatory comment and 15-second wait.
+- Managed Chromium queued-pause, task-switch, and queue-reorder specs passed all 4 tests. The
+  command built the backend, web assets, and fixture plugin.
+- Mobile-chrome queued-pause, cancellation reload, and queue-reorder specs passed all 3 tests using
+  those freshly built artifacts.
+- `pnpm run typecheck` and Prettier check for `type-while-busy.ts` passed.

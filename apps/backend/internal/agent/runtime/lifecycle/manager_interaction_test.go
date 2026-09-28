@@ -55,6 +55,7 @@ type restartMockAgentctlServer struct {
 	failSessionReset             bool
 	failCacheRepair              bool
 	failMode                     bool
+	modeResult                   *agentctl.ModeResult
 	failModel                    bool
 	failConfigOptionID           string
 	stderrLines                  []string
@@ -312,9 +313,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				if m.failMode {
 					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "mode rejected", nil)
 				} else {
-					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-						"success": true,
-					})
+					var request struct {
+						ModeID string `json:"mode_id"`
+					}
+					_ = json.Unmarshal(msg.Payload, &request)
+					result := agentctl.ModeResult{Requested: request.ModeID, Effective: request.ModeID, Confirmed: request.ModeID != ""}
+					if m.modeResult != nil {
+						result = *m.modeResult
+					}
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, result)
 				}
 			case "agent.session.set_model":
 				if m.failModel {

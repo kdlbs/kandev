@@ -166,6 +166,11 @@ export type SessionModeChangedPayload = {
   session_id: string;
   agent_id: string;
   current_mode_id: string;
+  /**
+   * Set only when the session is not in the mode Kandev asked for. Empty means
+   * the reported mode is exactly the requested one.
+   */
+  requested_mode_id?: string;
   available_modes?: {
     id: string;
     name: string;

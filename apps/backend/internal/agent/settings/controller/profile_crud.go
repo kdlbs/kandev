@@ -59,6 +59,23 @@ type CreateProfileRequest struct {
 	Dynamic                *dto.DynamicAgentProfileDTO
 }
 
+// AgentProfileExists reports whether id names a profile. It exists so callers
+// that only need to validate a caller-supplied ID do not have to read and
+// discard a whole profile, and so a missing row is not reported as an error.
+func (c *Controller) AgentProfileExists(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	profile, err := c.repo.GetAgentProfile(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return profile != nil, nil
+}
+
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
 	// Model is optional — the profile reconciler fills it from the host
 	// utility probe cache on boot, and session start applies it via
@@ -85,6 +102,8 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if req.CLIFlags == nil {
 		cliFlags = seedCLIFlags(agentConfig)
 	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
+		return nil, err
+	} else if err := validatePassthroughOnlyCLIFlags(agentConfig, req.CLIFlags, req.CLIPassthrough); err != nil {
 		return nil, err
 	}
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
@@ -488,6 +507,20 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
+	}
+	// Judge the flags the profile ends up with against the passthrough mode it
+	// ends up in. Validating only the submitted list let a partial update that
+	// just turns passthrough off keep an enabled flag that cannot reach the
+	// agent over ACP. profile.CLIPassthrough already carries the requested
+	// value at this point.
+	if req.CLIFlags != nil || req.CLIPassthrough != nil {
+		if agentConfig, ok := c.agentConfigForProfile(ctx, profile); ok {
+			if err := validatePassthroughOnlyCLIFlags(
+				agentConfig, cliFlagsToDTO(profile.CLIFlags), profile.CLIPassthrough,
+			); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if req.EnvVars != nil {
 		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {

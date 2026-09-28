@@ -138,3 +138,12 @@ PR fixup findings (2026-09-28):
   and history after rejection.
 - The final four-package race suite passed after these fixes: orchestrator 411.827s, executor
   3.667s, lifecycle 87.349s, backendapp 92.980s.
+
+Current-base merge verification (2026-09-28):
+
+- Current `main` added two lifecycle test call sites that used the prior two-argument callback
+  setter. They now pass `nil` for the optional admission callback; their dispatch behavior is
+  unchanged.
+- After that compatibility update, `go test -race ./internal/agent/runtime/lifecycle -count=1
+  -timeout=600s` passed (93.582s). In the same merged-tree run, orchestrator passed in 441.001s,
+  executor in 3.522s, and backendapp in 119.762s.
