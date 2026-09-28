@@ -15,14 +15,6 @@ vi.mock("@/lib/routing/client-router", () => ({
   useSearchParams: () => new URLSearchParams(searchString),
 }));
 
-vi.mock("@/components/page-shell", () => ({
-  PageShell: ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div data-testid="stub-page-shell" data-title={title}>
-      {children}
-    </div>
-  ),
-}));
-
 vi.mock("./coordinator-route-content", () => ({
   CoordinatorRouteContent: (props: CoordinatorRouteContentProps) => {
     capturedProps = props;
@@ -96,9 +88,8 @@ beforeEach(() => {
 });
 
 describe("QueuePageClient", () => {
-  it("renders the Queue page shell and passes the queue view", () => {
+  it("passes the queue view to the shared route content, which owns the page chrome", () => {
     render(<QueuePageClient workspaceId="ws-1" coordinatorId="co-1" />);
-    expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Queue");
     expect(capturedProps?.view).toBe("queue");
   });
 

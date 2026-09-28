@@ -234,9 +234,14 @@ Mockup:
   strip, no list and no **Add a coordinator** action. When the workspace's
   coordinator list cannot be read, the coordinator routes shall say "Could not
   load coordinators." and offer **Try again**, which re-reads the list.
-- **AC-COORDINATOR-NEEDS-YOU-006.5:** The header shall show the coordinator's
-  name, or a selector of the workspace's coordinators when there are several,
-  and a **Configure** action to its settings page for managers.
+- **AC-COORDINATOR-NEEDS-YOU-006.5:** The page's topbar crumb shall name the
+  viewed coordinator and then the screen, so the coordinator stays named while
+  the screen scrolls. The coordinator shall be a link to that coordinator's
+  own view of the current screen, or a selector of the workspace's
+  coordinators when there are several, and the topbar shall carry a
+  **Configure** action to the coordinator's settings page for managers. Before
+  a coordinator resolves, the crumb shall name the screen alone and the topbar
+  shall carry no action.
 
 ### REQ-COORDINATOR-NEEDS-YOU-007: Empty, missing and error states
 

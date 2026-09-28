@@ -89,9 +89,8 @@ function renderPage() {
 }
 
 describe("NeedsYouPageClient", () => {
-  it("renders the Needs you page shell and passes the needs-you view", () => {
+  it("passes the needs-you view to the shared route content, which owns the page chrome", () => {
     renderPage();
-    expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Needs you");
     expect(capturedProps?.view).toBe("needs-you");
     expect(capturedProps?.workspaceId).toBe("ws-1");
     expect(capturedProps?.coordinatorId).toBe("co-1");

@@ -14,7 +14,12 @@ import {
   useCoordinatorAttention,
   type UseCoordinatorAttentionResult,
 } from "./use-coordinator-attention";
-import { CoordinatorHeader, type CoordinatorHeaderView } from "./components/coordinator-header";
+import { PageShell } from "@/components/page-shell";
+import {
+  CoordinatorConfigureAction,
+  CoordinatorTitleSlot,
+  type CoordinatorHeaderView,
+} from "./components/coordinator-header";
 import { CountStrip } from "./components/count-strip";
 import { InputFailureBanner } from "./components/input-failure-banner";
 import { ListErrorState } from "./components/list-error-state";
@@ -55,10 +60,15 @@ function RedirectToCoordinator({ href }: { href: string }) {
 
 /**
  * Shared shell for the Needs you and Queue screens: resolves the viewed
- * coordinator, renders the header, the per-input failure banner, and the
- * loading/missing/error states, delegating the ready content to `children`
+ * coordinator, renders the page chrome (the topbar crumb carrying the
+ * coordinator and the screen, **Configure** for managers), the per-input
+ * failure banner, and the loading/missing/error states, delegating the ready
+ * content to `children`
  * (docs/specs/coordinator/system-design/needs-you.md#routes-and-sidebar,
  * #screens, #failure-and-recovery).
+ *
+ * The chrome is owned here rather than by each page client because the
+ * coordinator it names is not known until this component has resolved it.
  */
 export function CoordinatorRouteContent({
   workspaceId,
@@ -73,24 +83,35 @@ export function CoordinatorRouteContent({
   const workspace = useAppStore(selectWorkspaceById(workspaceId));
   const canManage = hasScope(workspace?.scopes, SCOPE.workspaceManage);
 
+  const title = view === "queue" ? t("coordinator:queueTitle") : t("coordinator:needsYouTitle");
+  // Until a coordinator resolves there is none to name, so the crumb is the
+  // screen alone and the topbar carries no action.
+  const bareShell = (inner: ReactNode) => (
+    <PageShell title={title} topbarTestId="coordinator-topbar">
+      {inner}
+    </PageShell>
+  );
+
   if (resolved.status === "loading") {
-    return (
+    return bareShell(
       <p className="text-muted-foreground p-4 text-sm" role="status" aria-live="polite">
         {t("common:loading")}
-      </p>
+      </p>,
     );
   }
   if (resolved.status === "list-error") {
-    return <ListErrorState retry={resolved.retry} />;
+    return bareShell(<ListErrorState retry={resolved.retry} />);
   }
   if (resolved.status === "no-coordinator") {
-    return <NoCoordinatorState workspaceId={workspaceId} canManage={canManage} />;
+    return bareShell(<NoCoordinatorState workspaceId={workspaceId} canManage={canManage} />);
   }
   if (resolved.status === "unknown-coordinator") {
-    return <UnknownCoordinatorState workspaceId={workspaceId} />;
+    return bareShell(<UnknownCoordinatorState workspaceId={workspaceId} />);
   }
   if (resolved.status === "redirect") {
-    return <RedirectToCoordinator href={hrefForView(workspaceId, resolved.target.id, view)} />;
+    return bareShell(
+      <RedirectToCoordinator href={hrefForView(workspaceId, resolved.target.id, view)} />,
+    );
   }
 
   // No workflow snapshot present and the read failed: lists and the count
@@ -99,45 +120,60 @@ export function CoordinatorRouteContent({
   const tasksHardFailed = attention.tasksNeverLoaded && Boolean(tasksInput?.error);
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 p-4">
-      <CoordinatorHeader
-        coordinator={resolved.coordinator}
-        coordinators={resolved.coordinators}
-        workspaceId={workspaceId}
-        view={view}
-        canManage={canManage}
-      />
-      <InputFailureBanner inputs={attention.inputs} retry={attention.retryFailed} />
-      {!tasksHardFailed && (
-        <>
-          <div className="bg-background sticky top-0 z-10">
-            <CountStrip
-              classification={attention.classification}
-              workspaceId={workspaceId}
-              coordinatorId={resolved.coordinator.id}
-              view={view}
-            />
-          </div>
-          {children({
-            coordinator: resolved.coordinator,
-            coordinators: resolved.coordinators,
-            attention,
-            canManage,
-          })}
-        </>
-      )}
-      {/* Keyed on the viewed coordinator: a coordinator switch fully
+    <PageShell
+      title={title}
+      titleSlot={
+        <CoordinatorTitleSlot
+          coordinator={resolved.coordinator}
+          coordinators={resolved.coordinators}
+          workspaceId={workspaceId}
+          view={view}
+          title={title}
+        />
+      }
+      actions={
+        canManage ? (
+          <CoordinatorConfigureAction
+            coordinator={resolved.coordinator}
+            workspaceId={workspaceId}
+          />
+        ) : undefined
+      }
+      topbarTestId="coordinator-topbar"
+    >
+      <div className="w-full max-w-3xl space-y-4 p-4">
+        <InputFailureBanner inputs={attention.inputs} retry={attention.retryFailed} />
+        {!tasksHardFailed && (
+          <>
+            <div className="bg-background sticky top-0 z-10">
+              <CountStrip
+                classification={attention.classification}
+                workspaceId={workspaceId}
+                coordinatorId={resolved.coordinator.id}
+                view={view}
+              />
+            </div>
+            {children({
+              coordinator: resolved.coordinator,
+              coordinators: resolved.coordinators,
+              attention,
+              canManage,
+            })}
+          </>
+        )}
+        {/* Keyed on the viewed coordinator: a coordinator switch fully
           remounts the controller, so every hook, ref, and draft resets to
           its initial value by construction instead of relying on each
           hook to detect and unwind a `coordinatorId` change itself
           (docs/specs/coordinator/system-design/copilot-popover.md). */}
-      <CoordinatorCopilot
-        key={resolved.coordinator.id}
-        workspaceId={workspaceId}
-        coordinatorId={resolved.coordinator.id}
-        coordinatorName={resolved.coordinator.name}
-        canManage={canManage}
-      />
-    </div>
+        <CoordinatorCopilot
+          key={resolved.coordinator.id}
+          workspaceId={workspaceId}
+          coordinatorId={resolved.coordinator.id}
+          coordinatorName={resolved.coordinator.name}
+          canManage={canManage}
+        />
+      </div>
+    </PageShell>
   );
 }

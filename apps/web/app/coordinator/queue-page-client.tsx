@@ -1,7 +1,5 @@
 "use client";
 
-import { useTranslation } from "react-i18next";
-import { PageShell } from "@/components/page-shell";
 import { useSearchParams } from "@/lib/routing/client-router";
 import type { QueueGroupKind } from "@/lib/coordinator/attention";
 import { CoordinatorRouteContent } from "./coordinator-route-content";
@@ -34,29 +32,26 @@ function isQueueGroupKind(value: string | null): value is QueueGroupKind {
  * force-opens a collapsed-by-default group.
  */
 export function QueuePageClient({ workspaceId, coordinatorId }: QueuePageClientProps) {
-  const { t } = useTranslation();
   const searchParams = useSearchParams();
   const rawGroup = searchParams.get("group");
   const linkedGroup = isQueueGroupKind(rawGroup) ? rawGroup : undefined;
 
   return (
-    <PageShell title={t("coordinator:queueTitle")}>
-      <CoordinatorRouteContent workspaceId={workspaceId} coordinatorId={coordinatorId} view="queue">
-        {({ attention }) => (
-          <div className="space-y-4" data-testid="queue-group-list">
-            {QUEUE_DISPLAY_ORDER.map((group) => (
-              <QueueGroup
-                key={group}
-                group={group}
-                items={attention.classification.queue[group]}
-                stepNameByTaskId={attention.stepNameByTaskId}
-                prsByTaskId={attention.prsByTaskId}
-                defaultOpen={linkedGroup === group ? true : undefined}
-              />
-            ))}
-          </div>
-        )}
-      </CoordinatorRouteContent>
-    </PageShell>
+    <CoordinatorRouteContent workspaceId={workspaceId} coordinatorId={coordinatorId} view="queue">
+      {({ attention }) => (
+        <div className="space-y-4" data-testid="queue-group-list">
+          {QUEUE_DISPLAY_ORDER.map((group) => (
+            <QueueGroup
+              key={group}
+              group={group}
+              items={attention.classification.queue[group]}
+              stepNameByTaskId={attention.stepNameByTaskId}
+              prsByTaskId={attention.prsByTaskId}
+              defaultOpen={linkedGroup === group ? true : undefined}
+            />
+          ))}
+        </div>
+      )}
+    </CoordinatorRouteContent>
   );
 }

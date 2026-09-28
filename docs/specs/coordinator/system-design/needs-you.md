@@ -214,11 +214,19 @@ with `detected_at` older than 30 days. There is no timer.
 
 ## Screens
 
-- `apps/web/app/coordinator/` holds the Needs you and Queue pages, the header
-  (name or selector, **Configure** for managers), the count strip (sticky,
-  outside the scroller), the item card with per-kind actions, the Queue groups
-  (Done and Other use a collapsed disclosure), and the empty, missing and error
-  states.
+- `apps/web/app/coordinator/` holds the Needs you and Queue pages, the count
+  strip (sticky, outside the scroller), the item card with per-kind actions,
+  the Queue groups (Done and Other use a collapsed disclosure), and the empty,
+  missing and error states.
+- The page chrome is the topbar, not a header in the body:
+  `coordinator-route-content.tsx` owns the `PageShell`, because the coordinator
+  the crumb names is not known until that component has resolved it. The crumb
+  is `PageShell`'s `titleSlot` (`CoordinatorTitleSlot`: the coordinator as a
+  link, or a `Select` when the workspace has several, then the screen's own
+  name), and **Configure** is a topbar action for managers. A page client
+  renders no shell of its own. The count strip is therefore the first thing
+  under the topbar, and the content column is left-aligned rather than
+  centred, as in mockup v2.1.
 - Phone: one column; the strip stays sticky; actions wrap with 44px minimum
   targets. Playwright checks run in the `mobile-chrome` project at 390px, and an
   axe scan asserts no critical violation on both screens.

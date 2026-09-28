@@ -38,6 +38,26 @@ vi.mock("./use-coordinator-attention", () => ({
   useCoordinatorAttention: () => attentionResult,
 }));
 
+vi.mock("@/components/page-shell", () => ({
+  PageShell: ({
+    title,
+    titleSlot,
+    actions,
+    children,
+  }: {
+    title: string;
+    titleSlot?: React.ReactNode;
+    actions?: React.ReactNode;
+    children: React.ReactNode;
+  }) => (
+    <div data-testid="stub-page-shell" data-title={title}>
+      <div data-testid="stub-topbar-title-slot">{titleSlot}</div>
+      <div data-testid="stub-topbar-actions">{actions}</div>
+      {children}
+    </div>
+  ),
+}));
+
 vi.mock("./copilot/coordinator-copilot", () => ({
   CoordinatorCopilot: (props: Record<string, unknown>) => {
     coordinatorCopilotCalls.push(props);
@@ -46,6 +66,8 @@ vi.mock("./copilot/coordinator-copilot", () => ({
 }));
 
 import { CoordinatorRouteContent } from "./coordinator-route-content";
+
+const MANAGE_SCOPE = "workspace.manage";
 
 afterEach(cleanup);
 
@@ -126,7 +148,7 @@ describe("CoordinatorRouteContent", () => {
 
   it("shows the no-coordinator state, gated by scope for Add a coordinator", () => {
     resolvedState = { status: "no-coordinator" };
-    workspaceItems = [{ id: "ws-1", scopes: ["workspace.manage"] }];
+    workspaceItems = [{ id: "ws-1", scopes: [MANAGE_SCOPE] }];
     render(
       <CoordinatorRouteContent workspaceId="ws-1" coordinatorId={null} view="needs-you">
         {() => <div data-testid="ready-content" />}
@@ -155,7 +177,7 @@ describe("CoordinatorRouteContent", () => {
     expect(replaceMock).toHaveBeenCalledWith("/workspaces/ws-1/coordinator/co-2/queue");
   });
 
-  it("renders the header, count strip and ready content when ready", () => {
+  it("names the coordinator in the topbar crumb, with the count strip and ready content", () => {
     resolvedState = {
       status: "ready",
       coordinator: coordinator(),
@@ -166,7 +188,7 @@ describe("CoordinatorRouteContent", () => {
         {({ coordinator: c }) => <div data-testid="ready-content">{c.name}</div>}
       </CoordinatorRouteContent>,
     );
-    expect(screen.getByRole("heading", { name: "Planner" })).not.toBeNull();
+    expect(screen.getByTestId("stub-topbar-title-slot").textContent).toContain("Planner");
     expect(screen.getByTestId("coordinator-count-strip")).not.toBeNull();
     expect(screen.getByTestId("ready-content").textContent).toBe("Planner");
     expect(screen.getByTestId("coordinator-copilot-marker")).not.toBeNull();
@@ -235,7 +257,7 @@ describe("CoordinatorRouteContent canManage", () => {
     // coordinator screen for a workspace they don't manage.
     workspaceItems = [
       { id: "ws-1", scopes: [] },
-      { id: "ws-2", scopes: ["workspace.manage"] },
+      { id: "ws-2", scopes: [MANAGE_SCOPE] },
     ];
     activeWorkspaceId = "ws-2";
     resolvedState = {
@@ -253,7 +275,7 @@ describe("CoordinatorRouteContent canManage", () => {
 
   it("grants canManage when the route's own workspace has the scope, even if it is not active", () => {
     workspaceItems = [
-      { id: "ws-1", scopes: ["workspace.manage"] },
+      { id: "ws-1", scopes: [MANAGE_SCOPE] },
       { id: "ws-2", scopes: [] },
     ];
     activeWorkspaceId = "ws-2";
@@ -268,5 +290,63 @@ describe("CoordinatorRouteContent canManage", () => {
       </CoordinatorRouteContent>,
     );
     expect(screen.getByTestId("can-manage").textContent).toBe("true");
+  });
+});
+
+describe("CoordinatorRouteContent page chrome", () => {
+  it("titles the shell by the view", () => {
+    resolvedState = {
+      status: "ready",
+      coordinator: coordinator(),
+      coordinators: [coordinator()],
+    };
+    const { rerender } = render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="needs-you">
+        {() => <div />}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Needs you");
+    rerender(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="queue">
+        {() => <div />}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Queue");
+  });
+
+  it("puts Configure in the topbar only for managers", () => {
+    resolvedState = {
+      status: "ready",
+      coordinator: coordinator(),
+      coordinators: [coordinator()],
+    };
+    workspaceItems = [{ id: "ws-1", scopes: [] }];
+    activeWorkspaceId = "ws-1";
+    const { rerender } = render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="queue">
+        {() => <div />}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("stub-topbar-actions").textContent).toBe("");
+
+    workspaceItems = [{ id: "ws-1", scopes: [MANAGE_SCOPE] }];
+    rerender(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="queue">
+        {() => <div />}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("stub-topbar-actions").textContent).toContain("Configure");
+  });
+
+  it("names the screen with no coordinator crumb before one resolves", () => {
+    resolvedState = { status: "loading" };
+    render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="queue">
+        {() => <div />}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Queue");
+    expect(screen.getByTestId("stub-topbar-title-slot").textContent).toBe("");
+    expect(screen.getByTestId("stub-topbar-actions").textContent).toBe("");
   });
 });

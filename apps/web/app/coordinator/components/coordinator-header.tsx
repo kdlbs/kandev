@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import Link from "@/components/routing/app-link";
@@ -14,12 +15,17 @@ import {
 
 export type CoordinatorHeaderView = "needs-you" | "queue";
 
-export type CoordinatorHeaderProps = {
+export type CoordinatorTitleSlotProps = {
   coordinator: Coordinator;
   coordinators: Coordinator[];
   workspaceId: string;
   view: CoordinatorHeaderView;
-  canManage: boolean;
+  title: string;
+};
+
+export type CoordinatorConfigureActionProps = {
+  coordinator: Coordinator;
+  workspaceId: string;
 };
 
 function hrefFor(workspaceId: string, coordinatorId: string, view: CoordinatorHeaderView): string {
@@ -29,23 +35,24 @@ function hrefFor(workspaceId: string, coordinatorId: string, view: CoordinatorHe
 }
 
 /**
- * The screens' header: the coordinator's name, or a selector when the
- * workspace has several, and Configure for managers
- * (AC-COORDINATOR-NEEDS-YOU-006.5).
+ * The topbar's current-page crumb: the coordinator's name, or a selector of
+ * the workspace's coordinators when there are several, then the screen's own
+ * name (AC-COORDINATOR-NEEDS-YOU-006.5). It lives in `PageShell`'s `titleSlot`
+ * because it carries an interactive control, which a plain `BreadcrumbPage`
+ * must not announce as a disabled link.
  */
-export function CoordinatorHeader({
+export function CoordinatorTitleSlot({
   coordinator,
   coordinators,
   workspaceId,
   view,
-  canManage,
-}: CoordinatorHeaderProps) {
+  title,
+}: CoordinatorTitleSlotProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const { isFinePointer } = useResponsiveBreakpoint();
 
   return (
-    <div className="flex items-center justify-between gap-2">
+    <span className="flex min-w-0 items-center gap-1.5">
       {coordinators.length > 1 ? (
         <Select
           value={coordinator.id}
@@ -66,20 +73,40 @@ export function CoordinatorHeader({
           </SelectContent>
         </Select>
       ) : (
-        <h2 className="text-lg font-semibold">{coordinator.name}</h2>
-      )}
-      {canManage && (
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className={cn(!isFinePointer && "min-h-11 min-w-11")}
+        <Link
+          href={hrefFor(workspaceId, coordinator.id, view)}
+          className="text-muted-foreground hover:text-foreground truncate text-sm transition-colors"
+          data-testid="coordinator-crumb"
         >
-          <Link href={linkToCoordinatorSettings(workspaceId, coordinator.id)}>
-            {t("coordinator:configure")}
-          </Link>
-        </Button>
+          {coordinator.name}
+        </Link>
       )}
-    </div>
+      <IconChevronRight className="text-muted-foreground size-3.5 shrink-0" aria-hidden="true" />
+      <span className="truncate text-sm font-medium">{title}</span>
+    </span>
+  );
+}
+
+/**
+ * The topbar action to the coordinator's settings page, for managers
+ * (AC-COORDINATOR-NEEDS-YOU-006.5).
+ */
+export function CoordinatorConfigureAction({
+  coordinator,
+  workspaceId,
+}: CoordinatorConfigureActionProps) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  return (
+    <Button
+      asChild
+      variant="outline"
+      size="sm"
+      className={cn(!isFinePointer && "min-h-11 min-w-11")}
+    >
+      <Link href={linkToCoordinatorSettings(workspaceId, coordinator.id)}>
+        {t("coordinator:configure")}
+      </Link>
+    </Button>
   );
 }
