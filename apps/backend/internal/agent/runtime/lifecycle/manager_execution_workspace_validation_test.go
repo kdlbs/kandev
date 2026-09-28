@@ -140,6 +140,37 @@ func TestValidateWorkspaceInfoForExecutionRequiresEnvironmentValidationMarker(t 
 	}
 }
 
+func TestValidateWorkspaceInfoForExecutionValidatesImplicitLocalEnvironment(t *testing.T) {
+	repository := initGitRepo(t)
+	info := &WorkspaceInfo{
+		TaskEnvironmentID:          "env-implicit-local",
+		ValidatedTaskEnvironmentID: "env-implicit-local",
+		WorkspacePath:              repository,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	}
+	if err := validateWorkspaceInfoForExecution(context.Background(), info); err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionRejectsUnrelatedImplicitLocalRepository(t *testing.T) {
+	selectedRepository := initGitRepo(t)
+	otherRepository := initGitRepo(t)
+	info := &WorkspaceInfo{
+		TaskEnvironmentID:          "env-implicit-local",
+		ValidatedTaskEnvironmentID: "env-implicit-local",
+		WorkspacePath:              otherRepository,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: selectedRepository, RepoName: "repository",
+		}},
+	}
+	if err := validateWorkspaceInfoForExecution(context.Background(), info); err == nil {
+		t.Fatal("validateWorkspaceInfoForExecution() accepted an unrelated Git checkout for the implicit local executor")
+	}
+}
+
 func TestValidateWorkspaceInfoForExecutionAcceptsMultiRepoTaskRoot(t *testing.T) {
 	root := t.TempDir()
 	first := initGitRepo(t)
@@ -160,6 +191,21 @@ func TestValidateWorkspaceInfoForExecutionAcceptsMultiRepoTaskRoot(t *testing.T)
 	})
 	if err != nil {
 		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionAcceptsIndependentImplicitLocalRepositories(t *testing.T) {
+	primary := initGitRepo(t)
+	additional := initGitRepo(t)
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		WorkspacePath: primary,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepositoryID: "repository-1", RepositoryPath: primary, RepoName: "primary"},
+			{RepositoryID: "repository-2", RepositoryPath: additional, RepoName: "additional"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v, want each local repository validated at its selected checkout", err)
 	}
 }
 

@@ -114,3 +114,8 @@ recovery admission; lifecycle and SQLite claim regressions passed, and the real
 dirty relocation E2E confirmed admission succeeds only after that durable state.
 Final PR-fixup verification also passed the changed-code backend linter with
 zero issues and the focused worktree relocation/admission regression set.
+Follow-up regressions cover implicit default-local repository validation,
+canonical absolute task-environment paths, and retaining a stopped passthrough
+execution ID across graceful backend shutdown. The full lifecycle and task
+service Go packages passed, along with the focused dirty-relocation, CLI
+fallback, single-repository TUI, and multi-repository TUI restart E2Es.

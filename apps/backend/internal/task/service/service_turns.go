@@ -1268,7 +1268,7 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}
-	if info.WorkspacePath == "" {
+	if info.WorkspacePath == "" || (!filepath.IsAbs(info.WorkspacePath) && filepath.IsAbs(env.WorkspacePath)) {
 		info.WorkspacePath = env.WorkspacePath
 	}
 	if env.ContainerID != "" {

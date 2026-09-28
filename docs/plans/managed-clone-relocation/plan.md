@@ -145,6 +145,9 @@ tests), i18n checks, desktop recovery E2E (2 tests), and mobile recovery E2E (5
 tests) passed. The desktop and phone dirty-relocation E2E cases passed with
 retries disabled using the legacy owner/name fixture. Public documentation
 checks, specification validation, spec lint, and `git diff --check` passed.
+Final PR fixup also passed the complete lifecycle and task-service Go packages,
+the desktop dirty-relocation, CLI fallback, and both TUI restart E2Es, plus the
+mobile clarification, mobile entry-recovery, and automation-confirmation cases.
 PostgreSQL-specific migration and concurrency checks were not run because
 `KANDEV_TEST_POSTGRES_DSN` was unset.
 

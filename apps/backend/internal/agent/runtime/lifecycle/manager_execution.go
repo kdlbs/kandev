@@ -429,9 +429,11 @@ func validateWorkspaceInfo(ctx context.Context, info *WorkspaceInfo, deferManage
 	if info == nil || len(info.WorkspaceRepositories) == 0 || models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
 		return nil
 	}
+	// The default local executor is persisted with an empty type, so ownership
+	// requires an exact type match while allowing that legacy default value.
 	if info.TaskEnvironmentID != "" &&
 		(info.ValidatedTaskEnvironmentID == "" || info.ValidatedTaskEnvironmentID != info.TaskEnvironmentID ||
-			info.ValidatedExecutorType == "" || info.ValidatedExecutorType != info.ExecutorType) {
+			info.ValidatedExecutorType != info.ExecutorType) {
 		return fmt.Errorf("%w: workspace environment ownership was not validated for this launch", models.ErrWorkspaceReuseUnsafe)
 	}
 	if info.WorkspacePath == "" {
@@ -471,6 +473,13 @@ func workspaceRepositoryCandidate(
 	case info.ExecutorType == string(models.ExecutorTypeWorktree) && repository.WorktreePath != "":
 		return repository.WorktreePath
 	case index > 0:
+		if info.ExecutorType != string(models.ExecutorTypeWorktree) {
+			if _, err := localGitTopLevel(ctx, info.WorkspacePath); err == nil {
+				// Local multi-repository sessions keep the primary checkout as
+				// WorkspacePath and attach secondary repositories independently.
+				return repository.RepositoryPath
+			}
+		}
 		return filepath.Join(info.WorkspacePath, repository.RepoName)
 	case len(info.WorkspaceRepositories) > 1:
 		// Multi-repository worktree layouts use a task root. Local layouts
@@ -501,10 +510,16 @@ func managedCloneMismatchCanDefer(
 }
 
 func localWorkspaceExpectedRepository(info *WorkspaceInfo, repository WorkspaceRepositorySpec) string {
-	if info != nil && (info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == legacyExecutorTypeLocalPC || info.ExecutorType == string(models.ExecutorTypeWorktree)) {
-		return repository.RepositoryPath
+	if info == nil {
+		return ""
 	}
-	return ""
+	switch info.ExecutorType {
+	// An empty type is the persisted default-local executor for pre-profile tasks.
+	case "", string(models.ExecutorTypeLocal), legacyExecutorTypeLocalPC, string(models.ExecutorTypeWorktree):
+		return repository.RepositoryPath
+	default:
+		return ""
+	}
 }
 
 // GetExecutionIDForSession returns the execution ID for a session from the in-memory
