@@ -160,7 +160,7 @@ function TaskRows({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
@@ -366,7 +366,7 @@ function TaskListRow({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -439,7 +439,7 @@ function TaskListSectionView({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -546,7 +546,7 @@ function TaskRowActions({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -606,8 +606,8 @@ function TaskRowActions({
         executorType={task.primary_executor_type}
         sharesParentWorkspace={cleanupSharesParentWorkspace(workspaceMode)}
         isDeleting={isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges }) =>
-          onDelete(task.id, { cascade, discardWorktreeChanges })
+        onConfirm={({ cascade, discardWorktreeChanges, confirmationId }) =>
+          onDelete(task.id, { cascade, discardWorktreeChanges, confirmationId })
         }
       />
       <TaskArchiveConfirmation

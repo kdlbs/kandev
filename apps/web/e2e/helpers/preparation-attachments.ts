@@ -180,11 +180,7 @@ export async function assertPreparationAttachments(options: Options) {
     await runCleanup(() => fs.writeFileSync(release, "release"));
     await runCleanup(async () => {
       if (!taskId) return;
-      const response = await apiClient.rawRequest(
-        "DELETE",
-        `/api/v1/tasks/${taskId}?discard_worktree_changes=true`,
-      );
-      expect(response.ok).toBeTruthy();
+      await apiClient.deleteTask(taskId, { discardWorktreeChanges: true });
     });
     await runCleanup(async () => {
       if (!repositoryId) return;

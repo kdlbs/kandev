@@ -170,7 +170,9 @@ func TestKubernetesCreateRebuildsControlForwardThatDiesBeforeRemoteHealth(t *tes
 			),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("agentctl"), nil }
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("agentctl"), nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -208,7 +210,9 @@ func TestKubernetesRetainedForwardOutlivesCreateContext(t *testing.T) {
 			),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("agentctl"), nil }
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("agentctl"), nil
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	instance, err := executor.CreateInstance(ctx, validKubernetesCreateRequest())
 	require.NoError(t, err)

@@ -3,6 +3,7 @@
 import { memo, useState, useCallback, type ReactNode } from "react";
 import { IconFile, IconLoader2, IconPhoto, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent } from "@kandev/ui/dialog";
 import type { ImageContextItem } from "@/lib/types/context";
@@ -17,6 +18,7 @@ import { ContextChip } from "./context-chip";
 // eslint-disable-next-line max-lines-per-function, complexity
 export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextItem }) {
   const { t } = useTranslation("chat");
+  const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
   const previewSrc = item.attachment.preview;
   const deliveryMode = item.attachment.deliveryMode;
@@ -48,8 +50,9 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
             type="button"
             size="icon"
             variant="ghost"
-            className="h-5 w-5"
+            className={isFinePointer ? "h-5 w-5" : "min-h-11 min-w-11"}
             aria-label={t("chat:retryAttachmentUpload")}
+            data-testid="attachment-upload-retry"
             onClick={(event) => {
               event.stopPropagation();
               item.onRetry?.();

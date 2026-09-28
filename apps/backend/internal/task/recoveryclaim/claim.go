@@ -32,6 +32,32 @@ var (
 const forUpdateClause = ` FOR UPDATE`
 
 type claimContextKey struct{}
+type taskCleanupJobContextKey struct{}
+
+// TaskCleanupJob identifies a task-level archive, delete, or environment-reset
+// job whose durable barrier authorizes resource cleanup for the same task.
+type TaskCleanupJob struct {
+	ID     string
+	TaskID string
+}
+
+// WithTaskCleanupJob carries an already admitted task cleanup job through the
+// runtime stop path. The repository revalidates the job before accepting it.
+func WithTaskCleanupJob(ctx context.Context, job TaskCleanupJob) context.Context {
+	if job.ID == "" || job.TaskID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskCleanupJobContextKey{}, job)
+}
+
+// TaskCleanupJobFromContext returns the task cleanup job carried by ctx.
+func TaskCleanupJobFromContext(ctx context.Context) (TaskCleanupJob, bool) {
+	if ctx == nil {
+		return TaskCleanupJob{}, false
+	}
+	job, ok := ctx.Value(taskCleanupJobContextKey{}).(TaskCleanupJob)
+	return job, ok && job.ID != "" && job.TaskID != ""
+}
 
 // WithClaim attaches a recovery claim to an internal operation context. The
 // marker lets nested lifecycle calls reuse the same authority without trying
@@ -85,7 +111,7 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if err := lockTask(ctx, db, tx, req.OwnerTaskID); err != nil {
 		return nil, err
 	}
-	if err := ensureCleanupAbsent(ctx, db, tx, req.OwnerTaskID); err != nil {
+	if err := ensureCleanupBarrier(ctx, db, tx, req.OwnerTaskID, req.CleanupJobID); err != nil {
 		return nil, err
 	}
 
@@ -107,7 +133,7 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		if err := validateRequesterIdentity(ctx, db, tx, req); err != nil {
 			return nil, err
 		}
-		snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
+		snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID, req.AllowCurrentSessionRuntime)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +151,7 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		return nil, err
 	}
 
-	snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
+	snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID, req.AllowCurrentSessionRuntime)
 	if err != nil {
 		return nil, err
 	}
@@ -474,23 +500,49 @@ func lockTask(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) erro
 	return nil
 }
 
-func ensureCleanupAbsent(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) error {
-	var active bool
-	if err := tx.QueryRowContext(ctx, db.Rebind(`
+func ensureCleanupBarrier(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID, allowedJobID string) error {
+	query := `
 		SELECT EXISTS (
 			SELECT 1 FROM task_resource_cleanup_jobs
 			WHERE task_id = ? AND state IN (?, ?, ?, ?)
-		)
-	`), taskID,
+	`
+	args := []interface{}{
+		taskID,
 		models.TaskResourceCleanupStatePrepared,
 		models.TaskResourceCleanupStatePending,
 		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait,
-	).Scan(&active); err != nil {
+	}
+	if allowedJobID != "" {
+		query += ` AND id <> ?`
+		args = append(args, allowedJobID)
+	}
+	query += `)`
+	var active bool
+	if err := tx.QueryRowContext(ctx, db.Rebind(query), args...).Scan(&active); err != nil {
 		return fmt.Errorf("check recovery owner cleanup barrier: %w", err)
 	}
 	if active {
 		return fmt.Errorf("%w: %s", repoerrors.ErrTaskCleanupInProgress, taskID)
+	}
+	if allowedJobID != "" {
+		var admitted bool
+		if err := tx.QueryRowContext(ctx, db.Rebind(`
+			SELECT EXISTS (
+				SELECT 1 FROM task_resource_cleanup_jobs
+				WHERE id = ? AND task_id = ? AND state IN (?, ?, ?, ?)
+			)
+		`), allowedJobID, taskID,
+			models.TaskResourceCleanupStatePrepared,
+			models.TaskResourceCleanupStatePending,
+			models.TaskResourceCleanupStateRunning,
+			models.TaskResourceCleanupStateRetryWait,
+		).Scan(&admitted); err != nil {
+			return fmt.Errorf("validate task cleanup claim: %w", err)
+		}
+		if !admitted {
+			return fmt.Errorf("%w: cleanup operation %s is no longer active", repoerrors.ErrTaskCleanupInProgress, allowedJobID)
+		}
 	}
 	return nil
 }
@@ -517,6 +569,7 @@ func loadAdmissionSnapshot(
 	tx *sqlx.Tx,
 	environmentID string,
 	requestingSessionID string,
+	allowCurrentSessionRuntime bool,
 ) (models.TaskEnvironmentAdmissionSnapshot, error) {
 	snapshot := models.TaskEnvironmentAdmissionSnapshot{}
 	if err := tx.QueryRowContext(ctx, db.Rebind(`
@@ -526,7 +579,6 @@ func loadAdmissionSnapshot(
 	`), environmentID).Scan(&snapshot.MaterializationSessionID); err != nil {
 		return snapshot, err
 	}
-
 	rows, err := tx.QueryContext(ctx, db.Rebind(`
 		SELECT ts.id, ts.state,
 			EXISTS (
@@ -557,6 +609,9 @@ func loadAdmissionSnapshot(
 			return snapshot, err
 		}
 		consumer.IsRequester = consumer.SessionID == requestingSessionID
+		if consumer.IsRequester && allowCurrentSessionRuntime {
+			continue
+		}
 		snapshot.Consumers = append(snapshot.Consumers, consumer)
 	}
 	return snapshot, rows.Err()

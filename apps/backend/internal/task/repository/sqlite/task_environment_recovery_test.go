@@ -178,3 +178,38 @@ func TestTaskEnvironmentRecoveryClaimRejectsStaleOwnership(t *testing.T) {
 		t.Fatalf("stale generation error = %v, want ErrTaskEnvironmentOwnershipChanged", err)
 	}
 }
+
+func TestTaskEnvironmentRecoveryClaimAcceptsOnlyItsActiveCleanupJob(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-recovery-cleanup-authority"
+		environmentID = "environment-recovery-cleanup-authority"
+		sessionID     = "session-recovery-cleanup-authority"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
+		ID: "cleanup-job-recovery-authority", OperationID: "cleanup-op-recovery-authority", TaskID: taskID,
+		Trigger: models.TaskResourceCleanupTriggerReconcile, State: models.TaskResourceCleanupStatePrepared,
+		ResourceSnapshot: `{}`,
+	}); err != nil {
+		t.Fatalf("create cleanup barrier: %v", err)
+	}
+	request := recoveryClaimRequest(t, repo, environmentID, taskID, sessionID, "operation-recovery-cleanup-authority", 1)
+	request.CleanupJobID = "cleanup-job-recovery-authority"
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("acquire recovery claim under matching cleanup job: %v", err)
+	}
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
+		t.Fatalf("release recovery claim: %v", err)
+	}
+
+	request.CleanupJobID = "other-cleanup-job"
+	if _, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request); !errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+		t.Fatalf("claim under another cleanup job = %v, want ErrTaskCleanupInProgress", err)
+	}
+}

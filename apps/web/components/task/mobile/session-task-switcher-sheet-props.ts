@@ -59,6 +59,6 @@ export function buildMobileTaskSwitcherProps(
     loadError: props.loadError,
     onRetryLoad: props.onRetryLoad,
     retryLabel: props.retryLabel,
-    totalTaskCount: props.tasks.length,
+    totalTaskCount: props.page?.total_tasks ?? props.tasks.length,
   };
 }

@@ -126,7 +126,7 @@ func TestKubernetesCreateInstanceProvisionsBootstrapsAndForwardsAgentctl(t *test
 			streams:   kubeexecutor.NewStreamOperations(execs, forwards),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) {
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
 		return []byte("agentctl-binary"), nil
 	}
 	req := validKubernetesCreateRequest()
@@ -176,7 +176,9 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 			streams:   kubeexecutor.NewStreamOperations(reconnectExecs, reconnectForwards),
 		}, nil
 	}
-	restartedBackend.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("unused"), nil }
+	restartedBackend.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("unused"), nil
+	}
 	reconnectRequest := validKubernetesCreateRequest()
 	reconnectRequest.InstanceID = "new-execution-id"
 	reconnectRequest.PreviousExecutionID = created.InstanceID

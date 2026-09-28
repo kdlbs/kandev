@@ -521,6 +521,10 @@ func (m *Manager) recoveredExactProfileLaunchAttempt(ctx context.Context, execut
 	return frozen
 }
 
+type pluginExecutorRunningLister interface {
+	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
 // ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
 // every live standalone executors_running row, read at startup step 3 before
 // any control-server contact, so the recovery guard can be taken against it
@@ -533,6 +537,16 @@ func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*mo
 		return nil, nil
 	}
 	return lister.ListExecutorsRunningLiveStandalone(ctx)
+}
+
+// ListLivePluginExecutorsRunning includes stopped inventory so callers can
+// distinguish a retained environment from an empty session record.
+func (m *Manager) ListLivePluginExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(pluginExecutorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningPluginRemote(ctx)
 }
 
 type executorRunningCASWriter interface {

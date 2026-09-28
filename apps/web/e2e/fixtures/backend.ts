@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
+import { prepareCompactRuntimeFixture, type CompactRuntimeFixture } from "./compact-runtime";
 import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
 import { killProcessGroup } from "./process-group";
@@ -73,6 +74,7 @@ export type BackendContext = {
    * every later restart until the returned release callback is awaited.
    */
   useEnv: (overrides: Record<string, string>) => Promise<() => Promise<void>>;
+  compactRuntime?: CompactRuntimeFixture;
 };
 
 function observeProcessExit(proc?: ChildProcess): {
@@ -267,12 +269,13 @@ export async function runOwnedBackendFixture<T>(
  * The process is spawned with `detached: true` so it becomes a process group leader.
  */
 function spawnBackendProcess(
+  binaryPath: string,
   env: Record<string, string>,
   debug: boolean,
   port: number,
   logPath: string,
 ): BackendProcess {
-  const proc = spawn(KANDEV_BIN, ["__backend"], {
+  const proc = spawn(binaryPath, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -381,7 +384,14 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // and runs without a Docker daemon. See e2e/README.md.
         const dockerEnabled = isContainerProjectActive(workerInfo.project.name);
         const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
-        const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
+        const compactRuntime = dockerEnabled
+          ? prepareCompactRuntimeFixture({
+              bundleDir: path.join(tmpDir, "compact-runtime", "kandev"),
+              homeDir,
+              sourceBinDir: path.join(BACKEND_DIR, "bin"),
+              launcherPath: KANDEV_BIN,
+            })
+          : undefined;
 
         const backendEnv = {
           ...sanitizeInheritedEnv(process.env as Record<string, string>),
@@ -399,6 +409,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_E2E_GITLAB_REMOTE_URL: `http://localhost:${backendPort}/platform/kandev.git`,
           HOME: tmpDir,
           KANDEV_HOME_DIR: homeDir,
+          ...(compactRuntime ? { KANDEV_BUNDLE_DIR: compactRuntime.bundleDir } : {}),
           KANDEV_SERVER_PORT: String(backendPort),
           KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
           KANDEV_DATABASE_PATH: dbPath,
@@ -414,19 +425,18 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // registry.RoutableProviderIDs).
           KANDEV_E2E_MOCK: "true",
           KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
-          // When Docker is on, point the lifecycle resolvers at the linux/amd64
-          // binaries the test runner pre-built, so containers can bind-mount them.
+          // Container-backed projects run from a standard package with only a
+          // verified linux/amd64 helper in the release-shaped cache.
           ...(dockerEnabled
             ? {
                 KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
-                KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
                 KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
               }
             : {}),
           KANDEV_WORKTREE_ENABLED: "true",
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "info",
+          KANDEV_LOG_LEVEL: dockerEnabled ? "debug" : (process.env.KANDEV_LOG_LEVEL ?? "info"),
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
@@ -457,6 +467,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
 
         // --- Spawn backend ---
         backendProc = spawnBackendProcess(
+          compactRuntime?.launcherPath ?? KANDEV_BIN,
           scopedEnv.apply(baselineEnv),
           debug,
           backendPort,
@@ -488,7 +499,13 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).
           await waitForPortFree(backendPort);
-          backendProc = spawnBackendProcess(nextEnv, debug, backendPort, processLogPath);
+          backendProc = spawnBackendProcess(
+            compactRuntime?.launcherPath ?? KANDEV_BIN,
+            nextEnv,
+            debug,
+            backendPort,
+            processLogPath,
+          );
           registerProcess(backendProc);
           // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
           // /ready, not /health — see the comment on the initial spawn above.
@@ -519,6 +536,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          compactRuntime,
           logPath: backendLogPath,
           pid: () => backendProc?.pid,
           restart,
@@ -557,7 +575,7 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 
 /** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
 // Sanitize the inherited environment before handing it to the e2e backend.
-// Three classes of vars must not leak through the `...process.env` spread:
+// Four classes of vars must not leak through the `...process.env` spread:
 //   - GitHub tokens — tests must hit the mock GitHub, never a real token.
 //   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
 //     column turns them on). When the suite is launched from inside a kandev
@@ -573,12 +591,17 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
+//   - Remote helper paths — container-backed tests must exercise the standard
+//     package cache path, never an inherited helper override.
 function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
   for (const key of Object.keys(cleaned)) {
     if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
+      delete cleaned[key];
+    }
+    if (/^KANDEV_AGENTCTL_(?:LINUX_BINARY|(?:LINUX|DARWIN)_(?:AMD64|ARM64)_BINARY)$/i.test(key)) {
       delete cleaned[key];
     }
     if (key.toUpperCase() === "PATH") delete cleaned[key];

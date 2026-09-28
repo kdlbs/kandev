@@ -459,10 +459,15 @@ export class ApiClient {
     });
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -1213,6 +1218,7 @@ export class ApiClient {
       name: string;
       type: string;
       profiles?: Array<{ id: string; name: string }>;
+      provider?: { plugin_id?: string; key?: string };
     }>;
   }> {
     return this.request("GET", "/api/v1/executors");
@@ -1258,6 +1264,8 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_hover_enabled?: boolean;
+      sidebar_hover_delay_ms?: number;
       sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
@@ -1290,6 +1298,8 @@ export class ApiClient {
     terminal_font_family?: string;
     terminal_font_size?: number;
     startup_page?: "task_overview" | "last_task" | "threads";
+    sidebar_hover_enabled?: boolean;
+    sidebar_hover_delay_ms?: number;
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
@@ -1438,12 +1448,32 @@ export class ApiClient {
     return res.json() as Promise<{ created: string[]; skipped: string[] }>;
   }
 
-  async deleteTask(taskId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/tasks/${taskId}`);
+  async deleteTask(
+    taskId: string,
+    options?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ): Promise<void> {
+    const cascade = options?.cascade ?? false;
+    const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
+    const preview = await this.request<{ confirmation_id: string }>(
+      "POST",
+      "/api/v1/tasks/delete-preflight",
+      { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
+    );
+    const query = new URLSearchParams();
+    if (cascade) query.set("cascade", "true");
+    if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
+    const queryString = query.toString() ? `?${query.toString()}` : "";
+    await this.request("DELETE", `/api/v1/tasks/${taskId}${queryString}`, undefined, {
+      "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id,
+    });
   }
 
   async archiveTask(taskId: string): Promise<void> {
     await this.request("POST", `/api/v1/tasks/${taskId}/archive`);
+  }
+
+  async unarchiveTask(taskId: string): Promise<void> {
+    await this.request("POST", `/api/v1/tasks/${taskId}/unarchive`);
   }
 
   async getAgentProfileMcpConfig(
@@ -1463,7 +1493,31 @@ export class ApiClient {
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
     const params = keepWorkflowIds?.length ? `?keep_workflows=${keepWorkflowIds.join(",")}` : "";
-    await this.request("DELETE", `/api/v1/e2e/reset/${workspaceId}${params}`);
+    const path = `/api/v1/e2e/reset/${workspaceId}${params}`;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await this.rawRequest("DELETE", path);
+      if (response.ok) return;
+
+      const body = await response.text();
+      const transientWorktreeInspection =
+        response.status === 500 &&
+        body.includes("exit status 128") &&
+        (body.includes("inspect worktrees before delete") ||
+          body.includes("capture worktree cleanup identities") ||
+          body.includes("capture cleanup identity"));
+      if (!transientWorktreeInspection || attempt === 3) {
+        throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
+      }
+
+      // A task cleanup worker can remove a checkout between the reset's
+      // inventory read and its dirty-worktree inspection. Retry the complete
+      // reset after the worker has had time to publish its deletion.
+      await dwell(
+        250 * (attempt + 1),
+        "poll-interval",
+        "retry interval for the E2E reset after a transient worktree inspection race",
+      );
+    }
   }
 
   /**
@@ -2081,6 +2135,7 @@ export class ApiClient {
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
+    has_merge_conflicts?: boolean;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_entry_id?: string;
@@ -2138,6 +2193,7 @@ export class ApiClient {
     review_state: string;
     checks_state: string;
     mergeable_state: string;
+    has_merge_conflicts?: boolean | null;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
@@ -2533,6 +2589,8 @@ export class ApiClient {
       turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }>;
   }> {
     // The production endpoint intentionally caps explicit pages at 100. E2E
@@ -2545,6 +2603,8 @@ export class ApiClient {
       type?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }> = [];
     let after = "";
     for (;;) {
@@ -3755,6 +3815,11 @@ export class ApiClient {
     return this.request("POST", "/api/v1/ssh/test", req);
   }
 
+  /** Remote Docker connection test: SSH reachability plus the daemon steps. */
+  async testRemoteDockerConnection(req: SSHTestRequest): Promise<SSHTestResult> {
+    return this.request("POST", "/api/v1/remote-docker/test", req);
+  }
+
   async listSSHSessions(executorId: string): Promise<SSHSession[]> {
     return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
   }
@@ -3779,7 +3844,8 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
-    taskMode?: "automation_run" | "normal_task";
+    taskMode?: "automation_run" | "normal_task" | "managed_conversation";
+    managedDestination?: { plugin_id: string; instance_key: string; revision: number };
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -3819,6 +3885,7 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       task_mode: opts.taskMode,
+      managed_destination: opts.managedDestination,
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
@@ -3909,9 +3976,13 @@ export class ApiClient {
    * Returns { skipped, reason } when the automation is at its concurrency cap.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
-  async triggerAutomationManual(
-    automationId: string,
-  ): Promise<{ run_task_id?: string; skipped?: boolean; reason?: string }> {
+  async triggerAutomationManual(automationId: string): Promise<{
+    run_task_id?: string;
+    run_id?: string;
+    delivery_status?: string;
+    skipped?: boolean;
+    reason?: string;
+  }> {
     return this.request("POST", `/api/v1/e2e/automations/${automationId}/trigger`, {});
   }
 

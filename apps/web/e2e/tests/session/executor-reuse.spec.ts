@@ -91,14 +91,10 @@ test.describe("Executor reuse", () => {
     const envBefore = await apiClient.getTaskEnvironment(task.id);
     expect(envBefore).not.toBeNull();
 
-    // 4. Navigate to task and create second session via dialog
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Reuse Env Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 4. Navigate to the task through its API-authoritative route. The Kanban
+    // projection can still be settling after the session reaches its terminal
+    // state, so a card lookup would race a perfectly valid task.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

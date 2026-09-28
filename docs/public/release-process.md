@@ -12,8 +12,8 @@ GitHub Release, container images, Homebrew formula, and Scoop bucket.
 Kandev uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, Homebrew formula, and Scoop bucket. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
 
 Each platform release contains a native Go `kandev` binary with the compiled
-web frontend embedded. Runtime archives also include `agentctl` binaries for
-task environments.
+web frontend embedded. Stable releases publish standard and full runtime
+archives plus one version-bound asset for each remote helper.
 
 ## Quick path
 
@@ -26,12 +26,12 @@ task environments.
 
 The workflow has four mutually exclusive operating modes:
 
-| Mode               | Inputs                            | Result                                                                                                                                              |
-| ------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Normal release     | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes                                                                              |
-| Dry run            | `dry_run=true`                    | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication        |
+| Mode               | Inputs                            | Result                                                                                                                                                     |
+| ------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Normal release     | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes                                                                                     |
+| Dry run            | `dry_run=true`                    | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication               |
 | Desktop validation | `desktop_validation_only=true`    | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, Homebrew, or Scoop publication |
-| Backfill           | `backfill_tag=vX.Y.Z`             | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag                                                 |
+| Backfill           | `backfill_tag=vX.Y.Z`             | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag                                                        |
 
 `dry_run` and desktop validation are not release candidates. Backfill cannot be combined with either and accepts only the latest exact SemVer tag after version manifests are checked for agreement.
 
@@ -97,7 +97,7 @@ Normal mode performs these stages:
 
 1. **Preflight and prepare version.** Compute the next version from packages and tags, then verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
 2. **Merge and tag.** Open a release branch and PR. Use the protected administrator token to squash-merge the exact head without queue or CI latency. Select GitHub's reported merge commit, then revalidate the public key before importing the protected signing key. Verify the signed `vX.Y.Z` tag locally before the push.
-3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Embed the SPA in each native Go `kandev` binary. Each archive contains `kandev`, the host `agentctl`, and required remote agentctl helpers. The workflow produces an adjacent checksum for each archive.
+3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Stable standard archives contain `kandev`, host `agentctl`, and `remote-helpers.json`. Stable `-full` archives add all four remote helpers. Windows also gets standard and full ZIP archives. The workflow publishes checksums for every archive and helper asset.
 4. **Build desktop.** Embed the matching runtime and package the same five platform/architecture targets into macOS, Linux, and Windows installer formats.
 5. **Build containers.** Publish amd64/arm64 base manifests, enforce the universal-image size gate, then publish multi-architecture universal images.
 6. **Publish GitHub Release.** Attach runtime archives, checksums, desktop artifacts, notes, and the updater feed when eligible.
@@ -106,6 +106,12 @@ Normal mode performs these stages:
 9. **Update Scoop.** Push `bucket/kandev.json` to `kdlbs/scoop-kandev` using the Windows tarball checksum and its separate deploy key. The manifest records the exact Stable version, release URL, and SHA-256 value.
 
 GHCR images are built before the GitHub Release. npm, Homebrew, and Scoop start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
+
+Stable default archive names contain the standard runtime. The `-full` names contain the offline
+command-line runtime. npm Stable packages, Homebrew, Scoop, winget, Chocolatey, and Desktop use the
+standard form. Desktop has one installer and updater track. Containers and npm Nightlies retain all
+remote helpers. The release attaches `runtime-size-report.md` with compressed sizes from the same
+build. Read it to compare each standard archive, full archive, and helper asset.
 
 Base image tags include `X.Y.Z`, `vX.Y.Z`, `sha-*`, and `latest`. Universal tags include `X.Y.Z-universal`, `vX.Y.Z-universal`, and the floating `universal`. The weekly universal rebuild updates only floating/dated weekly tags, never a version-specific release tag.
 
@@ -141,7 +147,7 @@ Never print signing material, tokens, certificate contents, or generated updater
 After publication, verify:
 
 - the Git tag points at the generated release merge;
-- GitHub notes, five runtime archives, checksums, expected desktop installers, and conditional `latest.json`;
+- GitHub notes, standard and full runtime archives, checksums, helper assets, the runtime size report, expected desktop installers, and conditional `latest.json`;
 - all five runtime npm packages plus `kandev`, including a clean `npx kandev@latest`;
 - Homebrew install/upgrade, a `Cellar/kandev/X.Y.Z` install path, and `kandev --version`;
 - Scoop install/update, the manifest version and hash, and `kandev --version`;

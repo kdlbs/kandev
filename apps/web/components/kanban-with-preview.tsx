@@ -22,6 +22,7 @@ import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
+import { getRenderedPreviewPanelWidth } from "@/lib/settings/preview-panel-width";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { taskRemovalCoversTask } from "@/lib/state/task-removal";
@@ -134,10 +135,24 @@ function useMirrorPreviewedTaskId(
   }, [setKanbanPreviewedTaskId]);
 }
 
+// The rendered width floors the stored, pointer-independent chosen width to
+// the pointer-appropriate minimum. It flips live with pointer mode and is
+// never written back to storage (only the chosen width itself is). The ref
+// lets the resize handler's mousemove closure read the current minimum
+// without depending on its mousedown-time value.
+function usePreviewPanelWidth(previewWidthPx: number, isFinePointer: boolean) {
+  const minWidthPx = isFinePointer ? PREVIEW_PANEL.MIN_WIDTH_PX : PREVIEW_PANEL.COARSE_MIN_WIDTH_PX;
+  const renderedPreviewWidthPx = getRenderedPreviewPanelWidth(previewWidthPx, isFinePointer);
+  const minWidthPxRef = useRef(minWidthPx);
+  minWidthPxRef.current = minWidthPx;
+  return { renderedPreviewWidthPx, minWidthPxRef };
+}
+
 function useResizeHandler(
   isResizingRef: React.RefObject<boolean>,
   previewWidthPx: number,
   updatePreviewWidth: (width: number) => void,
+  minWidthPxRef: React.RefObject<number>,
 ) {
   return useCallback(
     (e: React.MouseEvent) => {
@@ -150,7 +165,7 @@ function useResizeHandler(
       const handleMouseMove = (moveEvent: MouseEvent) => {
         if (!isResizingRef.current) return;
         const deltaX = startX - moveEvent.clientX;
-        updatePreviewWidth(startWidth + deltaX);
+        updatePreviewWidth(Math.max(startWidth + deltaX, minWidthPxRef.current));
       };
 
       const handleMouseUp = () => {
@@ -162,7 +177,7 @@ function useResizeHandler(
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [isResizingRef, previewWidthPx, updatePreviewWidth],
+    [isResizingRef, previewWidthPx, updatePreviewWidth, minWidthPxRef],
   );
 }
 
@@ -420,7 +435,7 @@ function usePreviewSessionFocus({
 
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
@@ -445,8 +460,16 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   useMirrorPreviewedTaskId(previewIsOpen, previewTaskId, setKanbanPreviewedTaskId);
 
+  const { renderedPreviewWidthPx, minWidthPxRef: previewPanelMinWidthPxRef } = usePreviewPanelWidth(
+    previewWidthPx,
+    isFinePointer,
+  );
+
   // Use custom hooks for layout and session management
-  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(previewIsOpen, previewWidthPx);
+  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(
+    previewIsOpen,
+    renderedPreviewWidthPx,
+  );
   const { sessionId: selectedTaskSessionId } = useTaskSession(previewTaskId ?? null);
 
   // User-selected tab overrides the default primary session pick.
@@ -509,7 +532,12 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   useEscapeKey(previewIsOpen && !actionsMenuOpen, close, previewStepMove.isDisclosureOpen);
 
-  const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
+  const handleResizeMouseDown = useResizeHandler(
+    isResizingRef,
+    renderedPreviewWidthPx,
+    updatePreviewWidth,
+    previewPanelMinWidthPxRef,
+  );
 
   // On mobile, skip the preview panel entirely — card clicks navigate directly
   if (isMobile) {
@@ -525,7 +553,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       containerRef={containerRef}
       shouldFloat={shouldFloat}
       kanbanWidth={kanbanWidth}
-      previewWidthPx={previewWidthPx}
+      previewWidthPx={renderedPreviewWidthPx}
       isOpen={previewIsOpen}
       selectedTask={previewIsOpen ? selectedTask : null}
       activeSessionId={previewIsOpen ? activeSessionId : null}

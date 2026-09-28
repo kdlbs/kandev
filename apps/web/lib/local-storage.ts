@@ -690,6 +690,7 @@ export function setChatDraftAttachments(
   sessionId: string,
   attachments: Array<{
     id: string;
+    file?: File;
     data?: string;
     attachmentId?: string;
     mimeType: string;
@@ -706,10 +707,11 @@ export function setChatDraftAttachments(
     // Store descriptors only. File bytes remain in backend private storage;
     // legacy inline data is retained only when no descriptor exists.
     const stored: StoredFileAttachment[] = attachments.flatMap(
-      ({ id, attachmentId, data, mimeType, fileName, size, isImage, deliveryMode }) => {
+      ({ id, file, attachmentId, data, mimeType, fileName, size, isImage, deliveryMode }) => {
         // A File object cannot survive sessionStorage. Do not persist an
-        // attachment until its descriptor or legacy inline bytes exist; the
-        // in-flight upload remains visible in the current composer only.
+        // attachment until upload finishes; the in-flight file remains visible
+        // in the current composer only.
+        if (file && !attachmentId) return [];
         if (!attachmentId && !data) return [];
         return [
           {

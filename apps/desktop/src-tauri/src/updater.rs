@@ -101,18 +101,42 @@ struct Machine {
 
 pub struct UpdaterState {
     machine: Mutex<Machine>,
+    install_enabled: bool,
     #[cfg(feature = "desktop-runtime")]
     pending: Mutex<Option<Update>>,
 }
 
 impl UpdaterState {
     pub fn new(current_version: impl Into<String>) -> Self {
-        Self::with_install_support(current_version, native_install_support())
+        Self::new_with_install_enabled(current_version, true)
     }
 
+    pub fn new_with_install_enabled(
+        current_version: impl Into<String>,
+        install_enabled: bool,
+    ) -> Self {
+        let support = if install_enabled {
+            native_install_support()
+        } else {
+            InstallSupport::unsupported(
+                "Update installation is disabled for temporary test instances.",
+            )
+        };
+        Self::with_install_policy(current_version, support, install_enabled)
+    }
+
+    #[cfg(test)]
     fn with_install_support(
         current_version: impl Into<String>,
         install_support: InstallSupport,
+    ) -> Self {
+        Self::with_install_policy(current_version, install_support, true)
+    }
+
+    fn with_install_policy(
+        current_version: impl Into<String>,
+        install_support: InstallSupport,
+        install_enabled: bool,
     ) -> Self {
         Self {
             machine: Mutex::new(Machine {
@@ -132,6 +156,7 @@ impl UpdaterState {
                 operation: None,
                 last_automatic_check: None,
             }),
+            install_enabled,
             #[cfg(feature = "desktop-runtime")]
             pending: Mutex::new(None),
         }
@@ -161,6 +186,11 @@ impl UpdaterState {
     }
 
     pub fn begin_install(&self) -> Result<(), String> {
+        if !self.install_enabled {
+            return Err(
+                "Update installation is disabled for temporary test instances.".to_string(),
+            );
+        }
         let mut machine = self.machine.lock().expect("updater state mutex poisoned");
         ensure_idle(&machine)?;
         if machine.snapshot.phase != UpdatePhase::Available {
@@ -495,6 +525,16 @@ mod tests {
             !state.should_run_automatic_check(AUTOMATIC_CHECK_INTERVAL - Duration::from_secs(1))
         );
         assert!(state.should_run_automatic_check(AUTOMATIC_CHECK_INTERVAL));
+    }
+
+    #[test]
+    fn temporary_test_instance_cannot_install_updates() {
+        let state = UpdaterState::new_with_install_enabled("1.0.0", false);
+
+        assert_eq!(
+            state.begin_install(),
+            Err("Update installation is disabled for temporary test instances.".to_string())
+        );
     }
 
     #[test]

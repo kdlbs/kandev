@@ -37,6 +37,11 @@ type Instance struct {
 	// Port is the HTTP port this instance is listening on
 	Port int
 
+	lease PortLease
+
+	listenerActive atomic.Bool
+	listenerDone   chan struct{}
+
 	// Status is the current status of the instance (e.g., "running", "stopped", "error")
 	Status string
 
@@ -240,6 +245,12 @@ type InstanceInfo struct {
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
 
+	// LeaseGeneration is the allocator-local generation for this instance's port.
+	LeaseGeneration uint64 `json:"lease_generation"`
+
+	// ListenerActive reports whether the instance HTTP server's Serve call is active.
+	ListenerActive bool `json:"listener_active"`
+
 	// Status is the current status of the instance
 	Status string `json:"status"`
 
@@ -301,6 +312,8 @@ func (i *Instance) Info() *InstanceInfo {
 	return &InstanceInfo{
 		ID:                   i.ID,
 		Port:                 i.Port,
+		LeaseGeneration:      i.lease.Generation,
+		ListenerActive:       i.listenerActive.Load(),
 		Status:               i.Status,
 		WorkspacePath:        i.WorkspacePath,
 		AgentCommand:         i.AgentCommand,

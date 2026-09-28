@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -22,11 +23,13 @@ const maxAgentToolResultBytes = 1 << 20
 const agentToolOutcomeError = "error"
 
 type AgentToolInvocationContext struct {
-	InvocationID string
-	TaskID       string
-	SessionID    string
-	WorkspaceID  string
-	Surface      string
+	InvocationID      string
+	TaskID            string
+	SessionID         string
+	WorkspaceID       string
+	Surface           string
+	ExecutionID       string
+	ManagedToolPolicy *mcpprofile.ManagedToolPolicy
 }
 
 // AgentToolCatalog returns the current active-plugin tool snapshot. The
@@ -131,6 +134,9 @@ func boolValue(value *bool, fallback bool) bool {
 // bounded call to the plugin's gRPC subprocess. It deliberately does not
 // retry because tools may have side effects.
 func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName string, arguments map[string]any, invocation AgentToolInvocationContext) (result *pluginsdk.AgentToolResult, err error) {
+	if invocation.ManagedToolPolicy != nil || invocation.Surface == manifest.AgentToolSurfaceManaged {
+		return s.invokeManagedAgentTool(ctx, pluginID, localName, arguments, invocation)
+	}
 	started := time.Now()
 	defer func() {
 		if s.log == nil {
@@ -178,6 +184,117 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 	return validateAgentToolResult(pluginID, localName, declaration, result)
 }
 
+func (s *Service) invokeManagedAgentTool(ctx context.Context, pluginID, localName string, arguments map[string]any, invocation AgentToolInvocationContext) (result *pluginsdk.AgentToolResult, err error) {
+	return s.invokeManagedAgentToolWithRemote(ctx, pluginID, localName, arguments, invocation, func() (managedAgentToolRemote, error) {
+		remote, ok := s.pluginRemote(pluginID)
+		if !ok {
+			return nil, fmt.Errorf("plugins: plugin %q is not running", pluginID)
+		}
+		return remote, nil
+	})
+}
+
+type managedAgentToolRemote interface {
+	InvokeAgentTool(context.Context, *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error)
+}
+
+//nolint:cyclop,funlen // The approval and provenance snapshot brackets the callback without holding the host lock.
+func (s *Service) invokeManagedAgentToolWithRemote(
+	ctx context.Context,
+	pluginID, localName string,
+	arguments map[string]any,
+	invocation AgentToolInvocationContext,
+	resolveRemote func() (managedAgentToolRemote, error),
+) (result *pluginsdk.AgentToolResult, err error) {
+	started := time.Now()
+	var approvalRevision uint64
+	if invocation.ManagedToolPolicy != nil {
+		approvalRevision = invocation.ManagedToolPolicy.ApprovalRevision
+	}
+	defer func() {
+		if s.log == nil {
+			return
+		}
+		outcome := "success"
+		if err != nil {
+			outcome = agentToolOutcomeError
+		} else if result != nil && result.IsError {
+			outcome = "tool_error"
+		}
+		s.log.Info("managed plugin agent tool invocation",
+			zap.String("audit_id", CanonicalApprovalDigest(pluginID, invocation.InvocationID, invocation.TaskID, invocation.SessionID, localName)),
+			zap.String("plugin_id", pluginID),
+			zap.String("local_name", localName),
+			zap.String("task_id", invocation.TaskID),
+			zap.String("session_id", invocation.SessionID),
+			zap.Uint64("approval_revision", approvalRevision),
+			zap.Duration("duration", time.Since(started)),
+			zap.String("outcome", outcome))
+	}()
+	policy := invocation.ManagedToolPolicy
+	if invocation.Surface != manifest.AgentToolSurfaceManaged || policy == nil || policy.Validate() != nil ||
+		!policy.Allows(pluginID, localName) || policy.PluginID != pluginID ||
+		policy.WorkspaceID != invocation.WorkspaceID || invocation.ExecutionID == "" ||
+		invocation.TaskID == "" || invocation.SessionID == "" || invocation.InvocationID == "" {
+		return nil, fmt.Errorf("plugins: managed agent tool policy denied the invocation")
+	}
+
+	dispatchLock := s.dispatchLocks.lockFor(pluginID)
+	dispatchLock.RLock()
+	defer dispatchLock.RUnlock()
+	s.approvalEffectMu.Lock()
+
+	record, err := s.Get(pluginID)
+	if err != nil {
+		s.approvalEffectMu.Unlock()
+		return nil, err
+	}
+	if record.Status != StatusActive || record.InstallationID != policy.InstallationID ||
+		ManifestCapabilityDigest(record.Manifest) != policy.ManifestDigest {
+		s.approvalEffectMu.Unlock()
+		return nil, fmt.Errorf("plugins: managed agent tool installation or manifest is stale")
+	}
+	capability := "host.v2.write:managed_agent_tools"
+	declared, err := ManifestCapabilityIDs(record.Manifest)
+	if err != nil || !containsString(declared, capability) {
+		s.approvalEffectMu.Unlock()
+		return nil, fmt.Errorf("plugins: managed agent tools capability is not declared")
+	}
+	requestDigest := CanonicalApprovalDigest("managed-agent-tool", invocation.InvocationID, invocation.TaskID, invocation.SessionID, localName)
+	decision := s.authorizePluginCapability(
+		policy.InstallationID, policy.WorkspaceID, capability, policy.ApprovalRevision,
+		requestDigest, CanonicalApprovalDigest("host-agent-tool", pluginID, localName, manifest.AgentToolSurfaceManaged, "v2"),
+	)
+	if !decision.Allowed {
+		s.approvalEffectMu.Unlock()
+		return nil, fmt.Errorf("plugins: managed agent tool capability denied: %s", decision.Reason)
+	}
+	declaration, err := findAgentTool(record.AgentTools, localName, manifest.AgentToolSurfaceManaged)
+	if err != nil {
+		s.approvalEffectMu.Unlock()
+		return nil, err
+	}
+	arguments, err = validateAgentToolArguments(pluginID, localName, declaration, arguments)
+	if err != nil {
+		s.approvalEffectMu.Unlock()
+		return nil, err
+	}
+	remote, err := resolveRemote()
+	if err != nil {
+		s.approvalEffectMu.Unlock()
+		return nil, err
+	}
+	// Host callbacks perform their own authorization at the effect boundary.
+	// Do not hold approvalEffectMu while plugin code runs: a callback can enter
+	// any Host method that also needs this mutex.
+	s.approvalEffectMu.Unlock()
+	result, err = invokeRemoteAgentTool(ctx, remote, localName, arguments, invocation)
+	if err != nil {
+		return nil, err
+	}
+	return validateAgentToolResult(pluginID, localName, declaration, result)
+}
+
 func findAgentTool(tools []manifest.AgentTool, localName, surface string) (*manifest.AgentTool, error) {
 	for i := range tools {
 		if tools[i].Name != localName {
@@ -210,14 +327,23 @@ func invokeRemoteAgentTool(ctx context.Context, remote interface {
 }, localName string, arguments map[string]any, invocation AgentToolInvocationContext) (*pluginsdk.AgentToolResult, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	toolContext := pluginsdk.AgentToolContext{
+		TaskID: invocation.TaskID, SessionID: invocation.SessionID,
+		WorkspaceID: invocation.WorkspaceID, Surface: invocation.Surface,
+		ExecutionID: invocation.ExecutionID,
+	}
+	if policy := invocation.ManagedToolPolicy; policy != nil {
+		toolContext.InstallationID = policy.InstallationID
+		toolContext.ConversationRevision = policy.ConversationRevision
+		toolContext.ApprovalRevision = policy.ApprovalRevision
+		toolContext.ManifestDigest = policy.ManifestDigest
+		toolContext.AgentToolNames = append([]string(nil), policy.AgentToolNames...)
+	}
 	return remote.InvokeAgentTool(callCtx, &pluginsdk.AgentToolRequest{
 		InvocationID: invocation.InvocationID,
 		Name:         localName,
 		Arguments:    arguments,
-		Context: pluginsdk.AgentToolContext{
-			TaskID: invocation.TaskID, SessionID: invocation.SessionID,
-			WorkspaceID: invocation.WorkspaceID, Surface: invocation.Surface,
-		},
+		Context:      toolContext,
 	})
 }
 

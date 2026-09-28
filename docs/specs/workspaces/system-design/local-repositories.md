@@ -2,6 +2,7 @@
 status: draft
 system: workspaces
 created: 2026-08-27
+updated: 2026-09-25
 owners:
   - kandev
 requirements:
@@ -72,9 +73,19 @@ configuration key. If the marker is absent, the backend uses server policy.
 
 ## Desktop folder selection
 
-The desktop bridge adds one origin-checked command. The command opens a native
-directory panel at the current user's home and returns one selected canonical
-directory or a cancellation result.
+The desktop bridge keeps one origin-checked folder-selection command. The
+command opens a native directory panel and returns a selected path,
+cancellation, or a failure. It does not block the Tauri IPC worker while the
+panel is open. The frontend still waits for the result and disables the picker
+trigger to avoid opening a second panel.
+
+The shell checks `Projects`, `Developer`, `src`, `Code`, `workspace`,
+`Development`, and `repos` under the desktop user's Home, in that order. It
+uses the first existing directory that is not a symlink as the initial panel
+location. If none exists, it omits `set_directory` and lets the operating
+system choose its default location. The user can navigate to Home from the
+panel. This avoids forcing the panel to list Home at open on machines without
+a local workspace directory.
 
 The command does not list directories, read files, or accept a caller-provided
 path. The Tauri WebView sends the returned path to the desktop root API. The
@@ -152,9 +163,19 @@ The SQLite migration distinguishes an existing database from a new database.
 For an existing database, it records this state only when configured and saved
 roots are both empty. A new database starts in the normal unconfigured state.
 
-The UI then shows Continue Home Discovery. If the user selects this action, the
-native picker opens at Home. Saved repositories remain available during this
-migration.
+The UI then shows Continue Home Discovery. This button calls a dedicated
+backend confirmation action without opening a picker or sending a path from
+the client. The backend checks that desktop Home confirmation is still
+pending, resolves its own current user's Home, and adds that canonical path
+through the existing discovery-root service. The action returns the saved
+root after its first scan. If the pending state is gone and Home is not saved,
+the action rejects the stale request; it does not add Home. If Home is already
+saved, a repeated request returns that root without starting a second scan.
+Saved repositories remain available throughout migration.
+
+This backend action is separate from ordinary folder selection. Sending
+`"~"` to `AddDesktopDiscoveryRoot` is invalid: that service treats it as a
+literal relative directory name, not as the current user's Home.
 
 ## Discovery flow
 
@@ -228,8 +249,11 @@ Desktop with no effective root shows saved repositories and one action named
 Choose folders to discover repositories. The action explains that the user can
 select Home or a narrower folder.
 
-If migration needs Home confirmation, the surface also shows Continue Home
-Discovery. Cancellation leaves the current choices unchanged.
+If migration needs Home confirmation, the surface also shows a direct
+Continue Home Discovery button. It has a disabled, busy state while the
+backend saves the root and scans. The separate Choose folders action still
+opens the picker. On a narrow viewport, both actions remain separate and
+reachable in the existing scroll region.
 
 An inaccessible saved root shows Reconnect and Remove actions. Reconnect opens
 the native picker again. It does not retry the denied path in the background.

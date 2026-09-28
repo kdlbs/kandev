@@ -110,11 +110,15 @@ test("surfaces queued PR metadata across desktop status surfaces", async ({
   await expect(popover.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
   await expect(popover.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
 
+  await session.prTopbarButton().blur();
   await session.hoverPRChip();
   const compactPopover = session.prChipPopover();
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("Queued");
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
+  await testPage.mouse.move(0, 0);
+  await expect(compactPopover).toBeHidden();
+  await expect(session.prTopbarPopover()).toBeHidden();
 
   // The default layout can reopen PR details as a dock tab or through the
   // existing topbar affordance. Keep the display scenario independent from
@@ -161,6 +165,7 @@ async function seedQueuedPR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedMergeReadyPRFeedback(apiClient);
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
 }
 
@@ -188,6 +193,7 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedMergeReadyPRFeedback(apiClient);
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
   await apiClient.mockGitHubSeedPRFeedback({
     owner: OWNER,
@@ -201,6 +207,23 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     reviews: [
       { id: 1, author: "reviewer-one", state: "APPROVED", created_at: "2026-09-24T10:00:00Z" },
       { id: 2, author: "reviewer-two", state: "APPROVED", created_at: "2026-09-24T11:00:00Z" },
+    ],
+  });
+}
+
+async function seedMergeReadyPRFeedback(apiClient: ApiClient) {
+  await apiClient.mockGitHubSeedPRFeedback({
+    owner: OWNER,
+    repo: REPO,
+    pr_number: PR_NUMBER,
+    checks: [
+      { name: "Build", status: "completed", conclusion: "success" },
+      { name: "Unit tests", status: "completed", conclusion: "success" },
+      { name: "E2E tests", status: "completed", conclusion: "success" },
+    ],
+    reviews: [
+      { id: 1, author: "reviewer-one", state: "APPROVED" },
+      { id: 2, author: "reviewer-two", state: "APPROVED" },
     ],
   });
 }

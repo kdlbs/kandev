@@ -10,6 +10,16 @@ import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
+  PluginActionElement,
+  PluginActionEvent,
+  PluginActionEventHandler,
+  PluginActionFocusEvent,
+  PluginActionGroupProps,
+  PluginActionKeyboardEvent,
+  PluginActionMouseEvent,
+  PluginActionPointerEvent,
+  PluginActionProps,
+  PluginActionRef,
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
   ChatTopBarSlotProps,

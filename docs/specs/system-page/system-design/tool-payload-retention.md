@@ -264,13 +264,18 @@ Payload bytes are not a prediction of compacted file bytes or backup duration.
 `useToolPayloadRetention` keeps status-read errors separate from action errors.
 A current successful GET clears only the status-read error. An action error
 takes display precedence and survives successful background reads. Explicit
-Refresh status and a new user action retain their existing dismissal behavior.
-Persisted operation failures remain part of the returned status.
+Refresh status clears only the status-read error and preserves `actionError`.
+Starting a new user action clears both error channels; a failed action sets
+`actionError` to its new failure. Persisted operation failures remain part of
+the returned status.
 
 The existing lifetime epoch and mutation generation checks apply to both error
 channels. A stale GET cannot clear a newer error or overwrite a mutation result.
 Polling continues at the existing cadence without automatic mutation retries.
-The hook keeps its outward `error` contract for `RetentionError`.
+Expose the error source to `RetentionError`: a failed status GET says that
+current status is unavailable and labels retained analysis as last known;
+an action error retains the operation-failure copy. The hook still keeps the
+last accepted status and its timestamps while polling recovers.
 Draft ownership stays in `useToolPayloadRetentionDraft`.
 
 The [platform health design](../../platform/system-design/postgres-domain-store-parity.md#sqlite-maintenance-coordination)

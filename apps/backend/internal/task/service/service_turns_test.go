@@ -1529,6 +1529,9 @@ func TestGetWorkspaceInfoForSession_KubernetesRunningRecordOwnsExecutorAndCurren
 	if info.ExecutorType != string(models.ExecutorTypeKubernetes) || info.RuntimeName != agentruntime.RuntimeKubernetes {
 		t.Fatalf("executor projection = type %q runtime %q", info.ExecutorType, info.RuntimeName)
 	}
+	if got := info.Metadata["executor_id"]; got != "recorded-kubernetes" {
+		t.Fatalf("executor ID metadata = %v, want the recorded Kubernetes executor", got)
+	}
 	if got := info.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
 		t.Fatalf("recorded Pod UID = %v", got)
 	}

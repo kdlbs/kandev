@@ -30,7 +30,7 @@ const TaskSidebar = lazy(() =>
 type Outlet = {
   element: HTMLDivElement;
   close: () => void;
-  navigate: (taskId: string) => void;
+  navigate: (taskId: string, sessionId?: string) => void;
   selection?: TaskSheetSelectionController | null;
   archivedState?: ReturnType<typeof useArchivedTaskState>;
   portForwarding?: PortForwardingVisibility;

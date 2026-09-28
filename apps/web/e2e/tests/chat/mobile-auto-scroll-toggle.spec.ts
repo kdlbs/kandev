@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -29,6 +29,16 @@ async function switchMobileTask(testPage: Page, title: string): Promise<void> {
   // while the mobile drawer is under CI load.
   await taskRow.click();
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
+
+async function simulateReaderScrollToMiddle(list: Locator): Promise<number> {
+  return list.evaluate((element) => {
+    const target = Math.floor((element.scrollHeight - element.clientHeight) / 2);
+    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
+    element.scrollTop = target;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return element.scrollTop;
+  });
 }
 
 /**
@@ -186,11 +196,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     );
     expect(olderRequests).toHaveLength(0);
 
-    const targetScrollTop = await list.evaluate((element) => {
-      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-      element.dispatchEvent(new Event("scroll"));
-      return element.scrollTop;
-    });
+    const targetScrollTop = await simulateReaderScrollToMiddle(list);
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -277,10 +283,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       })
       .toBeGreaterThan(200);
 
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
+    const targetScrollTop = await simulateReaderScrollToMiddle(list);
     expect(targetScrollTop).toBeGreaterThan(100);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
@@ -390,5 +393,98 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         { timeout: 2_000 },
       )
       .toBeLessThanOrEqual(2);
+  });
+
+  test("follows a live turn from the bottom, then pauses after a small upward touch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.emulateMedia({ reducedMotion: "reduce" });
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile transcript live follow intent",
+    );
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(5);
+
+    await session.sendMessageViaButton(
+      'e2e:message("MOBILE-LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("MOBILE-LIVE-FOLLOW-TAIL")',
+    );
+    await expect(activeChat.getByText("MOBILE-LIVE-FOLLOW-START", { exact: false })).toBeVisible();
+    const runningStatus = list.getByRole("status", { name: "Agent is running" });
+    await expect(runningStatus).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(5);
+    const listBox = await list.boundingBox();
+    const statusBox = await runningStatus.boundingBox();
+    expect(listBox).not.toBeNull();
+    expect(statusBox).not.toBeNull();
+    expect(statusBox!.y).toBeGreaterThanOrEqual(listBox!.y - 1);
+    expect(statusBox!.y + statusBox!.height).toBeLessThanOrEqual(listBox!.y + listBox!.height + 1);
+
+    const startTop = await list.evaluate((element) => element.scrollTop);
+    const box = await list.boundingBox();
+    expect(box).not.toBeNull();
+    await list.evaluate((element) => {
+      const events = ((
+        window as Window & { __transcriptTouchEvents?: { start: number; move: number } }
+      ).__transcriptTouchEvents = { start: 0, move: 0 });
+      element.addEventListener("touchstart", () => events.start++, { capture: true });
+      element.addEventListener("touchmove", () => events.move++, { capture: true });
+    });
+    const scrollEnded = list.evaluate(
+      (element) =>
+        new Promise<void>((resolve) => {
+          element.addEventListener("scrollend", () => resolve(), { once: true });
+        }),
+    );
+    const client = await testPage.context().newCDPSession(testPage);
+    const point = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ ...point, y: point.y + 30 }],
+    });
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await client.detach();
+    await scrollEnded;
+    const touchEvents = await testPage.evaluate(
+      () =>
+        (
+          window as Window & {
+            __transcriptTouchEvents?: { start: number; move: number };
+          }
+        ).__transcriptTouchEvents,
+    );
+    expect(touchEvents?.start).toBeGreaterThan(0);
+    expect(touchEvents?.move).toBeGreaterThan(0);
+    await expect
+      .poll(async () => startTop - (await list.evaluate((element) => element.scrollTop)))
+      .toBeGreaterThan(5);
+    const readerTop = await list.evaluate((element) => element.scrollTop);
+
+    await expect(activeChat.getByText("MOBILE-LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect
+      .poll(
+        async () => Math.abs((await list.evaluate((element) => element.scrollTop)) - readerTop),
+        {
+          timeout: 2_000,
+          message: "new live output must not pull a phone reader back to the latest message",
+        },
+      )
+      .toBeLessThanOrEqual(3);
   });
 });
