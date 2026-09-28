@@ -74,7 +74,10 @@ Deleted with the coordinator and on `workspace.deleted`.
 while phase 3 is effective, added to the exact-name auto-approve list and the
 guard's allowed coordinator actions, and absent from every other surface.
 Arguments: `title`, `rationale`, `context`, `evidence` (array of objects with
-exactly one of `run_id` or `task_id`).
+exactly one of `run_id` or `task_id`). There is no `in_reply_to`: a reply to
+an improvement is delivered with text that asks for a new improvement
+([relay](relay.md#reply-delivery)), and the improvement card never shows
+"Revised after your reply".
 
 Validation, in order, each failure refusing the call naming the field and
 storing nothing (`AC-COORDINATOR-IMPROVEMENTS-001.2`):
@@ -154,8 +157,13 @@ Apply runs in one transaction: read the change (404), require `pending`
 trimmed `context` with `base_value` (409 with `{"reason": "context_changed"}`
 when they differ, change left `pending`), then perform the phase 1 PATCH
 write of `context = new_value`, which clears `conversation_task_id` and
-increments `config_revision` because the context changed, and set the change
-`applied` with `WHERE id = ? AND status = 'pending'`. After commit it archives
+increments `config_revision` because the context changed. That write is
+conditional: its `UPDATE coordinators ... WHERE id = ? AND context = ?` binds
+`base_value`, so a manager's context PATCH that commits between the read and
+the write makes it change zero rows, and Apply rolls back and returns the same
+409 `context_changed` rather than overwriting the edit. Finally it sets the
+change `applied` with `WHERE id = ? AND status = 'pending'`, rolling back with
+409 when that changes zero rows. After commit it archives
 the old conversation exactly as a PATCH does. Discard is the conditional
 update to `discarded`. Concurrent applies or discards settle once; the loser
 gets 409 (`AC-COORDINATOR-IMPROVEMENTS-003.3`).

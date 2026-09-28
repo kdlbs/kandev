@@ -56,7 +56,10 @@ type DecisionLog interface {
 ```
 
 `Outcome` is one of `approved`, `approved_with_edits`, `rejected`,
-`returned`. When phase 2's log does not distinguish edits, the adapter
+`returned`. A **decided row** is a manager's decision: the adapter drops every
+row whose proposal has `decided_automatically = 1`, so automatic approvals
+count toward none of `history_30d`, `volume` and `unedited_rate`, before or
+after a lower and re-raise. `EarliestDecision` applies the same filter. When phase 2's log does not distinguish edits, the adapter
 derives `approved_with_edits` from the proposal row: `final_spec_json`
 differs from `spec_json` in title, description, workflow, step or repository.
 
@@ -98,7 +101,7 @@ error, and every caller treats an error as not eligible
 | `reviewed_by` | text not null | user id |
 | `reviewed_at` | timestamp not null | |
 | `window_start`, `window_end` | timestamp not null | the evidence window reviewed |
-| `row_count` | integer not null | decisions in that window at review time |
+| `row_count` | integer not null | decided rows in that window at review time |
 
 Deleted with the coordinator and on `workspace.deleted`.
 
@@ -108,6 +111,13 @@ Routes under `/api/v1/workspaces/:id/coordinators/:cid/`, phase 3 only:
 | --- | --- | --- |
 | `GET classes/create_task/eligibility` | `workspace.read` | `{eligible, conditions: [...], setting}` |
 | `POST classes/create_task/reviews` | `workspace.manage` | 201 with the review; any other class is 400 naming `class` |
+
+The review POST takes no fields: the body is empty or `{}`, and any field in
+it is ignored. The server sets `reviewed_by` from the caller, `reviewed_at`
+and `window_end` to now, `window_start` to now minus 30 days (the evidence
+window, half-open `[window_start, window_end)`), and `row_count` to the
+number of decided rows `Decisions` returns for that window. A log read error
+returns 503 naming `decision_log` and stores nothing.
 
 The coordinator guard refuses both write routes and the settings write for a
 coordinator principal (`AC-COORDINATOR-AUTOMATIC-002.2`,
@@ -124,23 +134,37 @@ checked (`AC-COORDINATOR-AUTOMATIC-004.1`).
 ## Automatic approval
 
 `coordinator_proposals` gains `decided_automatically integer not null default
-0`. In `propose_task_kandev`'s handler, after the phase 1 validation and insert
+0` and `automatic_at timestamp null`, both set once by the automatic claim's
+`UPDATE` and never rewritten by stale-claim recovery or a later manager
+approval. In `propose_task_kandev`'s handler, after the phase 1 validation and insert
 of the `pending` row:
 
 1. Read the `create_task` setting. Not `automatic` (or an error): return the
    phase 1 result.
 2. Take the coordinator's keyed automatic mutex. Count proposals with
-   `decided_automatically = 1 AND claimed_at >= now - 24h`; at 10 or more,
+   `decided_automatically = 1 AND automatic_at >= now - 24h`, whatever their
+   status: an automatic approval that ended `failed` counts toward the 10,
+   because the limit bounds automatic attempts. At 10 or more,
    return `{proposal_id, status: "pending", note: "automatic limit reached; a
    manager will decide"}` (`AC-COORDINATOR-AUTOMATIC-003.2`).
-3. Call the phase 1 approve service function (the one behind the approve
+3. Resolve the raiser: the setting's `ChangedBy` must be an active user who
+   holds `workspace.manage` on the coordinator's workspace, checked through
+   the same authorisation the approve route uses (with auth disabled, the
+   synthetic admin passes as it does on every route). When the user is
+   deleted, disabled, or no longer a manager, or the check errors, the
+   proposal stays `pending`, the tool returns `{proposal_id, status:
+   "pending", note: "automatic approval unavailable; a manager will decide"}`,
+   and, except on a check error, the coordinator calls `ActionSettings.Lower`
+   with the reason "raising manager no longer a manager". Nothing is claimed
+   and nothing counts toward the 10.
+4. Call the phase 1 approve service function (the one behind the approve
    route, below its HTTP authorisation) with no edits, the setting's
    `ChangedBy` as the deciding user and a flag that sets
-   `decided_automatically = 1` in the claim's `UPDATE`. Every phase 1
+   `decided_automatically = 1` and `automatic_at` in the claim's `UPDATE`. Every phase 1
    guarantee holds: the claim, the frozen spec, the pre-create eligible-step
    check, the idempotent create by external id, and no agent start (D15).
    The task is created under the raising manager's identity.
-4. Return `{proposal_id, status, task_id}` with the resulting status:
+5. Return `{proposal_id, status, task_id}` with the resulting status:
    `approved`, or `failed` with the error, which leaves a normal failed card
    for a manager (`AC-COORDINATOR-AUTOMATIC-003.3`).
 
@@ -186,7 +210,7 @@ In phase 2's permission settings for one coordinator (UI-06):
 ## Observability
 
 `coordinator_automatic_approval_total{outcome}` (`approved`, `failed`,
-`limited`) and `coordinator_automatic_lowered_total{reason}` counters, and an
+`limited`, `raiser_invalid`) and `coordinator_automatic_lowered_total{reason}` counters, and an
 info log for each raise refusal with the unmet condition.
 
 ## Related decisions

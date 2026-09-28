@@ -69,7 +69,8 @@ exactly one conversation, and the rules below never create another.
   transaction validates them against the row it read: turning autonomy on with
   no ceiling in the resulting row, or clearing the ceiling while the resulting
   row has autonomy on, is 400 naming `cost_ceiling`.
-- When a committed PATCH turns autonomy off, the same transaction runs
+- When a PATCH turns autonomy off, its transaction first takes the
+  coordinator's [wake lock](#wake-lock), then writes the row and runs
   `UPDATE coordinator_wakes SET status='superseded', updated_at=? WHERE
   coordinator_id=? AND status='pending'`. An open unattended turn is not
   touched.
@@ -108,8 +109,10 @@ Unique index `(coordinator_id, task_id, kind, episode_key)`; index
 | `conversation_task_id` | text not null | |
 | `session_id` | text not null | |
 | `message_id` | text null | set after the turn's message is stored |
+| `session_turn_id` | text null | the task session turn (`task_session_turns.id`) the message started; set with `message_id` |
 | `wake_count` | integer not null | |
 | `denied_permissions` | integer not null default 0 | [containment](containment.md#unattended-permissions) |
+| `stop_requested_at` | timestamp null | set by the ceiling stop before it cancels ([spend](spend.md#stopping)) |
 | `outcome` | text null | null while open; then `completed`, `failed`, `cancelled`, `stopped_at_ceiling`, `send_failed`, `interrupted` |
 | `cost_subcents` | bigint null | set at turn end ([spend](spend.md#per-turn-cost)) |
 | `started_at` | timestamp not null | |
@@ -124,6 +127,18 @@ Retention: the startup pass deletes wake rows with status `delivered` or
 `finished_at` older than 90 days. Coordinator delete and `workspace.deleted`
 delete both tables' rows for the coordinator in the same transaction that
 deletes its proposals.
+
+## Wake lock
+
+Three writes read a coordinator's state and then write on it: recording a
+wake (count, then insert), delivery step 3 (autonomy, then the turn row), and
+the autonomy-off PATCH. Each runs as one write transaction that first takes
+the coordinator's wake lock: on PostgreSQL `SELECT
+pg_advisory_xact_lock(hashtextextended('coordinator_wake:' || ?, 0))` with the
+coordinator id, the same shape `office/repository/sqlite/participants.go`
+uses; on SQLite the single writer connection already serialises write
+transactions. The lock is released at commit or rollback, so the three writes
+see each other's committed results and never interleave.
 
 ## Own tasks
 
@@ -145,18 +160,20 @@ effective:
 | --- | --- | --- |
 | `session.pending_action_changed` with `pending_action` `clarification` | `question` | the task repository's pending clarification bundle for the session: its `pending_id` |
 | `session.pending_action_changed` with `pending_action` `permission` | `permission` | the task repository's pending permission message for the session: its `pending_id` |
-| `coordinator_stalls` upsert (hooked in `stalls.go` after a row is written) | `stall` | the row's `last_event_at` |
+| `coordinator_stalls` upsert (hooked in `stalls.go` after a row is written) | `stall` | the row's `last_event_at`, only while the row is [current](#stall-currency) |
 | `task_session.error_changed` with `active: true` | `error` | the payload's `stamp` |
 | `task.state_changed` with `state` `COMPLETED` | `completed` | `completed` |
 
 For each event the recorder resolves `CoordinatorsOwningTask`, skips a session
 that is not the task's primary session, re-reads the condition from stored
-state, and when it holds calls `RecordWake`. `RecordWake` counts the
-coordinator's pending rows and, below 200, runs `INSERT ... ON CONFLICT
-(coordinator_id, task_id, kind, episode_key) DO NOTHING`. At 200 it inserts
-nothing and increments `coordinator_wake_dropped_total{reason="cap"}`; the
-count and insert are not atomic, so two concurrent inserts can reach 201,
-which is accepted. A committed insert calls `Kick(coordinatorID)`
+state, and when it holds calls `RecordWake`. `RecordWake` takes the
+[wake lock](#wake-lock), counts the coordinator's pending rows and, below 200,
+runs `INSERT ... ON CONFLICT (coordinator_id, task_id, kind, episode_key) DO
+NOTHING` in the same transaction. At 200 or more it inserts nothing and
+increments `coordinator_wake_dropped_total{reason="cap"}`. Because the count
+and insert run under the lock, concurrent recording never passes 200; only
+wakes returned to `pending` by a failed or interrupted turn can, and they are
+not inserts (`AC-COORDINATOR-WAKE-001.4`). A committed insert calls `Kick(coordinatorID)`
 ([Delivery](#delivery)). A read or insert error is logged at warn and dropped;
 the backstop recovers it.
 
@@ -169,13 +186,26 @@ closes. Each tick:
 1. Lists coordinators with `autonomy_enabled = 1`, ordered by id.
 2. For each, reads `ListOwnTasks` and, per task, the current episodes from
    stored state: the primary session's pending clarification bundle and
-   pending permission message, the task's `coordinator_stalls` row, the
+   pending permission message, the task's `coordinator_stalls` row when
+   [current](#stall-currency), the
    primary session's active error, and the task state. It calls `RecordWake`
    for each. A read error for one coordinator logs at warn, increments
    `coordinator_backstop_skipped_total`, and moves on.
 3. Runs the ceiling check of [spend](spend.md#stopping) for the coordinator's
    open turn, if any.
 4. Calls `Deliver(coordinatorID)`.
+
+### Stall currency
+
+A `coordinator_stalls` row is never deleted when its task resumes; it stays
+until the 30-day prune. Every reader in this design (recorder, backstop and
+delivery step 2) therefore treats a stall row as a condition only while it is
+current: the task's persisted `TaskStatusSummary.last_activity_at` is absent
+or not later than the row's `detected_at`. This is the test Needs you applies
+(`AC-COORDINATOR-NEEDS-YOU-001.2`, [needs-you design](needs-you.md)). A task
+that resumes before delivery makes its stall wake's condition end, and
+delivery supersedes it (`AC-COORDINATOR-WAKE-005.6`). A later stall upserts a
+new `last_event_at`, which is a new episode key.
 
 The recorder and the backstop call the same `RecordWake` with the same keys,
 which is why a restart, a redelivered event and a backstop pass converge on
@@ -215,37 +245,79 @@ ceiling-releasing turn end, and each backstop tick.
 1. `Admit`; on failure return. Delivery never creates, archives or repoints a
    conversation task, and never starts any session other than the admitted
    one (`AC-COORDINATOR-WAKE-003.1`).
-2. Read up to 50 `pending` wakes ordered by `created_at`, `id`. For each,
+2. Read every `pending` wake ordered by `created_at`, `id`; the cap bounds
+   this to 200 rows plus at most 20 returned by a failed turn. For each,
    re-check its condition from stored state with the same readers the backstop
-   uses; mark those whose condition ended `superseded` and keep the first 20
-   that still hold. With none, return.
-3. In one transaction: insert the turn row (`outcome` null, `message_id`
-   null); a unique violation means another delivery holds the open turn, so
-   roll back and return. Then `UPDATE coordinator_wakes SET status='delivered',
-   turn_id=? WHERE id IN (...) AND status='pending'`.
+   uses; mark every one whose condition ended `superseded`, and keep the first
+   20 that still hold. With none, return.
+3. In one transaction under the [wake lock](#wake-lock): re-read the
+   coordinator row and roll back if `autonomy_enabled` is not 1; insert the
+   turn row (`outcome` null, `message_id` null), where a unique violation
+   means another delivery holds the open turn, so roll back; `UPDATE
+   coordinator_wakes SET status='delivered', turn_id=? WHERE id IN (...) AND
+   status='pending'`, and roll back if it changed no row; set `wake_count` to
+   the rows it changed; commit. The unattended turn starts at this commit, so
+   an autonomy-off PATCH that commits first makes this step roll back, and one
+   that commits after it finds a running turn (`AC-COORDINATOR-WAKE-004.3`).
 4. Build the turn message ([Transcript](#transcript)) and send it through the
    conversation's message path (`orchestrator` prompt send with the
-   coordinator's system author and `metadata.coordinator_wake_turn_id`).
-5. On success, set `message_id`. On any send error, in one transaction set the
-   turn `outcome='send_failed'`, `finished_at`, and return its wakes to
-   `pending` with `turn_id` null (`AC-COORDINATOR-WAKE-005.3`).
+   coordinator's system author and `metadata.coordinator_wake_turn_id` set to
+   the turn row id).
+5. On success, set `message_id` and `session_turn_id` from the stored
+   message. On a send error, [find the turn's message](#finding-the-turns-message):
+   when found, record it as on success, because the prompt was sent. When it
+   is not found and the error is a refusal before dispatch (the session is not
+   promptable, or the request is invalid), in one transaction set the turn
+   `outcome='send_failed'`, `finished_at`, and return its wakes to `pending`
+   with `turn_id` null. Any other error (timeout, cancelled context,
+   transport) leaves the turn open with `message_id` null for the backstop
+   (`AC-COORDINATOR-WAKE-005.3`).
 
-The startup pass finds turn rows with `outcome IS NULL`: one whose
-`message_id` is null, or whose session is idle with no message after
-`started_at`, is set `interrupted` and its wakes returned to `pending`; one
-whose session is running is left for [Turn end](#turn-end).
+### Finding the turn's message
+
+The lookup reads the conversation session's messages created at or after the
+turn's `started_at` and returns the one whose
+`metadata.coordinator_wake_turn_id` equals the turn id. It is the only test of
+whether a send reached the conversation; nothing re-sends a turn whose message
+exists.
+
+The startup pass, and each backstop tick, examine turn rows with `outcome IS
+NULL` and `message_id` null. When the lookup finds the message, they record
+`message_id` and `session_turn_id` and leave the row to [Turn end](#turn-end).
+When it does not, the startup pass settles the row `interrupted`, and a
+backstop tick settles it `send_failed` once two minutes have passed since
+`started_at` and the session is not `RUNNING` or `STARTING`; either way its
+wakes return to `pending` with `turn_id` null. The settle is conditional on
+`outcome IS NULL AND message_id IS NULL`.
 
 ## Turn end
 
-A subscriber on `task_session.state_changed` for sessions that hold an open
-turn row settles it when the session leaves `RUNNING`: `WAITING_FOR_INPUT`
-settles `completed`, `FAILED` settles `failed`, `CANCELLED` settles
-`cancelled` unless the ceiling stop already set `stopped_at_ceiling`. The
-settle is `UPDATE ... WHERE id=? AND outcome IS NULL`, computes
-`cost_subcents` ([spend](spend.md#per-turn-cost)), and then calls `Kick`
-so a wake recorded during the turn is delivered after the cooldown. The
-backstop re-derives a missed settle: an open turn whose session is not
-`RUNNING` or `STARTING` is settled by the same rule.
+An unattended turn is bound to its session turn (`session_turn_id`), not to
+the session's state. The orchestrator returns a session to
+`WAITING_FOR_INPUT` and then immediately drains a queued message
+(`drainQueuedMessageForPromptableSession` in
+`orchestrator/event_handlers_agent.go`), so a session that is `RUNNING` again
+may be running a manager's attended turn.
+
+A subscriber on `turn.completed` settles the open turn row whose
+`session_turn_id` equals the completed turn's id. The outcome comes from the
+session's state when the settle runs: a row with
+`stop_requested_at` set settles `stopped_at_ceiling`; otherwise `FAILED`
+settles `failed`, `CANCELLED` settles `cancelled`, and any other state (including `RUNNING` on a drained queued message) settles
+`completed`. The settle is `UPDATE ... WHERE id=? AND outcome IS NULL`,
+computes `cost_subcents` ([spend](spend.md#per-turn-cost)), and then calls
+`Kick` so a wake recorded during the turn is delivered after the cooldown.
+The backstop re-derives a missed settle: an open turn whose `session_turn_id`
+turn has `completed_at` set, or whose session's active turn
+(`GetActiveTurnBySessionID`) is a different turn or none, is settled by the
+same rule.
+
+Everything that acts on "the open unattended turn" while it runs (the
+permission denial of [containment](containment.md#unattended-permissions) and
+the ceiling stop of [spend](spend.md#stopping)) first checks that the
+request's or the session's active turn id equals the row's
+`session_turn_id`. A turn of the same session with another id is attended and
+is never denied or stopped by this design.
 
 ## Transcript
 
@@ -314,8 +386,10 @@ re-read.
 | Failure | Result |
 | --- | --- |
 | Event lost or subscriber error | Backstop stores the wake within 60 s |
-| Process stops after step 3 of delivery | Startup pass sets `interrupted`, wakes back to `pending` |
-| Send fails | `send_failed`, wakes back to `pending`, retried on the next trigger after the cooldown |
+| Process stops after step 3 of delivery | Startup pass finds the message (turn continues) or sets `interrupted`, wakes back to `pending` |
+| Send refused before dispatch | `send_failed`, wakes back to `pending`, retried on the next trigger after the cooldown |
+| Send outcome unknown | Message found: the turn continues. Not found after two minutes: `send_failed`, wakes back to `pending` |
+| Autonomy turned off during delivery | Step 3 re-reads the flag under the wake lock and rolls back |
 | Two deliveries race | Partial unique index admits one turn row |
 | Conversation busy or unavailable | Wakes wait; nothing is created |
 

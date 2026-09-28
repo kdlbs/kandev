@@ -33,13 +33,15 @@ current episode from stored state.
 ## In scope
 
 - `internal/coordinator/wake_store.go`: `ListOwnTasks`,
-  `CoordinatorsOwningTask`, `RecordWake` (count below 200, then
-  insert-or-nothing on the unique key), pending reads
+  `CoordinatorsOwningTask`, `RecordWake` (under task 01's `WithWakeLock`:
+  count below 200, then insert-or-nothing on the unique key, in one
+  transaction), pending reads
   ([Own tasks](../../specs/coordinator/system-design/wake.md#own-tasks)).
 - `internal/coordinator/wake_episodes.go`: one reader per kind returning the
   current episode key from stored state (pending clarification bundle,
-  pending permission message, `coordinator_stalls` row, active session error,
-  task state), shared by the recorder, the backstop and task 05's re-check.
+  pending permission message, `coordinator_stalls` row only while
+  [current](../../specs/coordinator/system-design/wake.md#stall-currency),
+  active session error, task state), shared by the recorder, the backstop and task 05's re-check.
 - `internal/coordinator/wake_recorder.go`: subscribers for
   `session.pending_action_changed`, the stall upsert hook in `stalls.go`,
   `task_session.error_changed` and `task.state_changed`
@@ -66,7 +68,11 @@ current episode from stored state.
   `pending_id`, new `last_event_at`, new error `stamp`) stores a new row.
 - No wake for a task the coordinator does not own, for its own conversation
   task, for a non-primary session, or while autonomy is off; at 200 pending no
-  insert and a metric, and the backstop stores it once below 200.
+  insert and a metric, and the backstop stores it once below 200; 20
+  concurrent `RecordWake` calls for new episodes at 190 pending leave exactly
+  200 (SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with `-race`).
+- A stall row whose `detected_at` is earlier than the task's
+  `last_activity_at` stores no wake from the recorder or the backstop.
 - With every event suppressed, the backstop stores each episode within one
   period (`synctest`); a failing read for one coordinator logs, skips it and
   continues; turning autonomy on stores existing episodes on the next pass.

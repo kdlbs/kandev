@@ -113,8 +113,9 @@ order's frontmatter ([Traceability](#traceability)).
   `automatic.go`, `phase2.go` (adapters), `improvements.go`,
   `pending_changes.go`, with tests beside each.
 - `internal/task/usage`: the optional `OnRecorded` observer (task 03).
-- `internal/orchestrator`: the coordinator hook at the permission-request seam
-  phase 1's exact-name auto-approve uses (task 02).
+- `internal/orchestrator`: an optional `UnattendedPermissionHandler` called
+  from `handlePermissionRequest` beside `failAutomationRunOnPermission`, for
+  requests agentctl's exact-name auto-approve did not grant (task 02).
 - `internal/mcp/handlers`: `propose_improvement_kandev` and `in_reply_to` on
   `propose_task_kandev`; the guard's refused routes gain the phase 3 write
   routes (tasks 08, 10).
@@ -333,7 +334,7 @@ Criteria: `AC-COORDINATOR-IMPROVEMENTS-002.*`, `003.1`, `003.2`.
 | `AC-COORDINATOR-CONTAINMENT-001.1`, `001.2`, `001.3`, `002.1`, `002.2`, `003.1`, `003.2` | 02 |
 | `AC-COORDINATOR-SPEND-002.1`, `002.2`, `002.3`, `003.1`, `003.2`, `003.3` | 03 |
 | `AC-COORDINATOR-WAKE-001.1` to `001.4`, `002.1` to `002.4` | 04 |
-| `AC-COORDINATOR-WAKE-003.1` to `003.3`, `004.2`, `005.1` to `005.4` | 05 |
+| `AC-COORDINATOR-WAKE-003.1` to `003.3`, `004.2`, `005.1` to `005.4`, `005.6` | 05 |
 | `AC-COORDINATOR-WAKE-005.5`, `006.1` to `006.4`; `AC-COORDINATOR-SPEND-004.1` to `004.3`; `AC-COORDINATOR-CONTAINMENT-002.3`, `003.3` | 06 |
 | `AC-COORDINATOR-RELAY-001.1` to `001.5`, `002.1` to `002.4` | 07 |
 | `AC-COORDINATOR-RELAY-003.1` to `003.5` | 08 |
@@ -368,7 +369,7 @@ orders; tasks 05, 06 and 07 update the phase 1 tests that pin them.
 | --- | --- |
 | Phase 2's settings or log differ from the interfaces task 09 assumes | Adapters in `phase2.go` absorb names; a missing capability re-plans task 09 only |
 | The log review shows `create_task` is not the right first class | The ADR's evidence gate; task 09 alone re-plans |
-| A usage row lands after the ceiling is crossed | Documented one-report overshoot; backstop re-check every 60 s |
+| A usage row lands after the ceiling is crossed | Documented overshoot of one report, or one backstop period on a dropped call or failed cancel; backstop re-check every 60 s |
 | Containment passes on an executor that is not isolated in practice (for example a Docker host that is the backend host with the socket mounted) | Residual recorded in the ADR; the fix text names the conditions checked, not a guarantee |
 | Delivery races a manager's message into a busy session | Admission check 7 reads queued messages and the open turn; the partial unique index holds one open turn |
 | The automation runner's fork is reused by mistake | Task 05 adds a test that no delivery path calls the automation or Office run services |

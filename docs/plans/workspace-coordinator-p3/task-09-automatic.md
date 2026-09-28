@@ -48,7 +48,10 @@ confirming `create_task`.
   change validator (400 for other classes, 409 naming the first unmet
   condition), `Eligibility`, the class review store and routes, the automatic
   branch in `propose_task_kandev` with the keyed mutex and the 10-per-24h
-  limit, `decided_automatically` on the claim, and `OnUndo` lowering with the
+  limit counted on `automatic_at` whatever the outcome, the raiser check
+  before the claim, `decided_automatically` and `automatic_at` on the claim,
+  the adapter's exclusion of automatic rows from decided rows, the
+  server-computed review window and row count, and `OnUndo` lowering with the
   backstop retry ([automatic](../../specs/coordinator/system-design/automatic.md)).
 - Web: in phase 2's permission settings, "Cannot be raised", the eligibility
   list, **Review the last 30 days**, **Mark as reviewed**, **Raise to
@@ -81,8 +84,18 @@ Merge           Cannot be raised
 - A raised coordinator's valid proposal is approved automatically with every
   phase 1 approve guarantee and no agent start, returns `approved` with the
   task id, logs decider `automatic` and the raising manager; the eleventh in
-  24 hours stays `pending` with the limit note; a failed approval is left
-  `failed` for a manager.
+  24 hours stays `pending` with the limit note, also when earlier automatic
+  approvals ended `failed`; a failed approval is left `failed` for a manager
+  and keeps its `automatic_at` through stale-claim recovery.
+- With the raiser deleted, disabled or no longer a manager, the proposal stays
+  `pending` with the unavailable note, nothing is claimed or counted, and the
+  class is lowered with its reason; a raiser check error leaves it `pending`
+  without lowering.
+- Automatic approvals are not decided rows: after a lower and re-raise, 20
+  automatic approvals plus 5 manager decisions fail `volume`.
+- A review POST with any body stores `window_end` = now, `window_start` =
+  now minus 30 days and `row_count` from the log, ignoring client fields; a
+  log read error is 503 and stores nothing.
 - Undoing a task an automatic approval created lowers the class at once and
   logs the reason; a failed lower is retried by the backstop.
 

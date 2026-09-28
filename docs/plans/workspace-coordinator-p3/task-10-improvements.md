@@ -67,6 +67,8 @@ See [plan UI-07](plan.md#ascii-ui-previews).
 
 ## Acceptance
 
+- The tool has no `in_reply_to` argument, and an improvement card never
+  shows "Revised after your reply".
 - A valid call stores one `pending` improvement with the server-read
   `context_before` and counts toward 25; each invalid field (including no run,
   a foreign run, a foreign task, 0 or 11 references, an unchanged context) is
@@ -76,7 +78,10 @@ See [plan UI-07](plan.md#ascii-ui-previews).
   approves an improvement.
 - Approval stores one pending change and leaves the coordinator unchanged;
   Apply writes the context as a PATCH does (conversation replaced), is 409
-  `context_changed` when the base differs, and Apply and Discard settle once
+  `context_changed` when the base differs, including when a manager's context
+  PATCH commits between Apply's read and its conditional write (the edit is
+  kept; SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with
+  `-race`), and Apply and Discard settle once
   under concurrency and are refused to readers and a coordinator principal.
 
 ## Verification

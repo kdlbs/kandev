@@ -103,29 +103,43 @@ minutes, and the value is final after that.
 `OnRecorded(taskID, sessionID string)`, called after each successful insert
 in the writer's own goroutine, never blocking on it (the call enqueues onto a
 bounded channel of 256 and drops with a metric when full). The coordinator
-registers one only while phase 3 is effective. For a `sessionID` that holds an
-open unattended turn, it runs `Spend`; when the result is not measurable or
-`WindowSubcents >= cost_ceiling_subcents`, it:
+registers one only while phase 3 is effective. `CheckCeiling(coordinatorID)`
+runs for the coordinator whose open unattended turn is on `sessionID`. It
+acts only when the session's active turn (`GetActiveTurnBySessionID`) is the
+row's `session_turn_id` ([wake turn end](wake.md#turn-end)); a session running
+any other turn is left alone. It runs `Spend`, and when the result is not
+measurable or `WindowSubcents >= cost_ceiling_subcents` it:
 
-1. settles the turn with `outcome='stopped_at_ceiling'`, `finished_at` and
-   its [per-turn cost](#per-turn-cost) in one
-   `UPDATE ... WHERE id = ? AND outcome IS NULL`, which also frees the open
-   turn slot, so the later session state change settles nothing; an
-   unmeasurable reading
-   stops with the same outcome, because the ceiling can no longer be shown to
-   hold;
+1. marks the row with `stop_requested_at` in `UPDATE ... SET
+   stop_requested_at = ? WHERE id = ? AND outcome IS NULL AND
+   stop_requested_at IS NULL`, the retry marker; an unmeasurable reading
+   stops the same way, because the ceiling can no longer be shown to hold;
 2. cancels the session's current turn through the orchestrator's cancel, the
    path the panel's Stop uses;
-3. publishes `coordinator.updated` with `autonomy_changed`.
+3. when the cancel is confirmed (it returned without error), settles the turn
+   `outcome='stopped_at_ceiling'`, `finished_at` and its
+   [per-turn cost](#per-turn-cost) in `UPDATE ... WHERE id = ? AND outcome IS
+   NULL`, and publishes `coordinator.updated` with `autonomy_changed`.
 
-The [backstop](wake.md#backstop) runs the same function for every open
-unattended turn each tick, so a dropped observer call delays the stop by at
-most 60 seconds (`AC-COORDINATOR-SPEND-003.2`). The observer and the backstop
-never touch a session without an open unattended turn row, so an attended turn
-is never cancelled (`AC-COORDINATOR-SPEND-003.3`); the phase 1 message send
-path has no ceiling check.
+When the cancel fails, the row stays open with `stop_requested_at` set: the
+turn stays unattended, so its permissions are still denied, and the next
+observer call or [backstop](wake.md#backstop) tick cancels again, since an
+open row with `stop_requested_at` set is retried whatever the spend now reads.
+When the turn ends by itself first, [turn end](wake.md#turn-end) settles a row
+with `stop_requested_at` set as `stopped_at_ceiling`, whatever the session
+state. A retried cancel of a turn that has already ended finds a different or
+no active turn and does nothing.
 
-The overshoot is bounded by one usage report: the ceiling is compared after
+The backstop runs `CheckCeiling` for every open unattended turn each tick, so
+a dropped observer call or a failed cancel delays the stop by at most 60
+seconds (`AC-COORDINATOR-SPEND-003.2`). Both acting paths require the
+session's active turn to be the unattended one, so an attended turn, including
+a manager's queued message drained on the same session, is never cancelled
+(`AC-COORDINATOR-SPEND-003.3`); the phase 1 message send path has no ceiling
+check.
+
+The overshoot is bounded by one usage report, or by one backstop period when
+an observer call is dropped or a cancel fails: the ceiling is compared after
 each recorded usage event, not before a model request, since Kandev does not
 mediate the agent CLI's model calls.
 
@@ -150,6 +164,7 @@ mediate the agent CLI's model calls.
 | Usage query error | Not measurable: admission holds with `spend_unmeasured`; an open unattended turn is stopped |
 | Unpriced usage in the window | Same, until the row leaves the window |
 | Observer queue full | Metric; the backstop applies the stop within 60 s |
+| Cancel fails | Row stays open with `stop_requested_at`; the next observer call or tick cancels again |
 | Late usage row after settle | Per-turn cost corrected by the backstop within 10 minutes |
 
 ## Security

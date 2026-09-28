@@ -40,10 +40,13 @@ backstop re-check.
 - `internal/task/usage`: an optional `OnRecorded(taskID, sessionID)` observer
   on a bounded channel of 256 with a drop metric; no behaviour change when
   nothing registers.
-- `CheckCeiling(ctx, coordinatorID)`: for an open turn, when not measurable
-  or at or over the ceiling, settle it `stopped_at_ceiling` with cost in one
-  conditional update, cancel through the orchestrator's cancel, publish
-  `coordinator.updated` with `autonomy_changed`
+- `CheckCeiling(ctx, coordinatorID)`: for an open turn whose
+  `session_turn_id` is the session's active turn, when not measurable or at
+  or over the ceiling (or already marked), set `stop_requested_at`, cancel
+  through the orchestrator's cancel, and only after a confirmed cancel settle
+  it `stopped_at_ceiling` with cost in one conditional update and publish
+  `coordinator.updated` with `autonomy_changed`; a failed cancel leaves the
+  marked row open for the next call
   ([Stopping](../../specs/coordinator/system-design/spend.md#stopping)).
   The observer calls it; task 05 wires it into the backstop tick.
 
@@ -61,9 +64,15 @@ backstop re-check.
 - A usage row that takes the window to the ceiling during an open unattended
   turn settles it `stopped_at_ceiling` and cancels the session once, even when
   the session's own state change races the stop; with the observer queue full
-  the backstop stops it within one tick (`synctest`).
+  the backstop stops it within one tick (`synctest`). A cancel that fails
+  leaves the row open with `stop_requested_at` and its permissions still
+  denied; the next tick cancels and settles it. A turn that ends by itself
+  after the mark settles `stopped_at_ceiling`.
 - A session with no open unattended turn row is never cancelled, whatever the
-  spend: an attended turn over the ceiling runs to completion.
+  spend: an attended turn over the ceiling runs to completion. A manager's
+  queued message drained on the unattended turn's session, while the turn row
+  is still open because its settle event was lost, runs as an attended turn:
+  it is not cancelled and its permissions reach the panel.
 
 ## Verification
 

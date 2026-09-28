@@ -26,7 +26,8 @@ ordinary task and never starts an agent (D15).
 - **Action class:** one D17 action, as phase 2's permission settings name it.
   `create_task` is the class of `propose_task_kandev`.
 - **Decided row:** a log row recording a manager's decision on one proposal of
-  the class (approved, approved with edits, rejected or returned).
+  the class (approved, approved with edits, rejected or returned). An
+  automatic approval is not a decided row.
 - **Evidence window:** the 30 days ending at the moment of the check.
 - **Class review:** a manager's record that they reviewed one coordinator's
   evidence window for one class.
@@ -82,7 +83,7 @@ Mockup:
   days.
 - **AC-COORDINATOR-AUTOMATIC-002.2:** A manager shall be able to record a class
   review; the record shall store the reviewer, the time, the evidence window
-  and its row count. A reader or a coordinator principal shall be refused.
+  and its row count, all computed by the server at the time of the review. A reader or a coordinator principal shall be refused.
 - **AC-COORDINATOR-AUTOMATIC-002.3:** The permission settings shall list each
   eligibility condition as Met or Not met with its current value, and
   **Review the last 30 days** shall open the log filtered to this coordinator
@@ -106,9 +107,10 @@ bounded and recorded.
   `automatic`, and return `{proposal_id, status: "approved", task_id}`. The
   created task shall start no agent.
 - **AC-COORDINATOR-AUTOMATIC-003.2:** At most 10 automatic approvals per
-  coordinator per rolling 24 hours: beyond that, the proposal shall stay
-  `pending` for a manager and the tool result shall say that the automatic
-  limit was reached.
+  coordinator per rolling 24 hours, counting each automatic approval that
+  ended `failed`: beyond that, the proposal shall stay `pending` for a
+  manager and the tool result shall say that the automatic limit was
+  reached.
 - **AC-COORDINATOR-AUTOMATIC-003.3:** When the automatic approval fails, the
   proposal shall be left `failed` exactly as a manager's failed approval is,
   for a manager to approve, edit, reply to or reject.

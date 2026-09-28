@@ -181,11 +181,15 @@ REST when auth is off) stays accepted for them, because a manager is present.
 - **What happens at it.** Admission refuses a new unattended turn at or above
   the ceiling (`ceiling_reached`). An open unattended turn is stopped when a
   recorded usage event takes the window to the ceiling: the usage writer's
-  post-commit observer settles the turn `stopped_at_ceiling` and cancels it
-  through the path the panel's Stop uses; the backstop re-checks every 60
-  seconds in case the observer's queue dropped the call. Attended turns are
-  never stopped. The overshoot is bounded by one usage report, because Kandev
-  does not sit between the agent CLI and its model.
+  post-commit observer marks the turn for stopping, cancels it through the
+  path the panel's Stop uses, and settles it `stopped_at_ceiling` once the
+  cancel is confirmed; the backstop re-checks every 60 seconds in case the
+  observer's queue dropped the call or the cancel failed. Attended turns,
+  including a manager's queued message drained on the same session, are never
+  stopped, because the stop acts only on the unattended session turn. The
+  overshoot is bounded by one usage report, or by one backstop period when an
+  observer call is dropped or a cancel fails, because Kandev does not sit
+  between the agent CLI and its model.
 
 ### G3 decision 4: the first automatic class
 
@@ -255,9 +259,12 @@ Accepted for phase 3, each named so a later phase can close it:
   that; permission answers keep their audit.
 - **Auth-off REST during attended turns** remains phase 1's accepted
   residual.
-- **The pending-wake cap can overshoot by concurrent inserts** (201 rows), by
-  design; it bounds growth, not an exact count.
-- **Spend overshoot of one usage report**, as above.
+- **The pending-wake cap is exceeded only by returned wakes.** Recording is
+  serialised per coordinator, so inserts never pass 200; up to 20 wakes
+  returned by a failed or interrupted turn can take the pending count past it
+  until the next delivery.
+- **Spend overshoot of one usage report, or one backstop period** when an
+  observer call is dropped or a cancel fails, as above.
 
 ## G3 Status
 
@@ -311,14 +318,15 @@ Until then no phase 3 work order is built.
 
 ## Consequences
 
-- The coordinator package gains four tables (`coordinator_wakes`,
-  `coordinator_unattended_turns`, `coordinator_class_reviews`,
-  `coordinator_pending_changes`), columns on `coordinators` and
+- The coordinator package gains five tables (`coordinator_wakes`,
+  `coordinator_unattended_turns`, `coordinator_unattended_denials`,
+  `coordinator_class_reviews`, `coordinator_pending_changes`), columns on `coordinators` and
   `coordinator_proposals`, a recorder, a 60-second backstop and a delivery
   loop, all built only when phase 3 is effective.
 - The task usage writer gains an optional post-commit observer; the
-  orchestrator's permission handling gains a coordinator hook at the seam
-  phase 1's exact-name auto-approve already uses. Neither changes behaviour
+  orchestrator's `handlePermissionRequest` gains an optional coordinator
+  handler beside `failAutomationRunOnPermission`, reached only by requests
+  agentctl's exact-name auto-approve did not grant. Neither changes behaviour
   when nothing registers.
 - The permission response builder moves from the chat hook to a shared module
   so the Needs you card and the chat send the same request.

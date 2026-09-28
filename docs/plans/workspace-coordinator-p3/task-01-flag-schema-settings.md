@@ -41,16 +41,19 @@ Starts only after G3 is met.
   `...Automatic`, `...Improvements`.
 - `internal/coordinator/store.go`: `coordinators.autonomy_enabled`,
   `coordinators.cost_ceiling_subcents`; `coordinator_proposals.kind`,
-  `reply_text`, `reply_delivered_at`, `in_reply_to`,
-  `decided_automatically`; tables `coordinator_wakes`,
-  `coordinator_unattended_turns` (with the partial unique index),
+  `reply_text`, `reply_delivered_at`, `reply_delivery_claimed_at`,
+  `in_reply_to`, `decided_automatically`, `automatic_at`; tables `coordinator_wakes`,
+  `coordinator_unattended_turns` (with the partial unique index,
+  `session_turn_id` and `stop_requested_at`), `coordinator_unattended_denials`,
   `coordinator_class_reviews`, `coordinator_pending_changes`; deletion with
   the coordinator and on `workspace.deleted`; retention in the startup pass
   ([wake Store](../../specs/coordinator/system-design/wake.md#store)).
 - PATCH fields `autonomy_enabled` and `cost_ceiling_usd` with the integer
   parser ([spend Ceiling](../../specs/coordinator/system-design/spend.md#ceiling)),
   the interlock, no `config_revision` change, and the supersede on autonomy
-  off in the same transaction; GET and list carry both fields; the guard
+  off in the same transaction, which first takes the per-coordinator
+  [wake lock](../../specs/coordinator/system-design/wake.md#wake-lock)
+  (`WithWakeLock(ctx, coordinatorID, fn)`, the helper tasks 04 and 05 reuse); GET and list carry both fields; the guard
   refuses the fields from a coordinator principal.
 - Typed client fields in `apps/web/lib/api/domains/coordinator-api.ts`, and an
   empty Autonomy section in the coordinator settings page rendered only while
@@ -70,7 +73,11 @@ Starts only after G3 is met.
   `conversation_task_id` are unchanged; readers get 403 and a coordinator
   principal is refused.
 - Turning autonomy off marks every pending wake `superseded` in the same
-  transaction and leaves an open turn row untouched.
+  transaction and leaves an open turn row untouched. `WithWakeLock`
+  serialises two concurrent callers for one coordinator and not for two
+  coordinators (SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with
+  `-race`). The delivery half of `AC-COORDINATOR-WAKE-004.3` is tested in
+  task 05.
 - With either flag off, the new PATCH fields are ignored, every phase 3 route
   is 404, the Autonomy section is hidden, and stored rows survive an off/on
   cycle.

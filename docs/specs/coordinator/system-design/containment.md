@@ -91,21 +91,42 @@ and message send paths are unchanged (`AC-COORDINATOR-CONTAINMENT-002.2`).
 
 ## Unattended permissions
 
-The unattended turn row ([wake](wake.md#store)) marks a session as running an
-unattended turn from delivery step 3 until its settle. The coordinator
-package registers a hook on the orchestrator's permission-request handling for
-sessions of `coordinator` origin, the same seam phase 1's exact-name
-auto-approve uses:
+The unattended turn row ([wake](wake.md#store)) marks one session turn, its
+`session_turn_id`, as unattended ([wake turn end](wake.md#turn-end)).
 
-- When the request is auto-approved by the exact-name rule, nothing changes.
-- Otherwise, when the session holds an open unattended turn, the hook resolves
-  the request at once through the same resolution path a person's answer
-  takes, choosing the request's reject option (or cancelling when it has
-  none), with a `PermissionResolutionAudit` of actor kind
-  `coordinator_unattended`, source `coordinator_wake` and the turn id, and
-  increments the turn row's `denied_permissions` with
-  `UPDATE ... SET denied_permissions = denied_permissions + 1 WHERE id = ?`.
-- Otherwise the request reaches the panel as in phase 1.
+Phase 1's exact-name auto-approve runs in agentctl
+(`autoApproveCoordinatorPermission` and `coordinatorAutoApprovedTools` in
+`internal/agentctl/server/process/manager_permission_policy.go`): a request
+it grants never leaves agentctl. Every other request arrives in the backend at
+`orchestrator.Service.handlePermissionRequest`
+(`internal/orchestrator/event_handlers_git.go`), which stores the permission
+message with the session's active turn id and then calls
+`failAutomationRunOnPermission`. Phase 3 adds a sibling call there, after the
+message is stored: an optional `UnattendedPermissionHandler` the coordinator
+package registers on the orchestrator only while phase 3 is effective. It
+receives the `watcher.PermissionRequestData` and the active turn id, and:
+
+- does nothing unless the task is of `coordinator` origin and holds an open
+  unattended turn row whose `session_turn_id` equals the request's turn id;
+- otherwise, in one transaction, inserts `(turn_id, pending_id)` into
+  `coordinator_unattended_denials` (primary key on both columns) with `ON
+  CONFLICT DO NOTHING` and, only when the insert added a row, runs `UPDATE
+  coordinator_unattended_turns SET denied_permissions = denied_permissions + 1
+  WHERE id = ?`. A redelivered request with the same `pending_id` therefore
+  counts once;
+- after that commit, resolves the request through a reject function the
+  orchestrator passes to the handler, backed by `cancelAgentPermission` (the
+  path `failAutomationRunOnPermission` uses): the reject option, or a cancel
+  when there is none, with a `PermissionResolutionAudit` of actor kind
+  `coordinator_unattended`, source `coordinator_wake` and the turn id. The
+  resolution path's own claim on the pending id makes a second resolution of
+  the same request a no-op. A failed resolution is logged at warn; each
+  [backstop](wake.md#backstop) tick resolves again every permission message
+  still pending whose `(turn_id, pending_id)` is in
+  `coordinator_unattended_denials`, without counting it again.
+
+A request whose turn id is not the unattended turn's reaches the panel as in
+phase 1. `coordinator_unattended_denials` rows are deleted with their turn row.
 
 A request that arrives after the turn settles is an attended-mode request and
 waits for a person. The phase 1 forcing of the profile and environment

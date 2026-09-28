@@ -33,7 +33,9 @@ control on both proposal card surfaces.
   and deliver route, the single conditional update shared in form with
   approve's claim and reject, [Reply delivery](../../specs/coordinator/system-design/relay.md#reply-delivery)
   through `OpenConversation` and the panel composer's message path as the
-  replying manager; the guard's refused list gains both routes;
+  replying manager, with the delivery claim on `reply_delivery_claimed_at`,
+  `metadata.coordinator_reply_proposal_id` and the stored-or-queued message
+  lookup before each send, and the kind-specific delivery text; the guard's refused list gains both routes;
   `in_reply_to` validation ([Revised proposals](../../specs/coordinator/system-design/relay.md#revised-proposals));
   the client store's never-unsettle rule treats `returned` as settled.
 - Web: the control, returned and revised card states and **Send again** in
@@ -43,7 +45,8 @@ control on both proposal card surfaces.
 ## Out of scope
 
 - A reply tool for the coordinator; replies to improvement proposals use the
-  same route and need nothing extra (task 10 renders the control).
+  same route and the improvement delivery text, and need no `in_reply_to`
+  (task 10 renders the control).
 
 ## ASCII UI preview
 
@@ -64,8 +67,14 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
 - The reply is delivered as the manager's message (opening a conversation when
   none), queued behind a busy turn; a send failure leaves `returned` with
   "Reply saved, not delivered" and **Send again**, which delivers once.
-- `in_reply_to` naming a `returned` proposal of the same coordinator is
-  accepted and shown as "Revised after your reply"; any other value is refused
+- Two concurrent deliver calls send one message; a crash injected after the
+  send and before `reply_delivered_at` is followed, once the claim is two
+  minutes old, by a Send again that finds the message by its metadata and
+  sends nothing (`synctest`).
+- A reply to an improvement is delivered with the improvement text, which
+  names no `in_reply_to`.
+- `in_reply_to` naming a `returned` task proposal of the same coordinator is
+  accepted; one naming a `returned` improvement is refused; and shown as "Revised after your reply"; any other value is refused
   naming the field; a coordinator principal is refused both routes on every
   transport.
 

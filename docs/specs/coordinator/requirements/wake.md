@@ -42,15 +42,21 @@ conditions that hold it.
   | --- | --- | --- |
   | `question` | the task's primary session has a pending clarification bundle | the bundle's pending id |
   | `permission` | the task's primary session has a pending permission request | the request's pending id |
-  | `stall` | the coordinator holds a stall record for the task | the record's `last_event_at` |
+  | `stall` | the coordinator holds a current stall record for the task | the record's `last_event_at` |
   | `error` | the task's primary session has an active error | the error's stamp |
   | `completed` | the task's state is `COMPLETED` | the literal `completed` |
 
+- **Current stall record:** a stall record whose detection time is not
+  earlier than the task's last activity, the same currency test Needs you
+  applies in `AC-COORDINATOR-NEEDS-YOU-001.2`. A stall record left behind
+  after the task resumed is not current, so it is no condition.
 - **Wake:** the stored record of one episode for one coordinator. A wake is
   `pending`, `delivered` (it was included in an unattended turn) or
   `superseded` (its condition ended before delivery).
 - **Unattended turn:** a turn of the coordinator's conversation started by
-  wake delivery rather than by a person.
+  wake delivery rather than by a person. It starts when delivery commits it
+  and ends when the session turn its message started ends; a later turn of
+  the same session, such as a manager's queued message, is never part of it.
 - **Backstop:** a periodic pass that re-derives every own task's current
   episodes from stored state, so a dropped event delays a wake but never loses
   it.
@@ -87,7 +93,10 @@ own tasks exactly once.
 - **AC-COORDINATOR-WAKE-001.4:** When a coordinator already holds 200 `pending`
   wakes, the system shall store no further wake for it, count the refusal in
   metrics, and store the episode later through the backstop once the
-  coordinator holds fewer than 200.
+  coordinator holds fewer than 200. Concurrent recording shall not take the
+  count past 200. Wakes returned to `pending` by
+  `AC-COORDINATOR-WAKE-005.3` are not newly stored and may take it past 200
+  until delivery reduces it.
 
 ### REQ-COORDINATOR-WAKE-002: Level-triggered backstop
 
@@ -157,7 +166,9 @@ Mockup:
   (`cooldown`).
 - **AC-COORDINATOR-WAKE-004.3:** When autonomy is turned off, the system shall
   mark every `pending` wake of that coordinator `superseded` and start no
-  unattended turn for it; a running unattended turn shall finish normally.
+  unattended turn for it, including a delivery that passed admission before
+  the change but had not yet started its turn; a running unattended turn
+  shall finish normally.
 - **AC-COORDINATOR-WAKE-004.4:** While `features.coordinatorPhase3` or
   `features.coordinator` is off, the system shall store no wake, run no
   backstop, start no unattended turn, and hide the Autonomy section; stored
@@ -172,8 +183,9 @@ that no person started it.
 
 - **AC-COORDINATOR-WAKE-005.1:** When admission passes, the system shall mark
   every pending wake whose condition still holds as delivered, oldest first by
-  creation time then id, at most 20 per turn, mark each pending wake whose
-  condition has ended `superseded`, and start one unattended turn whose
+  creation time then id, at most 20 per turn, mark every pending wake whose
+  condition has ended `superseded` (all of them, not only those before the
+  twentieth delivered one), and start one unattended turn whose
   message lists the delivered wakes. When no pending wake still holds, it
   shall start no turn.
 - **AC-COORDINATOR-WAKE-005.2:** A coordinator shall never have more than one
@@ -182,7 +194,9 @@ that no person started it.
 - **AC-COORDINATOR-WAKE-005.3:** When the turn's message cannot be sent, or the
   process stops after wakes were marked delivered and before the turn started,
   the system shall return those wakes to `pending` and record the turn as
-  failed or interrupted; no wake shall be lost or delivered twice.
+  failed or interrupted; no wake shall be lost or delivered twice. A send
+  whose outcome is unknown (for example a timeout) shall count as sent when
+  the turn's message is stored, and shall not be sent again.
 - **AC-COORDINATOR-WAKE-005.4:** An unattended turn shall use the same Kandev
   tool surface and permission policy as an attended turn, except as
   [containment](containment.md) narrows it.
@@ -190,6 +204,9 @@ that no person started it.
   message shall render as "Woken by" followed by the number of events, with an
   expandable list naming each event's kind and task, visibly distinct from a
   manager's message.
+- **AC-COORDINATOR-WAKE-005.6:** Given an own task that stalls and then shows
+  new activity before its stall wake is delivered, the system shall mark that
+  wake `superseded` and include it in no unattended turn.
 
 ### REQ-COORDINATOR-WAKE-006: Seeing what autonomy is doing
 

@@ -21,6 +21,7 @@ acceptance_criteria:
   - AC-COORDINATOR-WAKE-005.2
   - AC-COORDINATOR-WAKE-005.3
   - AC-COORDINATOR-WAKE-005.4
+  - AC-COORDINATOR-WAKE-005.6
 system_design:
   - ../../specs/coordinator/system-design/wake.md
   - ../../specs/coordinator/system-design/containment.md
@@ -33,8 +34,8 @@ system_design:
 
 Delivers pending wakes as at most one unattended turn per coordinator into its
 existing conversation, after the eight ordered admission checks, and settles
-the turn when the session leaves `RUNNING`. No path creates, archives or
-repoints a conversation.
+the turn when the session turn its message started completes. No path
+creates, archives or repoints a conversation.
 
 ## In scope
 
@@ -42,13 +43,17 @@ repoints a conversation.
   calling task 02's `Check` and task 03's `Spend`
   ([Admission](../../specs/coordinator/system-design/wake.md#admission)).
 - `internal/coordinator/delivery.go`: `Deliver` under a keyed mutex, `Kick`
-  on a coalescing bounded worker, the re-check and 20-wake batch, the
-  transactional turn insert and wake marking, the send through the
-  conversation message path with `metadata.coordinator_wake_turn_id`, and the
-  `send_failed` rollback ([Delivery](../../specs/coordinator/system-design/wake.md#delivery)).
-- `internal/coordinator/turns.go`: turn end on
-  `task_session.state_changed`, the backstop's missed-settle rule, the startup
-  `interrupted` pass, and cost via task 03's `TurnCost`
+  on a coalescing bounded worker, the re-check of every pending wake and the
+  20-wake batch, the step 3 transaction under `WithWakeLock` (re-read
+  autonomy, insert the turn row, mark wakes, roll back when none changed),
+  the send through the conversation message path with
+  `metadata.coordinator_wake_turn_id`, the lookup of the turn's message by
+  that key, and the `send_failed` rollback only for a refusal before dispatch
+  ([Delivery](../../specs/coordinator/system-design/wake.md#delivery)).
+- `internal/coordinator/turns.go`: `session_turn_id` from the stored
+  message, turn end on `turn.completed` for that turn id, the backstop's
+  missed-settle and unknown-send rules, the startup pass using the message
+  lookup, and cost via task 03's `TurnCost`
   ([Turn end](../../specs/coordinator/system-design/wake.md#turn-end)).
 - The backstop hooks of task 04: step 3 calls `CheckCeiling`, step 4 calls
   `Deliver`. Kick triggers from wake insert, conversation idle, the autonomy
@@ -76,9 +81,25 @@ repoints a conversation.
 - Concurrent `Deliver` from events, the backstop and a PATCH yield one open
   turn (unique index), 20 wakes at most, oldest first, ended conditions
   `superseded`, and no turn when none holds.
-- A send error and a crash after marking return the wakes to `pending` and
-  record `send_failed` or `interrupted`; a turn uses the phase 1 tool surface
-  and policy (guard table test runs against a delivery-started session).
+- An autonomy-off PATCH committed between `Admit` and step 3 makes step 3
+  roll back with no turn row and no wake `delivered`; one committed after
+  step 3 leaves the turn running (`AC-COORDINATOR-WAKE-004.3`, owned by task
+  01).
+- More than 50 pending wakes with ended conditions are all `superseded` in
+  one delivery; a stall wake whose task shows activity after the stall is
+  `superseded` and not delivered (`AC-COORDINATOR-WAKE-005.6`).
+- A refused send and a crash after marking with no stored message return the
+  wakes to `pending` and record `send_failed` or `interrupted`; a send that
+  times out after the message was stored is found by
+  `metadata.coordinator_wake_turn_id`, is not sent again, and continues as a
+  turn; a timed-out send with no message is settled `send_failed` by the
+  backstop after two minutes.
+- The session goes `WAITING_FOR_INPUT` and immediately runs a drained queued
+  manager message while the `turn.completed` settle is suppressed: the
+  backstop settles the unattended row `completed` because the active turn
+  differs, and the manager's turn is never treated as unattended.
+- A turn uses the phase 1 tool surface and policy (guard table test runs
+  against a delivery-started session).
 
 ## Verification
 

@@ -37,12 +37,18 @@ during an unattended turn and counts them on the turn row.
   resolved launch environment (secrets resolved through the secrets store,
   compared and discarded), and `AgentProfileMcpConfig`
   ([Check](../../specs/coordinator/system-design/containment.md#check)).
-- The coordinator hook at the orchestrator's permission-request seam that
-  phase 1's exact-name auto-approve uses: for a session with an open
-  unattended turn row, resolve with the reject option (or cancel) through the
-  normal resolution path with a `PermissionResolutionAudit` of actor kind
-  `coordinator_unattended`, source `coordinator_wake`, the turn id, and
-  increment `denied_permissions`
+- An optional `UnattendedPermissionHandler` on the orchestrator, called from
+  `handlePermissionRequest` (`internal/orchestrator/event_handlers_git.go`)
+  after the permission message is stored, beside
+  `failAutomationRunOnPermission`. Requests reaching it were not granted by
+  agentctl's exact-name auto-approve (`manager_permission_policy.go`). For a
+  request whose turn id equals an open unattended turn row's
+  `session_turn_id`: record `(turn_id, pending_id)` in
+  `coordinator_unattended_denials` and increment `denied_permissions` only
+  when that insert added a row, then reject (or cancel) through
+  `cancelAgentPermission` with a `PermissionResolutionAudit` of actor kind
+  `coordinator_unattended`, source `coordinator_wake` and the turn id; the
+  backstop re-resolves a recorded denial whose message is still pending
   ([Unattended permissions](../../specs/coordinator/system-design/containment.md#unattended-permissions)).
 - `coordinator_containment_failed_total{condition}` and the state-change log.
 
@@ -62,7 +68,10 @@ during an unattended turn and counts them on the turn row.
 - A permission request during an open unattended turn that the exact-name
   rule does not approve is resolved at once with the audit above and the
   count incremented; an auto-approved one is untouched; the same request with
-  no open turn waits for a person; a coordinator session started by delivery
+  no open turn, or from a later session turn than the unattended one (a
+  drained queued manager message), waits for a person; the same `pending_id`
+  delivered twice is counted and resolved once; a failed resolution is
+  resolved again by the next backstop tick without a second count; a coordinator session started by delivery
   has profile and environment auto-approve forced off.
 - Attended paths never call `Check`: the phase 1 conversation and message
   tests pass unchanged with every condition failing.

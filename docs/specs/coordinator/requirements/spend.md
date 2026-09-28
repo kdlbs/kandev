@@ -78,7 +78,7 @@ same usage ledger the task cost display uses.
 ### REQ-COORDINATOR-SPEND-003: Stopping at the ceiling
 
 **Intent:** Unattended turns stop at the ceiling, with overshoot bounded by
-one usage report.
+one usage report, or by one backstop period when a notification is missed.
 
 #### Acceptance criteria
 
