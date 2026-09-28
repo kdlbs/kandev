@@ -26,7 +26,7 @@ apps/
 - **E2E**: Playwright (`cd apps/web && pnpm e2e:run` or the guarded `pnpm e2e:raw`). Local runners enforce one worker per shard and a memory-aware shard budget; do not pass all-worker overrides or overlap full suites. The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
-- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path.
+- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path. When `functions.exec` starts parallel long-running commands, retain every returned `session_id` and poll each handle to completion; do not discard a handle and infer status from a duplicate run.
 
 ### Worktrees and commit hooks
 
@@ -73,7 +73,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts. Stable default runtime archives for npm, Homebrew, Scoop, winget, Chocolatey, and Desktop contain host binaries plus a helper manifest; use `-full` for offline CLI, while containers and npm Nightlies remain full.
 
 ### Code Quality
 
@@ -182,11 +182,11 @@ history and remains immutable.
 
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
-For multiline Markdown issue or PR bodies, write the body to a file and pass it
-with the relevant `gh ... --body-file <path>` option. Do not send escaped
-newlines through `--body`; GitHub will render them literally.
+For multiline Markdown issue or PR bodies, use `gh ... --body-file <path>`; never send escaped
+newlines through `--body`. After body edits, verify the live body because `gh pr edit` can no-op with
+a Projects-classic warning; use REST PATCH if needed and refresh PR evidence because edits enqueue checks.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call. In a shared worktree, a stale or locked `refs/remotes/origin/*` is not authoritative; read the remote SHA with `git ls-remote` and use an explicit `--force-with-lease=refs/heads/<branch>:<remote-sha>`.
 
 A branch in GitHub's merge queue cannot be updated; before an authorized fixup
 push, dequeue it, push the exact head, wait for required checks, and restore

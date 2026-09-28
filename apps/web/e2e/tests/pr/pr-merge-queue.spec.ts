@@ -110,11 +110,15 @@ test("surfaces queued PR metadata across desktop status surfaces", async ({
   await expect(popover.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
   await expect(popover.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
 
+  await session.prTopbarButton().blur();
   await session.hoverPRChip();
   const compactPopover = session.prChipPopover();
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("Queued");
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
+  await testPage.mouse.move(0, 0);
+  await expect(compactPopover).toBeHidden();
+  await expect(session.prTopbarPopover()).toBeHidden();
 
   // The default layout can reopen PR details as a dock tab or through the
   // existing topbar affordance. Keep the display scenario independent from

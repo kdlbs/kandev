@@ -462,14 +462,24 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
  * seeding task-only data when no session exists yet and otherwise enriching via
  * the shared optional-hydration pipeline.
  */
-export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
+export async function fetchSessionDataForTask(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<FetchedSessionData> {
   const [task, allSessionsResponse] = await Promise.all([
     fetchTask(taskId, { cache: "no-store" }),
     listTaskSessions(taskId, { cache: "no-store" }),
   ]);
   const sessions = allSessionsResponse.sessions ?? [];
 
-  const sessionId = task.primary_session_id ?? sessions[0]?.id;
+  const ownedSessions = sessions.filter((session) => session.task_id === taskId);
+  const requestedSession = requestedSessionId
+    ? ownedSessions.find((session) => session.id === requestedSessionId)
+    : undefined;
+  const primarySession = task.primary_session_id
+    ? ownedSessions.find((session) => session.id === task.primary_session_id)
+    : undefined;
+  const sessionId = requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id;
   if (!sessionId) {
     // No sessions yet — fetch task/workspace data so the store is seeded and
     // the auto-start hook can fire immediately without a client-side crash.

@@ -1073,6 +1073,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		profileInfo: profileInfo,
 	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
+	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
 }
 

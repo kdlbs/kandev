@@ -690,6 +690,14 @@ func startAgentInfrastructure(
 	// terminal sees the same variables the agent subprocess and the repository
 	// setup script get.
 	lifecycleMgr.SetExecutorProfileReader(repos.Task)
+	if services.Plugins != nil {
+		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
+		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
+		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
+		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
+		lifecycleMgr.RegisterExecutorBackend(pluginExecutor)
+		services.Plugins.SetExecutorProviderHostHandler(lifecycleMgr)
+	}
 
 	// Configure quick-chat workspace cleanup
 	if homeDir := cfg.ResolvedHomeDir(); homeDir != "" {
@@ -1190,14 +1198,38 @@ func startGatewayAndServe(
 	if services.Plugins != nil {
 		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
 		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
+		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+			services.Plugins.SetPendingTaskTransitionSource(pluginsPendingTaskTransitionAdapter{queue: queue})
+			services.Plugins.SetExactExecutionController(pluginsExactExecutionController{
+				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue,
+			})
+		}
 	}
 
 	// Wire the managed conversation dispatcher, for the same boot-ordering
 	// reason as SetWriteDeps just above: AgentConversations was constructed
 	// during service initialization, but its dispatch path needs the
 	// orchestrator, which exists only here.
+	if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+		orchestratorSvc.SetManagedInputStorage(queue.ManagedInputStorage())
+	}
 	if services.AgentConversations != nil {
 		SetAgentConversationsDispatcher(services.AgentConversations, services.Task, orchestratorSvc, log)
+		services.AgentConversations.SetManagedExecutionStopper(func(ctx context.Context, taskID string) error {
+			_, err := orchestratorSvc.StopTaskForCoordinator(ctx, taskID)
+			return err
+		})
+		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+			services.AgentConversations.SetManagedInputStorage(
+				queue.ManagedInputStorage(), queue.ResolveSessionIdentity, queue.MaxPerSession,
+			)
+			services.AgentConversations.SetManagedInputNotifier(orchestratorSvc.NotifyQueuedUserPrompt)
+		}
+		services.AgentConversations.SetManagedInputExecutionStopper(func(
+			ctx context.Context, taskID, sessionID, expectedExecutionID string,
+		) (bool, error) {
+			return orchestratorSvc.StopManagedInputExecution(ctx, taskID, sessionID, expectedExecutionID)
+		})
 	}
 
 	// ============================================
@@ -1658,6 +1690,10 @@ func wireOfficeSvcsDependencies(
 	// tags its row with the originating run id, matching the async
 	// subscriber it replaced.
 	services.OfficeSvcs.Dashboard.SetRunResolver(services.Office)
+	// Wire the office service as the dashboard's run event appender so a
+	// refused agent comment read is recorded on the caller's run, the same
+	// way the runtime action surface already records a refused runtime call.
+	services.OfficeSvcs.Dashboard.SetRunEventAppender(services.Office)
 	// Wire the Office activity projection before task.state_changed events
 	// reach the WebSocket broadcaster, so workflow moves have durable timeline
 	// data when the frontend refetches the task detail.
@@ -2600,6 +2636,9 @@ func buildOfficeFeatureServices(
 	)
 	onboardingSvc.SetCoordinatorRoutineInstaller(routineSvc)
 	schedulerSvc := officescheduler.NewSchedulerService(repo, log, services.Office)
+	if services.Office != nil {
+		services.Office.SetDeferredAssignmentQueue(schedulerSvc)
+	}
 	labelSvc := officelabels.NewLabelService(repo)
 	gitMgr := configloader.NewGitManager(cfgLoader.BasePath(), cfgLoader, log)
 	configSyncSvc := initOfficeConfigSyncService(repo, services.GitHub, services.GitLab, log)
@@ -2619,6 +2658,7 @@ func buildOfficeFeatureServices(
 	schedulerSvc.SetPauseGate(pauseSvc)
 	if services.Office != nil {
 		services.Office.SetPauseGate(pauseSvc)
+		pauseSvc.SetAssignmentReplayer(services.Office)
 	}
 
 	return &office.Services{
@@ -2866,6 +2906,7 @@ func buildHTTPServer(
 		addCleanup:                    addCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,
+		commit:                        Commit,
 		webInternalURL:                cfg.Server.WebInternalURL,
 		webTitlePrefix:                cfg.Server.WebTitlePrefix,
 		devMode:                       cfg.Debug.DevMode || cfg.Debug.PprofEnabled,

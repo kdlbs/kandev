@@ -190,24 +190,6 @@
     },
     {
       "escape": "as any",
-      "marker": "...createFeaturesSlice(set as any, get as any, api as any),",
-      "occurrence": 1,
-      "path": "apps/web/lib/state/store.ts"
-    },
-    {
-      "escape": "as any",
-      "marker": "...createFeaturesSlice(set as any, get as any, api as any),",
-      "occurrence": 2,
-      "path": "apps/web/lib/state/store.ts"
-    },
-    {
-      "escape": "as any",
-      "marker": "...createFeaturesSlice(set as any, get as any, api as any),",
-      "occurrence": 3,
-      "path": "apps/web/lib/state/store.ts"
-    },
-    {
-      "escape": "as any",
       "marker": "...createAuthSlice(set as any),",
       "occurrence": 1,
       "path": "apps/web/lib/state/store.ts"

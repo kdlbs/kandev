@@ -4,7 +4,12 @@ import type { TaskSession } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => {
   const state = {
-    taskSessions: { items: {} as Record<string, TaskSession> },
+    taskSessions: {
+      items: {} as Record<string, TaskSession>,
+      activityEpochBySession: {} as Record<string, number>,
+      readCursorEpochBySession: {} as Record<string, number>,
+    },
+    taskSessionsByTask: { itemsByTaskId: {} as Record<string, TaskSession[]> },
     sessionAgentctl: { itemsBySessionId: {} as Record<string, { status: string }> },
     connection: { status: "connected" },
     setTaskSession: vi.fn(),
@@ -55,6 +60,11 @@ beforeEach(() => {
   mocks.state.taskSessions.items = {
     [SESSION_ID]: session("RUNNING", "2026-07-31T08:00:00Z"),
   };
+  mocks.state.taskSessionsByTask.itemsByTaskId = {
+    "task-1": [mocks.state.taskSessions.items[SESSION_ID]],
+  };
+  mocks.state.taskSessions.activityEpochBySession = {};
+  mocks.state.taskSessions.readCursorEpochBySession = {};
   mocks.fetchTaskSession.mockResolvedValue({
     session: session("RUNNING", "2026-07-31T08:00:01Z"),
   });
@@ -119,6 +129,26 @@ describe("useSession reconciliation", () => {
     await flushPromises();
 
     expect(mocks.state.setTaskSession).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
+  it("passes request-start epochs to the HTTP snapshot merge", async () => {
+    mocks.state.taskSessions.items[SESSION_ID].last_read_message_id = "message-2";
+    mocks.state.taskSessions.readCursorEpochBySession[SESSION_ID] = 7;
+    mocks.fetchTaskSession.mockResolvedValue({
+      session: {
+        ...session("RUNNING", "2026-07-31T08:00:06Z"),
+        last_read_message_id: "message-1",
+      },
+    });
+
+    const hook = renderHook(() => useSession(SESSION_ID));
+    await flushPromises();
+
+    expect(mocks.state.setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({ last_read_message_id: "message-1" }),
+      { activity: 0, readCursor: 7 },
+    );
     hook.unmount();
   });
 

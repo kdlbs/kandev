@@ -198,8 +198,17 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 		gotRepo.WorktreeBranch != wt.Branch || gotRepo.BranchSlug != wt.BranchSlug {
 		t.Fatalf("repository identity after archive = %+v, want worktree %+v", gotRepo, wt)
 	}
-	if gotRepo.DeletedAt == nil {
-		t.Fatal("repository row remains active after physical archive cleanup")
+	// REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001 (AC-.1, AC-.3): a dirty checkout is
+	// preserved on disk with its active worktree record, not force-removed,
+	// even though its source manifest was captured as evidence above.
+	if gotRepo.DeletedAt != nil {
+		t.Fatal("repository row was deleted for a dirty checkout archive should have preserved")
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "README.md")); err != nil {
+		t.Fatalf("tracked change on disk after archive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "untracked.txt")); err != nil {
+		t.Fatalf("untracked file on disk after archive: %v", err)
 	}
 }
 

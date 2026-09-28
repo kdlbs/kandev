@@ -53,7 +53,7 @@ test.describe("Org chart", () => {
     };
     expect(agents).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: officeSeed.agentId, name: "CEO" }),
+        expect.objectContaining({ id: officeSeed.agentId, name: agentName }),
         expect.objectContaining({ id: workerId, name: "Org Chart Reparent Target" }),
       ]),
     );

@@ -423,6 +423,7 @@ test.describe("LSP file intelligence", () => {
     expect(lspSockets).toHaveLength(1);
     await expectFakeLspMarkerCount(testPage, 1);
 
+    await testPage.keyboard.press("Escape");
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
     await testPage.keyboard.press("Control+Space");
@@ -1220,6 +1221,23 @@ test.describe("LSP file intelligence", () => {
       await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
       const reopenedStatus = reopenedPage.locator('[data-testid="lsp-status-button"]:visible');
       await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const continuityDidOpenCount = () =>
+        readFakeLspEvents(backend).filter(
+          (event) => event.event === "message" && event.method === "textDocument/didOpen",
+        ).length;
+      await expect.poll(continuityDidOpenCount, { timeout: 15_000 }).toBe(2);
+
+      // During a resumed lease, the server can publish diagnostics before the
+      // browser sends attachmentReady. Reopen the file after the barrier so the
+      // marker assertion observes a post-ready didOpen instead of packet timing.
+      const reopenedTab = reopenedPage.locator(".dv-default-tab", {
+        hasText: path.basename(task.filePaths[0]),
+      });
+      await reopenedTab.hover();
+      await reopenedTab.locator(".dv-default-tab-action").click();
+      await expect(reopenedTab).toHaveCount(0);
+      await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
+      await expect.poll(continuityDidOpenCount, { timeout: 15_000 }).toBe(3);
       await expectFakeLspMarkerMessages(reopenedPage, modelUri, ["Fake Kotlin diagnostic"]);
       const progress = (await openLspStatus(reopenedPage)).getByTestId("lsp-project-progress");
       await expect(progress).toHaveAttribute("data-lsp-progress-kind", "active");
@@ -1235,7 +1253,7 @@ test.describe("LSP file intelligence", () => {
         events.filter(
           (event) => event.event === "message" && event.method === "textDocument/didOpen",
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(3);
       await performLspAction(reopenedPage, "stop");
       await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "disabled");
       await expect.poll(() => isProcessAlive(started.pid)).toBe(false);

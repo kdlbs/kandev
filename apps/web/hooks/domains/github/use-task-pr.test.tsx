@@ -4,6 +4,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
+import { TASK_PR_UNLINK_NO_ACTIVE_WORKSPACE } from "./task-pr-mutations";
 
 const requestMock = vi.fn();
 const deleteTaskPRMock = vi.hoisted(() => vi.fn());
@@ -178,19 +179,19 @@ describe("useTaskPR — shared synchronization", () => {
 });
 
 describe("useTaskPR — unlink", () => {
-  it("rejects without a task or active workspace and skips the API", async () => {
+  it("rejects without a task or active workspace using a stable non-copy sentinel", async () => {
     const noTask = renderHook(() => useTaskPR(null), {
       wrapper: createStateWrapper(unlinkState("ws-1")),
     });
-    await expect(noTask.result.current.unlink(linkedPR.id)).rejects.toThrow(
-      "No active workspace is selected.",
+    await expect(noTask.result.current.unlink(linkedPR.id)).rejects.toBe(
+      TASK_PR_UNLINK_NO_ACTIVE_WORKSPACE,
     );
 
     const noWorkspace = renderHook(() => useTaskPR("task-1"), {
       wrapper: createStateWrapper(unlinkState(null)),
     });
-    await expect(noWorkspace.result.current.unlink(linkedPR.id)).rejects.toThrow(
-      "No active workspace is selected.",
+    await expect(noWorkspace.result.current.unlink(linkedPR.id)).rejects.toBe(
+      TASK_PR_UNLINK_NO_ACTIVE_WORKSPACE,
     );
     expect(deleteTaskPRMock).not.toHaveBeenCalled();
   });

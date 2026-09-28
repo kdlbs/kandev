@@ -121,5 +121,14 @@
   "newViewNumbered": "New view {{suffix}}",
   "untitledView": "Untitled view",
   "workspaceContextRefreshFailed": "Could not refresh tasks.",
-  "workspaceContextAccessDenied": "You no longer have access to this workspace."
+  "workspaceContextAccessDenied": "You no longer have access to this workspace.",
+  "continuedFrom": "Continued from {{title}}",
+  "continuationLabel": "continued",
+  "selectedTaskCount_one": "{{count}} task selected",
+  "selectedTaskCount_other": "{{count}} tasks selected",
+  "clearSelection": "Clear selection",
+  "nextPage": "Next",
+  "pageLoadFailed": "Could not load this page.",
+  "pageStatus": "Page {{page}} of {{total}}",
+  "previousPage": "Previous"
 }

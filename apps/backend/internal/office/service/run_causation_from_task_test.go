@@ -61,6 +61,8 @@ func newRunCausationFromTaskTestService(t *testing.T) (*Service, *officesqlite.R
 			state TEXT DEFAULT 'TODO',
 			project_id TEXT DEFAULT '',
 			metadata TEXT DEFAULT '{}',
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
+			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -250,6 +252,53 @@ func TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata(t *testing.T) {
 	}
 	if assignedRun.HumanRooted != creatingRun.HumanRooted {
 		t.Errorf("human_rooted = %v, want carried %v", assignedRun.HumanRooted, creatingRun.HumanRooted)
+	}
+}
+
+// TestReplayDeferredAssignment_PreservesAssignmentActor proves that a
+// deferred assignment keeps the actor that caused the assignment through
+// replay. Without that context, a human assignment is replayed as a system
+// wake, which changes its priority and skips the agent-assignment rate gate.
+func TestReplayDeferredAssignment_PreservesAssignmentActor(t *testing.T) {
+	svc, repo := newRunCausationFromTaskTestService(t)
+	ctx := context.Background()
+
+	assignee := runCausationTestAgent("assignee-agent", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, assignee); err != nil {
+		t.Fatalf("create assignee agent: %v", err)
+	}
+	seedOfficeTaskWithMetadata(t, repo, "task-deferred-actor", map[string]interface{}{})
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants
+		(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES ('participant-deferred-actor', '', 'task-deferred-actor', 'runner', ?, 0, 0, datetime('now'))
+	`, assignee.ID); err != nil {
+		t.Fatalf("seed task assignee: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO office_deferred_assignments
+		(task_id, workspace_id, agent_profile_id, assignment_generation, pause_id, created_at, actor_type, actor_id)
+		VALUES ('task-deferred-actor', 'ws-1', ?, 0, 'pause-1', datetime('now'), 'user', '')
+	`, assignee.ID); err != nil {
+		t.Fatalf("seed deferred assignment: %v", err)
+	}
+
+	if err := svc.ReplayDeferredAssignments(ctx, "ws-1"); err != nil {
+		t.Fatalf("replay deferred assignment: %v", err)
+	}
+
+	runs, err := repo.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1", len(runs))
+	}
+	if runs[0].ActorKind != models.ActorKindUser {
+		t.Fatalf("replayed actor kind = %q, want %q", runs[0].ActorKind, models.ActorKindUser)
+	}
+	if runs[0].PriorityClass != models.PriorityClassHuman {
+		t.Fatalf("replayed priority class = %v, want %v", runs[0].PriorityClass, models.PriorityClassHuman)
 	}
 }
 

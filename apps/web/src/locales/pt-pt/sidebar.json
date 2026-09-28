@@ -121,5 +121,14 @@
   "orgChart": "Organograma",
   "untitledView": "Vista sem título",
   "workspaceContextRefreshFailed": "Não foi possível atualizar as tarefas.",
-  "workspaceContextAccessDenied": "Já não tem acesso a esta área de trabalho."
+  "workspaceContextAccessDenied": "Já não tem acesso a esta área de trabalho.",
+  "continuedFrom": "Continuação de {{title}}",
+  "continuationLabel": "continuação",
+  "selectedTaskCount_one": "{{count}} tarefa selecionada",
+  "selectedTaskCount_other": "{{count}} tarefas selecionadas",
+  "clearSelection": "Limpar seleção",
+  "nextPage": "Seguinte",
+  "pageLoadFailed": "Não foi possível carregar esta página.",
+  "pageStatus": "Página {{page}} de {{total}}",
+  "previousPage": "Anterior"
 }

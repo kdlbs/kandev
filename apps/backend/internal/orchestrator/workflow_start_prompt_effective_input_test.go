@@ -34,6 +34,13 @@ func TestWorkflowAsyncStartFailure_PreservesPlanOnlyInputThroughRecovery(t *test
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for asynchronous startup")
 	}
+	started, err := fixture.repo.GetTaskSession(ctx, fixture.sessionID)
+	if err != nil {
+		t.Fatalf("load starting session: %v", err)
+	}
+	if attemptID := models.StringFromAny(started.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID == "" {
+		t.Fatalf("starting session has no persisted process attempt identity: %#v", started.Metadata)
+	}
 	close(fixture.releaseStart)
 	select {
 	case <-fixture.startReturned:

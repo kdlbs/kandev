@@ -61,6 +61,8 @@ type Manifest struct {
 	// RepositoryProviders declares provider IDs this plugin owns while active.
 	// Ownership is checked across active plugins by the runtime registry.
 	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
+	// ExecutorProviders declares remote compute providers this plugin owns.
+	ExecutorProviders []ExecutorProvider `yaml:"executor_providers,omitempty" json:"executor_providers,omitempty"`
 	// ReferenceSources declares composer sources this plugin owns while active.
 	ReferenceSources []ReferenceSource `yaml:"reference_sources,omitempty" json:"reference_sources,omitempty"`
 
@@ -86,8 +88,9 @@ type Manifest struct {
 }
 
 const (
-	AgentToolSurfaceKanban = "kanban-task"
-	AgentToolSurfaceOffice = "office-task"
+	AgentToolSurfaceKanban  = "kanban-task"
+	AgentToolSurfaceOffice  = "office-task"
+	AgentToolSurfaceManaged = "managed-conversation"
 )
 
 // AgentTool is an MCP tool a plugin contributes to matching task sessions.
@@ -162,6 +165,36 @@ type Capabilities struct {
 	// visibility, and lifecycle — the plugin never receives raw database or
 	// user identity through this surface.
 	AgentConversation bool `yaml:"agent_conversation,omitempty" json:"agent_conversation,omitempty"`
+	// ExecutorProvider permits the plugin to allocate and manage remote
+	// execution environments through the host's operation-scoped provider API.
+	ExecutorProvider bool `yaml:"executor_provider,omitempty" json:"executor_provider,omitempty"`
+}
+
+// ExecutorProvider describes one provider implementation owned by a plugin.
+// Provider identities are derived as plugin:<plugin-id>:<key>.
+type ExecutorProvider struct {
+	Key                    string                       `yaml:"key" json:"key"`
+	DisplayName            string                       `yaml:"display_name" json:"display_name"`
+	Description            string                       `yaml:"description" json:"description"`
+	LocalizedMessages      map[string]string            `yaml:"localized_messages,omitempty" json:"localized_messages,omitempty"`
+	ContractVersion        int                          `yaml:"contract_version" json:"contract_version"`
+	SupportedStateVersions []int                        `yaml:"supported_state_versions" json:"supported_state_versions"`
+	ProfileSchema          map[string]any               `yaml:"profile_schema" json:"profile_schema"`
+	ResourceStateSchema    map[string]any               `yaml:"resource_state_schema" json:"resource_state_schema"`
+	Capabilities           ExecutorProviderCapabilities `yaml:"capabilities" json:"capabilities"`
+}
+
+// ExecutorProviderCapabilities is the maximum feature set a provider can
+// offer. Profile and inspected resource capabilities can only narrow it.
+type ExecutorProviderCapabilities struct {
+	Terminal            bool   `yaml:"terminal,omitempty" json:"terminal,omitempty"`
+	Files               bool   `yaml:"files,omitempty" json:"files,omitempty"`
+	Git                 bool   `yaml:"git,omitempty" json:"git,omitempty"`
+	EmbeddedEditor      bool   `yaml:"embedded_editor,omitempty" json:"embedded_editor,omitempty"`
+	Preview             bool   `yaml:"preview,omitempty" json:"preview,omitempty"`
+	Reattach            bool   `yaml:"reattach,omitempty" json:"reattach,omitempty"`
+	Retention           string `yaml:"retention" json:"retention"`
+	MaximumLifetimeSecs int64  `yaml:"maximum_lifetime_seconds,omitempty" json:"maximum_lifetime_seconds,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login

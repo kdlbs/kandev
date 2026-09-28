@@ -31,7 +31,18 @@ test.describe("Mobile clarification multiline answer", () => {
     await composer.pressSequentially("Queue this from phone 1", { timeout: 30_000 });
     await expect(composer).toContainText("Queue this from phone 1");
     await expect(session.clarificationOverlay()).toBeVisible();
-    await testPage.getByTestId("submit-message-button").tap();
+    const submit = testPage.getByTestId("submit-message-button");
+    const nav = testPage.getByTestId("session-mobile-bottom-nav");
+    const [submitBox, navBox] = await Promise.all([submit.boundingBox(), nav.boundingBox()]);
+    if (!submitBox || !navBox) throw new Error("expected mobile send controls to be measurable");
+    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(navBox.y);
+    const submitOwnsHitTarget = await submit.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return target === button || button.contains(target);
+    });
+    expect(submitOwnsHitTarget).toBe(true);
+    await submit.tap();
 
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();

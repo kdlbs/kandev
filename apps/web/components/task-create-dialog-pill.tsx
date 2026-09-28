@@ -175,7 +175,7 @@ function PillPopoverContent({
               refreshing={refreshing}
               label={refreshLabel}
               testId={refreshLabel === "repositories" ? "repo-refresh-button" : undefined}
-              touchTarget={refreshLabel === "repositories"}
+              touchTarget
             />
           ) : null}
           {action ? (

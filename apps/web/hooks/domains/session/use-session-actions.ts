@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { deleteTask } from "@/lib/api/domains/kanban-api";
+import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
 import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSessionState } from "@/lib/types/http";
@@ -147,7 +147,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
           feedback: options.feedback,
           requestOverride:
             deletionTarget.kind === "quick-chat-task"
-              ? () => deleteTask(deletionTarget.taskId)
+              ? () => deleteTaskAfterUserAction(deletionTarget.taskId)
               : undefined,
         },
       );

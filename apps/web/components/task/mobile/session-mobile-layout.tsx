@@ -78,12 +78,7 @@ export function resolveMobileReviewSource(
   return null;
 }
 
-const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
-
-export function mobilePanelTopNavHeight(hasSharedTaskError: boolean): string {
-  return hasSharedTaskError ? "0px" : TOP_NAV_HEIGHT;
-}
 
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
@@ -106,7 +101,6 @@ type SessionMobileLayoutProps = {
   onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
-  hasSharedTaskError?: boolean;
 };
 
 function MobileChatPanelContent({
@@ -762,7 +756,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
         mobileScrollTarget={mobileScrollTarget}
-        topNavHeight={mobilePanelTopNavHeight(Boolean(props.hasSharedTaskError))}
+        // TaskPageInner's mobile control toolbar already sits below the fixed top bar.
+        topNavHeight="0px"
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
         reviews={reviews}
         selectedReview={selectedReview}

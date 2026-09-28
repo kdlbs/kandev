@@ -60,6 +60,9 @@ test("uses nested task commands and the move drawer on a phone", async ({
     .getByRole("option")
     .filter({ has: testPage.getByText("Archive task", { exact: true }) })
     .tap();
+  // Tapping the command starts the archive action asynchronously. Wait for
+  // the palette portal to close before locating the confirmation dialog.
+  await expect(palette).toBeHidden({ timeout: 10_000 });
   const confirm = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
   await expect(confirm).toBeVisible();
   await expect(testPage.getByRole("combobox")).toHaveCount(0);

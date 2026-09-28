@@ -1437,21 +1437,13 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
-	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
-	for i, mcp := range m.cfg.McpServers {
-		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
-		}
+	mcpServers, err := m.adapterMCPServers()
+	if err != nil {
+		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
-		AutoApprove:               m.cfg.AutoApprovePermissions,
+		AutoApprove:               m.adapterAutoApprove(),
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
@@ -2790,11 +2782,24 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
 	// injected-MCP approval; only the exact six-tool coordinator allowlist
 	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
-	if m.cfg.McpMode == mcpmode.Coordinator {
+	switch {
+	case m.cfg.McpMode == mcpmode.Coordinator:
 		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
 			return response, nil
 		}
-	} else {
+	case m.RequiresManagedToolPolicy():
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
+		toolName := ""
+		if req.ToolName != nil {
+			toolName = *req.ToolName
+		}
+		m.logger.Warn("managed agent tool policy denied a native permission request",
+			zap.String("reason", "native_tool_denied"),
+			zap.String("tool_name", toolName))
+		return &adapter.PermissionResponse{Cancelled: true}, nil
+	default:
 		// If auto-approve is enabled, immediately approve with the first "allow" option
 		if m.cfg.AutoApprovePermissions {
 			return m.autoApprovePermission(req)

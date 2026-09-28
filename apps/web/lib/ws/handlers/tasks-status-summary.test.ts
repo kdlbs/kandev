@@ -5,6 +5,7 @@ import { makeStore } from "./tasks.test-helpers";
 const TASK_ID = "task-1";
 const WORKFLOW_ID = "workflow-1";
 const STEP_ID = "step-1";
+const WORKSPACE_ID = "workspace-1";
 const UPDATED_AT = "2026-08-01T18:00:00Z";
 
 function summaryMessage(summary: Record<string, unknown>) {
@@ -14,7 +15,7 @@ function summaryMessage(summary: Record<string, unknown>) {
     action: "task.status_summary.updated" as const,
     payload: {
       task_id: TASK_ID,
-      workspace_id: "workspace-1",
+      workspace_id: WORKSPACE_ID,
       status_summary: summary,
     },
   } as Parameters<
@@ -113,7 +114,7 @@ describe("task.status_summary.updated archived cache", () => {
       kanbanMulti: { isLoading: false, snapshots: {} },
       sidebarArchivedTasks: {
         itemsByWorkspaceId: {
-          "workspace-1": [
+          [WORKSPACE_ID]: [
             {
               id: TASK_ID,
               workflowStepId: STEP_ID,
@@ -127,10 +128,10 @@ describe("task.status_summary.updated archived cache", () => {
             },
           ],
         },
-        loadedByWorkspaceId: { "workspace-1": true },
+        loadedByWorkspaceId: { [WORKSPACE_ID]: true },
         loadingByWorkspaceId: {},
         errorByWorkspaceId: {},
-        revisionByWorkspaceId: { "workspace-1": 1 },
+        revisionByWorkspaceId: { [WORKSPACE_ID]: 1 },
       },
     } as never);
 
@@ -142,9 +143,104 @@ describe("task.status_summary.updated archived cache", () => {
       }),
     );
 
-    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-1"]?.[0];
+    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId[WORKSPACE_ID]?.[0];
     expect(archived?.statusSummary).toMatchObject({ revision: 6 });
     expect(archived?.statusSummary?.queued_prompt_count).toBeUndefined();
+  });
+});
+
+describe("task.status_summary.updated sidebar invalidation", () => {
+  it("patches display-only summaries without refreshing the sidebar query", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workspaceId: WORKSPACE_ID,
+            workflowStepId: STEP_ID,
+            title: "Task",
+            statusSummary: {
+              revision: 1,
+              updated_at: UPDATED_AT,
+              last_activity_at: UPDATED_AT,
+            },
+          },
+        ],
+      },
+      kanbanMulti: { isLoading: false, snapshots: {} },
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        errorByWorkspaceId: {},
+        revisionByWorkspaceId: { [WORKSPACE_ID]: 4 },
+      },
+    } as never);
+
+    registerTasksHandlers(store)["task.status_summary.updated"]!(
+      summaryMessage({
+        revision: 2,
+        updated_at: "2026-08-01T18:01:00Z",
+        last_activity_at: UPDATED_AT,
+        pending_action: "clarification",
+      }),
+    );
+
+    expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId[WORKSPACE_ID]).toBe(4);
+    expect(
+      store.getState().sidebarStatusSummaryByWorkspaceId[WORKSPACE_ID]?.[TASK_ID],
+    ).toMatchObject({ revision: 2, pending_action: "clarification" });
+  });
+
+  it("refreshes ordering/filter data only for a newer query-relevant summary", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workspaceId: WORKSPACE_ID,
+            workflowStepId: STEP_ID,
+            title: "Task",
+            statusSummary: {
+              revision: 3,
+              updated_at: UPDATED_AT,
+              last_activity_at: UPDATED_AT,
+            },
+          },
+        ],
+      },
+      kanbanMulti: { isLoading: false, snapshots: {} },
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        errorByWorkspaceId: {},
+        revisionByWorkspaceId: { [WORKSPACE_ID]: 4 },
+      },
+    } as never);
+    const handler = registerTasksHandlers(store)["task.status_summary.updated"]!;
+
+    handler(
+      summaryMessage({
+        revision: 2,
+        updated_at: "2026-08-01T18:01:00Z",
+        last_activity_at: "2026-08-01T17:00:00Z",
+      }),
+    );
+    expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId[WORKSPACE_ID]).toBe(4);
+
+    handler(
+      summaryMessage({
+        revision: 4,
+        updated_at: "2026-08-01T18:02:00Z",
+        last_activity_at: "2026-08-01T19:00:00Z",
+      }),
+    );
+    expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId[WORKSPACE_ID]).toBe(5);
   });
 });
 

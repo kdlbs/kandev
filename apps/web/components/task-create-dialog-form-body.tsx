@@ -20,6 +20,7 @@ import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-la
 import { RUNNER_INELIGIBLE_REASON_KEYS } from "@/components/task-create-dialog-helpers";
 import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useTranslation } from "react-i18next";
+import type { ComboboxOption } from "@/components/combobox";
 
 type SelectorOption = {
   value: string;
@@ -35,11 +36,7 @@ type CreateEditSelectorsProps = {
   agentProfileId: string;
   onAgentProfileChange: (value: string) => void;
   isCreatingSession: boolean;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
@@ -53,7 +50,7 @@ type CreateEditSelectorsProps = {
     popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
-    options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+    options: ComboboxOption[];
     value: string;
     onValueChange: (value: string) => void;
     disabled: boolean;
@@ -322,11 +319,7 @@ type SessionSelectorsProps = {
   onAgentProfileChange: (value: string) => void;
   agentProfilesLoading: boolean;
   isCreatingSession: boolean;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
@@ -340,7 +333,7 @@ type SessionSelectorsProps = {
     popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
-    options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+    options: ComboboxOption[];
     value: string;
     onValueChange: (value: string) => void;
     disabled: boolean;

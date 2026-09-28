@@ -1,11 +1,34 @@
 import { test, expect } from "../../fixtures/test-base";
-import { watchWs } from "../../helpers/causal-waits";
+import type { ApiClient } from "../../helpers/api-client";
+import { pollUntil } from "../../helpers/poll-until";
 import { seedIdleSession } from "../../helpers/session";
-import {
-  isTransientRetryNoticePayload,
-  listTransientRetryNotices,
-} from "../../helpers/transient-retry";
+import { listTransientRetryNotices } from "../../helpers/transient-retry";
 import { SessionPage } from "../../pages/session-page";
+
+type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
+
+async function waitForRetryNotice(
+  apiClient: ApiClient,
+  sessionId: string,
+  minimumAttempt: number,
+  timeout = 45_000,
+): Promise<SessionMessage> {
+  return pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.find(
+        (message) =>
+          message.type === "status" &&
+          message.metadata?.retrying === true &&
+          typeof message.metadata.attempt === "number" &&
+          message.metadata.attempt >= minimumAttempt,
+      );
+    },
+    (message): message is SessionMessage => message !== undefined,
+    timeout,
+    `waiting for persisted transient retry attempt ${minimumAttempt}`,
+  );
+}
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
   test("shows the yellow retrying card, not the red error banner", async ({
@@ -68,37 +91,21 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const ws = watchWs(testPage);
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Backoff Test");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
 
-    let retryNoticeId: string | undefined;
-    const firstNoticeAdded = ws.waitForEvent("session.message.added", {
-      timeout: 45_000,
-      where: (payload) => {
-        if (!isTransientRetryNoticePayload(payload, sessionId)) return false;
-        retryNoticeId = typeof payload.message_id === "string" ? payload.message_id : undefined;
-        return retryNoticeId !== undefined;
-      },
-    });
-    const nextAttemptUpdated = ws.waitForEvent("session.message.updated", {
-      timeout: 45_000,
-      where: (payload) =>
-        retryNoticeId !== undefined &&
-        payload.message_id === retryNoticeId &&
-        isTransientRetryNoticePayload(payload, sessionId, 2),
-    });
-
     // /overloaded:9 keeps failing, so each backoff retry re-drives the prompt
-    // and the orchestrator advances the attempt counter. Observe the persisted
-    // status updates through the websocket so a short-lived attempt cannot be
-    // missed by polling the message list while the next backoff is in flight.
+    // and the orchestrator advances the attempt counter. Read the persisted
+    // status row instead of depending on a websocket notification. The row is
+    // the durable contract and remains observable when a busy gateway drops a
+    // short-lived notification.
+    const firstNoticePromise = waitForRetryNotice(apiClient, sessionId, 1);
     await session.sendMessage("/overloaded:9");
-    const firstNotice = await firstNoticeAdded;
-    expect(firstNotice.payload.metadata).toMatchObject({ attempt: 1, retry_in_seconds: 5 });
-    const firstMetadata = firstNotice.payload.metadata as Record<string, unknown>;
-    const createdAt = Date.parse(String(firstNotice.payload.created_at));
+    const firstNotice = await firstNoticePromise;
+    const firstMetadata = firstNotice.metadata as Record<string, unknown>;
+    expect(firstMetadata).toMatchObject({ attempt: 1, retry_in_seconds: 5 });
+    const createdAt = Date.parse(String(firstNotice.created_at));
     const retryAt = Date.parse(String(firstMetadata.retry_at));
     expect(Number.isFinite(createdAt)).toBe(true);
     expect(Number.isFinite(retryAt)).toBe(true);
@@ -108,13 +115,13 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toContainText(/attempt [1-5] of 5/i);
 
-    const advancedEvent = await nextAttemptUpdated;
-    const advancedMetadata = advancedEvent.payload.metadata as Record<string, unknown>;
+    const advancedNotice = await waitForRetryNotice(apiClient, sessionId, 2);
+    const advancedMetadata = advancedNotice.metadata as Record<string, unknown>;
     expect(advancedMetadata.attempt).toBeGreaterThanOrEqual(2);
 
     const advanced = await listTransientRetryNotices(apiClient, sessionId);
     expect(advanced).toHaveLength(1);
-    const firstNoticeId = advanced[0].id;
+    const firstNoticeId = advancedNotice.id;
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
 

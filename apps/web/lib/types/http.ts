@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
-import type { ExecutorType } from "./executor";
+import type { ExecutorProvider, ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -23,7 +23,7 @@ import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
-export type { ExecutorType } from "./executor";
+export type { ExecutorProvider, ExecutorProviderCapabilities, ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 export type {
   SavedLayout,
@@ -813,6 +813,52 @@ export type ListTasksResponse = {
   total: number;
 };
 
+export type SidebarTaskQuery = {
+  filters: Array<{
+    dimension: string;
+    op: string;
+    value: string | string[] | boolean;
+  }>;
+  sort: { key: string; direction: string };
+  group: string;
+  collapsed_group_keys: string[];
+  collapsed_task_ids: string[];
+  page: number;
+  page_size: number;
+  locale: string;
+};
+
+export type SidebarTaskPageEntry = {
+  kind: "task" | "group" | "continuation";
+  task_id?: string;
+  task?: Task;
+  group_key?: string;
+  group_label?: string;
+  workflow_name?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
+  depth?: number;
+  parent_id?: string;
+  parent_title?: string;
+  continuation?: boolean;
+  matching_count?: number;
+  wip_queue_position?: number;
+  wip_queue_total?: number;
+  subtask_count?: number;
+};
+
+export type SidebarTaskPageResponse = {
+  query_key: string;
+  page: number;
+  page_size: number;
+  total_entries: number;
+  total_tasks: number;
+  total_visible_tasks: number;
+  has_previous: boolean;
+  has_next: boolean;
+  entries: SidebarTaskPageEntry[];
+};
+
 export type ListRepositorySetsResponse = {
   repository_sets: RepositorySet[];
   total: number;
@@ -908,6 +954,7 @@ export type Executor = {
   is_system: boolean;
   config?: Record<string, string>;
   profiles?: ExecutorProfile[];
+  provider?: ExecutorProvider;
   created_at: string;
   updated_at: string;
 };
@@ -926,6 +973,8 @@ export type ExecutorProfile = {
   name: string;
   mcp_policy?: string;
   config?: Record<string, string>;
+  secret_fields?: Record<string, boolean>;
+  provider?: ExecutorProvider;
   prepare_script: string;
   cleanup_script: string;
   env_vars?: ProfileEnvVar[];

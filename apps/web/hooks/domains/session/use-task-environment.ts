@@ -6,6 +6,7 @@ import {
   fetchTaskEnvironmentLive,
   resetTaskEnvironment,
   type ContainerLiveStatus,
+  type PluginExecutorLiveStatus,
   type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
@@ -25,6 +26,7 @@ type LiveEnvironmentState = {
   env: TaskEnvironment | null;
   container: ContainerLiveStatus | null;
   ssh: SSHLiveStatus | null;
+  pluginExecutor: PluginExecutorLiveStatus | null;
   kubernetes: KubernetesEnvironmentStatus;
 };
 
@@ -32,6 +34,7 @@ const EMPTY_ENVIRONMENT_STATE: LiveEnvironmentState = {
   env: null,
   container: null,
   ssh: null,
+  pluginExecutor: null,
   kubernetes: { session: null, loaded: false, error: null },
 };
 
@@ -52,7 +55,7 @@ export function useTaskEnvironment(
     active,
   );
   const { isResetting, reset } = useEnvironmentReset(taskId, clear);
-  const { env, container, ssh } = state;
+  const { env, container, ssh, pluginExecutor } = state;
   const {
     session: kubernetes,
     loaded: kubernetesLoaded,
@@ -66,15 +69,17 @@ export function useTaskEnvironment(
             env,
             container,
             env.executor_type === "k8s" ? state.kubernetes : undefined,
+            pluginExecutor,
           )
         : null,
-    [container, env, state.kubernetes],
+    [container, env, pluginExecutor, state.kubernetes],
   );
 
   return {
     env,
     container,
     ssh,
+    pluginExecutor,
     kubernetes,
     kubernetesLoaded,
     kubernetesError,
@@ -120,7 +125,12 @@ function useLiveEnvironment(
 
   const publish = useCallback((next: LiveEnvironmentState) => {
     const kubernetes = next.env?.executor_type === "k8s" ? next.kubernetes : undefined;
-    const nextStatus = getEnvironmentStatusSnapshot(next.env, next.container, kubernetes);
+    const nextStatus = getEnvironmentStatusSnapshot(
+      next.env,
+      next.container,
+      kubernetes,
+      next.pluginExecutor,
+    );
     maybeNotifyEnvironmentStatus(lastStatusRef.current, nextStatus);
     lastStatusRef.current = nextStatus;
     setState(next);
@@ -219,6 +229,7 @@ async function fetchLiveEnvironment(
     env: data.environment,
     container: data.container ?? null,
     ssh: data.ssh ?? null,
+    pluginExecutor: data.plugin_executor ?? null,
     kubernetes,
   };
 }

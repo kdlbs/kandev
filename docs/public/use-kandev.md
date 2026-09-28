@@ -48,6 +48,11 @@ kandev
 Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
 is still needed for the agent CLIs Kandev installs through its own interface.
 
+Stable package-manager and Desktop installs use the standard runtime. Local work starts without a
+remote-helper download. A remote task needs outbound HTTPS to `github.com` and
+`release-assets.githubusercontent.com` the first time it uses a remote platform. See the [CLI guide](cli.md#release-archive)
+for the full offline command-line archive and the [Desktop guide](desktop-app.md) for its network limits.
+
 Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
 `main` without changing a global installation, launch the package once from the npm-only `nightly`
 tag:

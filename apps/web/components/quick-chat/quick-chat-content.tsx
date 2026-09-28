@@ -16,7 +16,10 @@ import {
 } from "@/components/task/chat/chat-input-area";
 import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
-import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
+import {
+  routePanelClick,
+  routePanelMouseDown,
+} from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
 import { useQuickChatInitialDraft } from "./use-quick-chat-initial-draft";
 import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
@@ -140,13 +143,13 @@ export const QuickChatContent = memo(function QuickChatContent({
     (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
     [],
   );
-
   return (
     <div
       ref={shortcutScopeRef}
       data-testid="quick-chat-content"
       tabIndex={-1}
       onMouseDown={handleShortcutScopeMouseDown}
+      onClick={(event) => routePanelClick(event, shortcutScopeRef)}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >
       <QuickChatCancelCommands

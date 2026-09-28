@@ -18,6 +18,7 @@
   "attachmentPreviewAlt": "Pré-visualização",
   "attachmentPreviewFullAlt": "Pré-visualização em tamanho real",
   "attachmentUploadFailed": "Não foi possível carregar o anexo",
+  "attachmentWorkspaceUnavailable": "Não foi possível encontrar o espaço de trabalho desta tarefa. Os ficheiros continuam no rascunho.",
   "attachmentUploadPending": "A carregar o anexo…",
   "attachmentUploadPendingSubmit": "Termine o carregamento dos anexos antes de enviar.",
   "chatTabName": "Chat {{index}}",

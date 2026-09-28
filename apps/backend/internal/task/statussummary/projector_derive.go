@@ -22,7 +22,23 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
+		CompletionGate:      cloneCompletionGate(state.completionGate),
 	}
+}
+
+func cloneCompletionGate(gate *CompletionGateSummary) *CompletionGateSummary {
+	if gate == nil {
+		return nil
+	}
+	copy := *gate
+	return &copy
+}
+
+func equalCompletionGate(left, right *CompletionGateSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {

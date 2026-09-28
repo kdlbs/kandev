@@ -8,7 +8,6 @@ import {
   IconLoader,
   IconLogicBuffer,
   IconTrash,
-  IconUnlink,
 } from "@tabler/icons-react";
 import {
   stepHasAutoStart,
@@ -22,7 +21,6 @@ import {
 } from "@/lib/tasks/task-priority";
 import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
-import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./plugins/task-menu-actions";
@@ -138,6 +136,8 @@ export type BuildKanbanCardMenuEntriesArgs = {
    * with another's behaviour. Building them in place is always correct.
    */
   pluginEntries?: CardPluginEntries;
+  nativeUnlinkEntries?: KanbanCardMenuEntry[];
+  loadingUnlinkLabel?: string;
   /**
    * Forces the flat Edit item regardless of registered plugin `edit`-group
    * actions. Group `edit` is a card-only plugin contract; surfaces outside
@@ -170,6 +170,8 @@ export type PluginEntryInputs = Pick<
   | "isDetaching"
   | "onEdit"
   | "forceFlatEdit"
+  | "nativeUnlinkEntries"
+  | "loadingUnlinkLabel"
   | "pluginMenuContext"
 >;
 
@@ -191,6 +193,8 @@ export function buildCardPluginEntries(args: PluginEntryInputs): CardPluginEntri
       disabled: isProcessing,
       context,
       forceFlat: args.forceFlatEdit,
+      nativeUnlinkEntries: args.nativeUnlinkEntries,
+      loadingUnlinkLabel: args.loadingUnlinkLabel,
     }),
   };
 }
@@ -284,7 +288,7 @@ function buildPriorityItemEntry(
   };
 }
 
-function buildPriorityMenuEntry({
+export function buildPriorityMenuEntry({
   currentPriority,
   disabled,
   onSelectPriority,
@@ -381,7 +385,7 @@ function buildSendToWorkflowSubmenu({
   };
 }
 
-function buildWorkflowMenuEntry({
+export function buildWorkflowMenuEntry({
   currentWorkflowId,
   workflows,
   stepsByWorkflowId,
@@ -416,7 +420,7 @@ function buildWorkflowMenuEntry({
   });
 }
 
-function buildCurrentWorkflowMoveEntry(
+export function buildCurrentWorkflowMoveEntry(
   currentSteps: TaskMoveStep[],
   currentStepId: string | null | undefined,
   disabled: boolean,
@@ -431,126 +435,34 @@ function buildCurrentWorkflowMoveEntry(
 }
 
 // A flat Edit surface cannot reuse plugin entries that include the card-only Edit group.
-function resolveCardPluginEntries({
+export function resolveCardPluginEntries({
   pluginEntries,
   forceFlatEdit,
   disabled,
   onEdit,
+  nativeUnlinkEntries,
+  loadingUnlinkLabel,
   pluginMenuContext,
 }: Pick<
   BuildKanbanCardMenuEntriesArgs,
-  "pluginEntries" | "forceFlatEdit" | "onEdit" | "pluginMenuContext"
+  | "pluginEntries"
+  | "forceFlatEdit"
+  | "onEdit"
+  | "nativeUnlinkEntries"
+  | "loadingUnlinkLabel"
+  | "pluginMenuContext"
 > & {
   disabled: boolean;
 }): CardPluginEntries {
   if (pluginEntries && !forceFlatEdit) return pluginEntries;
-  return buildCardPluginEntries({ disabled, onEdit, forceFlatEdit, pluginMenuContext });
-}
-
-export function buildKanbanCardMenuEntries({
-  currentWorkflowId,
-  currentStepId,
-  workflows,
-  stepsByWorkflowId,
-  moveDisabled,
-  disabled,
-  isDeleting,
-  isArchiving,
-  isDetaching,
-  parentTaskId,
-  currentPriority,
-  onSelectPriority,
-  onEdit,
-  onArchive,
-  onDelete,
-  onDetach,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  pluginLinkActions,
-  onMoveToStep,
-  onChangeWorkflow,
-  onSendToWorkflow,
-  isBulkSelection,
-  pluginMenuContext,
-  pluginEntries,
-  forceFlatEdit,
-}: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
-  const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
-  const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
-  const priorityEntry = buildPriorityMenuEntry({
-    currentPriority,
-    disabled: isProcessing,
-    onSelectPriority,
-  });
-
-  const moveToEntry = buildCurrentWorkflowMoveEntry(
-    currentSteps,
-    currentStepId,
-    Boolean(moveDisabled || isProcessing),
-    onMoveToStep,
-  );
-  const sendToEntry = buildWorkflowMenuEntry({
-    currentWorkflowId,
-    workflows,
-    stepsByWorkflowId,
-    disabled: Boolean(moveDisabled || isProcessing),
-    onChangeWorkflow,
-    onSendToWorkflow,
-    isBulkSelection,
-  });
-
-  const pluginContributions = resolveCardPluginEntries({
-    pluginEntries,
-    forceFlatEdit,
-    disabled: isProcessing,
+  return buildCardPluginEntries({
+    disabled,
     onEdit,
+    forceFlatEdit,
+    nativeUnlinkEntries,
+    loadingUnlinkLabel,
     pluginMenuContext,
   });
-
-  const linkEntry = buildLinkSubmenu({
-    disabled: isProcessing,
-    onLinkPullRequest,
-    onLinkIssue,
-    onLinkMergeRequest,
-    onLinkJiraTicket,
-    onLinkLinearIssue,
-    onLinkSentryIssue,
-    pluginLinkActions,
-  });
-
-  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
-
-  return buildGroupedMenuEntries([
-    { key: "priority", entries: priorityEntry ? [priorityEntry] : [] },
-    {
-      key: "edit",
-      entries: [pluginContributions.edit],
-    },
-    {
-      key: "relationships",
-      entries: [linkEntry, detachEntry].filter(
-        (entry): entry is KanbanCardMenuEntry => entry !== null,
-      ),
-    },
-    {
-      key: "move",
-      entries: [moveToEntry, sendToEntry].filter(
-        (entry): entry is KanbanCardMenuEntry => entry !== null,
-      ),
-    },
-    { key: "plugins", entries: pluginContributions.primary },
-    {
-      key: "remove",
-      entries: [
-        buildArchiveEntry({ isArchiving, isProcessing, onArchive }),
-        buildDeleteEntry({ isDeleting, isProcessing, onDelete }),
-      ],
-    },
-  ]);
 }
 
 export function buildArchiveEntry({
@@ -597,29 +509,5 @@ export function buildDeleteEntry({
     destructive: true,
     disabled: isProcessing || !onDelete,
     onSelect: onDelete,
-  };
-}
-
-function buildDetachEntry({
-  parentTaskId,
-  onDetach,
-  isDetaching,
-  isProcessing,
-}: Pick<BuildKanbanCardMenuEntriesArgs, "parentTaskId" | "onDetach" | "isDetaching"> & {
-  isProcessing: boolean;
-}): KanbanCardMenuEntry | null {
-  if (!parentTaskId || !onDetach) return null;
-  return {
-    kind: "item",
-    key: "detach",
-    testId: "task-context-detach",
-    icon: isDetaching ? (
-      <IconLoader className="mr-2 h-4 w-4 animate-spin" />
-    ) : (
-      <IconUnlink className="mr-2 h-4 w-4" />
-    ),
-    label: t("kanban:detachFromParent"),
-    disabled: isProcessing,
-    onSelect: onDetach,
   };
 }

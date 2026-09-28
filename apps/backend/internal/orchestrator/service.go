@@ -687,6 +687,7 @@ type Service struct {
 
 	// Message queue service for queueing messages while agent is running
 	messageQueue                   *messagequeue.Service
+	managedInputStorage            messagequeue.ManagedInputStorage
 	passthroughDispatchMu          sync.Mutex
 	passthroughDispatches          map[string]map[*passthroughDispatchToken]struct{}
 	initialCreatePromptMu          sync.Mutex
@@ -2109,6 +2110,12 @@ func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
 
+// SetManagedInputStorage wires the durable receipt store that shares the
+// message queue's FIFO repository.
+func (s *Service) SetManagedInputStorage(storage messagequeue.ManagedInputStorage) {
+	s.managedInputStorage = storage
+}
+
 // SetTaskEventPublisher wires the publisher used for task.updated events.
 //
 // The task service is the canonical publisher: it loads session counts,
@@ -3052,6 +3059,18 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	lock := value.(*sync.Mutex)
 	lock.Lock()
 	return lock.Unlock
+}
+
+func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil, false
+	}
+	return lock.Unlock, true
 }
 
 // acquireTurnCompletionLock serializes on_turn_complete processing for a
