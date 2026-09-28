@@ -88,6 +88,81 @@ describe("ApiClient user settings", () => {
   });
 });
 
+describe("ApiClient.deleteTask", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refreshes the preview when the task changes before deletion", async () => {
+    let preflightCount = 0;
+    let deleteCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+          preflightCount += 1;
+          return Response.json({ confirmation_id: `confirmation-${preflightCount}` });
+        }
+        if (url.endsWith("/api/v1/tasks/task-1")) {
+          deleteCount += 1;
+          if (deleteCount === 1) {
+            return Response.json(
+              { error: "task deletion preview is no longer current" },
+              { status: 409 },
+            );
+          }
+          expect(init?.headers).toMatchObject({
+            "X-Kandev-Task-Delete-Confirmation": "confirmation-2",
+          });
+          return Response.json({ success: true });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(
+      new ApiClient("http://backend.test").deleteTask("task-1"),
+    ).resolves.toBeUndefined();
+
+    expect(preflightCount).toBe(2);
+    expect(deleteCount).toBe(2);
+  });
+
+  it("does not retry deletion for an unrelated conflict", async () => {
+    let preflightCount = 0;
+    let deleteCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+          preflightCount += 1;
+          return Response.json({ confirmation_id: "confirmation-1" });
+        }
+        if (url.endsWith("/api/v1/tasks/task-1")) {
+          deleteCount += 1;
+          return Response.json({ error: "task cannot be deleted" }, { status: 409 });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(new ApiClient("http://backend.test").deleteTask("task-1")).rejects.toThrow(
+      'API DELETE /api/v1/tasks/task-1 failed (409): {"error":"task cannot be deleted"}',
+    );
+
+    expect(preflightCount).toBe(1);
+    expect(deleteCount).toBe(1);
+  });
+});
+
 describe("loadInterimSettingsInterlockToken", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

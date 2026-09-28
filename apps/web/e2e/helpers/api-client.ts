@@ -438,6 +438,8 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   return fields;
 }
 
+const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
+
 /**
  * HTTP API client for seeding test data via the backend REST API.
  */
@@ -449,13 +451,14 @@ export class ApiClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: Pick<RequestInit, "redirect">,
+    options?: Pick<RequestInit, "redirect"> & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
+    const { extraHeaders, ...requestOptions } = options ?? {};
     return fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
-      ...options,
+      ...requestOptions,
     });
   }
 
@@ -1463,18 +1466,39 @@ export class ApiClient {
   ): Promise<void> {
     const cascade = options?.cascade ?? false;
     const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
-    const preview = await this.request<{ confirmation_id: string }>(
-      "POST",
-      "/api/v1/tasks/delete-preflight",
-      { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
-    );
     const query = new URLSearchParams();
     if (cascade) query.set("cascade", "true");
     if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
     const queryString = query.toString() ? `?${query.toString()}` : "";
-    await this.request("DELETE", `/api/v1/tasks/${taskId}${queryString}`, undefined, {
-      "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id,
-    });
+    const deletePath = `/api/v1/tasks/${taskId}${queryString}`;
+    for (let attempt = 0; attempt < MAX_TASK_DELETE_PREVIEW_ATTEMPTS; attempt += 1) {
+      const preview = await this.request<{ confirmation_id: string }>(
+        "POST",
+        "/api/v1/tasks/delete-preflight",
+        { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
+      );
+      const response = await this.rawRequest("DELETE", deletePath, undefined, {
+        extraHeaders: { "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id },
+      });
+      if (response.ok) {
+        await response.json();
+        return;
+      }
+
+      const text = await response.text();
+      let isStalePreview = false;
+      if (response.status === 409) {
+        try {
+          const payload = JSON.parse(text) as { error?: unknown };
+          isStalePreview = payload.error === "task deletion preview is no longer current";
+        } catch {
+          isStalePreview = false;
+        }
+      }
+      if (!isStalePreview || attempt === MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) {
+        throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${text}`);
+      }
+    }
   }
 
   async archiveTask(taskId: string): Promise<void> {
