@@ -42,11 +42,13 @@ live-state boundary before any write.
 | --- | --- |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.1` | Guarded-port refusal and free-port selection in `scripts/dev-isolated.ps1` |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.2` | Unique default home, isolated `KANDEV_HOME_DIR`, `HOME`, `USERPROFILE`, and fresh `data` database |
-| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.3` | `Resolve-SafeIsolatedHome` refuses profile/production/drive/workspace boundaries before any write |
-| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.4` | `-WebHost` default `127.0.0.1` and `pnpm exec vite --host` |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.3` | `Resolve-SafeIsolatedHome` refuses live-home descendants, reparse aliases, drive/workspace boundaries before any write |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.4` | `-WebHost` defaults to `127.0.0.1`; the Go backend proxies to the selected Vite host |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | Direct Vite PID, start-time verification, and full-tree teardown after backend exit |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.6` | `kandev-kill.ps1` guarded-port refusal unless `-Force` |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.7` | Recorded home and pipeline-friendly `-Raw` listing |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.8` | Backend and Vite child environments are allowlisted; backend config discovery is disabled |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.9` | Focused PowerShell safety tests run on the Windows CI runner |
 
 Run from the repository root:
 

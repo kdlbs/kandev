@@ -50,12 +50,16 @@ live instance, production data, or any state outside the isolated home.
   isolated home intentionally.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-001.3:** Before creating any directory or
   file, the launcher shall refuse a resolved `-HomeDir` that is the real user
-  profile root, the production kandev home, a drive or filesystem root, or a git
-  workspace root. It shall not replace an existing git configuration or SQLite
-  database in a chosen isolated home.
+  profile root, inside the default or configured production Kandev home, a
+  drive or filesystem root, or inside a git workspace. It shall also refuse
+  paths that pass through symbolic links or junctions, including the database
+  and application-data paths in a reused isolated home. It shall not replace an
+  existing git configuration or SQLite database in a chosen isolated home.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-001.4:** The isolated backend, agentctl, and
   Vite dev server shall bind `127.0.0.1` by default. The web server may bind a
-  network-reachable host only when an explicit host option is given.
+  network-reachable host only when an explicit host option is given. When Vite
+  runs, the backend proxy target shall use the selected web host and the
+  browser shall open the backend URL.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-001.5:** Teardown shall terminate the recorded
   backend and the full descendant process tree of the recorded web process, even
   when the backend has already exited. It shall verify process start identities
@@ -67,3 +71,12 @@ live instance, production data, or any state outside the isolated home.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-001.7:** Instance listing shall report the
   recorded isolated home when its pidfile still names the launched backend, and
   raw output shall be usable in a pipeline.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-001.8:** The backend and Vite child processes
+  shall receive an allowlisted environment plus explicit isolated settings.
+  They shall not inherit host database, config-file, provider, Docker, or Vite
+  configuration. The backend shall load an empty isolated config file instead
+  of discovering operator config files. They shall use the isolated home for
+  application data and the per-launch directory for temporary files.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-001.9:** Windows CI shall run PowerShell tests
+  for live-home boundaries, junction paths, inherited environment isolation,
+  and restoration of the caller environment.

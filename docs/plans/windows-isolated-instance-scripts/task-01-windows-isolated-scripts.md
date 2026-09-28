@@ -14,6 +14,9 @@ acceptance_criteria:
   - AC-LAUNCHER-ISOLATED-SCRIPTS-001.4
   - AC-LAUNCHER-ISOLATED-SCRIPTS-001.5
   - AC-LAUNCHER-ISOLATED-SCRIPTS-001.6
+  - AC-LAUNCHER-ISOLATED-SCRIPTS-001.7
+  - AC-LAUNCHER-ISOLATED-SCRIPTS-001.8
+  - AC-LAUNCHER-ISOLATED-SCRIPTS-001.9
 system_design:
   - ../../specs/launcher/system-design/isolated-scripts.md
 ---
@@ -49,14 +52,19 @@ loopback, and tear the instance down exactly without orphaning the Vite listener
   instance ranges do not overlap across automatic launches.
 - Each default launch uses a distinct isolated home and fresh database.
 - A resolved `-HomeDir` that is the real user profile root, the production
-  `~/.kandev` home, a drive/filesystem root, or a git workspace root is refused
-  before any write.
-- The backend and Vite dev server bind `127.0.0.1` by default.
+  `~/.kandev` home or any configured KANDEV home, a drive/filesystem root, or
+  a git workspace is refused before any write. Paths through junctions are
+  refused, including data and application-data paths inside a reused home.
+- The backend and Vite dev server bind `127.0.0.1` by default. The Go backend
+  remains the browser entry point, and its Vite proxy uses the selected host.
+- Backend and Vite child processes receive only an allowlisted environment and
+  explicit isolated settings; operator config discovery is disabled.
 - Teardown validates recorded process identities and terminates the backend and
   full web process tree even if the backend already exited.
 - Teardown refuses a guarded production port unless `-Force` is given.
 - Instance listing reports the recorded home and produces pipeline-friendly raw
   rows.
+- Windows CI runs focused PowerShell tests for path and environment isolation.
 
 ## Verification
 
@@ -69,14 +77,17 @@ python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-PowerShell parser check for the three scripts, plus a one-off guard test using a
-disposable fake profile.
+PowerShell parser check for the scripts and automated isolation tests in the
+Windows CI job. The tests use a disposable fake profile.
 
 ## Files likely touched
 
 - `scripts/dev-isolated.ps1`
+- `scripts/isolated-instance.psm1`
+- `scripts/tests/isolated-instance.Tests.ps1`
 - `scripts/kandev-kill.ps1`
 - `scripts/kandev-instances.ps1`
+- `.github/workflows/backend-tests.yml`
 - `docs/public/windows-support.md`
 - `docs/specs/launcher/requirements/isolated-scripts.md`
 - `docs/specs/launcher/system-design/isolated-scripts.md`
@@ -113,7 +124,7 @@ the listener. Teardown verifies process start times before stopping the backend
 and web trees, including when the backend has already exited. The home guard
 was verified with a disposable fake profile (never a real user home).
 
-Verification:
+Initial PR verification:
 
 - PowerShell parser: zero errors on all three scripts.
 - `node scripts/validate-public-docs.mjs`: passed.
@@ -125,3 +136,19 @@ Verification:
 - A deliberately mismatched test-owned web start-time record was refused; the
   web process stayed live until its correct record was restored and teardown
   completed.
+
+Follow-up remediation:
+
+- Added a dedicated module for safe home resolution and allowlisted child
+  environments. The guard rejects paths inside default or configured live
+  homes and paths that pass through junctions, including reused-home data and
+  application-data paths.
+- The backend receives a blank isolated config file. Backend and Vite child
+  processes do not inherit arbitrary host variables, and the caller environment
+  is restored after each launch.
+- The Go backend remains the browser URL. `KANDEV_WEB_INTERNAL_URL` now targets
+  the selected Vite host, and the direct Vite API-port override is removed.
+- Added PowerShell tests for live-home and junction guards, environment
+  allowlisting, explicit settings, and environment restoration. Windows CI runs
+  these tests and parses the three launcher scripts. The current Linux workspace
+  has no PowerShell runtime, so they could not be executed locally.
