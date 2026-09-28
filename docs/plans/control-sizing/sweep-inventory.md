@@ -77,7 +77,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/task-create-dialog-source-mode.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task-create-dialog-workspace-repo-chips.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/add-workspace-sources/add-folder-button.tsx` — already conforming; retained after source and responsive-geometry review.
-- [x] `apps/web/components/task/add-workspace-sources/add-workspace-sources-dialog.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/task/add-workspace-sources/add-workspace-sources-dialog.tsx` — changed in the follow-up; footer actions use the standard adaptive size, and the remove-source icon uses the responsive icon size.
 - [x] `apps/web/components/task/branch-picker-list.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/changes-panel-dialogs.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/chat/anchored-last-prompt-bar.tsx` — already conforming; retained after source and responsive-geometry review.
@@ -117,7 +117,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/task/executor-settings-button.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/file-browser-parts.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/file-browser-toolbar.tsx` — content-sized; preserved because the surface is not an ordinary control.
-- [x] `apps/web/components/task/file-upload-conflict-dialog.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/task/file-upload-conflict-dialog.tsx` — changed in the follow-up; choice actions use compact desktop sizing with touch minima, and footer actions use the standard adaptive size.
 - [x] `apps/web/components/task/file-viewer-header.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/html-preview-content.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/markdown-preview-content.tsx` — content-sized; preserved because the surface is not an ordinary control.
@@ -138,7 +138,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/task/prompt-history-panel-row.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/remote-cloud-tooltip.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/remote-contribution-header-actions.tsx` — already conforming; retained after source and responsive-geometry review.
-- [x] `apps/web/components/task/remote-contribution-resolution-dialog.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/task/remote-contribution-resolution-dialog.tsx` — changed in the follow-up; dialog actions use the standard adaptive size.
 - [x] `apps/web/components/task/review-item-selector.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task/session-dialog-shared.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/task/sessions-dropdown.tsx` — already conforming; retained after source and responsive-geometry review.
@@ -186,6 +186,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/settings/agents/agent-profiles-section.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/canvas-host-components.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/canvas-lifecycle-dialogs.tsx` — changed in implementation; verified by source review and focused checks.
+- [x] `apps/web/components/settings/canvas-rename-dialog.tsx` — changed in the follow-up; its input and actions use the standard adaptive size.
 - [x] `apps/web/components/settings/cli-flags-field.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/copy-move-dialog-body.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/dynamic-agent-candidate-list.tsx` — changed in implementation; verified by source review and focused checks.
@@ -193,6 +194,8 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/settings/dynamic-agents-card.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/executor-profiles-card.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/installed-agent-card.tsx` — changed in implementation; verified by source review and focused checks.
+- [x] `apps/web/components/settings/plugin-executor-profile-dialog.tsx` — changed in the follow-up; its name field and actions use the standard adaptive size.
+- [x] `apps/web/components/settings/plugin-executor-profile-page.tsx` — changed in the follow-up after the repeat search found the edit page name field and actions also forced 44px on desktop.
 - [x] `apps/web/components/settings/keyboard-shortcuts-card.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/layouts/layout-editor-toolbar.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/settings/layouts/layout-profile-delete-confirmation.tsx` — changed in implementation; verified by source review and focused checks.
@@ -261,6 +264,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/app/office/workspace/org/org-zoom-controls.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/app/office/workspace/routing/components/role-tier-card.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/app/office/workspace/settings/export/export-file-tree.tsx` — changed in implementation; verified by source review and focused checks.
+- [x] `apps/web/app/office/workspace/settings/export/export-preview.tsx` — changed in the follow-up; the compact retry action is 24px on desktop and retains a 44px touch minimum.
 - [x] `apps/web/app/office/workspace/skills/skill-list.tsx` — changed in implementation; verified by source review and focused checks.
 
 ## Other application surfaces
@@ -273,7 +277,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/app-status-bar/agent-runtime-unavailable-alert.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/app-status-bar/app-status-surface-provider.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/app-status-bar/backend-reload-required-alert.tsx` — changed in implementation; verified by source review and focused checks.
-- [x] `apps/web/components/automations/automation-delete-confirm-dialog.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/automations/automation-delete-confirm-dialog.tsx` — changed in the follow-up; confirmation actions use the standard adaptive size.
 - [x] `apps/web/components/automations/automations-export-button.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/automations/automations-list-page.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/automations/schedule-selector.tsx` — changed in implementation; verified by source review and focused checks.
@@ -290,7 +294,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/command-panel-scope-switcher.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/config-chat/config-chat-panel.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/config-chat/config-chat-setup.tsx` — already conforming; retained after source and responsive-geometry review.
-- [x] `apps/web/components/confirmation/action-confirm-popover.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/confirmation/action-confirm-popover.tsx` — changed in the follow-up; both shared confirmation actions use the standard adaptive size.
 - [x] `apps/web/components/create-local-repository-surface.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/editors/codemirror/codemirror-code-editor.tsx` — documented exception; specialized chrome retains independent geometry.
 - [x] `apps/web/components/editors/lsp-status-button.tsx` — documented exception; specialized chrome retains independent geometry.
@@ -333,7 +337,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/integrations/change-request-detail-copy-button.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/integrations/change-request-detail-header.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/integrations/change-request-detail.tsx` — changed in implementation; verified by source review and focused checks.
-- [x] `apps/web/components/integrations/integration-change-request-status-content.tsx` — content-sized; preserved because the surface is not an ordinary control.
+- [x] `apps/web/components/integrations/integration-change-request-status-content.tsx` — reviewed in the follow-up; the 44px Open review action exists only in the mobile Drawer branch and remains touch-sized.
 - [x] `apps/web/components/integrations/integration-change-request-status-mobile.tsx` — touch-only; preserved with its existing touch composition.
 - [x] `apps/web/components/integrations/integration-change-request-status-trigger.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/integrations/integration-list-toolbar.tsx` — changed in implementation; verified by source review and focused checks.
@@ -368,7 +372,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/review/review-diff-header.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/review/review-diff-toolbar.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/review/walkthrough-overlay.tsx` — already conforming; retained after source and responsive-geometry review.
-- [x] `apps/web/components/runs/automation-detail-page.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/runs/automation-detail-page.tsx` — changed in the follow-up; the compact stop action is 24px on desktop and retains a 44px touch minimum.
 - [x] `apps/web/components/runs/run-filters.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/sentry/sentry-instance-card.tsx` — card surface remains content-sized; embedded Edit and Delete actions use the standard adaptive control size.
 - [x] `apps/web/components/sentry/sentry-issue-dialog.tsx` — changed in implementation; verified by source review and focused checks.
@@ -377,7 +381,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/shared/resizable-markdown-table.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/system-health/health-indicator.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/task-autopilot-toggle.tsx` — changed in implementation; verified by source review and focused checks.
-- [x] `apps/web/components/task-edit-dialog-dependencies.tsx` — already conforming; retained after source and responsive-geometry review.
+- [x] `apps/web/components/task-edit-dialog-dependencies.tsx` — changed in the follow-up; retry actions use the standard adaptive size, and the compact info icon retains a 44px touch target.
 - [x] `apps/web/components/task-preview-panel.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/theme-toggle.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/threads/thread-session-switcher.tsx` — already conforming; retained after source and responsive-geometry review.
@@ -438,4 +442,23 @@ Implementation completed on 2026-09-10.
 - Ordinary task, settings, integration, Office, navigation, and shared-wrapper controls were migrated; retained rows identify content-sized, touch-only, or documented specialized geometry.
 - Red/green regressions covered shared controls, completed-session actions, task creation, Layouts, repository secrets, workflow navigation, settings typography, and representative application controls.
 - Final focused Vitest and managed E2E results are recorded in the work orders and plan.
-- The final source sweep found no unexplained ordinary control with an unconditional desktop 44px height; remaining explicit heights are classified above or are embedded/editor/layout geometry.
+- The initial source sweep was closed on 2026-09-10. A follow-up audit on 2026-09-27 found missed ordinary actions; see [control-sizing follow-up](../control-sizing-follow-up/plan.md).
+
+## Post-completion follow-up outcomes (2026-09-27)
+
+The re-audit found the following missed size overrides. The follow-up corrected the ordinary desktop controls and retained touch-sized actions only in touch contexts.
+
+- [x] `apps/web/components/confirmation/action-confirm-popover.tsx` — both actions use the standard 28px desktop size and adaptive touch size.
+- [x] `apps/web/components/automations/automation-delete-confirm-dialog.tsx` — confirmation actions use the standard adaptive size.
+- [x] `apps/web/components/task/file-upload-conflict-dialog.tsx` — choice actions use compact 24px desktop sizing with touch minima; footer actions use the standard adaptive size.
+- [x] `apps/web/components/task/remote-contribution-resolution-dialog.tsx` — confirmation actions use the standard adaptive size.
+- [x] `apps/web/components/settings/plugin-executor-profile-dialog.tsx` — the name input and actions use the standard adaptive size.
+- [x] `apps/web/components/settings/plugin-executor-profile-page.tsx` — the edit name field and Back/Delete actions use the standard adaptive size.
+- [x] `apps/web/components/settings/canvas-rename-dialog.tsx` — the name input and actions use the standard adaptive size.
+- [x] `apps/web/components/task/add-workspace-sources/add-workspace-sources-dialog.tsx` — footer actions use the standard adaptive size and the row removal icon uses the responsive icon size.
+- [x] `apps/web/components/task-edit-dialog-dependencies.tsx` — retry actions use the standard adaptive size; the compact info icon retains its touch target for coarse pointers.
+- [x] `apps/web/app/office/workspace/settings/export/export-preview.tsx` — the compact retry action is 24px on desktop and touch-sized on phones/coarse pointers; the 44px Back action is confined to its touch drawer branch.
+- [x] `apps/web/components/runs/automation-detail-page.tsx` — the compact stop action is 24px on desktop and touch-sized on phones/coarse pointers.
+- [x] `apps/web/components/integrations/integration-change-request-status-content.tsx` — reviewed and retained; the 44px Open review action exists only in the mobile Drawer branch.
+
+Search results that are drawer-only, coarse-pointer-only, menu rows, navigation rows, or content-sized selections remain outside this follow-up and keep their existing dispositions.

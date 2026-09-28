@@ -139,6 +139,33 @@ it("keeps action failures when a status read succeeds", async () => {
   expect(result.current.error).toBe(actionError);
 });
 
+it("clears status-read failures after refresh without clearing action failures", async () => {
+  const { result } = renderHook(useToolPayloadRetention);
+  await waitFor(() => expect(result.current.status).toEqual(status));
+  const actionError = new Error("analysis failed");
+  vi.mocked(api.analyzeToolPayloadRetention).mockRejectedValueOnce(actionError);
+  await act(async () => {
+    await expect(result.current.analyze(status.policy.age)).rejects.toBe(actionError);
+  });
+
+  const statusError = new Error("status unavailable");
+  vi.mocked(api.fetchToolPayloadRetention).mockRejectedValueOnce(statusError);
+  await act(async () => {
+    await result.current.reload();
+  });
+  expect(result.current.statusError).toBe(statusError);
+  expect(result.current.actionError).toBe(actionError);
+  expect(result.current.error).toBe(actionError);
+
+  vi.mocked(api.fetchToolPayloadRetention).mockResolvedValueOnce(status);
+  await act(async () => {
+    await result.current.refresh();
+  });
+  expect(result.current.statusError).toBeNull();
+  expect(result.current.actionError).toBe(actionError);
+  expect(result.current.error).toBe(actionError);
+});
+
 it("does not let a stale status failure replace a mutation result", async () => {
   const { result } = renderHook(useToolPayloadRetention);
   await waitFor(() => expect(result.current.status).toEqual(status));

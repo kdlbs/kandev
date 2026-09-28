@@ -56,8 +56,8 @@ func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Clie
 	return sprite, nil
 }
 
-func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sprite) error {
-	binaryPath, err := r.agentctlResolver.ResolveLinuxBinary()
+func (r *SpritesExecutor) uploadAgentctl(ctx, helperCtx context.Context, sprite *sprites.Sprite, onProgress PrepareProgressCallback) error {
+	binaryPath, err := r.agentctlResolver.ResolveLinuxBinaryContext(helperCtx, onProgress)
 	if err != nil {
 		return fmt.Errorf("agentctl binary not found: %w", err)
 	}

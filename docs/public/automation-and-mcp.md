@@ -37,7 +37,9 @@ New automations are enabled. Each trigger has its own `enabled` value, which
 is false when omitted. Creation does not manually start a run, but an enabled
 trigger can fire as soon as its conditions are met. The default target is a
 hidden automation run with no repository, a new task for each firing, and one
-concurrent run. The `normal_task` target requires a workflow.
+concurrent run. The `normal_task` target requires a workflow. A
+`managed_conversation` target delivers the prompt to an existing retained plugin
+conversation selected in the workspace; it does not create an automation task.
 
 The result includes the saved automation ID and triggers, plus the webhook
 secret revealed on creation. Later reads redact that secret. You can inspect
@@ -95,6 +97,7 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 3. Choose the run destination:
    - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
    - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
+   - **Send to a managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository and workflow settings are hidden.
 4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
 5. Enter a prompt and optional task-title template.
 6. Choose **Context between runs**:
@@ -121,6 +124,14 @@ The run destination and ordered repository/base-branch pairs are explicit saved 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 
 A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
+
+For a managed-conversation destination, each firing is admitted as durable ordered
+input to the selected conversation. Automation delivery status records whether
+the input was accepted, separately from the agent's result. Pausing or deleting
+the schedule does not delete the shared conversation. Portable automation export
+stores the plugin ID and instance key, not a private conversation ID; import
+requires an explicit binding to an available conversation in the destination
+workspace.
 
 ## Trigger behavior
 

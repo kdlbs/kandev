@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-start-temporary-test-instance"
+description = "Enables the startup conflict action to open an isolated temporary test instance."
+commands.allow = ["start_temporary_test_instance"]

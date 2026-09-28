@@ -8,6 +8,29 @@ export type TransientRetryNotice = {
   content: string;
 };
 
+export function isTransientRetryNoticePayload(
+  payload: Record<string, unknown>,
+  sessionId: string,
+  minimumAttempt = 1,
+): boolean {
+  const metadata = payload.metadata;
+  if (
+    payload.session_id !== sessionId ||
+    !metadata ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata)
+  ) {
+    return false;
+  }
+
+  const noticeMetadata = metadata as Record<string, unknown>;
+  return (
+    noticeMetadata.retrying === true &&
+    typeof noticeMetadata.attempt === "number" &&
+    noticeMetadata.attempt >= minimumAttempt
+  );
+}
+
 export async function listTransientRetryNotices(
   apiClient: ApiClient,
   sessionId: string,

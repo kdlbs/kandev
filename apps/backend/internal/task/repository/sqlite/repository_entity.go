@@ -15,9 +15,46 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+const optimisticUpdatedAtPredicate = " AND updated_at = ?"
+
 // CreateRepository creates a new repository
 func (r *Repository) CreateRepository(ctx context.Context, repository *models.Repository) error {
 	return r.insertRepository(ctx, r.db, repository)
+}
+
+// CreateRepositoryIfWorkspaceUnchanged inserts only while the workspace still
+// has the version observed by the exact Host command.
+func (r *Repository) CreateRepositoryIfWorkspaceUnchanged(ctx context.Context, repository *models.Repository, expected time.Time) error {
+	if repository.ID == "" {
+		repository.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	repository.CreatedAt = now
+	repository.UpdatedAt = now
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO repositories (
+			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner,
+			provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
+		)
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
+	`), repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath,
+		repository.Provider, repository.ProviderRepoID, repository.ProviderHost, repository.ProviderScope, repository.ProviderOwner,
+		repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix,
+		repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript,
+		repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.CreatedAt, repository.UpdatedAt,
+		repository.DeletedAt, repository.WorkspaceID, expected)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	return nil
 }
 
 func (r *Repository) insertRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) error {
@@ -86,7 +123,13 @@ func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repo
 
 // UpdateRepository updates an existing repository
 func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
-	return r.updateRepository(ctx, r.db, repository)
+	return r.updateRepository(ctx, r.db, repository, nil)
+}
+
+// UpdateRepositoryIfUnchanged applies the update only while the repository
+// still has the version observed by the exact Host command.
+func (r *Repository) UpdateRepositoryIfUnchanged(ctx context.Context, repository *models.Repository, expected time.Time) error {
+	return r.updateRepository(ctx, r.db, repository, &expected)
 }
 
 // UpdateRepositoryDefaultBranch updates only the default branch while the
@@ -112,23 +155,35 @@ func (r *Repository) UpdateRepositoryDefaultBranch(ctx context.Context, reposito
 	return nil
 }
 
-func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) error {
+func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository, expected *time.Time) error {
 	repository.UpdatedAt = time.Now().UTC()
 
-	result, err := exec.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_host = ?, provider_scope = ?, provider_owner = ?,
 			provider_name = ?, remote_url = ?, default_branch = ?, worktree_branch_prefix = ?, worktree_branch_template = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, copy_files = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`), repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
+	`
+	args := []interface{}{repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
 		repository.ProviderHost, repository.ProviderScope, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
-		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.UpdatedAt, repository.ID)
+		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.UpdatedAt, repository.ID}
+	if expected != nil {
+		query += optimisticUpdatedAtPredicate
+		args = append(args, *expected)
+	}
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if rows == 0 {
+		if expected != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
 		return fmt.Errorf("repository not found: %s", repository.ID)
 	}
 	return nil
@@ -144,7 +199,26 @@ func (r *Repository) UpdateRepositoryWithSecretBindings(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.updateRepository(ctx, tx, repository); err != nil {
+	if err := r.updateRepository(ctx, tx, repository, nil); err != nil {
+		return err
+	}
+	if err := insertRepositorySecretBindings(ctx, r.db, tx, repository.ID, bindings); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateRepositoryWithSecretBindingsIfUnchanged atomically applies a versioned
+// repository update and replaces its binding set.
+func (r *Repository) UpdateRepositoryWithSecretBindingsIfUnchanged(
+	ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding, expected time.Time,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateRepository(ctx, tx, repository, &expected); err != nil {
 		return err
 	}
 	if err := insertRepositorySecretBindings(ctx, r.db, tx, repository.ID, bindings); err != nil {

@@ -599,7 +599,9 @@ func TestRestoreTaskMessageRollbackWritesUnarchiveRestoreRow(t *testing.T) {
 	}
 
 	task.WorkflowStepID = "step-restored"
-	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(ctx, task, "session-rollback", models.TaskSessionStateRunning)
+	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx, task, "session-rollback", models.TaskSessionStateRunning, task.State, "step-a",
+	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
 	}
@@ -631,7 +633,9 @@ func TestRestoreTaskMessageRollbackWrongSessionStateWritesNoRow(t *testing.T) {
 
 	before := stepTransitionRowsForTask(t, repo, "task-rollback-mismatch")
 	task.WorkflowStepID = "step-restored"
-	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(ctx, task, "session-mismatch", models.TaskSessionStateRunning)
+	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx, task, "session-mismatch", models.TaskSessionStateRunning, task.State, "step-a",
+	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
 	}

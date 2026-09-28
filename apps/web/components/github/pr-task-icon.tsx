@@ -107,6 +107,122 @@ export function isPRDraft(pr: TaskPR): boolean {
   return pr.state === "open" && pr.mergeable_state === "draft";
 }
 
+export function getPRStatusAccessibleLabels(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  const labels: string[] = [];
+  if (pr.state === "merged") labels.push(t("github:merged"));
+  else if (pr.state === "closed") labels.push(t("github:closed"));
+  else if (isPRDraft(pr)) labels.push(t("github:draft"));
+  else if (pr.state === "open") labels.push(t("common:open"));
+
+  if (pr.state === "open") {
+    if (pr.checks_state === "failure") labels.push(t("github:checksFailed"));
+    else if (pr.checks_state === "success") labels.push(t("github:checksPassed"));
+    else if (hasPRChecksInProgressForDisplay(pr)) {
+      const pendingCount =
+        pr.checks_total > 0 ? Math.max(1, pr.checks_total - pr.checks_passing) : 1;
+      labels.push(t("github:checksPendingCount", { count: pendingCount }));
+    }
+
+    if (pr.mergeable_state === "behind") labels.push(t("github:behindBase"));
+    else if (isPRWaitingOnBranchProtection(pr)) {
+      labels.push(t("github:blockedByBranchProtection"));
+    }
+
+    if (pr.review_state === "changes_requested") labels.push(t("github:changesRequested"));
+    else if (pr.review_state === "approved") labels.push(t("github:approved"));
+    else if (pr.review_state === "pending") labels.push(t("github:pendingReview"));
+  }
+  return labels;
+}
+
+function compactPRLifecycleLabel(
+  state: string,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  switch (state.toLowerCase()) {
+    case "merged":
+      return t("github:merged");
+    case "closed":
+      return t("github:closed");
+    case "draft":
+      return t("github:draft");
+    case "open":
+      return t("common:open");
+    default:
+      return null;
+  }
+}
+
+function compactPRAggregateLabel(
+  state: string | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  switch (state?.toLowerCase()) {
+    case "failure":
+      return t("github:needsAttention");
+    case "pending":
+      return t("common:pending");
+    case "awaiting_review":
+      return t("github:pendingReview");
+    case "blocked":
+      return t("github:blocked");
+    case "ready":
+      return null;
+    case "queued":
+      return t("github:mergeQueueStateQueued");
+    case "passing":
+      return t("github:checksPassed");
+    case "draft":
+      return t("github:draft");
+    case "merged":
+      return t("github:merged");
+    case "closed":
+      return t("github:closed");
+    default:
+      return null;
+  }
+}
+
+export function getCompactPRStatusAccessibleLabels(
+  prInfo: TaskPRInfo,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  return [
+    compactPRLifecycleLabel(prInfo.state, t),
+    compactPRAggregateLabel(prInfo.aggregateState, t),
+  ]
+    .filter((label): label is string => label !== null)
+    .filter((label, index, labels) => labels.indexOf(label) === index);
+}
+
+function getTaskPRStatusAccessibleLabels(
+  prs: TaskPR[],
+  prInfo: TaskPRInfo | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  if (prs.length > 0) {
+    return [...new Set(prs.flatMap((pr) => getPRStatusAccessibleLabels(pr, t)))];
+  }
+  if (prInfo) return getCompactPRStatusAccessibleLabels(prInfo, t);
+  return [];
+}
+
+export function hasPRMergeConflict(pr: TaskPR): boolean {
+  if (pr.state !== "open") return false;
+  return pr.has_merge_conflicts ?? pr.mergeable_state === "dirty";
+}
+
+export function hasAnyPRMergeConflict(prs: TaskPR[]): boolean {
+  return prs.some(hasPRMergeConflict);
+}
+
+function taskPRHasMergeConflict(prs: TaskPR[], prInfo?: TaskPRInfo): boolean {
+  return prs.length > 0 ? hasAnyPRMergeConflict(prs) : prInfo?.hasMergeConflicts === true;
+}
+
 export function isPRQueued(pr: TaskPR): boolean {
   return (
     pr.state === "open" &&
@@ -342,6 +458,7 @@ function PRTaskIconView({
     displayCount,
   } = getTaskPRIconPresentation(prs, prInfo);
 
+  const statusLabels = getTaskPRStatusAccessibleLabels(prs, prInfo, t);
   const statusAriaLabel =
     prs.length > 1
       ? t("github:pullRequestStatuses", { count: prs.length })
@@ -352,7 +469,15 @@ function PRTaskIconView({
   ]
     .filter(Boolean)
     .join(", ");
-  const ariaLabel = automationAria ? `${statusAriaLabel}, ${automationAria}` : statusAriaLabel;
+  const conflict = taskPRHasMergeConflict(prs, prInfo);
+  const ariaLabel = [
+    statusAriaLabel,
+    ...statusLabels,
+    conflict ? t("github:conflicts") : null,
+    automationAria || null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   const disclosureProps: PRTaskIconDisclosureProps = {
     taskId,
@@ -366,7 +491,7 @@ function PRTaskIconView({
     displayCount,
     iconColor,
     ariaLabel,
-    icon: <PRTaskIconGlyph automation={automation} />,
+    icon: <PRTaskIconGlyph automation={automation} hasMergeConflicts={conflict} />,
     content: hasFullData ? (
       <>
         <PRTaskStatusSummary summaries={summaries} />

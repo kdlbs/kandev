@@ -70,6 +70,7 @@ func (r *Repository) runMigrations() error {
 	r.migrateRoutineCatchUp()
 	r.migrateBudgetPolicyRevision()
 	r.migrateWorkspacePauseSkipAttribution()
+	r.migrateDeferredAssignmentActor()
 	r.migrateLoopLivenessCausationID()
 	if err := r.migrateRetentionIndexes(); err != nil {
 		return err
@@ -84,6 +85,22 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	return nil
+}
+
+// migrateDeferredAssignmentActor adds the actor snapshot needed to replay a
+// paused assignment with the same priority and assignment-rate semantics as
+// the live scheduler path. The fresh table definition includes these columns;
+// these idempotent ALTERs converge databases created by the first replay
+// implementation before the actor snapshot was added.
+func (r *Repository) migrateDeferredAssignmentActor() {
+	_ = r.migrate.Apply(
+		"office_deferred_assignments.actor_type",
+		`ALTER TABLE office_deferred_assignments ADD COLUMN actor_type TEXT NOT NULL DEFAULT ''`,
+	)
+	_ = r.migrate.Apply(
+		"office_deferred_assignments.actor_id",
+		`ALTER TABLE office_deferred_assignments ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`,
+	)
 }
 
 // migrateRunSkillLabels adds the captured labels used by run history. The

@@ -123,6 +123,43 @@ The MCP task-create handler continues to pass the task description and selected
 step into `LaunchSession`. It does not gain a separate expansion implementation.
 This repair does not infer a workflow step or change step-selection semantics.
 
+### Workflow entry and composed launches
+
+Workflow entry returns the composed prompt and its exact generated expansion
+context together. `buildWorkflowEntryPrompt` retains the context returned by
+`buildWorkflowPromptWithContext`. Its initial-description claim keeps its existing semantics.
+
+`launchAfterOnEnterDispatch` carries both values into `autoStartStepPrompt`.
+Created sessions and context resets pass the expansion context into both
+runtime-context injectors before message recording. Office and ordinary task
+injectors use the same exact-content trust rule.
+
+The private `startCreatedSessionWithComposedPrompt` entry point forwards the
+context to `startCreatedSession`. Skipping composition does not skip trusted-context
+propagation. The final `wrapCreatedSessionPrompt` receives the same value.
+
+`StartSessionForWorkflowStep`, missing-execution recovery, and replacement-session
+branches also carry the generated context to any downstream canonicalization.
+A replacement that rebuilds the step prompt uses the context from that rebuild.
+An immediate retry of an already prepared prompt retains its matching context.
+Do not infer provenance by extracting a block from prompt text.
+
+Keep queued-message storage and replay authority unchanged. If replay prepares
+references again, use the backend resolver before canonicalization. Never treat
+a serialized expansion-shaped block as a new trust source. This repair adds no
+queue schema or new acceptance-time snapshot contract for queued messages.
+
+Queued workflow auto-start prompts resolve saved references again at the drain
+boundary, before the user-message row is written. The same call returns the
+trusted expansion context for dispatch recovery. If the saved record changes
+after the row is written but before provider dispatch completes, a fresh-runtime
+fallback uses that drain-time context rather than re-resolving the mutable
+record. Other queued messages keep their existing preparation path.
+
+Preserve task/session identity, completion instructions, mode transforms, entity
+references, handoff ordering, cancellation guards, and title ownership. Passthrough
+sessions continue to omit hidden expansions.
+
 ## Failure and recovery
 
 A saved-prompt lookup error remains non-fatal. Kandev logs a warning without
@@ -146,6 +183,11 @@ The accepted message keeps the expansion that existed at acceptance time.
 
 The backend saved-prompt repository is authoritative. The browser can select or
 name a prompt, but it cannot define trusted prompt instructions.
+
+Create, update, and delete routes require `org.config.manage`. Reads and
+reference use remain available to org members because saved prompts are shared
+reusable configuration. Custom records can only be changed through this
+authority-gated API; built-in records remain backend-seeded.
 
 The prompt service removes forged expansion blocks and legacy browser prompt
 blocks. It sanitizes saved names and content before it writes a system tag.
@@ -172,6 +214,9 @@ expansion reached the session during diagnosis.
   Chat and observe a deterministic agent response from its definition.
 - Orchestrator tests cover missing workflow-step IDs, ephemeral launches,
   absent step getters, and lookup failures with the real saved-prompt service.
+- Prompt-handler tests deny member mutations without `org.config.manage` and
+  retain member reads. Queue-drain tests compare the recorded definition with a
+  replacement launch after a saved-prompt edit during failed dispatch.
 - Launch integration tests capture the agent-manager prompt and recorded user
   message for `LaunchSession` and `StartCreatedSession` without workflow steps.
   They verify matching definitions, preserved trust, and passthrough exclusion.
@@ -180,3 +225,9 @@ expansion reached the session during diagnosis.
 
 - [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
 - [Apply Agent-Generated Titles to Quick Chat](../../../decisions/2026-08-26-quick-chat-agent-titles.md)
+
+## Implementation plans
+
+- [Quick Chat delivery](../../../plans/quick-chat-saved-prompt-delivery/plan.md): completed direct-message repair.
+- [Launch fallback](../../../plans/saved-prompt-launch-fallback/plan.md): completed no-workflow repair.
+- [Workflow entry delivery](../../../plans/workflow-entry-saved-prompts/plan.md): completed composed-launch repair.

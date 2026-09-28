@@ -26,6 +26,7 @@ import type { ComposerActivity } from "./use-composer-disclosure";
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
   sessionId: string | null;
+  taskId: string | null;
   workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;

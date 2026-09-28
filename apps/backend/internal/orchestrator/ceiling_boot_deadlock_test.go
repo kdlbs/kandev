@@ -140,7 +140,7 @@ func TestReviewAdmissionWaitDoesNotBlockIndependentScheduling(t *testing.T) {
 		taskRepo.mu.Lock()
 		state := taskRepo.tasks["new-task"].State
 		taskRepo.mu.Unlock()
-		require.Equal(t, v1.TaskStateScheduling, state)
+		require.Equal(t, v1.TaskStateInProgress, state)
 	case <-time.After(time.Second):
 		t.Error("a task-local admission wait blocked independent scheduling")
 	}

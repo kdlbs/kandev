@@ -59,6 +59,7 @@ func (r *githubTaskStatusSummaryPRReader) ListTaskStatusSummaryPullRequests(
 				ReviewState:           pr.ReviewState,
 				ChecksState:           pr.ChecksState,
 				MergeableState:        pr.MergeableState,
+				HasMergeConflicts:     pr.HasMergeConflicts,
 				MergeQueueState:       pr.MergeQueueState,
 				UnresolvedReviewCount: pr.UnresolvedReviewThreads,
 				PendingReviewCount:    pr.PendingReviewCount,

@@ -74,6 +74,7 @@ export const defaultKanbanState: KanbanSliceState = {
     errorByWorkspaceId: {},
     revisionByWorkspaceId: {},
   },
+  sidebarStatusSummaryByWorkspaceId: {},
   workflows: { items: [], activeId: null },
   workspaceContextGeneration: 0,
   workspaceContextRead: createWorkspaceContextReadState(),

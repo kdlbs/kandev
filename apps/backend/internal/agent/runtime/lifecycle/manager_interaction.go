@@ -1179,6 +1179,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// backend process owns, so it dies with the backend regardless, and
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
+	if reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NamePluginRemote {
+		return m.detachAgentExecution(executionID, execution)
+	}
 	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
 		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
 		return m.detachAgentExecution(executionID, execution)

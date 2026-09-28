@@ -32,6 +32,7 @@ function renderInputState(
       useChatInputContainer({
         ref: createRef<ChatInputContainerHandle>(),
         sessionId: "session-1",
+        taskId: null,
         isSending: false,
         isStarting: false,
         canQueueWhileStarting: false,

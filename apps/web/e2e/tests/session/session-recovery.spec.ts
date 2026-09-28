@@ -141,12 +141,7 @@ test.describe("Session recovery", () => {
         fixture.identity.sessionId,
         90_000,
       );
-      await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
-        "contenteditable",
-        "true",
-        { timeout: 30_000 },
-      );
-
+      await fixture.session.composerReady();
       await fixture.session.sendMessage("/e2e:simple-message");
       await fixture.session.expectChatResponseVisible("simple mock response", 1, {
         timeout: 60_000,

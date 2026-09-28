@@ -711,7 +711,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
 	}
 	if overrides.McpProfile != nil {
-		profileContext := *overrides.McpProfile
+		profileContext := mcpprofile.Normalize(*overrides.McpProfile)
 		cfg.McpProfile = &profileContext
 	}
 	if overrides.NamespacesMCPToolsByServer {

@@ -1,9 +1,10 @@
 name: Pull request documentation coverage
 
-# This workflow reads untrusted pull-request metadata and files as data only.
-# The checked-out validator is always from a trusted workflow/base revision.
+# This workflow reads untrusted pull-request metadata and files as data, and
+# fetches PR commits only as Git objects for bounded exact-head searches.
+# The checked-out validator always stays at a trusted workflow/base revision.
 on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] base-controlled metadata-only workflow
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted code reads PR objects without checkout
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
@@ -72,4 +73,5 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+          TRUSTED_CHECKOUT_SHA: ${{ env.CHECKOUT_REF }}
         run: node .github/scripts/pr-docs.cjs
