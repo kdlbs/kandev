@@ -1041,6 +1041,7 @@ func (s *Service) applyWorkspaceExecutorRecord(
 		mergeExecutorConfigMetadata(info, exec.Config)
 	}
 	if exec.Type == models.ExecutorTypeKubernetes {
+		ensureWorkspaceMetadata(info)["executor_id"] = executorID
 		mergeKubernetesExecutorConfigMetadata(info, exec.Config)
 	}
 	return nil

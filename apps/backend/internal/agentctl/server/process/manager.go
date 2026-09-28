@@ -1436,21 +1436,13 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
-	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
-	for i, mcp := range m.cfg.McpServers {
-		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
-		}
+	mcpServers, err := m.adapterMCPServers()
+	if err != nil {
+		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
-		AutoApprove:               m.cfg.AutoApprovePermissions,
+		AutoApprove:               m.adapterAutoApprove(),
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
@@ -1858,12 +1850,14 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
 	base := environmentMapFromSlice(current)
+	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
 	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
-		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
+			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+		return nil, fmt.Errorf("remove generated Git credential helpers: %w", err)
 	}
 	if replaceIndexed {
 		// A complete environment owns the entire indexed block, including an
@@ -2782,6 +2776,20 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
+
+	if m.RequiresManagedToolPolicy() {
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
+		toolName := ""
+		if req.ToolName != nil {
+			toolName = *req.ToolName
+		}
+		m.logger.Warn("managed agent tool policy denied a native permission request",
+			zap.String("reason", "native_tool_denied"),
+			zap.String("tool_name", toolName))
+		return &adapter.PermissionResponse{Cancelled: true}, nil
+	}
 
 	// If auto-approve is enabled, immediately approve with the first "allow" option
 	if m.cfg.AutoApprovePermissions {

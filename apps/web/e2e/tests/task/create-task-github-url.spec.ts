@@ -723,9 +723,9 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(launchError).toBeVisible({ timeout: 30_000 });
     await expect(launchError).toContainText(/launch needs attention/i);
 
-    const detailsBtn = launchError.getByRole("button", { name: "Show details" });
-    await expect(detailsBtn).toBeVisible();
-    await detailsBtn.click();
+    const detailsToggle = launchError.locator("summary").filter({ hasText: "Show details" });
+    await expect(detailsToggle).toBeVisible();
+    await detailsToggle.click();
     await expect(launchError.getByTestId("task-launch-error-details")).toContainText(
       /pull request head 200|no remote ref|workspace checkout failed/i,
     );

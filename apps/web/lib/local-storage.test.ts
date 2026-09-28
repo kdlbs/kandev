@@ -8,6 +8,7 @@ import {
   getOpenFileTabs,
   getStoredAutoScrollEnabled,
   getStoredAutoScrollTop,
+  getChatDraftAttachments,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   markPRPanelOffered,
@@ -20,6 +21,7 @@ import {
   setOpenFileTabs,
   setStoredAutoScrollEnabled,
   setStoredAutoScrollTop,
+  setChatDraftAttachments,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
   wasPRPanelOffered,
@@ -336,6 +338,27 @@ describe("open file tabs storage", () => {
 });
 
 describe("chat draft attachment storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("does not persist file bytes while an upload is incomplete", () => {
+    const file = new File(["pending"], "pending.txt", { type: "text/plain" });
+    setChatDraftAttachments("session-a", [
+      {
+        id: "pending-file",
+        file,
+        data: "cGVuZGluZw==",
+        mimeType: "text/plain",
+        fileName: file.name,
+        size: file.size,
+        isImage: false,
+      },
+    ]);
+
+    expect(getChatDraftAttachments("session-a")).toEqual([]);
+  });
+
   it("normalizes invalid restored image delivery modes to prompt", () => {
     const restored = restoreAttachmentPreview({
       id: "att-1",

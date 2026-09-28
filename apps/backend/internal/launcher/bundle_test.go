@@ -2,11 +2,74 @@ package launcher
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestValidateRuntimeBundleAcceptsStandardManifestBundle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeRemoteHelperManifest(t, dir, "standard")
+
+	bundle, err := validateRuntimeBundle(dir, "test", BuildInfo{Version: "1.2.3", Commit: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatalf("validate standard bundle: %v", err)
+	}
+	if bundle.Dir != dir {
+		t.Fatalf("bundle dir = %q, want %q", bundle.Dir, dir)
+	}
+}
+
+func TestValidateRuntimeBundleRejectsManifestIdentityMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeRemoteHelperManifest(t, dir, "standard")
+
+	_, err := validateRuntimeBundle(dir, "test", BuildInfo{Version: "9.9.9", Commit: strings.Repeat("b", 40)})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("validate mismatched bundle error = %v, want identity mismatch", err)
+	}
+}
+
+func writeRemoteHelperManifest(t *testing.T, dir, variant string) {
+	t.Helper()
+	type helper struct {
+		Platform  string `json:"platform"`
+		Asset     string `json:"asset"`
+		SHA256    string `json:"sha256"`
+		SizeBytes int64  `json:"size_bytes"`
+	}
+	manifest := struct {
+		SchemaVersion int      `json:"schema_version"`
+		Version       string   `json:"version"`
+		Commit        string   `json:"commit"`
+		Variant       string   `json:"variant"`
+		Helpers       []helper `json:"helpers"`
+	}{
+		SchemaVersion: 1,
+		Version:       "1.2.3",
+		Commit:        strings.Repeat("a", 40),
+		Variant:       variant,
+		Helpers: []helper{
+			{Platform: "linux/amd64", Asset: "agentctl-linux-amd64.gz", SHA256: strings.Repeat("a", 64), SizeBytes: 10},
+			{Platform: "linux/arm64", Asset: "agentctl-linux-arm64.gz", SHA256: strings.Repeat("b", 64), SizeBytes: 10},
+			{Platform: "darwin/amd64", Asset: "agentctl-darwin-amd64.gz", SHA256: strings.Repeat("c", 64), SizeBytes: 10},
+			{Platform: "darwin/arm64", Asset: "agentctl-darwin-arm64.gz", SHA256: strings.Repeat("d", 64), SizeBytes: 10},
+		},
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "remote-helpers.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestValidateRuntimeBundleAcceptsSingleBinaryLayout(t *testing.T) {
 	dir := t.TempDir()

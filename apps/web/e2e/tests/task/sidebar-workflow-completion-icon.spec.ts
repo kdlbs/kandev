@@ -43,6 +43,26 @@ test.describe("Sidebar workflow completion icons", () => {
     const workflowCompleteRow = session.sidebarTaskItem("Sidebar workflow complete");
     await expect(turnFinishedRow).toBeVisible();
     await expect(workflowCompleteRow).toBeVisible();
+
+    // The row can render from the task snapshot before the workspace workflow
+    // step snapshot has arrived. Re-drive hydration until the final-step map
+    // is present; checking the row alone does not prove that map is ready.
+    await expect
+      .poll(
+        async () => {
+          const icon = workflowCompleteRow.getByTestId("task-state-workflow-complete");
+          if (await icon.isVisible().catch(() => false)) return true;
+          await testPage.reload();
+          await session.waitForLoad();
+          return icon.isVisible().catch(() => false);
+        },
+        {
+          timeout: 30_000,
+          message: "workflow completion icon should follow workflow step hydration",
+        },
+      )
+      .toBe(true);
+
     await expect(turnFinishedRow.getByTestId("task-state-turn-finished")).toBeVisible();
     await expect(turnFinishedRow.getByTestId("task-state-workflow-complete")).toHaveCount(0);
     await expect(workflowCompleteRow.getByTestId("task-state-workflow-complete")).toBeVisible();

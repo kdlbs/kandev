@@ -36,6 +36,8 @@ type httpWorkspaceSourcesRequest struct {
 	Sources []json.RawMessage `json:"sources"`
 }
 
+const taskDeleteConfirmationHeader = "X-Kandev-Task-Delete-Confirmation"
+
 type workspaceSourceJSON struct {
 	Kind           string `json:"kind"`
 	RepositoryID   string `json:"repository_id"`
@@ -786,13 +788,17 @@ type httpCreateTaskRequest struct {
 	StartAgent             bool                      `json:"start_agent,omitempty"`
 	PrepareSession         bool                      `json:"prepare_session,omitempty"`
 	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID             string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
-	PlanMode               bool                      `json:"plan_mode,omitempty"`
-	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID               string                    `json:"parent_id,omitempty"`
-	WorkspacePath          string                    `json:"workspace_path,omitempty"`
-	BlockedBy              []string                  `json:"blocked_by,omitempty"`
+	// AssigneeAgentProfileID names an Office agent instance to seat as the
+	// task's runner at create time. Optional, and always workspace-scoped;
+	// see service.ValidateAssigneeAgentProfile for eligibility rules.
+	AssigneeAgentProfileID string                 `json:"assignee_agent_profile_id,omitempty"`
+	ExecutorID             string                 `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                 `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                   `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment `json:"attachments,omitempty"`
+	ParentID               string                 `json:"parent_id,omitempty"`
+	WorkspacePath          string                 `json:"workspace_path,omitempty"`
+	BlockedBy              []string               `json:"blocked_by,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
@@ -932,7 +938,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_profile_id is required to start agent"})
 		return
 	}
-
 	repos, ok := convertCreateTaskRepositories(c, body.Repositories)
 	if !ok {
 		return
@@ -957,6 +962,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
+	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
+	// and the value the runner seat is written under are identical — a
+	// padded ID that passed validation must not be stored un-trimmed, where
+	// an exact-ID lookup on the seat would never resolve it.
+	assigneeAgentProfileID := strings.TrimSpace(body.AssigneeAgentProfileID)
 
 	// Office task-handoffs phase 5: resolve workspace policy from the
 	// request + parent task, merge into Metadata, and remember it so the
@@ -982,33 +992,42 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
-		WorkspaceID:                 body.WorkspaceID,
-		WorkflowID:                  body.WorkflowID,
-		WorkflowStepID:              body.WorkflowStepID,
-		WorkflowAgentOverrides:      body.WorkflowAgentOverrides,
-		ExecutorID:                  body.ExecutorID,
-		ExecutorProfileID:           body.ExecutorProfileID,
-		Title:                       title,
-		Description:                 description,
-		AutoTitle:                   body.AutoTitle,
-		Autopilot:                   body.Autopilot,
-		Priority:                    body.Priority,
-		State:                       body.State,
-		Repositories:                convertToServiceRepos(repos),
-		Position:                    body.Position,
-		Metadata:                    metadata,
-		DeferredLaunch:              deferredLaunch,
-		RecordAgentProfileRecentUse: true,
-		PlanMode:                    body.PlanMode,
-		StartAgent:                  body.StartAgent,
-		ParentID:                    body.ParentID,
-		WorkspacePath:               body.WorkspacePath,
-		BlockedBy:                   body.BlockedBy,
-		StartWhenUnblocked:          body.StartWhenUnblocked,
-		ProjectID:                   body.ProjectID,
-		Labels:                      labels,
-		ExternalID:                  body.ExternalID,
-		WorkspacePolicy:             &wsPolicy,
+		WorkspaceID:            body.WorkspaceID,
+		WorkflowID:             body.WorkflowID,
+		WorkflowStepID:         body.WorkflowStepID,
+		WorkflowAgentOverrides: body.WorkflowAgentOverrides,
+		AssigneeAgentProfileID: assigneeAgentProfileID,
+		// This is untrusted browser input, unlike the internal callers
+		// (agent-created subtasks, onboarding, routines) that also populate
+		// AssigneeAgentProfileID — only this HTTP path opts into create-time
+		// validation of the named profile. Gating it inside
+		// prepareTaskForCreation (rather than checking it here, before
+		// CreateTask runs) means a duplicate external_id still short-circuits
+		// to the existing task without re-validating this request's assignee.
+		RequireAssigneeAgentProfileValidation: true,
+		ExecutorID:                            body.ExecutorID,
+		ExecutorProfileID:                     body.ExecutorProfileID,
+		Title:                                 title,
+		Description:                           description,
+		AutoTitle:                             body.AutoTitle,
+		Autopilot:                             body.Autopilot,
+		Priority:                              body.Priority,
+		State:                                 body.State,
+		Repositories:                          convertToServiceRepos(repos),
+		Position:                              body.Position,
+		Metadata:                              metadata,
+		DeferredLaunch:                        deferredLaunch,
+		RecordAgentProfileRecentUse:           true,
+		PlanMode:                              body.PlanMode,
+		StartAgent:                            body.StartAgent,
+		ParentID:                              body.ParentID,
+		WorkspacePath:                         body.WorkspacePath,
+		BlockedBy:                             body.BlockedBy,
+		StartWhenUnblocked:                    body.StartWhenUnblocked,
+		ProjectID:                             body.ProjectID,
+		Labels:                                labels,
+		ExternalID:                            body.ExternalID,
+		WorkspacePolicy:                       &wsPolicy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -1779,11 +1798,12 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string                        `json:"workflow_id"`
-	WorkflowStepID string                        `json:"workflow_step_id"`
-	Position       int                           `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
-	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
+	WorkflowID         string                                     `json:"workflow_id"`
+	WorkflowStepID     string                                     `json:"workflow_step_id"`
+	Position           int                                        `json:"position"`
+	EntryOptions       *workflowmove.EntryOptions                 `json:"entry_options,omitempty"`
+	WorkflowChange     *models.WorkflowChangeRequest              `json:"workflow_change,omitempty"`
+	CompletionOverride *service.TaskCompletionMoveOverrideRequest `json:"completion_override,omitempty"`
 }
 
 // httpReorderStepTasksRequest is the frozen reorder request contract
@@ -1864,9 +1884,16 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              body.EntryOptions,
 			WorkflowChange:            body.WorkflowChange,
+			CompletionOverride:        body.CompletionOverride,
 		},
 	)
 	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) ||
+			errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict) ||
+			errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired) {
+			h.handleCompletionGateError(c, err)
+			return
+		}
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
@@ -1896,45 +1923,37 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
 	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
-	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
-	// when wired so descendant runs are cancelled, group memberships are
-	// released with reason=deleted, and the cleanup state machine fires.
-	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
-			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
-				DiscardWorktreeChanges: discardWorktreeChanges,
-			},
-		); err != nil {
-			if !isCascadePostCommitError(err) {
-				handleNotFound(c, h.logger, err, "task not deleted")
-				return
+	err := h.service.WithTaskDeleteConfirmation(
+		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, discardWorktreeChanges,
+		func() error {
+			options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges}
+			if h.handoffSvc != nil {
+				_, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
+				return err
 			}
+			return h.service.DeleteTaskWithOptions(deleteCtx, taskID, options)
+		},
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
+			c.JSON(http.StatusPreconditionRequired, gin.H{"error": "current task deletion preview is required"})
+		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "task deletion confirmation requires an authenticated user"})
+		case errors.Is(err, service.ErrTaskDeleteConfirmationExpired),
+			errors.Is(err, service.ErrTaskDeleteConfirmationStale),
+			errors.Is(err, service.ErrTaskDeleteConfirmationReplay),
+			errors.Is(err, service.ErrTaskDeleteConfirmationMismatch):
+			c.JSON(http.StatusConflict, gin.H{"error": "task deletion preview is no longer current"})
+		case isCascadePostCommitError(err):
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", taskID), zap.Error(err))
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				responseKeySuccess: false,
-				responseKeyPending: true,
-				"task_id":          taskID,
+				responseKeySuccess: false, responseKeyPending: true, "task_id": taskID,
 			})
-			return
+		default:
+			handleNotFound(c, h.logger, err, "task not deleted")
 		}
-		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
-		return
-	}
-	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
-		DiscardWorktreeChanges: discardWorktreeChanges,
-	}); err != nil {
-		if isCascadePostCommitError(err) {
-			h.logger.Warn("task deleted but post-commit housekeeping failed",
-				zap.String("task_id", taskID), zap.Error(err))
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				responseKeySuccess: false,
-				responseKeyPending: true,
-				"task_id":          taskID,
-			})
-			return
-		}
-		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})

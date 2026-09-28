@@ -20,8 +20,8 @@ import { useQuickChatTabOrder } from "./use-quick-chat-tab-order";
 const noop = () => {};
 
 async function deleteQuickChatTask(taskId: string) {
-  const { deleteTask } = await import("@/lib/api/domains/kanban-api");
-  await deleteTask(taskId);
+  const { deleteTaskAfterUserAction } = await import("@/lib/api/domains/kanban-api");
+  await deleteTaskAfterUserAction(taskId);
 }
 
 function useQuickChatStore(workspaceId: string) {

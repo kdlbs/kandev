@@ -4,7 +4,7 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-08-27
+updated: 2026-09-25
 owners:
   - tbd
 ---
@@ -17,9 +17,9 @@ This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-00
 
 ## Requirement mapping
 
-| Requirement                         | Design section                                |
-| ----------------------------------- | --------------------------------------------- |
-| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture) |
+| Requirement | Design section |
+| --- | --- |
+| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome) |
 
 ## Desktop architecture
 
@@ -49,6 +49,37 @@ implemented launch and backend-lifecycle behavior, it provides:
 The macOS red window close control quits Kandev and stops its owned backend. It does not hide the
 window or leave a tray/background process. `Cmd+W` is deliberately separate from that lifecycle.
 
+### macOS window chrome
+
+The main macOS window uses Tauri's overlay title-bar style with decorations
+enabled and its centered native title hidden. The native traffic lights remain
+at the upper left, over Kandev's own startup surface and later its web app.
+This removes the separate full-width strip without replacing the native
+controls with web buttons. Other platforms keep their decorated windows. See
+the [isolated startup design](isolated-startup.md#macos-window-chrome) for the
+first-paint and conflict states. This follows the
+[macOS overlay decision](../../../decisions/2026-09-25-macos-overlay-titlebar.md).
+
+The macOS web shell reserves the traffic-light hit area within the existing
+sidebar/page header row. The expanded sidebar is at least 320px wide: the
+native controls sit at the left, then the Kandev link, flexible workspace
+switcher, and fixed collapse button stay in one 40px header row. The
+workspace name truncates before its chevron or the collapse control can be
+covered. A hover-revealed sidebar follows the same expanded arrangement.
+
+The collapsed rail is only 56px wide, narrower than the traffic-light hit
+area. Its top 40px stays clear; its Kandev brand and expand button stack
+below that area, as they do today. The native controls may extend over the
+left end of the adjacent page header, so that header also reserves the
+remaining controls width before its title or search. The workspace switcher
+is absent in collapsed mode, as it is today, and returns after expansion.
+Interactive controls do not become drag regions. Empty portions of the
+header provide window dragging through Tauri's narrow drag affordance. The
+existing installed-PWA window-controls overlay remains separate: its geometry
+comes from the browser API, while the desktop app uses a shell-provided macOS
+overlay hint and fixed safe inset checked on supported macOS versions. No
+general window-management API is exposed to the backend-served page.
+
 ### Existing shell guarantees
 
 This increment preserves the shipped desktop contract:
@@ -56,8 +87,10 @@ This increment preserves the shipped desktop contract:
 - installers target macOS arm64/x64, Linux arm64/x64, and Windows x64;
 - the app starts the packaged native launcher and Go backend, then displays the existing embedded
   Vite/React SPA without requiring Node.js or a separate web server at runtime;
-- desktop and CLI/browser launches share the existing Kandev data directory, database, worktrees,
-  executor settings, integrations, and agent configuration;
+- normal desktop and CLI/browser launches share the selected Kandev data
+  directory, database, worktrees, executor settings, integrations, and agent
+  configuration; a conflict can instead lead to the explicit
+  [isolated test launch](isolated-startup.md);
 - the desktop shell owns the backend process tree, waits for a two-stage readiness signal (a
   token-verified `/health` proving process ownership, then an unauthenticated `/ready` proving
   application readiness), and cleans up on startup failure, quit, update restart, or WebView
@@ -67,7 +100,9 @@ This increment preserves the shipped desktop contract:
   started, and `/ready` then reports the backend has finished startup;
 - GUI launches retain the predictable process environment and common user binary locations needed
   to discover configured agent CLIs;
-- a second launch focuses the existing instance instead of starting another backend; and
+- a second normal launch focuses the existing normal instance instead of
+  starting another backend; explicit temporary test processes follow the
+  [isolated startup design](isolated-startup.md); and
 - GitHub releases continue to include the existing installers, runtime archives, and checksums.
 
 ## Existing launch and data contract
@@ -89,11 +124,13 @@ navigates the WebView to the backend origin once `/ready` reports the backend ha
 startup. The desktop shell also sets `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` to identify the
 launch as desktop-owned. The nested native launcher must forward the shell's exact non-empty
 health token to the backend and use it for its own `/health` readiness poll rather than
-replacing it with another token. A second instance focuses the first and does not start another
-backend.
+replacing it with another token. A second normal instance focuses the first and
+does not start another backend. An explicit temporary test process is exempt
+from that GUI single-instance guard and owns distinct data.
 
-The shell preserves the existing GUI-launch `PATH` normalization and the existing Kandev data
-directory, SQLite database, worktrees, executor settings, integrations, and agent configuration.
+The normal launch preserves the existing GUI-launch `PATH` normalization and the selected Kandev
+data directory, SQLite database, worktrees, executor settings, integrations, and agent
+configuration. A separate test launch follows the [isolated startup design](isolated-startup.md).
 It owns cleanup of the launcher/backend process tree on quit, startup failure, and update restart.
 The existing HTTP, WebSocket, and boot-payload product APIs remain the SPA's data plane; the
 desktop bridge is only for native integration.
@@ -346,6 +383,7 @@ display before being shown.
 
 - [Initial Desktop Tauri App plan](../../../plans/desktop-tauri-app/plan.md)
 - [Desktop Native Integration plan](../../../plans/desktop-native-integration/plan.md)
+- [Isolated desktop startup plan](../../../plans/desktop-isolated-startup/plan.md)
 - [ADR-0026: Tauri desktop shell over native runtime](../../../decisions/0026-tauri-desktop-shell.md)
 - [ADR-0039: Native desktop integration boundary](../../../decisions/0039-native-desktop-integration-boundary.md)
 - [Desktop Repository Discovery Consent plan](../../../plans/desktop-repository-discovery-consent/plan.md)

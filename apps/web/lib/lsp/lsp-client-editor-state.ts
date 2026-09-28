@@ -126,6 +126,7 @@ export class LspClientEditorState {
   handleDiagnostics(connection: ManagedLspConnection, params: PublishDiagnosticsParams): void {
     const uri = canonicalFileUri(params.uri);
     if (!uri) return;
+    if (connection.closedDocuments.has(uri)) return;
     const canonicalParams = { ...params, uri };
     connection.diagnosticsByUri.set(uri, canonicalParams);
     const monaco = getMonacoInstance();
@@ -135,6 +136,21 @@ export class LspClientEditorState {
       .getModels()
       .find((model: monacoEditor.ITextModel) => connectionModelMatchesUri(model, uri, connection));
     if (targetModel) this.applyDiagnostics(connection.ownerId, targetModel, canonicalParams);
+  }
+
+  clearDocumentDiagnostics(connection: ManagedLspConnection, documentUri: string): void {
+    const uri = canonicalFileUri(documentUri);
+    if (!uri) return;
+    connection.diagnosticsByUri.delete(uri);
+
+    const monaco = getMonacoInstance();
+    if (!monaco) return;
+    const markerOwner = this.markerOwner(connection.ownerId);
+    for (const model of monaco.editor.getModels()) {
+      if (connectionModelMatchesUri(model, uri, connection)) {
+        monaco.editor.setModelMarkers(model, markerOwner, []);
+      }
+    }
   }
 
   clearConnectionDiagnostics(connection: ManagedLspConnection): void {

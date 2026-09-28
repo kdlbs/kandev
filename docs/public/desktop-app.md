@@ -107,15 +107,32 @@ Desktop forces the backend to `127.0.0.1`, supplies a random 256-bit health toke
 
 The preferred desktop port is `38430`. If only that port is unavailable, Kandev asks the OS for a free loopback port. `KANDEV_DESKTOP_PORT` can request a different port, but a non-UTF-8 value, a non-integer, `0`, or a value above `65535` is a fatal startup configuration error. If the requested port is occupied, the desktop still falls back to an OS-assigned loopback port.
 
-Startup waits up to 60 seconds for the owned backend. A missing packaged binary, invalid port, configuration/database error, or early backend exit appears on the startup screen with the most recent captured backend output. Reinstall the complete artifact if runtime validation reports a missing `kandev`, `agentctl`, or remote helper.
+Startup waits up to 60 seconds for the owned backend. A missing packaged binary, invalid port, configuration/database error, or early backend exit appears on the startup screen with the most recent captured backend output. Reinstall the app if runtime validation reports a missing `kandev`, `agentctl`, or helper manifest.
+
+Stable Desktop resources contain the host binaries and a remote-helper manifest. Local startup and
+local tasks do not need a helper download. The first remote task for a platform downloads the
+matching helper if no verified copy is cached. Kandev checks its digest before use. Allow outbound
+HTTPS to `github.com` and `release-assets.githubusercontent.com`; GitHub redirects release-asset
+downloads to the second host. Desktop has no full offline installer or updater. A cached helper or
+an existing helper-path override supports remote work without this download.
 
 ## Data, processes, and cleanup
 
 Desktop inherits normal backend configuration. By default, persistent data lives in `~/.kandev` (below the user profile directory on Windows). Set `KANDEV_HOME_DIR` in the desktop process environment before launch to isolate or relocate it; see [Configuration](configuration.md). The desktop app's own platform app-data directory separately stores window geometry.
 
-Only one desktop instance runs per OS user/application scope. Launching the app a second time shows, unminimizes, and focuses the existing main window; it does not start a second backend.
+Normal desktop launches are single-instance. Launching the app a second time shows, unminimizes, and focuses the existing main window. Each database can also be owned by only one Kandev process at a time. If another process is using the selected home or database, the startup screen identifies the conflict and keeps the normal data unchanged.
 
 Closing the main OS window or choosing **Quit Kandev** quits the application and stops the backend it owns. There is no tray/background mode or desktop autostart service. On Unix, shutdown sends a graceful termination and force-kills after five seconds if needed; on Windows it terminates the owned process tree. Active external executor resources may have their own lifecycle, check [Executors](executors.md) before manual cleanup.
+
+If another Kandev process owns the selected home or database, the startup screen can open one or more isolated temporary test windows. Each window has a new private home and SQLite database below the operating system's temporary directory. The window shows its temporary data folder while it starts and keeps the path visible if startup fails. Data created there is separate from your normal Kandev data and is removed after a confirmed clean quit. If Kandev cannot confirm a clean stop, it keeps the folder for inspection. Do not use a temporary test window to store work you need to keep.
+
+For a reusable development home on macOS, set a separate path before starting the developer build:
+
+```bash
+KANDEV_HOME_DIR="$HOME/.kandev-desktop-dev" make desktop-dev
+```
+
+This home persists between launches. It is separate from both your normal Kandev home and each disposable temporary test window.
 
 The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
 
@@ -125,17 +142,19 @@ Uninstalling the desktop application does not delete the Kandev home. Keep it to
 
 The desktop backend does not scan your Home directory until you select a
 discovery folder. Open **Settings → Workspaces → Repositories → Add Local
-Repository**, then choose Home or a narrower folder. The selected folders are
-saved for the desktop installation and are available to its workspaces. A
-normal browser connected to the same backend uses the HTTP folder picker. The
-browser does not receive the desktop app's native picker authority.
+Repository**, then choose a folder. The selected folders are saved for the
+desktop installation and are available to its workspaces. A normal browser
+connected to the same backend uses the HTTP folder picker. The browser does
+not receive the desktop app's native picker authority.
 
 After an upgrade, an existing installation can show **Continue Home
-Discovery**. This is a confirmation action. Kandev does not start a new Home
-scan without that action. A Home scan skips repositories directly below
-`Desktop`, `Documents`, and `Downloads` on macOS. Select one of those folders
-explicitly when it contains repositories you want to discover. Selecting that
-protected folder itself is allowed.
+Discovery**. This action saves the desktop backend's Home folder directly; it
+does not open a folder picker. Kandev does not start a new Home scan without
+that action. **Choose folders to discover repositories** still opens the
+folder picker for a separate or narrower root. A Home scan skips repositories
+directly below `Desktop`, `Documents`, and `Downloads` on macOS. Select one of
+those folders explicitly when it contains repositories you want to discover.
+Selecting that protected folder itself is allowed.
 
 Discovery results are cached for up to 30 minutes while a visible repository
 surface is open. Empty or filtered results have a **Refresh** action. If a
@@ -221,6 +240,13 @@ Reinstalling repairs packaged program files but intentionally leaves user data u
 ### Agent works in a terminal but not Desktop
 
 Use the full command path in the agent profile and verify GUI-visible credentials. Shell aliases and functions are not executables and cannot be discovered by `PATH`.
+
+### A remote task cannot get its helper
+
+Read the preparation error. If it names a download or network problem, allow outbound HTTPS to
+`github.com` and `release-assets.githubusercontent.com`, then retry. A Stable Desktop installer has
+no full offline variant. Use a cached helper or an existing helper-path override when the app cannot
+reach those hosts.
 
 ### Update check reports no usable feed
 

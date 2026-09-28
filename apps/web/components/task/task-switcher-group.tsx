@@ -1,4 +1,5 @@
 import { IconChevronDown } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 export function TaskSwitcherSkeleton() {
@@ -17,14 +18,17 @@ export function GroupHeader({
   groupKey,
   count,
   isCollapsed,
+  isContinuation = false,
   onToggle,
 }: {
   label: string;
   groupKey: string;
   count: number;
   isCollapsed: boolean;
+  isContinuation?: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -37,6 +41,11 @@ export function GroupHeader({
       <span className="flex-1 truncate text-left text-[12px] font-medium text-foreground/80">
         {label}
       </span>
+      {isContinuation && (
+        <span className="shrink-0 text-[10px] text-muted-foreground/70">
+          {t("sidebar:continuationLabel")}
+        </span>
+      )}
       <span className="text-[11px] text-muted-foreground/50">{count}</span>
       <IconChevronDown
         className={cn(

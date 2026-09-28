@@ -8,6 +8,7 @@ import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overloa
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { attachGatewayTrafficCapture, type GatewayTrafficFrame } from "../../helpers/ws-traffic";
 import { requireBox } from "../../helpers/layout-assertions";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
 import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
@@ -550,8 +551,7 @@ test.describe("Mobile Threads view", () => {
     const buttons = geometryDrawer.locator("button:visible");
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {
-      const box = await buttons.nth(index).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expectTouchControl(buttons.nth(index));
     }
     await assertNoHorizontalOverflow(testPage, "mobile Threads saved views");
     await expect(testPage.getByTestId("mobile-home-menu-scroll")).toHaveClass(

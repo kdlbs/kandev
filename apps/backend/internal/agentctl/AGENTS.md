@@ -196,6 +196,16 @@ ordering.
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
 
+## Standalone instance port leases
+
+`instance.PortAllocator` reservations are `PortLease` values containing the
+owner, port, and allocator-local generation. Release and mark-unavailable must
+compare the full lease. A pre-registration instance remains in the manager's
+provisional map until its listener and process resources stop successfully;
+failed cleanup keeps the bundle and lease for a serialized retry, and the same
+instance ID cannot bind another listener while that bundle remains. Shutdown
+drains in-flight cleanup and retries retained bundles before returning.
+
 ## Env stripping for credential-mode agents (`StripEnv`)
 
 Some agents check environment variables to decide their credential mode. For example, `devin acp` checks `ACP_BACKEND`: when set (any value, including empty), it requires protocol-level `authenticate` and refuses local credentials; when unset, it falls back to reading `~/.local/share/devin/credentials.toml` directly. Kandev (which may inherit `ACP_BACKEND` from Windsurf Next) needs the fall-back path, so the variable must be **absent** from the child environment — not just empty.

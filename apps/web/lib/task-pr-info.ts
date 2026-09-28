@@ -6,6 +6,7 @@ export type TaskPRInfo = {
   aggregateState?: string;
   autoFixEnabled?: boolean;
   autoMergeEnabled?: boolean;
+  hasMergeConflicts?: boolean;
 };
 
 function capitalize(value: string): string {
@@ -24,5 +25,6 @@ export function taskPRInfoFromSummary(
     aggregateState: pullRequest.aggregate_state,
     ...(pullRequest.auto_fix_enabled ? { autoFixEnabled: true } : {}),
     ...(pullRequest.auto_merge_enabled ? { autoMergeEnabled: true } : {}),
+    ...(pullRequest.has_merge_conflicts ? { hasMergeConflicts: true } : {}),
   };
 }

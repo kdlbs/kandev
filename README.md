@@ -12,7 +12,6 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
 
 ## What
 
-
 Kandev is a powerful tool for power users who want deeper control over how AI agents work: customize workflows, agent profiles, runtimes, prompts, and review gates to match your process.
 
 Organize work across kanban and pipeline views with opinionated workflows and execute multiple tasks in parallel. Assign agents from any provider, and review their output in an integrated workspace - file editor, file tree, terminal, browser preview, and git changes in one place. Terminal agent TUIs are great for running agents, but reviewing and iterating on changes there doesn't scale.
@@ -29,9 +28,10 @@ and API, so the application server does not need Node.js, a separate web
 server, or a frontend build at runtime.
 
 Homebrew, Scoop, release archives, and the desktop app run this native binary
-directly. The npm/npx package adds a small Node.js platform selector, so Node.js
-is required to launch Kandev through npm/npx but not by the application server.
-Release bundles also include `agentctl` helpers for task environments.
+directly. Stable standard installs download a verified remote `agentctl` helper
+only when a remote task needs one. Use a `-full` CLI archive for offline use.
+The npm/npx package adds a small Node.js platform selector, so Node.js is
+required to launch Kandev through npm/npx but not by the application server.
 
 ## Vision
 
@@ -85,30 +85,30 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 
 ## Supported ACP Agents
 
-| Agent | Package / command |
-|:-------:|:----------:|
-| **Claude Code** | `@agentclientprotocol/claude-agent-acp` |
-| **Codex** | `@agentclientprotocol/codex-acp` |
-| **GitHub Copilot** | `@github/copilot` |
-| **Gemini CLI** | `@google/gemini-cli` |
-| **Amp** | `amp-acp` |
-| **Auggie** | `@augmentcode/auggie` |
-| **OpenCode** | `opencode-ai` |
-| **Cursor** | `cursor-agent` *(requires Cursor Pro)* |
-| **Devin** | `devin` *(install Devin CLI from Devin Desktop or standalone installer)* |
-| **Qwen** | `@qwen-code/qwen-code` |
-| **Factory Droid** | `droid` |
-| **iFlow (beta)** | `@iflow-ai/iflow-cli` |
-| **Kilocode** | `@kilocode/cli` |
-| **Pi** | ACP adapter: `pi-acp`; CLI passthrough: `pi` |
-| **Kimi** | `kimi` *(install Kimi CLI from Moonshot AI)* |
-| **Kiro** | `kiro-cli-chat` *(install Kiro CLI from AWS)* |
-| **Qoder** | `qodercli` *(install Qoder CLI)* |
-| **Trae** | `traecli` *(install Trae IDE CLI)* |
-| **Oh My Pi** | `omp` *(install `@oh-my-pi/pi-coding-agent` with Bun)* |
-| **Grok** | `grok` *(install `@xai-official/grok` with npm)* |
-| **Hermes** | `hermes` *(install with the official Hermes installer)* |
-| **Antigravity** | `agy_acp_server.par` / `.exe` *(no automated install; download from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp), extract both archive entries into one directory, and put that directory on PATH)* |
+|       Agent        |                                                                                                                  Package / command                                                                                                                   |
+| :----------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+|  **Claude Code**   |                                                                                                       `@agentclientprotocol/claude-agent-acp`                                                                                                        |
+|     **Codex**      |                                                                                                           `@agentclientprotocol/codex-acp`                                                                                                           |
+| **GitHub Copilot** |                                                                                                                  `@github/copilot`                                                                                                                   |
+|   **Gemini CLI**   |                                                                                                                 `@google/gemini-cli`                                                                                                                 |
+|      **Amp**       |                                                                                                                      `amp-acp`                                                                                                                       |
+|     **Auggie**     |                                                                                                                `@augmentcode/auggie`                                                                                                                 |
+|    **OpenCode**    |                                                                                                                    `opencode-ai`                                                                                                                     |
+|     **Cursor**     |                                                                                                        `cursor-agent` _(requires Cursor Pro)_                                                                                                        |
+|     **Devin**      |                                                                                       `devin` _(install Devin CLI from Devin Desktop or standalone installer)_                                                                                       |
+|      **Qwen**      |                                                                                                                `@qwen-code/qwen-code`                                                                                                                |
+| **Factory Droid**  |                                                                                                                       `droid`                                                                                                                        |
+|  **iFlow (beta)**  |                                                                                                                `@iflow-ai/iflow-cli`                                                                                                                 |
+|    **Kilocode**    |                                                                                                                   `@kilocode/cli`                                                                                                                    |
+|       **Pi**       |                                                                                                     ACP adapter: `pi-acp`; CLI passthrough: `pi`                                                                                                     |
+|      **Kimi**      |                                                                                                     `kimi` _(install Kimi CLI from Moonshot AI)_                                                                                                     |
+|      **Kiro**      |                                                                                                    `kiro-cli-chat` _(install Kiro CLI from AWS)_                                                                                                     |
+|     **Qoder**      |                                                                                                           `qodercli` _(install Qoder CLI)_                                                                                                           |
+|      **Trae**      |                                                                                                          `traecli` _(install Trae IDE CLI)_                                                                                                          |
+|    **Oh My Pi**    |                                                                                                `omp` _(install `@oh-my-pi/pi-coding-agent` with Bun)_                                                                                                |
+|      **Grok**      |                                                                                                   `grok` _(install `@xai-official/grok` with npm)_                                                                                                   |
+|     **Hermes**     |                                                                                               `hermes` _(install with the official Hermes installer)_                                                                                                |
+|  **Antigravity**   | `agy_acp_server.par` / `.exe` _(no automated install; download from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp), extract both archive entries into one directory, and put that directory on PATH)_ |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
@@ -125,13 +125,13 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 
 ## Supported Executors
 
-| Executor | Description |
-|:--------:|-------------|
-| **Local Process** | Runs the agent as a local process on the host machine |
-| **Docker** | Runs the agent in an isolated Docker container |
-| **Kubernetes** | Runs each task session in an administrator-configured Pod with managed, existing, or disposable workspace storage |
-| **SSH** | Runs the agent on a remote server over SSH |
-| **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
+|     Executor      | Description                                                                                                       |
+| :---------------: | ----------------------------------------------------------------------------------------------------------------- |
+| **Local Process** | Runs the agent as a local process on the host machine                                                             |
+|    **Docker**     | Runs the agent in an isolated Docker container                                                                    |
+|  **Kubernetes**   | Runs each task session in an administrator-configured Pod with managed, existing, or disposable workspace storage |
+|      **SSH**      | Runs the agent on a remote server over SSH                                                                        |
+|    **Sprites**    | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev)                               |
 
 Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
 

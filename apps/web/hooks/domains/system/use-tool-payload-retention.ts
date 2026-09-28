@@ -173,7 +173,6 @@ export function useToolPayloadRetention() {
   );
   const refresh = useCallback(() => {
     setStatusError(null);
-    setActionError(null);
     return reload();
   }, [reload]);
   useAcceptedOperationRefresh(acceptedId, reload);
@@ -223,6 +222,8 @@ export function useToolPayloadRetention() {
   return {
     status,
     error: actionError ?? statusError,
+    statusError,
+    actionError,
     pending,
     active,
     preparing,

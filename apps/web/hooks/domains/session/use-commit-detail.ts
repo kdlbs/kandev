@@ -6,7 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import type { PRCommitDetail } from "@/lib/types/github";
 import type { FileInfo } from "@/lib/state/store";
-import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 import {
   CommitDetailProtocolError,
   requestCommitDetail,

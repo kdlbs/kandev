@@ -15,7 +15,7 @@ func TestSerializePrepareResult(t *testing.T) {
 		result := &EnvPrepareResult{
 			Success: true,
 			Steps: []PrepareStep{
-				{Name: "Validate repository", Status: PrepareStepCompleted, Command: "git status", Output: "On branch main"},
+				{Name: "Resolve remote helper", Kind: "remote_helper", RemotePlatform: "linux/amd64", FailureCode: "", Status: PrepareStepCompleted, Command: "git status", Output: "On branch main"},
 				{Name: "Run setup script", Status: PrepareStepCompleted, Command: "npm install", Output: "added 100 packages", StartedAt: &twoSecsAgo, EndedAt: &now},
 			},
 			Duration: 3 * time.Second,
@@ -30,7 +30,9 @@ func TestSerializePrepareResult(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, steps, 2)
 
-		require.Equal(t, "Validate repository", steps[0]["name"])
+		require.Equal(t, "Resolve remote helper", steps[0]["name"])
+		require.Equal(t, "remote_helper", steps[0]["kind"])
+		require.Equal(t, "linux/amd64", steps[0]["remote_platform"])
 		require.Equal(t, string(PrepareStepCompleted), steps[0]["status"])
 		require.Equal(t, "git status", steps[0]["command"])
 		require.Equal(t, "On branch main", steps[0]["output"])
@@ -45,7 +47,7 @@ func TestSerializePrepareResult(t *testing.T) {
 			Success:      false,
 			ErrorMessage: "setup script failed",
 			Steps: []PrepareStep{
-				{Name: "Run setup script", Status: PrepareStepFailed, Command: "npm install", Output: "ERR! not found"},
+				{Name: "Resolve remote helper", Kind: "remote_helper", RemotePlatform: "linux/amd64", FailureCode: "download_failed", Status: PrepareStepFailed, Command: "download helper", Output: "asset unavailable"},
 			},
 			Duration: 1 * time.Second,
 		}
@@ -54,6 +56,10 @@ func TestSerializePrepareResult(t *testing.T) {
 
 		require.Equal(t, "failed", serialized["status"])
 		require.Equal(t, "setup script failed", serialized["error_message"])
+		steps := serialized["steps"].([]map[string]interface{})
+		require.Equal(t, "remote_helper", steps[0]["kind"])
+		require.Equal(t, "linux/amd64", steps[0]["remote_platform"])
+		require.Equal(t, "download_failed", steps[0]["failure_code"])
 	})
 
 	t.Run("truncates long output at UTF-8 boundary", func(t *testing.T) {

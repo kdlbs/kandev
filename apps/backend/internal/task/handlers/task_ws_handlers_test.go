@@ -267,14 +267,40 @@ func TestWSDeleteTaskUsesHandoffCascadeWhenWired(t *testing.T) {
 	repo := &wsTaskRepo{}
 	h := newWSTaskHandlers(t, repo)
 	h.handoffSvc = service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
+	h.service.SetWorktreeCleanup(authzDeleteCleanup{})
+	ctx := asUser("user-b")
+	preview, err := h.service.TaskDeletePreflight(ctx, []string{"task-b"}, false, false)
+	require.NoError(t, err)
 
-	resp, err := h.wsDeleteTask(asUser("user-a"), wsWorkflowRequest(t, ws.ActionTaskDelete,
-		map[string]any{"id": "task-b"}))
+	resp, err := h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b", "confirmation_id": preview.ConfirmationID}))
 
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted)
 	require.Empty(t, repo.deleted, "wired handoff deletion must not use the legacy service path")
+
+	replay, err := h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b", "confirmation_id": preview.ConfirmationID}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, replay.Type)
+	require.Equal(t, ws.ErrorCodeConflict, wsWorkflowError(t, replay).Code)
+	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted, "single-use confirmation must block replay")
+}
+
+func TestWSDeleteTaskRequiresCurrentConfirmation(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+
+	resp, err := h.wsDeleteTask(asUser("user-b"), wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b"}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	require.Equal(t, ws.ErrorCodeValidation, wsWorkflowError(t, resp).Code)
+	require.Contains(t, wsWorkflowError(t, resp).Message, "preview is required")
+	require.Empty(t, repo.deleted)
+	require.Empty(t, repo.cascadeDeleted)
 }
 
 func TestWSLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *testing.T) {
@@ -291,9 +317,16 @@ func TestWSLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *testing.
 			handoff := service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
 			handoff.SetTaskResourceCleaner(&postCommitCleanupFailure{err: fmt.Errorf("cleanup unavailable")})
 			h.SetHandoffService(handoff)
+			ctx := asUser("user-b")
+			requestPayload := map[string]any{"id": "task-b"}
+			if tc.action == ws.ActionTaskDelete {
+				h.service.SetWorktreeCleanup(authzDeleteCleanup{})
+				preview, previewErr := h.service.TaskDeletePreflight(ctx, []string{"task-b"}, false, false)
+				require.NoError(t, previewErr)
+				requestPayload["confirmation_id"] = preview.ConfirmationID
+			}
 
-			resp, err := tc.call(h, asUser("user-b"), wsWorkflowRequest(t, tc.action,
-				map[string]any{"id": "task-b"}))
+			resp, err := tc.call(h, ctx, wsWorkflowRequest(t, tc.action, requestPayload))
 			require.NoError(t, err)
 			require.Equal(t, ws.MessageTypeResponse, resp.Type)
 			var payload map[string]any

@@ -1,4 +1,3 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toSheetItem } from "./session-task-switcher-sheet-item";
 import {
@@ -8,10 +7,7 @@ import {
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
-import {
-  loadWorkspaceTaskSessions,
-  useSheetArchiveActions,
-} from "./session-task-switcher-sheet-hooks";
+import { loadWorkspaceTaskSessions } from "./session-task-switcher-sheet-hooks";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -243,6 +239,9 @@ describe("selectPendingTaskFromSheet", () => {
     const setActiveSession = vi.fn((_taskId: string, sessionId: string) => {
       order.push(`session:${sessionId}`);
     });
+    const navigate = vi.fn((_taskId: string, sessionId?: string) => {
+      order.push(`navigate:${sessionId ?? ""}`);
+    });
     await selectPendingTaskFromSheet({
       taskId: "task-1",
       preferredSessionId: "primary",
@@ -250,13 +249,14 @@ describe("selectPendingTaskFromSheet", () => {
       loadTaskSessionsForTask,
       setActiveSession,
       setActiveTask: vi.fn(),
-      navigate: () => order.push("navigate"),
+      navigate,
       onOpenChange: () => order.push("close"),
     });
 
     expect(setActiveSession).toHaveBeenCalledWith("task-1", "secondary");
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith("task-1", { force: true });
-    expect(order).toEqual(["session:secondary", "navigate", "close"]);
+    expect(order).toEqual(["session:secondary", "navigate:secondary", "close"]);
+    expect(navigate).toHaveBeenCalledWith("task-1", "secondary");
   });
 
   it("falls back safely when session loading fails", async () => {
@@ -422,7 +422,7 @@ describe("selectTaskFromSheet races", () => {
     expect(setActiveSession).toHaveBeenCalledTimes(1);
     expect(setActiveSession).toHaveBeenCalledWith("task-b", "owner-b");
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith("task-b");
+    expect(navigate).toHaveBeenCalledWith("task-b", "owner-b");
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -626,36 +626,5 @@ describe("selectTaskFromSheet sheet lifecycle", () => {
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     expect(onOpenChange.mock.calls).toEqual([[false], [true]]);
-  });
-});
-
-describe("useSheetArchiveActions", () => {
-  it("tracks the directly archived row while its request is pending", async () => {
-    let resolveArchive: () => void = () => undefined;
-    const archiveAndSwitch = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveArchive = resolve;
-        }),
-    );
-    const store = {
-      getState: () => ({}),
-    } as Parameters<typeof useSheetArchiveActions>[0];
-    const { result } = renderHook(() =>
-      useSheetArchiveActions(
-        store,
-        archiveAndSwitch as Parameters<typeof useSheetArchiveActions>[1],
-      ),
-    );
-
-    act(() => result.current.handleArchiveTask("task-1", { cascade: false }));
-
-    await waitFor(() => expect(result.current.archivingTaskId).toBe("task-1"));
-    expect(result.current.isArchiving).toBe(true);
-
-    await act(async () => resolveArchive());
-
-    await waitFor(() => expect(result.current.archivingTaskId).toBeNull());
-    expect(result.current.isArchiving).toBe(false);
   });
 });

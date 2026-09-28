@@ -19,6 +19,7 @@ import { subscribeNewTaskCreationRequests } from "@/lib/desktop/new-task-request
 import type { QuickChatActivityState } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
 import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
 import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import { AppSidebarWorkspaceActions } from "./app-sidebar-workspace-actions";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
@@ -66,8 +67,16 @@ function RowActionButton({
   return (
     <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
       <TooltipTrigger asChild>
-        <button
-          type="button"
+        <SurfaceAction
+          surface="sidebar"
+          presentation="desktop"
+          label={label}
+          icon={
+            <span className="relative flex">
+              <Icon className="h-3.5 w-3.5" />
+              <QuickChatActivityIndicator activity={activity} />
+            </span>
+          }
           onClick={onClick}
           onPointerEnter={() => {
             hoveredRef.current = true;
@@ -81,15 +90,8 @@ function RowActionButton({
             hoveredRef.current = false;
             setTooltipOpen(false);
           }}
-          aria-label={label}
           data-testid={testId}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"
-        >
-          <span className="relative flex">
-            <Icon className="h-3.5 w-3.5" />
-            <QuickChatActivityIndicator activity={activity} />
-          </span>
-        </button>
+        />
       </TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>

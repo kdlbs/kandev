@@ -15,11 +15,11 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// proxyEntry caches both the reverse proxy and its target URL so we can
-// detect when the upstream has changed (e.g. VS Code restarted on a new port).
+// proxyEntry caches the upstream endpoint and lease generation used by a proxy.
 type proxyEntry struct {
-	proxy  *httputil.ReverseProxy
-	target string // "host:port"
+	proxy      *httputil.ReverseProxy
+	target     string
+	generation string
 }
 
 // VscodeProxyHandler reverse-proxies HTTP and WebSocket traffic to code-server
@@ -104,22 +104,8 @@ func (h *VscodeProxyHandler) HandleVscodeProxy(c *gin.Context) {
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
-// resolveProxy returns a cached proxy if the target hasn't changed, or creates
-// a new one. Only performs the upstream status check when no cache exists or
-// when the cached target is stale.
+// resolveProxy reuses a cached proxy only while its endpoint and lease generation match.
 func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*httputil.ReverseProxy, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	// Fast path: return cached proxy if available
-	if entry, ok := h.proxies[sessionID]; ok {
-		h.logger.Debug("reusing cached vscode proxy",
-			zap.String("session_id", sessionID),
-			zap.String("target", entry.target))
-		return entry.proxy, nil
-	}
-
-	// Slow path: resolve upstream target
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found or no active execution"})
@@ -131,6 +117,21 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 	if agentctlClient == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
 		return nil, fmt.Errorf("agentctl client not available")
+	}
+	generation, err := agentctlClient.ConnectionGeneration(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl connection is unavailable"})
+		return nil, fmt.Errorf("resolve agentctl connection generation: %w", err)
+	}
+	baseURL := agentctlClient.BaseURL()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if entry, ok := h.proxies[sessionID]; ok && entry.target == baseURL && entry.generation == generation {
+		h.logger.Debug("reusing cached vscode proxy",
+			zap.String("session_id", sessionID),
+			zap.String("target", entry.target))
+		return entry.proxy, nil
 	}
 
 	vscodeStatus, err := agentctlClient.VscodeStatus(c.Request.Context())
@@ -152,16 +153,14 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 		return nil, fmt.Errorf("code-server not running")
 	}
 
-	baseURL := agentctlClient.BaseURL()
 	target, err := url.Parse(baseURL)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to resolve agentctl target"})
 		return nil, err
 	}
 
-	authToken := agentctlClient.AuthToken()
-	proxy := h.createProxy(sessionID, target, authToken)
-	h.proxies[sessionID] = &proxyEntry{proxy: proxy, target: baseURL}
+	proxy := h.createProxy(sessionID, target, agentctlClient.ProxyTransport())
+	h.proxies[sessionID] = &proxyEntry{proxy: proxy, target: baseURL, generation: generation}
 
 	h.logger.Info("created vscode proxy for session",
 		zap.String("session_id", sessionID),
@@ -172,17 +171,14 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 }
 
 // createProxy builds a reverse proxy for the given target URL.
-func (h *VscodeProxyHandler) createProxy(sessionID string, target *url.URL, authToken string) *httputil.ReverseProxy {
+func (h *VscodeProxyHandler) createProxy(sessionID string, target *url.URL, transport http.RoundTripper) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = transport
 
 	// Allow WebSocket upgrades by preserving hop-by-hop headers
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
-		// Inject agentctl auth token
-		if authToken != "" {
-			req.Header.Set("Authorization", "Bearer "+authToken)
-		}
 		// Preserve WebSocket headers that SingleHostReverseProxy strips
 		if req.Header.Get("Upgrade") != "" {
 			req.Header.Set("Connection", "Upgrade")

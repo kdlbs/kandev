@@ -7,16 +7,26 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
 type taskDeletePreflightHTTPCleanup struct {
 	dirty bool
+}
+
+type taskDeletePreflightHTTPRepo struct{ mockRepository }
+
+func (taskDeletePreflightHTTPRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
+	now := time.Now().UTC()
+	return &models.Task{ID: id, Title: id, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func (taskDeletePreflightHTTPCleanup) OnTaskDeleted(context.Context, string) error { return nil }
@@ -39,7 +49,7 @@ func (c taskDeletePreflightHTTPCleanup) InspectDirtyWorktrees(
 func newTaskDeletePreflightRouter(t *testing.T, cleanup service.WorktreeCleanup) *gin.Engine {
 	t.Helper()
 	log := newTestLogger(t)
-	repo := &mockRepository{}
+	repo := &taskDeletePreflightHTTPRepo{}
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
@@ -54,6 +64,10 @@ func newTaskDeletePreflightRouter(t *testing.T, cleanup service.WorktreeCleanup)
 	return router
 }
 
+func withTaskDeleteTestIdentity(request *http.Request) *http.Request {
+	return request.WithContext(authn.WithIdentity(request.Context(), authn.Identity{UserID: "http-test-user", Synthetic: true}))
+}
+
 func TestHTTPTaskDeletePreflightReturnsNoStoreConsent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newTaskDeletePreflightRouter(t, taskDeletePreflightHTTPCleanup{dirty: true})
@@ -64,6 +78,7 @@ func TestHTTPTaskDeletePreflightReturnsNoStoreConsent(t *testing.T) {
 		strings.NewReader(`{"task_ids":["task-1"],"cascade":false}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
+	request = withTaskDeleteTestIdentity(request)
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -71,6 +86,7 @@ func TestHTTPTaskDeletePreflightReturnsNoStoreConsent(t *testing.T) {
 	var response service.TaskDeletePreflightResult
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.RequiresDiscardConsent)
+	require.NotEmpty(t, response.ConfirmationID)
 }
 
 func TestHTTPTaskDeletePreflightRejectsEmptySelection(t *testing.T) {
@@ -81,6 +97,7 @@ func TestHTTPTaskDeletePreflightRejectsEmptySelection(t *testing.T) {
 		"/api/v1/tasks/delete-preflight",
 		strings.NewReader(`{"task_ids":[],"cascade":false}`),
 	)
+	request = withTaskDeleteTestIdentity(request)
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
@@ -94,6 +111,7 @@ func TestHTTPTaskDeletePreflightReturnsServiceUnavailableWhenInspectionUnavailab
 		"/api/v1/tasks/delete-preflight",
 		strings.NewReader(`{"task_ids":["task-1"],"cascade":false}`),
 	)
+	request = withTaskDeleteTestIdentity(request)
 
 	router.ServeHTTP(recorder, request)
 

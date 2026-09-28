@@ -29,7 +29,7 @@ func runInstalled(ctx context.Context, opts Options, build BuildInfo) int {
 		return 1
 	}
 	ports.BackendURL = endpoints.accessURL
-	bundle, err := resolveRuntimeBundle()
+	bundle, err := resolveRuntimeBundle(build)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -50,6 +50,7 @@ func runInstalled(ctx context.Context, opts Options, build BuildInfo) int {
 		Mode:       "run",
 		Backend:    bundle.Launcher,
 		BackendCWD: filepath.Dir(bundle.Launcher),
+		BundleDir:  bundle.Dir,
 		Ports:      ports,
 		LogLevel:   logLevel,
 		Opts:       opts,
