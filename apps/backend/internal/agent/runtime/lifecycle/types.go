@@ -1431,12 +1431,13 @@ type AgentProfileInfo struct {
 	AutoFallback bool
 	// RequireExactModel makes the configured model an explicit identity
 	// requirement. False preserves compatible pre-PR behavior.
-	RequireExactModel    bool
-	AllowIndexing        bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
-	CLIPassthrough       bool
-	CursorMCPAuthEnabled bool
-	NativeSessionResume  bool // Agent supports ACP session/load for resume
-	SupportsMCP          bool
+	RequireExactModel       bool
+	AllowIndexing           bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	CLIPassthrough          bool
+	CursorMCPAuthEnabled    bool
+	CursorPluginsMCPEnabled bool
+	NativeSessionResume     bool // Agent supports ACP session/load for resume
+	SupportsMCP             bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag

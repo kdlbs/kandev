@@ -44,8 +44,9 @@ type AgentProfileDTO struct {
 	ProviderBaseURL string `json:"provider_base_url,omitempty"`
 	// ProviderAPIKeySecretID references the Kandev global secret holding the
 	// bearer key. The value is never returned.
-	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty"`
-	CursorMCPAuthEnabled   bool   `json:"cursor_mcp_auth_enabled"`
+	ProviderAPIKeySecretID  string `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled    bool   `json:"cursor_mcp_auth_enabled"`
+	CursorPluginsMCPEnabled bool   `json:"cursor_plugins_mcp_enabled"`
 	// ProviderSupported is computed at read time: true when the profile's
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`

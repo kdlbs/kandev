@@ -262,6 +262,12 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
       "cursor_mcp_auth_enabled",
       true,
     ),
+    cursorPluginsMcpEnabled: pickBool(
+      profile,
+      "cursorPluginsMcpEnabled",
+      "cursor_plugins_mcp_enabled",
+      true,
+    ),
     // Absent on legacy payloads → enabled by default.
     enabled: pickBool(profile, "enabled", "enabled", true),
     workspaceId: (() => {

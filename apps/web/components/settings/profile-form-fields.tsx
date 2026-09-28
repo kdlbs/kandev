@@ -1,24 +1,18 @@
 "use client";
 
-import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { IconAlertTriangle } from "@tabler/icons-react";
 import type { SelectConfigOption } from "@/components/model-config-selector";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Skeleton } from "@kandev/ui/skeleton";
-import { Switch } from "@kandev/ui/switch";
-import {
-  PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
-  PERMISSION_KEYS,
-  readPermissionValue,
-  type PermissionKey,
-} from "@/lib/agent-permissions";
+import type { PermissionKey } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
+import { CursorPluginsMCPPreference } from "@/components/settings/cursor-plugins-mcp-preference";
 import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
 import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
+import { PermissionToggles } from "@/components/settings/profile-permission-toggles";
 import {
   CapabilityStatusMessage,
   RefreshCapabilitiesButton,
@@ -64,6 +58,7 @@ export type ProfileFormData = {
   command_prefix?: string;
   provider_kind?: string;
   cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -88,171 +83,6 @@ export type ProfileFormFieldsProps = {
    */
   hideCustomCLIFlags?: boolean;
 };
-
-type PermissionToggleProps = {
-  profile: ProfileFormData;
-  baselineProfile?: ProfileFormData;
-  onChange: (patch: Partial<ProfileFormData>) => void;
-  permissionSettings: Record<string, PermissionSetting>;
-  passthroughConfig: PassthroughConfig | null;
-  variant: "default" | "compact";
-  lockPassthrough?: boolean;
-};
-
-function permissionToggleWrapperClass(isDanger: boolean, compact: boolean): string {
-  if (isDanger) {
-    return "flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3";
-  }
-  if (compact) {
-    return "flex items-center justify-between gap-2";
-  }
-  return "flex items-center justify-between rounded-md border p-3";
-}
-
-function PermissionToggleRow({
-  settingKey,
-  setting,
-  checked,
-  onCheckedChange,
-  compact,
-  isDirty,
-}: {
-  settingKey: string;
-  setting: PermissionSetting;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-  compact: boolean;
-  isDirty: boolean;
-}) {
-  const isDanger = setting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE;
-  const switchSize = compact ? ("sm" as const) : ("default" as const);
-  const labelCls = compact ? "text-xs" : undefined;
-  const wrapperCls = permissionToggleWrapperClass(isDanger, compact);
-  const instanceId = useId();
-  const switchId = `${instanceId}-permission-toggle-${settingKey}`;
-
-  return (
-    <div
-      key={settingKey}
-      className={wrapperCls}
-      data-settings-dirty={isDirty}
-      data-settings-dirty-level="container"
-      data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
-    >
-      <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
-        <SettingsFieldLabel
-          htmlFor={switchId}
-          className={`flex items-center gap-1.5 ${labelCls ?? ""}`}
-        >
-          {isDanger && <IconAlertTriangle className="size-4 shrink-0 text-destructive" />}
-          {setting.label}
-        </SettingsFieldLabel>
-        <SettingsFieldDescription>{setting.description}</SettingsFieldDescription>
-      </div>
-      <Switch id={switchId} size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
-  );
-}
-
-function PermissionToggles({
-  profile,
-  onChange,
-  permissionSettings,
-  passthroughConfig,
-  variant,
-  lockPassthrough,
-  baselineProfile,
-}: PermissionToggleProps) {
-  const isCompact = variant === "compact";
-  const switchSize = isCompact ? ("sm" as const) : ("default" as const);
-
-  if (isCompact) {
-    return (
-      <>
-        {PERMISSION_KEYS.map((key) => {
-          const setting = permissionSettings[key];
-          if (!setting?.supported) return null;
-          if (setting.apply_method === "cli_flag") return null;
-          const checked = readPermissionValue(profile, key, permissionSettings);
-          return (
-            <PermissionToggleRow
-              key={key}
-              settingKey={key}
-              setting={setting}
-              checked={checked}
-              onCheckedChange={(checked) => onChange({ [key]: checked })}
-              compact
-              isDirty={
-                Boolean(baselineProfile) &&
-                checked !== readPermissionValue(baselineProfile!, key, permissionSettings)
-              }
-            />
-          );
-        })}
-        {passthroughConfig?.supported && (
-          <div className="flex items-center justify-between gap-2">
-            <div className="space-y-0.5">
-              <SettingsFieldLabel className="text-xs">{passthroughConfig.label}</SettingsFieldLabel>
-              <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
-            </div>
-            <Switch
-              size={switchSize}
-              checked={profile.cli_passthrough}
-              onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
-              disabled={lockPassthrough}
-              data-settings-dirty={
-                Boolean(baselineProfile) &&
-                profile.cli_passthrough !== baselineProfile?.cli_passthrough
-              }
-            />
-          </div>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {PERMISSION_KEYS.map((key) => {
-        const setting = permissionSettings[key];
-        if (!setting?.supported) return null;
-        if (setting.apply_method === "cli_flag") return null;
-        return (
-          <PermissionToggleRow
-            key={key}
-            settingKey={key}
-            setting={setting}
-            checked={readPermissionValue(profile, key, permissionSettings)}
-            onCheckedChange={(checked) => onChange({ [key]: checked })}
-            compact={false}
-            isDirty={
-              Boolean(baselineProfile) &&
-              readPermissionValue(profile, key, permissionSettings) !==
-                readPermissionValue(baselineProfile!, key, permissionSettings)
-            }
-          />
-        );
-      })}
-      {passthroughConfig?.supported && (
-        <div className="flex items-center justify-between rounded-md border p-3">
-          <div className="space-y-1">
-            <SettingsFieldLabel>{passthroughConfig.label}</SettingsFieldLabel>
-            <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
-          </div>
-          <Switch
-            checked={profile.cli_passthrough}
-            onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
-            disabled={lockPassthrough}
-            data-settings-dirty={
-              Boolean(baselineProfile) &&
-              profile.cli_passthrough !== baselineProfile?.cli_passthrough
-            }
-          />
-        </div>
-      )}
-    </div>
-  );
-}
 
 type CapabilitiesRowProps = {
   profile: ProfileFormData;
@@ -536,17 +366,12 @@ export function ProfileFormFields({
         baselineProfile={baselineProfile}
       />
 
-      {cursorMcpAuthSupported && (
-        <CursorMCPAuthPreference
-          enabled={profile.cursor_mcp_auth_enabled ?? true}
-          savedEnabled={
-            baselineProfile === undefined
-              ? undefined
-              : (baselineProfile.cursor_mcp_auth_enabled ?? true)
-          }
-          onChange={(enabled) => onChange({ cursor_mcp_auth_enabled: enabled })}
-        />
-      )}
+      <CursorProfilePreferences
+        supported={cursorMcpAuthSupported}
+        profile={profile}
+        baselineProfile={baselineProfile}
+        onChange={onChange}
+      />
 
       <ProfileFormFooter
         profile={profile}
@@ -560,6 +385,42 @@ export function ProfileFormFields({
         isCompact={isCompact}
       />
     </div>
+  );
+}
+
+function CursorProfilePreferences({
+  supported,
+  profile,
+  baselineProfile,
+  onChange,
+}: {
+  supported: boolean;
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  if (!supported) return null;
+  return (
+    <>
+      <CursorMCPAuthPreference
+        enabled={profile.cursor_mcp_auth_enabled ?? true}
+        savedEnabled={
+          baselineProfile === undefined
+            ? undefined
+            : (baselineProfile.cursor_mcp_auth_enabled ?? true)
+        }
+        onChange={(enabled) => onChange({ cursor_mcp_auth_enabled: enabled })}
+      />
+      <CursorPluginsMCPPreference
+        enabled={profile.cursor_plugins_mcp_enabled ?? true}
+        savedEnabled={
+          baselineProfile === undefined
+            ? undefined
+            : (baselineProfile.cursor_plugins_mcp_enabled ?? true)
+        }
+        onChange={(enabled) => onChange({ cursor_plugins_mcp_enabled: enabled })}
+      />
+    </>
   );
 }
 

@@ -44,6 +44,8 @@ export type ProfileFormData = {
   cli_flags: CLIFlag[];
   command_prefix?: string;
   provider_kind?: string;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
 } & Record<PermissionKey, boolean>;
 
 function CustomProviderModelInput({

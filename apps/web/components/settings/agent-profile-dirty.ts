@@ -49,6 +49,7 @@ function hasExecutionProfileFieldsChanged(
     arePermissionsDirty(draft, savedProfile, permissionSettings),
     draft.cliPassthrough !== savedProfile.cliPassthrough,
     (draft.cursorMcpAuthEnabled ?? true) !== (savedProfile.cursorMcpAuthEnabled ?? true),
+    (draft.cursorPluginsMcpEnabled ?? true) !== (savedProfile.cursorPluginsMcpEnabled ?? true),
     (draft.enabled ?? true) !== (savedProfile.enabled ?? true),
     !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
     (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? ""),

@@ -77,6 +77,14 @@ function changedCursorMcpAuthPreference(
   return draftValue === (savedProfile.cursorMcpAuthEnabled ?? true) ? undefined : draftValue;
 }
 
+function changedCursorPluginsMcpPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftValue = draft.cursorPluginsMcpEnabled ?? true;
+  return draftValue === (savedProfile.cursorPluginsMcpEnabled ?? true) ? undefined : draftValue;
+}
+
 export function useProfileEditorState(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
@@ -182,6 +190,50 @@ type ProfileEditorActionsOptions = {
   onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
 };
 
+function providerUpdateFields(draft: AgentProfile) {
+  const isOpenAI = (draft.providerKind ?? "") === "openai_compatible";
+  return {
+    provider_kind: draft.providerKind ?? "",
+    provider_base_url: isOpenAI ? (draft.providerBaseUrl ?? "") : "",
+    provider_api_key_secret_id: isOpenAI ? (draft.providerApiKeySecretId ?? "") : "",
+  };
+}
+
+function changedEnabledPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftEnabled = draft.enabled ?? true;
+  const savedEnabled = savedProfile.enabled ?? true;
+  return draftEnabled !== savedEnabled ? draftEnabled : undefined;
+}
+
+function buildProfileUpdatePatch(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): Parameters<typeof updateAgentProfileAction>[1] {
+  return {
+    name: draft.name,
+    model: draft.model,
+    fallback_model: draft.fallbackModel ?? "",
+    auto_fallback: draft.autoFallback ?? false,
+    require_exact_model: draft.requireExactModel ?? false,
+    mode: draft.mode,
+    config_options: draft.configOptions ?? {},
+    ...permissionsToProfilePatch(draft),
+    cli_passthrough: draft.cliPassthrough,
+    cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
+    cursor_plugins_mcp_enabled: changedCursorPluginsMcpPreference(draft, savedProfile),
+    // Omit an unchanged enabled value so a profile editor save cannot
+    // resurrect a concurrent list-toggle response from its stale draft.
+    enabled: changedEnabledPreference(draft, savedProfile),
+    cli_flags: draft.cliFlags,
+    command_prefix: draft.commandPrefix ?? "",
+    ...providerUpdateFields(draft),
+    env_vars: draft.envVars ?? [],
+  };
+}
+
 export function useProfileSave({
   agent,
   draft,
@@ -220,34 +272,7 @@ export function useProfileSave({
     try {
       const updated = await updateAgentProfileAction(
         draft.id,
-        {
-          name: draft.name,
-          model: draft.model,
-          fallback_model: draft.fallbackModel ?? "",
-          auto_fallback: draft.autoFallback ?? false,
-          require_exact_model: draft.requireExactModel ?? false,
-          mode: draft.mode,
-          config_options: draft.configOptions ?? {},
-          ...permissionsToProfilePatch(draft),
-          cli_passthrough: draft.cliPassthrough,
-          cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
-          // Omit an unchanged enabled value so a profile editor save cannot
-          // resurrect a concurrent list-toggle response from its stale draft.
-          enabled:
-            (draft.enabled ?? true) !== (savedProfile.enabled ?? true)
-              ? (draft.enabled ?? true)
-              : undefined,
-          cli_flags: draft.cliFlags,
-          command_prefix: draft.commandPrefix ?? "",
-          provider_kind: draft.providerKind ?? "",
-          provider_base_url:
-            (draft.providerKind ?? "") === "openai_compatible" ? (draft.providerBaseUrl ?? "") : "",
-          provider_api_key_secret_id:
-            (draft.providerKind ?? "") === "openai_compatible"
-              ? (draft.providerApiKeySecretId ?? "")
-              : "",
-          env_vars: draft.envVars ?? [],
-        },
+        buildProfileUpdatePatch(draft, savedProfile),
         force,
       );
       if (acceptProfileSaveResponse(updated, submitted)) {

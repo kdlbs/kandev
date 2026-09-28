@@ -69,6 +69,7 @@ export async function createAgentAction(payload: {
       mode?: string;
       cli_passthrough: boolean;
       cursor_mcp_auth_enabled?: boolean;
+      cursor_plugins_mcp_enabled?: boolean;
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
@@ -115,6 +116,7 @@ export async function createAgentProfileAction(
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
     cursor_mcp_auth_enabled?: boolean;
+    cursor_plugins_mcp_enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     provider_kind?: string;
@@ -149,6 +151,7 @@ export async function updateAgentProfileAction(
     auto_approve?: boolean;
     cli_passthrough?: boolean;
     cursor_mcp_auth_enabled?: boolean;
+    cursor_plugins_mcp_enabled?: boolean;
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;

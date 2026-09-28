@@ -106,6 +106,9 @@ type AgentProfile struct {
 	// CursorMCPAuthEnabled shares local Cursor MCP auth files for Cursor launches.
 	CursorMCPAuthEnabled bool `json:"cursor_mcp_auth_enabled" db:"cursor_mcp_auth_enabled"`
 
+	// CursorPluginsMCPEnabled imports local Cursor plugin MCP servers for Cursor launches.
+	CursorPluginsMCPEnabled bool `json:"cursor_plugins_mcp_enabled" db:"cursor_plugins_mcp_enabled"`
+
 	// Enabled gates the profile from new-work selection: when false, the
 	// profile is hidden from task/session creation pickers but keeps serving
 	// existing sessions and remains editable in settings. Independent of

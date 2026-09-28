@@ -240,6 +240,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
 | Share local Cursor MCP credentials | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory. |
+| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Discovers and imports MCP servers from installed Cursor plugins and user configuration into local task worktrees. |
 
 Agents can inspect and update declared profile settings through the compact
 `search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,

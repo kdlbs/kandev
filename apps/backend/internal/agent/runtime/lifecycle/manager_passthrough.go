@@ -404,7 +404,7 @@ func (m *Manager) applyPassthroughMCP(
 	// passthroughMCPServers always returns at least the kandev server (or an
 	// error when the port is unavailable), so the strategy receives a non-empty
 	// list; each strategy guards its own empty-after-filtering case.
-	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig)
+	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig, profileInfo, execution.ExecutorType, pt.MCPStrategy)
 	if err != nil {
 		return nil, err
 	}
@@ -420,9 +420,15 @@ func (m *Manager) applyPassthroughMCP(
 }
 
 // passthroughMCPServers returns kandev's own HTTP MCP server followed by the
-// profile's resolved MCP servers. The kandev server requires the standalone
-// port; a profile server named "kandev" is dropped so it cannot shadow ours.
-func (m *Manager) passthroughMCPServers(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
+// profile's resolved MCP servers and any discovered Cursor plugin MCP servers.
+func (m *Manager) passthroughMCPServers(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+	strategy mcpconfig.PassthroughMCPStrategy,
+) ([]agentctltypes.McpServer, error) {
 	port := passthroughMCPConfigPort(execution)
 	if port <= 0 {
 		return nil, fmt.Errorf("standalone port unavailable for passthrough MCP config")
@@ -441,6 +447,10 @@ func (m *Manager) passthroughMCPServers(ctx context.Context, execution *AgentExe
 			continue
 		}
 		servers = append(servers, srv)
+	}
+	if strategy != nil {
+		discovered := m.discoverCursorPluginMCPServers(execution, profileInfo, executorType, strategy)
+		servers = mergeDiscoveredPluginServers(servers, discovered)
 	}
 	return servers, nil
 }

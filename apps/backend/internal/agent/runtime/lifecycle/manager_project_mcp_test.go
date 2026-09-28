@@ -209,3 +209,70 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 		t.Fatalf("resolved disabled execution profile kept shared link, lstat err=%v", err)
 	}
 }
+
+func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
+	cursorHome := t.TempDir()
+	t.Setenv("HOME", cursorHome)
+
+	pluginDir := filepath.Join(cursorHome, ".cursor", "plugins", "cache", "cursor-public", "atlassian", "v1")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(`{
+		"mcpServers": {
+			"atlassian": {
+				"type": "streamable-http",
+				"url": "https://mcp.atlassian.com/v2/mcp"
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  t.TempDir(),
+		ExecutorType:   "worktree",
+		metadata:       map[string]interface{}{},
+		standalonePort: 45678,
+	}
+	agentConfig, ok := mgr.registry.Get("cursor-acp")
+	if !ok {
+		t.Fatal("cursor-acp agent missing from test registry")
+	}
+
+	profileInfo := &AgentProfileInfo{
+		CursorPluginsMCPEnabled: true,
+	}
+
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, profileInfo, "worktree"); err != nil {
+		t.Fatalf("materializeRuntimeProjectMCP: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(execution.WorkspacePath, ".cursor", "mcp.json"))
+	if err != nil {
+		t.Fatalf("cursor mcp.json not written: %v", err)
+	}
+	var payload struct {
+		MCPServers map[string]struct {
+			URL  string `json:"url"`
+			Type string `json:"type"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("cursor mcp.json not valid JSON: %v\n%s", err, data)
+	}
+	if _, ok := payload.MCPServers["atlassian"]; !ok {
+		t.Fatalf("atlassian plugin MCP server not found in materialized .cursor/mcp.json: %s", data)
+	}
+	if payload.MCPServers["atlassian"].URL != "https://mcp.atlassian.com/v2/mcp" {
+		t.Errorf("atlassian URL = %q, want https://mcp.atlassian.com/v2/mcp", payload.MCPServers["atlassian"].URL)
+	}
+	if _, ok := payload.MCPServers["kandev"]; !ok {
+		t.Fatalf("kandev MCP server missing: %s", data)
+	}
+}

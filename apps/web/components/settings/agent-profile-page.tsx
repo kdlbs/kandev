@@ -92,6 +92,7 @@ function toProfileFormData(
     allow_indexing: permissionValues.allow_indexing,
     cli_passthrough: profile.cliPassthrough,
     cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
+    cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",

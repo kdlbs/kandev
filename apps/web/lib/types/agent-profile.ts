@@ -165,6 +165,8 @@ export type AgentProfile = {
   cliPassthrough: boolean;
   /** Reuse locally stored Cursor MCP OAuth credentials when this profile launches. */
   cursorMcpAuthEnabled?: boolean;
+  /** Import local Cursor plugin MCP servers when this profile launches. */
+  cursorPluginsMcpEnabled?: boolean;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep running and the profile stays editable in settings.
@@ -254,6 +256,7 @@ export type AgentProfilePayload = {
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
   cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
   enabled?: boolean;
   user_modified?: boolean;
   created_at: string;

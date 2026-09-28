@@ -50,6 +50,15 @@ describe("sameEditableProfile", () => {
       ),
     ).toBe(false);
   });
+
+  it("treats Cursor plugin MCP import preference as an editable change", () => {
+    expect(
+      sameEditableProfile(
+        profile({ cursorPluginsMcpEnabled: true }),
+        profile({ cursorPluginsMcpEnabled: false }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("reconcileAgentProfileSnapshot", () => {

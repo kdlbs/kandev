@@ -9,25 +9,26 @@ import (
 // creation. Value fields retain the existing create defaults; omitted optional
 // fields are left at their domain defaults.
 type ProfileCreateRequest struct {
-	AgentID                string                  `json:"agent_id"`
-	Name                   string                  `json:"name"`
-	Model                  string                  `json:"model,omitempty"`
-	FallbackModel          string                  `json:"fallback_model,omitempty"`
-	AutoFallback           bool                    `json:"auto_fallback,omitempty"`
-	RequireExactModel      bool                    `json:"require_exact_model,omitempty"`
-	Mode                   string                  `json:"mode,omitempty"`
-	ConfigOptions          map[string]string       `json:"config_options,omitempty"`
-	AllowIndexing          bool                    `json:"allow_indexing,omitempty"`
-	AutoApprove            bool                    `json:"auto_approve,omitempty"`
-	CLIPassthrough         bool                    `json:"cli_passthrough,omitempty"`
-	CLIFlags               []CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars                []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
-	CommandPrefix          string                  `json:"command_prefix,omitempty"`
-	ProviderKind           string                  `json:"provider_kind,omitempty"`
-	ProviderBaseURL        string                  `json:"provider_base_url,omitempty"`
-	ProviderAPIKeySecretID string                  `json:"provider_api_key_secret_id,omitempty"`
-	CursorMCPAuthEnabled   *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
-	Dynamic                *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+	AgentID                 string                  `json:"agent_id"`
+	Name                    string                  `json:"name"`
+	Model                   string                  `json:"model,omitempty"`
+	FallbackModel           string                  `json:"fallback_model,omitempty"`
+	AutoFallback            bool                    `json:"auto_fallback,omitempty"`
+	RequireExactModel       bool                    `json:"require_exact_model,omitempty"`
+	Mode                    string                  `json:"mode,omitempty"`
+	ConfigOptions           map[string]string       `json:"config_options,omitempty"`
+	AllowIndexing           bool                    `json:"allow_indexing,omitempty"`
+	AutoApprove             bool                    `json:"auto_approve,omitempty"`
+	CLIPassthrough          bool                    `json:"cli_passthrough,omitempty"`
+	CLIFlags                []CLIFlagDTO            `json:"cli_flags,omitempty"`
+	EnvVars                 []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	CommandPrefix           string                  `json:"command_prefix,omitempty"`
+	ProviderKind            string                  `json:"provider_kind,omitempty"`
+	ProviderBaseURL         string                  `json:"provider_base_url,omitempty"`
+	ProviderAPIKeySecretID  string                  `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled    *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
+	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
+	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 // ProfileUpdateRequest is the shared partial wire contract. A nil pointer
@@ -51,12 +52,13 @@ type ProfileUpdateRequest struct {
 	CommandPrefix     *string             `json:"command_prefix,omitempty"`
 	// Provider* replace their value when non-nil. The settings editor always
 	// sends the full triple on save, so a switch back to Native persists.
-	ProviderKind           *string                 `json:"provider_kind,omitempty"`
-	ProviderBaseURL        *string                 `json:"provider_base_url,omitempty"`
-	ProviderAPIKeySecretID *string                 `json:"provider_api_key_secret_id,omitempty"`
-	CursorMCPAuthEnabled   *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
-	Dynamic                *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-	Force                  bool                    `json:"force,omitempty"`
+	ProviderKind            *string                 `json:"provider_kind,omitempty"`
+	ProviderBaseURL         *string                 `json:"provider_base_url,omitempty"`
+	ProviderAPIKeySecretID  *string                 `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled    *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
+	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
+	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+	Force                   bool                    `json:"force,omitempty"`
 }
 
 func (r ProfileCreateRequest) Validate() error {
@@ -109,6 +111,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "provider_base_url", JSONType: "string", Support: "read_write", Description: "OpenAI-compatible provider base URL."},
 		{Path: "provider_api_key_secret_id", JSONType: "string", Support: "read_write", Description: "Global secret reference for the provider API key.", Sensitive: true},
 		{Path: "cursor_mcp_auth_enabled", JSONType: "boolean", Support: "read_write", Description: "Share local Cursor MCP credentials. Defaults to true for new profiles."},
+		{Path: "cursor_plugins_mcp_enabled", JSONType: "boolean", Support: "read_write", Description: "Import local Cursor plugin MCP servers. Defaults to true for new profiles."},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

@@ -51,6 +51,7 @@ function profileFormData(
     allow_indexing: permissions.allow_indexing,
     cli_passthrough: profile.cliPassthrough ?? false,
     cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
+    cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
   };

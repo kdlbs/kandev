@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -29,7 +30,7 @@ func (m *Manager) materializeRuntimeProjectMCP(
 	if err := m.prepareCursorMCPAuth(execution, profileInfo, executorType, rt.ProjectMCPStrategy); err != nil {
 		return err
 	}
-	servers, err := m.runtimeProjectMCPServers(ctx, execution, agentConfig)
+	servers, err := m.runtimeProjectMCPServers(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy)
 	if err != nil {
 		return err
 	}
@@ -43,8 +44,15 @@ func (m *Manager) materializeRuntimeProjectMCP(
 	return m.writePassthroughMCPFiles(execution, artifacts.Files)
 }
 
-func (m *Manager) runtimeProjectMCPServers(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
-	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig)
+func (m *Manager) runtimeProjectMCPServers(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+	strategy mcpconfig.PassthroughMCPStrategy,
+) ([]agentctltypes.McpServer, error) {
+	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig, profileInfo, executorType, strategy)
 	if err == nil {
 		return servers, nil
 	}

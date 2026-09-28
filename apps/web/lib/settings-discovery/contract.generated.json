@@ -404,6 +404,21 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.cursor_plugins_mcp_enabled",
+          "field_path": "cursor_plugins_mcp_enabled",
+          "label": "cursor_plugins_mcp_enabled",
+          "description": "Import local Cursor plugin MCP servers. Defaults to true for new profiles.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.dynamic",
           "field_path": "dynamic",
           "label": "dynamic",
@@ -6292,6 +6307,7 @@
       "command_prefix",
       "config_options",
       "cursor_mcp_auth_enabled",
+      "cursor_plugins_mcp_enabled",
       "dynamic",
       "enabled",
       "env_vars",
