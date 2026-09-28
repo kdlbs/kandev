@@ -107,8 +107,13 @@ registers one only while phase 3 is effective. `CheckCeiling(coordinatorID)`
 runs for the coordinator whose open unattended turn is on `sessionID`. It
 acts only when the session's active turn (`GetActiveTurnBySessionID`) is the
 row's `session_turn_id` ([wake turn end](wake.md#turn-end)); a session running
-any other turn is left alone. It runs `Spend`, and when the result is not
-measurable or `WindowSubcents >= cost_ceiling_subcents` it:
+any other turn is left alone. The ceiling it compares against is the
+coordinator's current `cost_ceiling_subcents`, so a raised or lowered ceiling
+applies to the open turn; when that is null (a manager turned autonomy off
+and then cleared the ceiling while the turn was still open), it is the turn
+row's `start_ceiling_subcents` ([wake store](wake.md#store)). It runs `Spend`,
+and when the result is not measurable or `WindowSubcents` is at or above
+that ceiling it:
 
 1. marks the row with `stop_requested_at` in `UPDATE ... SET
    stop_requested_at = ? WHERE id = ? AND outcome IS NULL AND
@@ -145,7 +150,8 @@ with `stop_requested_at` set as `stopped_at_ceiling`, whatever the session
 state. A retried cancel of a turn that has already ended gets `ErrTurnNotActive`
 and does nothing.
 
-The backstop runs `CheckCeiling` for every open unattended turn each tick, so
+The backstop runs `CheckCeiling` for every open unattended turn each tick,
+whether or not autonomy is still on ([wake backstop](wake.md#backstop)), so
 a dropped observer call or a failed cancel delays the stop by at most 60
 seconds (`AC-COORDINATOR-SPEND-003.2`). Both acting paths cancel only
 through `CancelTurn` fenced to the row's `session_turn_id`, so an attended

@@ -2,9 +2,10 @@
 id: "09-automatic"
 title: "The first automatic class: create_task"
 status: pending
-wave: 2
+wave: 3
 depends_on:
   - "01-flag-schema-settings"
+  - "04-wake-recorder-backstop"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-AUTOMATIC-001
@@ -55,7 +56,11 @@ confirming `create_task`.
   claim (`claimed_automatically` 0 on a manager's claim), the adapter's
   exclusion of log rows decided by the automatic path, the
   server-computed review window and row count, and `OnUndo` lowering with the
-  backstop retry ([automatic](../../specs/coordinator/system-design/automatic.md)).
+  backstop retry, filled into task 04's step 2.4 hook
+  ([automatic](../../specs/coordinator/system-design/automatic.md)).
+- `internal/coordinator/no_turn_start_test.go`: append the automatic
+  approval row to `noTurnStartPaths`
+  ([copilot](../../specs/coordinator/system-design/copilot.md#attended-only)).
 - Web: in phase 2's permission settings, "Cannot be raised", the eligibility
   list, **Review the last 30 days**, **Mark as reviewed**, **Raise to
   automatic**, the raised record and **Lower**
@@ -100,10 +105,17 @@ Merge           Cannot be raised
   now minus 30 days and `row_count` from the log, ignoring client fields; a
   log read error is 503 and stores nothing.
 - Undoing a task an automatic approval created lowers the class at once and
-  logs the reason; a failed lower is retried by the backstop. Undoing a task
+  logs the reason. A failed lower is retried by the backstop's step 2.4 hook
+  on the next tick, also for a coordinator whose autonomy is off, and a
+  retry against a setting already `requires_approval` writes nothing.
+  Undoing a task
   created by a manager's approval of a proposal whose automatic approval had
   ended `failed` does not lower, and that manager approval counts as a
   decided row.
+- The `noTurnStartPaths` row for the automatic approval, run through
+  `TestCoordinatorConversationNoTurnStart`, asserts that an automatic
+  approval sends no prompt and starts no agent on the conversation or the
+  created task.
 - Two processes proposing concurrently at 9 automatic approvals in 24 hours
   on PostgreSQL produce exactly one tenth automatic approval (`-race` and a
   two-connection PostgreSQL test); a lower committed between step 1's read
@@ -112,7 +124,7 @@ Merge           Cannot be raised
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/coordinator/... -run 'Automatic|Eligibility|ClassReview|Phase2' -count=1
+cd apps/backend && go test ./internal/coordinator/... -run 'Automatic|Eligibility|ClassReview|Phase2|NoTurnStart' -count=1
 cd apps/backend && go test ./internal/coordinator/... -run 'Automatic' -race -count=1
 cd apps/web && pnpm test -- app/settings/workspace app/coordinator
 cd apps/web && pnpm run typecheck && pnpm run i18n:check

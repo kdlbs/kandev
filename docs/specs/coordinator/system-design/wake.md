@@ -112,6 +112,7 @@ Unique index `(coordinator_id, task_id, kind, episode_key)`; index
 | `session_turn_id` | text null | the task session turn (`task_session_turns.id`) the message started; set with `message_id` |
 | `wake_count` | integer not null | |
 | `denied_permissions` | integer not null default 0 | [containment](containment.md#unattended-permissions) |
+| `start_ceiling_subcents` | bigint not null | the coordinator's ceiling when the turn started; the ceiling check falls back to it when the ceiling is cleared after autonomy is turned off ([spend](spend.md#stopping)) |
 | `stop_requested_at` | timestamp null | set by the ceiling stop before it cancels ([spend](spend.md#stopping)) |
 | `outcome` | text null | null while open; then `completed`, `failed`, `cancelled`, `stopped_at_ceiling`, `send_failed`, `interrupted` |
 | `cost_subcents` | bigint null | set at turn end ([spend](spend.md#per-turn-cost)) |
@@ -181,19 +182,57 @@ the backstop recovers it.
 
 `internal/coordinator/wake_backstop.go` runs one goroutine with a 60-second
 ticker, started after the startup pass and stopped (joined) before the store
-closes. Each tick:
+closes. Its duties come in two groups. **Turn and setting duties** run for a
+coordinator whatever its `autonomy_enabled` reads. **Wake duties** run only
+while autonomy is on. Turning autonomy off therefore stops new wakes and
+deliveries at once, but it never abandons a turn that is already open or an
+undo lowering that is already owed (`AC-COORDINATOR-WAKE-004.3`).
 
-1. Lists coordinators with `autonomy_enabled = 1`, ordered by id.
-2. For each, reads `ListOwnTasks` and, per task, the current episodes from
-   stored state: the primary session's pending clarification bundle and
-   pending permission message, the task's `coordinator_stalls` row when
-   [current](#stall-currency), the
-   primary session's active error, and the task state. It calls `RecordWake`
-   for each. A read error for one coordinator logs at warn, increments
-   `coordinator_backstop_skipped_total`, and moves on.
-3. Runs the ceiling check of [spend](spend.md#stopping) for the coordinator's
-   open turn, if any.
-4. Calls `Deliver(coordinatorID)`.
+Each tick:
+
+1. Builds the visit set, the union of three queries, deduplicated and ordered
+   by coordinator id:
+   - coordinators with `autonomy_enabled = 1`;
+   - coordinators with a `coordinator_unattended_turns` row that has
+     `outcome IS NULL`, or `finished_at` in the last 10 minutes;
+   - coordinators with at least one `coordinator_proposals` row with
+     `claimed_automatically = 1` ([automatic](automatic.md#lowering)).
+
+   A query that fails logs at warn and increments
+   `coordinator_backstop_skipped_total`, and the tick continues with the
+   other queries. A coordinator deleted between the list and its visit is
+   skipped.
+2. For each coordinator in the visit set, re-reads the coordinator row and
+   runs the turn and setting duties in this order:
+   1. message recovery for its open turn with `message_id` null
+      ([Finding the turn's message](#finding-the-turns-message));
+   2. missed-settle re-derivation for its open turn ([Turn end](#turn-end)),
+      then the per-turn cost recompute for its turns settled in the last 10
+      minutes ([spend](spend.md#per-turn-cost));
+   3. the ceiling check `CheckCeiling` of [spend](spend.md#stopping) for its
+      open turn, if any, including a row with `stop_requested_at` set;
+   4. the lower-on-undo retry of [automatic](automatic.md#lowering).
+
+   A read or write error in one duty logs at warn, increments
+   `coordinator_backstop_skipped_total`, and does not skip the later duties
+   or coordinators.
+3. Only when the re-read row has `autonomy_enabled = 1`, runs the wake duties:
+   1. reads `ListOwnTasks` and, per task, the current episodes from stored
+      state: the primary session's pending clarification bundle and pending
+      permission message, the task's `coordinator_stalls` row when
+      [current](#stall-currency), the primary session's active error, and the
+      task state. It calls `RecordWake` for each. A read error for one
+      coordinator logs at warn, increments
+      `coordinator_backstop_skipped_total`, and moves on to the next
+      coordinator.
+   2. Calls `Deliver(coordinatorID)`.
+
+With autonomy off, an open turn therefore keeps the 60-second ceiling bound of
+`AC-COORDINATOR-SPEND-003.2`, the `stop_failing` state of
+`AC-COORDINATOR-SPEND-003.4`, and the recovery of a missed settle. No wake is
+recorded for it and nothing is delivered after it ends. Once its turns are
+settled and past the 10-minute recompute, and it has no automatic claim, the
+coordinator leaves the visit set.
 
 ### Stall currency
 
@@ -256,7 +295,9 @@ ceiling-releasing turn end, and each backstop tick.
    to read current state.
 3. In one transaction under the [wake lock](#wake-lock): re-read the
    coordinator row and roll back if `autonomy_enabled` is not 1; insert the
-   turn row (`outcome` null, `message_id` null), where a unique violation
+   turn row (`outcome` null, `message_id` null, `start_ceiling_subcents`
+   copied from the re-read row's `cost_ceiling_subcents`, which autonomy on
+   guarantees is set), where a unique violation
    means another delivery holds the open turn, so roll back; `UPDATE
    coordinator_wakes SET status='delivered', turn_id=? WHERE id IN (...) AND
    status='pending'`, and roll back if it changed no row; set `wake_count` to
@@ -403,7 +444,11 @@ re-read.
   `autonomy_enabled`: "Autonomy: Active" or "Autonomy: Held (<reason text>)",
   "Last woke <age>" or "Not woken yet", "<n> pending", and the spend pill from
   [spend](spend.md#screens). A read error shows "Autonomy state unavailable"
-  with Try again (`AC-COORDINATOR-WAKE-006.4`).
+  with Try again (`AC-COORDINATOR-WAKE-006.4`). While autonomy is off, the
+  strip renders only when `last_turn.stop_state` is `"stop_failing"`, and
+  then shows "Autonomy: Off" with the stop warning and Stop of
+  [spend](spend.md#stopping), so a turn left open by turning autonomy off
+  still surfaces a failing stop (`AC-COORDINATOR-SPEND-003.4`).
 - `classify` in `apps/web/lib/coordinator/attention.ts` gains an optional
   `autonomy` input and emits one item of kind `autonomy` when the reason is in
   the persistent set of `AC-COORDINATOR-WAKE-006.2` and `pending_wakes > 0`,
@@ -424,6 +469,7 @@ re-read.
 | Send refused before dispatch | `send_failed`, wakes back to `pending`, retried on the next trigger after the cooldown |
 | Send outcome unknown | Message found: the turn continues. Not found after two minutes: `send_failed`, wakes back to `pending` |
 | Autonomy turned off during delivery | Step 3 re-reads the flag under the wake lock and rolls back |
+| Autonomy turned off while a turn is open | The turn runs on; the backstop keeps its ceiling check, recovery and settle until it ends; no wake is recorded or delivered |
 | Two deliveries race | Partial unique index admits one turn row |
 | Conversation busy or unavailable | Wakes wait; nothing is created |
 

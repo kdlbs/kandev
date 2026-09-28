@@ -33,11 +33,14 @@ control on both proposal card surfaces.
   and deliver route, the single conditional update shared in form with
   approve's claim and reject, [Reply delivery](../../specs/coordinator/system-design/relay.md#reply-delivery)
   through `OpenConversation` and the panel composer's message path as the
-  replying manager, with the delivery claim on `reply_delivery_claimed_at`,
-  `metadata.coordinator_reply_proposal_id` and the stored-or-queued message
-  lookup before each send, the send under a 60-second deadline, the
-  finalisation conditional on this delivery's claim value, and the
-  kind-specific delivery text; the guard's refused list gains both routes;
+  replying manager, with the in-flight marker on `reply_delivery_claimed_at`,
+  the delivery key `coordinator-reply:<proposal_id>` as message and queue
+  entry id, `metadata.coordinator_reply_proposal_id`, the new
+  `CreateQueuedMessageOnce` in `internal/task/service` and its repository
+  writer on both dialects (message insert `ON CONFLICT (id) DO NOTHING`, queue
+  entry only when one row was inserted, one transaction, before any
+  dispatch), the `NotifyQueuedUserPrompt` kick, the finalisation on any
+  returned message, and the kind-specific delivery text; the guard's refused list gains both routes;
   `in_reply_to` validation ([Revised proposals](../../specs/coordinator/system-design/relay.md#revised-proposals));
   the client store's never-unsettle rule treats `returned` as settled.
 - Web: the control, returned and revised card states and **Send again** in
@@ -67,15 +70,28 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
   longer is 400 naming `text`; a settled proposal is 409 before validation; a
   reply racing approve or reject leaves exactly one winner (race test).
 - The reply is delivered as the manager's message (opening a conversation when
-  none), queued behind a busy turn; a send failure leaves `returned` with
+  none), queued behind a busy turn and dispatched when it ends; a send failure leaves `returned` with
   "Reply saved, not delivered" and **Send again**, which delivers once.
-- Two concurrent deliver calls send one message; a crash injected after the
-  send and before `reply_delivered_at` is followed, once the claim is two
-  minutes old, by a Send again that finds the message by its metadata and
-  sends nothing (`synctest`).
-- A send that blocks past 60 seconds is cancelled and clears only its own
-  claim; a delivery whose claim was taken over after expiry writes nothing
-  at step 4, and the reply is sent once (`synctest`).
+- `CreateQueuedMessageOnce` on SQLite and on PostgreSQL under
+  `KANDEV_TEST_POSTGRES_DSN`: the first call returns `created = true` with
+  one message row and one queue entry; a second call with the same id
+  returns the stored message with `created = false` and adds no message and
+  no queue entry; a failure inside the transaction stores neither.
+- Two concurrent deliver calls (`-race`), and two deliveries where the first
+  is held after step 1 until the second has finished (a slow send outliving
+  the other's claim), each store one message, leave one queue entry and
+  produce one agent prompt, and both end with `reply_delivered_at` set.
+- A crash injected after step 3 commits and before step 4 is followed by a
+  Send again that stores and dispatches nothing new and sets
+  `reply_delivered_at`; a crash injected inside step 3's transaction is
+  followed by a Send again that stores and dispatches the reply once.
+- A full queue (`ErrQueueFull`) and a notify error: the first leaves the
+  proposal undelivered with **Send again** and nothing stored; the second
+  still records the delivery and the entry drains when the session is next
+  idle.
+- With the conversation replaced after a crash that followed step 3's
+  commit, Send again stores nothing in the new conversation and records the
+  delivery.
 - A reply to an improvement is delivered with the improvement text, which
   names no `in_reply_to`.
 - `in_reply_to` naming a `returned` task proposal of the same coordinator is
@@ -88,6 +104,7 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
 ```bash
 cd apps/backend && go test ./internal/coordinator/... -run 'Reply' -count=1
 cd apps/backend && go test ./internal/coordinator/... -run 'Reply.*Race' -race -count=1
+cd apps/backend && go test ./internal/task/service/... ./internal/task/repository/... -run 'QueuedMessageOnce' -race -count=1
 cd apps/backend && go test ./internal/mcp/... -run 'Coordinator' -count=1
 cd apps/web && pnpm test -- app/coordinator hooks/domains/coordinator
 cd apps/web && pnpm run typecheck && pnpm run i18n:check

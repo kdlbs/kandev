@@ -45,7 +45,7 @@ Starts only after G3 is met.
   `in_reply_to`, `decided_automatically`, `claimed_automatically`,
   `automatic_at`; tables `coordinator_wakes`,
   `coordinator_unattended_turns` (with the partial unique index,
-  `session_turn_id` and `stop_requested_at`), `coordinator_unattended_denials`,
+  `session_turn_id`, `start_ceiling_subcents` and `stop_requested_at`), `coordinator_unattended_denials`,
   `coordinator_class_reviews`, `coordinator_pending_changes`; deletion with
   the coordinator and on `workspace.deleted`; retention in the startup pass
   ([wake Store](../../specs/coordinator/system-design/wake.md#store)).
@@ -77,8 +77,9 @@ Starts only after G3 is met.
   transaction and leaves an open turn row untouched. `WithWakeLock`
   serialises two concurrent callers for one coordinator and not for two
   coordinators (SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with
-  `-race`). The delivery half of `AC-COORDINATOR-WAKE-004.3` is tested in
-  task 05.
+  `-race`). The delivery half of `AC-COORDINATOR-WAKE-004.3`, and its
+  clause that an open turn keeps its ceiling stop, recovery and settle, are
+  tested in task 05.
 - With either flag off, the new PATCH fields are ignored, every phase 3 route
   is 404, the Autonomy section is hidden, and stored rows survive an off/on
   cycle.

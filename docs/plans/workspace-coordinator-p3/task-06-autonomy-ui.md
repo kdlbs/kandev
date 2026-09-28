@@ -89,7 +89,10 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
   and Check again.
 - An open unattended turn whose ceiling stop was requested more than five
   minutes ago shows "Stop at ceiling not confirmed" with Stop on the strip;
-  at four minutes it does not (`synctest` on the read).
+  at four minutes it does not (`synctest` on the read). With autonomy
+  turned off while that turn is open, the strip renders "Autonomy: Off" with
+  the same warning and Stop; with autonomy off and no failing stop, it does
+  not render.
 - The transcript renders the unattended message as "Woken by N events" with
   the expandable list and the denied count, distinct from a manager message;
   the 390px layout matches the plan's phone views.

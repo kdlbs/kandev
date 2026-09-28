@@ -60,16 +60,20 @@ creates, archives or repoints a conversation.
   missed-settle and unknown-send rules, the startup pass using the message
   lookup, and cost via task 03's `TurnCost`
   ([Turn end](../../specs/coordinator/system-design/wake.md#turn-end)).
-- The backstop hooks of task 04: step 3 calls `CheckCeiling`, step 4 calls
-  `Deliver`. Kick triggers from wake insert, conversation idle, the autonomy
+- The backstop hooks of task 04: the step 2 turn duties (message recovery,
+  missed-settle re-derivation, per-turn cost recompute, and `CheckCeiling`,
+  which run whatever `autonomy_enabled` reads) and the step 3.2 `Deliver`.
+  The turn row's `start_ceiling_subcents` is written at the step 3 insert. Kick triggers from wake insert, conversation idle, the autonomy
   and ceiling PATCH, and turn end.
 - The turn message text ([Transcript](../../specs/coordinator/system-design/wake.md#transcript)),
   agent-facing, not localized.
 - `no_turn_start_test.go`: add the wake delivery as the one allowed non-manager
   turn start (amended `AC-COORDINATOR-COPILOT-002.1`) and add every other
-  phase 3 path (recorder, backstop, relay read, automatic approval,
-  improvement approve and apply) to `noTurnStartPaths`. Reply delivery is a
-  manager's message and is covered by task 08.
+  phase 3 path this work order or an earlier one owns (recorder, backstop,
+  relay read) to `noTurnStartPaths`. Reply delivery is a manager's message
+  and is covered by task 08; the automatic approval row is added by task 09
+  and the improvement approve and apply rows by task 10, each with its own
+  code.
 
 ## Out of scope
 
@@ -90,6 +94,13 @@ creates, archives or repoints a conversation.
   roll back with no turn row and no wake `delivered`; one committed after
   step 3 leaves the turn running (`AC-COORDINATOR-WAKE-004.3`, owned by task
   01).
+- Autonomy turned off while a turn is open, with every event and observer
+  call suppressed (`synctest`). The backstop still records the missing
+  `message_id` and settles a missed `turn.completed`. A usage row that brings
+  spend to the ceiling is stopped within one tick. A stop whose cancel keeps
+  failing reaches `stop_state: "stop_failing"` after five minutes. With the
+  ceiling then cleared, the check uses `start_ceiling_subcents`. No wake is
+  recorded and no turn is delivered for that coordinator.
 - More than 50 pending wakes with ended conditions are all `superseded` in
   one delivery; a stall wake whose task shows activity after the stall is
   `superseded` and not delivered (`AC-COORDINATOR-WAKE-005.6`).

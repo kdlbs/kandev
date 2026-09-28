@@ -207,9 +207,15 @@ that task was automatic (the proposal's `claimed_automatically = 1`; a
 manager's approval of a proposal whose automatic approval ended `failed`
 sets it to 0, so the task it creates is a manager's), it calls `ActionSettings.Lower(ctx,
 coordinatorID, "create_task", "undo of an automatic create")`. A failed lower
-is retried by the backstop tick of [wake](wake.md#backstop), which re-checks
-`UndoneTaskIDs` over the last 24 hours against proposals with
-`claimed_automatically = 1` while the setting is `automatic`.
+is retried by the backstop tick of [wake](wake.md#backstop), which visits every
+coordinator with a proposal with `claimed_automatically = 1` whatever its
+`autonomy_enabled` reads, because raising `create_task` does not require
+autonomy. For each such coordinator whose `create_task` setting reads
+`automatic`, it intersects `UndoneTaskIDs` over the last 24 hours with the
+`task_id`s of its proposals with `claimed_automatically = 1`. A non-empty
+intersection calls the same `Lower`. A setting that already reads
+`requires_approval` is not written again, so the retry is idempotent. A
+read error skips this coordinator's retry for the tick.
 
 ## Screens
 

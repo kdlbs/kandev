@@ -116,7 +116,7 @@ repository query directly, not the flag-gated Inbox handler.
 | --- | --- | --- |
 | `reply_text` | text null | trimmed, 1 to 2,000 characters, set with `returned` |
 | `reply_delivered_at` | timestamp null | set when the reply message is stored |
-| `reply_delivery_claimed_at` | timestamp null | the delivery claim; see [Reply delivery](#reply-delivery) |
+| `reply_delivery_claimed_at` | timestamp null | the in-flight marker of a delivery; at-most-once rests on the message key, see [Reply delivery](#reply-delivery) |
 | `in_reply_to` | text null | a `returned` proposal id of the same coordinator |
 
 `status` gains `returned`, a settled status. It is not open, so it does not
@@ -149,54 +149,71 @@ the claim it returns 200 with the current proposal and sends nothing.
 
 ## Reply delivery
 
-1. Claim: `UPDATE coordinator_proposals SET reply_delivery_claimed_at = ?
-   WHERE id = ? AND status = 'returned' AND reply_delivered_at IS NULL AND
-   (reply_delivery_claimed_at IS NULL OR reply_delivery_claimed_at < ?)`,
-   the last value being now minus two minutes. Zero rows means the reply was
-   delivered or another delivery is in flight: return the current proposal
-   and send nothing. Two concurrent deliveries therefore send at most once.
+Delivery is exactly one conditional insert keyed by the proposal. The reply's
+delivery key is `coordinator-reply:<proposal_id>` (under the 128-character
+`client_message_id` limit), used as both the message id and the queue entry
+id; the message table's primary key is the uniqueness constraint that decides, so no deadline,
+lookup or cancellation is needed for at-most-once.
+
+1. Mark the delivery in flight: `UPDATE coordinator_proposals SET
+   reply_delivery_claimed_at = ? WHERE id = ? AND status = 'returned' AND
+   reply_delivered_at IS NULL`. Zero rows means the reply was delivered or the
+   proposal is not `returned`: return the current proposal and send nothing.
+   The claim only drives the card's in-flight state; overlapping deliveries
+   are made safe by step 3, not by the claim.
 2. Resolve the coordinator's conversation through the phase 1
    `OpenConversation` (which reuses a live current task or creates one, under
    the caller's identity).
-3. Send the message through the same conversation message path the panel's
-   composer uses, as the replying manager, so it is an attended turn start
-   (`REQ-COORDINATOR-COPILOT-002`), with `metadata.coordinator_reply_proposal_id`
-   set to the proposal id. Before sending, delivery looks in the
-   conversation's messages created at or after the proposal's `updated_at`,
-   and in its primary session's queued message (the orchestrator queue read
-   [wake admission](wake.md#admission) uses), for one carrying that key; when it finds one, it skips the send and goes to
-   step 4, because the reply already reached the conversation. The
-   agent-facing text depends on the proposal's `kind`. For `task`:
-   `Reply to your proposal "<title>" (proposal <id>): <reply text>. If you
-   still think the work is needed, propose it again with in_reply_to set to
-   <id>.` For `improvement`: `Reply to your improvement "<title>" (proposal
-   <id>): <reply text>. If you still think a change is needed, propose a new
-   improvement.` `propose_improvement_kandev` takes no `in_reply_to`, so an
-   improvement card never shows "Revised after your reply".
-   The send runs under a 60-second context deadline, half the two-minute
-   claim expiry, so a live delivery always finishes its send before its claim
-   can be taken over.
-4. Finalise conditionally on the claim this delivery wrote: on success
-   `UPDATE ... SET reply_delivered_at = ?, reply_delivery_claimed_at = NULL
-   WHERE id = ? AND reply_delivery_claimed_at = <this claim's value>`; on any
-   error, log at warn and `UPDATE ... SET reply_delivery_claimed_at = NULL`
-   with the same condition, leaving `reply_delivered_at` null; the card shows
-   "Reply saved, not delivered" with **Send again**. Zero rows means another
-   delivery took the claim over after it expired: this delivery writes
-   nothing and returns the current proposal, and the other delivery's lookup
-   finds this one's message when it was stored, so the reply is still sent
-   at most once.
+3. Store and enqueue in one transaction, before any dispatch, through the
+   durable dispatch receipt the composer already uses for comment-bearing
+   messages (`CreateQueuedMessageIdempotent`, which commits the transcript
+   message and its `messagequeue.QueuedMessage` together under the caller's
+   id). Phase 3 adds a plain variant without plan-comment refs,
+   `CreateQueuedMessageOnce(ctx, id, req, queued, maxPerSession) (message,
+   created bool, err)`, whose message insert is `INSERT ... ON CONFLICT (id)
+   DO NOTHING`: one affected row inserts the queue entry with the same id,
+   commits and returns `created = true`; zero affected rows inserts nothing,
+   rolls back and returns the stored message with `created = false`. The
+   message is authored by the replying manager with
+   `metadata.coordinator_reply_proposal_id` set to the proposal id and
+   `user_message_recorded`, so its dispatch is an attended turn start
+   (`REQ-COORDINATOR-COPILOT-002`). Then delivery calls the orchestrator's
+   `NotifyQueuedUserPrompt(taskID, sessionID)`, the same kick the composer
+   uses: a promptable session drains the entry at once, and a running
+   session drains it when its turn ends, as any queued manager message
+   does. The queue removes an entry when it dispatches it, so the entry is
+   dispatched once; a second notify finds nothing to drain. The agent-facing
+   text depends on the proposal's `kind`. For `task`: `Reply to your proposal
+   "<title>" (proposal <id>): <reply text>. If you still think the work is
+   needed, propose it again with in_reply_to set to <id>.` For `improvement`:
+   `Reply to your improvement "<title>" (proposal <id>): <reply text>. If you
+   still think a change is needed, propose a new improvement.`
+   `propose_improvement_kandev` takes no `in_reply_to`, so an improvement
+   card never shows "Revised after your reply".
+4. Finalise: when step 3 returned a message, `created` or not, `UPDATE ...
+   SET reply_delivered_at = ?, reply_delivery_claimed_at = NULL WHERE id = ?
+   AND reply_delivered_at IS NULL`, because the reply is in the conversation.
+   On any error before step 3 committed (conversation open, a full queue
+   (`ErrQueueFull`), a repository error), log at warn and `UPDATE ... SET
+   reply_delivery_claimed_at = NULL WHERE id = ? AND reply_delivered_at IS
+   NULL`, leaving `reply_delivered_at` null; the card shows "Reply saved, not
+   delivered" with **Send again**, which runs steps 1 to 4 again. An error
+   after the commit (the notify) does not undo the delivery: the entry stays
+   queued and drains at the session's next idle point, the queue's existing
+   restart drain, or the notify of the next delivery attempt.
 
-A crash after the send and before step 4 leaves the claim set and
-`reply_delivered_at` null, so the card shows "Reply saved, not delivered".
-**Send again** sends nothing until the claim is two minutes old; after that
-it finds the stored or queued message by its metadata and records the
-delivery without sending again. When the
-conversation was replaced in between, the new conversation holds no such
-message and the reply is sent to it once.
-
-A delivered reply that lands while the conversation is busy queues behind the
-running turn through the existing message queue, as any manager message does.
+Two deliveries that overlap in any order, including a slow one that outlives
+another's claim, both reach step 3 at most; exactly one insert affects a row,
+so one message is stored and one queue entry is dispatched, and the other
+returns the stored message and records the delivery. A crash after step 3
+commits and before step 4 leaves `reply_delivered_at` null, so the card shows
+"Reply saved, not delivered"; **Send again** at once gets `created = false`,
+kicks the queue again and records the delivery, storing and dispatching
+nothing new. When the conversation was replaced in between, the key still
+names the proposal, so the reply stays in the earlier conversation's
+transcript and is not sent a second time; the manager can repeat it in the
+new conversation by hand. A crash inside step 3's transaction commits
+nothing, so Send again stores the reply once.
 
 ## Revised proposals
 

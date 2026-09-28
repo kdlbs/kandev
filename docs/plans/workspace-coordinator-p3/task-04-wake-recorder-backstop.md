@@ -47,9 +47,14 @@ current episode from stored state.
   `task_session.error_changed` and `task.state_changed`
   ([Recorder](../../specs/coordinator/system-design/wake.md#recorder)).
 - `internal/coordinator/wake_backstop.go`: the 60-second ticker, started
-  after the startup pass and joined before the store closes, steps 1 and 2
-  of [Backstop](../../specs/coordinator/system-design/wake.md#backstop), with
-  a `Hooks` struct task 05 fills for steps 3 and 4 (no-op until then).
+  after the startup pass and joined before the store closes. It builds the
+  step 1 visit set (autonomy on, an open or recently settled unattended turn,
+  a `claimed_automatically = 1` proposal) and runs the step 3.1 wake
+  recording only for coordinators whose re-read row has autonomy on
+  ([Backstop](../../specs/coordinator/system-design/wake.md#backstop)). A
+  `Hooks` struct carries the step 2 turn duties (task 05), the step 2.4
+  lowering retry (task 09) and the step 3.2 `Deliver` (task 05); each hook is
+  a no-op until its owner fills it.
 - `Kick` is a no-op interface here; task 05 implements it.
 - Metrics `coordinator_wake_recorded_total{kind}`,
   `coordinator_wake_dropped_total{reason}`,
@@ -76,6 +81,12 @@ current episode from stored state.
 - With every event suppressed, the backstop stores each episode within one
   period (`synctest`); a failing read for one coordinator logs, skips it and
   continues; turning autonomy on stores existing episodes on the next pass.
+- The visit set holds a coordinator with autonomy off and an open turn, one
+  with a turn settled 9 minutes ago, and one with a `claimed_automatically =
+  1` proposal. It runs their turn and setting hooks and records no wake and
+  calls no `Deliver` for them. It excludes a coordinator with autonomy off,
+  no open turn, no turn settled in the last 10 minutes and no automatic
+  claim. A failing visit-set query skips only its own source.
 
 ## Verification
 

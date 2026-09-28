@@ -72,13 +72,14 @@ confirms `create_task`; a different class re-plans task 09 only.
 G3 --> task-01 flag, schema, settings --+--> task-02 containment ----------+
                                         +--> task-03 spend ----------------+--> task-05 delivery, turn --> task-06 autonomy UI
                                         +--> task-04 recorder, backstop ---+                       |
-                                        +--> task-07 answer in place                               v
+                                        +--> task-07 answer in place     |                         v
                                         +--> task-08 reply with a condition -------------> task-10 improvements
-                                        +--> task-09 automatic (needs phase 2 merged + log review)
+                                        +--> task-09 automatic <---------+ (also needs 04; phase 2 merged + log review)
 ```
 
-Critical path: G3, 01, 04, 05, 06. Tasks 02, 03, 04, 07, 08 and 09 run in
-parallel after 01 and touch disjoint files except
+Critical path: G3, 01, 04, 05, 06. Tasks 02, 03, 04, 07 and 08 run in
+parallel after 01, and task 09 after 01 and 04 (it fills the backstop's
+lowering-retry hook). They touch disjoint files except
 `internal/backendapp/coordinator.go`, where task 01 gives each later work
 order its own named registration function (containment, spend, wake,
 delivery, relay, reply, automatic, improvements), and the coordinator
@@ -98,7 +99,7 @@ request once every work order passes.
 | [task-06](task-06-autonomy-ui.md) | WP-11 | M | 05 | Autonomy strip, held item, settings Autonomy section, "Woken by" transcript entry |
 | [task-07](task-07-answer-in-place.md) | WP-11 | M | 01 | Questions and permissions answered on the Needs you card |
 | [task-08](task-08-reply-with-condition.md) | WP-11 | M | 01 | Reply with a condition, delivery to the conversation, revised proposals |
-| [task-09](task-09-automatic.md) | WP-11 | L | 01, phase 2 | `create_task` raisable to automatic under the eligibility gate; automatic approval; lowering on undo |
+| [task-09](task-09-automatic.md) | WP-11 | L | 01, 04, phase 2 | `create_task` raisable to automatic under the eligibility gate; automatic approval; lowering on undo |
 | [task-10](task-10-improvements.md) | WP-12 | M | 06, 08 | Improvement proposals, the card, pending changes applied in settings |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Every acceptance

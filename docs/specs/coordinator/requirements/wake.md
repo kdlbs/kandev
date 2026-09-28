@@ -168,7 +168,9 @@ Mockup:
   mark every `pending` wake of that coordinator `superseded` and start no
   unattended turn for it, including a delivery that passed admission before
   the change but had not yet started its turn; a running unattended turn
-  shall finish normally.
+  shall finish normally, and until it ends the ceiling stop, the recovery of
+  its message and its settle shall keep applying to it as they do while
+  autonomy is on.
 - **AC-COORDINATOR-WAKE-004.4:** While `features.coordinatorPhase3` or
   `features.coordinator` is off, the system shall store no wake, run no
   backstop, start no unattended turn, and hide the Autonomy section; stored

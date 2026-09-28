@@ -43,6 +43,9 @@ pending change, and the settings list where a manager applies or discards it.
   the pending-change routes with the base comparison and the phase 1 PATCH
   context write ([Pending changes](../../specs/coordinator/system-design/improvements.md#pending-changes));
   guard refusals; `coordinator_improvement_total`.
+- `internal/coordinator/no_turn_start_test.go`: append the improvement
+  approve and apply rows to `noTurnStartPaths`
+  ([copilot](../../specs/coordinator/system-design/copilot.md#attended-only)).
 - Web: `app/coordinator/components/improvement-card.tsx` branching from
   `ProposalCard`, "Runs behind it" through task 06's run read, the diff through
   the existing diff viewer, the approve gate and the reply control from task
@@ -83,11 +86,15 @@ See [plan UI-07](plan.md#ascii-ui-previews).
   kept; SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with
   `-race`), and Apply and Discard settle once
   under concurrency and are refused to readers and a coordinator principal.
+- The `noTurnStartPaths` rows for improvement approve and for Apply, run
+  through `TestCoordinatorConversationNoTurnStart`, assert that neither sends
+  a prompt or starts an agent; Apply's conversation replacement starts no
+  turn on the new conversation.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/coordinator/... -run 'Improvement|PendingChange' -count=1
+cd apps/backend && go test ./internal/coordinator/... -run 'Improvement|PendingChange|NoTurnStart' -count=1
 cd apps/backend && go test ./internal/coordinator/... -run 'PendingChange.*Race' -race -count=1
 cd apps/backend && go test ./internal/mcp/... -run 'Coordinator' -count=1
 cd apps/web && pnpm test -- app/coordinator app/settings/workspace
