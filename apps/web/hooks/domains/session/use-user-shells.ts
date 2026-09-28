@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type {
@@ -8,6 +8,7 @@ import type {
   UserShellPTYStatus,
 } from "@/lib/state/slices";
 import { t } from "@/lib/i18n";
+import { useSessionRead } from "./use-session-read";
 
 interface UseUserShellsReturn {
   shells: UserShellInfo[];
@@ -72,72 +73,33 @@ export function useUserShells(
     if (!environmentId) return false;
     return state.userShells.loaded[environmentId] ?? false;
   });
-  const connectionStatus = useAppStore((state) => state.connection.status);
-
-  // Cache the fetch scope as env+task. An earlier load without a task
-  // id (e.g. before the active task hydrated) must not block the
-  // task-scoped refetch — that would pin the store on the legacy
-  // shells while the DB-backed ordinary rows never reach the panel.
-  const fetchScope = environmentId ? `${environmentId}:${taskId ?? ""}` : null;
-  const lastFetchedScopeRef = useRef<string | null>(null);
-
-  // Reset ref when scope clears (no env, or env+task changed)
-  useEffect(() => {
-    if (!fetchScope) {
-      lastFetchedScopeRef.current = null;
-    }
-  }, [fetchScope]);
-
-  // Fetch user shells from backend
-  useEffect(() => {
-    if (!environmentId || !fetchScope) return;
-    if (connectionStatus !== "connected") return;
-    // Skip when this exact scope has already been fetched. A different
-    // env+task pair re-runs the effect because the ref no longer matches.
-    if (lastFetchedScopeRef.current === fetchScope) return;
-    // `isLoaded` stays in deps so external store invalidation can
-    // re-run this effect; fetchScope + lastFetchedScopeRef still guard
-    // duplicate requests for the same env+task.
-
-    const fetchShells = async () => {
-      const client = getWebSocketClient();
-      if (!client) return;
-
-      store.getState().setUserShellsLoading(environmentId, true);
-
-      try {
-        // include_parked=true is required for the "Parked terminals"
-        // submenu to populate after a page reload — without it the
-        // backend returns only state=open rows and parked PTYs become
-        // invisible until the user parks something in the same session.
-        // `buildTerminalsFromShells` already filters parked entries out
-        // of the main strip so this doesn't change visible-tab behaviour.
-        const payload: Record<string, unknown> = {
-          task_environment_id: environmentId,
-          include_parked: true,
-        };
-        if (taskId) payload.task_id = taskId;
-        const response = await client.request<{ shells?: ListResponseItem[] }>(
-          "user_shell.list",
-          payload,
-          10000,
-        );
-
-        const mapped: UserShellInfo[] = (response.shells ?? []).map((s) => mapListItemToShell(s));
-        store.getState().setUserShells(environmentId, mapped);
-        lastFetchedScopeRef.current = fetchScope;
-      } catch (error) {
-        console.error("Failed to fetch user shells:", error);
-        store.getState().setUserShells(environmentId, []);
-        lastFetchedScopeRef.current = fetchScope;
-      }
-    };
-
-    fetchShells();
-    // `taskId` is captured inside `payload` via the fetchShells closure;
-    // including it in the deps array is the React-hooks-lint preference
-    // even though `fetchScope` already encodes the same information.
-  }, [environmentId, fetchScope, taskId, connectionStatus, isLoaded, store]);
+  const { read, scope } = useSessionRead<UserShellInfo[]>(
+    environmentId
+      ? {
+          resource: "shells",
+          key: JSON.stringify([environmentId, taskId ?? null]),
+          environmentId,
+          onLoading: (loading) => store.getState().setUserShellsLoading(environmentId, loading),
+          fetch: async (isCurrent) => {
+            const payload: Record<string, unknown> = {
+              task_environment_id: environmentId,
+              include_parked: true,
+            };
+            if (taskId) payload.task_id = taskId;
+            const response = await getWebSocketClient()!.request<{ shells?: ListResponseItem[] }>(
+              "user_shell.list",
+              payload,
+              10000,
+            );
+            if (!isCurrent()) return {};
+            const mapped = (response.shells ?? []).map(mapListItemToShell);
+            store.getState().setUserShells(environmentId, mapped);
+            return { data: mapped };
+          },
+        }
+      : null,
+  );
+  useEffect(() => read?.ensure(undefined, !isLoaded), [read, scope, isLoaded]);
 
   const addShell = (shell: UserShellInfo) => {
     if (environmentId) {

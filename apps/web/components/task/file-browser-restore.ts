@@ -1,6 +1,6 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileTree } from "@/lib/ws/workspace-files";
-import type { FileTreeNode } from "@/lib/types/backend";
+import type { FileTreeNode, FileTreeResponse } from "@/lib/types/backend";
 import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
 import { findNodeByPath, mergeTreeNodes } from "./file-tree-utils";
 import type { TreeLoadOwner } from "./file-browser-tree-loader";
@@ -8,6 +8,7 @@ export type RestoredTree = {
   root: FileTreeNode | null;
   tree: FileTreeNode | null;
   failedPaths: string[];
+  errors?: unknown[];
 };
 
 export function restoredExpandedPaths(paths: string[]): string[] {
@@ -32,10 +33,77 @@ export function removeFailedExpansions(paths: string[], failedPaths: string[]): 
   );
 }
 
-function mergeLoadedFolder(tree: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
+export function mergeLoadedFolder(tree: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
   if (tree.path === incoming.path) return mergeTreeNodes(tree, incoming);
   if (!tree.children) return tree;
-  return { ...tree, children: tree.children.map((child) => mergeLoadedFolder(child, incoming)) };
+  const children = tree.children.map((child) => mergeLoadedFolder(child, incoming));
+  return children.every((child, index) => child === tree.children![index])
+    ? tree
+    : { ...tree, children };
+}
+
+type FolderResult = { path: string } & (
+  | { ok: true; response: FileTreeResponse }
+  | { ok: false; error: unknown }
+);
+
+function startReadyFolders({
+  pending,
+  running,
+  blocked,
+  tree,
+  readPath,
+  failedPaths,
+}: {
+  pending: Set<string>;
+  running: Map<string, Promise<FolderResult>>;
+  blocked: Set<string>;
+  tree: FileTreeNode | null;
+  readPath: (path: string) => Promise<FileTreeResponse>;
+  failedPaths: string[];
+}) {
+  for (const path of pending) {
+    if (running.size >= 4) break;
+    const parent = path.slice(0, Math.max(0, path.lastIndexOf("/")));
+    if (pending.has(parent) || running.has(parent)) continue;
+    pending.delete(path);
+    if ([...blocked].some((ancestor) => path.startsWith(`${ancestor}/`))) continue;
+    if (!tree || !findNodeByPath(tree, path)?.is_dir) {
+      failedPaths.push(path);
+      blocked.add(path);
+      continue;
+    }
+    running.set(
+      path,
+      readPath(path).then(
+        (response): FolderResult => ({ ok: true, path, response }),
+        (error: unknown): FolderResult => ({ ok: false, path, error }),
+      ),
+    );
+  }
+}
+
+function applyFolderResult(
+  result: FolderResult,
+  tree: FileTreeNode | null,
+  state: {
+    errors: unknown[];
+    blocked: Set<string>;
+    failedPaths: string[];
+    onTree?: (tree: FileTreeNode | null, root: boolean) => void;
+  },
+) {
+  if (!result.ok) {
+    state.errors.push(result.error);
+    state.blocked.add(result.path);
+  } else if (result.response.root && tree) {
+    tree = mergeLoadedFolder(tree, result.response.root);
+    state.onTree?.(result.response.root, false);
+  } else {
+    state.failedPaths.push(result.path);
+    state.blocked.add(result.path);
+  }
+  return tree;
 }
 
 export async function fetchRestoredTree({
@@ -43,28 +111,36 @@ export async function fetchRestoredTree({
   owner,
   paths,
   isCurrentLoad,
+  onTree,
+  readPath = (path) => requestFileTree(client, owner.sessionId, path, 1),
 }: {
   client: NonNullable<ReturnType<typeof getWebSocketClient>>;
   owner: TreeLoadOwner;
   paths: string[];
   isCurrentLoad: () => boolean;
+  onTree?: (tree: FileTreeNode | null, root: boolean) => void;
+  readPath?: (path: string) => Promise<FileTreeResponse>;
 }): Promise<RestoredTree | null> {
-  const rootResponse = await requestFileTree(client, owner.sessionId, "", 1);
+  const rootResponse = await readPath("");
   if (!isCurrentLoad()) return null;
-  let tree = rootResponse.root ?? null;
+  let tree: FileTreeNode | null = rootResponse.root ?? null;
   const failedPaths: string[] = [];
-  for (const path of paths) {
-    if (failedPaths.some((failed) => path === failed || path.startsWith(`${failed}/`))) continue;
-    if (!tree || !findNodeByPath(tree, path)?.is_dir) {
-      failedPaths.push(path);
-      continue;
-    }
-    const response = await requestFileTree(client, owner.sessionId, path, 1);
+  const errors: unknown[] = [];
+  const blocked = new Set<string>();
+  const pending = new Set(restoredExpandedPaths(paths));
+  const running = new Map<string, Promise<FolderResult>>();
+  // Empty materializing roots retain the loader's bounded readiness retries.
+  if (!tree || tree.children?.length) onTree?.(tree, true);
+  while (pending.size > 0 || running.size > 0) {
     if (!isCurrentLoad()) return null;
-    if (response.root) tree = mergeLoadedFolder(tree, response.root);
-    else failedPaths.push(path);
+    startReadyFolders({ pending, running, blocked, tree, readPath, failedPaths });
+    if (running.size === 0) break;
+    const result = await Promise.race(running.values());
+    running.delete(result.path);
+    if (!isCurrentLoad()) return null;
+    tree = applyFolderResult(result, tree, { errors, blocked, failedPaths, onTree });
   }
-  return { root: rootResponse.root ?? null, tree, failedPaths };
+  return { root: rootResponse.root ?? null, tree, failedPaths, errors };
 }
 
 export function completeRestoredTree(

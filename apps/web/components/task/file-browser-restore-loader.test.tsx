@@ -16,7 +16,8 @@ vi.mock("@/hooks/domains/session/use-session-agentctl", () => ({
   useSessionAgentctl: () => ({ isReady: true }),
 }));
 
-import { useFileBrowserTree } from "./file-browser-hooks";
+import { useFileBrowserTree, loadNodeChildren } from "./file-browser-hooks";
+import { FileBrowserTreeCache, type FileTreeCacheBinding } from "./file-browser-tree-cache";
 
 const SESSION = "session-1";
 const SUCCESSOR_SESSION = "session-2";
@@ -58,6 +59,126 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3
+it("shows a retained tree before a return navigation refresh responds", async () => {
+  const cache = new FileBrowserTreeCache();
+  const bindings: Record<string, FileTreeCacheBinding> = {
+    [ENVIRONMENT]: { cache, key: ENVIRONMENT, isCurrent: () => true },
+    [SUCCESSOR_ENVIRONMENT]: { cache, key: SUCCESSOR_ENVIRONMENT, isCurrent: () => true },
+  };
+  const { result, rerender } = renderHook(
+    ({ key }) => useFileBrowserTree(SESSION, key, bindings[key]),
+    {
+      initialProps: { key: ENVIRONMENT },
+    },
+  );
+  await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+  rerender({ key: SUCCESSOR_ENVIRONMENT });
+  await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+  const response = deferred<{ root: typeof ROOT & { children: (typeof CODEX)[] } }>();
+  requestFileTreeMock.mockReturnValueOnce(response.promise);
+  rerender({ key: ENVIRONMENT });
+  expect(result.current.visibleRows.map((row) => row.path)).toContain(CONFIG_PATH);
+  expect(result.current.isLoadingTree).toBe(true);
+  await act(async () => response.resolve({ root: { ...ROOT, children: [CODEX] } }));
+});
+
+it("shares a pending restored folder read with manual expansion", async () => {
+  const response = deferred<{ root: typeof CODEX & { children: (typeof AGENTS)[] } }>();
+  requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+    if (path === "") return Promise.resolve({ root: { ...ROOT, children: [CODEX] } });
+    if (path === CODEX_PATH) return response.promise;
+    return Promise.resolve({ root: { ...AGENTS, children: [CONFIG] } });
+  });
+  const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
+  await waitFor(() => expect(requestFileTreeMock).toHaveBeenCalledTimes(2));
+  let load: Promise<boolean>;
+  act(() => {
+    load = loadNodeChildren(CODEX, SESSION, result.current);
+  });
+  expect(requestFileTreeMock).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    response.resolve({ root: { ...CODEX, children: [AGENTS] } });
+    await load;
+  });
+});
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4
+it("publishes the root and successful sibling before a held folder completes", async () => {
+  const held = deferred<{ root: typeof CODEX & { children: (typeof AGENTS)[] } }>();
+  const sibling = { ...CODEX, name: ".new", path: ".new" };
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify([CODEX_PATH, ".new"]));
+  requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+    if (path === "") return Promise.resolve({ root: { ...ROOT, children: [CODEX, sibling] } });
+    if (path === CODEX_PATH) return held.promise;
+    return Promise.resolve({ root: { ...sibling, children: [NEW_CONFIG] } });
+  });
+  const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
+  await waitFor(() =>
+    expect(requestFileTreeMock.mock.calls.some((call) => call[2] === CODEX_PATH)).toBe(true),
+  );
+  expect(result.current.tree?.children?.map((node) => node.path)).toEqual([CODEX_PATH, ".new"]);
+  await waitFor(() =>
+    expect(result.current.visibleRows.some((row) => row.path === NEW_CONFIG.path)).toBe(true),
+  );
+  expect(result.current.isLoadingTree).toBe(true);
+  await act(async () => held.resolve({ root: { ...CODEX, children: [AGENTS] } }));
+  expect(result.current.loadState).toBe("loaded");
+});
+
+it("restores at most four independent folders concurrently and preserves every merge", async () => {
+  const folders = Array.from({ length: 6 }, (_, i) => ({
+    ...CODEX,
+    name: `dir-${i}`,
+    path: `dir-${i}`,
+  }));
+  const responses = folders.map(() =>
+    deferred<{ root: typeof CODEX & { children: (typeof CONFIG)[] } }>(),
+  );
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(folders.map((folder) => folder.path)));
+  requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+    if (path === "") return Promise.resolve({ root: { ...ROOT, children: folders } });
+    return responses[folders.findIndex((folder) => folder.path === path)].promise;
+  });
+  const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
+  await waitFor(() => expect(requestFileTreeMock).toHaveBeenCalledTimes(5));
+  for (const index of [2, 0, 1, 3, 4, 5]) {
+    await act(async () =>
+      responses[index].resolve({
+        root: {
+          ...folders[index],
+          children: [{ ...CONFIG, path: `${folders[index].path}/config.toml` }],
+        },
+      }),
+    );
+  }
+  expect(result.current.loadState).toBe("loaded");
+  expect(result.current.visibleRows.filter((row) => !row.isDir)).toHaveLength(6);
+});
+
+it("preserves successful branches and expansion intent after a transient folder failure", async () => {
+  vi.useFakeTimers();
+  const sibling = { ...CODEX, name: ".new", path: ".new" };
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify([CODEX_PATH, ".new"]));
+  let fail = true;
+  requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+    if (path === "") return Promise.resolve({ root: { ...ROOT, children: [CODEX, sibling] } });
+    if (path === CODEX_PATH && fail) return Promise.reject(new Error("temporarily unavailable"));
+    return Promise.resolve({
+      root: { ...(path === CODEX_PATH ? CODEX : sibling), children: [NEW_CONFIG] },
+    });
+  });
+  const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(result.current.visibleRows.some((row) => row.path === NEW_CONFIG.path)).toBe(true);
+  expect(result.current.expandedPaths).toEqual(new Set([CODEX_PATH, ".new"]));
+  fail = false;
+  await act(async () => result.current.loadTree({ resetRetry: true }));
+  expect(result.current.loadState).toBe("loaded");
+});
 
 it("starts a successor load after a session switch and ignores the stale predecessor", async () => {
   const firstRoot = deferred<{ root: typeof ROOT & { children: (typeof CODEX)[] } }>();
