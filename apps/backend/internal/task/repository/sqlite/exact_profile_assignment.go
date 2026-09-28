@@ -12,8 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const postgresForShare = ` FOR SHARE`
-
 // GetExactProfileAssignment loads the task-owned profile selection. A missing
 // assignment is represented by nil, preserving ordinary routing behavior.
 func (r *Repository) GetExactProfileAssignment(ctx context.Context, taskID string) (*models.ExactProfileAssignment, error) {
@@ -555,9 +553,9 @@ func (r *Repository) GetExactProfileLaunchReceipt(ctx context.Context, taskID, s
 	sessionLockQuery := `SELECT 1 FROM task_sessions WHERE id = ? AND task_id = ?`
 	bindingLockQuery := `SELECT 1 FROM task_exact_profile_launch_attempt_bindings WHERE task_id = ? AND session_id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		assignmentLockQuery += postgresForShare
-		sessionLockQuery += postgresForShare
-		bindingLockQuery += postgresForShare
+		assignmentLockQuery += forUpdateClause
+		sessionLockQuery += forUpdateClause
+		bindingLockQuery += forUpdateClause
 	}
 	var found int
 	err = tx.GetContext(ctx, &found, r.db.Rebind(assignmentLockQuery), taskID)
