@@ -87,30 +87,35 @@ func (r *Repository) healStepParticipantSeatRole(templateID, stepName, role stri
 	return nil
 }
 
-// healParticipantSeatRowWithRetry drives the CAS retry loop for a single
-// workflow_steps row (AC-OFFICE-REVIEW-SEATS-005.9): a concurrent writer
-// changing the row between read and write is retried a bounded number of
-// times; exhausting the budget leaves the step unchanged, logs a warning
-// naming the workflow and step, and returns nil so a single un-reconciled
-// step never blocks backend startup.
+// healParticipantSeatRowWithRetry drives the retry loop for a single
+// workflow_steps row (AC-OFFICE-REVIEW-SEATS-005.9): a CAS conflict or a
+// transient database contention error is retried a bounded number of times;
+// exhausting the budget leaves the step unchanged, logs a warning naming the
+// workflow and step, and returns nil so a single un-reconciled step never
+// blocks backend startup.
 func (r *Repository) healParticipantSeatRowWithRetry(stepID, workflowID, templateID, stepName, role string) error {
-	for attempt := 0; attempt < maxParticipantSeatReconcileAttempts; attempt++ {
-		applied, retry, err := r.tryHealParticipantSeatRow(stepID, role)
-		if err != nil {
-			return err
-		}
-		if applied || !retry {
-			return nil
-		}
+	last, err := runStepEventsRetryLoop(maxParticipantSeatReconcileAttempts, func() (stepEventsHealOutcome, error) {
+		return r.tryHealParticipantSeatRow(stepID, role)
+	})
+	if err != nil {
+		return err
+	}
+	if last == nil {
+		return nil
 	}
 	if r.log != nil {
-		r.log.Warn("exhausted retries reconciling participant seat action; leaving step unchanged",
+		fields := []zap.Field{
 			zap.String("template_id", templateID),
 			zap.String("step_name", stepName),
 			zap.String("workflow_id", workflowID),
 			zap.String("step_id", stepID),
 			zap.String("role", role),
-		)
+			zap.String("retry_cause", string(last.retryCause)),
+		}
+		if last.retryCause == stepEventsRetryCauseLockContention {
+			fields = append(fields, zap.Error(last.retryErr))
+		}
+		r.log.Warn("exhausted retries reconciling participant seat action; leaving step unchanged", fields...)
 	}
 	return nil
 }
@@ -119,13 +124,11 @@ func (r *Repository) healParticipantSeatRowWithRetry(stepID, workflowID, templat
 // It reads the stored events blob, inserts the seat-ensuring action for role
 // if absent, and writes back only if the row's events column still matches
 // what was read — the read value doubles as the optimistic-concurrency
-// guard. applied is true when the row already had the action or the write
-// succeeded (both are "nothing left to do" outcomes); retry is true only
-// when a concurrent writer changed the row between the read and the write.
-func (r *Repository) tryHealParticipantSeatRow(stepID, role string) (applied, retry bool, err error) {
+// guard.
+func (r *Repository) tryHealParticipantSeatRow(stepID, role string) (stepEventsHealOutcome, error) {
 	if r.failParticipantSeatReconcileAttempts > 0 {
 		r.failParticipantSeatReconcileAttempts--
-		return false, true, nil
+		return stepEventsHealOutcome{retryCause: stepEventsRetryCauseCASConflict}, nil
 	}
 
 	return r.tryHealWorkflowStepEvents(stepID, "participant seat", func(events *wfmodels.StepEvents) bool {

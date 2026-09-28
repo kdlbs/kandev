@@ -147,6 +147,26 @@ type Repository struct {
 	// test that doesn't exercise it, and in production until
 	// SetStepEntryDispatcher is called during boot wiring.
 	stepEntryDispatcher StepEntryDispatcher
+	// workflowStepEventsAfterReadHook is a test-only synchronization seam,
+	// called (if set) inside tryHealWorkflowStepEvents after the SELECT of
+	// workflow_steps.events succeeds and before the mutator and UPDATE run.
+	// It lets a test commit a real, independent write to the same row
+	// through a second *sql.DB connection at the exact gap a concurrent
+	// writer can land in, so the repository's own UPDATE then meets a real
+	// driver-reported contention error instead of a synthetic one. Nil in
+	// production and in every test but the one that sets it.
+	workflowStepEventsAfterReadHook func(stepID string)
+	// workflowStepEventsDBFailpoint is a test-only failpoint, called (if
+	// set) immediately before each database operation inside
+	// tryHealWorkflowStepEvents (begin/read/write/rows_affected/commit). A
+	// non-nil return replaces that operation: the operation is not
+	// performed and the returned error is classified exactly as that
+	// operation's own error would be. It drives per-site transient and
+	// non-transient regressions, and cancellation-between-attempts
+	// regressions, since only the UPDATE site can be driven into a real
+	// driver lock deterministically. Nil in production and in every test
+	// but the one that sets it.
+	workflowStepEventsDBFailpoint func(stepID string, site stepEventsDBSite) error
 }
 
 func (r *Repository) nowUTC() time.Time {

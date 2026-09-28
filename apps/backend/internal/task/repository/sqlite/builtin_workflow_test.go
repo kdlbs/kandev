@@ -20,6 +20,16 @@ import (
 // task repository, so the test exercises the full schema migration chain.
 func newRepoForBuiltinWorkflowTests(t *testing.T) *Repository {
 	t.Helper()
+	repo, _ := newRepoForBuiltinWorkflowTestsWithPath(t)
+	return repo
+}
+
+// newRepoForBuiltinWorkflowTestsWithPath is newRepoForBuiltinWorkflowTests,
+// additionally returning the repository's database file path so a test can
+// open a second, independent *sql.DB connection onto the same file to
+// construct a real concurrent-writer contention scenario.
+func newRepoForBuiltinWorkflowTestsWithPath(t *testing.T) (*Repository, string) {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "builtin-wf.db")
 	dbConn, err := db.OpenSQLite(dbPath)
 	if err != nil {
@@ -37,7 +47,7 @@ func newRepoForBuiltinWorkflowTests(t *testing.T) *Repository {
 		t.Fatalf("init workflow repo schema: %v", err)
 	}
 	t.Cleanup(func() { _ = sqlxDB.Close() })
-	return repo
+	return repo, dbPath
 }
 
 // loadStepsForWorkflow returns the workflow_steps rows for a workflow,

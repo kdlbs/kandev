@@ -107,32 +107,37 @@ func (r *Repository) healStepOnAgentErrorAction(templateID, stepName string, act
 	return nil
 }
 
-// healAgentErrorRowWithRetry drives the CAS retry loop for a single
-// workflow_steps row: a concurrent writer changing the row between read and
-// write is retried a bounded number of times; exhausting the budget leaves
+// healAgentErrorRowWithRetry drives the retry loop for a single
+// workflow_steps row: a CAS conflict or a transient database contention
+// error is retried a bounded number of times; exhausting the budget leaves
 // the step unchanged, logs a warning naming the workflow and step, and
 // returns nil so a single un-reconciled step never blocks backend startup.
 func (r *Repository) healAgentErrorRowWithRetry(stepID, workflowID, templateID, stepName string, action wfmodels.GenericAction) error {
 	target, _ := action.Config["target"].(string)
 	reason, _ := action.Config["reason"].(string)
-	for attempt := 0; attempt < maxAgentErrorReconcileAttempts; attempt++ {
-		applied, retry, err := r.tryHealAgentErrorRow(stepID, action)
-		if err != nil {
-			return err
-		}
-		if applied || !retry {
-			return nil
-		}
+	last, err := runStepEventsRetryLoop(maxAgentErrorReconcileAttempts, func() (stepEventsHealOutcome, error) {
+		return r.tryHealAgentErrorRow(stepID, action)
+	})
+	if err != nil {
+		return err
+	}
+	if last == nil {
+		return nil
 	}
 	if r.log != nil {
-		r.log.Warn("exhausted retries reconciling on_agent_error action; leaving step unchanged",
+		fields := []zap.Field{
 			zap.String("template_id", templateID),
 			zap.String("step_name", stepName),
 			zap.String("workflow_id", workflowID),
 			zap.String("step_id", stepID),
 			zap.String("target", target),
 			zap.String("reason", reason),
-		)
+			zap.String("retry_cause", string(last.retryCause)),
+		}
+		if last.retryCause == stepEventsRetryCauseLockContention {
+			fields = append(fields, zap.Error(last.retryErr))
+		}
+		r.log.Warn("exhausted retries reconciling on_agent_error action; leaving step unchanged", fields...)
 	}
 	return nil
 }
@@ -140,15 +145,12 @@ func (r *Repository) healAgentErrorRowWithRetry(stepID, workflowID, templateID, 
 // tryHealAgentErrorRow makes one read-modify-write attempt for stepID. It
 // reads the stored events blob, appends the on_agent_error action if no
 // equivalent normalized action already exists, and writes back only if the
-// row's events column still matches what was read — the
-// read value doubles as the optimistic-concurrency guard. applied is true
-// when the row already had the action or the write succeeded (both are
-// "nothing left to do" outcomes); retry is true only when a concurrent
-// writer changed the row between the read and the write.
-func (r *Repository) tryHealAgentErrorRow(stepID string, action wfmodels.GenericAction) (applied, retry bool, err error) {
+// row's events column still matches what was read — the read value doubles
+// as the optimistic-concurrency guard.
+func (r *Repository) tryHealAgentErrorRow(stepID string, action wfmodels.GenericAction) (stepEventsHealOutcome, error) {
 	if r.failAgentErrorReconcileAttempts > 0 {
 		r.failAgentErrorReconcileAttempts--
-		return false, true, nil
+		return stepEventsHealOutcome{retryCause: stepEventsRetryCauseCASConflict}, nil
 	}
 
 	return r.tryHealWorkflowStepEvents(stepID, "agent-error", func(events *wfmodels.StepEvents) bool {
