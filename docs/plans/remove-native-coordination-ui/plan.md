@@ -204,10 +204,10 @@ both the recovery card and the clearance predicate.
 - The final focused frontend Vitest run passed 81 tests across four files,
   covering the feedback branches, live bootstrap status, safe-area ownership,
   ordinary pages, shared errors, and desktop behavior.
-- The managed mobile E2E run rebuilt backend and web assets and passed five
-  targeted tests across coordination removal and launch recovery. It measured
-  feedback, retry, and shared-error controls against the fixed header and
-  confirmed the retry is tappable.
+- The managed mobile E2E passed six targeted tests across coordination removal
+  and launch recovery. It measured
+  ensure-session and status-unavailable feedback against the fixed header,
+  confirmed both retry controls are tappable, and checked shared-error spacing.
 - The desktop coordination-removal E2E passed 1 test on the reviewed changes.
   Web typecheck and scoped ESLint passed.
 - `pnpm run i18n:check`, documentation catalog validation, all specification

@@ -173,10 +173,11 @@ Regression and validation:
   cases cover ensure failure without a task-summary error, each page-feedback
   branch, live bootstrap status, duplicated safe-area clearance, ordinary
   pages, shared errors, and desktop behavior.
-- The managed mobile E2E run rebuilt backend and web assets and passed five
-  targeted tests across coordination removal and launch recovery. It measured
-  feedback, retry, and shared-error controls against the fixed header and
-  confirmed the retry is tappable.
+- The managed mobile E2E passed six targeted tests across coordination removal
+  and launch recovery. The new
+  ensure-session failure case has no task-summary error, measures the banner
+  and retry against the fixed header, and taps retry after recovery. The
+  status-unavailable notice has the same geometry and interaction checks.
 - The desktop coordination-removal E2E passed 1 test on the reviewed changes.
   Web typecheck and scoped ESLint passed.
 - `pnpm run i18n:check`, documentation catalog validation, all specification

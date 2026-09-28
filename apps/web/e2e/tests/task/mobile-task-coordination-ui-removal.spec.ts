@@ -1,6 +1,9 @@
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
-import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
+import {
+  rejectSessionEnsureRequests,
+  routeSessionEntryRecovery,
+} from "../../helpers/session-entry-recovery";
 import type { Locator, Page } from "@playwright/test";
 
 async function expectPhoneFeedbackBelowHeader(
@@ -130,6 +133,39 @@ test("phone task chat keeps its header clearance and omits coordination controls
     expect(coordinationReads).toEqual([]);
   } finally {
     await apiClient.deleteTask(task.id).catch(() => undefined);
+  }
+});
+
+test("phone ensure-session failure is below the fixed header and retry is tappable", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  const { task_id: taskId } = await apiClient.seedTask(
+    seedData.workspaceId,
+    "Mobile ensure-session error feedback",
+  );
+  const taskSessions = await apiClient.listTaskSessions(taskId);
+  expect(taskSessions.sessions).toHaveLength(0);
+  const ensureFailure = await rejectSessionEnsureRequests(
+    testPage,
+    "simulated session ensure failure",
+  );
+
+  try {
+    await testPage.goto(`/t/${taskId}`);
+    await expect.poll(ensureFailure.requestCount).toBeGreaterThan(0);
+    const feedback = testPage.getByTestId("ensure-session-error-banner");
+    const retry = testPage.getByTestId("ensure-session-error-retry");
+    await expect(feedback).toBeVisible({ timeout: 45_000 });
+    await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
+    await expectPhoneFeedbackBelowHeader(testPage, feedback, retry);
+
+    await retry.tap();
+    await expect.poll(ensureFailure.requestCount).toBeGreaterThan(1);
+  } finally {
+    await apiClient.deleteTask(taskId).catch(() => undefined);
   }
 });
 
