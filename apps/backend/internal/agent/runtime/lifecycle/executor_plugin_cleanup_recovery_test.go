@@ -33,7 +33,10 @@ func TestPluginExecutorResetRecoversMissingCleanupHandle(t *testing.T) {
 			loader := &pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
 				Provider: testPluginExecutorLaunchProvider(), ProfileID: "profile-plugin-recovery",
 			}}
-			store := &pluginExecutorInventoryStoreFake{record: pluginExecutorRecoveryRecord(t, "cleanup_pending", nil)}
+			store := &pluginExecutorInventoryStoreFake{
+				record:  pluginExecutorRecoveryRecord(t, "cleanup_pending", nil),
+				session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+			}
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 			runtime.SetRecoveryDependencies(loader, store)
 			ctx := recoveryclaim.WithTaskCleanupJob(context.Background(), recoveryclaim.TaskCleanupJob{

@@ -258,7 +258,7 @@ func TestPluginExecutorPreHandshakeRecoveryCleansKnownResources(t *testing.T) {
 			}}
 			store := &pluginExecutorInventoryStoreFake{
 				record:  pluginExecutorRecoveryRecord(t, phase, resource),
-				session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+				session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
 			}
 			store.record.TransientAuthToken = ""
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
@@ -289,7 +289,7 @@ func TestPluginExecutorPreHandshakeUnknownDestroyRetainsCleanupInventory(t *test
 	}}
 	store := &pluginExecutorInventoryStoreFake{
 		record:  pluginExecutorRecoveryRecord(t, "bootstrapping", resource),
-		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
 	}
 	store.record.TransientAuthToken = ""
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())

@@ -33,7 +33,7 @@ func TestPluginExecutorStopMatrix(t *testing.T) {
 	}}
 	store := &pluginExecutorInventoryStoreFake{record: pluginExecutorRecoveryRecord(t, "ready", &pluginsdk.ExecutorResourceDescriptor{
 		ResourceHandle: "resource-recovery", StateJson: `{"resource":"one"}`, Platform: "linux-amd64", StateVersion: 1,
-	}), session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateCompleted}}
+	}), session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateCompleted}}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
 
@@ -92,7 +92,7 @@ func TestPluginExecutorOwnershipFence(t *testing.T) {
 		record: pluginExecutorRecoveryRecord(t, "ready", &pluginsdk.ExecutorResourceDescriptor{
 			ResourceHandle: "resource-recovery", StateJson: `{"resource":"one"}`, Platform: "linux-amd64", StateVersion: 1,
 		}),
-		session:  &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateCompleted},
+		session:  &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateCompleted},
 		claimErr: models.ErrExecutionRotated,
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
