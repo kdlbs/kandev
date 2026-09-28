@@ -2541,5 +2541,8 @@
   "managedCloneRelocationTitle": "O espaço de trabalho precisa de reparação",
   "managedCloneRelocateResume": "Mover ficheiros e retomar",
   "managedCloneRelocationConfirmBody": "O Kandev vai criar um worktree no clone atual do repositório e continuar esta sessão.",
-  "managedCloneRelocationConfirm": "Mover e retomar"
+  "managedCloneRelocationConfirm": "Mover e retomar",
+  "sessionRecoveryResumeDescription": "Retomar mantém as mensagens e o contexto anteriores.",
+  "sessionRecoveryFreshDescription": "Começar de novo utiliza o mesmo espaço de trabalho sem o contexto da conversa anterior.",
+  "sessionRecoveryCorruptedDescription": "É provável que retomar volte a falhar porque o estado guardado desta sessão está corrompido. Inicie uma nova sessão."
 }

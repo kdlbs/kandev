@@ -3861,12 +3861,16 @@ func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, te
 // likely-to-fail, since the agent's persisted state is poisoned.
 func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError, resumeCorrupted bool) []map[string]interface{} {
 	resumeTooltip := "Resuming keeps your previous messages and context."
+	resumeTooltipKey := "sessionRecoveryResumeDescription"
 	if resumeCorrupted {
-		resumeTooltip = "Resume will likely fail again — this session's saved state is corrupted. Prefer Start fresh."
+		resumeTooltip = "Resuming will likely fail again because this session's saved state is corrupted. Start a fresh session instead."
+		resumeTooltipKey = "sessionRecoveryCorruptedDescription"
 	}
 	resume := func() map[string]interface{} {
-		return wsRecoveryAction(taskID, sessionID, "resume",
+		action := wsRecoveryAction(taskID, sessionID, "resume",
 			"Resume session", "refresh", resumeTooltip, recoveryResumeButtonTestID)
+		action["tooltip_key"] = resumeTooltipKey
+		return action
 	}
 
 	freshLabel, freshTestID := "Start fresh session", recoveryFreshButtonTestID
@@ -3875,6 +3879,7 @@ func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError,
 	}
 	fresh := wsRecoveryAction(taskID, sessionID, "fresh_start", freshLabel, "player-play",
 		"Starting fresh uses the same workspace without previous conversation context.", freshTestID)
+	fresh["tooltip_key"] = "sessionRecoveryFreshDescription"
 
 	actions := []map[string]interface{}{}
 	if resumeCorrupted {
