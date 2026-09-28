@@ -245,7 +245,9 @@ function DisplayView({
       </span>
       <div className="flex-1 min-w-0 space-y-1">
         {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
-        {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
+        {senderTask && (
+          <SenderTaskBadge sender={senderTask} destinationTaskId={entry.task_id} size="xs" />
+        )}
         {visible && (
           <BoundedMessagePreview
             source={visible}

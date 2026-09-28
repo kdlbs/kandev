@@ -2678,9 +2678,9 @@ func (h *Handlers) publishStepCompletionEvent(
 //   - WAITING/COMPLETED: message is recorded and the agent is prompted (auto-resuming if needed)
 //   - CREATED          : message is recorded then the agent is started with it as initial prompt
 //
-// Strict validation: missing sender_task_id, self-message, and unknown sender
-// task all reject with an MCP error rather than silently delivering an
-// unattributed message.
+// Strict validation: missing sender_task_id, same-session targets, and unknown
+// sender tasks reject with an MCP error. Same-task messages are allowed only
+// when session_id names a distinct sibling session.
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID            string `json:"task_id"`
