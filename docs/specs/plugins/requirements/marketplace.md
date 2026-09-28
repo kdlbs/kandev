@@ -50,8 +50,8 @@ curation and package-integrity authority.
 #### Acceptance criteria
 
 - **AC-PLUGINS-MARKETPLACE-002.1:** The official registry SHALL poll only repositories listed in the
-  checked-out `plugin-registry/plugins.yaml` every five minutes and target publication within 10
-  minutes under normal provider scheduling. The provider's best-effort scheduling caveat SHALL be
+  checked-out `plugin-registry/plugins.yaml` every three hours and target publication within four
+  hours under normal provider scheduling. The provider's best-effort scheduling caveat SHALL be
   documented and the 06:00 UTC daily rebuild SHALL remain enabled.
 - **AC-PLUGINS-MARKETPLACE-002.2:** A release SHALL enter the official index only when its exact
   `<id>-<version>.tar.gz` asset passes the package checksum and manifest safety gate and the verified

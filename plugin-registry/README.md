@@ -87,7 +87,7 @@ usage telemetry** — there is no "most installed" metric, by design.
    contract.
 5. **A maintainer reviews and merges** — maintainer approval is what gates the
    official catalog. Once listed, a central read-only poll checks curated
-   repositories every five minutes and targets publication within 10 minutes
+   repositories every three hours and targets publication within four hours
    under normal GitHub Actions scheduling. GitHub schedules can be delayed or
    dropped, so this is an operational SLO rather than a hard wall-clock
    guarantee. The daily 06:00 UTC rebuild remains the fallback and refreshes

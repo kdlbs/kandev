@@ -6,9 +6,9 @@ name: Plugin Registry Curated Release Poll
 on:
   workflow_dispatch:
   schedule:
-    # GitHub schedules are best-effort. This off-boundary five-minute poll
-    # targets publication within 10 minutes under normal provider scheduling.
-    - cron: "3-58/5 * * * *"
+    # GitHub schedules are best-effort. This off-boundary three-hour poll
+    # targets publication within four hours under normal provider scheduling.
+    - cron: "33 1-22/3 * * *"
 
 permissions:
   contents: read

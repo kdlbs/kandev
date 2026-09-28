@@ -16,7 +16,7 @@ status: complete
 
 Close the release-visibility gap in the official plugin marketplace: a valid
 release published by an already-curated plugin repository becomes discoverable
-through the central index within the documented 10-minute target under normal
+through the central index within the documented four-hour target under normal
 GitHub Actions scheduling, without waiting for the 06:00 UTC rebuild, while
 curation authority stays with the maintainer-reviewed allowlist and package
 integrity stays with the central verifier.
@@ -36,7 +36,7 @@ concurrency group.
 ## Work packages
 
 - [x] [task-01-prompt-publication](task-01-prompt-publication.md) - central
-  five-minute curated release poll, index builder validation and fallback
+  three-hour curated release poll, index builder validation and fallback
   retention, package verifier, shared deployment serialization, and update
   ordering semantics.
 
@@ -55,7 +55,7 @@ baseline before delivery.
 
 ## Final verification
 
-- `node --test plugin-registry/*.test.mjs`: 43 passed.
+- `node --test plugin-registry/*.test.mjs`: 45 passed.
 - `go test ./cmd/plugin-package-verify ./internal/plugins/pkgtar
   ./internal/plugins/manifest ./cmd/plugin-pack`: passed.
 - `make -C apps/backend e2e-plugin-package`: passed, including the package

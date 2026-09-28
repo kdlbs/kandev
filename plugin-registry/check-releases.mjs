@@ -21,6 +21,7 @@ const OFFICIAL_INDEX =
 const GITHUB_API =
   process.env.PLUGIN_REGISTRY_GITHUB_API || "https://api.github.com";
 const USER_AGENT = "kandev-plugin-registry-release-detector";
+const PUBLICATION_SLO_MS = 4 * 60 * 60 * 1000;
 
 export async function detectReleaseChanges(
   specs,
@@ -76,7 +77,7 @@ export async function detectReleaseChanges(
     candidates.push(`${spec.id}@${version}`);
     if (
       release.published_at &&
-      Date.now() - Date.parse(release.published_at) > 10 * 60 * 1000
+      Date.now() - Date.parse(release.published_at) > PUBLICATION_SLO_MS
     ) {
       slaBreaches.push(`${spec.id}@${version}`);
     }
@@ -131,7 +132,7 @@ async function main() {
   for (const release of result.slaBreaches) {
     emitAnnotation(
       "warning",
-      `${release} exceeded the 10-minute publication SLO before detection`,
+      `${release} exceeded the four-hour publication SLO before detection`,
     );
   }
   if (result.errors.length > 0 && !result.rebuild) {
@@ -150,7 +151,7 @@ async function emitSummary(result, listedCount) {
     `- Rebuild requested: ${result.rebuild ? "yes" : "no"}`,
     `- Candidates: ${result.candidates.length ? result.candidates.join(", ") : "none"}`,
     `- Lookup or release errors: ${result.errors.length}`,
-    `- 10-minute SLO breaches at detection: ${result.slaBreaches.length}`,
+    `- Four-hour SLO breaches at detection: ${result.slaBreaches.length}`,
     "",
   ];
   await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));

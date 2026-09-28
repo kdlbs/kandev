@@ -156,7 +156,7 @@ source list, enriches it, emits a static JSON API, and serves it from GitHub Pag
 
 ### Curated release propagation
 
-The official repository owns a five-minute, off-boundary poll. It reads repository identities only
+The official repository owns a three-hour, off-boundary poll. It reads repository identities only
 from the checked-out `plugins.yaml`, compares their latest exact package releases with the published
 official index, and calls the reusable index workflow only when a curated candidate changed. The
 detector has read-only contents permission; plugin repositories receive no Kandev credential and
@@ -170,9 +170,13 @@ present. If one latest release fails, the builder retains only that still-curate
 record and reports the failure; other valid releases may advance. A provider-wide failure or missing
 trusted prior aborts before Pages upload, leaving the published site unchanged.
 
+The verifier command stays in the backend Go module so it can import the shared
+`internal/plugins/pkgtar` package. GitHub Actions and E2E fixtures build this command; the running
+Kandev backend does not invoke it.
+
 The release poll, source-triggered builds, manual rebuilds, and the daily 06:00 UTC fallback share
 the static `plugin-registry-pages` concurrency group. Active deployment finishes and pending work
-coalesces. The five-minute poll targets a 10-minute propagation SLO under normal GitHub Actions
+coalesces. The three-hour poll targets a four-hour propagation SLO under normal GitHub Actions
 scheduling; GitHub schedules may be delayed or dropped, so this is not a deterministic guarantee.
 
 The per-repo publishing convention and the two Actions are an operational contract,

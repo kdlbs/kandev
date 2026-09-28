@@ -51,7 +51,7 @@ test("detectReleaseChanges surfaces candidates already beyond the publication SL
   ]);
   const staleRelease = release("alpha", "1.1.0");
   staleRelease.published_at = new Date(
-    Date.now() - 11 * 60 * 1000,
+    Date.now() - (4 * 60 * 60 + 60) * 1000,
   ).toISOString();
 
   const result = await detectReleaseChanges([specs[0]], current, {
@@ -60,6 +60,23 @@ test("detectReleaseChanges surfaces candidates already beyond the publication SL
 
   assert.equal(result.rebuild, true);
   assert.deepEqual(result.slaBreaches, ["alpha@1.1.0"]);
+});
+
+test("detectReleaseChanges does not flag a release within the publication SLO", async () => {
+  const current = indexWith([
+    { id: "alpha", repo: "acme/alpha", version: "1.0.0" },
+  ]);
+  const recentRelease = release("alpha", "1.1.0");
+  recentRelease.published_at = new Date(
+    Date.now() - (3 * 60 * 60 + 59 * 60) * 1000,
+  ).toISOString();
+
+  const result = await detectReleaseChanges([specs[0]], current, {
+    fetchLatestRelease: async () => recentRelease,
+  });
+
+  assert.equal(result.rebuild, true);
+  assert.deepEqual(result.slaBreaches, []);
 });
 
 test("detectReleaseChanges compares numeric SemVer identifiers without precision loss", async () => {

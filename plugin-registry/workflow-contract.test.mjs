@@ -12,10 +12,10 @@ const pollPath = new URL(
 );
 const e2ePath = new URL("../.github/workflows/e2e-tests.yml", import.meta.url);
 
-test("release poll is off-boundary every five minutes and never accepts repository dispatch", async () => {
+test("release poll runs every three hours and never accepts repository dispatch", async () => {
   const poll = await fs.readFile(pollPath, "utf8");
 
-  assert.match(poll, /cron:\s*["']3-58\/5 \* \* \* \*["']/);
+  assert.match(poll, /cron:\s*["']33 1-22\/3 \* \* \*["']/);
   assert.doesNotMatch(poll, /repository_dispatch/);
   assert.match(poll, /permissions:\s*\n\s+contents:\s*read/);
   assert.match(poll, /run:\s*node plugin-registry\/check-releases\.mjs/);

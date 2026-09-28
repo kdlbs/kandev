@@ -111,6 +111,11 @@ the marketplace cache and retrieve current versions without reloading the
 page. **Sync** remains a separate action that reconciles your local plugins
 folder.
 
+The page requests the catalog from your Kandev backend. The backend caches
+each source's index for five minutes, so a page reload during that time does
+not fetch it again. The official index is a static GitHub Pages file; loading
+it does not call the GitHub Releases API.
+
 While a check is running, the header shows a "Checking for updates…"
 indicator. After the check completes, the header shows the last check time.
 If the marketplace cannot be reached, an inline error explains the problem.
@@ -251,10 +256,10 @@ a PR that lists it.
    plugin appears in the in-app catalog on the next build.
 
 After a repository is curated, Kandev checks its latest release centrally every
-five minutes. A valid new release targets publication in the official index
-within 10 minutes under normal GitHub Actions scheduling, without a Kandev
+three hours. A valid new release targets publication in the official index
+within four hours under normal GitHub Actions scheduling, without a Kandev
 source commit or manual rebuild. GitHub schedules can be delayed or dropped, so
-10 minutes is an operational SLO rather than a hard guarantee; the daily 06:00
+four hours is an operational SLO rather than a hard guarantee; the daily 06:00
 UTC rebuild remains the fallback and star-count refresh.
 
 The checked-out registry list is the only allowlist. Plugin repositories do not

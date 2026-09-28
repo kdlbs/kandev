@@ -22,7 +22,7 @@ system_design:
 ## Goal
 
 A valid release from an already-curated plugin repository becomes discoverable
-through the official marketplace within the documented 10-minute target under
+through the official marketplace within the documented four-hour target under
 normal GitHub Actions scheduling, without a Kandev source commit or a manual
 registry dispatch, while curation authority, package integrity validation, and
 the 06:00 UTC recovery rebuild are preserved.
@@ -31,7 +31,7 @@ the 06:00 UTC recovery rebuild are preserved.
 
 - Central release poll workflow
   (`.github/workflows/plugin-registry-release-poll.yml`) that enumerates only
-  the checked-out `plugin-registry/plugins.yaml` allowlist every five minutes
+  the checked-out `plugin-registry/plugins.yaml` allowlist every three hours
   at an off-boundary minute offset and triggers the shared index rebuild
   through `workflow_call` when a newer curated release is detected.
 - Release detection (`plugin-registry/check-releases.mjs`) with unit coverage
@@ -60,8 +60,8 @@ the 06:00 UTC recovery rebuild are preserved.
 
 ## Acceptance mapping
 
-- `AC-PLUGINS-MARKETPLACE-002.1` - five-minute allowlist-only poll, documented
-  10-minute target, provider caveat, daily fallback retained.
+- `AC-PLUGINS-MARKETPLACE-002.1` - three-hour allowlist-only poll, documented
+  four-hour target, provider caveat, daily fallback retained.
 - `AC-PLUGINS-MARKETPLACE-002.2` - exact asset, checksum/manifest gate, and
   manifest identity equality before a record is published.
 - `AC-PLUGINS-MARKETPLACE-002.3` - bad release retains the prior validated
