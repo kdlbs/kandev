@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { Badge } from "@kandev/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { BoundedMessagePreview } from "./bounded-message-preview";
@@ -26,7 +27,41 @@ type UserMessageBodyOptions = {
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  /** Message's originating task, from `MessageTaskOriginContext`. Only the
+   *  string `"coordinator"` triggers the About-prefix tag below. */
+  taskOrigin?: string;
 };
+
+// i18n-exempt: stable, coordinator-agent-facing wire marker (English, not i18n), not rendered as-is.
+const COORDINATOR_ABOUT_PREFIX = "About ";
+const COORDINATOR_ABOUT_SEPARATOR = ": ";
+
+type CoordinatorAboutPrefix = { id: string; remainder: string };
+
+/** Parses the coordinator's "About <id>: " prefix. The id is the text between
+ *  `About ` and the first `: `; an id containing its own `: ` splits at that
+ *  first occurrence (a known, accepted limit). Returns `null` for content
+ *  that does not start with the prefix, has no `: ` separator, or whose id
+ *  is empty or spans a line break. */
+function parseCoordinatorAboutPrefix(content: string): CoordinatorAboutPrefix | null {
+  if (!content.startsWith(COORDINATOR_ABOUT_PREFIX)) return null;
+  const separatorIndex = content.indexOf(
+    COORDINATOR_ABOUT_SEPARATOR,
+    COORDINATOR_ABOUT_PREFIX.length,
+  );
+  if (separatorIndex === -1) return null;
+  const id = content.slice(COORDINATOR_ABOUT_PREFIX.length, separatorIndex);
+  if (!id || /[\r\n]/.test(id)) return null;
+  return { id, remainder: content.slice(separatorIndex + COORDINATOR_ABOUT_SEPARATOR.length) };
+}
+
+function CoordinatorAboutTag({ id }: { id: string }) {
+  return (
+    <Badge data-testid="coordinator-about-tag" variant="secondary" className="w-fit">
+      {t("chat:coordinatorAboutTag", { id })}
+    </Badge>
+  );
+}
 
 function UserMessageMarkdown({
   content,
@@ -104,12 +139,14 @@ function CollapsedInstructions({
 
 function MessageSegments({
   content,
+  downloadSource = content,
   promptMentionComponents,
   taskId,
   worktreePath,
   onOpenFile,
 }: {
   content: string;
+  downloadSource?: string;
   promptMentionComponents?: Components;
   taskId: string;
   worktreePath?: string;
@@ -140,7 +177,7 @@ function MessageSegments({
             <BoundedMessagePreview
               key={`text-${index}`}
               source={segment.content}
-              downloadSource={content}
+              downloadSource={downloadSource}
               fileName="kandev-message.txt"
               preview={preview}
               renderContent={(previewContent) => (
@@ -177,6 +214,40 @@ function MessageSegments({
   );
 }
 
+function CoordinatorAboutMessage({
+  id,
+  remainder,
+  content,
+  promptMentionComponents,
+  taskId,
+  worktreePath,
+  onOpenFile,
+}: {
+  id: string;
+  remainder: string;
+  content: string;
+  promptMentionComponents?: Components;
+  taskId: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {remainder && (
+        <MessageSegments
+          content={remainder}
+          downloadSource={content}
+          promptMentionComponents={promptMentionComponents}
+          taskId={taskId}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+        />
+      )}
+      <CoordinatorAboutTag id={id} />
+    </div>
+  );
+}
+
 export function renderUserMessageBody({
   hasContent,
   showRaw,
@@ -187,6 +258,7 @@ export function renderUserMessageBody({
   taskId,
   worktreePath,
   onOpenFile,
+  taskOrigin,
 }: UserMessageBodyOptions): React.ReactNode {
   if (hasContent && showRaw) {
     const raw = rawContent || content;
@@ -201,6 +273,21 @@ export function renderUserMessageBody({
     );
   }
   if (hasContent) {
+    const coordinatorPrefix =
+      taskOrigin === "coordinator" ? parseCoordinatorAboutPrefix(content) : null;
+    if (coordinatorPrefix) {
+      return (
+        <CoordinatorAboutMessage
+          id={coordinatorPrefix.id}
+          remainder={coordinatorPrefix.remainder}
+          content={content}
+          promptMentionComponents={promptMentionComponents}
+          taskId={taskId}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+        />
+      );
+    }
     return (
       <MessageSegments
         content={content}

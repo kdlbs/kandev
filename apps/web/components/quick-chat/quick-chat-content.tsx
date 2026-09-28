@@ -2,7 +2,11 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+import {
+  type ChatInputContainerHandle,
+  type ChatSubmitPayload,
+  type ChatSubmitResult,
+} from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
 import {
@@ -14,6 +18,7 @@ import { ClarificationPanelSection } from "@/components/task/chat/clarification-
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
+import { useQuickChatInitialDraft } from "./use-quick-chat-initial-draft";
 import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
@@ -23,9 +28,59 @@ type QuickChatContentProps = {
   placeholderOverride?: string;
   initialPrompt?: string;
   onInitialPromptAttempted?: () => void;
+  /** Inserted once through `chatInputRef.insertText`, not sent. See
+   *  {@link useQuickChatInitialDraft}. */
+  initialDraft?: string;
+  /** Applied to the composer message once per submit, before
+   *  `buildSubmitMessage`. See {@link useSubmitHandler}. */
+  transformOutgoing?: (message: string) => string;
 };
 
-function useQuickChatState(sessionId: string) {
+/** Bundles the composer-priming hooks: a rejected launch prompt is restored
+ *  as a manual draft, and a caller-supplied draft is inserted once the
+ *  prompt (if any) clears. */
+function useQuickChatComposerPriming({
+  sessionId,
+  taskId,
+  initialPrompt,
+  initialDraft,
+  blocked,
+  handleSubmit,
+  onInitialPromptAttempted,
+  chatInputRef,
+}: {
+  sessionId: string;
+  taskId: string | null;
+  initialPrompt?: string;
+  initialDraft?: string;
+  blocked: boolean;
+  handleSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
+  onInitialPromptAttempted?: () => void;
+  chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
+}) {
+  const restoreRejectedPrompt = useCallback(
+    (rejectedSessionId: string, prompt: string) => {
+      const input = chatInputRef.current;
+      if (rejectedSessionId === sessionId && input && !input.getValue())
+        input.insertText(prompt, 0, 0);
+    },
+    [chatInputRef, sessionId],
+  );
+
+  useQuickChatInitialPrompt({
+    sessionId,
+    taskId,
+    prompt: initialPrompt,
+    blocked,
+    submit: handleSubmit,
+    onAttempted: onInitialPromptAttempted,
+    onRejected: restoreRejectedPrompt,
+  });
+
+  useQuickChatInitialDraft({ draft: initialDraft, initialPrompt, chatInputRef });
+}
+
+function useQuickChatState(sessionId: string, transformOutgoing?: (message: string) => string) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
 
   useSettingsData(true);
@@ -34,7 +89,9 @@ function useQuickChatState(sessionId: string) {
     onOpenFile: undefined,
     onOpenFileAtLine: undefined,
   });
-  const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
+  const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined, {
+    transformOutgoing,
+  });
   const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
 
   return {
@@ -52,10 +109,12 @@ export const QuickChatContent = memo(function QuickChatContent({
   placeholderOverride,
   initialPrompt,
   onInitialPromptAttempted,
+  initialDraft,
+  transformOutgoing,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
-  const state = useQuickChatState(sessionId);
+  const state = useQuickChatState(sessionId, transformOutgoing);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
@@ -65,23 +124,15 @@ export const QuickChatContent = memo(function QuickChatContent({
     return () => clearTimeout(timer);
   }, [chatInputRef]);
 
-  const restoreRejectedPrompt = useCallback(
-    (rejectedSessionId: string, prompt: string) => {
-      const input = chatInputRef.current;
-      if (rejectedSessionId === sessionId && input && !input.getValue())
-        input.insertText(prompt, 0, 0);
-    },
-    [chatInputRef, sessionId],
-  );
-
-  useQuickChatInitialPrompt({
+  useQuickChatComposerPriming({
     sessionId,
     taskId,
-    prompt: initialPrompt,
+    initialPrompt,
+    initialDraft,
     blocked: panelState.planCommentMigration?.isBlocking ?? false,
-    submit: handleSubmit,
-    onAttempted: onInitialPromptAttempted,
-    onRejected: restoreRejectedPrompt,
+    handleSubmit,
+    onInitialPromptAttempted,
+    chatInputRef,
   });
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
