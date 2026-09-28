@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -77,6 +78,9 @@ func (f *fakeConversationTasks) ArchiveTask(_ context.Context, id string) error 
 	task, ok := f.tasks[id]
 	if !ok {
 		return taskrepo.ErrTaskNotFound
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("%w: %s", taskservice.ErrTaskAlreadyArchived, id)
 	}
 	now := time.Now().UTC()
 	task.ArchivedAt = &now
@@ -279,6 +283,9 @@ func TestOpenConversationReusesNonTerminalSessionStates(t *testing.T) {
 	for _, state := range []taskmodels.TaskSessionState{
 		taskmodels.TaskSessionStateWaitingForInput,
 		taskmodels.TaskSessionStateCreated,
+		taskmodels.TaskSessionStateStarting,
+		taskmodels.TaskSessionStateRunning,
+		taskmodels.TaskSessionStateIdle,
 	} {
 		t.Run(string(state), func(t *testing.T) {
 			deps := newConversationTestDeps(t)
@@ -388,6 +395,40 @@ func TestOpenConversationRacingOpensOverEndedTaskConverge(t *testing.T) {
 	}
 	if len(deps.tasks.archivedIDs) != 1 || deps.tasks.archivedIDs[0] != first.TaskID {
 		t.Errorf("archivedIDs = %v, want [%s] (the original ended task, archived exactly once)", deps.tasks.archivedIDs, first.TaskID)
+	}
+}
+
+// TestOpenConversationReuseArchiveCollisionSurfacesAlreadyArchived covers
+// copilot.md #conversation-task step 2's race note directly: two callers
+// that both independently observe the same terminal task each call
+// ArchiveTask on it. The first succeeds; the second must hit
+// ErrTaskAlreadyArchived, exactly like the real task service, and that
+// error must be logged and swallowed identically to any other archive
+// failure rather than surfaced or treated as a second successful archive.
+func TestOpenConversationReuseArchiveCollisionSurfacesAlreadyArchived(t *testing.T) {
+	deps := newConversationTestDeps(t)
+	ctx := context.Background()
+
+	first, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("first OpenConversation() unexpected error: %v", err)
+	}
+	deps.sessions.states[first.TaskID] = string(taskmodels.TaskSessionStateFailed)
+
+	resultA, reusableA, errA := deps.svc.reuseConversationTask(ctx, deps.coordinator.ID, first.TaskID)
+	if errA != nil || reusableA || resultA != nil {
+		t.Fatalf("caller A: result=%v reusable=%v err=%v, want (nil, false, nil)", resultA, reusableA, errA)
+	}
+	if len(deps.tasks.archivedIDs) != 1 || deps.tasks.archivedIDs[0] != first.TaskID {
+		t.Fatalf("archivedIDs after caller A = %v, want [%s]", deps.tasks.archivedIDs, first.TaskID)
+	}
+
+	resultB, reusableB, errB := deps.svc.reuseConversationTask(ctx, deps.coordinator.ID, first.TaskID)
+	if errB != nil || reusableB || resultB != nil {
+		t.Fatalf("caller B: result=%v reusable=%v err=%v, want (nil, false, nil): the archive collision must be logged and swallowed, not surfaced", resultB, reusableB, errB)
+	}
+	if len(deps.tasks.archivedIDs) != 1 {
+		t.Errorf("archivedIDs after caller B = %v, want still exactly one entry: B's ArchiveTask must fail as already-archived, not succeed a second time", deps.tasks.archivedIDs)
 	}
 }
 

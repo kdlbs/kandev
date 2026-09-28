@@ -110,6 +110,7 @@ function ReadyBody({
           error={errorMessage?.trim() || t("task:backendRejectedSessionRequest")}
           notice={null}
           onRetry={onRetry}
+          workspaceId={workspaceId}
           retryDisabled={retryDisabled}
           testId="session-recovery-error"
         />

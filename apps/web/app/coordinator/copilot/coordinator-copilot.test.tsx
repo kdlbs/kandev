@@ -392,6 +392,18 @@ describe("CoordinatorCopilot - ended session banner", () => {
     await waitFor(() => screen.getByTestId(SESSION_RECOVERY_TEST_ID));
     expect(screen.queryByText(SUGGESTION_QUESTION)).toBeNull();
   });
+
+  it("links to the popover's workspace settings when the session ended for a missing agent profile", async () => {
+    taskSessionItems["session-1"] = {
+      state: "FAILED",
+      error_message: "agent_profile_id is required",
+    };
+    mockReadyEndedSession();
+    renderCopilot();
+    await waitFor(() => screen.getByTestId(SESSION_RECOVERY_TEST_ID));
+    const action = screen.getByTestId("ensure-session-error-action");
+    expect(action.getAttribute("href")).toBe(`/settings/workspaces/${WORKSPACE_ID}`);
+  });
 });
 
 describe("CoordinatorCopilot - ended session retry", () => {
