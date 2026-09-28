@@ -349,7 +349,7 @@ func TestCreateOnboardingAgent_KeepsRuntimeConfigurationIndirect(t *testing.T) {
 
 func TestCreateOnboardingAgent_BindsDynamicSourceProfile(t *testing.T) {
 	svc, _, _ := newTestOnboardingService(t)
-	source := &models.AgentInstance{ID: "dynamic-profile", AgentID: agents.DynamicAgentID}
+	source := &models.AgentInstance{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true}
 	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
 		"dynamic-profile": source,
 	}}
@@ -377,7 +377,10 @@ func TestCreateOnboardingAgent_BindsDynamicSourceProfile(t *testing.T) {
 // office-agent configuration path.
 func TestCreateOnboardingAgent_RejectsForeignSourceProfile(t *testing.T) {
 	svc, _, _ := newTestOnboardingService(t)
-	foreign := &models.AgentInstance{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, WorkspaceID: "ws-other"}
+	foreign := &models.AgentInstance{
+		ID: "dynamic-profile", AgentID: agents.DynamicAgentID,
+		WorkspaceID: "ws-other", Enabled: true,
+	}
 	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
 		"dynamic-profile": foreign,
 	}}
@@ -391,6 +394,26 @@ func TestCreateOnboardingAgent_RejectsForeignSourceProfile(t *testing.T) {
 	}
 	if capture.agent != nil {
 		t.Fatalf("agent was created for a foreign profile: %+v", capture.agent)
+	}
+}
+
+func TestCompleteOnboardingRejectsWorkspaceDynamicSourceBeforeCreatingWorkspace(t *testing.T) {
+	svc, wsCreator, _ := newTestOnboardingService(t)
+	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"dynamic-profile": {
+			ID: "dynamic-profile", AgentID: agents.DynamicAgentID,
+			WorkspaceID: "another-workspace", Enabled: true,
+		},
+	}}
+
+	_, err := svc.CompleteOnboarding(context.Background(), CompleteRequest{
+		WorkspaceName: "new-workspace", AgentName: "CEO", AgentProfileID: "dynamic-profile",
+	})
+	if err == nil {
+		t.Fatal("CompleteOnboarding accepted a dynamic profile from another workspace")
+	}
+	if _, ok := wsCreator.workspaces["new-workspace"]; ok {
+		t.Fatal("CompleteOnboarding created a workspace before rejecting the source profile")
 	}
 }
 

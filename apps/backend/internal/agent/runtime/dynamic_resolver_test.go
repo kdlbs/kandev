@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
@@ -166,6 +167,61 @@ func TestResolveExecutionFailsClosedWhenOfficeBindingMissing(t *testing.T) {
 
 	if _, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, ""); err == nil {
 		t.Fatal("Resolve succeeded with a dangling office binding")
+	}
+}
+
+func TestResolveExecutionFailsClosedWhenBoundDynamicSourceUnavailable(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*agentsettingsmodels.AgentProfile, *agentsettingsmodels.AgentProfile)
+	}{
+		{
+			name:   "disabled",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) { source.Enabled = false },
+		},
+		{
+			name: "deleted",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) {
+				deletedAt := time.Now().UTC()
+				source.DeletedAt = &deletedAt
+			},
+		},
+		{
+			name: "foreign workspace",
+			mutate: func(source, office *agentsettingsmodels.AgentProfile) {
+				source.WorkspaceID = "ws-foreign"
+				office.WorkspaceID = "ws-office"
+			},
+		},
+		{
+			name:   "wrong profile family",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) { source.AgentID = "concrete-agent" },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &agentsettingsmodels.AgentProfile{
+				ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+			}
+			office := &agentsettingsmodels.AgentProfile{
+				ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+				ExecutionAgentProfileID: source.ID,
+			}
+			tc.mutate(source, office)
+			profiles := &dynamicResolverTestProfiles{
+				logical: source, office: office,
+				concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+				dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: source.ID, Version: 1},
+				routes: []agentsettingsmodels.DynamicAgentRoute{{
+					DynamicProfileID: source.ID, ExecutionProfileID: "concrete-profile", Enabled: true,
+				}},
+			}
+			resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+			if _, err := resolver.Resolve(context.Background(), "session-office", office.ID, 0, ""); err == nil {
+				t.Fatal("Resolve succeeded with an unavailable bound dynamic source")
+			}
+		})
 	}
 }
 

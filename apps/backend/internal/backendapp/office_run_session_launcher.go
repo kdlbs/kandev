@@ -87,6 +87,11 @@ func (l *officeRunSessionLauncher) StartRunSession(
 	if !reserved {
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("run %q attempt %d was not admitted", run.ID, attempt)
 	}
+	if agent.ExecutionAgentProfileID != "" {
+		// A bound dynamic profile owns candidate selection. Workspace routing
+		// must not replace that selection for this Office identity.
+		route = nil
+	}
 
 	executionProfileID := launch.ProfileID
 	adapterOverride := ""
@@ -361,16 +366,16 @@ func (l *officeRunSessionLauncher) AdmitExecution(ctx context.Context, owner run
 }
 
 // resolveTasklessDynamicExecution selects a concrete candidate for a taskless
-// Office run whose agent is bound to a dynamic execution profile. The route
-// identity is namespaced by the run session so retries of the same attempt
-// share one durable generation.
+// Office run whose agent is bound to a dynamic execution profile. The resolver
+// uses an isolated utility route because task-route persistence requires a
+// task_sessions row; Office persists the concrete choice on its run-session.
 func (l *officeRunSessionLauncher) resolveTasklessDynamicExecution(
-	ctx context.Context, agent *models.AgentInstance, runSessionID string,
+	ctx context.Context, agent *models.AgentInstance, _ string,
 ) (runtimeapi.ProfileExecution, error) {
 	if l.resolver == nil {
 		return runtimeapi.ProfileExecution{}, errors.New("dynamic execution resolver is not configured")
 	}
-	return l.resolver.Resolve(ctx, "run:"+runSessionID, agent.ID, 0, "")
+	return l.resolver.ResolveExecutionDetails(ctx, "", agent.ID)
 }
 
 func cloneStringMap(input map[string]string) map[string]string {

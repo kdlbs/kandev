@@ -678,7 +678,8 @@ func (si *SchedulerIntegration) launchAgent(
 			si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
 				"phase": "adapter.invoke", "error_message": err.Error(),
 			})
-			si.failTasklessRun(ctx, run, agent, err.Error())
+			si.releaseCheckoutIfNeeded(ctx, run)
+			_ = si.svc.HandleRunFailure(ctx, run, err)
 			return false
 		}
 		IncLoopLaunch(agent.WorkspaceID)

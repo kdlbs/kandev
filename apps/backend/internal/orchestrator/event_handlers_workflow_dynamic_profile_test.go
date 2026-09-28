@@ -260,31 +260,48 @@ func newWorkflowOfficeDynamicProfileResolver(
 	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(), true)
 }
 
-func TestRestoreTaskStateAfterDynamicResolutionFailure(t *testing.T) {
+func TestOverlappingTaskStartFailuresRestorePriorStateOnce(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
-	seedMockTaskState(taskRepo, "task-restore", v1.TaskStateScheduling)
+	seedMockTaskState(taskRepo, "task-restore", v1.TaskStateReview)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
 
-	svc.restoreTaskStateAfterDynamicResolutionFailure(ctx, "task-restore", v1.TaskStateReview)
+	first := svc.beginTaskScheduling(ctx, "task-restore")
+	second := svc.beginTaskScheduling(ctx, "task-restore")
+	if first == nil || second == nil {
+		t.Fatal("expected both task starts to hold a scheduling claim")
+	}
+
+	svc.finishTaskScheduling(ctx, "task-restore", first, false)
+	if got := taskRepo.tasks["task-restore"].State; got != v1.TaskStateScheduling {
+		t.Fatalf("state after first failed start = %q, want SCHEDULING while the second start is active", got)
+	}
+	svc.finishTaskScheduling(ctx, "task-restore", second, false)
 
 	if got := taskRepo.tasks["task-restore"].State; got != v1.TaskStateReview {
-		t.Fatalf("task state = %q, want REVIEW", got)
+		t.Fatalf("state after both starts failed = %q, want REVIEW", got)
 	}
 }
 
-func TestRestoreTaskStateAfterDynamicResolutionFailureKeepsConcurrentState(t *testing.T) {
+func TestSuccessfulOverlappingTaskStartCommitsSchedulingTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
-	seedMockTaskState(taskRepo, "task-concurrent", v1.TaskStateInProgress)
+	seedMockTaskState(taskRepo, "task-concurrent", v1.TaskStateReview)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
 
-	svc.restoreTaskStateAfterDynamicResolutionFailure(ctx, "task-concurrent", v1.TaskStateReview)
+	first := svc.beginTaskScheduling(ctx, "task-concurrent")
+	second := svc.beginTaskScheduling(ctx, "task-concurrent")
+	if first == nil || second == nil {
+		t.Fatal("expected both task starts to hold a scheduling claim")
+	}
 
-	if got := taskRepo.tasks["task-concurrent"].State; got != v1.TaskStateInProgress {
-		t.Fatalf("task state = %q, want the concurrent IN_PROGRESS state preserved", got)
+	svc.finishTaskScheduling(ctx, "task-concurrent", first, true)
+	svc.finishTaskScheduling(ctx, "task-concurrent", second, false)
+
+	if got := taskRepo.tasks["task-concurrent"].State; got != v1.TaskStateScheduling {
+		t.Fatalf("state after one start resolved = %q, want SCHEDULING preserved", got)
 	}
 }
 

@@ -600,17 +600,38 @@ func (r *ProfileExecutionResolver) dynamicSourceProfileID(ctx context.Context, l
 	if err != nil {
 		return "", fmt.Errorf("resolve profile %s: %w", logicalProfileID, err)
 	}
+	sourceProfileID := logicalProfileID
 	if profile != nil && profile.ExecutionAgentProfileID != "" {
-		bound, err := r.profiles.GetAgentProfile(ctx, profile.ExecutionAgentProfileID)
-		if err != nil {
-			return "", fmt.Errorf("resolve bound execution profile %s: %w", profile.ExecutionAgentProfileID, err)
-		}
-		if bound == nil || !bound.Enabled {
-			return "", fmt.Errorf("bound execution profile %s is unavailable", profile.ExecutionAgentProfileID)
-		}
-		return profile.ExecutionAgentProfileID, nil
+		sourceProfileID = profile.ExecutionAgentProfileID
 	}
-	return logicalProfileID, nil
+	if err := r.validateDynamicSourceProfile(ctx, logicalProfileID, sourceProfileID, profile); err != nil {
+		return "", err
+	}
+	return sourceProfileID, nil
+}
+
+func (r *ProfileExecutionResolver) validateDynamicSourceProfile(
+	ctx context.Context, logicalProfileID, sourceProfileID string, logicalProfile *agentsettingsmodels.AgentProfile,
+) error {
+	source, err := r.profiles.GetAgentProfile(ctx, sourceProfileID)
+	if err != nil {
+		return fmt.Errorf("resolve dynamic source profile %s: %w", sourceProfileID, err)
+	}
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return fmt.Errorf("dynamic source profile %s is unavailable", sourceProfileID)
+	}
+	if logicalProfile != nil && sourceProfileID != logicalProfileID &&
+		source.WorkspaceID != "" && source.WorkspaceID != logicalProfile.WorkspaceID {
+		return fmt.Errorf("dynamic source profile %s belongs to a different workspace", sourceProfileID)
+	}
+	agent, err := r.profiles.GetAgent(ctx, source.AgentID)
+	if err != nil {
+		return fmt.Errorf("resolve dynamic source profile family %s: %w", sourceProfileID, err)
+	}
+	if agent == nil || agent.Name != agents.DynamicAgentID {
+		return fmt.Errorf("execution profile %s is not a dynamic profile", sourceProfileID)
+	}
+	return nil
 }
 
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {

@@ -56,12 +56,13 @@ binding in a new `TEXT NOT NULL DEFAULT ''` column. The shared resolver consults
 binding only for Office rows that set it and otherwise resolves the requested ID
 unchanged, so non-Office launches keep `execution_profile_id == agent_profile_id`.
 
-Taskless runs reach the launcher with no workspace route. When the bound Office
-agent carries a dynamic execution profile, resolve a concrete candidate through
-the shared resolver before launch rather than launching the virtual family,
-which the lifecycle rejects. When resolution fails, finish the run session and
-return the error. Task-backed launches restore the pre-`SCHEDULING` task state
-only while the task is still `SCHEDULING`, so a concurrent transition wins.
+Taskless runs with an execution binding bypass workspace routing. The launcher
+resolves a concrete candidate through the shared resolver before launch. It uses
+the resolver's isolated utility route because task-route storage requires a task
+session. Office stores the concrete candidate on its run-session. Task-backed
+runs with a binding also bypass workspace routing and use the shared resolver.
+The resolver rejects disabled, deleted, non-dynamic, or foreign-workspace
+sources. Taskless launch errors use the normal retry and backoff handler.
 
 ## Tests
 

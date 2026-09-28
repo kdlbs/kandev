@@ -550,14 +550,21 @@ func (s *AgentService) ApplyProfileConfiguration(
 	if s.profileStore == nil {
 		return errors.New("agent profile store is not configured")
 	}
+	if target == nil {
+		return errors.New("target agent is required")
+	}
 	source, err := s.profileStore.GetAgentProfile(ctx, sourceProfileID)
 	if err != nil {
 		return fmt.Errorf("get source agent profile: %w", err)
+	}
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return errors.New("source agent profile is unavailable")
 	}
 	if source.WorkspaceID != "" && source.WorkspaceID != target.WorkspaceID {
 		return errors.New("source agent profile belongs to a different workspace")
 	}
 	target.AgentID = source.AgentID
+	target.ExecutionAgentProfileID = ""
 	if source.AgentID == agents.DynamicAgentID {
 		// A dynamic execution profile is a routing owner, not a concrete CLI
 		// family. Bind the Office identity to it so the shared resolver can
