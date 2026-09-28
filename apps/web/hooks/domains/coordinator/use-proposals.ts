@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { create } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { getProposal, listProposals, type Proposal } from "@/lib/api/domains/coordinator-api";
@@ -45,18 +45,91 @@ export function mergeProposal(cached: Proposal | undefined, incoming: Proposal):
 
 type CoordinatorProposalsState = {
   byId: Record<string, Proposal>;
+  /** Highest ticket applied (success or not-found) for each id, gating a stale duplicate. */
+  appliedSeq: Record<string, number>;
+  /** Ticket of the latest applied not-found for each id, present iff that id currently reads as not found. */
+  tombstoneSeq: Record<string, number>;
+  /** Monotonic ticket counter shared by every read/write path for this coordinator. */
+  nextSeq: number;
   pendingLoadedAt: number | undefined;
   pendingError: boolean;
 };
 
 const INITIAL_COORDINATOR_PROPOSALS: CoordinatorProposalsState = {
   byId: {},
+  appliedSeq: {},
+  tombstoneSeq: {},
+  nextSeq: 1,
   pendingLoadedAt: undefined,
   pendingError: false,
 };
 
+export type ProposalApplyResult = { kind: "success"; proposal: Proposal } | { kind: "not_found" };
+
+/**
+ * Applies one ticketed response for one proposal id
+ * (docs/specs/coordinator/system-design/proposal-cards.md#client-store
+ * "Per-id ticket ordering"). Every path that reads or writes a proposal id -
+ * `useProposalById`, `backfillDropped`, `readPending`'s per-row merge, a
+ * decision's response, and a `coordinator.updated` re-read - funnels through
+ * here with a ticket from the same per-coordinator counter, so exactly one
+ * mechanism decides which response wins regardless of arrival order:
+ * - A not-found response is applied only if its ticket is the newest
+ *   applied-or-issued for that id; an older one is a stale duplicate and is
+ *   ignored. Applying one sets a tombstone at its ticket and evicts the row.
+ * - A success is only ever shadowed by a tombstone with a *newer* ticket
+ *   (there is no `updated_at` to arbitrate a not-found by); otherwise it
+ *   always merges via `mergeProposal`, so success-vs-success stays
+ *   content-arbitrated and ticket-order-independent. A success that lands
+ *   the newest ticket for its id clears an older tombstone.
+ */
+function applyProposalToCoordinator(
+  coordinator: CoordinatorProposalsState,
+  id: string,
+  seq: number,
+  result: ProposalApplyResult,
+): CoordinatorProposalsState {
+  const applied = coordinator.appliedSeq[id] ?? 0;
+  const tombstone = coordinator.tombstoneSeq[id];
+
+  if (result.kind === "not_found") {
+    if (seq < applied) return coordinator;
+    const byId = { ...coordinator.byId };
+    delete byId[id];
+    return {
+      ...coordinator,
+      byId,
+      appliedSeq: { ...coordinator.appliedSeq, [id]: seq },
+      tombstoneSeq: { ...coordinator.tombstoneSeq, [id]: seq },
+    };
+  }
+
+  if (tombstone !== undefined && tombstone > seq) return coordinator;
+  const byId = { ...coordinator.byId, [id]: mergeProposal(coordinator.byId[id], result.proposal) };
+  const tombstoneSeq = coordinator.tombstoneSeq;
+  const clearedTombstoneSeq =
+    tombstone === undefined
+      ? tombstoneSeq
+      : Object.fromEntries(Object.entries(tombstoneSeq).filter(([key]) => key !== id));
+  return {
+    ...coordinator,
+    byId,
+    appliedSeq: { ...coordinator.appliedSeq, [id]: Math.max(applied, seq) },
+    tombstoneSeq: clearedTombstoneSeq,
+  };
+}
+
 type ProposalsStoreState = {
   byCoordinator: Record<string, CoordinatorProposalsState>;
+  takeProposalTicket: (coordinatorId: string) => number;
+  applyProposalResult: (
+    coordinatorId: string,
+    id: string,
+    seq: number,
+    result: ProposalApplyResult,
+  ) => void;
+  mergePendingRows: (coordinatorId: string, seq: number, proposals: Proposal[]) => void;
+  setPendingSettled: (coordinatorId: string) => void;
   mergeOne: (coordinatorId: string, incoming: Proposal) => void;
   mergePendingList: (coordinatorId: string, proposals: Proposal[]) => void;
   setPendingError: (coordinatorId: string) => void;
@@ -72,6 +145,48 @@ type ProposalsStoreState = {
  */
 export const useProposalsStore = create<ProposalsStoreState>()((set) => ({
   byCoordinator: {},
+  takeProposalTicket: (coordinatorId) => {
+    let seq = 0;
+    set((state) => {
+      const coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
+      seq = coordinator.nextSeq;
+      return {
+        byCoordinator: {
+          ...state.byCoordinator,
+          [coordinatorId]: { ...coordinator, nextSeq: coordinator.nextSeq + 1 },
+        },
+      };
+    });
+    return seq;
+  },
+  applyProposalResult: (coordinatorId, id, seq, result) =>
+    set((state) => {
+      const coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
+      const updated = applyProposalToCoordinator(coordinator, id, seq, result);
+      if (updated === coordinator) return state;
+      return { byCoordinator: { ...state.byCoordinator, [coordinatorId]: updated } };
+    }),
+  mergePendingRows: (coordinatorId, seq, proposals) =>
+    set((state) => {
+      let coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
+      for (const incoming of proposals) {
+        coordinator = applyProposalToCoordinator(coordinator, incoming.id, seq, {
+          kind: "success",
+          proposal: incoming,
+        });
+      }
+      return { byCoordinator: { ...state.byCoordinator, [coordinatorId]: coordinator } };
+    }),
+  setPendingSettled: (coordinatorId) =>
+    set((state) => {
+      const coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
+      return {
+        byCoordinator: {
+          ...state.byCoordinator,
+          [coordinatorId]: { ...coordinator, pendingLoadedAt: Date.now(), pendingError: false },
+        },
+      };
+    }),
   mergeOne: (coordinatorId, incoming) =>
     set((state) => {
       const coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
@@ -93,7 +208,12 @@ export const useProposalsStore = create<ProposalsStoreState>()((set) => ({
       return {
         byCoordinator: {
           ...state.byCoordinator,
-          [coordinatorId]: { byId, pendingLoadedAt: Date.now(), pendingError: false },
+          [coordinatorId]: {
+            ...coordinator,
+            byId,
+            pendingLoadedAt: Date.now(),
+            pendingError: false,
+          },
         },
       };
     }),
@@ -132,21 +252,29 @@ export type UseProposalsResult = {
 
 /**
  * Fetches every id the fresh pending-list response no longer contains but
- * that the cache still holds unsettled, and merges each by-id read the same
- * way (proposal-cards.md#client-store "Merging one proposal" / the by-id
+ * that the cache still holds unsettled, and applies each by-id read through
+ * the same per-id ticket rule as every other path
+ * (proposal-cards.md#client-store "Per-id ticket ordering" / the by-id
  * backfill paragraph). A failed by-id read leaves the entry as-is; a 404
- * evicts it.
+ * applies a tombstone that no older success can undo.
  */
 function backfillDropped(workspaceId: string, coordinatorId: string, freshIds: Set<string>): void {
   const coordinator = useProposalsStore.getState().byCoordinator[coordinatorId];
   if (!coordinator) return;
   for (const [id, cached] of Object.entries(coordinator.byId)) {
     if (freshIds.has(id) || isSettledProposal(cached)) continue;
+    const seq = useProposalsStore.getState().takeProposalTicket(coordinatorId);
     getProposal(workspaceId, coordinatorId, id)
-      .then((row) => useProposalsStore.getState().mergeOne(coordinatorId, row))
+      .then((row) =>
+        useProposalsStore
+          .getState()
+          .applyProposalResult(coordinatorId, id, seq, { kind: "success", proposal: row }),
+      )
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 404) {
-          useProposalsStore.getState().evict(coordinatorId, id);
+          useProposalsStore
+            .getState()
+            .applyProposalResult(coordinatorId, id, seq, { kind: "not_found" });
         }
       });
   }
@@ -165,23 +293,30 @@ export function useProposals(
   const store = useProposalsStore((state) =>
     coordinatorId ? state.byCoordinator[coordinatorId] : undefined,
   );
-  const seqRef = useRef(0);
-  const lastSucceededSeqRef = useRef(0);
+  const listSeqRef = useRef(0);
+  const lastAppliedListSeqRef = useRef(0);
 
-  // Overlapping reads are not cancelled: every response is merged and the
-  // merge rules decide which row wins (proposal-cards.md#client-store). The
-  // sequence only keeps a failure older than a later success from raising
-  // the input's error.
+  // Overlapping reads are not cancelled. Each row's own merge always goes
+  // through the store's per-id ticket rule (proposal-cards.md#client-store
+  // "Per-id ticket ordering"), so row content is safe regardless of arrival
+  // order. `listSeqRef`/`lastAppliedListSeqRef` guard only the list-level
+  // `pendingLoadedAt`/`pendingError` bookkeeping, symmetrically for both the
+  // success and failure branches, so a stale response of either kind can
+  // never clobber a state a newer one already applied.
   const readPending = useCallback((ws: string, coordinator: string) => {
-    const seq = ++seqRef.current;
+    const listSeq = ++listSeqRef.current;
+    const seq = useProposalsStore.getState().takeProposalTicket(coordinator);
     listProposals(ws, coordinator, "pending")
       .then((res) => {
-        lastSucceededSeqRef.current = Math.max(lastSucceededSeqRef.current, seq);
-        useProposalsStore.getState().mergePendingList(coordinator, res.proposals);
+        useProposalsStore.getState().mergePendingRows(coordinator, seq, res.proposals);
         backfillDropped(ws, coordinator, new Set(res.proposals.map((p) => p.id)));
+        if (listSeq < lastAppliedListSeqRef.current) return;
+        lastAppliedListSeqRef.current = listSeq;
+        useProposalsStore.getState().setPendingSettled(coordinator);
       })
       .catch(() => {
-        if (lastSucceededSeqRef.current > seq) return;
+        if (listSeq < lastAppliedListSeqRef.current) return;
+        lastAppliedListSeqRef.current = listSeq;
         useProposalsStore.getState().setPendingError(coordinator);
       });
   }, []);
@@ -254,41 +389,36 @@ export function useProposalById(
   proposalId: string | null,
 ): UseProposalByIdResult {
   const proposal = useProposalRow(coordinatorId, proposalId);
-  const [notFound, setNotFound] = useState(false);
-  const seqRef = useRef(0);
-  const lastAppliedSeqRef = useRef(0);
-  const currentIdRef = useRef<string | null>(null);
+  const notFound = useProposalsStore((state) =>
+    coordinatorId && proposalId
+      ? (state.byCoordinator[coordinatorId]?.tombstoneSeq[proposalId] ?? undefined) !== undefined
+      : false,
+  );
 
-  // Every response is merged into the store whatever order it arrives in;
-  // the merge rules decide which row wins (proposal-cards.md#client-store).
-  // `notFound` has no `updated_at` to arbitrate by, so every write to it -
-  // clearing it on a success, setting it on a 404 - is guarded by the same
-  // per-id request sequence: an older response can never override state a
-  // newer one already applied, in either direction, and a response for an
-  // id this hook has since moved past can never touch it at all.
+  // Every response is applied through the store's per-id ticket rule
+  // (proposal-cards.md#client-store "Per-id ticket ordering"), so an older
+  // response - whether a success or a 404 - can never override state a
+  // newer one already applied, in either direction. `notFound` is derived
+  // straight from the store's tombstone for this id rather than local hook
+  // state, so a response for an id this hook has since moved past can never
+  // touch it, with no separate id-tracking ref needed.
   const read = useCallback((ws: string, coordinator: string, id: string) => {
-    const seq = ++seqRef.current;
+    const seq = useProposalsStore.getState().takeProposalTicket(coordinator);
     getProposal(ws, coordinator, id)
-      .then((row) => {
-        useProposalsStore.getState().mergeOne(coordinator, row);
-        if (id !== currentIdRef.current || seq < lastAppliedSeqRef.current) return;
-        lastAppliedSeqRef.current = seq;
-        setNotFound(false);
-      })
+      .then((row) =>
+        useProposalsStore
+          .getState()
+          .applyProposalResult(coordinator, id, seq, { kind: "success", proposal: row }),
+      )
       .catch((error: unknown) => {
         if (!(error instanceof ApiError) || error.status !== 404) return;
-        if (id !== currentIdRef.current || seq < lastAppliedSeqRef.current) return;
-        lastAppliedSeqRef.current = seq;
-        useProposalsStore.getState().evict(coordinator, id);
-        setNotFound(true);
+        useProposalsStore
+          .getState()
+          .applyProposalResult(coordinator, id, seq, { kind: "not_found" });
       });
   }, []);
 
   useEffect(() => {
-    currentIdRef.current = proposalId;
-    setNotFound(false);
-    seqRef.current = 0;
-    lastAppliedSeqRef.current = 0;
     if (!workspaceId || !coordinatorId || !proposalId) return;
     read(workspaceId, coordinatorId, proposalId);
   }, [workspaceId, coordinatorId, proposalId, read]);

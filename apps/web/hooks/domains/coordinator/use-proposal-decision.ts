@@ -9,7 +9,7 @@ import {
   type ApproveProposalEdits,
   type Proposal,
 } from "@/lib/api/domains/coordinator-api";
-import { useProposalsStore } from "./use-proposals";
+import { useProposalsStore, type ProposalApplyResult } from "./use-proposals";
 
 export type ProposalDecisionOutcome =
   | { kind: "decided"; proposal: Proposal }
@@ -40,9 +40,14 @@ function fieldErrorBody(body: unknown): { message: string; field: string | null 
  * the decision-outcomes table (docs/specs/coordinator/system-design/
  * proposal-cards.md#cards "In-flight lock", "Decision outcomes"): every
  * non-2xx status is translated to one outcome kind instead of a thrown
- * error, and every outcome that has a settled row merges it into the shared
- * store before resolving. Callers (ProposalCard) own the resulting UI:
- * closing forms, toasts, and focus.
+ * error, and every outcome that has a settled row applies it into the shared
+ * store, through the same per-id ticket rule every other read/write path
+ * uses (proposal-cards.md#client-store "Per-id ticket ordering"), before
+ * resolving. A ticket is taken lazily, only in a branch that actually
+ * applies a result: the in-flight lock rules out an overlapping dispatch for
+ * this hook instance, and a 400/403/network outcome must leave the store
+ * untouched. Callers (ProposalCard) own the resulting UI: closing forms,
+ * toasts, and focus.
  */
 export function useProposalDecision(
   workspaceId: string,
@@ -51,19 +56,27 @@ export function useProposalDecision(
 ): UseProposalDecisionResult {
   const [busy, setBusy] = useState(false);
 
+  const apply = useCallback(
+    (result: ProposalApplyResult) => {
+      const seq = useProposalsStore.getState().takeProposalTicket(coordinatorId);
+      useProposalsStore.getState().applyProposalResult(coordinatorId, proposalId, seq, result);
+    },
+    [coordinatorId, proposalId],
+  );
+
   const run = useCallback(
     async (action: () => Promise<Proposal>): Promise<ProposalDecisionOutcome> => {
       setBusy(true);
       try {
         const proposal = await action();
-        useProposalsStore.getState().mergeOne(coordinatorId, proposal);
+        apply({ kind: "success", proposal });
         return { kind: "decided", proposal };
       } catch (error) {
         if (error instanceof ApiError) {
           if (error.status === 409) {
             const conflict = getProposalConflict(error);
             if (conflict) {
-              useProposalsStore.getState().mergeOne(coordinatorId, conflict);
+              apply({ kind: "success", proposal: conflict });
               return { kind: "conflict", proposal: conflict };
             }
           }
@@ -73,7 +86,7 @@ export function useProposalDecision(
           }
           if (error.status === 403) return { kind: "forbidden" };
           if (error.status === 404) {
-            useProposalsStore.getState().evict(coordinatorId, proposalId);
+            apply({ kind: "not_found" });
             return { kind: "not_found" };
           }
         }
@@ -82,7 +95,7 @@ export function useProposalDecision(
         setBusy(false);
       }
     },
-    [coordinatorId, proposalId],
+    [apply],
   );
 
   const approve = useCallback(
