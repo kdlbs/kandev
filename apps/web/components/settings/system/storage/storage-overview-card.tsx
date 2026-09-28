@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kand
 import { Spinner } from "@kandev/ui/spinner";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
-import { useLayoutEffect, useRef, type FocusEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   formatDateTime,
@@ -21,11 +20,14 @@ import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
 import {
   storageResources,
+  SYSTEM_TEMPORARY_RESOURCE_ID,
   TEMPORARY_ARTIFACTS_RESOURCE_ID,
   type StorageResource,
   type Translate,
 } from "./storage-overview-resources";
 import { formatGigabytes } from "./storage-units";
+import { StorageTemporaryEntries } from "./storage-temporary-entries";
+import { useStorageOverviewFocus } from "./use-storage-overview-focus";
 import { storageAnalysisTotal } from "./storage-totals";
 
 interface Props {
@@ -36,6 +38,9 @@ interface Props {
   disabledReason?: string;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts?: () => void;
+  onReviewTemporaryArtifacts?: () => void;
+  focusTemporaryEntries?: number;
+  focusTemporaryCleanup?: number;
 }
 
 function goCacheDisabledReason(
@@ -81,6 +86,7 @@ interface ResourceRowProps {
   onRunGoCache: () => void;
   temporaryArtifactsCleanupDisabledReason?: string;
   onRunTemporaryArtifacts: () => void;
+  onReviewTemporaryArtifacts: () => void;
 }
 
 function ResourceBar({ resource }: { resource: StorageResource }) {
@@ -100,33 +106,13 @@ function ResourceBar({ resource }: { resource: StorageResource }) {
   );
 }
 
-interface FocusedStorageTarget {
-  resourceId: string;
-  element: HTMLElement;
-  focusId: string;
-}
-
-function focusedElementAfterReorder(
-  container: HTMLElement,
-  target: FocusedStorageTarget,
-): HTMLElement | null {
-  const resource = Array.from(
-    container.querySelectorAll<HTMLElement>("[data-storage-resource-id]"),
-  ).find((element) => element.dataset.storageResourceId === target.resourceId);
-  if (!resource) return null;
-  return (
-    Array.from(resource.querySelectorAll<HTMLElement>("[data-storage-focus-id]")).find(
-      (element) => element.dataset.storageFocusId === target.focusId,
-    ) ?? null
-  );
-}
-
 function ResourceRow({
   resource,
   goCacheCleanupDisabledReason,
   onRunGoCache,
   temporaryArtifactsCleanupDisabledReason,
   onRunTemporaryArtifacts,
+  onReviewTemporaryArtifacts,
 }: ResourceRowProps) {
   const { t } = useTranslation();
   return (
@@ -177,6 +163,13 @@ function ResourceRow({
           </div>
         )}
         {resource.warning && <p className="mt-2 break-words text-amber-600">{resource.warning}</p>}
+        {resource.id === SYSTEM_TEMPORARY_RESOURCE_ID && resource.systemTemporary && (
+          <StorageTemporaryEntries
+            roots={resource.systemTemporary.roots}
+            temporaryArtifacts={resource.temporaryArtifacts}
+            onReviewCleanup={onReviewTemporaryArtifacts}
+          />
+        )}
         {resource.id === "go-cache" && (
           <StorageActionButton
             variant="outline"
@@ -384,66 +377,30 @@ function StorageOverviewHeader({
 
 function StorageOverviewResources({
   resources,
+  focusTemporaryEntries,
+  focusTemporaryCleanup,
   cleanupDisabledReason,
   temporaryArtifactsCleanupDisabledReason,
   onRunGoCache,
   onRunTemporaryArtifacts,
+  onReviewTemporaryArtifacts,
 }: {
   resources: StorageResource[];
+  focusTemporaryEntries?: number;
+  focusTemporaryCleanup?: number;
   cleanupDisabledReason?: string;
   temporaryArtifactsCleanupDisabledReason?: string;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts: () => void;
+  onReviewTemporaryArtifacts: () => void;
 }) {
-  const resourcesRef = useRef<HTMLDivElement | null>(null);
-  const focusedTargetRef = useRef<FocusedStorageTarget | null>(null);
-  const resourceOrderKey = resources.map((resource) => resource.id).join("\u0000");
-
-  const rememberFocusedTarget = (event: FocusEvent<HTMLDivElement>) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const container = resourcesRef.current;
-    const resource = target.closest<HTMLElement>("[data-storage-resource-id]");
-    if (!container || !resource || !container.contains(resource)) {
-      focusedTargetRef.current = null;
-      return;
-    }
-    const focusId = target.dataset.storageFocusId;
-    if (!focusId) {
-      focusedTargetRef.current = null;
-      return;
-    }
-    focusedTargetRef.current = {
-      resourceId: resource.dataset.storageResourceId ?? "",
-      element: target,
-      focusId,
-    };
-  };
-
-  const forgetFocusedTargetOutsideResources = (event: FocusEvent<HTMLDivElement>) => {
-    const relatedTarget = event.relatedTarget;
-    if (!(relatedTarget instanceof Node) || !resourcesRef.current?.contains(relatedTarget)) {
-      focusedTargetRef.current = null;
-    }
-  };
-
-  useLayoutEffect(() => {
-    const container = resourcesRef.current;
-    const target = focusedTargetRef.current;
-    if (!container || !target) return;
-    const activeElement = document.activeElement;
-    if (
-      activeElement &&
-      activeElement !== document.body &&
-      (!container.contains(activeElement) || activeElement !== target.element)
-    ) {
-      focusedTargetRef.current = null;
-      return;
-    }
-    const element = focusedElementAfterReorder(container, target);
-    if (element && document.activeElement !== element) element.focus();
-    focusedTargetRef.current = null;
-  }, [resourceOrderKey]);
+  const {
+    resourcesRef,
+    expandedResources,
+    setExpandedResources,
+    rememberFocusedTarget,
+    forgetFocusedTargetOutsideResources,
+  } = useStorageOverviewFocus({ resources, focusTemporaryEntries, focusTemporaryCleanup });
 
   return (
     <CardContent
@@ -452,7 +409,12 @@ function StorageOverviewResources({
       onFocusCapture={rememberFocusedTarget}
       onBlurCapture={forgetFocusedTargetOutsideResources}
     >
-      <Accordion type="multiple" className="min-w-0">
+      <Accordion
+        type="multiple"
+        className="min-w-0"
+        value={expandedResources}
+        onValueChange={setExpandedResources}
+      >
         {resources.map((resource) => (
           <ResourceRow
             key={resource.id}
@@ -461,6 +423,7 @@ function StorageOverviewResources({
             onRunGoCache={onRunGoCache}
             temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
             onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+            onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
           />
         ))}
       </Accordion>
@@ -476,6 +439,9 @@ export function StorageOverviewCard({
   disabledReason,
   onRunGoCache,
   onRunTemporaryArtifacts = () => {},
+  focusTemporaryEntries,
+  focusTemporaryCleanup,
+  onReviewTemporaryArtifacts = () => {},
 }: Props) {
   const { t } = useTranslation();
   if (!overview) {
@@ -501,10 +467,13 @@ export function StorageOverviewCard({
       />
       <StorageOverviewResources
         resources={storageResources(t, overview)}
+        focusTemporaryEntries={focusTemporaryEntries}
+        focusTemporaryCleanup={focusTemporaryCleanup}
         cleanupDisabledReason={cleanupDisabledReason}
         temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
         onRunGoCache={onRunGoCache}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
       />
     </Card>
   );

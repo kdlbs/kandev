@@ -2,6 +2,18 @@
 // `apps/backend/internal/system/` HTTP surface (see
 // docs/specs/system-page/requirements/system-page.md "Backend surface").
 
+import type { StorageSystemTemporarySummary } from "./system-storage";
+export type {
+  StorageDiskCapacityResponse,
+  StorageSystemTemporarySummary,
+  StorageTemporaryDiskCapacity,
+  StorageTemporaryEntry,
+  StorageTemporaryEntryBreakdown,
+  StorageTemporaryEntryOwnership,
+  StorageTemporaryRootMeasurement,
+  StorageTemporaryRootStatus,
+} from "./system-storage";
+
 export interface SystemInfo {
   version: string;
   commit: string;
@@ -396,28 +408,6 @@ export interface StorageTemporaryArtifactsSummary {
   warning?: string;
 }
 
-export type StorageTemporaryRootStatus = "measured" | "partial" | "unavailable" | "not_applicable";
-
-export interface StorageTemporaryRootMeasurement {
-  requested_path: string;
-  path: string;
-  aliases?: string[];
-  status: StorageTemporaryRootStatus;
-  size_bytes?: number;
-  skipped_count?: number;
-  reason?: string;
-  warnings?: string[];
-}
-
-export interface StorageSystemTemporarySummary {
-  status: StorageTemporaryRootStatus;
-  roots: StorageTemporaryRootMeasurement[];
-  size_bytes?: number;
-  included_in_total: false;
-  reason?: string;
-  warnings?: string[];
-}
-
 export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
 
 export type StorageFootprintMeasurement =
@@ -569,16 +559,6 @@ export interface StorageOverviewResponse {
   analyzed_at: string | null;
   analysis: StorageAnalysisState;
   last_run: StorageMaintenanceRun | null;
-}
-
-export interface StorageDiskCapacityResponse {
-  path: string;
-  total_bytes: number;
-  used_bytes: number;
-  available_bytes: number;
-  used_percent: number;
-  available: boolean;
-  warning?: string;
 }
 
 export interface StoragePolicyResponse {
