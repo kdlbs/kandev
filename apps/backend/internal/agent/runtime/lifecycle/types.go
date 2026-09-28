@@ -285,8 +285,10 @@ type AgentExecution struct {
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                   sync.Mutex
 	dispatchedPromptPending    atomic.Bool
+	idleSuspensionMu           sync.Mutex
 	idleSuspensionInProgress   atomic.Bool
 	idleSuspensionAgentStopped atomic.Bool
+	idleSuspensionEvents       []idleSuspensionEvent
 	// Initial-prompt callbacks are installed before StartAgentProcess for
 	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
 	// so they must be captured before startup begins and consumed once that

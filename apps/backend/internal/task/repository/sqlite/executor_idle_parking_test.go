@@ -92,3 +92,81 @@ func TestExecutorRunningUpsertDoesNotRegressIdleSuspensionForSameExecution(t *te
 		t.Fatalf("ready successor retained suspension provenance: %q", got.IdleSuspensionState)
 	}
 }
+
+func TestClaimExecutorRunningIdleSuspensionPersistsPolicyRevision(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	workspace := &models.Workspace{
+		ID: "workspace-idle-policy-revision", Name: "Idle policy revision",
+		ACPIdleSuspensionEnabled: true, ACPIdleTimeoutMinutes: 120,
+	}
+	if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ID: "task-idle-policy-revision", WorkspaceID: workspace.ID, Title: "Idle policy revision"}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-idle-policy-revision", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-idle-policy-revision", SessionID: "session-idle-policy-revision", TaskID: task.ID,
+		AgentExecutionID: "execution-idle-policy-revision", Status: models.ExecutorRunningStatusReady,
+		Resumable: true, ResumeToken: "resume-token",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := repo.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "session-idle-policy-revision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimExecutorRunningIdleSuspension(ctx, running.SessionID, running.AgentExecutionID,
+		running.UpdatedAt, workspace.ID, workspace.UpdatedAt)
+	if err != nil || !claimed {
+		t.Fatalf("claim = %v, error = %v", claimed, err)
+	}
+	running, err = repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.IdleSuspensionPolicyUpdatedAt.IsZero() || !running.IdleSuspensionPolicyUpdatedAt.Equal(workspace.UpdatedAt) {
+		t.Fatalf("persisted policy revision = %v, want %v", running.IdleSuspensionPolicyUpdatedAt, workspace.UpdatedAt)
+	}
+	valid, err := repo.ValidateExecutorRunningIdleSuspensionPolicy(ctx, running.SessionID, running.AgentExecutionID,
+		workspace.ID, workspace.UpdatedAt)
+	if err != nil || !valid {
+		t.Fatalf("current claim policy = %v, error = %v", valid, err)
+	}
+	workspace.ACPIdleTimeoutMinutes = 121
+	if err := repo.UpdateWorkspace(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
+	valid, err = repo.ValidateExecutorRunningIdleSuspensionPolicy(ctx, running.SessionID, running.AgentExecutionID,
+		workspace.ID, workspace.UpdatedAt)
+	if err != nil || valid {
+		t.Fatalf("changed claim policy = %v, error = %v; want invalid", valid, err)
+	}
+	for _, transition := range [][2]string{
+		{models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionAgentStopped},
+		{models.ExecutorIdleSuspensionAgentStopped, models.ExecutorIdleSuspensionNone},
+	} {
+		if err := repo.CompareAndSetExecutorRunningIdleSuspension(ctx, running.SessionID, running.AgentExecutionID,
+			time.Time{}, transition[0], transition[1]); err != nil {
+			t.Fatal(err)
+		}
+		running, err = repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if transition[1] == models.ExecutorIdleSuspensionNone && !running.IdleSuspensionPolicyUpdatedAt.IsZero() {
+			t.Fatalf("cleared claim retained policy revision %v", running.IdleSuspensionPolicyUpdatedAt)
+		}
+	}
+}

@@ -155,8 +155,37 @@ func TestPostgresIdleSuspensionPolicyAndProvenance(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create executor inventory: %v", err)
 	}
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "session-pg-idle-parking")
+	if err != nil {
+		t.Fatalf("load executor inventory before claim: %v", err)
+	}
+	claimed, err := repo.ClaimExecutorRunningIdleSuspension(ctx, running.SessionID, running.AgentExecutionID,
+		running.UpdatedAt, loadedWorkspace.ID, loadedWorkspace.UpdatedAt)
+	if err != nil || !claimed {
+		t.Fatalf("claim idle suspension = %v, error = %v", claimed, err)
+	}
+	running, err = repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+	if err != nil {
+		t.Fatalf("reload claimed executor inventory: %v", err)
+	}
+	if !running.IdleSuspensionPolicyUpdatedAt.Equal(loadedWorkspace.UpdatedAt) {
+		t.Fatalf("claimed policy revision = %v, want %v", running.IdleSuspensionPolicyUpdatedAt, loadedWorkspace.UpdatedAt)
+	}
+	policyCurrent, err := repo.ValidateExecutorRunningIdleSuspensionPolicy(ctx, running.SessionID, running.AgentExecutionID,
+		loadedWorkspace.ID, loadedWorkspace.UpdatedAt)
+	if err != nil || !policyCurrent {
+		t.Fatalf("validate current idle policy = %v, error = %v", policyCurrent, err)
+	}
+	loadedWorkspace.ACPIdleTimeoutMinutes = 46
+	if err := repo.UpdateWorkspace(ctx, loadedWorkspace); err != nil {
+		t.Fatalf("change idle workspace policy: %v", err)
+	}
+	policyCurrent, err = repo.ValidateExecutorRunningIdleSuspensionPolicy(ctx, running.SessionID, running.AgentExecutionID,
+		loadedWorkspace.ID, running.IdleSuspensionPolicyUpdatedAt)
+	if err != nil || policyCurrent {
+		t.Fatalf("validate changed idle policy = %v, error = %v; want false", policyCurrent, err)
+	}
 	for _, transition := range [][2]string{
-		{models.ExecutorIdleSuspensionNone, models.ExecutorIdleSuspensionInProgress},
 		{models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionAgentStopped},
 		{models.ExecutorIdleSuspensionAgentStopped, models.ExecutorIdleSuspensionSuspended},
 	} {
@@ -166,7 +195,7 @@ func TestPostgresIdleSuspensionPolicyAndProvenance(t *testing.T) {
 			t.Fatalf("idle suspension transition %q -> %q: %v", transition[0], transition[1], err)
 		}
 	}
-	running, err := repo.GetExecutorRunningBySessionID(ctx, "session-pg-idle-parking")
+	running, err = repo.GetExecutorRunningBySessionID(ctx, "session-pg-idle-parking")
 	if err != nil {
 		t.Fatalf("load executor inventory: %v", err)
 	}

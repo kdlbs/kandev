@@ -2641,18 +2641,19 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID                  string               `json:"id"`
-	SessionID           string               `json:"session_id"`
-	TaskID              string               `json:"task_id"`
-	ExecutionProfileID  string               `json:"execution_profile_id"`
-	ExecutorID          string               `json:"executor_id"`
-	Runtime             agentruntime.Runtime `json:"runtime,omitempty"`
-	Status              string               `json:"status"`
-	IdleSuspensionState string               `json:"-" db:"idle_suspension_state"`
-	Resumable           bool                 `json:"resumable"`
-	ResumeToken         string               `json:"resume_token,omitempty"`
-	LastMessageUUID     string               `json:"last_message_uuid,omitempty"`
-	AgentExecutionID    string               `json:"agent_execution_id,omitempty"`
+	ID                            string               `json:"id"`
+	SessionID                     string               `json:"session_id"`
+	TaskID                        string               `json:"task_id"`
+	ExecutionProfileID            string               `json:"execution_profile_id"`
+	ExecutorID                    string               `json:"executor_id"`
+	Runtime                       agentruntime.Runtime `json:"runtime,omitempty"`
+	Status                        string               `json:"status"`
+	IdleSuspensionState           string               `json:"-" db:"idle_suspension_state"`
+	IdleSuspensionPolicyUpdatedAt time.Time            `json:"-" db:"idle_suspension_policy_updated_at"`
+	Resumable                     bool                 `json:"resumable"`
+	ResumeToken                   string               `json:"resume_token,omitempty"`
+	LastMessageUUID               string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID              string               `json:"agent_execution_id,omitempty"`
 	// TransientAuthToken carries a decrypted agentctl token only between the
 	// lifecycle recovery inventory read and the matching remote runtime. It is
 	// excluded from JSON and database persistence.

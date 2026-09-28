@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -18,12 +19,17 @@ type idleParkingTestAgent struct {
 	*mockAgentManager
 	mu           sync.Mutex
 	suspendCalls []agentapi.IdleSuspensionIdentity
+	suspendFunc  func(context.Context, agentapi.IdleSuspensionIdentity) error
 }
 
-func (m *idleParkingTestAgent) SuspendIdle(_ context.Context, identity agentapi.IdleSuspensionIdentity) error {
+func (m *idleParkingTestAgent) SuspendIdle(ctx context.Context, identity agentapi.IdleSuspensionIdentity) error {
 	m.mu.Lock()
 	m.suspendCalls = append(m.suspendCalls, identity)
+	suspendFunc := m.suspendFunc
 	m.mu.Unlock()
+	if suspendFunc != nil {
+		return suspendFunc(ctx, identity)
+	}
 	return nil
 }
 
@@ -75,6 +81,9 @@ func newIdleParkingFixture(t *testing.T, enabled bool, timeout int, provider str
 		t.Fatalf("age runtime settlement: %v", err)
 	}
 	agent := &idleParkingTestAgent{mockAgentManager: &mockAgentManager{isAgentRunning: true}}
+	agent.probeBackgroundWorkloadsFunc = func(context.Context, string) (client.ProbeResult, error) {
+		return client.ProbeResultSettled, nil
+	}
 	agent.currentPromptExecutionID = running.AgentExecutionID
 	agent.currentPromptLastActivityAt = old
 	agent.currentPromptGeneration.Store(4)
@@ -155,6 +164,220 @@ func TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning(t *testing.T) {
 			t.Fatalf("suspension calls = %d, want 0 for known active work", got)
 		}
 	})
+}
+
+func TestIdleParkingSkipsInconclusiveBackgroundProbe(t *testing.T) {
+	tests := []struct {
+		name   string
+		result client.ProbeResult
+		err    error
+		want   int
+	}{
+		{name: "live", result: client.ProbeResultLive},
+		{name: "unknown", result: client.ProbeResultUnknown},
+		{name: "error", result: client.ProbeResultSettled, err: errors.New("probe failed")},
+		{name: "settled", result: client.ProbeResultSettled, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, agent, _ := newIdleParkingFixture(t, true, 1, "claude-acp")
+			agent.probeBackgroundWorkloadsFunc = func(context.Context, string) (client.ProbeResult, error) {
+				return tt.result, tt.err
+			}
+			svc.suspendWorkspaceIdleSessionsOnce(context.Background())
+			if got := len(agent.suspensionCalls()); got != tt.want {
+				t.Fatalf("suspension calls = %d, want %d for probe result %q (err=%v)", got, tt.want, tt.result, tt.err)
+			}
+		})
+	}
+}
+
+func TestIdleParkingDoesNotReleaseItsActiveSuspensionClaim(t *testing.T) {
+	svc, agent, running := newIdleParkingFixture(t, true, 1, "claude-acp")
+	ctx := context.Background()
+	entered := make(chan struct{})
+	finishStop := make(chan struct{})
+	var finishStopOnce sync.Once
+	releaseStop := func() { finishStopOnce.Do(func() { close(finishStop) }) }
+	defer releaseStop()
+	agent.suspendFunc = func(ctx context.Context, identity agentapi.IdleSuspensionIdentity) error {
+		current, err := svc.repo.GetExecutorRunningBySessionID(ctx, identity.SessionID)
+		if err != nil {
+			return err
+		}
+		claimer := svc.repo.(interface {
+			ClaimExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, time.Time) (bool, error)
+		})
+		claimed, err := claimer.ClaimExecutorRunningIdleSuspension(ctx, identity.SessionID, identity.ExecutionID,
+			current.UpdatedAt, identity.WorkspaceID, identity.PolicyUpdatedAt)
+		if err != nil || !claimed {
+			return errors.Join(err, errors.New("test suspension claim was rejected"))
+		}
+		close(entered)
+		select {
+		case <-finishStop:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		cas := svc.repo.(idleSuspensionStateCAS)
+		if err := cas.CompareAndSetExecutorRunningIdleSuspension(ctx, identity.SessionID, identity.ExecutionID,
+			time.Time{}, models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionAgentStopped); err != nil {
+			return err
+		}
+		return cas.CompareAndSetExecutorRunningIdleSuspension(ctx, identity.SessionID, identity.ExecutionID,
+			time.Time{}, models.ExecutorIdleSuspensionAgentStopped, models.ExecutorIdleSuspensionSuspended)
+	}
+	finished := make(chan struct{})
+	go func() {
+		svc.suspendWorkspaceIdleSessionsOnce(ctx)
+		close(finished)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("idle suspension did not acquire its durable claim")
+	}
+	current, err := svc.repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := idleParkingScanSummary{observed: make(map[idleParkingCandidateKey]struct{}), skipped: make(map[idleParkingSkipReason]int)}
+	svc.processWorkspaceIdleRow(ctx, current, time.Now().UTC(), agent, &summary)
+	current, err = svc.repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.IdleSuspensionState != models.ExecutorIdleSuspensionInProgress {
+		releaseStop()
+		t.Fatalf("concurrent reaper changed active claim to %q", current.IdleSuspensionState)
+	}
+	releaseStop()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("active suspension did not finish after its stop completed")
+	}
+	current, err = svc.repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.IdleSuspensionState != models.ExecutorIdleSuspensionSuspended {
+		t.Fatalf("completed suspension state = %q, want suspended", current.IdleSuspensionState)
+	}
+}
+
+func TestIdleParkingRetriesOnlyClaimsWithTheCurrentWorkspacePolicy(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		name := "current_policy"
+		if changed {
+			name = "changed_policy"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, agent, seed := newIdleParkingFixture(t, true, 1, "claude-acp")
+			workspace, err := svc.repo.GetWorkspace(ctx, "workspace-idle-parking")
+			if err != nil {
+				t.Fatal(err)
+			}
+			running, err := svc.repo.GetExecutorRunningBySessionID(ctx, seed.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claimer := svc.repo.(interface {
+				ClaimExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, time.Time) (bool, error)
+			})
+			claimed, err := claimer.ClaimExecutorRunningIdleSuspension(ctx, running.SessionID, running.AgentExecutionID,
+				running.UpdatedAt, workspace.ID, workspace.UpdatedAt)
+			if err != nil || !claimed {
+				t.Fatalf("claim = %v, error = %v", claimed, err)
+			}
+			if changed {
+				workspace.ACPIdleTimeoutMinutes = 121
+				updater := svc.repo.(interface {
+					UpdateWorkspace(context.Context, *models.Workspace) error
+				})
+				if err := updater.UpdateWorkspace(ctx, workspace); err != nil {
+					t.Fatal(err)
+				}
+			}
+			running, err = svc.repo.GetExecutorRunningBySessionID(ctx, seed.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if recovered := svc.reconcileIdleSuspensionAfterRestart(ctx, running); !recovered {
+				t.Fatal("reconciliation did not resolve the provisional claim")
+			}
+			got, err := svc.repo.GetExecutorRunningBySessionID(ctx, seed.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := agent.suspensionCalls()
+			if changed {
+				if len(calls) != 0 || got.IdleSuspensionState != models.ExecutorIdleSuspensionNone {
+					t.Fatalf("changed policy claim recovery = calls:%d state:%q, want released without resume", len(calls), got.IdleSuspensionState)
+				}
+			} else if len(calls) != 1 || got.IdleSuspensionState != models.ExecutorIdleSuspensionInProgress {
+				t.Fatalf("current policy claim recovery = calls:%d state:%q, want one retry retaining claim", len(calls), got.IdleSuspensionState)
+			}
+		})
+	}
+}
+
+func TestIdleParkingReleasesPromptLocksBeforeBoundedSuspensionIO(t *testing.T) {
+	svc, agent, _ := newIdleParkingFixture(t, true, 1, "claude-acp")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	entered := make(chan struct{})
+	deadlineSeen := make(chan bool, 1)
+	agent.suspendFunc = func(ctx context.Context, _ agentapi.IdleSuspensionIdentity) error {
+		_, ok := ctx.Deadline()
+		deadlineSeen <- ok
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	finished := make(chan struct{})
+	go func() {
+		svc.suspendWorkspaceIdleSessionsOnce(ctx)
+		close(finished)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("suspension did not reach runtime IO")
+	}
+
+	locksAvailable := make(chan error, 1)
+	go func() {
+		locksAvailable <- svc.withSessionPromptAdmission(context.Background(), "session-idle-parking", func(admitted context.Context) error {
+			release := svc.acquireSessionLifecycleLock("session-idle-parking")
+			defer release()
+			return nil
+		})
+	}()
+	select {
+	case err := <-locksAvailable:
+		if err != nil {
+			t.Fatalf("acquire session operations during suspension: %v", err)
+		}
+	case <-time.After(time.Second):
+		cancel()
+		<-finished
+		t.Fatal("session admission/lifecycle locks remained held across runtime IO")
+	}
+	if hasDeadline := <-deadlineSeen; !hasDeadline {
+		cancel()
+		<-finished
+		t.Fatal("suspension runtime IO has no operation deadline")
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("suspension did not stop after its parent context was cancelled")
+	}
 }
 
 func TestIdleParkingReconcilesStoppedAgentWithCurrentIdentity(t *testing.T) {

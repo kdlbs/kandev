@@ -450,6 +450,7 @@ const infraSchemaDDL = `
 		runtime TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'starting',
 		idle_suspension_state TEXT NOT NULL DEFAULT '',
+		idle_suspension_policy_updated_at TIMESTAMP,
 		resumable INTEGER NOT NULL DEFAULT 0,
 		resume_token TEXT DEFAULT '',
 		agent_execution_id TEXT DEFAULT '',

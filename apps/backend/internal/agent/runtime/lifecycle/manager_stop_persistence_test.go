@@ -49,6 +49,12 @@ func TestSuspendIdlePreservesRuntimeOwnershipWithoutAgentStopped(t *testing.T) {
 	}))
 	workspace, err := repo.GetWorkspace(ctx, "workspace-idle-suspension")
 	require.NoError(t, err)
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-idle-suspension", WorkspaceID: workspace.ID, Title: "Idle suspension",
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-idle-suspension", TaskID: "task-idle-suspension", State: models.TaskSessionStateWaitingForInput,
+	}))
 	mgr, eventBus := createTestManagerWithTracking()
 	mgr.SetExecutorRunningWriter(repo)
 	backend := &runOwnerRecoveryExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
@@ -84,6 +90,62 @@ func TestSuspendIdlePreservesRuntimeOwnershipWithoutAgentStopped(t *testing.T) {
 		require.NotEqual(t, events.AgentStopped, published.Event.Type,
 			"idle suspension must not flow through generic cancellation handling")
 	}
+}
+
+func TestSuspendIdleDoesNotStopWhenWorkspacePolicyChangesAfterClaim(t *testing.T) {
+	ctx := context.Background()
+	repo, db := runOwnerTestRepository(t)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "workspace-idle-policy-race", Name: "Idle policy race",
+		ACPIdleSuspensionEnabled: true, ACPIdleTimeoutMinutes: 120,
+	}))
+	workspace, err := repo.GetWorkspace(ctx, "workspace-idle-policy-race")
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-idle-policy-race", WorkspaceID: workspace.ID, Title: "Idle policy race",
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-idle-policy-race", TaskID: "task-idle-policy-race", State: models.TaskSessionStateWaitingForInput,
+	}))
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(repo)
+	backend := &runOwnerRecoveryExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	mgr.executorRegistry = NewExecutorRegistry(mgr.logger)
+	mgr.executorRegistry.Register(backend)
+	execution := &AgentExecution{
+		ID: "execution-idle-policy-race", TaskID: "task-idle-policy-race", SessionID: "session-idle-policy-race",
+		Status: v1.AgentStatusReady, RuntimeName: executor.NameStandalone,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	require.NoError(t, mgr.persistExecutorRunningResult(ctx, execution))
+	running, err := repo.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	require.NoError(t, err)
+	running.Resumable = true
+	running.ResumeToken = "retained-token"
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
+	_, err = db.ExecContext(ctx, `
+		CREATE TRIGGER change_idle_policy_after_claim
+		AFTER UPDATE OF idle_suspension_state ON executors_running
+		WHEN NEW.idle_suspension_state = 'suspending'
+		BEGIN
+			UPDATE workspaces
+			   SET acp_idle_suspension_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+			 WHERE id = 'workspace-idle-policy-race';
+		END;
+	`)
+	require.NoError(t, err)
+
+	err = mgr.SuspendIdle(ctx, IdleSuspensionIdentity{
+		ExecutionID: execution.ID, SessionID: execution.SessionID,
+		WorkspaceID: workspace.ID, PolicyUpdatedAt: workspace.UpdatedAt,
+	})
+	require.ErrorIs(t, err, ErrIdleSuspensionRejected)
+	running, err = repo.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecutorIdleSuspensionNone, running.IdleSuspensionState)
+	require.Empty(t, backend.stoppedID, "runtime teardown must not start after policy invalidation")
+	_, tracked := mgr.executionStore.Get(execution.ID)
+	require.True(t, tracked)
 }
 
 func TestSuspendIdleRejectsStaleIdentityAndMissingRestoreData(t *testing.T) {

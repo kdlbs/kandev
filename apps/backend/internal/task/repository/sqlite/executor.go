@@ -306,7 +306,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, idle_suspension_policy_updated_at, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -326,7 +326,7 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 // rows and recent executions on every reaper tick.
 func (r *Repository) ListExecutorsRunningIdle(ctx context.Context, cutoff time.Time) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, idle_suspension_policy_updated_at, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -348,7 +348,7 @@ func (r *Repository) ListExecutorsRunningIdle(ctx context.Context, cutoff time.T
 // before any control-server contact (discovery H).
 func (r *Repository) ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, idle_suspension_policy_updated_at, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -370,7 +370,7 @@ func (r *Repository) ListExecutorsRunningLiveStandalone(ctx context.Context) ([]
 // terminal rows remain visible to cleanup and profile lifecycle checks.
 func (r *Repository) ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, idle_suspension_policy_updated_at, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -390,7 +390,7 @@ func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID st
 		return nil, fmt.Errorf("task_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, idle_suspension_policy_updated_at, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
@@ -420,11 +420,11 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	}
 	running := &models.ExecutorRunning{}
 	var resumable int
-	var lastSeen sql.NullTime
+	var lastSeen, idleSuspensionPolicyUpdatedAt sql.NullTime
 	var metadataJSON string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, idle_suspension_policy_updated_at, resumable, resume_token,
 		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 		       created_at, updated_at
@@ -439,6 +439,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.Runtime,
 		&running.Status,
 		&running.IdleSuspensionState,
+		&idleSuspensionPolicyUpdatedAt,
 		&resumable,
 		&running.ResumeToken,
 		&running.LastMessageUUID,
@@ -464,6 +465,9 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		return nil, err
 	}
 	running.Resumable = resumable == 1
+	if idleSuspensionPolicyUpdatedAt.Valid {
+		running.IdleSuspensionPolicyUpdatedAt = idleSuspensionPolicyUpdatedAt.Time
+	}
 	if lastSeen.Valid {
 		running.LastSeenAt = &lastSeen.Time
 	}
@@ -480,9 +484,10 @@ func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) 
 	for rows.Next() {
 		running := &models.ExecutorRunning{}
 		var (
-			resumable    int
-			lastSeen     sql.NullTime
-			metadataJSON string
+			resumable                     int
+			lastSeen                      sql.NullTime
+			idleSuspensionPolicyUpdatedAt sql.NullTime
+			metadataJSON                  string
 		)
 		if scanErr := rows.Scan(
 			&running.ID,
@@ -493,6 +498,7 @@ func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) 
 			&running.Runtime,
 			&running.Status,
 			&running.IdleSuspensionState,
+			&idleSuspensionPolicyUpdatedAt,
 			&resumable,
 			&running.ResumeToken,
 			&running.LastMessageUUID,
@@ -514,6 +520,9 @@ func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) 
 			return nil, scanErr
 		}
 		running.Resumable = resumable == 1
+		if idleSuspensionPolicyUpdatedAt.Valid {
+			running.IdleSuspensionPolicyUpdatedAt = idleSuspensionPolicyUpdatedAt.Time
+		}
 		if lastSeen.Valid {
 			running.LastSeenAt = &lastSeen.Time
 		}
@@ -852,13 +861,21 @@ func (r *Repository) CompareAndSetExecutorRunningIdleSuspension(
 		 WHERE session_id = ? AND agent_execution_id = ? AND idle_suspension_state = ?
 	`
 	args := []interface{}{toState, now, sessionID, executionID, fromState}
-	if toState == models.ExecutorIdleSuspensionSuspended {
+	switch toState {
+	case models.ExecutorIdleSuspensionSuspended:
 		query = `
 			UPDATE executors_running
 			   SET idle_suspension_state = ?, status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
 			 WHERE session_id = ? AND agent_execution_id = ? AND idle_suspension_state = ?
 		`
 		args = []interface{}{toState, models.ExecutorRunningStatusStopped, now, now, sessionID, executionID, fromState}
+	case models.ExecutorIdleSuspensionNone:
+		query = `
+			UPDATE executors_running
+			   SET idle_suspension_state = ?, idle_suspension_policy_updated_at = NULL, updated_at = ?
+			 WHERE session_id = ? AND agent_execution_id = ? AND idle_suspension_state = ?
+		`
+		args = []interface{}{toState, now, sessionID, executionID, fromState}
 	}
 	if !expectedUpdatedAt.IsZero() {
 		query += " AND updated_at = ?\n"
@@ -909,13 +926,13 @@ func (r *Repository) ClaimExecutorRunningIdleSuspension(
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE executors_running
-		   SET idle_suspension_state = ?, updated_at = ?
+		   SET idle_suspension_state = ?, idle_suspension_policy_updated_at = ?, updated_at = ?
 		 WHERE session_id = ? AND agent_execution_id = ? AND idle_suspension_state = ? AND updated_at = ?
 		   AND EXISTS (
 		       SELECT 1 FROM workspaces
 		        WHERE id = ? AND acp_idle_suspension_enabled = TRUE AND updated_at = ?
 		   )
-	`), models.ExecutorIdleSuspensionInProgress, time.Now().UTC(), sessionID, executionID,
+	`), models.ExecutorIdleSuspensionInProgress, expectedPolicyUpdatedAt, time.Now().UTC(), sessionID, executionID,
 		models.ExecutorIdleSuspensionNone, expectedRowUpdatedAt, workspaceID, expectedPolicyUpdatedAt)
 	if err != nil {
 		return false, err
@@ -931,6 +948,38 @@ func (r *Repository) ClaimExecutorRunningIdleSuspension(
 		return false, err
 	}
 	return true, nil
+}
+
+// ValidateExecutorRunningIdleSuspensionPolicy reports whether the provisional
+// claim still matches the enabled workspace policy at the stop boundary.
+func (r *Repository) ValidateExecutorRunningIdleSuspensionPolicy(
+	ctx context.Context,
+	sessionID, executionID, workspaceID string,
+	expectedPolicyUpdatedAt time.Time,
+) (bool, error) {
+	if sessionID == "" || executionID == "" || workspaceID == "" || expectedPolicyUpdatedAt.IsZero() {
+		return false, nil
+	}
+	var match int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1
+		  FROM executors_running er
+		  JOIN tasks t ON t.id = er.task_id
+		  JOIN workspaces w ON w.id = t.workspace_id
+		 WHERE er.session_id = ? AND er.agent_execution_id = ?
+		   AND er.idle_suspension_state = ?
+		   AND er.idle_suspension_policy_updated_at = ?
+		   AND w.id = ? AND w.acp_idle_suspension_enabled = TRUE AND w.updated_at = ?
+		 LIMIT 1
+	`), sessionID, executionID, models.ExecutorIdleSuspensionInProgress, expectedPolicyUpdatedAt,
+		workspaceID, expectedPolicyUpdatedAt).Scan(&match)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return match == 1, nil
 }
 
 func validExecutorIdleSuspensionTransition(from, to string) bool {

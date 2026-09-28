@@ -47,6 +47,7 @@ type ExecutorRunningWriter interface {
 type idleSuspensionInventory interface {
 	GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error)
 	ClaimExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, time.Time) (bool, error)
+	ValidateExecutorRunningIdleSuspensionPolicy(context.Context, string, string, string, time.Time) (bool, error)
 	CompareAndSetExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, string) error
 }
 

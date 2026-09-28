@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -16,6 +17,12 @@ const StopReasonIdleSuspension = "idle suspension"
 
 var ErrIdleSuspensionRejected = errors.New("idle suspension candidate is no longer eligible")
 var ErrIdleSuspensionInProgress = errors.New("idle suspension is in progress")
+
+type idleSuspensionEvent struct {
+	event                agentctl.AgentEvent
+	enforceResetBoundary bool
+	attemptID            string
+}
 
 type idleSuspensionStageError struct {
 	stage string
@@ -38,12 +45,13 @@ func IdleSuspensionFailureStage(err error) (string, bool) {
 // IdleSuspensionIdentity binds a scan result to the exact session turn and
 // Kandev-observed activity that made it eligible.
 type IdleSuspensionIdentity struct {
-	ExecutionID      string
-	SessionID        string
-	WorkspaceID      string
-	PolicyUpdatedAt  time.Time
-	PromptGeneration uint64
-	ActivityEpoch    uint64
+	ExecutionID          string
+	SessionID            string
+	WorkspaceID          string
+	PolicyUpdatedAt      time.Time
+	RequireCurrentPolicy bool
+	PromptGeneration     uint64
+	ActivityEpoch        uint64
 }
 
 // SuspendIdle stops one settled task-owned ACP process while retaining its
@@ -72,6 +80,43 @@ func (m *Manager) SuspendIdle(ctx context.Context, identity IdleSuspensionIdenti
 	return m.suspendLiveIdleExecution(ctx, store, execution, identity, &stage)
 }
 
+func (e *AgentExecution) beginIdleSuspension() {
+	e.idleSuspensionMu.Lock()
+	e.idleSuspensionEvents = nil
+	e.idleSuspensionInProgress.Store(true)
+	e.idleSuspensionMu.Unlock()
+}
+
+func (e *AgentExecution) bufferIdleSuspensionEvent(event idleSuspensionEvent) bool {
+	if !e.idleSuspensionInProgress.Load() {
+		return false
+	}
+	e.idleSuspensionMu.Lock()
+	defer e.idleSuspensionMu.Unlock()
+	if !e.idleSuspensionInProgress.Load() {
+		return false
+	}
+	e.idleSuspensionEvents = append(e.idleSuspensionEvents, event)
+	return true
+}
+
+func (e *AgentExecution) finishIdleSuspension() []idleSuspensionEvent {
+	e.idleSuspensionMu.Lock()
+	defer e.idleSuspensionMu.Unlock()
+	e.idleSuspensionInProgress.Store(false)
+	events := e.idleSuspensionEvents
+	e.idleSuspensionEvents = nil
+	return events
+}
+
+func (m *Manager) replayIdleSuspensionEvents(execution *AgentExecution, pending []idleSuspensionEvent) {
+	for _, buffered := range pending {
+		m.handleAgentEventAtContextResetBoundaryWithIdleSuspensionReplay(
+			execution, buffered.event, buffered.enforceResetBoundary, buffered.attemptID,
+		)
+	}
+}
+
 func (m *Manager) suspendLiveIdleExecution(
 	ctx context.Context,
 	store idleSuspensionInventory,
@@ -79,17 +124,27 @@ func (m *Manager) suspendLiveIdleExecution(
 	identity IdleSuspensionIdentity,
 	stage *string,
 ) error {
-	*stage = "execution_lifecycle_lock"
-	execution.remoteInstanceLifecycleMu.Lock()
-	defer execution.remoteInstanceLifecycleMu.Unlock()
-	if current, currentExists := m.executionStore.Get(identity.ExecutionID); !currentExists || current != execution {
-		return ErrExecutionNotFound
+	var pending []idleSuspensionEvent
+	resultErr := func() error {
+		*stage = "execution_lifecycle_lock"
+		execution.remoteInstanceLifecycleMu.Lock()
+		defer func() {
+			pending = execution.finishIdleSuspension()
+			execution.remoteInstanceLifecycleMu.Unlock()
+		}()
+		if current, currentExists := m.executionStore.Get(identity.ExecutionID); !currentExists || current != execution {
+			return ErrExecutionNotFound
+		}
+		running, err := m.claimIdleSuspension(ctx, store, execution, identity, stage)
+		if err != nil {
+			return err
+		}
+		return m.stopAndPersistIdleSuspension(ctx, store, execution, running, identity, stage)
+	}()
+	if !execution.idleSuspensionAgentStopped.Load() {
+		m.replayIdleSuspensionEvents(execution, pending)
 	}
-	running, err := m.claimIdleSuspension(ctx, store, execution, identity, stage)
-	if err != nil {
-		return err
-	}
-	return m.stopAndPersistIdleSuspension(ctx, store, execution, running, identity, stage)
+	return resultErr
 }
 
 func (m *Manager) claimIdleSuspension(
@@ -99,6 +154,7 @@ func (m *Manager) claimIdleSuspension(
 	identity IdleSuspensionIdentity,
 	stage *string,
 ) (*models.ExecutorRunning, error) {
+	execution.beginIdleSuspension()
 	*stage = "execution_admission"
 	releaseAdmission, err := execution.acquireContextResetExclusive(ctx)
 	if err != nil {
@@ -133,7 +189,6 @@ func (m *Manager) claimIdleSuspension(
 		*stage = "suspension_state"
 		return nil, fmt.Errorf("idle suspension state %q is not resumable: %w", running.IdleSuspensionState, ErrIdleSuspensionRejected)
 	}
-	execution.idleSuspensionInProgress.Store(true)
 	return running, nil
 }
 
@@ -146,18 +201,15 @@ func (m *Manager) claimIdleSuspensionInventory(
 	stage *string,
 ) error {
 	*stage = "suspension_claim"
-	execution.idleSuspensionInProgress.Store(true)
 	claimed, err := store.ClaimExecutorRunningIdleSuspension(
 		ctx, identity.SessionID, identity.ExecutionID, running.UpdatedAt,
 		identity.WorkspaceID, identity.PolicyUpdatedAt,
 	)
 	if err != nil {
-		execution.idleSuspensionInProgress.Store(false)
 		return fmt.Errorf("claim idle suspension: %w", err)
 	}
 	if !claimed {
 		*stage = "claim_conflict"
-		execution.idleSuspensionInProgress.Store(false)
 		return fmt.Errorf("idle suspension policy or execution changed before claim: %w", ErrIdleSuspensionRejected)
 	}
 	running.IdleSuspensionState = models.ExecutorIdleSuspensionInProgress
@@ -216,6 +268,9 @@ func (m *Manager) stopIdleACPProcess(
 	stage *string,
 ) error {
 	if !execution.idleSuspensionAgentStopped.Load() {
+		if err := m.validateLiveIdleSuspensionPolicy(ctx, store, identity, running, stage); err != nil {
+			return err
+		}
 		*stage = "agentctl_stop"
 		if m.stopExecutionAgentctl(ctx, execution.ID, execution, false) {
 			resetErr := store.CompareAndSetExecutorRunningIdleSuspension(
@@ -223,7 +278,6 @@ func (m *Manager) stopIdleACPProcess(
 				models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionNone,
 			)
 			if resetErr == nil {
-				execution.idleSuspensionInProgress.Store(false)
 				execution.idleSuspensionAgentStopped.Store(false)
 			}
 			return errors.Join(fmt.Errorf("stop ACP process for idle suspension: agentctl rejected stop"), resetErr)
@@ -241,6 +295,34 @@ func (m *Manager) stopIdleACPProcess(
 		return fmt.Errorf("persist ACP stop for idle suspension: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) validateLiveIdleSuspensionPolicy(
+	ctx context.Context,
+	store idleSuspensionInventory,
+	identity IdleSuspensionIdentity,
+	running *models.ExecutorRunning,
+	stage *string,
+) error {
+	if running.IdleSuspensionState != models.ExecutorIdleSuspensionInProgress {
+		return nil
+	}
+	policyCurrent, err := store.ValidateExecutorRunningIdleSuspensionPolicy(
+		ctx, identity.SessionID, identity.ExecutionID, identity.WorkspaceID, identity.PolicyUpdatedAt,
+	)
+	if err != nil {
+		*stage = "suspension_policy_validation"
+		return fmt.Errorf("validate idle suspension policy before stop: %w", err)
+	}
+	if policyCurrent {
+		return nil
+	}
+	resetErr := store.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, identity.SessionID, identity.ExecutionID, time.Time{},
+		models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionNone,
+	)
+	*stage = "suspension_policy_changed"
+	return errors.Join(ErrIdleSuspensionRejected, resetErr)
 }
 
 // CancelIdleSuspension releases a provisional event/prompt fence after the
@@ -262,12 +344,14 @@ func (m *Manager) CancelIdleSuspension(ctx context.Context, sessionID, execution
 		return nil
 	}
 	execution.remoteInstanceLifecycleMu.Lock()
-	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
+		execution.remoteInstanceLifecycleMu.Unlock()
 		return ErrExecutionNotFound
 	}
 	execution.idleSuspensionAgentStopped.Store(false)
-	execution.idleSuspensionInProgress.Store(false)
+	pending := execution.finishIdleSuspension()
+	execution.remoteInstanceLifecycleMu.Unlock()
+	m.replayIdleSuspensionEvents(execution, pending)
 	return nil
 }
 
@@ -353,6 +437,9 @@ func (m *Manager) finishPersistedIdleSuspension(
 			running.IdleSuspensionState != models.ExecutorIdleSuspensionAgentStopped) {
 		return fmt.Errorf("persisted idle suspension identity changed: %w", ErrIdleSuspensionRejected)
 	}
+	if err := validatePersistedIdleSuspensionPolicy(ctx, store, identity, running); err != nil {
+		return err
+	}
 	if m.executorRegistry == nil {
 		return fmt.Errorf("idle suspension runtime registry is unavailable")
 	}
@@ -389,6 +476,31 @@ func (m *Manager) finishPersistedIdleSuspension(
 		return fmt.Errorf("persist recovered idle suspension: %w", err)
 	}
 	return nil
+}
+
+func validatePersistedIdleSuspensionPolicy(
+	ctx context.Context,
+	store idleSuspensionInventory,
+	identity IdleSuspensionIdentity,
+	running *models.ExecutorRunning,
+) error {
+	if !identity.RequireCurrentPolicy || running.IdleSuspensionState != models.ExecutorIdleSuspensionInProgress {
+		return nil
+	}
+	policyCurrent, err := store.ValidateExecutorRunningIdleSuspensionPolicy(
+		ctx, identity.SessionID, identity.ExecutionID, identity.WorkspaceID, identity.PolicyUpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("validate persisted idle suspension policy before stop: %w", err)
+	}
+	if policyCurrent {
+		return nil
+	}
+	resetErr := store.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, identity.SessionID, identity.ExecutionID, time.Time{},
+		models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionNone,
+	)
+	return errors.Join(ErrIdleSuspensionRejected, resetErr)
 }
 
 func (m *Manager) hasTrackedExecutionActivity(executionID string) bool {

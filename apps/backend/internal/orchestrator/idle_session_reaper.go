@@ -62,6 +62,13 @@ const (
 	// settling — on_enter / on_turn_complete / agent.ready may have
 	// just transitioned the row and the next event has not fired yet.
 	idleReaperMinIdle = 60 * time.Second
+
+	// idleSuspensionOperationTimeout bounds executor teardown after candidate
+	// locks have been released.
+	idleSuspensionOperationTimeout = 30 * time.Second
+	// idleSuspensionRevalidationTimeout bounds admission and candidate reads
+	// performed while session locks are held.
+	idleSuspensionRevalidationTimeout = 5 * time.Second
 )
 
 // idleSessionReaper owns the lifecycle of one background goroutine.
@@ -114,6 +121,7 @@ const (
 	idleParkingSkipOwnershipProtected   idleParkingSkipReason = "ownership_protected"
 	idleParkingSkipSessionState         idleParkingSkipReason = "session_state"
 	idleParkingSkipKnownWork            idleParkingSkipReason = "known_work"
+	idleParkingSkipProbeInconclusive    idleParkingSkipReason = "background_probe_inconclusive"
 	idleParkingSkipRestoreUnavailable   idleParkingSkipReason = "restore_unavailable"
 	idleParkingSkipActivityUnavailable  idleParkingSkipReason = "activity_unavailable"
 	idleParkingSkipStaleActivity        idleParkingSkipReason = "stale_activity"
@@ -127,6 +135,7 @@ var idleParkingSkipReasonOrder = [...]idleParkingSkipReason{
 	idleParkingSkipOwnershipProtected,
 	idleParkingSkipSessionState,
 	idleParkingSkipKnownWork,
+	idleParkingSkipProbeInconclusive,
 	idleParkingSkipRestoreUnavailable,
 	idleParkingSkipActivityUnavailable,
 	idleParkingSkipStaleActivity,
@@ -372,18 +381,32 @@ func (s *Service) suspendWorkspaceIdleCandidate(
 	suspender idleSuspender,
 	summary *idleParkingScanSummary,
 ) {
-	suspendErr := s.withSessionPromptAdmission(ctx, row.SessionID, func(admittedCtx context.Context) error {
+	var identity agentruntime.IdleSuspensionIdentity
+	revalidated := false
+	revalidationCtx, cancelRevalidation := context.WithTimeout(ctx, idleSuspensionRevalidationTimeout)
+	suspendErr := s.withSessionPromptAdmission(revalidationCtx, row.SessionID, func(admittedCtx context.Context) error {
 		releaseLifecycleLock := s.acquireSessionLifecycleLock(row.SessionID)
 		defer releaseLifecycleLock()
 		current, _, currentOK := s.workspaceIdleCandidate(admittedCtx, row, time.Now().UTC())
 		if !currentOK || current.key != candidate.key || current.identity != candidate.identity {
 			return nil
 		}
-		return suspender.SuspendIdle(admittedCtx, current.identity)
+		identity = current.identity
+		revalidated = true
+		return nil
 	})
-	s.finishIdleParkingCandidate(candidate.key, suspendErr == nil)
+	cancelRevalidation()
+	if suspendErr == nil && revalidated {
+		operationCtx, cancel := context.WithTimeout(ctx, idleSuspensionOperationTimeout)
+		suspendErr = suspender.SuspendIdle(operationCtx, identity)
+		cancel()
+	}
+	succeeded := suspendErr == nil && revalidated
+	s.finishIdleParkingCandidate(candidate.key, succeeded)
 	if suspendErr == nil {
-		summary.suspended++
+		if succeeded {
+			summary.suspended++
+		}
 		return
 	}
 	summary.failed++
@@ -441,8 +464,11 @@ func (s *Service) workspaceIdleCandidate(
 	if !ok {
 		return workspaceIdleCandidate{}, reason, false
 	}
-	if s.sessionHasKnownIdleWork(ctx, current.SessionID) || s.hasKnownBackgroundWork(ctx, current.SessionID) {
+	if s.sessionHasKnownIdleWork(ctx, current.SessionID) {
 		return workspaceIdleCandidate{}, idleParkingSkipKnownWork, false
+	}
+	if !s.backgroundWorkSettled(ctx, current.SessionID) {
+		return workspaceIdleCandidate{}, idleParkingSkipProbeInconclusive, false
 	}
 	executionID, generation, activityEpoch, lastActivityAt, reason, ok := s.workspaceIdleActivity(ctx, current, session, workspace, now)
 	if !ok {
@@ -511,7 +537,7 @@ func (s *Service) workspaceIdleSession(ctx context.Context, row *models.Executor
 	return session, "", true
 }
 
-func (s *Service) hasKnownBackgroundWork(ctx context.Context, sessionID string) bool {
+func (s *Service) backgroundWorkSettled(ctx context.Context, sessionID string) bool {
 	prober, ok := s.agentManager.(interface {
 		ProbeBackgroundWorkloads(context.Context, string) (agentruntime.BackgroundWorkloadProbeResult, error)
 	})
@@ -519,7 +545,7 @@ func (s *Service) hasKnownBackgroundWork(ctx context.Context, sessionID string) 
 		return false
 	}
 	result, err := prober.ProbeBackgroundWorkloads(ctx, sessionID)
-	return err == nil && result == agentruntime.BackgroundWorkloadProbeResultLive
+	return err == nil && result == agentruntime.BackgroundWorkloadProbeResultSettled
 }
 
 func (s *Service) workspaceIdleActivity(
@@ -697,6 +723,9 @@ func (s *Service) reconcileIdleSuspensionAfterRestart(ctx context.Context, row *
 		(s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(row.SessionID)) {
 		return false
 	}
+	if s.idleParkingSessionInFlight(row.SessionID) {
+		return false
+	}
 	live, err := s.probeAgentRunning(ctx, row.SessionID)
 	if err != nil {
 		return false
@@ -705,13 +734,43 @@ func (s *Service) reconcileIdleSuspensionAfterRestart(ctx context.Context, row *
 	if !ok {
 		return false
 	}
+	policyCurrent := s.idleSuspensionClaimPolicyCurrent(ctx, row)
 	if row.IdleSuspensionState == models.ExecutorIdleSuspensionInProgress && live {
-		return s.releaseLiveIdleSuspensionClaim(ctx, row, cas)
+		if !policyCurrent {
+			return s.releaseLiveIdleSuspensionClaim(ctx, row, cas)
+		}
+		return s.finishRestartedIdleSuspension(ctx, row, true)
 	}
 	if live {
 		return false
 	}
-	return s.finishRestartedIdleSuspension(ctx, row)
+	// Once liveness proves the process stopped, complete its claim. Disabling
+	// policy invalidates only claims whose agent process is still live.
+	return s.finishRestartedIdleSuspension(ctx, row, false)
+}
+
+func (s *Service) idleParkingSessionInFlight(sessionID string) bool {
+	s.idleParkingMu.Lock()
+	defer s.idleParkingMu.Unlock()
+	for key := range s.idleParkingInFlight {
+		if key.sessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) idleSuspensionClaimPolicyCurrent(ctx context.Context, row *models.ExecutorRunning) bool {
+	if row == nil || row.IdleSuspensionPolicyUpdatedAt.IsZero() || row.TaskID == "" {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, row.TaskID)
+	if err != nil || task == nil || task.WorkspaceID == "" {
+		return false
+	}
+	workspace, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
+	return err == nil && workspace != nil && workspace.ACPIdleSuspensionEnabled &&
+		workspace.UpdatedAt.Equal(row.IdleSuspensionPolicyUpdatedAt)
 }
 
 func (s *Service) releaseLiveIdleSuspensionClaim(
@@ -739,13 +798,23 @@ func (s *Service) releaseLiveIdleSuspensionClaim(
 	return true
 }
 
-func (s *Service) finishRestartedIdleSuspension(ctx context.Context, row *models.ExecutorRunning) bool {
+func (s *Service) finishRestartedIdleSuspension(
+	ctx context.Context,
+	row *models.ExecutorRunning,
+	requireCurrentPolicy bool,
+) bool {
 	suspender, ok := s.agentManager.(idleSuspender)
 	if !ok || suspender == nil {
 		return false
 	}
+	task, err := s.repo.GetTask(ctx, row.TaskID)
+	if err != nil || task == nil || task.WorkspaceID == "" {
+		return false
+	}
 	identity := agentruntime.IdleSuspensionIdentity{
 		ExecutionID: row.AgentExecutionID, SessionID: row.SessionID,
+		WorkspaceID: task.WorkspaceID, PolicyUpdatedAt: row.IdleSuspensionPolicyUpdatedAt,
+		RequireCurrentPolicy: requireCurrentPolicy,
 	}
 	if reader, ok := s.agentManager.(idlePromptActivityReader); ok {
 		executionID, generation, activityEpoch, _, activityErr := reader.GetPromptActivityForSession(ctx, row.SessionID)
@@ -757,7 +826,9 @@ func (s *Service) finishRestartedIdleSuspension(ctx context.Context, row *models
 			identity.ActivityEpoch = activityEpoch
 		}
 	}
-	if err := suspender.SuspendIdle(ctx, identity); err != nil {
+	operationCtx, cancel := context.WithTimeout(ctx, idleSuspensionOperationTimeout)
+	defer cancel()
+	if err := suspender.SuspendIdle(operationCtx, identity); err != nil {
 		return false
 	}
 	return true

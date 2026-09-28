@@ -2130,10 +2130,14 @@ func (m *Manager) clearIdleSuspensionAfterReady(ctx context.Context, execution *
 	if running.AgentExecutionID != execution.ID || running.IdleSuspensionState == models.ExecutorIdleSuspensionNone {
 		return nil
 	}
-	return store.CompareAndSetExecutorRunningIdleSuspension(
+	if err := store.CompareAndSetExecutorRunningIdleSuspension(
 		ctx, execution.SessionID, execution.ID, time.Time{},
 		running.IdleSuspensionState, models.ExecutorIdleSuspensionNone,
-	)
+	); err != nil {
+		return err
+	}
+	execution.idleSuspensionAgentStopped.Store(false)
+	return nil
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip

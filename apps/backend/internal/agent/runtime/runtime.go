@@ -38,7 +38,11 @@ type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
 type BackgroundWorkloadProbeResult = client.ProbeResult
 
-const BackgroundWorkloadProbeResultLive = client.ProbeResultLive
+const (
+	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive
+	BackgroundWorkloadProbeResultSettled = client.ProbeResultSettled
+	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
+)
 
 // ErrNoExecutionForSession reports that a session has no live execution.
 var ErrNoExecutionForSession = lifecycle.ErrNoExecutionForSession
