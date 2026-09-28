@@ -2,13 +2,14 @@
 
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconInbox, IconRobot, IconSquarePlus } from "@tabler/icons-react";
+import { IconInbox, IconSquarePlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useCoordinatorSidebarEntries } from "@/app/coordinator/use-coordinator-sidebar-entries";
+import { CoordinatorIcon } from "@/lib/coordinator/icon";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "@/lib/coordinator/links";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
@@ -180,7 +181,7 @@ function MobileCoordinatorRows({
           onClick={onNavigate}
           data-testid="mobile-sidebar-coordinator-generic"
         >
-          <IconRobot className="h-4 w-4 shrink-0" />
+          <CoordinatorIcon className="h-4 w-4 shrink-0" />
           <span className="flex-1 text-left">{t("coordinator:sidebarGenericEntry")}</span>
         </Link>
       </Button>
@@ -203,7 +204,7 @@ function MobileCoordinatorRows({
               onClick={onNavigate}
               data-testid={`mobile-sidebar-coordinator-${coordinator.id}`}
             >
-              <IconRobot className="h-4 w-4 shrink-0" />
+              <CoordinatorIcon className="h-4 w-4 shrink-0" />
               <span className="flex-1 truncate text-left">{coordinator.name}</span>
               {badge > 0 && <Badge>{badge}</Badge>}
             </Link>

@@ -76,4 +76,17 @@ describe("AppSidebarCoordinatorRows", () => {
     expect(reviewer.getAttribute("href")).toBe("/workspaces/ws-1/coordinator/c-2");
     expect(reviewer.textContent).toContain("4");
   });
+
+  it("draws a coordinator with the coordinator icon, not the agent-profile robot", () => {
+    entriesResult = {
+      coordinators: [coordinator("c-1", "Planner")],
+      badgeByCoordinatorId: new Map(),
+    };
+    renderRows();
+    const row = screen.getByTestId("sidebar-coordinator-c-1");
+    // Shared via lib/coordinator/icon.ts so the sidebar, the phone nav and
+    // the settings tab cannot drift apart.
+    expect(row.querySelector("svg.tabler-icon-user-cog")).not.toBeNull();
+    expect(row.querySelector("svg.tabler-icon-robot")).toBeNull();
+  });
 });

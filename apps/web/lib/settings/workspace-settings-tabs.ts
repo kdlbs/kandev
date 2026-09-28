@@ -7,8 +7,9 @@ import {
   IconKey,
   IconLayoutGrid,
   IconPlugConnected,
-  IconUserCog,
 } from "@tabler/icons-react";
+
+import { CoordinatorIcon } from "@/lib/coordinator/icon";
 
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 
@@ -57,7 +58,7 @@ export const WORKSPACE_SETTINGS_TABS: ReadonlyArray<WorkspaceTabSpec> = [
   { tab: "integrations", labelKey: "common:integrations", icon: IconPlugConnected },
   { tab: "automations", labelKey: "common:automations", icon: IconBolt },
   { tab: "secrets", labelKey: "settings:secrets", icon: IconKey },
-  { tab: "coordinators", labelKey: "coordinator:coordinators", icon: IconUserCog },
+  { tab: "coordinators", labelKey: "coordinator:coordinators", icon: CoordinatorIcon },
 ];
 
 /**

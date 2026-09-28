@@ -1,7 +1,7 @@
 "use client";
 
-import { IconRobot } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { CoordinatorIcon } from "@/lib/coordinator/icon";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "@/lib/coordinator/links";
 import { useCoordinatorSidebarEntries } from "@/app/coordinator/use-coordinator-sidebar-entries";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
@@ -29,7 +29,7 @@ export function AppSidebarCoordinatorRows({
   if (coordinators.length === 0) {
     return (
       <AppSidebarNavItem
-        icon={IconRobot}
+        icon={CoordinatorIcon}
         label={t("coordinator:sidebarGenericEntry")}
         href={linkToCoordinator(workspaceId)}
         collapsed={collapsed}
@@ -43,7 +43,7 @@ export function AppSidebarCoordinatorRows({
       {coordinators.map((coordinator) => (
         <AppSidebarNavItem
           key={coordinator.id}
-          icon={IconRobot}
+          icon={CoordinatorIcon}
           label={coordinator.name}
           href={linkToCoordinatorNeedsYou(workspaceId, coordinator.id)}
           badge={badgeByCoordinatorId.get(coordinator.id)}
