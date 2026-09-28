@@ -286,6 +286,64 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
   });
 });
 
+// Review round 2 Finding B: a chip-seeded draft that was already sent as a
+// message must not resurrect itself into the composer of the fresh session
+// Retry produces after the prior one ended. The hook cannot see "was it sent"
+// directly, but it does see the session identity change Retry always
+// produces (a new session_id replaces the ended one), which is exactly the
+// boundary where a carried-over seed would otherwise leak into a session it
+// was never meant for.
+describe("useCoordinatorCopilot - pendingDraft clearing on session replacement", () => {
+  it("clears pendingDraft when Retry replaces the session with a new one", () => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }),
+    );
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+    expect(result.current.routeSession).toEqual(conversation);
+
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    const retried: ConversationResponse = {
+      task_id: "task-2",
+      session_id: "session-2",
+      archive_state: false,
+    };
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: retried }),
+    );
+    rerender();
+
+    expect(result.current.routeSession).toEqual(retried);
+    expect(result.current.pendingDraft).toBeUndefined();
+  });
+
+  it("keeps pendingDraft when the ready session's id is unchanged (same session, remounted via askKey)", () => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }),
+    );
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    // Re-deliver the identical "ready" session (e.g. a re-render from an
+    // unrelated state change, or reopening a still-live conversation).
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: { ...conversation } }),
+    );
+    rerender();
+
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+  });
+});
+
 /** The mount site keys the controller on `coordinatorId`
  * (`coordinator-route-content.tsx`), so a coordinator switch always
  * unmounts and remounts this hook rather than handing it a changed prop.

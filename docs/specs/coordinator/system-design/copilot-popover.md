@@ -170,7 +170,12 @@ with the task page, mobile and the Settings chat.
   task ([copilot](copilot.md#conversation-task) step 2), so a 200 carries a
   new `session_id`; the controller stores it as the held route session, the
   launcher follows it, and `QuickChatSessionView` is keyed on the session id
-  as well as `askKey`, so no view state of the ended session carries over.
+  as well as `askKey`, so no view state of the ended session carries over —
+  including the controller's own one-shot chip-seeded draft
+  (`useCoordinatorCopilot`'s `pendingDraft`): the controller clears it
+  whenever the incoming ready session's id differs from the one it
+  previously held for this coordinator, so a question seeded into the ended
+  session cannot reappear in the composer of its replacement.
   The new session is `CREATED` and not ended, so the feedback disappears and
   the empty state shows. Any other outcome replaces the body with that
   outcome's row of [Opening the conversation](#opening-the-conversation), as

@@ -97,9 +97,21 @@ export function useCoordinatorCopilot(
   }, [entry.open, entry.chip]);
 
   useEffect(() => {
-    if (openSequence.state.kind === "ready") {
-      setOwnedRouteSession({ coordinatorId, session: openSequence.state.session });
+    if (openSequence.state.kind !== "ready") return;
+    const nextSession = openSequence.state.session;
+    const priorSession =
+      ownedRouteSession && ownedRouteSession.coordinatorId === coordinatorId
+        ? ownedRouteSession.session
+        : null;
+    if (priorSession && priorSession.session_id !== nextSession.session_id) {
+      // Retry (or anything else that hands this coordinator a brand new
+      // session) starts clean: a seed captured for the session that just
+      // ended must not resurrect an already-consumed question into its
+      // replacement.
+      setPendingDraft(undefined);
     }
+    setOwnedRouteSession({ coordinatorId, session: nextSession });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedRouteSession is read for its current value only; adding it would re-run this effect on every ready-session update rather than just on an actual incoming state change.
   }, [openSequence.state, coordinatorId]);
 
   useEffect(() => {
