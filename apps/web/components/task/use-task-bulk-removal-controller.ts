@@ -1,9 +1,12 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import type { TaskSession } from "@/lib/types/http";
-import { suppressTaskSessionAutoProvisioning } from "@/lib/session/session-auto-provisioning-fence";
+import {
+  clearTaskSessionAutoProvisioningSuppression,
+  suppressTaskSessionAutoProvisioning,
+} from "@/lib/session/session-auto-provisioning-fence";
 import {
   useBulkSessionRemoval,
   type BulkSessionRemovalReason,
@@ -28,6 +31,10 @@ export function useTaskBulkRemovalController({
   const { t } = useTranslation();
   const { toast } = useToast();
   const store = useAppStoreApi();
+  const suppressedTaskIdRef = useRef<string | null>(null);
+  const hasError = useAppStore((state) =>
+    taskId ? !!state.taskSessionsByTask.errorByTaskId?.[taskId] : false,
+  );
   const reportIneligible = useCallback(
     (reason: BulkSessionRemovalReason) => {
       if (!reason) return;
@@ -40,23 +47,33 @@ export function useTaskBulkRemovalController({
     const state = store.getState();
     return {
       sessions: taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
-      isLoading: !taskId || !!state.taskSessionsByTask.errorByTaskId?.[taskId],
+      isLoading: !taskId || !!state.taskSessionsByTask.loadingByTaskId[taskId],
+      hasError: taskId ? !!state.taskSessionsByTask.errorByTaskId?.[taskId] : false,
     };
   }, [loadSessions, store, taskId]);
   const bulkRemoval = useBulkSessionRemoval({
     sessions,
     isLoading,
+    hasError,
     remove: removeById,
     getLatestSnapshot,
-    onRemoveAllConfirmed: () => taskId && suppressTaskSessionAutoProvisioning(taskId),
-    onInvalidSnapshot: () => toast({ title: t("task:sessionsChangedReviewAgain") }),
+    onRemoveAllConfirmed: () => {
+      if (!taskId) return;
+      suppressedTaskIdRef.current = taskId;
+      suppressTaskSessionAutoProvisioning(taskId);
+    },
+    onInvalidSnapshot: (reason) =>
+      reason ? reportIneligible(reason) : toast({ title: t("task:sessionsChangedReviewAgain") }),
     onComplete: ({ removed, remaining, failed }) => {
       if (failed) {
         toast({
           title: t("task:bulkRemovalPartial", { removed, remaining }),
           variant: "error",
         });
+        const suppressedTaskId = suppressedTaskIdRef.current;
+        if (suppressedTaskId) clearTaskSessionAutoProvisioningSuppression(suppressedTaskId);
       }
+      suppressedTaskIdRef.current = null;
     },
   });
   const request = useCallback(

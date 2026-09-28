@@ -23,9 +23,12 @@ import {
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
-import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
+import {
+  BulkSessionRemoveDialog,
+  SessionContextMenuItems,
+  SessionTabDialogs,
+} from "./session-tab-menu";
 import { useTaskBulkRemovalController } from "./use-task-bulk-removal-controller";
-import { SessionTabBulkRemovalDialog } from "./session-tab-bulk-removal";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
   markSessionTabUserActivationIntent,
@@ -523,7 +526,7 @@ function SessionTabContent({
         sessionId={sessionId}
         groupId={props.api.group?.id}
       />
-      <SessionTabBulkRemovalDialog
+      <BulkSessionRemoveDialog
         scope={bulkRemoval.snapshot?.scope ?? null}
         count={bulkRemoval.snapshot?.targetIds.length ?? 0}
         pending={bulkRemoval.pending}

@@ -277,6 +277,7 @@
   "removeAll": "Remove All",
   "sessionsChangedReviewAgain": "The sessions changed. Review the updated count and confirm again.",
   "bulkRemovalUnavailable_loading": "Sessions are still loading. Try again in a moment.",
+  "bulkRemovalUnavailable_error": "Couldn't refresh the sessions. Check your connection and try again.",
   "bulkRemovalUnavailable_empty": "There are no sessions to remove.",
   "bulkRemovalUnavailable_active": "Stop the active sessions before removing them.",
   "bulkRemovalProgress": "Sessions removed: {{removed}} / {{total}}...",

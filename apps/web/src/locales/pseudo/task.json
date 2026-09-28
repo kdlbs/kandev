@@ -277,6 +277,7 @@
   "removeAll": "Ŕēḿōvē Àĺĺ",
   "sessionsChangedReviewAgain": "Ţĥē śēśśĩōńś ćĥàńĝēď. Ŕēvĩēŵ ţĥē ũƥďàţēď ćōũńţ àńď ćōńƒĩŕḿ àĝàĩń.",
   "bulkRemovalUnavailable_loading": "Śēśśĩōńś àŕē śţĩĺĺ ĺōàďĩńĝ. Ţŕŷ àĝàĩń ĩń à ḿōḿēńţ.",
+  "bulkRemovalUnavailable_error": "Ĉōũĺďń'ţ ŕēƒŕēśĥ ţĥē śēśśĩōńś. Ĉĥēćķ ŷōũŕ ćōńńēćţĩōń àńď ţŕŷ àĝàĩń.",
   "bulkRemovalUnavailable_empty": "Ţĥēŕē àŕē ńō śēśśĩōńś ţō ŕēḿōvē.",
   "bulkRemovalUnavailable_active": "Śţōƥ ţĥē àćţĩvē śēśśĩōńś ƀēƒōŕē ŕēḿōvĩńĝ ţĥēḿ.",
   "bulkRemovalProgress": "Śēśśĩōńś ŕēḿōvēď: {{removed}} / {{total}}...",

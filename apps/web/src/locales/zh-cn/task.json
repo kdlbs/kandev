@@ -267,6 +267,7 @@
   "removeAll": "移除全部",
   "sessionsChangedReviewAgain": "会话已变更。请查看更新后的数量并再次确认。",
   "bulkRemovalUnavailable_loading": "会话仍在加载。请稍后重试。",
+  "bulkRemovalUnavailable_error": "无法刷新会话。请检查网络连接后重试。",
   "bulkRemovalUnavailable_empty": "没有可移除的会话。",
   "bulkRemovalUnavailable_active": "请先停止活跃的会话，再进行移除。",
   "bulkRemovalProgress": "已移除会话：{{removed}} / {{total}}...",

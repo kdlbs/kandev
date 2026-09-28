@@ -267,6 +267,7 @@
   "removeAll": "Remover tudo",
   "sessionsChangedReviewAgain": "As sessões foram alteradas. Reveja a contagem atualizada e confirme novamente.",
   "bulkRemovalUnavailable_loading": "As sessões ainda estão a carregar. Tente novamente dentro de momentos.",
+  "bulkRemovalUnavailable_error": "Não foi possível atualizar as sessões. Verifique a ligação e tente novamente.",
   "bulkRemovalUnavailable_empty": "Não há sessões para remover.",
   "bulkRemovalUnavailable_active": "Pare as sessões ativas antes de as remover.",
   "bulkRemovalProgress": "Sessões removidas: {{removed}} / {{total}}...",

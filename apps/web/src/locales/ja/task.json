@@ -277,6 +277,7 @@
   "removeAll": "すべて削除",
   "sessionsChangedReviewAgain": "セッションが変更されました。更新後の件数を確認して、もう一度確認してください。",
   "bulkRemovalUnavailable_loading": "セッションを読み込み中です。少し待ってから再試行してください。",
+  "bulkRemovalUnavailable_error": "セッションを更新できませんでした。接続を確認して、もう一度お試しください。",
   "bulkRemovalUnavailable_empty": "削除できるセッションがありません。",
   "bulkRemovalUnavailable_active": "削除する前に、実行中のセッションを停止してください。",
   "bulkRemovalProgress": "削除済みセッション: {{removed}} / {{total}}...",

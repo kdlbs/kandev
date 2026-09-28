@@ -126,3 +126,17 @@ backend/web builds, and desktop/phone E2E flows passed. The full desktop E2E run
 passed 12 of 13 tests; its unrelated task-switching case hit a temporary
 "web app unavailable" fixture response and passed on focused rerun. The phone
 confirmation screenshot was visually checked.
+
+## PR fixup (2026-09-28)
+
+Review remediation keeps the auto-provisioning fence active during Remove All,
+clears it after a partial failure, and reports a failed session refresh with a
+localized retry message. The desktop confirmation imports its dialog directly
+without a passthrough component.
+
+Verification after the fix:
+
+- `pnpm exec vitest run components/task/use-task-bulk-removal-controller.test.tsx components/task/session-bulk-removal.test.ts components/task/session-tab-menu.test.tsx` — 18 passed.
+- `pnpm run typecheck` — passed.
+- `pnpm run i18n:check` — passed for all required locales.
+- `pnpm run i18n:ratchet` — passed.

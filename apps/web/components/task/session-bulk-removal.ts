@@ -2,7 +2,7 @@ import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { useCallback, useRef, useState } from "react";
 
 export type BulkSessionRemovalScope = "others" | "all";
-export type BulkSessionRemovalReason = "loading" | "empty" | "active" | null;
+export type BulkSessionRemovalReason = "loading" | "error" | "empty" | "active" | null;
 
 export type BulkSessionRemovalSnapshot = {
   scope: BulkSessionRemovalScope;
@@ -42,6 +42,7 @@ export function buildBulkSessionRemovalSnapshot(
   selectedSessionId: string,
   sessions: TaskSession[],
   isLoading: boolean,
+  hasError = false,
 ): BulkSessionRemovalSnapshot {
   const targets = orderedTargetSessions(scope, selectedSessionId, sessions);
   const targetStates = targets.map(
@@ -49,6 +50,7 @@ export function buildBulkSessionRemovalSnapshot(
   );
   let reason: BulkSessionRemovalReason = null;
   if (isLoading) reason = "loading";
+  else if (hasError) reason = "error";
   else if (targets.length === 0) reason = "empty";
   else if (targets.some((session) => isActiveDeletionTarget(session.state))) reason = "active";
   return {
@@ -65,12 +67,14 @@ export function isBulkSessionRemovalSnapshotCurrent(
   snapshot: BulkSessionRemovalSnapshot,
   sessions: TaskSession[],
   isLoading: boolean,
+  hasError = false,
 ): boolean {
   const current = buildBulkSessionRemovalSnapshot(
     snapshot.scope,
     snapshot.selectedSessionId,
     sessions,
     isLoading,
+    hasError,
   );
   return (
     current.eligible &&
@@ -105,9 +109,33 @@ export async function executeBulkSessionRemoval(
   return { removed, remaining: 0, failed: false };
 }
 
+function refreshInvalidSnapshot(
+  snapshot: BulkSessionRemovalSnapshot,
+  latest: { sessions: TaskSession[]; isLoading: boolean; hasError?: boolean },
+): BulkSessionRemovalSnapshot | null {
+  if (
+    isBulkSessionRemovalSnapshotCurrent(
+      snapshot,
+      latest.sessions,
+      latest.isLoading,
+      latest.hasError,
+    )
+  ) {
+    return null;
+  }
+  return buildBulkSessionRemovalSnapshot(
+    snapshot.scope,
+    snapshot.selectedSessionId,
+    latest.sessions,
+    latest.isLoading,
+    latest.hasError,
+  );
+}
+
 export function useBulkSessionRemoval({
   sessions,
   isLoading,
+  hasError = false,
   remove,
   getLatestSnapshot,
   onInvalidSnapshot,
@@ -116,9 +144,14 @@ export function useBulkSessionRemoval({
 }: {
   sessions: TaskSession[];
   isLoading: boolean;
+  hasError?: boolean;
   remove: (sessionId: string) => Promise<boolean>;
-  getLatestSnapshot?: () => Promise<{ sessions: TaskSession[]; isLoading: boolean }>;
-  onInvalidSnapshot?: () => void;
+  getLatestSnapshot?: () => Promise<{
+    sessions: TaskSession[];
+    isLoading: boolean;
+    hasError?: boolean;
+  }>;
+  onInvalidSnapshot?: (reason: BulkSessionRemovalReason) => void;
   onRemoveAllConfirmed?: () => void;
   onComplete?: (result: { removed: number; remaining: number; failed: boolean }) => void;
 }) {
@@ -129,14 +162,20 @@ export function useBulkSessionRemoval({
   const pendingRef = useRef(false);
   const request = useCallback(
     (scope: BulkSessionRemovalScope, selectedSessionId: string) => {
-      const next = buildBulkSessionRemovalSnapshot(scope, selectedSessionId, sessions, isLoading);
+      const next = buildBulkSessionRemovalSnapshot(
+        scope,
+        selectedSessionId,
+        sessions,
+        isLoading,
+        hasError,
+      );
       if (pendingRef.current) return next;
       if (next.eligible) setSnapshot(next);
       setRemovedCount(0);
       setWasRefreshed(false);
       return next;
     },
-    [isLoading, sessions],
+    [hasError, isLoading, sessions],
   );
   const cancel = useCallback(() => {
     if (pendingRef.current) return;
@@ -147,24 +186,19 @@ export function useBulkSessionRemoval({
     if (!snapshot || pendingRef.current) return null;
     pendingRef.current = true;
     setPending(true);
-    let latest: { sessions: TaskSession[]; isLoading: boolean };
+    let latest: { sessions: TaskSession[]; isLoading: boolean; hasError?: boolean };
     try {
       latest = getLatestSnapshot ? await getLatestSnapshot() : { sessions, isLoading };
     } catch {
       latest = { sessions: [], isLoading: true };
     }
-    if (!isBulkSessionRemovalSnapshotCurrent(snapshot, latest.sessions, latest.isLoading)) {
-      const refreshed = buildBulkSessionRemovalSnapshot(
-        snapshot.scope,
-        snapshot.selectedSessionId,
-        latest.sessions,
-        latest.isLoading,
-      );
+    const refreshed = refreshInvalidSnapshot(snapshot, latest);
+    if (refreshed) {
       setSnapshot(refreshed.eligible ? refreshed : null);
       setWasRefreshed(refreshed.eligible);
       setPending(false);
       pendingRef.current = false;
-      onInvalidSnapshot?.();
+      onInvalidSnapshot?.(refreshed.reason);
       return { stale: true } satisfies BulkSessionRemovalConfirmationResult;
     }
     if (snapshot.scope === "all") onRemoveAllConfirmed?.();

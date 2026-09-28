@@ -60,6 +60,15 @@ describe("bulk session removal", () => {
         false,
       ),
     ).toMatchObject({ eligible: false, reason: "active" });
+    expect(
+      buildBulkSessionRemovalSnapshot(
+        "all",
+        "selected",
+        [taskSession("selected", "COMPLETED")],
+        false,
+        true,
+      ),
+    ).toMatchObject({ eligible: false, reason: "error" });
   });
 
   it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 invalidates a snapshot after an eligible target changes", () => {

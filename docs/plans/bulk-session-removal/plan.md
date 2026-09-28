@@ -136,6 +136,10 @@ flows passed. One unrelated task-switching browser case encountered a temporary
 rerun passed. The phone confirmation screenshot was inspected at the Pixel 5
 viewport.
 
+The 2026-09-28 PR fixup adds coverage for partial Remove All failure cleanup and
+failed-refresh messaging. Its focused tests (18 passed), web typecheck,
+`i18n:check`, and `i18n:ratchet` passed.
+
 ## Risks
 
 - `session.delete` is non-atomic across targets; a server refusal after an

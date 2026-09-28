@@ -267,6 +267,7 @@
   "removeAll": "移除全部",
   "sessionsChangedReviewAgain": "工作階段已變更。請檢視更新後的數量並再次確認。",
   "bulkRemovalUnavailable_loading": "工作階段仍在載入。請稍後重試。",
+  "bulkRemovalUnavailable_error": "無法重新整理工作階段。請檢查網路連線後再試。",
   "bulkRemovalUnavailable_empty": "沒有可移除的工作階段。",
   "bulkRemovalUnavailable_active": "請先停止活躍的工作階段，再進行移除。",
   "bulkRemovalProgress": "已移除工作階段：{{removed}} / {{total}}...",
