@@ -3,6 +3,8 @@ package coordinator
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
 )
 
 // Error codes for the response bodies Build decision 16 defines. error_code
@@ -322,8 +324,8 @@ type ApproveProposalRequest map[string]json.RawMessage
 const (
 	ApproveFieldTitle        = "title"
 	ApproveFieldDescription  = "description"
-	ApproveFieldWorkflowID   = "workflow_id"
-	ApproveFieldStepID       = "step_id"
+	ApproveFieldWorkflowID   = mcpcontract.FieldWorkflowID
+	ApproveFieldStepID       = mcpcontract.FieldStepID
 	ApproveFieldRepositoryID = "repository_id"
 )
 

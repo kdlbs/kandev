@@ -5,12 +5,16 @@
 // proposals,needs-you,copilot}.md.
 package coordinator
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
+)
 
 // ActionProposeTask is the MCP action name the copilot's propose_task_kandev
 // tool dispatches (docs/specs/coordinator/system-design/proposals.md#propose).
 // The dispatch site is owned by a later work package.
-const ActionProposeTask = "coordinator.propose_task"
+const ActionProposeTask = mcpcontract.ActionProposeTask
 
 // Coordinator is a workspace's coordinator configuration.
 type Coordinator struct {

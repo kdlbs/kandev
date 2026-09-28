@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -68,8 +68,8 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString(canvasTitleArg, mcp.Required(), mcp.Description("Proposed task title, 1 to 60 characters after trimming")),
 			mcp.WithString(descriptionArg, mcp.Required(), mcp.Description("Proposed task description, at most 10,000 characters")),
 			mcp.WithString("rationale", mcp.Required(), mcp.Description("Why this task is being proposed, at most 10,000 characters")),
-			mcp.WithString(coordinator.ApproveFieldWorkflowID, mcp.Required(), mcp.Description("The workflow the task would be created in")),
-			mcp.WithString(coordinator.ApproveFieldStepID, mcp.Description("Optional workflow step the task would be created in. Defaults to the workflow's start step")),
+			mcp.WithString(mcpcontract.FieldWorkflowID, mcp.Required(), mcp.Description("The workflow the task would be created in")),
+			mcp.WithString(mcpcontract.FieldStepID, mcp.Description("Optional workflow step the task would be created in. Defaults to the workflow's start step")),
 			mcp.WithString(mcpKeyRepositoryID, mcp.Description("Optional repository the task would target")),
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
 		),
@@ -91,21 +91,21 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("rationale is required"), nil
 		}
-		workflowID, err := req.RequireString(coordinator.ApproveFieldWorkflowID)
+		workflowID, err := req.RequireString(mcpcontract.FieldWorkflowID)
 		if err != nil {
 			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
 		payload := map[string]string{
-			canvasTitleArg:                     title,
-			descriptionArg:                     description,
-			"rationale":                        rationale,
-			coordinator.ApproveFieldWorkflowID: workflowID,
-			coordinator.ApproveFieldStepID:     req.GetString(coordinator.ApproveFieldStepID, ""),
-			mcpKeyRepositoryID:                 req.GetString(mcpKeyRepositoryID, ""),
-			"source_task_id":                   req.GetString("source_task_id", ""),
+			canvasTitleArg:              title,
+			descriptionArg:              description,
+			"rationale":                 rationale,
+			mcpcontract.FieldWorkflowID: workflowID,
+			mcpcontract.FieldStepID:     req.GetString(mcpcontract.FieldStepID, ""),
+			mcpKeyRepositoryID:          req.GetString(mcpKeyRepositoryID, ""),
+			"source_task_id":            req.GetString("source_task_id", ""),
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, coordinator.ActionProposeTask, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
