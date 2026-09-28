@@ -60,6 +60,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
+		ExecutorType:   "local",
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
@@ -68,7 +69,8 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		t.Fatal("cursor-acp agent missing from test registry")
 	}
 
-	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""); err != nil {
+	profileInfo := &AgentProfileInfo{ProfileID: "profile-1", CursorMCPAuthEnabled: true}
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, profileInfo, "local"); err != nil {
 		t.Fatalf("materializeRuntimeProjectMCP: %v", err)
 	}
 

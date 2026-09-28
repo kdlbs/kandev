@@ -31,6 +31,24 @@ test("phone users can toggle and save Cursor plugin MCP import preference", asyn
         async () => (await apiClient.getAgentProfile(fixture.profileId)).cursorPluginsMcpEnabled,
       )
       .toBe(false);
+
+    await testPage.reload();
+    await expect(checkbox).toHaveAttribute("aria-checked", "false");
+    await label.tap();
+    await expect(checkbox).toHaveAttribute("aria-checked", "true");
+    await save.click();
+    await expect
+      .poll(
+        async () => (await apiClient.getAgentProfile(fixture.profileId)).cursorPluginsMcpEnabled,
+      )
+      .toBe(true);
+
+    await label.tap();
+    await expect(checkbox).toHaveAttribute("aria-checked", "false");
+    const reset = testPage.getByRole("button", { name: /^Reset$/i }).first();
+    await expect(reset).toBeEnabled();
+    await reset.click();
+    await expect(checkbox).toHaveAttribute("aria-checked", "true");
   } finally {
     await fixture.dispose();
   }

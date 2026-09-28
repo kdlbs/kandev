@@ -77,4 +77,4 @@ Cursor disk formats are not a public stable API. Unsupported formats must fail c
 
 ## Results
 
-Implemented `DiscoverCursorPluginMCPServers` in `cursor_plugins.go` and unit tests in `cursor_plugins_test.go`. Discovers stdio and network servers across cached, local, and marketplace plugin directories and user global config with timestamp precedence and reserved name filtering. Tests passed with race detector.
+Implemented `DiscoverCursorPluginMCPServers` and `DiscoverCursorPluginCandidates` in `cursor_plugins.go` and comprehensive unit tests in `cursor_plugins_test.go`. Discovers stdio and network servers across cached, local, and marketplace plugin directories and user global config, respecting central installation registries, newest completed version selection, descriptor-based relative file references with containment checks, plugin-root variable expansion, unsupported cwd skipping, and transport validation. All unit tests passed with race detector (`go test -race -v ./internal/agent/mcpconfig/...`).

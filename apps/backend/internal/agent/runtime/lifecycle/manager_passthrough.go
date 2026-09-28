@@ -401,6 +401,12 @@ func (m *Manager) applyPassthroughMCP(
 	if err := m.prepareCursorMCPAuth(execution, profileInfo, execution.ExecutorType, pt.MCPStrategy); err != nil {
 		return nil, err
 	}
+	if isCursorMCPAuthStrategy(pt.MCPStrategy) {
+		if err := m.reconcileAndMaterializeCursorProjectMCP(ctx, execution, agentConfig, profileInfo, execution.ExecutorType, pt.MCPStrategy); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
 	// passthroughMCPServers always returns at least the kandev server (or an
 	// error when the port is unavailable), so the strategy receives a non-empty
 	// list; each strategy guards its own empty-after-filtering case.
@@ -447,10 +453,6 @@ func (m *Manager) passthroughMCPServers(
 			continue
 		}
 		servers = append(servers, srv)
-	}
-	if strategy != nil {
-		discovered := m.discoverCursorPluginMCPServers(execution, profileInfo, executorType, strategy)
-		servers = mergeDiscoveredPluginServers(servers, discovered)
 	}
 	return servers, nil
 }

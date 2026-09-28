@@ -30,6 +30,9 @@ func (m *Manager) materializeRuntimeProjectMCP(
 	if err := m.prepareCursorMCPAuth(execution, profileInfo, executorType, rt.ProjectMCPStrategy); err != nil {
 		return err
 	}
+	if isCursorMCPAuthStrategy(rt.ProjectMCPStrategy) {
+		return m.reconcileAndMaterializeCursorProjectMCP(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy)
+	}
 	servers, err := m.runtimeProjectMCPServers(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy)
 	if err != nil {
 		return err

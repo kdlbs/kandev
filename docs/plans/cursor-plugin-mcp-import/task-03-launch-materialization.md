@@ -90,4 +90,4 @@ Existing merge behavior is additive, and whole-file cleanup can erase successor 
 
 ## Results
 
-Integrated `discoverCursorPluginMCPServers` into `manager_project_mcp.go` and `manager_passthrough.go`. When `CursorPluginsMCPEnabled: true` for a local Cursor execution, discovered plugin MCP servers are merged into `.cursor/mcp.json` alongside `kandev` internal tools and explicit profile servers. Unit and race tests passed.
+Implemented `reconcileAndMaterializeCursorProjectMCP` in `cursor_plugin_mcp.go`, integrated across `manager_project_mcp.go` and `manager_passthrough.go`, and created `cursor_plugin_mcp_test.go`. Features policy enforcement on imported candidates, explicit profile and reserved name protection, project file precedence (preserving user project servers over global/plugin imports), and persistent backend-private import ownership tracking (`.cursor/.kandev-mcp-imports.json`). Stale unmodified imported servers are safely removed on disablement or plugin deletion, while user edits survive. All unit and race tests passed (`go test -race -v ./internal/agent/runtime/lifecycle/ -run "TestCursorPlugin"`).

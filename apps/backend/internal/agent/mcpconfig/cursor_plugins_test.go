@@ -125,15 +125,177 @@ func TestDiscoverCursorPluginMCPServers_NewerPluginPrecedence(t *testing.T) {
 	require.Equal(t, "https://v2-url", servers[0].URL, "newer plugin version should win")
 }
 
-func TestDiscoverCursorPluginMCPServers_IgnoresDisabled(t *testing.T) {
+func TestDiscoverCursorPluginMCPServers_UninstalledCacheIgnored(t *testing.T) {
 	tempHome := t.TempDir()
-	pluginDir := filepath.Join(tempHome, "plugins", "local", "disabled-plugin")
-	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
-	pJSON := `{"mcpServers": {"active": {"url": "https://active"}, "disabled-srv": {"url": "https://disabled", "disabled": true}}}`
-	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(pJSON), 0o644))
+
+	// 1. Uninstalled plugin folder under cache
+	uninstalledDir := filepath.Join(tempHome, "plugins", "cache", "store", "uninstalled", "v1")
+	require.NoError(t, os.MkdirAll(uninstalledDir, 0o755))
+	uninstalledJSON := `{"mcpServers": {"uninstalled-srv": {"command": "untrusted-command"}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(uninstalledDir, "mcp.json"), []byte(uninstalledJSON), 0o644))
+
+	// 2. Disabled plugin in installed.json registry
+	installedRegistry := `{
+		"plugins": [
+			{"id": "disabled-plugin", "enabled": false},
+			{"id": "enabled-plugin", "enabled": true}
+		]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "plugins", "installed.json"), []byte(installedRegistry), 0o644))
+
+	disabledDir := filepath.Join(tempHome, "plugins", "local", "disabled-plugin")
+	require.NoError(t, os.MkdirAll(disabledDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(disabledDir, "mcp.json"), []byte(`{"mcpServers":{"disabled-srv":{"command":"node"}}}`), 0o644))
+
+	enabledDir := filepath.Join(tempHome, "plugins", "local", "enabled-plugin")
+	require.NoError(t, os.MkdirAll(enabledDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(enabledDir, "mcp.json"), []byte(`{"mcpServers":{"enabled-srv":{"command":"node"}}}`), 0o644))
 
 	servers, err := DiscoverCursorPluginMCPServers(tempHome)
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
-	require.Equal(t, "active", servers[0].Name)
+	require.Equal(t, "enabled-srv", servers[0].Name)
+}
+
+func TestDiscoverCursorPluginMCPServers_DescriptorFileReference(t *testing.T) {
+	tempHome := t.TempDir()
+
+	// 1. Plugin descriptor referencing a relative file
+	pluginDir := filepath.Join(tempHome, "plugins", "local", "ref-plugin")
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, "config"), 0o755))
+
+	pluginDesc := `{
+		"name": "ref-plugin",
+		"mcpServers": "config/servers.json"
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(pluginDesc), 0o644))
+
+	serversJSON := `{
+		"mcpServers": {
+			"ref-server": {
+				"type": "http",
+				"url": "https://ref.example.com/mcp"
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "config", "servers.json"), []byte(serversJSON), 0o644))
+
+	// 2. Plugin descriptor attempting path traversal (should be skipped without erroring out sibling)
+	evilPluginDir := filepath.Join(tempHome, "plugins", "local", "evil-plugin")
+	require.NoError(t, os.MkdirAll(evilPluginDir, 0o755))
+	evilDesc := `{
+		"name": "evil-plugin",
+		"mcpServers": "../../../etc/passwd"
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(evilPluginDir, "plugin.json"), []byte(evilDesc), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	require.Equal(t, "ref-server", servers[0].Name)
+	require.Equal(t, "https://ref.example.com/mcp", servers[0].URL)
+}
+
+func TestDiscoverCursorPluginMCPServers_PluginRootExpansion(t *testing.T) {
+	tempHome := t.TempDir()
+
+	pluginDir := filepath.Join(tempHome, "plugins", "local", "path with spaces")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+
+	manifest := `{
+		"mcpServers": {
+			"expanded-server": {
+				"command": "${CURSOR_PLUGIN_ROOT}/bin/server",
+				"args": ["--root", "${PLUGIN_ROOT}", "literal argument"],
+				"env": {"DIR": "${CURSOR_PLUGIN_ROOT}/data"}
+			},
+			"unresolved-server": {
+				"command": "${UNRESOLVED_VAR}/bin/server"
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(manifest), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	require.Equal(t, "expanded-server", servers[0].Name)
+	require.Equal(t, filepath.Join(pluginDir, "bin", "server"), servers[0].Command)
+	require.Equal(t, []string{"--root", pluginDir, "literal argument"}, servers[0].Args)
+	require.Equal(t, filepath.Join(pluginDir, "data"), servers[0].Env["DIR"])
+}
+
+func TestDiscoverCursorPluginMCPServers_UnsupportedCWD(t *testing.T) {
+	tempHome := t.TempDir()
+
+	pluginDir := filepath.Join(tempHome, "plugins", "local", "cwd-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+
+	manifest := `{
+		"mcpServers": {
+			"cwd-server": {
+				"command": "node",
+				"args": ["server.js"],
+				"cwd": "${CURSOR_PLUGIN_ROOT}"
+			},
+			"valid-sibling": {
+				"command": "node",
+				"args": ["valid.js"]
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(manifest), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	require.Equal(t, "valid-sibling", servers[0].Name)
+}
+
+func TestDiscoverCursorPluginMCPServers_TransportValidation(t *testing.T) {
+	tempHome := t.TempDir()
+
+	pluginDir := filepath.Join(tempHome, "plugins", "local", "transport-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+
+	manifest := `{
+		"mcpServers": {
+			"sse-server": {
+				"type": "sse",
+				"url": "https://example.com/sse"
+			},
+			"streamable-server": {
+				"type": "streamable_http",
+				"url": "https://example.com/stream"
+			},
+			"conflicting-shape": {
+				"command": "run.sh",
+				"url": "https://example.com/mcp"
+			},
+			"invalid-stdio-url": {
+				"type": "stdio",
+				"url": "https://example.com/mcp"
+			},
+			"invalid-network-cmd": {
+				"type": "http",
+				"command": "run.sh"
+			},
+			"unknown-transport": {
+				"type": "grpc",
+				"url": "https://example.com/mcp"
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(manifest), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	require.NoError(t, err)
+	require.Len(t, servers, 2)
+
+	serverMap := make(map[string]string)
+	for _, s := range servers {
+		serverMap[s.Name] = s.Type
+	}
+	require.Equal(t, string(ServerTypeSSE), serverMap["sse-server"])
+	require.Equal(t, string(ServerTypeStreamableHTTP), serverMap["streamable-server"])
 }

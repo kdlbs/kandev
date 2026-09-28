@@ -86,7 +86,15 @@ Dependencies: 00 -> {01, 02} -> 03 -> 04. This graph does not authorize parallel
 
 ## Verification results
 
-Implementation checks: Pending. Each work order contains exact commands rooted independently at the repository. On a fresh worktree run `(cd apps && pnpm install --frozen-lockfile)` before the first pnpm command. Generate catalog artifacts before its `--check`; inspect generated changes for unrelated churn.
+Implementation verification (2026-09-28):
+
+- Backend mcpconfig tests: `(cd apps/backend && go test -race -v ./internal/agent/mcpconfig/...)` passed.
+- Backend lifecycle Cursor & Project MCP tests: `(cd apps/backend && go test -race -v ./internal/agent/runtime/lifecycle/... -run "Cursor|ProjectMCP")` passed.
+- Backend settings store & controller tests: `(cd apps/backend && go test -race ./internal/agent/settings/store/... ./internal/agent/settings/controller/...)` passed.
+- Backend lint: `golangci-lint run ./internal/agent/mcpconfig/... ./internal/agent/runtime/lifecycle/... ./internal/agent/settings/...` passed with 0 issues.
+- Frontend typecheck & lint: `pnpm run typecheck && pnpm run lint` passed with 0 errors/warnings.
+- Frontend i18n checks: `pnpm run i18n:check` passed across all 7 catalogs.
+- Frontend Vitest unit tests: 77 tests passed across profile forms, normalizers, and save helpers.
 
 Design review validation (2026-09-28):
 

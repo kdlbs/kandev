@@ -89,4 +89,4 @@ CLI availability and undocumented installation state can block this task; do not
 
 ## Results
 
-Compatibility report recorded in `compatibility-evidence.md` against Cursor version 2026.09.26-dd393fe. Verified ACP tool resolution and supported manifest formats (`mcp.json`, `.mcp.json`, `.cursor-plugin/plugin.json`, `plugin.json`, and global `~/.cursor/mcp.json`). All gate criteria met.
+Compatibility report recorded in `compatibility-evidence.md` against Cursor version 2026.09.26-dd393fe. Verified ACP tool resolution and supported manifest formats (`mcp.json`, `.mcp.json`, `.cursor-plugin/plugin.json`, `plugin.json`, descriptor relative file references, and global `~/.cursor/mcp.json`). Established eligible root selection, variable expansion, transport normalization, and persistent ownership tracking via `.cursor/.kandev-mcp-imports.json`. All gate criteria met.
