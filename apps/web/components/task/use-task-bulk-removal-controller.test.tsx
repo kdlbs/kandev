@@ -42,7 +42,7 @@ describe("useTaskBulkRemovalController eligibility", () => {
   it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 waits for an authoritative session list", () => {
     const state = getState();
     state.taskSessionsByTask.loadedByTaskId["task-1"] = false;
-    const removeById = vi.fn(async () => true);
+    const removeById = vi.fn<(id: string) => Promise<boolean>>(async () => true);
     const { result } = renderHook(() =>
       useTaskBulkRemovalController({
         taskId: "task-1",
@@ -111,6 +111,29 @@ describe("useTaskBulkRemovalController", () => {
     expect(suppress).toHaveBeenCalledWith("task-1");
     expect(clear).toHaveBeenCalledWith("task-1");
     expect(removeById.mock.calls.map(([id]) => id)).toEqual(["second", "first"]);
+  });
+
+  it("continues Remove All when fence persistence fails", async () => {
+    suppress.mockImplementationOnce(() => {
+      throw new Error("storage unavailable");
+    });
+    const removeById = vi.fn<(id: string) => Promise<boolean>>(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById.mock.calls.map(([id]) => id)).toEqual(["second", "first"]);
+    expect(result.current.bulkRemoval.pending).toBe(false);
   });
 
   it("reports refresh failures as errors instead of saying sessions are loading", async () => {

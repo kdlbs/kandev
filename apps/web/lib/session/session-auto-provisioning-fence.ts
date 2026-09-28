@@ -1,23 +1,37 @@
 const suppressedTaskIds = new Set<string>();
 const storageKey = "kandev.bulk-session-removal-fences";
 
+function readPersistedTaskIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]") as unknown;
+    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function replaceSuppressedTaskIds(taskIds: Iterable<string>) {
+  suppressedTaskIds.clear();
+  for (const taskId of taskIds) suppressedTaskIds.add(taskId);
+}
+
 function persist() {
-  if (typeof window !== "undefined")
+  if (typeof window === "undefined") return;
+  try {
     window.localStorage.setItem(storageKey, JSON.stringify([...suppressedTaskIds]));
+  } catch {
+    // Persistence only preserves the fence across reloads; the current tab remains protected.
+  }
 }
 
 function restore(taskId: string) {
   if (typeof window === "undefined" || suppressedTaskIds.has(taskId)) return;
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]") as string[];
-    stored.forEach((id) => suppressedTaskIds.add(id));
-  } catch {
-    window.localStorage.removeItem(storageKey);
-  }
+  readPersistedTaskIds().forEach((id) => suppressedTaskIds.add(id));
 }
 
 export function suppressTaskSessionAutoProvisioning(taskId: string) {
-  suppressedTaskIds.add(taskId);
+  replaceSuppressedTaskIds([...suppressedTaskIds, ...readPersistedTaskIds(), taskId]);
   persist();
 }
 
@@ -28,6 +42,8 @@ export function isTaskSessionAutoProvisioningSuppressed(taskId: string | null) {
 }
 
 export function clearTaskSessionAutoProvisioningSuppression(taskId: string) {
-  suppressedTaskIds.delete(taskId);
+  const taskIds = new Set([...suppressedTaskIds, ...readPersistedTaskIds()]);
+  taskIds.delete(taskId);
+  replaceSuppressedTaskIds(taskIds);
   persist();
 }

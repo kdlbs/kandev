@@ -11,6 +11,7 @@ import { performLayoutSwitch, releaseLayoutToDefault } from "@/lib/state/dockvie
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { clearTaskSessionAutoProvisioningSuppression } from "@/lib/session/session-auto-provisioning-fence";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { isInputCapableSessionState } from "@/lib/utils/task-pending-input";
 import { isAbortError } from "@/lib/utils/abort-error";
@@ -276,6 +277,7 @@ export async function prepareAndSwitchTask(
     const resp = await launchSession(request);
     if (!shouldContinue()) return false;
     if (resp.session_id) {
+      clearTaskSessionAutoProvisioningSuppression(taskId);
       // Pass `null` instead of the original oldSessionId — releaseLayoutToDefault
       // already saved + released the outgoing env, and the dockview now holds the
       // default layout. If we forwarded oldSessionId, the subsequent

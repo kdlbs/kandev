@@ -66,7 +66,11 @@ export function useTaskBulkRemovalController({
     onRemoveAllConfirmed: () => {
       if (!taskId) return;
       suppressedTaskIdRef.current = taskId;
-      suppressTaskSessionAutoProvisioning(taskId);
+      try {
+        suppressTaskSessionAutoProvisioning(taskId);
+      } catch {
+        // A best-effort reload fence must never block the confirmed deletion.
+      }
     },
     onInvalidSnapshot: (reason) =>
       reason ? reportIneligible(reason) : toast({ title: t("task:sessionsChangedReviewAgain") }),
@@ -77,7 +81,13 @@ export function useTaskBulkRemovalController({
           variant: "error",
         });
         const suppressedTaskId = suppressedTaskIdRef.current;
-        if (suppressedTaskId) clearTaskSessionAutoProvisioningSuppression(suppressedTaskId);
+        if (suppressedTaskId) {
+          try {
+            clearTaskSessionAutoProvisioningSuppression(suppressedTaskId);
+          } catch {
+            // The deletion result remains authoritative when browser storage is unavailable.
+          }
+        }
       }
       suppressedTaskIdRef.current = null;
     },

@@ -1,6 +1,7 @@
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { clearTaskSessionAutoProvisioningSuppression } from "@/lib/session/session-auto-provisioning-fence";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
 import { isAbortError } from "@/lib/utils/abort-error";
 import {
@@ -148,6 +149,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
       const response = await launchSession(request);
       if (!selectionIsCurrent(actions)) return;
       if (response.session_id) {
+        clearTaskSessionAutoProvisioningSuppression(taskId);
         actions.setActiveSession(taskId, response.session_id);
         navigate(taskId);
         actions.onOpenChange(false);
