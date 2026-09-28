@@ -43,6 +43,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
 		r.initClarificationInboxSidecarSchema,
+		r.initBackgroundWorkSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,

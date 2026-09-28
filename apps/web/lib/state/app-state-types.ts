@@ -162,8 +162,10 @@ export type AppState = KanbanSlice & {
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
   sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
+  usageInvalidation: (typeof defaultSessionRuntimeState)["usageInvalidation"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
+  backgroundWork: (typeof defaultSessionRuntimeState)["backgroundWork"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -602,6 +604,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
@@ -621,6 +624,21 @@ export type AppState = KanbanSlice & {
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  setBackgroundWorkloads: (
+    sessionId: string,
+    workloads: import("@/lib/types/background-work").WorkloadRunObservation[],
+  ) => void;
+  updateBackgroundWorkload: (
+    sessionId: string,
+    workload: import("@/lib/types/background-work").WorkloadRunObservation,
+  ) => void;
+  appendBackgroundWorkloadOutput: (
+    sessionId: string,
+    chunk: import("@/lib/types/background-work").WorkloadOutputChunk,
+  ) => void;
+  setActiveBackgroundWorkload: (sessionId: string, workId: string) => void;
+  clearBackgroundWork: (sessionId: string) => void;
+  setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];

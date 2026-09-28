@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
+
+var errUsageEventReaderUnavailable = errors.New("usage event detail is unavailable")
 
 // GetTaskUsageTotals returns the task-cost-ledger aggregate for taskID
 // (docs/specs/task-cost-ledger/spec.md AC-18, AC-19), including rows whose
@@ -31,4 +35,43 @@ func (s *Service) GetTaskSessionUsageTotals(ctx context.Context, taskID, session
 		return nil, err
 	}
 	return s.usage.GetSessionUsageTotals(ctx, sessionID)
+}
+
+func (s *Service) ListTaskSessionUsageTurns(ctx context.Context, taskID, sessionID string, afterID int64, limit int) ([]models.TaskUsageTurnEvents, int64, error) {
+	if err := s.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
+		return nil, afterID, err
+	}
+	reader, ok := s.usage.(repository.UsageEventReader)
+	if !ok {
+		return nil, afterID, errUsageEventReaderUnavailable
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	turns, err := reader.ListSessionUsageTurnCursors(ctx, sessionID, afterID, limit)
+	if err != nil {
+		return nil, afterID, err
+	}
+	result := make([]models.TaskUsageTurnEvents, 0, len(turns))
+	nextCursor := afterID
+	for _, turn := range turns {
+		events, err := reader.ListSessionUsageEventsByTurn(ctx, sessionID, turn.TurnID)
+		if err != nil {
+			return nil, afterID, err
+		}
+		result = append(result, models.TaskUsageTurnEvents{TurnID: turn.TurnID, Cursor: turn.Cursor, Events: events})
+		nextCursor = turn.Cursor
+	}
+	return result, nextCursor, nil
+}
+
+func (s *Service) GetTaskSessionUsageTurn(ctx context.Context, taskID, sessionID, turnID string) ([]*models.TaskUsageEvent, error) {
+	if err := s.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	reader, ok := s.usage.(repository.UsageEventReader)
+	if !ok {
+		return nil, errUsageEventReaderUnavailable
+	}
+	return reader.ListSessionUsageEventsByTurn(ctx, sessionID, turnID)
 }

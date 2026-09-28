@@ -3072,6 +3072,10 @@ export class ApiClient {
     });
   }
 
+  async renameSession(sessionId: string, name: string): Promise<void> {
+    await this.wsRequest("session.rename", { session_id: sessionId, name });
+  }
+
   async setSessionMode(sessionId: string, modeId: string): Promise<void> {
     await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-mode`, {
       mode_id: modeId,
@@ -3108,9 +3112,16 @@ export class ApiClient {
     });
   }
 
-  async getQueueStatus(
-    identity: QueueSessionIdentityInput,
-  ): Promise<{ count: number; auto_run: boolean; auto_merge_enabled: boolean }> {
+  async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
+    count: number;
+    entries: Array<{
+      content: string;
+      queued_by: string;
+      metadata?: Record<string, unknown>;
+    }>;
+    auto_run: boolean;
+    auto_merge_enabled: boolean;
+  }> {
     return this.wsRequest("message.queue.get", {
       task_id: identity.taskId,
       session_id: identity.sessionId,

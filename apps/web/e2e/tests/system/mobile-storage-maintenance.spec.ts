@@ -124,7 +124,9 @@ test.describe("Mobile storage maintenance", () => {
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
-    await expect(testPage.getByRole("progressbar")).toBeVisible();
+    await expect(
+      testPage.getByTestId("storage-disk-capacity-card").getByRole("progressbar"),
+    ).toBeVisible();
     await testPage
       .getByRole("button", { name: "More information about Scheduled maintenance" })
       .click();

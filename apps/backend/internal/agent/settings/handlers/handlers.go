@@ -616,7 +616,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	}
 	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
 	if err != nil {
-		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) {
+		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) || errors.Is(err, controller.ErrAgentFeatureDisabled) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
@@ -714,6 +714,10 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 		ID: profileID,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrAgentFeatureDisabled) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
