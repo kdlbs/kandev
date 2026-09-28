@@ -8,6 +8,7 @@ import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { selectWorkspaceById } from "@/lib/state/slices/workspace/selectors";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import { linkToCoordinatorNeedsYou, linkToCoordinatorQueue } from "@/lib/coordinator/links";
+import { CoordinatorCopilot } from "./copilot/coordinator-copilot";
 import { useResolvedCoordinator } from "./use-resolved-coordinator";
 import {
   useCoordinatorAttention,
@@ -124,6 +125,12 @@ export function CoordinatorRouteContent({
           })}
         </>
       )}
+      <CoordinatorCopilot
+        workspaceId={workspaceId}
+        coordinatorId={resolved.coordinator.id}
+        coordinatorName={resolved.coordinator.name}
+        canManage={canManage}
+      />
     </div>
   );
 }

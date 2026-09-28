@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@kandev/ui/card";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import { deriveCopilotItemId } from "@/lib/coordinator/copilot-id";
 import { formatAge } from "@/lib/coordinator/format";
 import { resolveProposalSourceTask, severityFor, whyClearsText } from "@/lib/coordinator/item-text";
 import { AskAboutThisButton, NeedsYouItemPrimaryActions } from "./needs-you-item-actions";
@@ -22,6 +23,8 @@ export type NeedsYouItemCardProps = {
   stepNameByWorkflowStep: Map<string, string>;
   openTasksById: Map<string, AttentionTask>;
   coordinatorName: string;
+  coordinatorId: string;
+  canManage: boolean;
 };
 
 function headFor(
@@ -57,11 +60,14 @@ export function NeedsYouItemCard({
   stepNameByWorkflowStep,
   openTasksById,
   coordinatorName,
+  coordinatorId,
+  canManage,
 }: NeedsYouItemCardProps) {
   const { t } = useTranslation();
   const head = headFor(item, stepNameByTaskId, openTasksById, t("coordinator:newTask"));
   const severity = severityFor(item);
   const { why, clears } = whyClearsText(item, t);
+  const copilotId = deriveCopilotItemId(item, openTasksById);
 
   return (
     <Card data-testid={`needs-you-item-${item.id}`}>
@@ -79,7 +85,7 @@ export function NeedsYouItemCard({
           <span className="text-muted-foreground font-normal">{formatAge(item.ageMs)}</span>
         </CardTitle>
         <CardAction>
-          <AskAboutThisButton />
+          <AskAboutThisButton coordinatorId={coordinatorId} id={copilotId} canManage={canManage} />
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-2">

@@ -1,0 +1,106 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { useCopilotStore, INITIAL_COPILOT_ENTRY } from "./copilot-store";
+
+function reset() {
+  useCopilotStore.setState({ entries: {} });
+}
+
+const WHY_KAN_418 = "Why is KAN-418 here?";
+
+describe("copilot store", () => {
+  beforeEach(reset);
+
+  it("returns the initial entry for a coordinator never touched", () => {
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual(INITIAL_COPILOT_ENTRY);
+  });
+
+  it("askAboutThis sets the chip, draft and opens the popover", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: true,
+      chip: { id: "KAN-418", label: "KAN-418" },
+      draft: WHY_KAN_418,
+    });
+  });
+
+  it("a second askAboutThis call replaces the chip and draft again", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-9", "Why is KAN-9 here?");
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: true,
+      chip: { id: "KAN-9", label: "KAN-9" },
+      draft: "Why is KAN-9 here?",
+    });
+  });
+
+  it("keeps separate entries per coordinator id", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    expect(useCopilotStore.getState().getEntry("coord-2")).toEqual(INITIAL_COPILOT_ENTRY);
+  });
+
+  it("clearDraft resets the draft to empty once it has been applied", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().clearDraft("coord-1");
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: true,
+      chip: { id: "KAN-418", label: "KAN-418" },
+      draft: "",
+    });
+  });
+
+  it("setOpen updates only the open flag", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().setOpen("coord-1", false);
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: false,
+      chip: { id: "KAN-418", label: "KAN-418" },
+      draft: WHY_KAN_418,
+    });
+  });
+
+  it("setOpen(true) opens the launcher's own entry with no chip", () => {
+    useCopilotStore.getState().setOpen("coord-1", true);
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: true,
+      chip: null,
+      draft: "",
+    });
+  });
+
+  it("removeChip clears the chip and leaves the draft as-is", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().removeChip("coord-1");
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: true,
+      chip: null,
+      draft: WHY_KAN_418,
+    });
+  });
+
+  it("clearChipAndDraft clears both but keeps open unchanged (a 404 while open)", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().clearChipAndDraft("coord-1");
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: true,
+      chip: null,
+      draft: "",
+    });
+  });
+
+  it("clearChipAndDraft keeps open=false unchanged (a 404 while closed)", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().setOpen("coord-1", false);
+    useCopilotStore.getState().clearChipAndDraft("coord-1");
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
+      open: false,
+      chip: null,
+      draft: "",
+    });
+  });
+
+  it("removeEntry resets the coordinator back to the initial entry", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().removeEntry("coord-1");
+    expect(useCopilotStore.getState().getEntry("coord-1")).toEqual(INITIAL_COPILOT_ENTRY);
+  });
+});

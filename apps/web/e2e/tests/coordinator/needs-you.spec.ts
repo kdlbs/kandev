@@ -63,7 +63,7 @@ test.describe("Coordinator Needs you and Queue", () => {
 
     const askAboutThis = card.getByRole("button", { name: "Ask about this" });
     await expect(askAboutThis).toBeVisible();
-    await expect(askAboutThis).toBeDisabled();
+    await expect(askAboutThis).toBeEnabled();
 
     await expect(card.getByRole("link", { name: "Open task" })).toBeVisible();
     // A question item is not a stall: no evidence popover trigger renders.

@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-005.3
 system_design:
   - ../../specs/coordinator/system-design/copilot.md
+  - ../../specs/coordinator/system-design/copilot-popover.md
 ---
 
 # Task 05: Popover Shell and Chat Props (WP-4a)
@@ -37,7 +38,7 @@ everything after it.
   and `transformOutgoing` (threaded through `QuickChatContent` into the
   shared `useSubmitHandler`); `useSessionResumption` option
   `skipAutomaticRecovery`
-  ([copilot design](../../specs/coordinator/system-design/copilot.md#popover)).
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#popover)).
 - The coordinator branch in
   `components/task/chat/messages/user-message-body.tsx`: when the task origin
   is `coordinator` and the text starts with `About `, up to the first `: `, it

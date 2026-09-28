@@ -11,6 +11,7 @@ import type { ResolvedCoordinatorState } from "./use-resolved-coordinator";
 const replaceMock = vi.fn();
 const retryListMock = vi.fn();
 const retryFailedMock = vi.fn();
+const coordinatorCopilotCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 
 let resolvedState: ResolvedCoordinatorState;
 let attentionResult: UseCoordinatorAttentionResult;
@@ -35,6 +36,13 @@ vi.mock("./use-resolved-coordinator", () => ({
 
 vi.mock("./use-coordinator-attention", () => ({
   useCoordinatorAttention: () => attentionResult,
+}));
+
+vi.mock("./copilot/coordinator-copilot", () => ({
+  CoordinatorCopilot: (props: Record<string, unknown>) => {
+    coordinatorCopilotCalls.push(props);
+    return <div data-testid="coordinator-copilot-marker" />;
+  },
 }));
 
 import { CoordinatorRouteContent } from "./coordinator-route-content";
@@ -87,6 +95,7 @@ function attention(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  coordinatorCopilotCalls.length = 0;
   workspaceItems = [{ id: "ws-1", scopes: [] }];
   activeWorkspaceId = "ws-1";
   attentionResult = attention();
@@ -160,6 +169,37 @@ describe("CoordinatorRouteContent", () => {
     expect(screen.getByRole("heading", { name: "Planner" })).not.toBeNull();
     expect(screen.getByTestId("coordinator-count-strip")).not.toBeNull();
     expect(screen.getByTestId("ready-content").textContent).toBe("Planner");
+    expect(screen.getByTestId("coordinator-copilot-marker")).not.toBeNull();
+    expect(coordinatorCopilotCalls[0]).toMatchObject({
+      workspaceId: "ws-1",
+      coordinatorId: "co-1",
+      coordinatorName: "Planner",
+      canManage: false,
+    });
+  });
+});
+
+describe("CoordinatorRouteContent - tasks never loaded", () => {
+  it("mounts the copilot even when tasks failed to load", () => {
+    attentionResult = attention({
+      tasksNeverLoaded: true,
+      inputs: [
+        { kind: "tasks", error: true, loadedAt: undefined },
+        { kind: "stalls", error: false, loadedAt: 1 },
+        { kind: "proposals", error: false, loadedAt: 1 },
+      ],
+    });
+    resolvedState = {
+      status: "ready",
+      coordinator: coordinator(),
+      coordinators: [coordinator()],
+    };
+    render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="needs-you">
+        {() => <div data-testid="ready-content" />}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("coordinator-copilot-marker")).not.toBeNull();
   });
 
   it("replaces the lists and count strip with the banner when tasks never loaded and failed", () => {

@@ -6,13 +6,11 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 requirements:
   - REQ-COORDINATOR-COPILOT-001
   - REQ-COORDINATOR-COPILOT-002
   - REQ-COORDINATOR-COPILOT-003
-  - REQ-COORDINATOR-COPILOT-004
-  - REQ-COORDINATOR-COPILOT-005
 ---
 
 # Coordinator copilot and tool surface System Design
@@ -36,8 +34,8 @@ see [Residual](#residual-external-surface).
 | `REQ-COORDINATOR-COPILOT-001` | [Conversation task](#conversation-task), [Standing instructions](#standing-instructions) |
 | `REQ-COORDINATOR-COPILOT-002` | [Attended only](#attended-only) |
 | `REQ-COORDINATOR-COPILOT-003` | [Principal and mode](#principal-and-mode), [Tool surface](#tool-surface), [Fail closed](#fail-closed), [Permission policy](#permission-policy) |
-| `REQ-COORDINATOR-COPILOT-004` | [Popover](#popover) |
-| `REQ-COORDINATOR-COPILOT-005` | [Ask about this](#ask-about-this) |
+| `REQ-COORDINATOR-COPILOT-004` | [Copilot popover](copilot-popover.md#popover) |
+| `REQ-COORDINATOR-COPILOT-005` | [Copilot popover](copilot-popover.md#ask-about-this) |
 
 ## Conversation task
 
@@ -480,42 +478,10 @@ unattended turn to be steered this way. The
 [ADR](../../../decisions/2026-09-26-workspace-coordinator.md) records this
 risk as accepted and unmitigated for phase 1.
 
-## Popover
+## Popover and Ask about this
 
-- `ChatPopoverShell` is extracted from `ConfigChatPanel` (position, size,
-  header, close, Escape handling, focus return). `ConfigChatPanel` keeps its
-  Expand and behaviour; a snapshot test pins it.
-- `CoordinatorCopilot` renders the shell at 420 by 550 pixels, bottom right,
-  title `Coordinator: <name>`, no Expand, full width below 640px. The launcher
-  renders only when the user holds `workspace.manage`; its busy state reads the
-  conversation session's state from the session store.
-- The body is `QuickChatSessionView` with new optional props, all defaulting
-  to today's behaviour: `automaticRecovery` (default `true`; see
-  [Attended only](#attended-only)), `hideSessionSelectors` (default `false`;
-  hides the mode and model selectors), `taskArchiveState` (when given, it is
-  used instead of `resolveTaskArchiveState`, whose fallback cannot see an
-  ephemeral task outside the Quick Chat store), `initialDraft` and
-  `transformOutgoing`. The popover builds the `QuickChatSession` value it
-  passes from the route's response with `kind: "chat"`;
-  `QuickChatSessionKind` (`"chat" | "config"`) is not widened, so the Quick
-  Chat tab list, selection and `serverIdsByKind` types are untouched. The
-  popover passes the route's `archive_state` as `taskArchiveState`; without
-  the prop the view behaves as today.
-- The empty state shows the intro text and one suggestion that fills the
-  composer.
-- On wide screens the popover is placed so it leaves the item column's action
-  area uncovered at 1200px; a Playwright check asserts no overlap.
-
-## Ask about this
-
-- A small copilot store holds `{open, chip: {id, label} | null, draft}`.
-  **Ask about this** sets the chip and the draft `Why is <id> here?`, opens the
-  popover and focuses the composer; a second call replaces both.
-- `transformOutgoing` prefixes `About <id>: ` while the chip is set; the hint
-  under the composer shows the stored form.
-- `user-message-body.tsx` gains a coordinator branch: when the task origin is
-  `coordinator` and the text starts with `About `, up to the first `: `, it
-  renders the remainder plus an `about <id>` tag. The stored text is unchanged.
+The popover, its launcher, the open sequence and **Ask about this** are
+designed in [copilot popover](copilot-popover.md).
 
 ## Security
 

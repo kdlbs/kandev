@@ -57,5 +57,22 @@
   "bannerStallsFailed": "Ćōũĺď ńōţ ĺōàď śţàĺĺ ŕēćōŕďś. Śĥōŵĩńĝ ŵĥàţ ŵàś ĺōàďēď àţ {{time}}.",
   "bannerStallsFailedFirstLoad": "Ćōũĺď ńōţ ĺōàď śţàĺĺ ŕēćōŕďś.",
   "bannerProposalsFailed": "Ćōũĺď ńōţ ĺōàď ƥŕōƥōśàĺś. Śĥōŵĩńĝ ŵĥàţ ŵàś ĺōàďēď àţ {{time}}.",
-  "bannerProposalsFailedFirstLoad": "Ćōũĺď ńōţ ĺōàď ƥŕōƥōśàĺś."
+  "bannerProposalsFailedFirstLoad": "Ćōũĺď ńōţ ĺōàď ƥŕōƥōśàĺś.",
+  "copilotTitle": "Ćōōŕďĩńàţōŕ: {{name}}",
+  "copilotClose": "Ćĺōśē",
+  "copilotLauncherIdle": "Ćĥàţ ŵĩţĥ {{name}}",
+  "copilotLauncherBusy": "{{name}} ĩś ŵōŕķĩńĝ",
+  "copilotAgentMissingMessage": "Ţĥē àĝēńţ ƥŕōƒĩĺē ŵàś ŕēḿōvēď. Ćĥōōśē àńōţĥēŕ ĩń Śēţţĩńĝś.",
+  "copilotAgentPassthroughMessage": "Ţĥē àĝēńţ ƥŕōƒĩĺē ũśēś ĆĹĨ ƥàśśţĥŕōũĝĥ, ŵĥĩćĥ à ćōōŕďĩńàţōŕ ćàńńōţ ũśē. Ćĥōōśē àńōţĥēŕ ĩń Śēţţĩńĝś.",
+  "copilotExecutorMissingMessage": "Ţĥē ēxēćũţōŕ ŵàś ŕēḿōvēď. Ćĥōōśē àńōţĥēŕ ĩń Śēţţĩńĝś.",
+  "copilotGoneMessage": "Ţĥĩś ćōōŕďĩńàţōŕ ńō ĺōńĝēŕ ēxĩśţś.",
+  "copilotLoadFailedMessage": "Ćōũĺď ńōţ ĺōàď ţĥē ćōōŕďĩńàţōŕ.",
+  "copilotConflictMessage": "Ţĥē ćōńvēŕśàţĩōń ćĥàńĝēď ŵĥĩĺē ōƥēńĩńĝ.",
+  "copilotOpenFailedMessage": "Ćōũĺď ńōţ ōƥēń ţĥē ćōńvēŕśàţĩōń.",
+  "copilotIntro": "Àśķ ţĥē ćōōŕďĩńàţōŕ àƀōũţ àńŷţĥĩńĝ ōń ţĥĩś śćŕēēń.",
+  "copilotTryAsking": "Ţŕŷ àśķĩńĝ",
+  "copilotSuggestionQuestion": "Ŵĥàţ ńēēďś ḿē ƒĩŕśţ, àńď ŵĥŷ?",
+  "copilotQuestionForItem": "Ŵĥŷ ĩś {{id}} ĥēŕē?",
+  "copilotRemoveChip": "Ŕēḿōvē",
+  "copilotReaderTooltip": "Ōńĺŷ ŵōŕķśƥàćē ḿàńàĝēŕś ćàń àśķ ţĥē ćōōŕďĩńàţōŕ."
 }

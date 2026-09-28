@@ -302,6 +302,31 @@ export function getProposalConflict(error: unknown): Proposal | null {
   return body.proposal;
 }
 
+// getCoordinatorProfileUnavailable returns the two profile statuses from a
+// 409 coordinator_profile_unavailable error thrown by openConversation, or
+// null for any other error. Unlike proposal_conflict, this body carries no
+// error_code, so it is narrowed by its error field and shape instead of
+// ApiError.errorCode.
+export function getCoordinatorProfileUnavailable(
+  error: unknown,
+): CoordinatorProfileUnavailableResponse | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  if (!error.body || typeof error.body !== "object") return null;
+  const body = error.body as Partial<CoordinatorProfileUnavailableResponse>;
+  if (
+    body.error !== "coordinator_profile_unavailable" ||
+    typeof body.agent_profile_status !== "string" ||
+    typeof body.executor_profile_status !== "string"
+  ) {
+    return null;
+  }
+  return {
+    error: "coordinator_profile_unavailable",
+    agent_profile_status: body.agent_profile_status,
+    executor_profile_status: body.executor_profile_status,
+  };
+}
+
 // openConversation resolves to the conversation route's 200 body, and
 // throws an ApiError on any non-2xx status: a 409 conversation_conflict or
 // coordinator_profile_unavailable. Only conversation_conflict carries

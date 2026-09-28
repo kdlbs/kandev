@@ -57,5 +57,22 @@
   "bannerStallsFailed": "Não foi possível carregar os registos de paragem. A mostrar o que foi carregado às {{time}}.",
   "bannerStallsFailedFirstLoad": "Não foi possível carregar os registos de paragem.",
   "bannerProposalsFailed": "Não foi possível carregar as propostas. A mostrar o que foi carregado às {{time}}.",
-  "bannerProposalsFailedFirstLoad": "Não foi possível carregar as propostas."
+  "bannerProposalsFailedFirstLoad": "Não foi possível carregar as propostas.",
+  "copilotTitle": "Coordenador: {{name}}",
+  "copilotClose": "Fechar",
+  "copilotLauncherIdle": "Conversar com {{name}}",
+  "copilotLauncherBusy": "{{name}} está a trabalhar",
+  "copilotAgentMissingMessage": "O perfil do agente foi removido. Escolha outro nas Definições.",
+  "copilotAgentPassthroughMessage": "O perfil do agente utiliza passagem direta de CLI, que um coordenador não pode usar. Escolha outro nas Definições.",
+  "copilotExecutorMissingMessage": "O executor foi removido. Escolha outro nas Definições.",
+  "copilotGoneMessage": "Este coordenador já não existe.",
+  "copilotLoadFailedMessage": "Não foi possível carregar o coordenador.",
+  "copilotConflictMessage": "A conversa mudou durante a abertura.",
+  "copilotOpenFailedMessage": "Não foi possível abrir a conversa.",
+  "copilotIntro": "Pergunte ao coordenador sobre qualquer coisa neste ecrã.",
+  "copilotTryAsking": "Experimente perguntar",
+  "copilotSuggestionQuestion": "O que precisa da minha atenção primeiro, e porquê?",
+  "copilotQuestionForItem": "Porque é que {{id}} está aqui?",
+  "copilotRemoveChip": "Remover",
+  "copilotReaderTooltip": "Só os gestores do espaço de trabalho podem perguntar ao coordenador."
 }

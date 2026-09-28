@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 requirements:
   - REQ-COORDINATOR-COORDINATORS-001
   - REQ-COORDINATOR-COORDINATORS-002
@@ -200,8 +200,9 @@ through `t()`, one message per status that is not `ok`:
 | executor `missing` | the executor was removed; choose another | under Executor |
 
 The copilot replaces the composer with these messages, from the statuses of
-the coordinator GET it already holds, and does not call the conversation
-route while either is not `ok`. When the route returns 409 anyway (a profile
+the coordinator GET it issues on each open (see
+[copilot popover](copilot-popover.md#coordinator-read)), and does not call the
+conversation route while either is not `ok`. When the route returns 409 anyway (a profile
 changed since the GET), the copilot shows the messages built from the 409
 body's two statuses. A status value the client does not know is shown as the
 agent or executor `missing` message of its field.

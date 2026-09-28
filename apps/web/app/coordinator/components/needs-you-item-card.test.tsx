@@ -1,5 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
+import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import type {
   AttentionTask,
   NeedsYouErrorItem,
@@ -87,9 +89,16 @@ const NO_OP_MAPS = {
   workflowNameById: new Map<string, string>(),
   stepNameByWorkflowStep: new Map<string, string>(),
   openTasksById: new Map<string, AttentionTask>(),
+  coordinatorId: "co-1",
+  canManage: true,
 };
 
 const SHOW_THE_EVIDENCE = "Show the evidence";
+const ASK_ABOUT_THIS = "Ask about this";
+
+afterEach(() => {
+  useCopilotStore.setState({ entries: {} });
+});
 
 describe("NeedsYouItemCard - head, severity and age", () => {
   it("shows the task identifier, step, decide-now severity and age for a question item", () => {
@@ -190,15 +199,60 @@ describe("NeedsYouItemCard - actions by kind", () => {
     expect(screen.queryByText("Reject")).toBeNull();
   });
 
-  it("renders Ask about this disabled on every kind", () => {
+  it("disables Ask about this for a reader, with a tooltip and no handler", () => {
+    render(
+      <TooltipProvider>
+        <NeedsYouItemCard
+          item={questionItem()}
+          {...NO_OP_MAPS}
+          canManage={false}
+          coordinatorName="Planner"
+        />
+      </TooltipProvider>,
+    );
+    const button = screen.getByRole("button", { name: ASK_ABOUT_THIS });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button);
+    expect(useCopilotStore.getState().entries["co-1"]).toBeUndefined();
+  });
+
+  it("enables Ask about this for a manager on every kind", () => {
     for (const item of [questionItem(), stallItem(), errorItem(), proposalItem()]) {
       const { unmount } = render(
         <NeedsYouItemCard item={item} {...NO_OP_MAPS} coordinatorName="Planner" />,
       );
-      const button = screen.getByRole("button", { name: "Ask about this" });
-      expect(button.hasAttribute("disabled")).toBe(true);
+      const button = screen.getByRole("button", { name: ASK_ABOUT_THIS });
+      expect(button.hasAttribute("disabled")).toBe(false);
       unmount();
     }
+  });
+
+  it("opens the copilot with the derived id and the translated question, on click", () => {
+    render(
+      <NeedsYouItemCard
+        item={questionItem({ task: task("t-1", { identifier: "KAN-1" }) })}
+        {...NO_OP_MAPS}
+        coordinatorName="Planner"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
+    expect(useCopilotStore.getState().entries["co-1"]).toEqual({
+      open: true,
+      chip: { id: "KAN-1", label: "KAN-1" },
+      draft: "Why is KAN-1 here?",
+    });
+  });
+
+  it("derives the id from the proposal's own title when it has no source task", () => {
+    const withoutSource = proposalItem();
+    withoutSource.proposal.spec.source_task_id = "";
+    withoutSource.proposal.spec.title = "New feature";
+    render(<NeedsYouItemCard item={withoutSource} {...NO_OP_MAPS} coordinatorName="Planner" />);
+    fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
+    expect(useCopilotStore.getState().entries["co-1"]?.chip).toEqual({
+      id: "New feature",
+      label: "New feature",
+    });
   });
 });
 

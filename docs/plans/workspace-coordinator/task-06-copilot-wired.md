@@ -28,6 +28,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-005.5
 system_design:
   - ../../specs/coordinator/system-design/copilot.md
+  - ../../specs/coordinator/system-design/copilot-popover.md
   - ../../specs/coordinator/system-design/coordinators.md
 ---
 
@@ -45,6 +46,25 @@ critical path.
 - Coordinator controller: launcher for `workspace.manage` only, busy state
   from the session store, 420 by 550 popover titled `Coordinator: <name>`, no
   Expand, full width below 640px. With the flag off no launcher renders.
+- Launcher busy state as the
+  [copilot design](../../specs/coordinator/system-design/copilot-popover.md#launcher-busy-state)
+  says: the controller never calls the conversation route on mount; the
+  session id is the latest route response's in this page, else the primary
+  session of the GET's `conversation_task_id` through `useTaskSessions`, kept
+  subscribed with `useSession` while a Coordinator screen is mounted; busy is
+  `isSessionWorking`; a null `conversation_task_id` or a failed read is not
+  busy and fetches nothing.
+- The controller's own coordinator read
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#coordinator-read)):
+  `getCoordinator` when the viewed coordinator resolves and again on each
+  popover open, before the route; no polling.
+- The open sequence and its outcome table
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#opening-the-conversation)):
+  one sequence in flight per coordinator, stale responses discarded, no
+  automatic retry; GET and route 404 show the gone message, a GET failure and
+  a route 502, 500, other status or network error show their message with
+  **Try again**, `conversation_conflict` shows its message with **Try again**.
+  No error body renders a composer or `SessionRecoveryFeedback`.
 - The popover builds its `QuickChatSession` value from the conversation
   route's response with `kind: "chat"`, passes `archive_state` as
   `taskArchiveState`, `automaticRecovery={false}` and
@@ -60,10 +80,24 @@ critical path.
   message, not the removed one), executor `missing`, both not `ok`, a 409 body
   after an `ok` GET, and an unknown status value (shown as that field's
   `missing` message).
-- Empty-conversation intro and one suggestion.
-- Copilot store `{open, chip, draft}`, **Ask about this** wiring on task 04's
-  item cards, the chip, and the "About <id>: " prefix through task 05's
-  `transformOutgoing`, with the hint under the composer.
+- Empty-conversation intro and one suggestion, the fixed translated "What
+  needs me first, and why?", shown only while the transcript is empty; it
+  replaces the composer text, sets no chip and sends nothing
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#empty-conversation)).
+- Copilot store `{open, chip, draft}` in client memory, one entry per
+  coordinator id, shared by Needs you and Queue, reset by a reload; a 404
+  clears `chip` and `draft` at once, keeps the popover open on the gone
+  message, and removes the entry when that popover closes; close keeps the chip, a send keeps the chip, `draft` is a one-shot
+  seed cleared once applied
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#ask-about-this)).
+- **Ask about this** wiring on task 04's item cards, the chip, and the
+  "About <id>: " prefix through task 05's `transformOutgoing`, with the hint
+  under the composer. `<id>` is the card's identifier, else task title, else
+  the proposal title for a proposal without a source task, normalised
+  (whitespace runs to one space, trimmed, each `: ` to ` - `); the question
+  "Why is {{id}} here?" is translated, the `About ` prefix is not.
+- Readers: **Ask about this** stays a disabled button with no handler and
+  the translated tooltip "Only workspace managers can ask the coordinator."
 - Screens leave room for the popover at 1200px.
 
 ## Out of scope
@@ -120,7 +154,8 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 ```bash
 cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
-cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/config-chat
+cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/settings/config-chat-popover.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/settings/mobile-config-chat-popover.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-copilot.spec.ts
 ```
 
@@ -146,6 +181,34 @@ viewer sees neither launcher, with no popover reachable by URL or keyboard.
 Task 02's `tests/auth/coordinator-settings-reader.spec.ts` is the coordinator
 suite's one `auth`-project Playwright spec; this reader-gating check does not
 need a second one.
+
+A component test on the open sequence covers each row of the design's
+outcome table: GET with a status not `ok` (route not called), GET 404 and
+route 404 (gone message, no **Try again**, popover still open with no chip until Close, then the entry is gone), GET 500 and network error, route
+409 `coordinator_profile_unavailable`, route 409 `conversation_conflict`,
+route 502 and 500. Each asserts no composer and no `SessionRecoveryFeedback`,
+Close and Escape still work, and **Try again** re-runs the GET and then the
+route exactly once. It also asserts that two opens in flight issue one GET
+and one route call, and that a response for a coordinator no longer viewed is
+discarded.
+
+A component test on the launcher asserts: mount issues the GET and never the
+conversation route; a null `conversation_task_id` shows not busy with no
+session read; a `RUNNING` session, and a `background` foreground activity,
+show busy with the popover closed; a session state change pushed while closed
+flips the launcher; when the viewed coordinator changes from A to B and A's
+GET resolves after B's, the launcher follows B's session and never subscribes
+to A's.
+
+A store and card test asserts: the `<id>` derivation for a task with and
+without `identifier`, a proposal with and without a source task, and titles
+containing a line break, repeated spaces and `: ` (the sent message parses
+back to the whole id); a same-item re-ask replaces typed text with the
+question; the chip survives close and reopen, a send, and Needs you to Queue
+navigation, and does not appear on another coordinator; a reload starts
+without a chip; the suggestion fills the composer without a chip or a send
+and hides once a message exists; a reader's **Ask about this** is disabled,
+shows its tooltip, and opens nothing.
 
 ## Likely files
 
