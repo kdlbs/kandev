@@ -106,6 +106,8 @@ type persistedWorktreeBranchMetadata struct {
 }
 
 type taskResourceCleanupSnapshot struct {
+	// InventoryRepair retains the successor's provenance through progress saves.
+	InventoryRepair        json.RawMessage                            `json:"inventory_repair,omitempty"`
 	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
 	Worktrees              []*worktree.Worktree                       `json:"worktrees,omitempty"`
 	WorktreeHeadOIDs       map[string]string                          `json:"worktree_head_oids,omitempty"`
