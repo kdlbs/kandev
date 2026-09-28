@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 requirements:
   - REQ-COORDINATOR-COORDINATORS-001
   - REQ-COORDINATOR-COORDINATORS-002
@@ -14,6 +14,9 @@ requirements:
   - REQ-COORDINATOR-COORDINATORS-004
   - REQ-COORDINATOR-COORDINATORS-005
   - REQ-COORDINATOR-COORDINATORS-006
+  - REQ-COORDINATOR-COORDINATORS-007
+  - REQ-COORDINATOR-COORDINATORS-008
+  - REQ-COORDINATOR-COORDINATORS-009
 ---
 
 # Coordinators in a workspace System Design
@@ -40,6 +43,9 @@ them.
 | `REQ-COORDINATOR-COORDINATORS-004` | [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-COORDINATORS-005` | [Validation](#validation), [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-COORDINATORS-006` | [Workspace deletion](#workspace-deletion) |
+| `REQ-COORDINATOR-COORDINATORS-007` | [Phase 2](#phase-2) |
+| `REQ-COORDINATOR-COORDINATORS-008` | [Guided setup](#guided-setup) |
+| `REQ-COORDINATOR-COORDINATORS-009` | [Configure sections](#configure-sections) |
 
 ## Flag and wiring
 
@@ -237,6 +243,92 @@ so a redelivered event is harmless.
 - `lib/settings-discovery/catalog/workspaces.ts` adds the search entry.
 - All copy goes through `t()` in the six locales.
 
+## Phase 2
+
+- `features.coordinatorPhase2` is registered in
+  `internal/runtimeflags/registry.go` (environment
+  `KANDEV_FEATURES_COORDINATOR_PHASE2`), `RestartRequired: true`, and in
+  `profiles.yaml` as `prod: "false"`, `dev: "false"`, `e2e: "true"`
+  (`007.1`). The client `features` type gains `coordinatorPhase2`. The
+  backend computes `phase2 := features.Coordinator && features.CoordinatorPhase2`
+  once at startup and passes it to the coordinator service, the MCP server's
+  coordinator registration, the guard and the executor's coordinator branch.
+  The client derives the same value from both flags.
+- With `phase2` false (`007.2`, `007.4`): the phase-2 routes (settings,
+  standing orders, goal, activity, setup) are not registered and return
+  404; the phase-2 propose tools and `list_coordinator_activity_kandev` are
+  not registered; `ToolNames` returns the phase-1 seven tools and the guard
+  ignores stored policy and Watches ([permissions](permissions.md#binding));
+  the standing instructions carry no orders or goal; no activity row is
+  written; the retention ticker does not run; and the web renders none of
+  the phase-2 sections, launcher, card kinds, goal note, What it did,
+  stall Resume or Ready to merge actions.
+- Stored phase-2 columns and tables stay, untouched (`007.3`). The phase-1
+  proposal list query gains `AND kind = 'create_task'` while `phase2` is
+  false, so open non-create proposals neither show nor count toward
+  `open_proposals`, and the startup pass and sweep skip them; they are
+  served again unchanged when the flag returns.
+- A conversation opened while `phase2` was on carries a binding; after a
+  restart with it off, the binding is ignored and the phase-1 profile
+  applies. A conversation opened while it was off has no binding and gets the
+  phase-1 profile when it is turned on, until a change archives it.
+
+## Guided setup
+
+`POST /api/v1/workspaces/:id/coordinators/setup` (`workspace.manage`,
+phase 2 only) takes `{name, agent_profile_id, executor_profile_id, context,
+watches, policy, goal?}` and, after validating each part with its owner's
+validator (this document, [permissions](permissions.md#policy-value),
+[goals](goals.md#routes)), inserts the coordinator row with `policy_json`,
+`policy_revision = 1` and `watch_scope`, its watch rows, and the goal with
+its baseline in one transaction (`008.4`). Any validation error is 400
+naming the field with its step (`{"step": "watches", "field": ...}`), and
+nothing is stored. The phase-1 `POST .../coordinators` stays for phase 1.
+
+The web page `settings/workspace/[id]/coordinators/new` renders
+`CoordinatorSetup` while phase 2 is on:
+
+```text
+Add coordinator
+ 1 Who runs it   2 What it watches   3 What it is for   4 What it knows
+ 5 What it may do   6 Review
+ ------------------------------------------------------------------
+ 3 What it is for                                         [Skip this step]
+   Milestone  [                                   ]
+   Due        [          ]
+   Exit criteria  + Add criterion
+                                                  [Back]  [Next]
+```
+
+- Step state lives in the component; nothing is sent before Finish, so
+  leaving creates nothing (`008.5`).
+- Step contents reuse the Identity fields and the Watches, Goal and May do
+  section components in a "draft" mode that edits local state (`008.2`).
+  May do starts from `create_task`, `message`, `move`, `resume`
+  `requires_approval` and `start_agent`, `stop` `denied`.
+- Review renders "What it wrote" rows (Setting, Value, Owned from now on
+  by) and **Change** jumps to the step (`008.3`).
+- Finish is enabled per `008.4`; on 201 the page navigates to the new
+  coordinator's Configure page; on 400 it jumps to the named step and shows
+  the field error.
+- Readers never reach the page: the list has no Add for them, and a direct
+  URL renders the reader state of phase 1.
+
+## Configure sections
+
+- The coordinator page gains a Sections row (Identity, Watches, May do,
+  Standing orders, Goal) with the help text of each section; the section is
+  kept in `?section=` (`009.1`). Identity is the phase-1 form. Watches and
+  May do share the settings save bar and one PUT
+  ([permissions](permissions.md#settings-routes)); Standing orders writes
+  immediately; the Goal form uses the save bar and its checkboxes write
+  immediately.
+- The list response gains, per coordinator while phase 2 is on,
+  `summary: {watch_scope, watched_count, approval_actions, active_orders}`,
+  computed in the list query with grouped counts, and the card renders
+  "Every board" or "N boards", "N actions need approval" and "N standing
+  orders" in place of the later-phase note (`009.2`).
+
 ## Security
 
 - Every route authorises at the backend; the UI gating is presentation only.
@@ -253,3 +345,4 @@ workspace-deletion cleanup at info level with workspace and coordinator ids.
 ## Related decisions
 
 - [Workspace coordinator in core](../../../decisions/2026-09-26-workspace-coordinator.md)
+- [Coordinator phase 2, a person approves everything](../../../decisions/2026-09-29-coordinator-phase-2-control.md)
