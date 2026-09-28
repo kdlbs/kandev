@@ -40,6 +40,8 @@ managers, and the undone state.
   approver, "with edits", refused count) (`002.4`).
 - Empty and filtered-empty texts (`002.5`); reader view without Undo
   (`002.6`).
+- "No undo" on every `message` or `resume` class row whatever its outcome,
+  nothing on other non-undoable rows (`003.1`).
 - Undo button on undoable rows, confirmation, and the refusal handling of
   the design's Undo column: `already_undone` refetches with no error text,
   `not_undoable` shows "This can no longer be undone", `undo_conflict`
@@ -60,7 +62,7 @@ What it did                                        Action class [All      v]
 | When       | Action                         | Action class | How it was authorised | Undo               |
 | 2 min ago  | Created KAN-431 Retry webhooks | Create task  | Approved by Ana, with edits | [Undo]       |
 | 1 h ago    | Moved KAN-411 Build -> Review  | Move task    | Approved by Ana       | It has moved since |
-| 5 h ago    | Refused: not allowed by May do | Message task | Denied  x 3           |                    |
+| 5 h ago    | Refused: not allowed by May do | Message task | Denied  x 3           | No undo            |
                                   [Load more]
 ```
 
@@ -80,11 +82,14 @@ Phone: each row is a card; Undo is a full-width button.
   and refetches to "Undone by", `not_undoable` and `undo_conflict` show
   their texts, and a 500 shows "Undo failed. Try again." with the button
   still there.
+- A component test renders a `proposed` message row and a `refused`
+  message row and asserts "No undo" on both, and nothing in the Undo cell
+  of a `rejected` create row.
 
 ## Verification
 
 ```bash
-cd apps/web && pnpm test -- app/coordinator/components/what-it-did
+cd apps/web && pnpm test -- app/coordinator/queue/what-it-did
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/what-it-did.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/what-it-did.spec.ts
@@ -96,10 +101,10 @@ the filtered-empty text; a reader sees rows and no Undo.
 
 ## Likely files
 
-- `apps/web/app/coordinator/components/what-it-did.tsx`,
+- `apps/web/app/coordinator/queue/what-it-did.tsx`,
   `what-it-did-row.tsx`
 - `apps/web/app/coordinator/` Queue view composition
-- `apps/web/hooks/domains/coordinator/use-coordinator-activity.ts`
+- `apps/web/hooks/domains/coordinator/use-activity.ts`
 
 ## Dependencies
 

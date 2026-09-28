@@ -321,7 +321,10 @@ The approve route of [proposals](proposals.md#approve) gains, in step 1
 after the status decision and before the claim, a read of the stored
 policy: when the proposal's action (its kind's action, and `start_agent`
 too when `starts_agent` is true) is `denied`, it returns 409
-`{"error":"policy_denied","action":...}` and writes nothing (`002.6`). Reject
+`{"error":"policy_denied","action":...}` and writes nothing (`002.6`).
+`action` names one action: the kind's action (`create_task`, `resume`,
+`message` or `move`) when it is `denied`, otherwise `start_agent`; so when
+both are `denied` it is the kind's action. Reject
 has no such check. The card shows "Its May do settings no longer allow
 this" with Reject only. The re-check reads only the stored proposal and the
 policy, never the target, so it runs before any kind's `Execute` checks:

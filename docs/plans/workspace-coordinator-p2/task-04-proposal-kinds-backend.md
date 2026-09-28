@@ -116,7 +116,10 @@ returns the open proposal. A retire committed before a citing propose makes
 the propose refuse naming `standing_order_ids`. A move proposal stored with
 `starts_agent` true, whose task was then moved by hand onto the destination,
 is refused 409 `policy_denied` after `start_agent` flips to `denied`, with
-no claim and no `MoveTask` call. Two identical `propose_task_kandev` calls
+no claim and no `MoveTask` call. A `starts_agent` true move proposal
+approved while both `move` and `start_agent` are `denied` returns 409 with
+`action` `move`; with only `start_agent` `denied` it returns `action`
+`start_agent`. Two identical `propose_task_kandev` calls
 create two proposals, and a create call citing six ids, or one id twice, is
 refused naming `standing_order_ids` before any transaction. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.

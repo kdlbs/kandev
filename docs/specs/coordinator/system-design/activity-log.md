@@ -246,9 +246,12 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
   `AC-COORDINATOR-ACTIVITY-LOG-002.4`. How it was authorised shows
   "Requires approval" or "Denied", plus "Approved by <name>", "with edits",
   "x N".
-- Undo column: **Undo** for managers on rows with `undoable` true, "No undo" on
-  approved message and resume rows, "Undone by <name>, <time>" on undone
-  rows, and the 409 `undo_conflict` message "It has moved since" inline.
+- Undo column: **Undo** for managers on rows with `undoable` true; "No undo"
+  on every row whose action class is `message` or `resume`, whatever its
+  outcome (`proposed`, `approved`, `rejected`, `failed` or `refused`), and
+  for readers too; "Undone by <name>, <time>" on undone rows; nothing on any
+  other row (`003.1`). The 409 `undo_conflict` message "It has moved since"
+  shows inline.
   The other two refusals: 409 `already_undone` (a double click, or another
   manager undid it first) shows no error; the list refetches, so the row
   shows "Undone by <name>, <time>" of whoever undid it. 409 `not_undoable`
