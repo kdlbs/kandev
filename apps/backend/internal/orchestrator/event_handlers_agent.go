@@ -3860,7 +3860,7 @@ func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, te
 // Start fresh becomes the primary action and Resume is kept but flagged as
 // likely-to-fail, since the agent's persisted state is poisoned.
 func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError, resumeCorrupted bool) []map[string]interface{} {
-	resumeTooltip := "Re-launch with resume flag — keeps all previous messages and context"
+	resumeTooltip := "Resuming keeps your previous messages and context."
 	if resumeCorrupted {
 		resumeTooltip = "Resume will likely fail again — this session's saved state is corrupted. Prefer Start fresh."
 	}
@@ -3874,7 +3874,7 @@ func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError,
 		freshLabel, freshTestID = "Restart session", recoveryRestartButtonTestID
 	}
 	fresh := wsRecoveryAction(taskID, sessionID, "fresh_start", freshLabel, "player-play",
-		"New agent process on the same workspace — no previous conversation context", freshTestID)
+		"Starting fresh uses the same workspace without previous conversation context.", freshTestID)
 
 	actions := []map[string]interface{}{}
 	if resumeCorrupted {
