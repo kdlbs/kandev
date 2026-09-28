@@ -51,7 +51,7 @@ export type DynamicAgentProfileEditorState = {
   discardDraft: () => void;
 };
 
-function dynamicProfilePayload(
+export function dynamicProfilePayload(
   name: string,
   enabled: boolean,
   version: number,
@@ -91,6 +91,11 @@ function dynamicProfilePayload(
               max_wait_seconds: candidate.policies.hard.waitForReset.maxWaitSeconds,
             },
             on_exhausted: candidate.policies.hard.onExhausted,
+          },
+          unclassified: {
+            enabled: candidate.policies.unclassified.enabled,
+            consecutive_failure_threshold:
+              candidate.policies.unclassified.consecutiveFailureThreshold,
           },
         },
       })),

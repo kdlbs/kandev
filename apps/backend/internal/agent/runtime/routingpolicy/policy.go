@@ -21,6 +21,8 @@ const (
 	MaxRetryDelay                   = 24 * time.Hour
 	MinResetWaitSeconds       int64 = 1
 	MaxResetWaitSeconds       int64 = 7 * 24 * 60 * 60
+	MinUnclassifiedThreshold  int64 = 2
+	MaxUnclassifiedThreshold  int64 = 10
 )
 
 type Outcome string
@@ -47,10 +49,16 @@ type Policy struct {
 	OnExhausted  Outcome         `json:"on_exhausted"`
 }
 
+type UnclassifiedPolicy struct {
+	Enabled                     bool  `json:"enabled"`
+	ConsecutiveFailureThreshold int64 `json:"consecutive_failure_threshold"`
+}
+
 type Document struct {
-	Version   int64  `json:"version"`
-	Transient Policy `json:"transient"`
-	Hard      Policy `json:"hard"`
+	Version      int64               `json:"version"`
+	Transient    Policy              `json:"transient"`
+	Hard         Policy              `json:"hard"`
+	Unclassified *UnclassifiedPolicy `json:"unclassified,omitempty"`
 }
 
 func DefaultPolicy() Policy {
@@ -58,7 +66,12 @@ func DefaultPolicy() Policy {
 }
 
 func DefaultDocument() Document {
-	return Document{Version: Version, Transient: DefaultPolicy(), Hard: DefaultPolicy()}
+	return Document{
+		Version:      Version,
+		Transient:    DefaultPolicy(),
+		Hard:         DefaultPolicy(),
+		Unclassified: &UnclassifiedPolicy{},
+	}
 }
 
 func (document Document) PolicyFor(class routingerr.Class) (Policy, bool) {
@@ -81,6 +94,16 @@ func ValidateDocument(document Document) error {
 	}
 	if err := ValidatePolicy(document.Hard); err != nil {
 		return fmt.Errorf("hard policy: %w", err)
+	}
+	if document.Unclassified != nil {
+		policy := document.Unclassified
+		if policy.Enabled {
+			if policy.ConsecutiveFailureThreshold < MinUnclassifiedThreshold || policy.ConsecutiveFailureThreshold > MaxUnclassifiedThreshold {
+				return fmt.Errorf("unclassified.consecutive_failure_threshold must be between %d and %d", MinUnclassifiedThreshold, MaxUnclassifiedThreshold)
+			}
+		} else if policy.ConsecutiveFailureThreshold != 0 {
+			return errors.New("disabled unclassified threshold must be zero")
+		}
 	}
 	return nil
 }

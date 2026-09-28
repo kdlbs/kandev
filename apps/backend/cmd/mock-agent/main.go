@@ -47,16 +47,17 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn              sessionUpdater
-	model             string
-	sessions          map[acp.SessionId]bool
-	promptCancels     map[acp.SessionId]context.CancelFunc
-	promptCancelHolds map[acp.SessionId]chan struct{}
-	sessionMCPServers map[acp.SessionId]map[string]mcpServerDef
-	sessionConfig     map[acp.SessionId][]acp.SessionConfigOption
-	commandsEmitted   map[acp.SessionId]bool
-	nextSessionID     uint64
-	mu                sync.Mutex
+	conn                           sessionUpdater
+	model                          string
+	sessions                       map[acp.SessionId]bool
+	promptCancels                  map[acp.SessionId]context.CancelFunc
+	promptCancelHolds              map[acp.SessionId]chan struct{}
+	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
+	commandsEmitted                map[acp.SessionId]bool
+	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
+	nextSessionID                  uint64
+	mu                             sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
@@ -85,13 +86,14 @@ func main() {
 	defer closeMCPClients()
 
 	ag := &mockAgent{
-		model:             model,
-		sessions:          make(map[acp.SessionId]bool),
-		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
-		promptCancelHolds: make(map[acp.SessionId]chan struct{}),
-		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
-		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
-		commandsEmitted:   make(map[acp.SessionId]bool),
+		model:                          model,
+		sessions:                       make(map[acp.SessionId]bool),
+		promptCancels:                  make(map[acp.SessionId]context.CancelFunc),
+		promptCancelHolds:              make(map[acp.SessionId]chan struct{}),
+		sessionMCPServers:              make(map[acp.SessionId]map[string]mcpServerDef),
+		sessionConfig:                  make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted:                make(map[acp.SessionId]bool),
+		dynamicFallbackCounterSessions: make(map[acp.SessionId]acp.SessionId),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
 	ag.conn = asc
@@ -386,6 +388,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		time.Sleep(mockCancelHoldDuration())
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
+	// Dynamic unclassified fallback scenarios must return a terminal ACP
+	// RequestError directly from Prompt, just like real provider failures.
+	if resp, err, handled := a.handleDynamicUnclassifiedFallback(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
@@ -529,9 +536,14 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.sessions, req.SessionId)
 	delete(a.sessionConfig, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
+	dynamicFallbackCounterID := a.dynamicFallbackCounterSessions[req.SessionId]
+	delete(a.dynamicFallbackCounterSessions, req.SessionId)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	if dynamicFallbackCounterID == "" {
+		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
+	}
 	return acp.CloseSessionResponse{}, nil
 }
 

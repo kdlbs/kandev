@@ -22,11 +22,13 @@ const (
 )
 
 var (
-	ErrStaleGeneration     = errors.New("dynamic route generation is stale")
-	ErrNoEligibleCandidate = errors.New("dynamic profile has no eligible candidate")
-	ErrRouteStateNotFound  = errors.New("dynamic route state not found")
-	ErrRecoveryPending     = errors.New("dynamic route recovery is pending")
-	ErrRecoveryNotDue      = errors.New("dynamic route recovery is not due")
+	ErrStaleGeneration                        = errors.New("dynamic route generation is stale")
+	ErrNoEligibleCandidate                    = errors.New("dynamic profile has no eligible candidate")
+	ErrRouteStateNotFound                     = errors.New("dynamic route state not found")
+	ErrRecoveryPending                        = errors.New("dynamic route recovery is pending")
+	ErrRecoveryNotDue                         = errors.New("dynamic route recovery is not due")
+	ErrUnclassifiedWorkflowContextChanged     = errors.New("workflow context changed during unclassified fallback")
+	ErrUnclassifiedWorkflowContextUnavailable = errors.New("workflow context unavailable during unclassified fallback")
 	// ErrStatusClaimUnsupported means the persistence implementation cannot
 	// fence a same-generation status transition. Status-fenced claims must
 	// fail closed rather than silently degrade to a generation-only claim,
@@ -73,6 +75,31 @@ type PolicyState struct {
 	ResetWaitClasses map[routingerr.Class]bool `json:"reset_wait_classes,omitempty"`
 	Deadline         *time.Time                `json:"deadline,omitempty"`
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
+	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
+}
+
+// UnclassifiedStreak is the bounded durable identity for one sequence of
+// matching, effect-safe failures. It intentionally stores only a diagnostic
+// fingerprint, never provider-controlled diagnostic text.
+type UnclassifiedStreak struct {
+	Version             int                       `json:"version"`
+	LogicalProfileID    string                    `json:"logical_profile_id"`
+	ExecutionProfileID  string                    `json:"execution_profile_id"`
+	ProfileVersion      int64                     `json:"profile_version"`
+	StepID              string                    `json:"step_id,omitempty"`
+	Fingerprint         string                    `json:"fingerprint"`
+	Origin              UnclassifiedFailureOrigin `json:"origin"`
+	Phase               routingerr.Phase          `json:"phase"`
+	Count               int64                     `json:"count"`
+	LastAttemptID       string                    `json:"last_attempt_id"`
+	LastRouteGeneration int64                     `json:"last_route_generation"`
+}
+
+func (s *UnclassifiedStreak) valid() bool {
+	return s != nil && s.Version == 1 && s.LogicalProfileID != "" &&
+		s.ExecutionProfileID != "" && s.ProfileVersion >= 0 && s.Fingerprint != "" &&
+		s.Origin != "" && s.Phase != "" && s.Count >= 1 && s.Count <= 10 &&
+		s.LastAttemptID != "" && s.LastRouteGeneration > 0
 }
 
 type RouteDecision struct {
@@ -99,6 +126,91 @@ type RouteAttempt struct {
 	ProfileVersion     int64
 	Reason             string
 	CreatedAt          time.Time
+}
+
+// UnclassifiedFailureOrigin names one trusted producer boundary that can
+// supply complete evidence for the narrow repeated-failure policy.
+type UnclassifiedFailureOrigin string
+
+const (
+	UnclassifiedOriginTerminalProvider UnclassifiedFailureOrigin = "terminal_provider_result"
+	UnclassifiedOriginAgentStartup     UnclassifiedFailureOrigin = "agent_startup"
+)
+
+// UnclassifiedFailureEvidence is the typed, default-deny context for the
+// unclassified fallback exception. Callers must populate it from current
+// task and runtime evidence; a zero value never authorizes fallback.
+type UnclassifiedFailureEvidence struct {
+	TaskScope          bool
+	TaskID             string
+	WorkflowID         string
+	SessionID          string
+	LogicalProfileID   string
+	ExecutionProfileID string
+	RouteGeneration    int64
+	StepID             string
+	StepUpdatedAt      time.Time
+	StepKnown          bool
+	StepVeto           bool
+	AttemptID          string
+	Origin             UnclassifiedFailureOrigin
+	Phase              routingerr.Phase
+	ProviderID         string
+	DiagnosticText     string
+	DiagnosticComplete bool
+	CurrentAttempt     bool
+	EvidenceKnown      bool
+	OutputObserved     bool
+	EffectObserved     bool
+}
+
+func (e UnclassifiedFailureEvidence) currentFor(
+	sessionID string,
+	profile Profile,
+	candidateID string,
+	generation int64,
+) bool {
+	return e.TaskScope && e.TaskID != "" && e.CurrentAttempt && e.SessionID == sessionID &&
+		e.LogicalProfileID == profile.ID && e.ExecutionProfileID == candidateID &&
+		e.RouteGeneration == generation && e.AttemptID != ""
+}
+
+func (e UnclassifiedFailureEvidence) permits(failure *routingerr.Error) bool {
+	if failure == nil || !e.safeBeforeResult() || !e.trustedFailureShape(failure) {
+		return false
+	}
+	return e.failureMatchesOrigin(failure)
+}
+
+func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
+	return e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
+		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved && e.DiagnosticComplete
+}
+
+func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Error) bool {
+	if failure.UserAction {
+		return false
+	}
+	if failure.Class != "" && failure.Class != routingerr.ClassUnclassified {
+		return false
+	}
+	if routingerr.ClassForCode(failure.Code) != routingerr.ClassUnclassified ||
+		failure.Phase != e.Phase || e.ProviderID == "" {
+		return false
+	}
+	return true
+}
+
+func (e UnclassifiedFailureEvidence) failureMatchesOrigin(failure *routingerr.Error) bool {
+	switch e.Origin {
+	case UnclassifiedOriginTerminalProvider:
+		return failure.Code == routingerr.CodeUnknownProvider && e.Phase == routingerr.PhasePromptSend
+	case UnclassifiedOriginAgentStartup:
+		return failure.Code == routingerr.CodeAgentRuntime &&
+			(e.Phase == routingerr.PhaseProcessStart || e.Phase == routingerr.PhaseSessionInit)
+	default:
+		return false
+	}
 }
 
 // ContinuationRecord is the bounded handoff package persisted for a route
@@ -145,11 +257,35 @@ type GenerationStatusClaimer interface {
 	ClaimRouteStateFrom(context.Context, int64, string, RouteState) (bool, error)
 }
 
+// RouteStateSnapshotClaimer fences a same-generation update to the exact
+// policy snapshot that was observed. This is required for idempotent streak
+// increments when status remains action_required across failures.
+type RouteStateSnapshotClaimer interface {
+	ClaimRouteStateFromSnapshot(context.Context, int64, string, string, RouteState) (bool, error)
+}
+
 // DecisionRecorder lets a repository commit the state row and immutable
 // attempt row in one transaction. Persistence remains backwards compatible
 // for callers that only need the narrow Save/Append contract.
 type DecisionRecorder interface {
 	RecordRouteDecision(context.Context, RouteDecision, RouteState) error
+}
+
+// UnclassifiedRouteDecisionRecorder commits an automatically selected
+// successor only while the task's workflow step identity, revision, and veto
+// still match the evidence used to count the failure.
+type UnclassifiedRouteDecisionRecorder interface {
+	RecordUnclassifiedRouteDecision(
+		context.Context, RouteDecision, RouteState, UnclassifiedFailureEvidence,
+	) error
+}
+
+// UnclassifiedFallbackLaunchClaimer fences the final automatic launch against
+// workflow-step mutations after the route decision has been persisted.
+type UnclassifiedFallbackLaunchClaimer interface {
+	ClaimUnclassifiedFallbackLaunch(
+		context.Context, RouteDecision, UnclassifiedFailureEvidence,
+	) error
 }
 
 type NoEligibleCandidateError struct {

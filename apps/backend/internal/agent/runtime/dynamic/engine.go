@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -175,6 +176,11 @@ func (e *Engine) selectContext(
 			ProfileVersion:     profile.Version,
 			Status:             routeStatusStarting,
 			UpdatedAt:          now,
+		}
+		if exists && state.Status == routeStatusActionRequired &&
+			state.LogicalProfileID == profile.ID && state.ExecutionProfileID == candidate.ID &&
+			state.ProfileVersion == profile.Version {
+			nextState.PolicyStateJSON = carryUnclassifiedStreak(state.PolicyStateJSON, profile.ID, candidate.ID, profile.Version, candidate.Policies.Unclassified)
 		}
 		if err := e.claimAndPersist(ctx, expectedGeneration, decision, nextState); err != nil {
 			delete(e.states, sessionID)
@@ -400,6 +406,365 @@ func (e *Engine) ApplyFailureContext(
 	}
 }
 
+// ApplyUnclassifiedFailureContext applies the repeated-identical-failure
+// exception only when current task-owned evidence proves the narrow policy's
+// admission conditions. Ordinary callers must continue to use
+// ApplyFailureContext, which keeps unclassified failures fail-closed.
+func (e *Engine) ApplyUnclassifiedFailureContext(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	currentCandidateID string,
+	failure *routingerr.Error,
+	evidence UnclassifiedFailureEvidence,
+) (RouteDecision, error) {
+	if e == nil || sessionID == "" || failure == nil ||
+		!evidence.currentFor(sessionID, profile, currentCandidateID, expectedGeneration) {
+		return RouteDecision{}, ErrStaleGeneration
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, err := e.currentUnclassifiedRouteState(ctx, sessionID, profile, expectedGeneration, currentCandidateID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	policyState := decodePolicyState(state.PolicyStateJSON)
+	if previous := policyState.Unclassified; previous.valid() && previous.LastAttemptID == evidence.AttemptID {
+		return unclassifiedStreakDecision(state, previous), ErrRecoveryPending
+	}
+
+	candidate, threshold := candidateUnclassifiedThreshold(profile, currentCandidateID)
+	fingerprint, fingerprintErr := unclassifiedFailureFingerprint(evidence, failure)
+	if !unclassifiedFailureAdmitted(threshold, evidence, failure, fingerprintErr) {
+		policyState.Unclassified = nil
+		clearUnclassifiedFailureState(&policyState, failure)
+		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_manual_recovery")
+	}
+
+	count := nextUnclassifiedFailureCount(policyState.Unclassified, profile, currentCandidateID, evidence, expectedGeneration, fingerprint, threshold)
+	policyState.Unclassified = newUnclassifiedStreak(count, profile, currentCandidateID, evidence, expectedGeneration, fingerprint)
+	clearUnclassifiedFailureState(&policyState, failure)
+	if err := saveUnclassifiedPolicyJSON(&policyState, candidate.Policies); err != nil {
+		return RouteDecision{}, err
+	}
+	if count < threshold {
+		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_manual_recovery")
+	}
+	return e.routeToUnclassifiedSuccessor(
+		ctx, state, profile, currentCandidateID, expectedGeneration, failure, evidence, policyState,
+	)
+}
+
+func (e *Engine) currentUnclassifiedRouteState(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	currentCandidateID string,
+) (RouteState, error) {
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
+	if err != nil {
+		return RouteState{}, err
+	}
+	if !exists || state.Generation != expectedGeneration || state.LogicalProfileID != profile.ID ||
+		state.ExecutionProfileID != currentCandidateID || state.ProfileVersion != profile.Version {
+		return RouteState{}, ErrStaleGeneration
+	}
+	if state.Status != routeStatusActive && state.Status != routeStatusStarting &&
+		state.Status != routeStatusRetrying && state.Status != routeStatusActionRequired {
+		return RouteState{}, ErrRecoveryPending
+	}
+	return state, nil
+}
+
+func decodePolicyState(raw string) PolicyState {
+	var state PolicyState
+	if raw != "" && json.Unmarshal([]byte(raw), &state) != nil {
+		return PolicyState{}
+	}
+	return state
+}
+
+func candidateUnclassifiedThreshold(profile Profile, candidateID string) (Candidate, int64) {
+	candidate, found := candidateByID(profile, candidateID)
+	if !found || candidate.Policies.Unclassified == nil || !candidate.Policies.Unclassified.Enabled {
+		return candidate, 0
+	}
+	return candidate, candidate.Policies.Unclassified.ConsecutiveFailureThreshold
+}
+
+func unclassifiedFailureAdmitted(
+	threshold int64,
+	evidence UnclassifiedFailureEvidence,
+	failure *routingerr.Error,
+	fingerprintErr error,
+) bool {
+	return threshold >= 2 && threshold <= 10 && evidence.permits(failure) && fingerprintErr == nil
+}
+
+func nextUnclassifiedFailureCount(
+	previous *UnclassifiedStreak,
+	profile Profile,
+	candidateID string,
+	evidence UnclassifiedFailureEvidence,
+	generation int64,
+	fingerprint string,
+	threshold int64,
+) int64 {
+	count := int64(1)
+	if previous.valid() && previous.LogicalProfileID == profile.ID &&
+		previous.ExecutionProfileID == candidateID && previous.ProfileVersion == profile.Version &&
+		previous.StepID == evidence.StepID && previous.Fingerprint == fingerprint &&
+		previous.Origin == evidence.Origin && previous.Phase == evidence.Phase &&
+		previous.LastRouteGeneration <= generation {
+		count = previous.Count + 1
+	}
+	if count > threshold {
+		return threshold
+	}
+	return count
+}
+
+func newUnclassifiedStreak(
+	count int64,
+	profile Profile,
+	candidateID string,
+	evidence UnclassifiedFailureEvidence,
+	generation int64,
+	fingerprint string,
+) *UnclassifiedStreak {
+	return &UnclassifiedStreak{
+		Version: 1, LogicalProfileID: profile.ID, ExecutionProfileID: candidateID,
+		ProfileVersion: profile.Version, StepID: evidence.StepID, Fingerprint: fingerprint,
+		Origin: evidence.Origin, Phase: evidence.Phase, Count: count,
+		LastAttemptID: evidence.AttemptID, LastRouteGeneration: generation,
+	}
+}
+
+func clearUnclassifiedFailureState(state *PolicyState, failure *routingerr.Error) {
+	state.FailureCode = failure.Code
+	state.FailureClass = routingerr.ClassUnclassified
+	state.CatalogueVersion = routingerr.CatalogueVersion
+	state.PendingOutcome = routingpolicy.OutcomeStop
+}
+
+func saveUnclassifiedPolicyJSON(state *PolicyState, policies routingpolicy.Document) error {
+	policyJSON, err := json.Marshal(policies)
+	if err != nil {
+		return err
+	}
+	state.PolicyJSON = string(policyJSON)
+	return nil
+}
+
+func (e *Engine) routeToUnclassifiedSuccessor(
+	ctx context.Context,
+	state RouteState,
+	profile Profile,
+	currentCandidateID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence UnclassifiedFailureEvidence,
+	policyState PolicyState,
+) (RouteDecision, error) {
+	successor, found := e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
+	if !found {
+		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
+	}
+	decision, nextState := unclassifiedSuccessorRoute(state, profile, successor, expectedGeneration, failure, e.now())
+	if persistedDecision, err := e.recordUnclassifiedSuccessor(
+		ctx, expectedGeneration, decision, nextState, evidence, &policyState, state, failure,
+	); err != nil {
+		return persistedDecision, err
+	}
+	e.states[state.SessionID] = nextState
+	delete(e.retryClaims, state.SessionID)
+	return decision, nil
+}
+
+func (e *Engine) firstSelectableUnclassifiedSuccessor(
+	profile Profile,
+	currentCandidateID, sessionID string,
+	generation int64,
+) (Candidate, bool) {
+	for index, item := range profile.Candidates {
+		if item.ID != currentCandidateID {
+			continue
+		}
+		for _, candidate := range profile.Candidates[index+1:] {
+			if e.candidateSelectable(candidate, sessionID, generation+1, "", "", e.now()) {
+				return candidate, true
+			}
+		}
+		break
+	}
+	return Candidate{}, false
+}
+
+func unclassifiedSuccessorRoute(
+	state RouteState,
+	profile Profile,
+	successor Candidate,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	updatedAt time.Time,
+) (RouteDecision, RouteState) {
+	generation := expectedGeneration + 1
+	decision := RouteDecision{
+		SessionID: state.SessionID, LogicalProfileID: profile.ID,
+		ExecutionProfileID: successor.ID, Generation: generation,
+		ProfileVersion: profile.Version, Reason: "policy_skip",
+		Status: routeStatusStarting, ErrorCode: failure.Code,
+		ErrorClass:       routingerr.ClassUnclassified,
+		CatalogueVersion: routingerr.CatalogueVersion,
+		PendingOutcome:   routingpolicy.OutcomeSkip,
+	}
+	nextState := RouteState{
+		SessionID: state.SessionID, LogicalProfileID: profile.ID,
+		ExecutionProfileID: successor.ID, Generation: generation,
+		ProfileVersion: profile.Version, Status: routeStatusStarting,
+		UpdatedAt: updatedAt,
+	}
+	return decision, nextState
+}
+
+func (e *Engine) recordUnclassifiedSuccessor(
+	ctx context.Context,
+	expectedGeneration int64,
+	decision RouteDecision,
+	nextState RouteState,
+	evidence UnclassifiedFailureEvidence,
+	policyState *PolicyState,
+	currentState RouteState,
+	failure *routingerr.Error,
+) (RouteDecision, error) {
+	if e.persistence == nil {
+		return decision, e.claimAndPersist(ctx, expectedGeneration, decision, nextState)
+	}
+	recorder, ok := e.persistence.(UnclassifiedRouteDecisionRecorder)
+	if !ok {
+		return e.persistUnclassifiedDecisionFailure(ctx, currentState, *policyState, failure, "unclassified_workflow_context_unavailable")
+	}
+	if err := recorder.RecordUnclassifiedRouteDecision(ctx, decision, nextState, evidence); err != nil {
+		if errors.Is(err, ErrStaleGeneration) {
+			return RouteDecision{}, err
+		}
+		return e.persistUnclassifiedDecisionFailure(ctx, currentState, *policyState, failure, workflowContextFailureReason(err))
+	}
+	return decision, nil
+}
+
+func (e *Engine) persistUnclassifiedDecisionFailure(
+	ctx context.Context,
+	state RouteState,
+	policyState PolicyState,
+	failure *routingerr.Error,
+	reason string,
+) (RouteDecision, error) {
+	policyState.Unclassified = nil
+	return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, reason)
+}
+
+func workflowContextFailureReason(err error) string {
+	if errors.Is(err, ErrUnclassifiedWorkflowContextChanged) {
+		return "unclassified_workflow_context_changed"
+	}
+	return "unclassified_workflow_context_unavailable"
+}
+
+// ClaimUnclassifiedFallbackLaunch revalidates the task's workflow context at
+// the automatic successor's final launch boundary. Durable task repositories
+// must implement the transactional claim; a weaker read cannot authorize the
+// launch.
+func (e *Engine) ClaimUnclassifiedFallbackLaunch(
+	ctx context.Context,
+	decision RouteDecision,
+	evidence UnclassifiedFailureEvidence,
+) error {
+	if e == nil || e.persistence == nil {
+		return ErrUnclassifiedWorkflowContextUnavailable
+	}
+	claimer, ok := e.persistence.(UnclassifiedFallbackLaunchClaimer)
+	if !ok {
+		return ErrUnclassifiedWorkflowContextUnavailable
+	}
+	return claimer.ClaimUnclassifiedFallbackLaunch(ctx, decision, evidence)
+}
+
+func (e *Engine) persistUnclassifiedManual(
+	ctx context.Context,
+	state RouteState,
+	expectedPolicyState string,
+	policyState PolicyState,
+	failure *routingerr.Error,
+	reason string,
+) (RouteDecision, error) {
+	oldState := state.Status
+	state.Status = routeStatusActionRequired
+	state.PolicyStateJSON = string(mustJSON(policyState))
+	state.UpdatedAt = e.now()
+	if err := e.persistSnapshot(ctx, oldState, expectedPolicyState, state); err != nil {
+		return RouteDecision{}, err
+	}
+	e.states[state.SessionID] = state
+	decision := RouteDecision{
+		SessionID: state.SessionID, LogicalProfileID: state.LogicalProfileID,
+		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,
+		ProfileVersion: state.ProfileVersion, Reason: reason, Status: state.Status,
+		ErrorCode: failure.Code, ErrorClass: routingerr.ClassUnclassified,
+		CatalogueVersion: routingerr.CatalogueVersion, PendingOutcome: routingpolicy.OutcomeStop,
+	}
+	return decision, fmt.Errorf("%w: %s", ErrRecoveryPending, reason)
+}
+
+func (e *Engine) persistSnapshot(ctx context.Context, expectedStatus, expectedPolicyState string, next RouteState) error {
+	if e.persistence == nil {
+		return nil
+	}
+	claimer, ok := e.persistence.(RouteStateSnapshotClaimer)
+	if !ok {
+		return ErrStatusClaimUnsupported
+	}
+	claimed, err := claimer.ClaimRouteStateFromSnapshot(ctx, next.Generation, expectedStatus, expectedPolicyState, next)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return ErrStaleGeneration
+	}
+	return nil
+}
+
+func unclassifiedStreakDecision(state RouteState, streak *UnclassifiedStreak) RouteDecision {
+	return RouteDecision{
+		SessionID: state.SessionID, LogicalProfileID: state.LogicalProfileID,
+		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,
+		ProfileVersion: state.ProfileVersion, Reason: "unclassified_duplicate",
+		Status: state.Status, ErrorCode: routingerr.CodeUnknownProvider,
+		ErrorClass: routingerr.ClassUnclassified, RetryOrdinal: streak.Count,
+	}
+}
+
+func carryUnclassifiedStreak(
+	raw, logicalProfileID, executionProfileID string,
+	profileVersion int64,
+	policy *routingpolicy.UnclassifiedPolicy,
+) string {
+	var previous PolicyState
+	if policy == nil || !policy.Enabled || policy.ConsecutiveFailureThreshold < 2 ||
+		policy.ConsecutiveFailureThreshold > 10 ||
+		json.Unmarshal([]byte(raw), &previous) != nil || !previous.Unclassified.valid() ||
+		previous.Unclassified.LogicalProfileID != logicalProfileID ||
+		previous.Unclassified.ExecutionProfileID != executionProfileID ||
+		previous.Unclassified.ProfileVersion != profileVersion ||
+		previous.Unclassified.Count > policy.ConsecutiveFailureThreshold {
+		return ""
+	}
+	return string(mustJSON(PolicyState{Unclassified: previous.Unclassified}))
+}
+
 func candidateByID(profile Profile, candidateID string) (Candidate, bool) {
 	for _, candidate := range profile.Candidates {
 		if candidate.ID == candidateID {
@@ -490,6 +855,7 @@ func (e *Engine) preparePolicyFailure(
 			return RouteState{}, false, PolicyState{}, routingpolicy.Evaluation{}, time.Time{}, fmt.Errorf("decode dynamic policy state: %w", err)
 		}
 	}
+	policyState.Unclassified = nil
 	now := e.now()
 	failureClass := failure.Class
 	if failureClass == "" {
@@ -668,6 +1034,7 @@ func (e *Engine) CancelPending(
 	}
 	policyState.PendingOutcome = routingpolicy.OutcomeStop
 	expectedStatus := state.Status
+	policyState.Unclassified = nil
 	state.PolicyStateJSON = string(mustJSON(policyState))
 	state.Status = routeStatusActionRequired
 	state.UpdatedAt = e.now()
@@ -713,6 +1080,69 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 	}
 	e.states[sessionID] = state
 	delete(e.retryClaims, sessionID)
+	return nil
+}
+
+// ClearUnclassifiedStreak clears the current route's committed count after a
+// successful output/effect/turn event has been verified against the live
+// attempt by the caller.
+func (e *Engine) ClearUnclassifiedStreak(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	candidateID string,
+) error {
+	return e.clearUnclassifiedStreak(ctx, sessionID, expectedGeneration, candidateID, "")
+}
+
+// ClearUnclassifiedStartupStreak clears only a startup streak after a
+// confirmed boot-ready event. Launch acceptance alone is not initialization.
+func (e *Engine) ClearUnclassifiedStartupStreak(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	candidateID string,
+) error {
+	return e.clearUnclassifiedStreak(ctx, sessionID, expectedGeneration, candidateID, UnclassifiedOriginAgentStartup)
+}
+
+func (e *Engine) clearUnclassifiedStreak(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	candidateID string,
+	origin UnclassifiedFailureOrigin,
+) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrRouteStateNotFound
+	}
+	if state.Generation != expectedGeneration || state.ExecutionProfileID != candidateID {
+		return ErrStaleGeneration
+	}
+	if state.PolicyStateJSON == "" {
+		return nil
+	}
+	var policyState PolicyState
+	if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
+		return err
+	}
+	if policyState.Unclassified == nil || (origin != "" && policyState.Unclassified.Origin != origin) {
+		return nil
+	}
+	oldStatus, oldPolicyState := state.Status, state.PolicyStateJSON
+	policyState.Unclassified = nil
+	state.PolicyStateJSON = string(mustJSON(policyState))
+	state.UpdatedAt = e.now()
+	if err := e.persistSnapshot(ctx, oldStatus, oldPolicyState, state); err != nil {
+		return err
+	}
+	e.states[sessionID] = state
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -23,6 +24,33 @@ import (
 const dynamicRouteStatusWaiting = "waiting"
 const dynamicRouteStatusActive = "active"
 const dynamicRouteStatusActionRequired = "action_required"
+
+type dynamicStartupAttemptContextKey struct{}
+
+type dynamicStartupAttempt struct {
+	ID                 string
+	SessionID          string
+	LogicalProfileID   string
+	ExecutionProfileID string
+	Generation         int64
+}
+
+func withDynamicStartupAttempt(ctx context.Context, launch dynamicruntime.DownstreamLaunch) context.Context {
+	if launch.AttemptID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, dynamicStartupAttemptContextKey{}, dynamicStartupAttempt{
+		ID: launch.AttemptID, SessionID: launch.Decision.SessionID,
+		LogicalProfileID:   launch.Decision.LogicalProfileID,
+		ExecutionProfileID: launch.ExecutionProfileID,
+		Generation:         launch.Decision.Generation,
+	})
+}
+
+func dynamicStartupAttemptFromContext(ctx context.Context) (dynamicStartupAttempt, bool) {
+	attempt, ok := ctx.Value(dynamicStartupAttemptContextKey{}).(dynamicStartupAttempt)
+	return attempt, ok && attempt.ID != ""
+}
 
 // dynamicSuccessorDetachedTimeout bounds one detached fallback launch: the
 // predecessor stop plus the successor launch. Without it the repository calls
@@ -45,6 +73,7 @@ func (d *dynamicTaskDownstream) Launch(
 	ctx context.Context,
 	launch dynamicruntime.DownstreamLaunch,
 ) (dynamicruntime.DownstreamExecution, error) {
+	ctx = withDynamicStartupAttempt(ctx, launch)
 	if err := d.service.persistDynamicLaunchDecision(ctx, d.sessionID, launch.Decision); err != nil {
 		return dynamicruntime.DownstreamExecution{}, err
 	}
@@ -716,10 +745,43 @@ func (s *Service) routeDynamicAgentFailure(
 	data watcher.AgentEventData,
 	classified *routingerr.Error,
 ) bool {
+	result := s.routeDynamicAgentFailureWithEvidence(ctx, data, classified, nil, false)
+	return result.handled && !result.manualRecovery
+}
+
+type dynamicFailureRouteResult struct {
+	handled        bool
+	manualRecovery bool
+}
+
+type unclassifiedFallbackLaunchClaim struct {
+	decision dynamicruntime.RouteDecision
+	evidence dynamicruntime.UnclassifiedFailureEvidence
+}
+
+func (s *Service) routeDynamicAgentFailureWithEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	classified *routingerr.Error,
+	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
+	guardHeld bool,
+) dynamicFailureRouteResult {
+	unclassified := classified != nil && routingerr.ClassForCode(classified.Code) == routingerr.ClassUnclassified
+	if unclassified && !guardHeld && data.SessionID != "" {
+		lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+		lock.Lock()
+		defer func() {
+			lock.Unlock()
+			release()
+		}()
+		if s.isCancelInFlight(data.SessionID) {
+			return dynamicFailureRouteResult{}
+		}
+	}
 	data = s.withDynamicAttemptEvidence(data)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
-		return false
+		return dynamicFailureRouteResult{}
 	}
 	reason := "dynamic_recovery_declined"
 	if classified != nil {
@@ -745,37 +807,143 @@ func (s *Service) routeDynamicAgentFailure(
 			s.markDynamicRouteActionRequired(ctx, session.ID, generation, reason)
 		}
 	}()
-	if classified == nil || !classified.FallbackAllowed {
-		return false
+	if classified == nil {
+		return dynamicFailureRouteResult{}
 	}
-	if !dynamicPreResultSafe(data) {
-		// A dynamic route is never allowed to guess that a failed turn was
-		// pre-result. Missing evidence is as unsafe as observed output or a
-		// tool effect because the replacement could repeat a side effect.
-		return false
+	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
+	if !eligible {
+		return dynamicFailureRouteResult{}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {
-		return false
+		return dynamicFailureRouteResult{}
 	}
-	continuationInput, err := s.buildDynamicContinuation(
-		ctx, task, session.ID, "", classified.Error(),
-	)
-	if err != nil {
-		return false
-	}
-	decision, err := conductor.RouteAfterFailure(
-		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
-		session.RouteGeneration, classified,
+	decision, continuationInput, err := s.routeDynamicFailureDecision(
+		ctx, session, task, conductor, classified, evidence, unclassified,
 	)
 	if err != nil {
 		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
-		return handled
+		return dynamicFailureRouteResult{
+			handled: handled, manualRecovery: handled && decision.Status == dynamicRouteStatusActionRequired,
+		}
 	}
 	generation = decision.Generation
-	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
-	return handled
+	var launchClaim *unclassifiedFallbackLaunchClaim
+	if unclassified {
+		launchClaim = &unclassifiedFallbackLaunchClaim{decision: decision, evidence: evidence}
+	}
+	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput, launchClaim)
+	return dynamicFailureRouteResult{handled: handled}
+}
+
+func (s *Service) routeDynamicFailureDecision(
+	ctx context.Context,
+	session *models.TaskSession,
+	task *v1.Task,
+	conductor *dynamicruntime.Conductor,
+	classified *routingerr.Error,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+	unclassified bool,
+) (dynamicruntime.RouteDecision, dynamicruntime.ContinuationInput, error) {
+	var decision dynamicruntime.RouteDecision
+	var continuationInput dynamicruntime.ContinuationInput
+	var err error
+	if unclassified {
+		decision, err = conductor.RouteAfterUnclassifiedFailure(
+			ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+			session.RouteGeneration, classified, evidence,
+		)
+	} else {
+		continuationInput, err = s.buildDynamicContinuation(
+			ctx, task, session.ID, "", classified.Error(),
+		)
+		if err == nil {
+			decision, err = conductor.RouteAfterFailure(
+				ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+				session.RouteGeneration, classified,
+			)
+		}
+	}
+	if err != nil || !unclassified {
+		return decision, continuationInput, err
+	}
+	continuationInput, err = s.buildDynamicContinuation(ctx, task, session.ID, "", classified.Error())
+	return decision, continuationInput, err
+}
+
+func (s *Service) prepareDynamicFailureEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	classified *routingerr.Error,
+	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
+	unclassified bool,
+) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
+	if unclassified {
+		return s.prepareUnclassifiedFailureEvidence(ctx, data, session, classified, startupEvidence)
+	}
+	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
+		return dynamicruntime.UnclassifiedFailureEvidence{}, false
+	}
+	return dynamicruntime.UnclassifiedFailureEvidence{}, classified.FallbackAllowed && dynamicPreResultSafe(data)
+}
+
+func (s *Service) prepareUnclassifiedFailureEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	classified *routingerr.Error,
+	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
+) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
+	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, startupEvidence)
+	if !evidence.TaskScope || !evidence.CurrentAttempt {
+		return dynamicruntime.UnclassifiedFailureEvidence{}, false
+	}
+	if classified.Code == routingerr.CodeUnknownProvider || classified.Code == routingerr.CodeAgentRuntime {
+		return evidence, true
+	}
+	if err := s.profileExecutionResolver.ClearUnclassifiedStreak(
+		ctx, session.ID, session.RouteGeneration, session.ExecutionProfileID,
+	); err != nil {
+		s.logger.Warn("failed to reset unclassified route streak after an ineligible unknown failure",
+			zap.String("session_id", session.ID), zap.Error(err))
+	}
+	return dynamicruntime.UnclassifiedFailureEvidence{}, false
+}
+
+func (s *Service) unclassifiedFailureRouteEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	if startupEvidence != nil {
+		return *startupEvidence
+	}
+	return s.unclassifiedPromptEvidence(ctx, data, session)
+}
+
+func (s *Service) clearStreakAfterCurrentClassifiedFailure(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) bool {
+	current := data.DynamicRouteAttempt && data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	if !current {
+		return true
+	}
+	if err := s.profileExecutionResolver.ClearUnclassifiedStreak(
+		ctx, session.ID, session.RouteGeneration, session.ExecutionProfileID,
+	); err != nil {
+		s.logger.Warn("failed to reset unclassified route streak after classified failure",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return false
+	}
+	return true
 }
 
 func (s *Service) persistPendingDynamicRecovery(
@@ -787,6 +955,7 @@ func (s *Service) persistPendingDynamicRecovery(
 	if !errors.Is(err, dynamicruntime.ErrRecoveryPending) {
 		return false
 	}
+	oldState := session.State
 	// The evaluator durably owns the retry/reset deadline. Keep the logical
 	// session available for the authoritative recovery surface; no successor
 	// launch is allowed until a due/manual action claims the same generation.
@@ -800,6 +969,7 @@ func (s *Service) persistPendingDynamicRecovery(
 			zap.String("session_id", session.ID), zap.Error(updateErr))
 		return false
 	}
+	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 	s.schedulePersistedDynamicRecovery(ctx, session.ID, decision.Generation)
 	return true
 }
@@ -823,6 +993,7 @@ func (s *Service) launchDynamicSuccessorAfterFailure(
 	conductor *dynamicruntime.Conductor,
 	decision dynamicruntime.RouteDecision,
 	continuationInput dynamicruntime.ContinuationInput,
+	launchClaim *unclassifiedFallbackLaunchClaim,
 ) bool {
 	continuation, err := conductor.BuildContinuation(ctx, continuationInput)
 	if err != nil {
@@ -843,7 +1014,7 @@ func (s *Service) launchDynamicSuccessorAfterFailure(
 			zap.String("session_id", session.ID), zap.Error(err))
 		return false
 	}
-	return s.launchDynamicSuccessorDetached(ctx, data, next.ExecutionProfileID)
+	return s.launchDynamicSuccessorDetachedWithClaim(ctx, data, next.ExecutionProfileID, launchClaim)
 }
 
 // launchDynamicSuccessorDetached runs the predecessor stop and successor
@@ -868,6 +1039,15 @@ func (s *Service) launchDynamicSuccessorDetached(
 	data watcher.AgentEventData,
 	executionProfileID string,
 ) bool {
+	return s.launchDynamicSuccessorDetachedWithClaim(context.Background(), data, executionProfileID, nil)
+}
+
+func (s *Service) launchDynamicSuccessorDetachedWithClaim(
+	_ context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+	claim *unclassifiedFallbackLaunchClaim,
+) bool {
 	s.dynamicSuccessorMu.Lock()
 	if s.dynamicSuccessorStopped {
 		s.dynamicSuccessorMu.Unlock()
@@ -887,7 +1067,7 @@ func (s *Service) launchDynamicSuccessorDetached(
 		defer s.dynamicSuccessorWorkers.Done()
 		launchCtx, cancel := context.WithTimeout(workerCtx, dynamicSuccessorDetachedTimeout)
 		defer cancel()
-		s.runDetachedDynamicSuccessorLaunch(launchCtx, data, executionProfileID)
+		s.runDetachedDynamicSuccessorLaunchWithClaim(launchCtx, data, executionProfileID, claim)
 	}()
 	return true
 }
@@ -903,6 +1083,15 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	executionProfileID string,
+) {
+	s.runDetachedDynamicSuccessorLaunchWithClaim(ctx, data, executionProfileID, nil)
+}
+
+func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+	claim *unclassifiedFallbackLaunchClaim,
 ) {
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
@@ -939,6 +1128,24 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 			zap.Error(ctx.Err()))
 		return
 	}
+	if claim != nil {
+		if err := s.profileExecutionResolver.ClaimUnclassifiedFallbackLaunch(
+			ctx, claim.decision, claim.evidence,
+		); err != nil {
+			s.logger.Warn("dynamic successor launch rejected after workflow context changed",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("execution_profile_id", executionProfileID),
+				zap.Error(err))
+			failureCtx := context.WithoutCancel(ctx)
+			s.markDynamicRouteActionRequired(
+				failureCtx, data.SessionID, claim.decision.Generation,
+				"unclassified_workflow_context_changed",
+			)
+			s.settleDetachedDynamicSuccessorFailure(failureCtx, data, executionProfileID)
+			return
+		}
+	}
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return
@@ -962,16 +1169,21 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("execution_profile_id", executionProfileID))
-	// The synchronous failure path finalized the automation run before
-	// surfacing the recoverable failure. handleAgentFailedLocked already
-	// returned here because the route was accepted, so this branch owns that
-	// finalization: without it an automation run stays nonterminal and holds a
-	// max_concurrent_runs slot and its worktree forever.
-	failureCtx := context.WithoutCancel(ctx)
+	s.settleDetachedDynamicSuccessorFailure(context.WithoutCancel(ctx), data, executionProfileID)
+}
+
+func (s *Service) settleDetachedDynamicSuccessorFailure(
+	failureCtx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+) {
+	// The synchronous failure handler returned when the automatic route was
+	// accepted. This worker therefore owns terminal cleanup whenever the
+	// successor cannot start, including a workflow-context veto.
 	s.retireExecutionActivityAndPublish(failureCtx, data.TaskID, data.SessionID, data.AgentExecutionID)
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
-		errMsg = "dynamic successor launch failed"
+		errMsg = "dynamic successor launch failed for " + executionProfileID
 	}
 	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
 	if dispatch := s.handleRecoverableFailureLockedState(failureCtx, data, agentruntime.StopReasonRecoverableAgentFailure); dispatch != nil {
@@ -1100,6 +1312,145 @@ func (s *Service) dynamicFailureSession(
 		return nil, false
 	}
 	return session, true
+}
+
+func (s *Service) unclassifiedPromptEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	providerID, diagnostic, complete := "", "", false
+	if providerError := data.ProviderError; providerError != nil {
+		providerID = providerError.ProviderID
+		diagnostic = providerError.Message
+		complete = providerError.Valid() && providerError.DiagnosticIdentityComplete &&
+			completeProviderDiagnosticSource(providerError.Source)
+	}
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt, dynamicruntime.UnclassifiedOriginTerminalProvider,
+		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), providerID, diagnostic, complete,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
+}
+
+func (s *Service) unclassifiedStartupEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	attempt dynamicStartupAttempt,
+	startup *routingerr.AgentStartupFailure,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	phase, providerID, diagnostic := routingerr.Phase(""), "", ""
+	diagnosticComplete := false
+	if startup != nil {
+		phase, providerID, diagnostic = startup.Phase, startup.ProviderID, startup.Diagnostic
+		diagnosticComplete = streams.IsCompleteProviderDiagnostic(startup.Diagnostic)
+	}
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, startup != nil && startup.Cause != nil && session != nil && attempt.ID != "" &&
+			attempt.SessionID == data.SessionID && attempt.Generation == session.RouteGeneration &&
+			attempt.LogicalProfileID == session.AgentProfileID &&
+			attempt.ExecutionProfileID == session.ExecutionProfileID,
+		dynamicruntime.UnclassifiedOriginAgentStartup,
+		phase, attempt.ID, providerID, diagnostic, diagnosticComplete, true, false, false,
+	)
+}
+
+func (s *Service) unclassifiedFailureEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	currentAttempt bool,
+	origin dynamicruntime.UnclassifiedFailureOrigin,
+	phase routingerr.Phase,
+	attemptID, providerID, diagnostic string,
+	diagnosticComplete, evidenceKnown, outputObserved, effectObserved bool,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	evidence := dynamicruntime.UnclassifiedFailureEvidence{
+		SessionID: data.SessionID, AttemptID: attemptID, Origin: origin,
+		Phase: phase, ProviderID: providerID, DiagnosticText: diagnostic,
+		DiagnosticComplete: diagnosticComplete, CurrentAttempt: currentAttempt,
+		EvidenceKnown: evidenceKnown, OutputObserved: outputObserved, EffectObserved: effectObserved,
+	}
+	task, ok := s.unclassifiedFailureTask(ctx, data, session)
+	if !ok {
+		return evidence
+	}
+	evidence.TaskScope = true
+	evidence.TaskID = task.ID
+	evidence.WorkflowID = task.WorkflowID
+	evidence.SessionID = session.ID
+	evidence.LogicalProfileID = session.AgentProfileID
+	evidence.ExecutionProfileID = session.ExecutionProfileID
+	evidence.RouteGeneration = session.RouteGeneration
+	evidence.StepID = task.WorkflowStepID
+	evidence.StepKnown, evidence.StepVeto, evidence.StepUpdatedAt = s.unclassifiedStepEvidence(ctx, task)
+	return evidence
+}
+
+func (s *Service) unclassifiedFailureTask(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) (*models.Task, bool) {
+	if session == nil || s.repo == nil || data.TaskID == "" || data.OwnerKind != queueStatusScopeTask {
+		return nil, false
+	}
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil || task.ID == "" || task.ID != session.TaskID || task.ID != data.TaskID || task.IsFromOffice {
+		return nil, false
+	}
+	return task, true
+}
+
+func (s *Service) unclassifiedStepEvidence(
+	ctx context.Context,
+	task *models.Task,
+) (known, veto bool, updatedAt time.Time) {
+	if task.WorkflowStepID == "" {
+		return true, false, time.Time{}
+	}
+	if s.workflowStepGetter == nil {
+		return false, false, time.Time{}
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil || step.ID != task.WorkflowStepID ||
+		(task.WorkflowID != "" && step.WorkflowID != task.WorkflowID) {
+		return false, false, time.Time{}
+	}
+	return true, step.DisableUnclassifiedFallback, step.UpdatedAt
+}
+
+func (s *Service) currentDynamicPromptAttempt(sessionID, executionID string, promptGeneration uint64) bool {
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return false
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	return evidence.dynamic && evidence.evidenceKnown &&
+		evidence.executionID == executionID && evidence.promptGeneration == promptGeneration
+}
+
+func completeProviderDiagnosticSource(source string) bool {
+	switch source {
+	case streams.ProviderErrorSourceOpenCodeStderr, streams.ProviderErrorSourceOpenCodeACP,
+		streams.ProviderErrorSourceACPPrompt:
+		return true
+	default:
+		return false
+	}
+}
+
+func promptUnclassifiedAttemptID(data watcher.AgentEventData) string {
+	if data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		return ""
+	}
+	return fmt.Sprintf("prompt:%s:%d", data.AgentExecutionID, data.PromptGeneration)
 }
 
 type dynamicRelaunchOutcome uint8

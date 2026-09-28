@@ -330,6 +330,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
 		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0,
 		stage_type TEXT NOT NULL DEFAULT 'custom',
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,

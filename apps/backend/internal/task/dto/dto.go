@@ -362,19 +362,23 @@ type TaskSessionDTO struct {
 	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name              string `json:"name"`
-	AgentExecutionID  string `json:"agent_execution_id,omitempty"`
-	ContainerID       string `json:"container_id,omitempty"`
-	AgentProfileID    string `json:"agent_profile_id,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	EnvironmentID     string `json:"environment_id,omitempty"`
-	RepositoryID      string `json:"repository_id,omitempty"`
-	BaseBranch        string `json:"base_branch,omitempty"`
-	BaseCommitSHA     string `json:"base_commit_sha,omitempty"`
-	WorktreeID        string `json:"worktree_id,omitempty"`
-	WorktreePath      string `json:"worktree_path,omitempty"`
-	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	Name               string `json:"name"`
+	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
+	ContainerID        string `json:"container_id,omitempty"`
+	AgentProfileID     string `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64  `json:"route_generation,omitempty"`
+	RouteState         string `json:"route_state,omitempty"`
+	RouteReason        string `json:"route_reason,omitempty"`
+	ExecutorID         string `json:"executor_id,omitempty"`
+	ExecutorProfileID  string `json:"executor_profile_id,omitempty"`
+	EnvironmentID      string `json:"environment_id,omitempty"`
+	RepositoryID       string `json:"repository_id,omitempty"`
+	BaseBranch         string `json:"base_branch,omitempty"`
+	BaseCommitSHA      string `json:"base_commit_sha,omitempty"`
+	WorktreeID         string `json:"worktree_id,omitempty"`
+	WorktreePath       string `json:"worktree_path,omitempty"`
+	WorktreeBranch     string `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -456,19 +460,23 @@ type TaskSessionSummaryDTO struct {
 	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name              string `json:"name"`
-	AgentExecutionID  string `json:"agent_execution_id,omitempty"`
-	ContainerID       string `json:"container_id,omitempty"`
-	AgentProfileID    string `json:"agent_profile_id,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	EnvironmentID     string `json:"environment_id,omitempty"`
-	RepositoryID      string `json:"repository_id,omitempty"`
-	BaseBranch        string `json:"base_branch,omitempty"`
-	BaseCommitSHA     string `json:"base_commit_sha,omitempty"`
-	WorktreeID        string `json:"worktree_id,omitempty"`
-	WorktreePath      string `json:"worktree_path,omitempty"`
-	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	Name               string `json:"name"`
+	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
+	ContainerID        string `json:"container_id,omitempty"`
+	AgentProfileID     string `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64  `json:"route_generation,omitempty"`
+	RouteState         string `json:"route_state,omitempty"`
+	RouteReason        string `json:"route_reason,omitempty"`
+	ExecutorID         string `json:"executor_id,omitempty"`
+	ExecutorProfileID  string `json:"executor_profile_id,omitempty"`
+	EnvironmentID      string `json:"environment_id,omitempty"`
+	RepositoryID       string `json:"repository_id,omitempty"`
+	BaseBranch         string `json:"base_branch,omitempty"`
+	BaseCommitSHA      string `json:"base_commit_sha,omitempty"`
+	WorktreeID         string `json:"worktree_id,omitempty"`
+	WorktreePath       string `json:"worktree_path,omitempty"`
+	WorktreeBranch     string `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -1050,6 +1058,10 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		AgentExecutionID:   session.AgentExecutionID,
 		ContainerID:        session.ContainerID,
 		AgentProfileID:     session.AgentProfileID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		RouteGeneration:    session.RouteGeneration,
+		RouteState:         session.RouteState,
+		RouteReason:        session.RouteReason,
 		ExecutorID:         session.ExecutorID,
 		ExecutorProfileID:  session.ExecutorProfileID,
 		EnvironmentID:      session.EnvironmentID,
@@ -1087,6 +1099,10 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
 		AgentProfileID:       session.AgentProfileID,
+		ExecutionProfileID:   session.ExecutionProfileID,
+		RouteGeneration:      session.RouteGeneration,
+		RouteState:           session.RouteState,
+		RouteReason:          session.RouteReason,
 		ExecutorID:           session.ExecutorID,
 		ExecutorProfileID:    session.ExecutorProfileID,
 		EnvironmentID:        session.EnvironmentID,
@@ -1205,23 +1221,24 @@ func steerEligible(sessionID string, state models.TaskSessionState, provider For
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID                        string                                   `json:"id"`
-	WorkflowID                string                                   `json:"workflow_id"`
-	Name                      string                                   `json:"name"`
-	Position                  int                                      `json:"position"`
-	Color                     string                                   `json:"color"`
-	Prompt                    string                                   `json:"prompt,omitempty"`
-	Events                    *StepEventsDTO                           `json:"events,omitempty"`
-	AllowManualMove           bool                                     `json:"allow_manual_move"`
-	IsStartStep               bool                                     `json:"is_start_step"`
-	ShowInCommandPanel        bool                                     `json:"show_in_command_panel"`
-	AutoArchiveAfterHours     int                                      `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
-	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
-	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
-	SessionTarget             *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
-	WIPLimit                  int                                      `json:"wip_limit"`
-	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
+	ID                          string                                   `json:"id"`
+	WorkflowID                  string                                   `json:"workflow_id"`
+	Name                        string                                   `json:"name"`
+	Position                    int                                      `json:"position"`
+	Color                       string                                   `json:"color"`
+	Prompt                      string                                   `json:"prompt,omitempty"`
+	Events                      *StepEventsDTO                           `json:"events,omitempty"`
+	AllowManualMove             bool                                     `json:"allow_manual_move"`
+	IsStartStep                 bool                                     `json:"is_start_step"`
+	ShowInCommandPanel          bool                                     `json:"show_in_command_panel"`
+	AutoArchiveAfterHours       int                                      `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID              string                                   `json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy   models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
+	ProfileSessionEndPolicy     models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	DisableUnclassifiedFallback bool                                     `json:"disable_unclassified_fallback"`
+	SessionTarget               *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
+	WIPLimit                    int                                      `json:"wip_limit"`
+	PullFromStepID              string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
 	StageType                  string `json:"stage_type,omitempty"`

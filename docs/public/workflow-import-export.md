@@ -165,6 +165,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
   session_target:
     kind: initial
     # A source-step target uses: kind: step and step_position: 1
+  disable_unclassified_fallback: true
   complete_task_on_enter: false
 ```
 
@@ -183,6 +184,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `profile_session_start_policy` | enum | `reuse` or `new`; controls whether this destination step reuses the newest eligible nonterminal session for its profile or always starts a fresh conversation. Missing or unknown values use `reuse`. |
 | `profile_session_end_policy` | enum | `complete` or `park`; controls whether this source step's session is closed or kept available when the workflow leaves it for a different profile. Missing or unknown values use `complete`. |
 | `session_target` | object | Optional explicit recipient. Use `{kind: initial}` for the task's launch conversation. Use `{kind: step, step_position: N}` for an earlier direct-profile step. Source-step references use positions so import can remap step IDs. |
+| `disable_unclassified_fallback` | boolean | Always exported in version 2. `true` vetoes the optional repeated-unclassified policy for this step's task session, even when its dynamic candidate policy is enabled. Missing input defaults to `false`; step create/update API requests accept this field, omitted updates preserve the saved value, and explicit `null` is invalid. |
 | `complete_task_on_enter` | boolean | Always exported in version 2. On the final workflow step, `true` marks the task `COMPLETED` when it enters that step. On non-final steps the value is retained but inactive. Version 1 derives the legacy name-based behavior only when this field is absent. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
 | `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |

@@ -215,6 +215,72 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	}, nil
 }
 
+// RouteAfterUnclassifiedFailure validates the logical profile and applies the
+// narrow repeated-failure policy only with evidence built by a trusted task
+// runtime boundary.
+func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence dynamic.UnclassifiedFailureEvidence,
+) (dynamic.RouteDecision, error) {
+	if r.engine == nil || sessionID == "" {
+		return dynamic.RouteDecision{}, errors.New("dynamic profile execution is not configured")
+	}
+	if err := r.ValidateProfile(ctx, profileID); err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	profile, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	return r.engine.ApplyUnclassifiedFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, evidence,
+	)
+}
+
+// ClaimUnclassifiedFallbackLaunch performs the final contextual fence before
+// a detached automatic successor begins launch work.
+func (r *ProfileExecutionResolver) ClaimUnclassifiedFallbackLaunch(
+	ctx context.Context,
+	decision dynamic.RouteDecision,
+	evidence dynamic.UnclassifiedFailureEvidence,
+) error {
+	if r == nil || r.engine == nil {
+		return dynamic.ErrUnclassifiedWorkflowContextUnavailable
+	}
+	return r.engine.ClaimUnclassifiedFallbackLaunch(ctx, decision, evidence)
+}
+
+// ClearUnclassifiedStreak removes the session-owned count after a current
+// successful output/effect/turn event has been validated by the orchestrator.
+func (r *ProfileExecutionResolver) ClearUnclassifiedStreak(
+	ctx context.Context,
+	sessionID string,
+	generation int64,
+	candidateID string,
+) error {
+	if r == nil || r.engine == nil {
+		return errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.ClearUnclassifiedStreak(ctx, sessionID, generation, candidateID)
+}
+
+// ClearUnclassifiedStartupStreak removes a startup count only after the
+// lifecycle confirms that the agent session is initialized and ready.
+func (r *ProfileExecutionResolver) ClearUnclassifiedStartupStreak(
+	ctx context.Context,
+	sessionID string,
+	generation int64,
+	candidateID string,
+) error {
+	if r == nil || r.engine == nil {
+		return errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.ClearUnclassifiedStartupStreak(ctx, sessionID, generation, candidateID)
+}
+
 // ResolveExisting returns the persisted concrete execution for a logical
 // session without advancing its route generation. It is used by resume paths
 // after a restart, where selecting again would either fence a valid session

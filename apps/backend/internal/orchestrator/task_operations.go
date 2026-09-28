@@ -4672,6 +4672,10 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForTask(taskID)
 	}
+	var stoppedSessions []*models.TaskSession
+	if s.repo != nil {
+		stoppedSessions, _ = s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	}
 	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
 		if !errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
 			return err
@@ -4682,6 +4686,11 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 		s.logger.Warn("task stop reached REVIEW with an orphan recovery load failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+	}
+	for _, session := range stoppedSessions {
+		if session != nil {
+			s.clearDynamicUnclassifiedStreakForStop(ctx, session.ID)
+		}
 	}
 	// Move task to REVIEW state for user review
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
@@ -4813,6 +4822,9 @@ func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, ses
 	if result.Changed && s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
+	if result.Changed {
+		s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	}
 	// Detached teardown must not observe this operation as an in-flight
 	// cancellation. ScheduleTeardown starts a goroutine, so relying on the
 	// deferred release above makes the ordering scheduler-dependent.
@@ -4895,6 +4907,10 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForTask(taskID)
 	}
+	var stoppedSessions []*models.TaskSession
+	if s.repo != nil {
+		stoppedSessions, _ = s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	}
 	err := s.executor.StopByTaskID(ctx, taskID, reason, force)
 	if err != nil && errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
 		// Every session that could be reached did stop; only a registry-only
@@ -4903,7 +4919,14 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 		s.logger.Warn("task execution cancelled with an orphan recovery load failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		return nil
+		err = nil
+	}
+	if err == nil {
+		for _, session := range stoppedSessions {
+			if session != nil {
+				s.clearDynamicUnclassifiedStreakForStop(ctx, session.ID)
+			}
+		}
 	}
 	return err
 }
@@ -4945,7 +4968,11 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
-	return s.executor.Stop(ctx, sessionID, reason, force)
+	if err := s.executor.Stop(ctx, sessionID, reason, force); err != nil {
+		return err
+	}
+	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	return nil
 }
 
 // StopSessionSynchronously is the internal cleanup variant of StopSession. It
@@ -4956,7 +4983,11 @@ func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
-	return s.executor.StopSessionSynchronously(ctx, sessionID, reason, force)
+	if err := s.executor.StopSessionSynchronously(ctx, sessionID, reason, force); err != nil {
+		return err
+	}
+	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	return nil
 }
 
 // deleteSessionAndPublishRemoval commits a session deletion before publishing
@@ -9521,6 +9552,7 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	if err := s.finishCancelledAgentTurn(ctx, sessionID, prepared); err != nil {
 		return err
 	}
+	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil

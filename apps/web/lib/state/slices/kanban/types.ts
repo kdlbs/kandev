@@ -66,6 +66,7 @@ export type KanbanState = {
     session_target?: WorkflowSessionTarget | null;
     profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
     profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    disable_unclassified_fallback?: boolean;
     complete_task_on_enter?: boolean;
     cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */

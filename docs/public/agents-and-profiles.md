@@ -292,6 +292,47 @@ catalogue is versioned and can grow as provider signals become known; an
 ambiguous new signal fails closed. A future classifier may improve catalogue
 coverage, but no model is called to classify errors today.
 
+Dynamic profiles also have an API-only option for repeated, safe unclassified
+failures. It is off by default and is not exposed in the profile editor. In a
+candidate's `policies` object, set `unclassified` to:
+
+```json
+{
+  "enabled": true,
+  "consecutive_failure_threshold": 3
+}
+```
+
+When enabled, the threshold must be an integer from `2` to `10`. Configure the
+field through `POST /api/v1/agents/dynamic/profiles` or
+`PATCH /api/v1/agent-profiles/:id`, along with the candidate's existing
+transient and hard policies. An omitted or disabled policy does not count
+failures; a disabled policy must use a threshold of `0`.
+
+Kandev counts only a current task-session failure that has complete trusted
+evidence and no output or tool activity. Eligible errors are a terminal
+`unknown_provider_error` before output, or a typed agent process-start or
+session-initialization `agent_runtime_error`. For provider errors, each counted
+failure must have the same code, origin, phase, provider, and complete
+diagnostic. Kandev normalizes whitespace only; case and punctuation remain
+significant. Diagnostics that need redaction or truncation stay on manual
+recovery. Task, repository, permission, tool, cancellation, ambiguous
+mid-turn, stale, and other unclassified failures also remain manual.
+
+Below the threshold, each failure stops for manual recovery. Use **Retry** to
+make the next attempt; there is no automatic retry timer. On the threshold
+failure, Kandev tries the next enabled candidate in order, without wrapping to
+an earlier candidate. If no next candidate is eligible, recovery remains
+manual. The count resets when a failure is unsafe or different, when the
+candidate, profile, policy, or workflow step changes, or after a successful
+turn. This extension applies to task sessions. Office runs and utility calls
+remain outside its scope.
+
+Any workflow step can veto this policy with
+`disable_unclassified_fallback: true`. The field is available through the
+workflow-step API and is included in workflow import/export. The veto applies
+to the step's task session even when the candidate policy is enabled.
+
 After a provider switch, the failed provider is paused for the route health
 backoff, or until its trusted reset time when one is available. Kandev runs an
 exclusive health probe before it becomes eligible again. This shared error

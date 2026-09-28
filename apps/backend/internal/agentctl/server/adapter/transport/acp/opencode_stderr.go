@@ -135,9 +135,10 @@ func providerErrorFromACPPrompt(err error) *streams.ProviderError {
 		message = genericProviderErrorMessage
 	}
 	return &streams.ProviderError{
-		Source:     streams.ProviderErrorSourceACPPrompt,
-		Message:    message,
-		OccurredAt: time.Now(),
+		Source:                     streams.ProviderErrorSourceACPPrompt,
+		Message:                    message,
+		DiagnosticIdentityComplete: streams.IsCompleteProviderDiagnostic(reqErr.Message),
+		OccurredAt:                 time.Now(),
 	}
 }
 
@@ -170,10 +171,11 @@ func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 		return nil
 	}
 	return &streams.ProviderError{
-		Source:         streams.ProviderErrorSourceOpenCodeACP,
-		Message:        message,
-		RemediationURL: remediationURL,
-		OccurredAt:     time.Now(),
+		Source:                     streams.ProviderErrorSourceOpenCodeACP,
+		Message:                    message,
+		DiagnosticIdentityComplete: streams.IsCompleteProviderDiagnostic(reqErr.Message),
+		RemediationURL:             remediationURL,
+		OccurredAt:                 time.Now(),
 	}
 }
 
@@ -234,7 +236,8 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	if remediationURL == "" {
 		remediationURL = extractOpenCodeActionURL(fields["error.error"])
 	}
-	message := streams.SanitizeProviderMessage(fields["error.error"])
+	rawMessage := fields["error.error"]
+	message := streams.SanitizeProviderMessage(rawMessage)
 	if message == "" {
 		return openCodeStderrDiagnostic{}, false
 	}
@@ -244,12 +247,13 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	}
 
 	providerError := streams.ProviderError{
-		Source:         streams.ProviderErrorSourceOpenCodeStderr,
-		ProviderID:     safeOpenCodeField(fields["providerID"]),
-		ModelID:        safeOpenCodeField(fields["modelID"]),
-		Message:        message,
-		RemediationURL: remediationURL,
-		OccurredAt:     occurredAt,
+		Source:                     streams.ProviderErrorSourceOpenCodeStderr,
+		ProviderID:                 safeOpenCodeField(fields["providerID"]),
+		ModelID:                    safeOpenCodeField(fields["modelID"]),
+		Message:                    message,
+		DiagnosticIdentityComplete: streams.IsCompleteProviderDiagnostic(rawMessage),
+		RemediationURL:             remediationURL,
+		OccurredAt:                 occurredAt,
 	}
 	if resetAt := openCodeResetAt(message, occurredAt); resetAt != nil {
 		providerError.ResetAt = resetAt
