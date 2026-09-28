@@ -345,6 +345,7 @@ type promptTurnState struct {
 	evidenceMu        sync.Mutex
 	codexSystemError  bool
 	codexCapacity     bool
+	codexUsageLimit   *streams.ProviderError
 	cursorRetriable   bool
 	cursorRetriableAt time.Time
 	allowHandoff      bool
@@ -370,6 +371,31 @@ func (t *promptTurnState) codexCapacityFailure() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError && t.codexCapacity
+}
+
+func (t *promptTurnState) observeCodexUsageLimit(providerError streams.ProviderError) {
+	if t == nil || !providerError.Valid() {
+		return
+	}
+	t.evidenceMu.Lock()
+	if t.codexUsageLimit == nil {
+		copy := providerError
+		t.codexUsageLimit = &copy
+	}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexUsageLimitFailure() (*streams.ProviderError, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.codexUsageLimit == nil {
+		return nil, false
+	}
+	copy := *t.codexUsageLimit
+	return &copy, true
 }
 
 func (t *promptTurnState) hasCodexSystemError() bool {

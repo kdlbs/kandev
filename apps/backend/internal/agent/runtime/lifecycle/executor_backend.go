@@ -171,6 +171,21 @@ type ExecutorBackend interface {
 	IsAlwaysResumable() bool
 }
 
+// RecoveryCandidateOutcome represents the classified recovery outcome for one candidate record.
+type RecoveryCandidateOutcome string
+
+const (
+	RecoveryOutcomeNoMatchingInstance RecoveryCandidateOutcome = "no_matching_instance"
+	RecoveryOutcomeEnumerationFailed  RecoveryCandidateOutcome = "enumeration_failed"
+	RecoveryOutcomeUnknown            RecoveryCandidateOutcome = "unknown"
+)
+
+// DetailedRecoveryBackend is an optional extension for ExecutorBackend implementations
+// that report detailed per-candidate recovery outcomes.
+type DetailedRecoveryBackend interface {
+	RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error)
+}
+
 // McpServerConfig holds configuration for an MCP server.
 // Type alias for agentctl.McpServerConfig to avoid conversion boilerplate.
 type McpServerConfig = agentctl.McpServerConfig

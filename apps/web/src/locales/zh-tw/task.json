@@ -2541,5 +2541,8 @@
   "managedCloneRelocationTitle": "工作區需要修復",
   "managedCloneRelocateResume": "移動檔案並繼續",
   "managedCloneRelocationConfirmBody": "Kandev 將在目前儲存庫複製中建立 worktree，並繼續此工作階段。",
-  "managedCloneRelocationConfirm": "移動並繼續"
+  "managedCloneRelocationConfirm": "移動並繼續",
+  "sessionRecoveryResumeDescription": "恢復會保留之前的訊息和上下文。",
+  "sessionRecoveryFreshDescription": "重新開始會使用同一工作區，但不保留之前的對話上下文。",
+  "sessionRecoveryCorruptedDescription": "此工作階段的已儲存狀態已損壞，恢復可能會再次失敗。請開始新工作階段。"
 }

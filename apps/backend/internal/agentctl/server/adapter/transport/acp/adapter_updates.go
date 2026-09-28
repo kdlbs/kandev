@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -295,6 +296,27 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	turn := a.currentPromptTurn()
 	if turn == nil || turn.promptGeneration != promptGeneration {
 		return false
+	}
+	if event.Type == streams.EventTypeMessageChunk && event.ProviderDiagnosticCandidate {
+		classified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: codexAgentID,
+			Stderr:     event.Text,
+		})
+		if classified.Code == routingerr.CodeQuotaLimited &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed {
+			message := streams.SanitizeProviderMessage(event.Text)
+			if message != "" {
+				providerError := streams.ProviderError{
+					Source:     streams.ProviderErrorSourceCodexACP,
+					ProviderID: codexAgentID,
+					Message:    message,
+					OccurredAt: time.Now().UTC(),
+					ResetAt:    classified.ResetHint,
+				}
+				turn.observeCodexUsageLimit(providerError)
+			}
+		}
 	}
 	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
 	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)

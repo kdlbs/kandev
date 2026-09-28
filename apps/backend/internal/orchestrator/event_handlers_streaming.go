@@ -123,6 +123,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.SessionID,
 				eventExecutionID,
 				payload.Data.PromptGeneration,
+				payload.AgentType,
 				payload.Data.Text,
 			)
 		} else {

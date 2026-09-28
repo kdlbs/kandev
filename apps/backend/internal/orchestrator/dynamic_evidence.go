@@ -194,11 +194,13 @@ func (s *Service) observePromptAttempt(
 func (s *Service) observeProviderDiagnostic(
 	sessionID, executionID string,
 	promptGeneration uint64,
+	providerID string,
 	message string,
 ) {
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
@@ -287,7 +289,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, lifecycleDiagnosticText)
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -307,7 +309,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -316,8 +318,9 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		return
 	}
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
@@ -363,8 +366,9 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 		return ""
 	}
 	return routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: data.AgentID,
+		Stderr:     message,
 	}).Code
 }
 

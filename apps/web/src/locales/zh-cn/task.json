@@ -2541,5 +2541,8 @@
   "managedCloneRelocationTitle": "工作区需要修复",
   "managedCloneRelocateResume": "移动文件并继续",
   "managedCloneRelocationConfirmBody": "Kandev 将在当前仓库克隆中创建 worktree，并继续此会话。",
-  "managedCloneRelocationConfirm": "移动并继续"
+  "managedCloneRelocationConfirm": "移动并继续",
+  "sessionRecoveryResumeDescription": "恢复会保留之前的消息和上下文。",
+  "sessionRecoveryFreshDescription": "重新开始会使用同一工作区，但不保留之前的对话上下文。",
+  "sessionRecoveryCorruptedDescription": "此会话的已保存状态已损坏，恢复可能会再次失败。请开始新会话。"
 }
