@@ -94,15 +94,30 @@ Decode JSON as `map[string]json.RawMessage`.
 Require an object root and object-valued server entries.
 Skip invalid files as a whole. Preserve unknown fields inside server objects.
 Order sources by descending modification time and ascending path.
-Select the first object for each exact server key.
+For each exact server key, prefer the first credential-bearing object over any
+registration-only object. A credential-bearing object has a JSON object
+`tokens` containing a non-empty string `access_token` or `refresh_token`.
+Null, malformed, empty, or non-string token fields do not qualify. Whitespace-only
+strings do not qualify. This classification does not assert token validity,
+expiration or refresh success. If all objects are registration-only, retain
+the existing newest-file selection for that server.
+Copy the whole selected raw server object, including its matching `clientInfo`
+and unknown fields. Never pair tokens from one project with client information
+from another. Do not rank by expiry or use the existing shared snapshot as a
+fallback source. Removing all credential-bearing source files removes that
+credential from the next snapshot.
 Do not deep-merge tokens or combine accounts.
 
 Credential identity is the exact server name. The bridge does not read project MCP configuration or compare server URLs or OAuth issuers. A local project that declares an existing server name can therefore use its copied credential at another endpoint. This is an accepted trust boundary of default-enabled sharing: users must trust local project configurations launched with sharing enabled and revoke credentials through the provider if an unintended endpoint may have received them. The synthetic aggregation test covers this name-only sharing behavior.
 
 Rebuild `<cursorHome>/kandev-mcp-auth-unified.json` from sources on each eligible enabled launch.
-The prior master is never a source.
+The prior master is not an independent source. The [agent preparation design](agent-mcp-preparation.md)
+permits retaining a native-updated object only with matching unchanged eligible
+source provenance; missing or changed sources invalidate that exception.
 A valid empty source object can produce an empty snapshot.
-No eligible valid source means no master publication and no new link.
+No eligible valid source means no new link. The [agent preparation design](agent-mcp-preparation.md)
+supersedes retaining stale generated credentials when the last source is removed:
+existing owned links must be detached or the generated snapshot cleared safely.
 Use an internal result that distinguishes no sources from a successful empty snapshot.
 The public error-only helper can wrap this result.
 The composed link operation uses the result directly and must not infer success from an old master.
@@ -216,5 +231,16 @@ The [original plan](../../../plans/cursor-mcp-oauth-bridge/plan.md) owns the ori
 
 Cursor can replace a symlink during its own auth writes. A later enabled launch repairs it only if it remains a symlink.
 If Cursor creates a regular file, Kandev preserves that file.
-Cursor token refresh through a link can update the master, but the next aggregation still uses source-project precedence.
+Cursor token refresh through a link can update the master. The provenance rule
+in the [agent preparation design](agent-mcp-preparation.md) preserves that update
+while its selected source is unchanged; ordinary source precedence still applies
+when source data changes.
 This design does not synchronize refresh writes back to source projects.
+
+## Discovery/auth repair
+
+The [repair package](../../../plans/cursor-mcp-discovery-auth-repair/plan.md)
+supersedes newest-file-only selection. Its credential test matrix includes an
+older authenticated entry, a newer registration-only entry, and an independent
+server in the same scan. Existing source exclusions and file preservation apply
+unchanged. Plugin enablement is independent of token presence.

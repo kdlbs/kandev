@@ -64,6 +64,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
+	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -613,7 +614,11 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	}
 	body.AgentID = c.Param("id")
 	if err := body.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
+		message := err.Error()
+		if strings.TrimSpace(body.Name) == "" {
+			message = "profile name is required"
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": message})
 		return
 	}
 	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
@@ -654,7 +659,11 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	body.ID = c.Param("id")
 	body.Force = c.Query("force") == queryTrue
 	if err := body.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		message := err.Error()
+		if strings.TrimSpace(body.ID) == "" {
+			message = "profile id is required"
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": message})
 		return
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {

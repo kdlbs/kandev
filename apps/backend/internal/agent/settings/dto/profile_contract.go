@@ -28,6 +28,8 @@ type ProfileCreateRequest struct {
 	ProviderAPIKeySecretID  string                  `json:"provider_api_key_secret_id,omitempty"`
 	CursorMCPAuthEnabled    *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
 	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
+	MCPSelectionMode        *string                 `json:"mcp_selection_mode,omitempty"`
+	MCPSelectedServers      *[]string               `json:"mcp_selected_servers,omitempty"`
 	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
@@ -57,6 +59,8 @@ type ProfileUpdateRequest struct {
 	ProviderAPIKeySecretID  *string                 `json:"provider_api_key_secret_id,omitempty"`
 	CursorMCPAuthEnabled    *bool                   `json:"cursor_mcp_auth_enabled,omitempty"`
 	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
+	MCPSelectionMode        *string                 `json:"mcp_selection_mode,omitempty"`
+	MCPSelectedServers      *[]string               `json:"mcp_selected_servers,omitempty"`
 	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 	Force                   bool                    `json:"force,omitempty"`
 }
@@ -68,12 +72,42 @@ func (r ProfileCreateRequest) Validate() error {
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	return nil
+	return ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers)
 }
 
 func (r ProfileUpdateRequest) Validate() error {
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf("id is required")
+	}
+	return ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers)
+}
+
+const (
+	MCPSelectionModeInherit  = "inherit"
+	MCPSelectionModeSelected = "selected"
+	maxMCPSelectedServers    = 256
+	maxMCPServerIDLength     = 512
+)
+
+func ValidateMCPSelection(mode *string, servers *[]string) error {
+	if mode != nil && *mode != MCPSelectionModeInherit && *mode != MCPSelectionModeSelected {
+		return fmt.Errorf("mcp_selection_mode must be inherit or selected")
+	}
+	if servers == nil {
+		return nil
+	}
+	if len(*servers) > maxMCPSelectedServers {
+		return fmt.Errorf("mcp_selected_servers cannot contain more than %d identifiers", maxMCPSelectedServers)
+	}
+	seen := make(map[string]struct{}, len(*servers))
+	for index, serverID := range *servers {
+		if strings.TrimSpace(serverID) == "" || len(serverID) > maxMCPServerIDLength {
+			return fmt.Errorf("mcp_selected_servers[%d] must be a non-empty identifier of at most %d bytes", index, maxMCPServerIDLength)
+		}
+		if _, exists := seen[serverID]; exists {
+			return fmt.Errorf("mcp_selected_servers contains duplicate identifier %q", serverID)
+		}
+		seen[serverID] = struct{}{}
 	}
 	return nil
 }
@@ -112,6 +146,8 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "provider_api_key_secret_id", JSONType: "string", Support: "read_write", Description: "Global secret reference for the provider API key.", Sensitive: true},
 		{Path: "cursor_mcp_auth_enabled", JSONType: "boolean", Support: "read_write", Description: "Share local Cursor MCP credentials. Defaults to true for new profiles."},
 		{Path: "cursor_plugins_mcp_enabled", JSONType: "boolean", Support: "read_write", Description: "Import local Cursor plugin MCP servers. Defaults to true for new profiles."},
+		{Path: "mcp_selection_mode", JSONType: "string", Support: "read_write", Description: "Choose all enabled imported MCP servers or only selected native server identities."},
+		{Path: "mcp_selected_servers", JSONType: "array", Support: "read_write", Description: "Exact native MCP server identities selected for automatic preparation.", Replacement: true},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

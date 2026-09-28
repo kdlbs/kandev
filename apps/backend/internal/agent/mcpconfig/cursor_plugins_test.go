@@ -20,7 +20,8 @@ func TestDiscoverCursorPluginMCPServers_PluginAndUserConfig(t *testing.T) {
 	tempHome := t.TempDir()
 
 	// 1. Create a cached marketplace plugin with mcp.json
-	pluginDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "atlassian", "v1.0.0")
+	commit := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	pluginDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "atlassian", commit)
 	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
 	atlassianJSON := `{
 		"mcpServers": {
@@ -64,7 +65,9 @@ func TestDiscoverCursorPluginMCPServers_PluginAndUserConfig(t *testing.T) {
 	}`
 	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "mcp.json"), []byte(userMCPJSON), 0o644))
 
-	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	servers, err := DiscoverCursorPluginMCPServersWithInventory(tempHome, CursorNativeInventory{
+		Plugins: []CursorNativePlugin{{Name: "atlassian", Marketplace: "cursor-public", Revision: commit}},
+	})
 	require.NoError(t, err)
 	require.Len(t, servers, 3)
 
@@ -82,7 +85,8 @@ func TestDiscoverCursorPluginMCPServers_UserPrecedenceOverPlugin(t *testing.T) {
 	tempHome := t.TempDir()
 
 	// Plugin defines server-a pointing to plugin-url
-	pluginDir := filepath.Join(tempHome, "plugins", "cache", "pub", "p1", "v1")
+	commit := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	pluginDir := filepath.Join(tempHome, "plugins", "cache", "pub", "p1", commit)
 	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
 	pJSON := `{"mcpServers": {"server-a": {"url": "https://plugin-url"}}}`
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(pJSON), 0o644))
@@ -91,7 +95,9 @@ func TestDiscoverCursorPluginMCPServers_UserPrecedenceOverPlugin(t *testing.T) {
 	userJSON := `{"mcpServers": {"server-a": {"url": "https://user-url"}}}`
 	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "mcp.json"), []byte(userJSON), 0o644))
 
-	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	servers, err := DiscoverCursorPluginMCPServersWithInventory(tempHome, CursorNativeInventory{
+		Plugins: []CursorNativePlugin{{Name: "p1", Marketplace: "pub", Revision: commit}},
+	})
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
 	require.Equal(t, "server-a", servers[0].Name)
@@ -101,15 +107,17 @@ func TestDiscoverCursorPluginMCPServers_UserPrecedenceOverPlugin(t *testing.T) {
 func TestDiscoverCursorPluginMCPServers_NewerPluginPrecedence(t *testing.T) {
 	tempHome := t.TempDir()
 
-	// Older plugin v1
-	dir1 := filepath.Join(tempHome, "plugins", "cache", "pub", "p1", "v1")
+	// Older cached commit
+	oldCommit := "cccccccccccccccccccccccccccccccccccccccc"
+	dir1 := filepath.Join(tempHome, "plugins", "cache", "pub", "p1", oldCommit)
 	require.NoError(t, os.MkdirAll(dir1, 0o755))
 	p1JSON := `{"mcpServers": {"server-a": {"url": "https://v1-url"}}}`
 	f1 := filepath.Join(dir1, "mcp.json")
 	require.NoError(t, os.WriteFile(f1, []byte(p1JSON), 0o644))
 
-	// Newer plugin v2
-	dir2 := filepath.Join(tempHome, "plugins", "cache", "pub", "p1", "v2")
+	// The selected commit has an older cache timestamp than the other commit.
+	selectedCommit := "dddddddddddddddddddddddddddddddddddddddd"
+	dir2 := filepath.Join(tempHome, "plugins", "cache", "pub", "p1", selectedCommit)
 	require.NoError(t, os.MkdirAll(dir2, 0o755))
 	p2JSON := `{"mcpServers": {"server-a": {"url": "https://v2-url"}}}`
 	f2 := filepath.Join(dir2, "mcp.json")
@@ -119,13 +127,15 @@ func TestDiscoverCursorPluginMCPServers_NewerPluginPrecedence(t *testing.T) {
 	oldTime := time.Now().Add(-1 * time.Hour)
 	require.NoError(t, os.Chtimes(f1, oldTime, oldTime))
 
-	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	servers, err := DiscoverCursorPluginMCPServersWithInventory(tempHome, CursorNativeInventory{
+		Plugins: []CursorNativePlugin{{Name: "p1", Marketplace: "pub", Revision: selectedCommit}},
+	})
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
-	require.Equal(t, "https://v2-url", servers[0].URL, "newer plugin version should win")
+	require.Equal(t, "https://v2-url", servers[0].URL, "the selected exact revision wins over cache mtime")
 }
 
-func TestDiscoverCursorPluginMCPServers_UninstalledCacheIgnored(t *testing.T) {
+func TestCursorInventoryRequiredForCachedMarketplacePlugins(t *testing.T) {
 	tempHome := t.TempDir()
 
 	// 1. Uninstalled plugin folder under cache
@@ -134,27 +144,14 @@ func TestDiscoverCursorPluginMCPServers_UninstalledCacheIgnored(t *testing.T) {
 	uninstalledJSON := `{"mcpServers": {"uninstalled-srv": {"command": "untrusted-command"}}}`
 	require.NoError(t, os.WriteFile(filepath.Join(uninstalledDir, "mcp.json"), []byte(uninstalledJSON), 0o644))
 
-	// 2. Disabled plugin in installed.json registry
-	installedRegistry := `{
-		"plugins": [
-			{"id": "disabled-plugin", "enabled": false},
-			{"id": "enabled-plugin", "enabled": true}
-		]
-	}`
-	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "plugins", "installed.json"), []byte(installedRegistry), 0o644))
-
-	disabledDir := filepath.Join(tempHome, "plugins", "local", "disabled-plugin")
-	require.NoError(t, os.MkdirAll(disabledDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(disabledDir, "mcp.json"), []byte(`{"mcpServers":{"disabled-srv":{"command":"node"}}}`), 0o644))
-
-	enabledDir := filepath.Join(tempHome, "plugins", "local", "enabled-plugin")
-	require.NoError(t, os.MkdirAll(enabledDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(enabledDir, "mcp.json"), []byte(`{"mcpServers":{"enabled-srv":{"command":"node"}}}`), 0o644))
+	// An invented registry file cannot enable cached marketplace content.
+	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "plugins", "installed.json"), []byte(`{"enabled-plugin":true}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "mcp.json"), []byte(`{"mcpServers":{"global":{"url":"https://global.example/mcp"}}}`), 0o600))
 
 	servers, err := DiscoverCursorPluginMCPServers(tempHome)
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
-	require.Equal(t, "enabled-srv", servers[0].Name)
+	require.Equal(t, "global", servers[0].Name)
 }
 
 func TestDiscoverCursorPluginMCPServers_DescriptorFileReference(t *testing.T) {
@@ -298,4 +295,25 @@ func TestDiscoverCursorPluginMCPServers_TransportValidation(t *testing.T) {
 	}
 	require.Equal(t, string(ServerTypeSSE), serverMap["sse-server"])
 	require.Equal(t, string(ServerTypeStreamableHTTP), serverMap["streamable-server"])
+}
+
+func TestCursorPluginCacheWithoutEnabledStateIsNotImported(t *testing.T) {
+	for _, registry := range []string{"", "{invalid"} {
+		t.Run(registry, func(t *testing.T) {
+			home := t.TempDir()
+			dir := filepath.Join(home, "plugins", "cache", "cursor-public", "harness", "revision")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"),
+				[]byte(`{"mcpServers":{"figma":{"url":"https://mcp.figma.com/mcp"}}}`), 0o600))
+			if registry != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "plugins", "installed.json"), []byte(registry), 0o600))
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(home, "mcp.json"),
+				[]byte(`{"mcpServers":{"explicit":{"url":"https://explicit.example/mcp"}}}`), 0o600))
+			servers, err := DiscoverCursorPluginCandidates(home)
+			require.NoError(t, err)
+			require.Len(t, servers, 1, "cached files cannot establish enabled state")
+			require.Equal(t, "explicit", servers[0].Name)
+		})
+	}
 }

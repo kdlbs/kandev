@@ -2,12 +2,56 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPreparationAttemptOptionalMCPFailureKeepsOverallSuccess(t *testing.T) {
+	mgr, _ := newPrepareEventsTestManager(t, "profile-mcp-degraded")
+	recorder := mgr.newPreparationAttemptRecorder("task-mcp", "session-mcp")
+	recorder.AppendStep(PrepareStep{
+		Name:   "MCP server",
+		Kind:   PrepareStepKindAgentMCPVerification,
+		Status: PrepareStepFailed,
+	})
+
+	result := mergePreparationAttemptResult(nil, recorder, "/workspace")
+
+	require.True(t, result.Success)
+	require.Equal(t, PrepareStepFailed, result.Steps[0].Status)
+}
+
+func TestExecutionPrepareCompletionFatalErrorUpdatesResultAndEvent(t *testing.T) {
+	mgr, eventBus := newPrepareEventsTestManager(t, "profile-mcp-materialization-error")
+	recorder := mgr.newPreparationAttemptRecorder("task-mcp", "session-mcp")
+	recorder.AppendStep(PrepareStep{
+		Name:   "MCP discovery",
+		Kind:   PrepareStepKindAgentMCPDiscovery,
+		Status: PrepareStepFailed,
+	})
+	execution := &AgentExecution{
+		TaskID:        "task-mcp",
+		SessionID:     "session-mcp",
+		WorkspacePath: "/workspace",
+		PrepareResult: &EnvPrepareResult{Success: true},
+	}
+
+	mgr.publishExecutionPrepareCompleted(execution, recorder, errors.New("materialization failed"))
+
+	require.False(t, execution.PrepareResult.Success)
+	require.Equal(t, "materialization failed", execution.PrepareResult.ErrorMessage)
+	completed := prepareCompletedPayloads(eventBus)
+	require.Len(t, completed, 1)
+	require.False(t, completed[0].Success)
+	require.Equal(t, "materialization failed", completed[0].ErrorMessage)
+}
 
 func TestLaunch_WorktreeResumePublishesPrepareCompleted(t *testing.T) {
 	mgr, eventBus := newPrepareEventsTestManager(t, "profile-worktree-resume")
@@ -31,6 +75,64 @@ func TestLaunch_WorktreeResumePublishesPrepareCompleted(t *testing.T) {
 	require.Len(t, completed, 1)
 	require.True(t, completed[0].Success)
 	requirePrepareStep(t, completed[0].Steps, "Validate Docker")
+}
+
+func TestLaunch_PromotionPublishesPrepareCompletedAfterCursorMCPPreparation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cursorHome := filepath.Join(home, ".cursor")
+	writeCursorMCPRecoveryPlugin(t, cursorHome)
+	workspace := t.TempDir()
+	profile := &AgentProfileInfo{
+		ProfileID: "profile-promotion-mcp", AgentName: "cursor-acp",
+		CursorPluginsMCPEnabled: true, MCPSelectionMode: "selected",
+		MCPSelectedServers: []string{"plugin-harness-figma"},
+	}
+	manager, eventBus := newPrepareEventsTestManager(t, profile.ProfileID)
+	manager.profileResolver = &mockPassthroughProfileResolver{profile: profile}
+	manager.eventPublisher = NewEventPublisher(eventBus, manager.logger)
+	inventoryStarted := make(chan struct{})
+	releaseInventory := make(chan struct{})
+	manager.cursorInventoryLoader = func(context.Context) (mcpconfig.CursorNativeInventory, error) {
+		close(inventoryStarted)
+		<-releaseInventory
+		return mcpconfig.CursorNativeInventory{}, nil
+	}
+	execution := &AgentExecution{
+		ID: "workspace-only-mcp", TaskID: "task-promotion-mcp", SessionID: "session-promotion-mcp",
+		AgentProfileID: profile.ProfileID, WorkspacePath: workspace, ExecutorType: "local",
+		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false},
+	}
+	execution.setRuntimeEnvironment(map[string]string{"HOME": home})
+	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
+	require.NoError(t, manager.executionStore.Add(execution))
+	type launchOutcome struct {
+		execution *AgentExecution
+		err       error
+	}
+	done := make(chan launchOutcome, 1)
+	go func() {
+		got, err := manager.Launch(context.Background(), &LaunchRequest{
+			TaskID: execution.TaskID, SessionID: execution.SessionID,
+			AgentProfileID: profile.ProfileID, ExecutorType: "local",
+		})
+		done <- launchOutcome{execution: got, err: err}
+	}()
+	select {
+	case <-inventoryStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseInventory)
+		t.Fatal("promotion did not reach Cursor MCP discovery")
+	}
+	require.Empty(t, prepareCompletedPayloads(eventBus), "promotion must not complete while MCP discovery is blocked")
+	close(releaseInventory)
+	outcome := <-done
+	require.NoError(t, outcome.err)
+	require.Same(t, execution, outcome.execution)
+	completed := prepareCompletedPayloads(eventBus)
+	require.Len(t, completed, 1)
+	require.True(t, completed[0].Success)
+	requirePrepareStep(t, completed[0].Steps, "Cursor MCP verification")
 }
 
 func TestLaunch_ResumeWithoutPreparationPublishesNoPrepareEvents(t *testing.T) {
@@ -68,6 +170,52 @@ func TestPrepareProgressPublishesTypedRemoteHelperFields(t *testing.T) {
 	require.Equal(t, PrepareStepKindRemoteHelperDownload, payloads[0].StepKind)
 	require.Equal(t, "linux/amd64", payloads[0].RemotePlatform)
 	require.Equal(t, "timeout", payloads[0].FailureCode)
+}
+
+func TestPrepareAttemptEventsCarryDurableOrderedIdentityAndMCPFields(t *testing.T) {
+	mgr, eventBus := newPrepareEventsTestManager(t, "profile-mcp-events")
+	recorder := mgr.newPreparationAttemptRecorder("task-mcp", "session-mcp")
+	startedAt := recorder.preparationStartedAt
+	index := recorder.AppendStep(PrepareStep{
+		Name:        "MCP server",
+		Kind:        PrepareStepKindAgentMCPVerification,
+		MCPProvider: "cursor",
+		MCPServerID: "plugin-fixture-server",
+		Status:      PrepareStepRunning,
+	})
+	recorder.UpdateStep(index, PrepareStep{
+		Name:        "MCP server",
+		Kind:        PrepareStepKindAgentMCPVerification,
+		MCPProvider: "cursor",
+		MCPServerID: "plugin-fixture-server",
+		Status:      PrepareStepCompleted,
+	})
+	mgr.publishLaunchPrepareCompleted(&LaunchRequest{TaskID: "task-mcp", SessionID: "session-mcp"}, nil, recorder, "/workspace", true, nil)
+
+	progress := prepareProgressPayloads(eventBus)
+	require.Len(t, progress, 2)
+	require.NotEmpty(t, recorder.preparationID)
+	for _, payload := range progress {
+		require.Equal(t, recorder.preparationID, payload.PreparationID)
+		require.Equal(t, startedAt.Format(time.RFC3339Nano), payload.PreparationStartedAt)
+		require.Equal(t, "cursor", payload.MCPProvider)
+		require.Equal(t, "plugin-fixture-server", payload.MCPServerID)
+	}
+	completed := prepareCompletedPayloads(eventBus)
+	require.Len(t, completed, 1)
+	require.Equal(t, recorder.preparationID, completed[0].PreparationID)
+	require.Equal(t, startedAt.Format(time.RFC3339Nano), completed[0].PreparationStartedAt)
+	require.Equal(t, PrepareStepKindAgentMCPVerification, completed[0].Steps[0].Kind)
+	require.Equal(t, "plugin-fixture-server", completed[0].Steps[0].MCPServerID)
+
+	serialized := SerializePrepareResult(&EnvPrepareResult{
+		Success:              true,
+		Steps:                recorder.Steps(),
+		PreparationID:        recorder.preparationID,
+		PreparationStartedAt: startedAt,
+	})
+	require.Equal(t, recorder.preparationID, serialized["preparation_id"])
+	require.Equal(t, startedAt.Format(time.RFC3339Nano), serialized["preparation_started_at"])
 }
 
 func newPrepareEventsTestManager(t *testing.T, profileID string) (*Manager, *MockEventBusWithTracking) {

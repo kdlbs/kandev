@@ -405,6 +405,8 @@ export type PrepareStepInfo = {
   name: string;
   kind?: string;
   remotePlatform?: string;
+  mcpServerId?: string;
+  mcpProvider?: string;
   failureCode?: string;
   command?: string;
   status: string;
@@ -419,6 +421,8 @@ export type PrepareStepInfo = {
 export type SessionPrepareState = {
   sessionId: string;
   status: string;
+  preparationId?: string;
+  preparationStartedAt?: string;
   steps: PrepareStepInfo[];
   errorMessage?: string;
   durationMs?: number;

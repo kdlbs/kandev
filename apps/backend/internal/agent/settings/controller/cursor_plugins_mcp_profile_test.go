@@ -27,15 +27,23 @@ func TestCursorPluginsMCPPreferenceCreatePatchAndDuplicate(t *testing.T) {
 	if !createdDefault.CursorPluginsMCPEnabled {
 		t.Fatal("omitted create preference should default to true")
 	}
+	if createdDefault.MCPSelectionMode != dto.MCPSelectionModeInherit || createdDefault.MCPSelectedServers == nil || len(createdDefault.MCPSelectedServers) != 0 {
+		t.Fatalf("omitted selection defaults = %q / %#v, want inherit / empty", createdDefault.MCPSelectionMode, createdDefault.MCPSelectedServers)
+	}
 	disabled := false
+	selectedServers := []string{"plugin-atlassian-atlassian", "github"}
 	createdDisabled, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
 		AgentID: agent.ID, Name: "disabled", CursorPluginsMCPEnabled: &disabled,
+		CursorMCPAuthEnabled: &disabled, MCPSelectionMode: stringPointer("selected"), MCPSelectedServers: &selectedServers,
 	})
 	if err != nil {
 		t.Fatalf("create disabled profile: %v", err)
 	}
 	if createdDisabled.CursorPluginsMCPEnabled {
 		t.Fatal("explicit false create preference was lost")
+	}
+	if createdDisabled.CursorMCPAuthEnabled || createdDisabled.MCPSelectionMode != "selected" || len(createdDisabled.MCPSelectedServers) != 2 {
+		t.Fatalf("create MCP preferences = auth:%v mode:%q servers:%#v", createdDisabled.CursorMCPAuthEnabled, createdDisabled.MCPSelectionMode, createdDisabled.MCPSelectedServers)
 	}
 
 	updatedOmitted, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{ID: createdDisabled.ID, Name: stringPointer("renamed")})
@@ -44,6 +52,9 @@ func TestCursorPluginsMCPPreferenceCreatePatchAndDuplicate(t *testing.T) {
 	}
 	if updatedOmitted.CursorPluginsMCPEnabled {
 		t.Fatal("omitted patch reset the saved false preference")
+	}
+	if updatedOmitted.CursorMCPAuthEnabled || updatedOmitted.MCPSelectionMode != "selected" || len(updatedOmitted.MCPSelectedServers) != 2 {
+		t.Fatalf("unrelated patch changed MCP preferences: auth:%v mode:%q servers:%#v", updatedOmitted.CursorMCPAuthEnabled, updatedOmitted.MCPSelectionMode, updatedOmitted.MCPSelectedServers)
 	}
 
 	enabled := true
@@ -66,6 +77,19 @@ func TestCursorPluginsMCPPreferenceCreatePatchAndDuplicate(t *testing.T) {
 	}
 	if duplicated.CursorPluginsMCPEnabled {
 		t.Fatal("duplicate did not preserve explicit false")
+	}
+	if duplicated.CursorMCPAuthEnabled || duplicated.MCPSelectionMode != "selected" || len(duplicated.MCPSelectedServers) != 2 {
+		t.Fatalf("duplicate MCP preferences = auth:%v mode:%q servers:%#v", duplicated.CursorMCPAuthEnabled, duplicated.MCPSelectionMode, duplicated.MCPSelectedServers)
+	}
+	emptySelection := []string{}
+	cleared, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID: createdDisabled.ID, MCPSelectedServers: &emptySelection,
+	})
+	if err != nil {
+		t.Fatalf("clear selected servers: %v", err)
+	}
+	if cleared.MCPSelectionMode != "selected" || cleared.MCPSelectedServers == nil || len(cleared.MCPSelectedServers) != 0 {
+		t.Fatalf("explicit empty selection = %q / %#v, want selected / []", cleared.MCPSelectionMode, cleared.MCPSelectedServers)
 	}
 
 	var omittedCreate dto.ProfileCreateRequest

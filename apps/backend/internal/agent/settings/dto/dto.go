@@ -44,9 +44,11 @@ type AgentProfileDTO struct {
 	ProviderBaseURL string `json:"provider_base_url,omitempty"`
 	// ProviderAPIKeySecretID references the Kandev global secret holding the
 	// bearer key. The value is never returned.
-	ProviderAPIKeySecretID  string `json:"provider_api_key_secret_id,omitempty"`
-	CursorMCPAuthEnabled    bool   `json:"cursor_mcp_auth_enabled"`
-	CursorPluginsMCPEnabled bool   `json:"cursor_plugins_mcp_enabled"`
+	ProviderAPIKeySecretID  string   `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled    bool     `json:"cursor_mcp_auth_enabled"`
+	CursorPluginsMCPEnabled bool     `json:"cursor_plugins_mcp_enabled"`
+	MCPSelectionMode        string   `json:"mcp_selection_mode"`
+	MCPSelectedServers      []string `json:"mcp_selected_servers"`
 	// ProviderSupported is computed at read time: true when the profile's
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`
@@ -178,6 +180,24 @@ type AgentDTO struct {
 	InferenceCapable bool      `json:"inference_capable"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// AgentMCPDiscoveryDTO exposes a credential-free host preview of one agent's
+// native MCP sources. Host paths and server connection definitions stay local.
+type AgentMCPDiscoveryDTO struct {
+	AgentID    string                       `json:"agent_id"`
+	ProviderID string                       `json:"provider_id"`
+	Status     string                       `json:"status"`
+	Reason     string                       `json:"reason,omitempty"`
+	Servers    []AgentMCPDiscoveryServerDTO `json:"servers"`
+}
+
+type AgentMCPDiscoveryServerDTO struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	PluginName           string `json:"plugin_name,omitempty"`
+	SourceKind           string `json:"source_kind"`
+	CredentialsAvailable bool   `json:"credentials_available"`
 }
 
 type ListAgentsResponse struct {

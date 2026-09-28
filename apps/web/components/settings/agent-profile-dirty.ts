@@ -13,6 +13,13 @@ export function isProviderConfigDirty(draft: AgentProfile, savedProfile: AgentPr
   );
 }
 
+function areMcpSelectedServersEqual(left: string[] = [], right: string[] = []): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((serverId, index) => serverId === sortedRight[index]);
+}
+
 /**
  * True when any editable field of the profile editor draft differs from the
  * last-saved profile. Drives the settings save bar's dirty state.
@@ -50,6 +57,8 @@ function hasExecutionProfileFieldsChanged(
     draft.cliPassthrough !== savedProfile.cliPassthrough,
     (draft.cursorMcpAuthEnabled ?? true) !== (savedProfile.cursorMcpAuthEnabled ?? true),
     (draft.cursorPluginsMcpEnabled ?? true) !== (savedProfile.cursorPluginsMcpEnabled ?? true),
+    (draft.mcpSelectionMode ?? "inherit") !== (savedProfile.mcpSelectionMode ?? "inherit"),
+    !areMcpSelectedServersEqual(draft.mcpSelectedServers, savedProfile.mcpSelectedServers),
     (draft.enabled ?? true) !== (savedProfile.enabled ?? true),
     !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
     (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? ""),

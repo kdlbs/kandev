@@ -4,8 +4,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
-import { IconCopy } from "@tabler/icons-react";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconCopy, IconAlertTriangle } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -16,12 +15,12 @@ import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
+import { CursorMcpProfileSelection } from "@/components/settings/cursor-mcp-profile-selection";
 import { profilePermissionValues } from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
 import {
   AgentProfileDeleteConflictDialog,
   AgentProfileDisableConflictDialog,
-  type AgentProfileDeleteConflict,
 } from "@/components/settings/agent-profile-delete-dialog";
 import { DeleteProfileCard } from "@/components/settings/agent-profile-delete-card";
 import {
@@ -45,11 +44,11 @@ import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
-
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type {
   Agent,
   AgentProfile,
+  AgentProfileMcpConfig,
   ModelConfig,
   PermissionSetting,
   PassthroughConfig,
@@ -60,26 +59,22 @@ import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
-import type { AgentProfileMcpConfig } from "@/lib/types/http";
+import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { isHandledApiError } from "@/lib/api/client";
-import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 
-type ProfileEditorProps = {
-  agent: Agent;
-  profile: AgentProfile;
-  modelConfig: ModelConfig;
-  permissionSettings: Record<string, PermissionSetting>;
-  passthroughConfig: PassthroughConfig | null;
-  initialMcpConfig?: AgentProfileMcpConfig | null;
-};
+export {
+  ProfileEnvVarsEditor,
+  ProfileEnvVarsSection,
+} from "@/components/settings/profile-edit/profile-env-vars-section";
+export { preserveNewerProfileDraft } from "@/components/settings/agent-profile-page-state";
 
 function toProfileFormData(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
 ): ProfileFormData {
-  const permissionValues = profilePermissionValues(profile, permissionSettings);
+  const pv = profilePermissionValues(profile, permissionSettings);
   return {
     name: profile.name,
     model: profile.model,
@@ -88,11 +83,13 @@ function toProfileFormData(
     require_exact_model: profile.requireExactModel ?? false,
     mode: profile.mode ?? "",
     config_options: profile.configOptions ?? {},
-    auto_approve: permissionValues.auto_approve,
-    allow_indexing: permissionValues.allow_indexing,
+    auto_approve: pv.auto_approve,
+    allow_indexing: pv.allow_indexing,
     cli_passthrough: profile.cliPassthrough,
     cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
+    mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
+    mcp_selected_servers: profile.mcpSelectedServers ?? [],
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
@@ -188,6 +185,8 @@ function ProfileSettingsCard({
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
     onDraftChange(toAgentProfilePatch(patch));
   };
+  const supportsCursorMcp =
+    agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor";
 
   return (
     <SettingsCard
@@ -216,49 +215,22 @@ function ProfileSettingsCard({
           lockPassthrough={Boolean(agent.tui_config)}
           hideCustomCLIFlags
         />
+        {supportsCursorMcp ? (
+          <CursorMcpProfileSelection
+            agentId={agent.id}
+            profileId={draft.id}
+            mode={draft.mcpSelectionMode ?? "inherit"}
+            selectedServerIds={draft.mcpSelectedServers ?? []}
+            savedMode={savedProfile.mcpSelectionMode ?? "inherit"}
+            savedSelectedServerIds={savedProfile.mcpSelectedServers ?? []}
+            onModeChange={(mcpSelectionMode) => onDraftChange({ mcpSelectionMode })}
+            onSelectedServersChange={(mcpSelectedServers) => onDraftChange({ mcpSelectedServers })}
+          />
+        ) : null}
       </CardContent>
     </SettingsCard>
   );
 }
-
-type ProfileDeleteDialogsProps = {
-  conflict: AgentProfileDeleteConflict | null;
-  setConflict: (c: AgentProfileDeleteConflict | null) => void;
-  handleForceDelete: () => void;
-};
-
-function ProfileDeleteDialogs({
-  conflict,
-  setConflict,
-  handleForceDelete,
-}: ProfileDeleteDialogsProps) {
-  return (
-    <>
-      <AgentProfileDeleteConflictDialog
-        conflict={conflict}
-        onOpenChange={(open) => {
-          if (!open) setConflict(null);
-        }}
-        onConfirm={handleForceDelete}
-      />
-    </>
-  );
-}
-
-type ProfileEditorBodyProps = {
-  agent: Agent;
-  draft: AgentProfile;
-  savedProfile: AgentProfile;
-  isDirty: boolean;
-  updateDraft: (patch: Partial<AgentProfile>) => void;
-  modelConfig: ModelConfig;
-  permissionSettings: Record<string, PermissionSetting>;
-  passthroughConfig: PassthroughConfig | null;
-  secrets: SecretListItem[];
-  initialMcpConfig?: AgentProfileMcpConfig | null;
-  onToastError: (error: unknown) => void;
-  onModelConfigResolutionPendingChange: (pending: boolean) => void;
-};
 
 function ProfileEditorBody({
   agent,
@@ -273,7 +245,20 @@ function ProfileEditorBody({
   initialMcpConfig,
   onToastError,
   onModelConfigResolutionPendingChange,
-}: ProfileEditorBodyProps) {
+}: {
+  agent: Agent;
+  draft: AgentProfile;
+  savedProfile: AgentProfile;
+  isDirty: boolean;
+  updateDraft: (patch: Partial<AgentProfile>) => void;
+  modelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
+  secrets: SecretListItem[];
+  initialMcpConfig?: AgentProfileMcpConfig | null;
+  onToastError: (error: unknown) => void;
+  onModelConfigResolutionPendingChange: (pending: boolean) => void;
+}) {
   return (
     <>
       <ProfileSettingsCard
@@ -342,7 +327,14 @@ function ProfileEditor({
   permissionSettings,
   passthroughConfig,
   initialMcpConfig,
-}: ProfileEditorProps) {
+}: {
+  agent: Agent;
+  profile: AgentProfile;
+  modelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
+  initialMcpConfig?: AgentProfileMcpConfig | null;
+}) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const [modelConfigResolutionPending, setModelConfigResolutionPending] = useState(false);
@@ -419,7 +411,6 @@ function ProfileEditor({
     discard: discardProfileDraft,
   });
   const deleteState = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
-
   const { handleDuplicate: handleDuplicateProfile, duplicating } = useProfileDuplicateAction({
     agent,
     draft,
@@ -498,7 +489,6 @@ function ProfileEditor({
         onOpenChange={deleteState.setShowDeleteConfirm}
         onConfirm={deleteState.handleDeleteProfile}
       />
-
       <AgentProfileDisableConflictDialog
         agents={utilityConflict}
         onCancel={() => setUtilityConflict([])}
@@ -507,21 +497,22 @@ function ProfileEditor({
           await handleSave(true);
         }}
       />
-
-      <ProfileDeleteDialogs
+      <AgentProfileDeleteConflictDialog
         conflict={deleteState.conflict}
-        setConflict={deleteState.setConflict}
-        handleForceDelete={deleteState.handleForceDelete}
+        onOpenChange={(open) => {
+          if (!open) deleteState.setConflict(null);
+        }}
+        onConfirm={deleteState.handleForceDelete}
       />
     </div>
   );
 }
 
-type AgentProfilePageClientProps = {
+export function AgentProfilePage({
+  initialMcpConfig,
+}: {
   initialMcpConfig?: AgentProfileMcpConfig | null;
-};
-
-export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientProps) {
+}) {
   const { t } = useTranslation();
   const params = useParams();
   const agentParam = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;

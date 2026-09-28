@@ -380,6 +380,8 @@ export type AgentProfilePayload = {
   cli_passthrough?: boolean;
   cursor_mcp_auth_enabled?: boolean;
   cursor_plugins_mcp_enabled?: boolean;
+  mcp_selection_mode?: "inherit" | "selected";
+  mcp_selected_servers?: string[];
   plan: string;
   created_at?: string;
   updated_at?: string;

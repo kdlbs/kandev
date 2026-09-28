@@ -20,11 +20,16 @@ const EDITABLE_FIELDS = [
   "providerKind",
   "providerBaseUrl",
   "providerApiKeySecretId",
+  "mcpSelectionMode",
+  "mcpSelectedServers",
   "enabled",
   "dynamic",
 ] as const satisfies readonly (keyof AgentProfile)[];
 
-type EditableProfile = Pick<AgentProfile, (typeof EDITABLE_FIELDS)[number]>;
+type EditableProfile = Pick<AgentProfile, (typeof EDITABLE_FIELDS)[number]> & {
+  mcpSelectionMode: NonNullable<AgentProfile["mcpSelectionMode"]>;
+  mcpSelectedServers: string[];
+};
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -37,9 +42,12 @@ function canonicalize(value: unknown): unknown {
 }
 
 function editableSnapshot(profile: AgentProfile): EditableProfile {
-  return Object.fromEntries(
-    EDITABLE_FIELDS.map((field) => [field, profile[field]]),
-  ) as EditableProfile;
+  const fields = Object.fromEntries(EDITABLE_FIELDS.map((field) => [field, profile[field]]));
+  return {
+    ...fields,
+    mcpSelectionMode: profile.mcpSelectionMode ?? "inherit",
+    mcpSelectedServers: [...(profile.mcpSelectedServers ?? [])].sort(),
+  } as EditableProfile;
 }
 
 export function sameEditableProfile(left: AgentProfile, right: AgentProfile): boolean {

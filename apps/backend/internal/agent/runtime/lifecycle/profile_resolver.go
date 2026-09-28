@@ -101,6 +101,8 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		CLIPassthrough:             profile.CLIPassthrough,
 		CursorMCPAuthEnabled:       profile.CursorMCPAuthEnabled,
 		CursorPluginsMCPEnabled:    profile.CursorPluginsMCPEnabled,
+		MCPSelectionMode:           profile.MCPSelectionMode,
+		MCPSelectedServers:         append([]string{}, profile.MCPSelectedServers...),
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil

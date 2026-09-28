@@ -14,7 +14,7 @@ legacy_specs: []
 
 ## Overview
 
-Import supported installed Cursor plugin and user MCP definitions into local Cursor task launches with a persistent per-profile opt-out. Requirements and design remain draft. Review is against workspace documents over `adc5d67f55d19dd76161eaec5ae725e20a345acb`; no production implementation is present.
+Import supported installed Cursor plugin and user MCP definitions into local Cursor task launches with a persistent per-profile opt-out. Requirements and design remain draft. Implementation and review remediation are present through `2ea738e16`; Task 05 repairs gaps found during live testing.
 
 First resolve versioned compatibility and import ownership evidence, then implement discovery and profile contracts, integrate launch/reconciliation, and finish the settings UI and end-to-end evidence. Execute sequentially. Task 00 gates production implementation because cache contents do not prove installation and existing additive merge/cleanup cannot satisfy disable/restart semantics.
 
@@ -82,9 +82,27 @@ All IDs in this table have prefix `AC-AGENTS-CURSOR-PLUGIN-MCP-`. Work-order fro
 - [x] [Task 03: Launch integration and owned import reconciliation](task-03-launch-materialization.md)
 - [x] [Task 04: Settings UI, localization, and end-to-end evidence](task-04-ui-and-i18n.md)
 
+- [x] [Task 05: Native identity and cache eligibility repair](task-05-native-identity.md)
+
 Dependencies: 00 -> {01, 02} -> 03 -> 04. This graph does not authorize parallel agents; default execution is sequential.
 
 ## Verification results
+
+Task 05 repair verification (2026-09-28):
+
+- Red regressions reproduced wrong OAuth identity, cache activation without
+  enablement evidence, and logical/native-name precedence conflicts.
+- `go test -race ./internal/agent/mcpconfig ./internal/agent/runtime/lifecycle -run 'Cursor|ProjectMCP' -count=1`: passed, including shared credential identity and owned bare-name migration.
+- Scoped `golangci-lint run` on both packages: passed with temporary writable Go/linter caches. The default-cache invocation could not load packages.
+- Specification catalog and lint: passed. Public documentation tests: 62 passed;
+  published documentation validator: 47 pages passed. `git diff --check`: passed.
+- These results cover this repair only. No authenticated Atlassian/Figma smoke
+  was performed. Cache roots without readable enablement metadata are skipped;
+  native service-backed plugin inventory support remains outside this repair.
+- Public docs updated: `docs/public/agents-and-profiles.md` (reference/explanation).
+
+Earlier implementation evidence below is retained as reported by the preceding
+implementation; Task 05 does not independently certify every original work order.
 
 Implementation verification (2026-09-28):
 
@@ -114,3 +132,20 @@ Product tests and CLI smoke checks were not run in this documentation review. Do
 - Shared-workspace ownership, crash recovery, and stale cleanup require a concrete persistence design in Task 00 before launch implementation. Existing file-level metadata is insufficient.
 - Default-enabled imports can introduce plugin commands and secret-bearing values into task config. Source eligibility, policy, permissions, redaction and cleanup are mandatory, not optional follow-ups.
 - The opt-out stops Kandev copying only. Cursor can still read its own global configuration; public/UI copy must not promise complete MCP disablement.
+
+
+## Follow-up: native discovery and credential-bearing precedence
+
+The [discovery/auth repair](../cursor-mcp-discovery-auth-repair/plan.md)
+supersedes the filesystem-only native inventory assumption and newest-file-only
+credential conflict rule. All three repair work orders are complete, with package/lifecycle race tests,
+scoped lint and isolated native terminal/ACP fixture calls recorded there.
+Historical results above are separate from this follow-up evidence. Source-repository-only disable inheritance
+was explicitly selected by the user.
+
+## Follow-up: profile-authorized preparation
+
+The [agent MCP preparation package](../agent-mcp-preparation/plan.md) extends
+this delivery with profile selection, native server approval/readiness, task
+recovery and preservation of native credential refresh. Its results are tracked
+separately; the historical verification above does not prove the new behavior.

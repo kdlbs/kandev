@@ -113,6 +113,8 @@ func (r *sqliteRepository) initSchema() error {
 		provider_api_key_secret_id TEXT NOT NULL DEFAULT '',
 		cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1,
 		cursor_plugins_mcp_enabled INTEGER NOT NULL DEFAULT 1,
+		mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit',
+		mcp_selected_servers TEXT NOT NULL DEFAULT '[]',
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -209,6 +211,8 @@ func (r *sqliteRepository) initSchema() error {
 	_ = r.migrate.Apply("agent_profiles.require_exact_model", `ALTER TABLE agent_profiles ADD COLUMN require_exact_model INTEGER NOT NULL DEFAULT 0`)
 	_ = r.migrate.Apply("agent_profiles.cursor_mcp_auth_enabled", `ALTER TABLE agent_profiles ADD COLUMN cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1`)
 	_ = r.migrate.Apply("agent_profiles.cursor_plugins_mcp_enabled", `ALTER TABLE agent_profiles ADD COLUMN cursor_plugins_mcp_enabled INTEGER NOT NULL DEFAULT 1`)
+	_ = r.migrate.Apply("agent_profiles.mcp_selection_mode", `ALTER TABLE agent_profiles ADD COLUMN mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit'`)
+	_ = r.migrate.Apply("agent_profiles.mcp_selected_servers", `ALTER TABLE agent_profiles ADD COLUMN mcp_selected_servers TEXT NOT NULL DEFAULT '[]'`)
 	// Office identifiers bind the execution profile that owns their launches.
 	// Added after the table-recreation block for the same reason as
 	// command_prefix / provider_kind.
@@ -346,6 +350,8 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	srcHasRequireExactModel := columnExists(tx, "agent_profiles", "require_exact_model")
 	srcHasCursorMCPAuthEnabled := columnExists(tx, "agent_profiles", "cursor_mcp_auth_enabled")
 	srcHasCursorPluginsMCPEnabled := columnExists(tx, "agent_profiles", "cursor_plugins_mcp_enabled")
+	srcHasMCPSelectionMode := columnExists(tx, "agent_profiles", "mcp_selection_mode")
+	srcHasMCPSelectedServers := columnExists(tx, "agent_profiles", "mcp_selected_servers")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -386,6 +392,14 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		srcCols += ", cursor_plugins_mcp_enabled"
 		dstCols += ", cursor_plugins_mcp_enabled"
 	}
+	if srcHasMCPSelectionMode {
+		srcCols += ", mcp_selection_mode"
+		dstCols += ", mcp_selection_mode"
+	}
+	if srcHasMCPSelectedServers {
+		srcCols += ", mcp_selected_servers"
+		dstCols += ", mcp_selected_servers"
+	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
 		id TEXT PRIMARY KEY,
@@ -413,6 +427,8 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		require_exact_model INTEGER NOT NULL DEFAULT 0,
 		cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1,
 		cursor_plugins_mcp_enabled INTEGER NOT NULL DEFAULT 1,
+		mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit',
+		mcp_selected_servers TEXT NOT NULL DEFAULT '[]',
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	)`); err != nil {
 		return fmt.Errorf("create new table: %w", err)
@@ -1028,6 +1044,10 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 	if err != nil {
 		return err
 	}
+	mcpSelectedServersJSON, err := mcpSelectedServersToJSON(profile.MCPSelectedServers)
+	if err != nil {
+		return err
+	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
 		return err
@@ -1045,7 +1065,9 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			executor_preference, budget_monthly_cents, settings, permissions,
 			command_prefix, fallback_model, auto_fallback,
 			provider_kind, provider_base_url, provider_api_key_secret_id, require_exact_model,
-			cursor_mcp_auth_enabled, cursor_plugins_mcp_enabled, execution_agent_profile_id
+			cursor_mcp_auth_enabled, cursor_plugins_mcp_enabled,
+			mcp_selection_mode, mcp_selected_servers,
+			execution_agent_profile_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -1058,7 +1080,9 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?, ?,
-			?, ?, ?
+			?, ?,
+			?, ?,
+			?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1079,6 +1103,8 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.RequireExactModel),
 		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
 		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
+		normalizeMCPSelectionMode(profile.MCPSelectionMode),
+		mcpSelectedServersJSON,
 		profile.ExecutionAgentProfileID,
 	)
 	return err
@@ -1285,6 +1311,24 @@ func envVarsToJSON(envVars []models.ProfileEnvVar) (string, error) {
 	return string(data), nil
 }
 
+func mcpSelectedServersToJSON(servers []string) (string, error) {
+	if servers == nil {
+		servers = []string{}
+	}
+	data, err := json.Marshal(servers)
+	if err != nil {
+		return "", fmt.Errorf("marshal mcp_selected_servers: %w", err)
+	}
+	return string(data), nil
+}
+
+func normalizeMCPSelectionMode(mode string) string {
+	if mode == "" {
+		return "inherit"
+	}
+	return mode
+}
+
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	return r.updateAgentProfile(ctx, r.db, profile)
 }
@@ -1322,6 +1366,10 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 	if err != nil {
 		return err
 	}
+	mcpSelectedServersJSON, err := mcpSelectedServersToJSON(profile.MCPSelectedServers)
+	if err != nil {
+		return err
+	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
 		return err
@@ -1352,7 +1400,9 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
 			command_prefix = ?, fallback_model = ?, auto_fallback = ?,
 			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?, require_exact_model = ?,
-			cursor_mcp_auth_enabled = ?, cursor_plugins_mcp_enabled = ?, execution_agent_profile_id = ?
+			cursor_mcp_auth_enabled = ?, cursor_plugins_mcp_enabled = ?,
+			mcp_selection_mode = ?, mcp_selected_servers = ?,
+			execution_agent_profile_id = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -1373,6 +1423,8 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.RequireExactModel),
 		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
 		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
+		normalizeMCPSelectionMode(profile.MCPSelectionMode),
+		mcpSelectedServersJSON,
 		profile.ExecutionAgentProfileID,
 		profile.ID)
 	if err != nil {
@@ -1449,6 +1501,8 @@ const agentProfileSelectColumns = `
 		COALESCE(provider_api_key_secret_id, ''), COALESCE(require_exact_model, 0),
 		COALESCE(cursor_mcp_auth_enabled, 1),
 		COALESCE(cursor_plugins_mcp_enabled, 1),
+		COALESCE(mcp_selection_mode, 'inherit'),
+		COALESCE(mcp_selected_servers, '[]'),
 		COALESCE(execution_agent_profile_id, '')
 	FROM agent_profiles`
 
@@ -1633,6 +1687,7 @@ func scanAgentProfile(scanner interface {
 	var requireExactModel int
 	var cursorMCPAuthEnabled int
 	var cursorPluginsMCPEnabled int
+	var mcpSelectedServersJSON string
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -1681,6 +1736,8 @@ func scanAgentProfile(scanner interface {
 		&requireExactModel,
 		&cursorMCPAuthEnabled,
 		&cursorPluginsMCPEnabled,
+		&profile.MCPSelectionMode,
+		&mcpSelectedServersJSON,
 		&profile.ExecutionAgentProfileID,
 	); err != nil {
 		return nil, err
@@ -1702,6 +1759,13 @@ func scanAgentProfile(scanner interface {
 	profile.RequireExactModel = requireExactModel == 1
 	profile.CursorMCPAuthEnabled = cursorMCPAuthEnabled == 1
 	profile.CursorPluginsMCPEnabled = cursorPluginsMCPEnabled == 1
+	profile.MCPSelectionMode = normalizeMCPSelectionMode(profile.MCPSelectionMode)
+	if err := json.Unmarshal([]byte(mcpSelectedServersJSON), &profile.MCPSelectedServers); err != nil {
+		return nil, fmt.Errorf("failed to parse mcp_selected_servers for profile %s: %w", profile.ID, err)
+	}
+	if profile.MCPSelectedServers == nil {
+		profile.MCPSelectedServers = []string{}
+	}
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
 	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)

@@ -39,6 +39,8 @@ const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> =
   ["cli_passthrough", "cliPassthrough"],
   ["cursor_mcp_auth_enabled", "cursorMcpAuthEnabled"],
   ["cursor_plugins_mcp_enabled", "cursorPluginsMcpEnabled"],
+  ["mcp_selection_mode", "mcpSelectionMode"],
+  ["mcp_selected_servers", "mcpSelectedServers"],
   ["cli_flags", "cliFlags"],
   ["command_prefix", "commandPrefix"],
   ["provider_kind", "providerKind"],
@@ -251,6 +253,8 @@ function buildCreateProfilePayload(profile: DraftProfile) {
     cli_passthrough: profile.cliPassthrough ?? false,
     cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
+    mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
+    mcp_selected_servers: profile.mcpSelectedServers ?? [],
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
     ...providerPayloadFields(profile),
@@ -268,10 +272,29 @@ function changedCursorPreferences(profile: DraftProfile, savedProfile: AgentProf
     (profile.cursorPluginsMcpEnabled ?? true) === (savedProfile.cursorPluginsMcpEnabled ?? true)
       ? undefined
       : (profile.cursorPluginsMcpEnabled ?? true);
+  const selectionMode =
+    (profile.mcpSelectionMode ?? "inherit") === (savedProfile.mcpSelectionMode ?? "inherit")
+      ? undefined
+      : (profile.mcpSelectionMode ?? "inherit");
+  const selectedServers = areSelectedServerIdsEqual(
+    profile.mcpSelectedServers,
+    savedProfile.mcpSelectedServers,
+  )
+    ? undefined
+    : (profile.mcpSelectedServers ?? []);
   return {
     cursor_mcp_auth_enabled: mcpAuth,
     cursor_plugins_mcp_enabled: pluginsMcp,
+    mcp_selection_mode: selectionMode,
+    mcp_selected_servers: selectedServers,
   };
+}
+
+function areSelectedServerIdsEqual(left: string[] = [], right: string[] = []): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((serverId, index) => serverId === sortedRight[index]);
 }
 
 function buildUpdateProfilePayload(profile: DraftProfile, savedProfile: AgentProfile) {
@@ -580,6 +603,9 @@ function isProfileSettingsDirty(draft: DraftProfile, saved: AgentProfile): boole
   return (
     areConfigOptionsEqual(draft.configOptions, saved.configOptions) === false ||
     (draft.cursorMcpAuthEnabled ?? true) !== (saved.cursorMcpAuthEnabled ?? true) ||
+    (draft.cursorPluginsMcpEnabled ?? true) !== (saved.cursorPluginsMcpEnabled ?? true) ||
+    (draft.mcpSelectionMode ?? "inherit") !== (saved.mcpSelectionMode ?? "inherit") ||
+    !areSelectedServerIdsEqual(draft.mcpSelectedServers, saved.mcpSelectedServers) ||
     arePermissionsDirty(draft, saved)
   );
 }

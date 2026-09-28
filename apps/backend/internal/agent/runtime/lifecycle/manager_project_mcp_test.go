@@ -160,11 +160,16 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 }
 
 func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *testing.T) {
+	const revision = "1111111111111111111111111111111111111111"
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	workspace := t.TempDir()
 	cursorHome := filepath.Join(home, ".cursor")
 	projects := filepath.Join(cursorHome, "projects")
+	sourceRepository := t.TempDir()
+	secondaryRepository := t.TempDir()
+	writeCursorMCPDisabledForPath(t, cursorHome, sourceRepository, []string{"plugin-atlassian-atlassian"})
+	writeCursorNativeCachePlugin(t, cursorHome, revision, `{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"}}}`)
 	if err := os.MkdirAll(filepath.Join(projects, "source-project"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -178,26 +183,35 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 	resolver := &mockPassthroughProfileResolver{
 		profiles: map[string]*AgentProfileInfo{
 			"office-stable-profile":    {AgentName: "cursor-acp", CursorMCPAuthEnabled: true},
-			"cursor-execution-profile": {AgentName: "cursor-acp", CursorMCPAuthEnabled: false},
+			"cursor-execution-profile": {AgentName: "cursor-acp", CursorMCPAuthEnabled: false, CursorPluginsMCPEnabled: true},
 		},
 	}
 	mgr := newTestManager(t)
 	mgr.profileResolver = resolver
-	execution := &AgentExecution{
-		ID:             "exec-1",
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		WorkspacePath:  workspace,
-		ExecutorType:   "worktree",
-		metadata:       map[string]interface{}{},
-		standalonePort: 45678,
+	mgr.cursorInventoryLoader = func(context.Context) (mcpconfig.CursorNativeInventory, error) {
+		return cursorInventoryForRevision(revision), nil
 	}
+	execution := &AgentExecution{
+		ID:                   "exec-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+		WorkspacePath:        workspace,
+		WorkspaceSourceRoots: []string{secondaryRepository},
+		ExecutorType:         "worktree",
+		metadata:             map[string]interface{}{},
+		standalonePort:       45678,
+	}
+	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	req := &LaunchRequest{
 		TaskID:             "task-1",
 		SessionID:          "session-1",
 		AgentProfileID:     "office-stable-profile",
 		ExecutionProfileID: "cursor-execution-profile",
 		ExecutorType:       "worktree",
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "primary", RepositoryPath: sourceRepository},
+			{RepositoryID: "secondary", RepositoryPath: secondaryRepository},
+		},
 	}
 
 	if err := mgr.promoteWorkspaceExecution(context.Background(), execution, req); err != nil {
@@ -210,13 +224,21 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		t.Fatalf("resolved disabled execution profile kept shared link, lstat err=%v", err)
 	}
+	materialized := readCursorProjectMCPForTest(t, filepath.Join(workspace, ".cursor", "mcp.json"))
+	if _, imported := materialized["plugin-atlassian-atlassian"]; imported {
+		t.Fatal("promotion imported the source-disabled native plugin")
+	}
+	got, available := cursorMCPSourceRepository(execution)
+	if !available || got != sourceRepository {
+		t.Fatalf("promoted source repository = %q, want primary RepoSpecs path %q", got, sourceRepository)
+	}
 }
 
 func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
 	cursorHome := t.TempDir()
 	t.Setenv("HOME", cursorHome)
 
-	pluginDir := filepath.Join(cursorHome, ".cursor", "plugins", "cache", "cursor-public", "atlassian", "v1")
+	pluginDir := filepath.Join(cursorHome, ".cursor", "plugins", "local", "atlassian")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -268,11 +290,11 @@ func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		t.Fatalf("cursor mcp.json not valid JSON: %v\n%s", err, data)
 	}
-	if _, ok := payload.MCPServers["atlassian"]; !ok {
+	if _, ok := payload.MCPServers["plugin-atlassian-atlassian"]; !ok {
 		t.Fatalf("atlassian plugin MCP server not found in materialized .cursor/mcp.json: %s", data)
 	}
-	if payload.MCPServers["atlassian"].URL != "https://mcp.atlassian.com/v2/mcp" {
-		t.Errorf("atlassian URL = %q, want https://mcp.atlassian.com/v2/mcp", payload.MCPServers["atlassian"].URL)
+	if payload.MCPServers["plugin-atlassian-atlassian"].URL != "https://mcp.atlassian.com/v2/mcp" {
+		t.Errorf("atlassian URL = %q, want https://mcp.atlassian.com/v2/mcp", payload.MCPServers["plugin-atlassian-atlassian"].URL)
 	}
 	if _, ok := payload.MCPServers["kandev"]; !ok {
 		t.Fatalf("kandev MCP server missing: %s", data)

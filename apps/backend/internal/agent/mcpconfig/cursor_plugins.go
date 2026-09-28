@@ -58,7 +58,13 @@ func (c DiscoveredServerCandidate) ToServerDef() ServerDef {
 // DiscoverCursorPluginMCPServers scans Cursor plugin manifests and user-level
 // MCP configuration under cursorHome, returning deduplicated candidate servers.
 func DiscoverCursorPluginMCPServers(cursorHome string) ([]agentctltypes.McpServer, error) {
-	candidates, err := DiscoverCursorPluginCandidates(cursorHome)
+	return DiscoverCursorPluginMCPServersWithInventory(cursorHome, CursorNativeInventory{})
+}
+
+// DiscoverCursorPluginMCPServersWithInventory returns definitions from local,
+// global and exact native-inventory roots.
+func DiscoverCursorPluginMCPServersWithInventory(cursorHome string, inventory CursorNativeInventory) ([]agentctltypes.McpServer, error) {
+	candidates, err := DiscoverCursorPluginCandidatesWithInventory(cursorHome, inventory)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +92,12 @@ func DiscoverCursorPluginMCPServers(cursorHome string) ([]agentctltypes.McpServe
 
 // DiscoverCursorPluginCandidates returns discovered candidate servers with full provenance.
 func DiscoverCursorPluginCandidates(cursorHome string) ([]DiscoveredServerCandidate, error) {
+	return DiscoverCursorPluginCandidatesWithInventory(cursorHome, CursorNativeInventory{})
+}
+
+// DiscoverCursorPluginCandidatesWithInventory combines local/global config
+// with only the exact plugin roots in Cursor's current account inventory.
+func DiscoverCursorPluginCandidatesWithInventory(cursorHome string, inventory CursorNativeInventory) ([]DiscoveredServerCandidate, error) {
 	cursorPluginMCPMutex.Lock()
 	defer cursorPluginMCPMutex.Unlock()
 
@@ -93,7 +105,7 @@ func DiscoverCursorPluginCandidates(cursorHome string) ([]DiscoveredServerCandid
 		return nil, nil
 	}
 
-	candidates, err := collectCursorPluginCandidates(cursorHome)
+	candidates, err := collectCursorPluginCandidates(cursorHome, inventory)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +126,7 @@ func DiscoverCursorPluginCandidates(cursorHome string) ([]DiscoveredServerCandid
 	return candidates, nil
 }
 
-func collectCursorPluginCandidates(cursorHome string) ([]DiscoveredServerCandidate, error) {
+func collectCursorPluginCandidates(cursorHome string, inventory CursorNativeInventory) ([]DiscoveredServerCandidate, error) {
 	var candidates []DiscoveredServerCandidate
 
 	// 1. User-level global configuration (~/.cursor/mcp.json)
@@ -125,7 +137,7 @@ func collectCursorPluginCandidates(cursorHome string) ([]DiscoveredServerCandida
 
 	// 2. Plugins directory
 	pluginsDir := filepath.Join(cursorHome, "plugins")
-	pluginRoots := enumerateEligiblePluginRoots(pluginsDir)
+	pluginRoots := enumerateEligiblePluginRoots(pluginsDir, inventory)
 	for _, root := range pluginRoots {
 		rootCandidates := readEligiblePluginRootCandidates(root)
 		candidates = append(candidates, rootCandidates...)
@@ -140,19 +152,22 @@ type eligiblePluginRoot struct {
 	modTime int64
 }
 
-func enumerateEligiblePluginRoots(pluginsDir string) []eligiblePluginRoot {
+func enumerateEligiblePluginRoots(pluginsDir string, inventory CursorNativeInventory) []eligiblePluginRoot {
 	info, err := os.Lstat(pluginsDir)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return nil
 	}
 
-	installedMap := readInstalledPluginsRegistry(pluginsDir)
-	eligible := enumerateLocalPluginRoots(pluginsDir, installedMap)
-	versioned := enumerateVersionedPluginRoots(pluginsDir, installedMap)
-	return append(eligible, versioned...)
+	eligible := enumerateLocalPluginRoots(pluginsDir)
+	for _, plugin := range inventory.Plugins {
+		if root, ok := exactCursorPluginCacheRoot(pluginsDir, plugin); ok {
+			eligible = append(eligible, root)
+		}
+	}
+	return eligible
 }
 
-func enumerateLocalPluginRoots(pluginsDir string, installedMap map[string]bool) []eligiblePluginRoot {
+func enumerateLocalPluginRoots(pluginsDir string) []eligiblePluginRoot {
 	localDir := filepath.Join(pluginsDir, "local")
 	localEntries, err := os.ReadDir(localDir)
 	if err != nil {
@@ -165,9 +180,6 @@ func enumerateLocalPluginRoots(pluginsDir string, installedMap map[string]bool) 
 			continue
 		}
 		pDir := filepath.Join(localDir, entry.Name())
-		if !isInstalledAndEnabled(installedMap, entry.Name(), pDir) {
-			continue
-		}
 		dInfo, err := os.Lstat(pDir)
 		if err == nil && dInfo.IsDir() {
 			eligible = append(eligible, eligiblePluginRoot{
@@ -180,239 +192,27 @@ func enumerateLocalPluginRoots(pluginsDir string, installedMap map[string]bool) 
 	return eligible
 }
 
-func enumerateVersionedPluginRoots(pluginsDir string, installedMap map[string]bool) []eligiblePluginRoot {
-	versionedRoots := []string{
+func exactCursorPluginCacheRoot(pluginsDir string, plugin CursorNativePlugin) (eligiblePluginRoot, bool) {
+	if !isSafeCursorInventorySegment(plugin.Marketplace) || !isSafeCursorInventorySegment(plugin.Name) ||
+		!cursorInventoryRevisionPattern.MatchString(plugin.Revision) {
+		return eligiblePluginRoot{}, false
+	}
+	root := filepath.Join(pluginsDir, "cache", plugin.Marketplace, plugin.Name, strings.ToLower(plugin.Revision))
+	for _, dir := range []string{
 		filepath.Join(pluginsDir, "cache"),
-		filepath.Join(pluginsDir, "marketplaces"),
-	}
-
-	newestByPlugin := make(map[string]eligiblePluginRoot)
-	for _, subRoot := range versionedRoots {
-		subInfo, err := os.Lstat(subRoot)
-		if err != nil || subInfo.Mode()&os.ModeSymlink != 0 || !subInfo.IsDir() {
-			continue
+		filepath.Join(pluginsDir, "cache", plugin.Marketplace),
+		filepath.Join(pluginsDir, "cache", plugin.Marketplace, plugin.Name),
+		root,
+	} {
+		info, err := os.Lstat(dir)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return eligiblePluginRoot{}, false
 		}
-		discovered := scanVersionedPluginRoots(subRoot, 0)
-		for _, cand := range discovered {
-			if !isInstalledAndEnabled(installedMap, cand.name, cand.path) {
-				continue
-			}
-			existing, exists := newestByPlugin[cand.name]
-			if !exists || cand.modTime > existing.modTime {
-				newestByPlugin[cand.name] = cand
-			}
+		if dir == root {
+			return eligiblePluginRoot{name: plugin.Name, path: root, modTime: info.ModTime().UnixNano()}, true
 		}
 	}
-
-	var eligible []eligiblePluginRoot
-	for _, p := range newestByPlugin {
-		eligible = append(eligible, p)
-	}
-	return eligible
-}
-
-func scanVersionedPluginRoots(dir string, depth int) []eligiblePluginRoot {
-	if depth > 4 {
-		return nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
-	var results []eligiblePluginRoot
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		child := filepath.Join(dir, entry.Name())
-		if isCandidatePluginVersionDirectory(child) {
-			dInfo, err := os.Lstat(child)
-			if err == nil {
-				pluginName := derivePluginNameFromPath(child)
-				results = append(results, eligiblePluginRoot{
-					name:    pluginName,
-					path:    child,
-					modTime: dInfo.ModTime().UnixNano(),
-				})
-			}
-			continue
-		}
-		results = append(results, scanVersionedPluginRoots(child, depth+1)...)
-	}
-	return results
-}
-
-func derivePluginNameFromPath(dir string) string {
-	parent := filepath.Dir(dir)
-	base := filepath.Base(parent)
-	if base != "." && base != "/" && base != "cache" && base != "marketplaces" && base != "local" {
-		return base
-	}
-	return filepath.Base(dir)
-}
-
-func isCandidatePluginVersionDirectory(dir string) bool {
-	// Must contain a manifest
-	candidates := []string{
-		filepath.Join(".cursor-plugin", "plugin.json"),
-		"plugin.json",
-		".mcp.json",
-		"mcp.json",
-	}
-	hasManifest := false
-	for _, c := range candidates {
-		target := filepath.Join(dir, c)
-		if info, err := os.Lstat(target); err == nil && info.Mode().IsRegular() {
-			hasManifest = true
-			break
-		}
-	}
-	if !hasManifest {
-		return false
-	}
-
-	// Must not be an uninstalled/staging/incomplete folder
-	base := strings.ToLower(filepath.Base(dir))
-	if base == "_staging" || strings.Contains(base, "uninstalled") || strings.Contains(base, "disabled") {
-		return false
-	}
-	parentBase := strings.ToLower(filepath.Base(filepath.Dir(dir)))
-	if parentBase == "uninstalled" || parentBase == "disabled" {
-		return false
-	}
-
-	return true
-}
-
-type pluginRegistryEntry struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Path     string `json:"path"`
-	Enabled  *bool  `json:"enabled"`
-	Disabled bool   `json:"disabled"`
-}
-
-func readInstalledPluginsRegistry(pluginsDir string) map[string]bool {
-	registryFiles := []string{
-		filepath.Join(pluginsDir, "installed.json"),
-		filepath.Join(pluginsDir, "plugins.json"),
-	}
-
-	for _, rFile := range registryFiles {
-		data, err := os.ReadFile(rFile)
-		if err != nil {
-			continue
-		}
-		if res := parsePluginRegistryData(data); res != nil {
-			return res
-		}
-	}
-	return nil
-}
-
-func parsePluginRegistryData(data []byte) map[string]bool {
-	if res, ok := tryParseRegistryList(data); ok {
-		return res
-	}
-	if res, ok := tryParseRegistryMap(data); ok {
-		return res
-	}
-	if res, ok := tryParseRegistryArray(data); ok {
-		return res
-	}
-	return nil
-}
-
-func tryParseRegistryList(data []byte) (map[string]bool, bool) {
-	var obj struct {
-		Plugins   []pluginRegistryEntry `json:"plugins"`
-		Installed []pluginRegistryEntry `json:"installed"`
-	}
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return nil, false
-	}
-	if len(obj.Plugins) == 0 && len(obj.Installed) == 0 {
-		return nil, false
-	}
-	result := make(map[string]bool)
-	for _, entry := range obj.Plugins {
-		addRegistryEntry(result, entry)
-	}
-	for _, entry := range obj.Installed {
-		addRegistryEntry(result, entry)
-	}
-	return result, true
-}
-
-func tryParseRegistryMap(data []byte) (map[string]bool, bool) {
-	var mapShape map[string]json.RawMessage
-	if err := json.Unmarshal(data, &mapShape); err != nil || len(mapShape) == 0 {
-		return nil, false
-	}
-	result := make(map[string]bool)
-	for k, raw := range mapShape {
-		var b bool
-		if err := json.Unmarshal(raw, &b); err == nil {
-			result[strings.ToLower(k)] = b
-			continue
-		}
-		var entry pluginRegistryEntry
-		if err := json.Unmarshal(raw, &entry); err == nil {
-			if entry.ID == "" && entry.Name == "" {
-				entry.ID = k
-			}
-			addRegistryEntry(result, entry)
-		}
-	}
-	return result, true
-}
-
-func tryParseRegistryArray(data []byte) (map[string]bool, bool) {
-	var arrayShape []pluginRegistryEntry
-	if err := json.Unmarshal(data, &arrayShape); err != nil || len(arrayShape) == 0 {
-		return nil, false
-	}
-	result := make(map[string]bool)
-	for _, entry := range arrayShape {
-		addRegistryEntry(result, entry)
-	}
-	return result, true
-}
-
-func addRegistryEntry(result map[string]bool, entry pluginRegistryEntry) {
-	key := entry.ID
-	if key == "" {
-		key = entry.Name
-	}
-	if key == "" {
-		return
-	}
-	enabled := true
-	if entry.Enabled != nil {
-		enabled = *entry.Enabled
-	} else if entry.Disabled {
-		enabled = false
-	}
-	result[strings.ToLower(key)] = enabled
-}
-
-func isInstalledAndEnabled(registry map[string]bool, pluginName, pluginPath string) bool {
-	if registry == nil {
-		// When no central registry exists, completed plugin directories are accepted
-		return true
-	}
-	key := strings.ToLower(pluginName)
-	if enabled, exists := registry[key]; exists {
-		return enabled
-	}
-	// Check by directory base name
-	pathKey := strings.ToLower(filepath.Base(pluginPath))
-	if enabled, exists := registry[pathKey]; exists {
-		return enabled
-	}
-	return false
+	return eligiblePluginRoot{}, false
 }
 
 func readEligiblePluginRootCandidates(pluginRoot eligiblePluginRoot) []DiscoveredServerCandidate {

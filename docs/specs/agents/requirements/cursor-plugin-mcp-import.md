@@ -32,6 +32,12 @@ The agent system owns this capability because it manages profile preferences, ru
 - **AC-AGENTS-CURSOR-PLUGIN-MCP-001.8:** Plugin-relative references and supported plugin-root variables shall resolve against the eligible plugin root. Unsupported required fields or unresolved plugin variables shall cause that server to be skipped rather than launch with altered semantics.
 - **AC-AGENTS-CURSOR-PLUGIN-MCP-001.9:** Imported definitions shall respect the applicable MCP transport and executor policies. Discovery shall not execute commands, resolve secrets into logs, or modify source manifests or global configuration.
 
+- **AC-AGENTS-CURSOR-PLUGIN-MCP-001.10:** Materialized plugin server names shall preserve Cursor's native `plugin-<plugin-name>-<server-name>` identity so that shared workspace OAuth entries remain addressable. Logical manifest names retain their policy and precedence semantics. Credential objects and Cursor approval/disable settings shall not be rewritten to compensate for a different identity.
+
+- **AC-AGENTS-CURSOR-PLUGIN-MCP-001.11:** Native marketplace imports shall use the current account's effective enabled-plugin inventory and its selected immutable version. A missing login, unavailable inventory, unsupported version or absent selected cache root shall omit those imports without activating another cached version. Explicit project/profile/global definitions remain available through their existing paths.
+- **AC-AGENTS-CURSOR-PLUGIN-MCP-001.12:** A server disabled by exact native identifier in the task's source repository shall be excluded from automatic imports into that task workspace. The task's own disables shall also be honored. Unrelated workspaces shall not contribute disables. This inheritance applies to imports only; it shall not rewrite source or destination disabled/approval files or override explicit project/profile definitions. A malformed or unreadable disable store shall not be treated as an empty list.
+- **AC-AGENTS-CURSOR-PLUGIN-MCP-001.13:** Inventory discovery shall run only for eligible local launches with the import preference enabled and the same runtime user home. It shall use existing Cursor account authentication only with Cursor's verified HTTPS service, keep credentials and raw service payloads out of logs and application state, and never initiate login, token refresh or plugin installation.
+
 ### REQ-AGENTS-CURSOR-PLUGIN-MCP-002: Profile preference and settings control
 
 **Intent:** Users can control whether each Cursor profile automatically imports plugin MCP servers.
@@ -66,3 +72,9 @@ The agent system owns this capability because it manages profile preferences, ru
 ## Implementation plans
 
 - [Cursor plugin MCP import plan](../../../plans/cursor-plugin-mcp-import/plan.md)
+
+## Discovery/auth repair
+
+[Discovery and authenticated-source repair](../../../plans/cursor-mcp-discovery-auth-repair/plan.md)
+replaces the unverified local-registry assumption. The user selected source-repository-only disable inheritance; credential discovery
+continues to scan eligible existing workspaces independently.

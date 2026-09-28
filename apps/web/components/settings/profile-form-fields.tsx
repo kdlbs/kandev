@@ -42,6 +42,7 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 
 export type ProfileFormData = {
   name: string;
@@ -59,6 +60,8 @@ export type ProfileFormData = {
   provider_kind?: string;
   cursor_mcp_auth_enabled?: boolean;
   cursor_plugins_mcp_enabled?: boolean;
+  mcp_selection_mode?: MCPSelectionMode;
+  mcp_selected_servers?: string[];
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {

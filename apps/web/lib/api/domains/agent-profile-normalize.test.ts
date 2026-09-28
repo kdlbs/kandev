@@ -22,6 +22,8 @@ const snakeCaseWirePayload = {
   cli_passthrough: false,
   cursor_mcp_auth_enabled: false,
   cursor_plugins_mcp_enabled: false,
+  mcp_selection_mode: "inherit",
+  mcp_selected_servers: [],
   enabled: false,
   workspace_id: WORKSPACE_ID,
   user_modified: true,
@@ -46,6 +48,8 @@ const expectedCamelCaseProfile = {
   cliPassthrough: false,
   cursorMcpAuthEnabled: false,
   cursorPluginsMcpEnabled: false,
+  mcpSelectionMode: "inherit",
+  mcpSelectedServers: [],
   enabled: false,
   providerSupported: false,
   workspaceId: WORKSPACE_ID,
@@ -100,6 +104,31 @@ describe("normalizeAgentProfile", () => {
 
     expect(result.cursorMcpAuthEnabled).toBe(false);
     expect(toAgentProfilePayload(result).cursor_mcp_auth_enabled).toBe(false);
+  });
+
+  it("preserves MCP selection mode and server IDs through the wire round trip", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      mcp_selection_mode: "selected",
+      mcp_selected_servers: ["plugin-atlassian-jira", "filesystem"],
+    });
+
+    expect((result as { mcpSelectionMode?: string }).mcpSelectionMode).toBe("selected");
+    expect((result as { mcpSelectedServers?: string[] }).mcpSelectedServers).toEqual([
+      "plugin-atlassian-jira",
+      "filesystem",
+    ]);
+    const payload = toAgentProfilePayload(result) as Record<string, unknown>;
+    expect(payload.mcp_selection_mode).toBe("selected");
+    expect(payload.mcp_selected_servers).toEqual(["plugin-atlassian-jira", "filesystem"]);
+  });
+
+  it("defaults legacy profiles to inherited MCP selection with no selected IDs", () => {
+    const result = normalizeAgentProfile({ id: SAMPLE_ID, name: "default" });
+
+    expect((result as { mcpSelectionMode?: string }).mcpSelectionMode).toBe("inherit");
+    expect((result as { mcpSelectedServers?: string[] }).mcpSelectedServers).toEqual([]);
   });
 
   it("maps command_prefix to commandPrefix", () => {

@@ -97,6 +97,8 @@ describe("toAgentProfilePatch", () => {
       cli_passthrough: true,
       cursor_mcp_auth_enabled: false,
       cursor_plugins_mcp_enabled: false,
+      mcp_selection_mode: "selected",
+      mcp_selected_servers: ["server-a"],
       cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     };
     expect(toAgentProfilePatch(patch)).toEqual({
@@ -108,6 +110,8 @@ describe("toAgentProfilePatch", () => {
       cliPassthrough: true,
       cursorMcpAuthEnabled: false,
       cursorPluginsMcpEnabled: false,
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: ["server-a"],
       cliFlags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     });
   });
@@ -517,6 +521,32 @@ describe("Cursor MCP auth preference save payloads", () => {
     );
   });
 
+  it("saves an explicit selected-server set and omits unchanged selection fields", async () => {
+    const savedProfile = {
+      ...baseProfile,
+      mcpSelectionMode: "inherit" as const,
+      mcpSelectedServers: [],
+    };
+    const selectedProfile = draftFrom(savedProfile, {
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: ["server-b", "server-a"],
+    });
+    const savedAgent = agentWithProfiles([savedProfile]);
+    const draftAgent = agentWithProfiles([selectedProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(selectedProfile);
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({
+        mcp_selection_mode: "selected",
+        mcp_selected_servers: ["server-b", "server-a"],
+      }),
+    );
+  });
+
   it("defaults new agent profile payloads to enabled", async () => {
     const draftProfile = draftFrom(baseProfile, { id: DRAFT_PROFILE_ID });
     const draftAgent = agentWithProfiles([draftProfile]);
@@ -529,7 +559,13 @@ describe("Cursor MCP auth preference save payloads", () => {
 
     expect(createAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
-        profiles: [expect.objectContaining({ cursor_mcp_auth_enabled: true })],
+        profiles: [
+          expect.objectContaining({
+            cursor_mcp_auth_enabled: true,
+            mcp_selection_mode: "inherit",
+            mcp_selected_servers: [],
+          }),
+        ],
       }),
     );
   });

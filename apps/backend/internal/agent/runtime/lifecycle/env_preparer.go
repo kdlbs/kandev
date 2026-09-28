@@ -65,6 +65,14 @@ const (
 
 const PrepareStepKindRemoteHelperDownload = "remote_helper_download"
 
+const (
+	PrepareStepKindAgentMCPDiscovery    = "agent_mcp_discovery"
+	PrepareStepKindAgentMCPSelection    = "agent_mcp_selection"
+	PrepareStepKindAgentMCPCredentials  = "agent_mcp_credentials"
+	PrepareStepKindAgentMCPApproval     = "agent_mcp_approval"
+	PrepareStepKindAgentMCPVerification = "agent_mcp_verification"
+)
+
 // RepoPrepareSpec describes one repository for multi-repo environment preparation.
 // Mirrors the per-repo prepare fields that EnvPrepareRequest historically
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
@@ -227,6 +235,8 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 type PrepareStep struct {
 	Name           string            `json:"name"`
 	Kind           string            `json:"kind,omitempty"`
+	MCPProvider    string            `json:"mcp_provider,omitempty"`
+	MCPServerID    string            `json:"mcp_server_id,omitempty"`
 	RemotePlatform string            `json:"remote_platform,omitempty"`
 	FailureCode    string            `json:"failure_code,omitempty"`
 	Command        string            `json:"command,omitempty"`
@@ -260,11 +270,13 @@ type RepoWorktreeResult struct {
 
 // EnvPrepareResult contains the result of environment preparation.
 type EnvPrepareResult struct {
-	Success       bool          `json:"success"`
-	Steps         []PrepareStep `json:"steps"`
-	WorkspacePath string        `json:"workspace_path,omitempty"`
-	ErrorMessage  string        `json:"error_message,omitempty"`
-	Duration      time.Duration `json:"duration"`
+	Success              bool          `json:"success"`
+	Steps                []PrepareStep `json:"steps"`
+	PreparationID        string        `json:"preparation_id,omitempty"`
+	PreparationStartedAt time.Time     `json:"preparation_started_at,omitempty"`
+	WorkspacePath        string        `json:"workspace_path,omitempty"`
+	ErrorMessage         string        `json:"error_message,omitempty"`
+	Duration             time.Duration `json:"duration"`
 
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
@@ -338,6 +350,12 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 		if step.Kind != "" {
 			entry["kind"] = step.Kind
 		}
+		if step.MCPProvider != "" {
+			entry["mcp_provider"] = step.MCPProvider
+		}
+		if step.MCPServerID != "" {
+			entry["mcp_server_id"] = step.MCPServerID
+		}
 		if step.RemotePlatform != "" {
 			entry["remote_platform"] = step.RemotePlatform
 		}
@@ -361,11 +379,18 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 		}
 		steps = append(steps, entry)
 	}
-	return map[string]interface{}{
+	serialized := map[string]interface{}{
 		"status": status, "steps": steps,
 		"error_message": result.ErrorMessage,
 		"duration_ms":   result.Duration.Milliseconds(),
 	}
+	if result.PreparationID != "" {
+		serialized["preparation_id"] = result.PreparationID
+	}
+	if !result.PreparationStartedAt.IsZero() {
+		serialized["preparation_started_at"] = result.PreparationStartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return serialized
 }
 
 // PreparerRegistry maps executor types (models.ExecutorType — the "local",

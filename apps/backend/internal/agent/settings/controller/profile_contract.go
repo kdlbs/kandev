@@ -26,6 +26,8 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		ProviderAPIKeySecretID:  request.ProviderAPIKeySecretID,
 		CursorMCPAuthEnabled:    request.CursorMCPAuthEnabled,
 		CursorPluginsMCPEnabled: request.CursorPluginsMCPEnabled,
+		MCPSelectionMode:        request.MCPSelectionMode,
+		MCPSelectedServers:      request.MCPSelectedServers,
 		Dynamic:                 request.Dynamic,
 	}
 }
@@ -55,6 +57,8 @@ func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfile
 		ProviderAPIKeySecretID:  request.ProviderAPIKeySecretID,
 		CursorMCPAuthEnabled:    request.CursorMCPAuthEnabled,
 		CursorPluginsMCPEnabled: request.CursorPluginsMCPEnabled,
+		MCPSelectionMode:        request.MCPSelectionMode,
+		MCPSelectedServers:      request.MCPSelectedServers,
 		Dynamic:                 request.Dynamic,
 		Force:                   request.Force,
 	}
