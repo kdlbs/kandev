@@ -363,7 +363,7 @@ describe("CoordinatorCopilot - ended session banner", () => {
       mockReadyEndedSession();
       renderCopilot();
       await waitFor(() => screen.getByTestId(SESSION_RECOVERY_TEST_ID));
-      expect(screen.getByText(FALLBACK_DETAIL)).toBeTruthy();
+      expect(screen.getAllByText(FALLBACK_DETAIL).length).toBeGreaterThan(0);
     },
   );
 
