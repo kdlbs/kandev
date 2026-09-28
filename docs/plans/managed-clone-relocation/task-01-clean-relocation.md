@@ -119,3 +119,8 @@ canonical absolute task-environment paths, and retaining a stopped passthrough
 execution ID across graceful backend shutdown. The full lifecycle and task
 service Go packages passed, along with the focused dirty-relocation, CLI
 fallback, single-repository TUI, and multi-repository TUI restart E2Es.
+The PR inventory regression also changes the task's requested base branch while
+the session still selects its original worktree. Authorized relocation now
+validates and resumes against that exact selected worktree identity. The new
+regression and complete executor/worktree packages passed, along with the
+desktop dirty-relocation E2E after a fresh backend build.

@@ -135,3 +135,6 @@ spec lint, and `git diff --check` passed. In final fixup verification, the
 dirty relocation flow passed once on Chromium and once on mobile-chrome with
 retries disabled; both tests waited for the resumable runtime row to become
 durably `stopped` before offering relocation.
+The mobile clarification E2E now displays an update toast during the flow and
+checks that it does not cover the submit control. Mobile toast placement was
+moved below the task header, and the focused mobile-chrome regression passed.

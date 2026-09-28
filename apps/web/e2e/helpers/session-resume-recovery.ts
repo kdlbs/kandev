@@ -167,6 +167,7 @@ export async function cleanupManagedCloneRelocationFixture(
 
 type TaskEnvironmentRepository = {
   repository_id?: string;
+  branch_slug?: string;
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;

@@ -189,6 +189,7 @@ test.describe("worktree branch resume recovery", () => {
       const beforeEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
       const beforeRepository = taskEnvironmentRepository(beforeEnvironment, seedData.repositoryId);
       expect(beforeRepository).toBeDefined();
+      expect(beforeRepository!.branch_slug).toBe("main");
       expect(beforeRepository!.worktree_branch).toBe(fixture.originalBranch);
       expect(
         new GitHelper(fixture.sourceClonePath, makeGitEnv(backend.tmpDir))
@@ -319,6 +320,7 @@ test.describe("worktree branch resume recovery", () => {
       expect(afterRepository).toBeDefined();
       expect(afterEnvironment!.id).toBe(beforeEnvironment!.id);
       expect(afterRepository!.worktree_id).not.toBe(beforeRepository!.worktree_id);
+      expect(afterRepository!.branch_slug).toBe(beforeRepository!.branch_slug);
       expect(afterRepository!.worktree_branch).toBe(fixture.originalBranch);
       expect(relocatedPath).toContain(".relocated-");
       const relocationRecord = JSON.parse(

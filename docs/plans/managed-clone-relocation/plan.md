@@ -148,6 +148,11 @@ checks, specification validation, spec lint, and `git diff --check` passed.
 Final PR fixup also passed the complete lifecycle and task-service Go packages,
 the desktop dirty-relocation, CLI fallback, and both TUI restart E2Es, plus the
 mobile clarification, mobile entry-recovery, and automation-confirmation cases.
+The follow-up inventory regression pins an explicitly authorized dirty
+relocation to the exact worktree selected by its session when task branch
+settings have changed. The complete executor and worktree packages, changed-code
+backend lint, backend build, frontend E2E build, frontend typecheck, desktop
+dirty-relocation E2E, and mobile clarification E2E passed after this fix.
 PostgreSQL-specific migration and concurrency checks were not run because
 `KANDEV_TEST_POSTGRES_DSN` was unset.
 

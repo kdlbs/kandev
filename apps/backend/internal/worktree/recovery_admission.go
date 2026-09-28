@@ -150,6 +150,12 @@ func WithDirtyCloneRelocation(ctx context.Context) context.Context {
 	return context.WithValue(ctx, dirtyCloneRelocationContextKey{}, true)
 }
 
+// DirtyCloneRelocationAllowed reports whether the current operation carries
+// the explicit recovery authorization established by the orchestrator.
+func DirtyCloneRelocationAllowed(ctx context.Context) bool {
+	return dirtyCloneRelocationAllowed(ctx)
+}
+
 // WithManagedCloneRelocationAuthorization attaches the session-stamp check
 // required before a dirty worktree is changed. The callback is re-run after
 // the durable claim is acquired and at the filesystem mutation boundary.
