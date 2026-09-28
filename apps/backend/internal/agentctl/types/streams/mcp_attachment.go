@@ -205,9 +205,13 @@ type MCPAttachmentHistory struct {
 
 // StartAttempt makes attempt current and marks the previous current attempt as
 // historical, even when both use the same agent execution.
-func (h *MCPAttachmentHistory) StartAttempt(attempt MCPAttachmentAttempt) {
-	if attempt.AttemptID == "" {
-		return
+func (h *MCPAttachmentHistory) StartAttempt(attempt MCPAttachmentAttempt) bool {
+	if attempt.AttemptID == "" || h.Current.AttemptID == attempt.AttemptID {
+		return false
+	}
+	if h.Current.AttemptID != "" && h.Current.ExecutionID == attempt.ExecutionID &&
+		h.Current.StartupGeneration != 0 && attempt.StartupGeneration <= h.Current.StartupGeneration {
+		return false
 	}
 	now := attempt.StartedAt
 	if now.IsZero() {
@@ -216,7 +220,7 @@ func (h *MCPAttachmentHistory) StartAttempt(attempt MCPAttachmentAttempt) {
 	}
 	attempt.UpdatedAt = now
 	h.Version = MCPAttachmentSchemaVersion
-	if h.Current.AttemptID != "" && h.Current.AttemptID != attempt.AttemptID {
+	if h.Current.AttemptID != "" {
 		superseded := historicalMCPAttachmentAttempt(h.Current)
 		superseded.SupersededAt = &now
 		superseded.UpdatedAt = now
@@ -226,6 +230,7 @@ func (h *MCPAttachmentHistory) StartAttempt(attempt MCPAttachmentAttempt) {
 	if len(h.Previous) > MaxMCPAttachmentAttempts-1 {
 		h.Previous = h.Previous[:MaxMCPAttachmentAttempts-1]
 	}
+	return true
 }
 
 // Apply records current-attempt evidence and returns false for stale or empty

@@ -359,6 +359,11 @@ func startLaunchReceipt(history *LaunchReceiptHistory, identity LaunchAttemptIde
 	if history == nil || history.Current.Identity.equal(identity) {
 		return false
 	}
+	current := history.Current.Identity
+	if current.SessionID == identity.SessionID && current.Incarnation == identity.Incarnation &&
+		current.Generation != 0 && identity.Generation <= current.Generation {
+		return false
+	}
 	history.Start(identity)
 	return true
 }
@@ -4399,8 +4404,7 @@ func staleMCPAttachmentAttempt(payload *lifecycle.AgentStreamEventPayload) bool 
 func reduceMCPAttachmentHistory(history *streams.MCPAttachmentHistory, data *lifecycle.AgentStreamEventData) bool {
 	changed := false
 	if attempt := data.MCPAttachmentAttempt; attempt != nil {
-		history.StartAttempt(*attempt)
-		changed = true
+		changed = history.StartAttempt(*attempt)
 	}
 	if evidence := data.MCPAttachment; evidence != nil {
 		changed = history.Apply(*evidence) || changed

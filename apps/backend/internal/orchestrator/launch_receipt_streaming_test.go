@@ -154,7 +154,7 @@ func TestHandleAgentStreamEventRejectsDelayedSameExecutionStartupFact(t *testing
 	for _, event := range []struct {
 		generation uint64
 		fact       string
-	}{{1, "started"}, {2, "started"}, {1, "process_started"}} {
+	}{{1, "started"}, {2, "started"}, {1, "started"}} {
 		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
 			TaskID: "task-replaced", SessionID: "session-replaced", ExecutionID: "execution-reused",
 			Data: &lifecycle.AgentStreamEventData{Type: "launch_receipt", Data: event.fact, StartupGeneration: event.generation},
@@ -169,6 +169,43 @@ func TestHandleAgentStreamEventRejectsDelayedSameExecutionStartupFact(t *testing
 	identity := current["identity"].(map[string]interface{})
 	if identity["generation"] != float64(2) || current["process_created"] != string(LaunchTriStateUnknown) {
 		t.Fatalf("current receipt = %#v, want replacement generation with no stale process fact", current)
+	}
+	previous := stored["previous"].([]interface{})
+	if len(previous) != 1 || previous[0].(map[string]interface{})["identity"].(map[string]interface{})["generation"] != float64(1) {
+		t.Fatalf("previous receipts = %#v, want retained generation 1 diagnostic", previous)
+	}
+}
+
+func TestHandleSessionMCPAttachmentEventRejectsDelayedCurrentAttemptStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-attachment-order", "session-attachment-order", "step-attachment-order")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	for _, attempt := range []streams.MCPAttachmentAttempt{
+		{AttemptID: "old", ExecutionID: "execution-reused", StartupGeneration: 1},
+		{AttemptID: "current", ExecutionID: "execution-reused", StartupGeneration: 2},
+		{AttemptID: "old", ExecutionID: "execution-reused", StartupGeneration: 1},
+	} {
+		svc.handleSessionMCPAttachmentEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID: "task-attachment-order", SessionID: "session-attachment-order", ExecutionID: "execution-reused",
+			Data: &lifecycle.AgentStreamEventData{MCPAttachmentAttempt: &attempt},
+		})
+	}
+	session, err := repo.GetTaskSession(ctx, "session-attachment-order")
+	if err != nil {
+		t.Fatalf("get attachment session: %v", err)
+	}
+	stored, ok := session.Metadata[models.SessionMetaKeyMCPAttachmentState].(map[string]interface{})
+	if !ok {
+		t.Fatalf("attachment state = %#v", session.Metadata[models.SessionMetaKeyMCPAttachmentState])
+	}
+	current := stored["current"].(map[string]interface{})
+	if current["attachment_attempt_id"] != "current" || current["startup_generation"] != float64(2) {
+		t.Fatalf("current attachment = %#v, want generation 2", current)
+	}
+	previous := stored["previous"].([]interface{})
+	if len(previous) != 1 || previous[0].(map[string]interface{})["attachment_attempt_id"] != "old" {
+		t.Fatalf("previous attachments = %#v, want retained generation 1 diagnostic", previous)
 	}
 }
 
