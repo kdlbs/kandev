@@ -640,6 +640,50 @@ func (f ensureSessionFunc) EnsureSession(ctx context.Context, taskID string, opt
 	return f(ctx, taskID, opts...)
 }
 
+// TestOpenConversationConfirmDetectsConcurrentArchive covers Review round 2
+// Finding A: EnsureSession's per-task lock (session_ensure.go) is released as
+// soon as EnsureSession returns, so it does not span the caller's subsequent
+// confirmConversationTask re-read. If a concurrent opener (caller B) archives
+// this same task in that window -- because it independently observed a
+// terminal session state before caller A's own create+CAS (if any) would
+// otherwise have changed ConversationTaskID -- confirmConversationTask's
+// ConversationTaskID-only check still matches and must not hand the
+// now-archived task back to caller A as a success.
+func TestOpenConversationConfirmDetectsConcurrentArchive(t *testing.T) {
+	deps := newConversationTestDeps(t)
+	ctx := context.Background()
+
+	first, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("first OpenConversation() unexpected error: %v", err)
+	}
+
+	origEnsure := deps.sessions
+	raced := false
+	deps.svc.SetConversationDeps(deps.tasks, ensureSessionFunc(func(ctx context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+		resp, err := origEnsure.EnsureSession(ctx, taskID, opts...)
+		if err == nil && !raced && taskID == first.TaskID {
+			raced = true
+			// Caller B observes the same task as terminal and archives it, in
+			// the window between caller A's EnsureSession call above and A's
+			// own confirmConversationTask re-read below.
+			origEnsure.states[taskID] = string(taskmodels.TaskSessionStateFailed)
+			if _, reusableB, errB := deps.svc.reuseConversationTask(ctx, deps.coordinator.ID, taskID); errB != nil || reusableB {
+				t.Fatalf("caller B setup: reusable=%v err=%v", reusableB, errB)
+			}
+		}
+		return resp, err
+	}))
+
+	_, err = deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if !errors.Is(err, ErrConversationConflict) {
+		t.Fatalf("caller A OpenConversation() error = %v, want ErrConversationConflict: the task was archived by a concurrent opener between EnsureSession and confirm", err)
+	}
+	if len(deps.tasks.archivedIDs) != 1 || deps.tasks.archivedIDs[0] != first.TaskID {
+		t.Errorf("archivedIDs = %v, want exactly [%s] (caller B's archive)", deps.tasks.archivedIDs, first.TaskID)
+	}
+}
+
 func TestOpenConversationDeletedConversationTaskCreatesNew(t *testing.T) {
 	deps := newConversationTestDeps(t)
 	ctx := context.Background()
