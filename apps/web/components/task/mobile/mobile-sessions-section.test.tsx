@@ -17,14 +17,35 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
-  useTaskSessions: () => ({ sessions: mocks.sessions, isLoading: false, isLoaded: true }),
+  useTaskSessions: () => ({
+    sessions: mocks.sessions,
+    isLoading: false,
+    isLoaded: true,
+    loadSessions: vi.fn(),
+  }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({
+      taskSessionsByTask: {
+        itemsByTaskId: { [TASK_ID]: mocks.sessions },
+        loadingByTaskId: { [TASK_ID]: false },
+        loadedByTaskId: { [TASK_ID]: true },
+        errorByTaskId: {},
+      },
+    }),
+  }),
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       features: { dynamicAgentRouting: false },
       tasks: { activeSessionId: mocks.activeSessionId },
+      taskSessionsByTask: {
+        itemsByTaskId: { [TASK_ID]: mocks.sessions },
+        loadingByTaskId: { [TASK_ID]: false },
+        loadedByTaskId: { [TASK_ID]: true },
+        errorByTaskId: {},
+      },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
       repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
@@ -33,6 +54,10 @@ vi.mock("@/components/state-provider", () => ({
       executors: { items: [] },
       setActiveSession: mocks.setActiveSession,
     }),
+}));
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
 }));
 
 vi.mock("@/components/agent-logo", () => ({
@@ -47,6 +72,7 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
     stop: vi.fn(),
     resume: vi.fn(),
     remove: mocks.removeSession,
+    removeById: mocks.removeSession,
   }),
   isSessionStoppable: () => false,
   isSessionDeletable: () => true,

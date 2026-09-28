@@ -337,6 +337,12 @@ action instead. Both scroll actions keep the transcript at your requested
 position even if the agent streams new replies while the scroll is still in
 progress.
 
+### Remove session conversations
+
+From a session tab's context menu, **Remove Others** permanently removes every other conversation in the task, including hidden session tabs. **Remove All** permanently removes every conversation in the task. Kandev shows the exact number before either action runs. Stop running or starting sessions first.
+
+Removing sessions keeps the task workspace and its files. It does not archive or delete the task, worktree, or branch. Closing other tabs only hides their Dockview panels and keeps their conversations.
+
 ### Multiple repositories
 
 A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.

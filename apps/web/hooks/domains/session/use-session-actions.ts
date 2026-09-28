@@ -130,18 +130,18 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
     [sessionId, taskId, wsAction],
   );
 
-  const remove = useCallback(
-    async (options: RemoveSessionOptions = {}) => {
-      if (!sessionId || !taskId) return false;
+  const removeById = useCallback(
+    async (targetSessionId: string, options: RemoveSessionOptions = {}) => {
+      if (!taskId) return false;
       const deletionTarget = resolveSessionDeletionTarget(
-        sessionId,
+        targetSessionId,
         taskId,
         appStoreApi.getState().quickChat.sessions,
       );
       const ok = await wsAction(
         "session.delete",
         "task:sessionActionDelete",
-        { session_id: sessionId },
+        { session_id: targetSessionId },
         {
           timeout: 15000,
           feedback: options.feedback,
@@ -156,10 +156,10 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       // Switch the active session BEFORE removing from the store so callers
       // observing activeSessionId don't briefly point at a deleted session.
       const state = appStoreApi.getState();
-      if (state.tasks.activeSessionId === sessionId) {
+      if (state.tasks.activeSessionId === targetSessionId) {
         const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
         const remaining = sessions
-          .filter((s) => s.id !== sessionId)
+          .filter((s) => s.id !== targetSessionId)
           .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
         if (remaining.length > 0) {
           state.setActiveSessionAuto(taskId, remaining[0].id);
@@ -168,21 +168,22 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
         }
       }
 
-      removeTaskSession(taskId, sessionId);
-      removeQuickChatSession(sessionId);
-      onDeleted?.();
+      removeTaskSession(taskId, targetSessionId);
+      removeQuickChatSession(targetSessionId);
       return true;
     },
-    [
-      sessionId,
-      taskId,
-      wsAction,
-      removeTaskSession,
-      removeQuickChatSession,
-      appStoreApi,
-      onDeleted,
-    ],
+    [taskId, wsAction, removeTaskSession, removeQuickChatSession, appStoreApi],
   );
 
-  return { setPrimary, stop, resume, remove };
+  const remove = useCallback(
+    async (options: RemoveSessionOptions = {}) => {
+      if (!sessionId) return false;
+      const ok = await removeById(sessionId, options);
+      if (ok) onDeleted?.();
+      return ok;
+    },
+    [onDeleted, removeById, sessionId],
+  );
+
+  return { setPrimary, stop, resume, remove, removeById };
 }

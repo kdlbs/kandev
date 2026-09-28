@@ -1,0 +1,184 @@
+---
+id: "01-bulk-session-removal"
+title: "Implement task-scoped bulk session removal"
+status: done
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-BULK-SESSION-REMOVAL-001
+  - REQ-TASKS-BULK-SESSION-REMOVAL-002
+acceptance_criteria:
+  - AC-TASKS-BULK-SESSION-REMOVAL-001.1
+  - AC-TASKS-BULK-SESSION-REMOVAL-001.2
+  - AC-TASKS-BULK-SESSION-REMOVAL-001.3
+  - AC-TASKS-BULK-SESSION-REMOVAL-001.4
+  - AC-TASKS-BULK-SESSION-REMOVAL-001.5
+  - AC-TASKS-BULK-SESSION-REMOVAL-001.6
+  - AC-TASKS-BULK-SESSION-REMOVAL-002.1
+  - AC-TASKS-BULK-SESSION-REMOVAL-002.2
+  - AC-TASKS-BULK-SESSION-REMOVAL-002.3
+system_design:
+  - ../../specs/tasks/system-design/bulk-session-removal.md
+---
+
+# Task 01: Implement Task-Scoped Bulk Session Removal
+
+## Summary
+
+Add safe, permanent Remove Others and Remove All flows for persisted task
+sessions. The work delivers shared client orchestration, desktop and phone
+surfaces, localization, documentation, and focused browser evidence as one
+vertical result.
+
+## In scope
+
+- Write failing pure tests before target selection and ordered deletion code.
+- Revalidate a confirmed snapshot before dispatching existing `session.delete`
+  requests, clean up only successful targets, and surface partial results.
+- Add desktop menu actions and a stable confirmation owner.
+- Add phone picker actions and hosted, touch-sized confirmation.
+- Localize all new copy, update user documentation, and add focused desktop
+  and mobile Playwright coverage.
+
+## Out of scope
+
+- New server APIs, atomic rollback, or changes to backend deletion eligibility.
+- Preview-tab, task, workspace, worktree, branch, and Quick Chat deletion.
+
+## Acceptance
+
+- The persisted target snapshot, eligibility gates, ordering, duplicate guard,
+  and partial-failure result satisfy `AC-TASKS-BULK-SESSION-REMOVAL-001.2`
+  through `.6`.
+- Desktop satisfies the `UI-01` order and destructive confirmation in the
+  [plan preview](plan.md#ascii-ui-preview) without changing Close Others.
+- Phone satisfies `UI-02`, preserves the picker on cancellation, has physical
+  touch targets of at least 44 CSS pixels, and has no horizontal overflow.
+
+## ASCII UI preview
+
+See [`UI-01` and `UI-02` in the plan](plan.md#ascii-ui-preview). This task
+owns both rendered views and their error, disabled, and empty-session states.
+
+## Verification
+
+```bash
+(cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/session/use-session-actions.test.ts components/task/session-bulk-removal.test.ts components/task/mobile/mobile-sessions-section.test.tsx)
+(cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+make -C apps/backend build
+(cd apps/web && pnpm run build:e2e)
+(cd apps/web && pnpm e2e:run --project=chromium e2e/tests/session/session-tab-management.spec.ts)
+(cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/session/mobile-bulk-session-removal.spec.ts)
+```
+
+## Files likely touched
+
+- `apps/web/hooks/domains/session/use-session-actions.ts`
+- `apps/web/components/task/session-bulk-removal.ts`
+- `apps/web/components/task/session-bulk-removal.test.ts`
+- `apps/web/components/task/session-tab.tsx`
+- `apps/web/components/task/session-tab-menu.tsx`
+- `apps/web/components/task/mobile/mobile-sessions-section.tsx`
+- `apps/web/components/task/mobile/mobile-sessions-section.test.tsx`
+- `apps/web/e2e/tests/session/session-tab-management.spec.ts`
+- `apps/web/e2e/tests/session/mobile-bulk-session-removal.spec.ts`
+- `apps/web/src/locales/*/task.json`
+- `docs/public/tasks-and-workflows.md`
+
+## Dependencies
+
+None.
+
+## Risks
+
+- A selected tab can disappear while Remove All is in progress, so request
+  ownership cannot live solely inside that tab.
+- State changes between confirmation and submission require a new snapshot,
+  not a stale count.
+- Sequential success can be followed by a failed request; the UI must leave
+  completed deletion final and make the remaining set clear.
+
+## Parallelism
+
+`sequential`
+
+## Inputs
+
+- `REQ-TASKS-BULK-SESSION-REMOVAL-001` and
+  `REQ-TASKS-BULK-SESSION-REMOVAL-002`.
+- The paired [system design](../../specs/tasks/system-design/bulk-session-removal.md).
+- Existing `useSessionActions.remove`, `SessionContextMenuItems`, and
+  `MobileSessionsPicker` behavior.
+
+## Results
+
+Implemented and verified. The client removes persisted task sessions in order,
+keeps the initiating tab until the final delete, revalidates the count before
+submission, blocks duplicate requests, and reports progress and partial failure.
+Desktop and phone controls use the same task-scoped action with six localized
+catalogs. Focused unit tests, typecheck, i18n checks, spec/public-doc checks,
+backend/web builds, and desktop/phone E2E flows passed. The full desktop E2E run
+passed 12 of 13 tests; its unrelated task-switching case hit a temporary
+"web app unavailable" fixture response and passed on focused rerun. The phone
+confirmation screenshot was visually checked.
+
+## PR fixup (2026-09-28)
+
+Review remediation keeps the auto-provisioning fence active during Remove All,
+clears it after a partial failure, and reports a failed session refresh with a
+localized retry message. The desktop confirmation imports its dialog directly
+without a passthrough component.
+
+Verification after the fix:
+
+- `pnpm exec vitest run components/task/use-task-bulk-removal-controller.test.tsx components/task/session-bulk-removal.test.ts components/task/session-tab-menu.test.tsx` — 18 passed.
+- `pnpm run typecheck` — passed.
+- `pnpm run i18n:check` — passed for all required locales.
+- `pnpm run i18n:ratchet` — passed.
+
+## QA remediation (2026-09-28)
+
+After Remove All, the auto-provisioning fence remained active when a user
+created a new session. The New Session success path now clears that fence only
+after receiving a session ID, restoring ordinary single-session behavior for
+later visits. A failed launch leaves the fence in place. The focused regression
+test failed before the fix and passed afterward.
+
+Verification: 62 focused Vitest tests, web typecheck, specification validators,
+phone bulk-removal E2E (1/1), and desktop session-tab E2E (14/14) passed.
+
+## Review remediation (2026-09-28)
+
+Remove Others now rejects a confirmation if its selected session disappeared
+before submission, even when the remaining target IDs are unchanged. The
+confirmation closes with the existing changed-sessions message and sends no
+delete request. Focused snapshot and controller regressions failed before the
+fix and passed afterward; web typecheck passed.
+
+## QA loaded-state remediation (2026-09-28)
+
+Bulk removal now requires the task session list to be loaded, including when
+event projections make sessions visible before the first authoritative fetch.
+Confirmation rechecks that state before sending deletes. Two controller
+regressions failed before the fix; 68 affected frontend tests, typecheck,
+desktop session-tab E2E (14/14), and phone bulk-removal E2E (1/1) passed after it.
+
+## Independent QA remediation (2026-09-28)
+
+Successful desktop and phone selector prepares now clear the Remove All fence
+as soon as `session.launch` returns an ID, even if task navigation was
+superseded while the request was pending. Separate browser storage entries per
+task prevent one tab's later write from restoring a fence another tab cleared.
+Regression tests reproduced both stale-selection failures and the cross-tab
+clear before the repairs. Browser storage failures still preserve the current
+tab's fence state.
+
+Verification: 83 focused Vitest tests, web typecheck, targeted ESLint, i18n
+ratchet, specification validators, phone bulk-removal E2E (1/1), and desktop
+bulk-removal E2E (3/3) passed. The first phone E2E attempt stopped before page
+load when its backend fixture exited; a fresh diagnostic run passed.

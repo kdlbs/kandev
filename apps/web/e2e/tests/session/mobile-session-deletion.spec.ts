@@ -2,11 +2,12 @@ import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 test.describe("mobile: session deletion", () => {
-  test("deletes a session from the native session actions sheet", async ({
+  test("deletes a session and re-confirms a stale Remove All from the native session actions sheet", async ({
     testPage,
     apiClient,
     seedData,
@@ -46,6 +47,13 @@ test.describe("mobile: session deletion", () => {
       sessionId: `mobile-delete-${task.id}`,
       startedAt: "2026-01-01T00:01:00Z",
     });
+    const staleTarget = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+      repositoryId: seedData.repositoryId,
+      sessionId: `mobile-stale-${task.id}`,
+      startedAt: "2026-01-01T00:02:00Z",
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -60,7 +68,9 @@ test.describe("mobile: session deletion", () => {
     await expect(sheet).toBeVisible({ timeout: 5_000 });
     const sheetId = await sheet.getAttribute("id");
     const secondaryRow = sheet.getByTestId(`mobile-session-row-${secondarySession.session_id}`);
+    const staleTargetRow = sheet.getByTestId(`mobile-session-row-${staleTarget.session_id}`);
     await expect(secondaryRow).toBeVisible();
+    await expect(staleTargetRow).toBeVisible();
 
     // Radix's dropdown trigger is a mouse/click surface even inside the
     // touch-sized mobile sheet; the surrounding picker and row remain touch-tested.
@@ -102,6 +112,37 @@ test.describe("mobile: session deletion", () => {
     await expect(sheet.getByTestId(`mobile-session-row-${primarySessionId}`)).toBeVisible();
 
     const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions.map((item) => item.id)).toEqual([primarySessionId]);
+    expect(sessions.map((item) => item.id).sort()).toEqual(
+      [primarySessionId, staleTarget.session_id].sort(),
+    );
+
+    await sheet
+      .getByTestId(`mobile-session-row-${primarySessionId}`)
+      .getByRole("button", { name: "Session actions" })
+      .click();
+    await testPage.getByRole("menuitem", { name: "Remove All" }).tap();
+    const bulkConfirmation = testPage.getByTestId("mobile-bulk-session-remove-confirmation");
+    await expect(bulkConfirmation).toBeVisible();
+    await expect(bulkConfirmation).toContainText("Remove 2 sessions?");
+    expect(
+      (await bulkConfirmation.getByTestId("mobile-bulk-session-remove-confirm").boundingBox())!
+        .height,
+    ).toBeGreaterThanOrEqual(44);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile bulk session removal");
+    await apiClient.deleteSession(staleTarget.session_id);
+    await expect(staleTargetRow).not.toBeVisible({ timeout: 15_000 });
+    await bulkConfirmation.getByTestId("mobile-bulk-session-remove-confirm").tap();
+    await expect(bulkConfirmation).toBeVisible();
+    await expect(bulkConfirmation).toContainText("Remove 1 session?");
+    await expect(bulkConfirmation.getByRole("status")).toContainText(
+      "The sessions changed. Review the updated count and confirm again.",
+    );
+    await expect(bulkConfirmation.getByTestId("mobile-bulk-session-remove-confirm")).toBeEnabled();
+    await bulkConfirmation.getByTestId("mobile-bulk-session-remove-confirm").tap();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(0);
   });
 });

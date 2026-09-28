@@ -13,6 +13,7 @@ import { applySummarizeSessionResult, type SummaryToastFn } from "./session-cont
 import { t } from "@/lib/i18n";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseRecord } from "@/lib/agent-profile-recent-use";
+import { clearTaskSessionAutoProvisioningSuppression } from "@/lib/session/session-auto-provisioning-fence";
 
 type SessionContextChangeOpts = {
   promptRef: RefObject<TaskFormInputsHandle | null>;
@@ -118,9 +119,8 @@ export function useSessionLaunchSubmit({
           attachments: toMessageAttachments(selectedAttachments),
         });
         const response = await launchSession(request);
-        if (!response.session_id) {
-          throw new Error("Session created but no session ID returned");
-        }
+        if (!response.session_id) throw new Error("Session created but no session ID returned");
+        clearTaskSessionAutoProvisioningSuppression(taskId);
         const effectiveProfileId = response.agent_profile_id ?? selectedProfileId;
         recordTaskSessionProfileUse(effectiveProfileId, applyAgentProfileRecentUse);
         const profile = agentProfiles.find((p) => p.id === effectiveProfileId);
