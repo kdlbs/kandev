@@ -23,7 +23,7 @@ func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
 	response[0].Select.Id = "reasoning_effort"
 	response[1].Select.Id = "fast_mode"
 
-	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", response, nil)
+	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", response, nil, false)
 
 	event := findSessionModelsEvent(t, drainEvents(a))
 	if got := currentConfigValue(event.ConfigOptions, "reasoning_effort"); got != "low" {
@@ -51,7 +51,7 @@ func TestEmitAuthoritativeConfigOptionsIgnoresReplacedSession(t *testing.T) {
 			Type: "select", Id: "reasoning_effort", Name: "Reasoning effort",
 			CurrentValue: "low", Options: acp.SessionConfigSelectOptions{Ungrouped: &options},
 		},
-	}}, nil)
+	}}, nil, false)
 
 	if events := drainEvents(a); len(events) != 0 {
 		t.Fatalf("stale response emitted %d events, want none", len(events))

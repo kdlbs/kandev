@@ -176,27 +176,51 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 	return nil
 }
 
+// ModeResult reports which mode the agent ended up in after a mode change.
+// A clamped or unobserved mode must not read as a clean apply, so the caller
+// receives the agent's own answer rather than an echo of the request.
+type ModeResult struct {
+	Requested string `json:"requested"`
+	Effective string `json:"effective"`
+	Confirmed bool   `json:"confirmed"`
+}
+
+// Applied reports whether the agent confirmed the exact requested mode.
+func (r ModeResult) Applied() bool {
+	return r.Confirmed && r.Effective == r.Requested
+}
+
 // SetMode changes the agent's session mode via the agent WebSocket stream.
-func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
+func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) (ModeResult, error) {
 	payload := struct {
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}{SessionID: sessionID, ModeID: modeID}
 
+	result := ModeResult{Requested: modeID}
+
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_mode", payload)
 	if err != nil {
-		return fmt.Errorf("set mode request failed: %w", err)
+		return result, fmt.Errorf("set mode request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set mode failed: unable to parse error")
+			return result, fmt.Errorf("set mode failed: unable to parse error")
 		}
-		return fmt.Errorf("set mode failed: %s", errPayload.Message)
+		return result, fmt.Errorf("set mode failed: %s", errPayload.Message)
 	}
 
-	return nil
+	// An older agentctl answers without the result body. Leaving Confirmed
+	// false there is correct: nothing observed the applied mode.
+	if err := resp.ParsePayload(&result); err != nil {
+		return ModeResult{Requested: modeID}, nil
+	}
+	if result.Requested == "" {
+		result.Requested = modeID
+	}
+	return result, nil
 }
 
 // SetModel changes the agent's model via the agent WebSocket stream.

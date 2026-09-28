@@ -21,6 +21,13 @@ system_design:
 
 # Task 17: Reference adoption, evidence, writeback, and outcomes
 
+## Presentation scope correction (2026-09-28)
+
+The [removal package](../remove-native-coordination-ui/plan.md) supersedes this
+work order's UI-03 task-detail mockup for claim and completion controls. The
+correction affects presentation only. Task 17's plugin adoption, evidence,
+writeback, and outcome contracts and results remain valid.
+
 ## Summary
 
 Complete the reference coordinator operational tools using optional Host capabilities. Keep task completion and ownership enforced by native services.

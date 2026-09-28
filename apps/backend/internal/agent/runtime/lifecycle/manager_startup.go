@@ -197,7 +197,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
+	agentDisplayName := m.resolveAgentDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
@@ -228,7 +228,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution)
 		if err != nil {
 			execution.remoteInstanceLifecycleMu.Unlock()
 			return routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, execution.AgentID, err)
@@ -241,7 +241,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	execution.remoteInstanceLifecycleMu.Unlock()
 
-	if err := m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy); err != nil {
+	if err := m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription); err != nil {
 		return routingerr.NewAgentStartupFailure(routingerr.PhaseSessionInit, execution.AgentID, err)
 	}
 	return nil

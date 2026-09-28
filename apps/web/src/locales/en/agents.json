@@ -36,6 +36,7 @@
   "capabilityProbeFailed": "Probe failed. Check agent logs for details.",
   "capabilityProbing": "Checking agent capabilities…",
   "changeTierMappingsFirst": "Change these workspace tier mappings before deleting this profile.",
+  "cliFlagsGoToBridge": "CLI flags are appended to the launched ACP bridge process, not to the agent CLI it wraps.",
   "everythingInstalled": "Every available agent and tool is already installed.",
   "expandAgentProfiles": "Expand {{name}} profiles",
   "checkingAuthentication": "Checking authentication",

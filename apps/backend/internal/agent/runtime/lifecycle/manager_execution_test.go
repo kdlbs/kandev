@@ -1212,12 +1212,16 @@ type resumeTrackingExecutor struct {
 	MockExecutor
 	client        *agentctl.Client
 	resumeErr     error
+	resumeStarted chan struct{}
 	calls         []string
 	createRequest *ExecutorCreateRequest
 }
 
 func (e *resumeTrackingExecutor) ResumeRemoteInstance(_ context.Context, _ *ExecutorCreateRequest) error {
 	e.calls = append(e.calls, "resume")
+	if e.resumeStarted != nil {
+		close(e.resumeStarted)
+	}
 	return e.resumeErr
 }
 

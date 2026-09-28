@@ -447,13 +447,8 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// and the original-config snapshot could disagree with reality).
 	profileModel = effectiveModel.model
 	runtimeModel = ""
-	// Only mark the launch initialized once the start-model policy has
-	// succeeded — a strict unavailable model fails here, and a failed launch
-	// must not look initialized.
-	execution.setSessionInitialized(true)
-
-	finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
-		ctx, execution, result.SessionID, profileModel, profileMode, profileConfigOptions,
+	finalConfigID, profileModelApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
+		ctx, execution, result.SessionID, profileModel, profileConfigOptions,
 		effectiveModel.handled, effectiveModel.appliedModel,
 	)
 
@@ -464,8 +459,16 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 
 	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(
 		ctx, execution, result.SessionID, finalConfigID,
-		profileModelApplied, profileModeApplied, runtimeModel, runtimeMode, runtimeConfigOptions,
+		profileModelApplied, profileMode, runtimeModel, runtimeMode, runtimeConfigOptions,
 	)
+	requestedMode := runtimeMode
+	if requestedMode == "" {
+		requestedMode = profileMode
+	}
+	if err := sm.applyExplicitSessionMode(ctx, execution, result.SessionID, requestedMode); err != nil {
+		return err
+	}
+	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
@@ -603,19 +606,17 @@ func (sm *SessionManager) applyProfileSessionLayers(
 	execution *AgentExecution,
 	acpSessionID string,
 	profileModel string,
-	profileMode string,
 	profileConfigOptions map[string]string,
 	modelPolicyHandled bool,
 	policyAppliedModel string,
-) (string, string, string, map[string]string) {
+) (string, string, map[string]string) {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return "", "", "", nil
+		return "", "", nil
 	}
 	finalConfigID := ""
 	profileModelApplied := ""
-	profileModeApplied := ""
 	profileConfigOptionsApplied := make(map[string]string)
 	if profileModel != "" {
 		if modelPolicyHandled {
@@ -642,17 +643,7 @@ func (sm *SessionManager) applyProfileSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("model", profileModel))
 		}
 	}
-	if profileMode != "" {
-		if err := client.SetMode(ctx, acpSessionID, profileMode); err != nil {
-			sm.logger.Warn("failed to set profile mode via ACP",
-				zap.String("execution_id", execution.ID), zap.String("mode", profileMode), zap.Error(err))
-		} else {
-			profileModeApplied = profileMode
-			sm.logger.Info("set profile mode on ACP session",
-				zap.String("execution_id", execution.ID), zap.String("mode", profileMode))
-		}
-	}
-	sanitizedOptions := profileconfig.SanitizeConfigOptions(profileConfigOptions)
+	sanitizedOptions := sanitizeProfileConfigOptions(profileConfigOptions, execution.GetModelState())
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := client.SetConfigOption(ctx, configID, value); err != nil {
@@ -666,7 +657,7 @@ func (sm *SessionManager) applyProfileSessionLayers(
 		sm.logger.Info("set profile config option on ACP session",
 			zap.String("execution_id", execution.ID), zap.String("config_id", configID), zap.String("value", value))
 	}
-	return finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied
+	return finalConfigID, profileModelApplied, profileConfigOptionsApplied
 }
 
 func (sm *SessionManager) applyRuntimeSessionLayers(
@@ -700,13 +691,6 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel))
 		}
 	}
-	if runtimeMode != "" && runtimeMode != profileMode {
-		if err := client.SetMode(ctx, acpSessionID, runtimeMode); err != nil {
-			failed = append(failed, "mode")
-			sm.logger.Warn("failed to set runtime mode via ACP",
-				zap.String("execution_id", execution.ID), zap.String("mode", runtimeMode), zap.Error(err))
-		}
-	}
 	// Fail safe: when the current agent's option catalog is not yet known, we
 	// cannot verify which persisted options it supports, so replay nothing
 	// rather than sending a prior agent's keys (spec failure mode: unknown
@@ -730,6 +714,45 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 		finalConfigID = configID
 	}
 	return finalConfigID, failed
+}
+
+func sanitizeProfileConfigOptions(options map[string]string, state *CachedModelState) map[string]string {
+	cleaned := profileconfig.SanitizeConfigOptions(options)
+	catalog, catalogKnown := capturedRuntimeConfigOptionCatalog(state)
+	if !catalogKnown || len(cleaned) == 0 {
+		return cleaned
+	}
+	for id := range cleaned {
+		if strings.EqualFold(catalog[id], "mode") {
+			delete(cleaned, id)
+		}
+	}
+	return cleaned
+}
+
+func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, execution *AgentExecution, sessionID, mode string) error {
+	if mode == "" {
+		return nil
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode)
+	}
+	result, err := client.SetMode(ctx, sessionID, mode)
+	if err != nil {
+		return fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err)
+	}
+	if !result.Confirmed || result.Effective == "" {
+		return fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode)
+	}
+	if result.Effective != mode {
+		return fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective)
+	}
+	sm.logger.Info("session mode confirmed before first prompt",
+		zap.String("execution_id", execution.ID), zap.String("session_id", sessionID),
+		zap.String("requested_mode", mode), zap.String("effective_mode", result.Effective))
+	return nil
 }
 
 func sortedConfigOptionKeys(options map[string]string) []string {

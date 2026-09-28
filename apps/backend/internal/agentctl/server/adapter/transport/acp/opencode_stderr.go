@@ -26,6 +26,7 @@ type openCodeStderrDiagnostic struct {
 
 type providerPromptError struct {
 	ProviderError streams.ProviderError
+	cause         error
 }
 
 func (e *providerPromptError) Error() string {
@@ -33,6 +34,13 @@ func (e *providerPromptError) Error() string {
 		return "provider stream error"
 	}
 	return e.ProviderError.Message
+}
+
+func (e *providerPromptError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
 }
 
 // ProviderErrorFromError extracts the safe provider diagnostic from a prompt

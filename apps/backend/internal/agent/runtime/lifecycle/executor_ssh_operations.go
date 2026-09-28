@@ -1051,6 +1051,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 			env[key] = val
 		}
 	}
+	// Keep an explicit profile configuration path intact. Mode application no
+	// longer creates or redirects this directory.
+	if configDir := req.Env["CLAUDE_CONFIG_DIR"]; configDir != "" {
+		env["CLAUDE_CONFIG_DIR"] = configDir
+	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
 	}
@@ -1218,7 +1223,19 @@ func remoteProcessCommandLineCommand(pid int) string {
 	// PID as an empty, non-zero result so remotePsProbeConfirmsAbsence can still
 	// distinguish it from a probe error. If neither mechanism is available,
 	// return stderr and fail closed rather than treating the process as absent.
+	//
+	// A `ps -p` failure is ambiguous by itself: it means either "no process
+	// with this pid" or "this ps build doesn't understand -p at all". Probing
+	// the caller's own pid (always alive) with the same selector tells them
+	// apart — if `-p` finds the shell running this very script, it is
+	// supported, so the original failure was a genuine miss and the pid is
+	// confirmed absent. This is what lets a host with a working `-p` but no
+	// /proc (macOS) confirm absence instead of falling into the /proc branch
+	// below and failing the identity probe closed on every exited pid.
 	return fmt.Sprintf(`ps -p %[1]d -o command= 2>/dev/null || {
+  if ps -p $$ -o pid= >/dev/null 2>&1; then
+    exit 1
+  fi
   if [ ! -d /proc ]; then
     echo "process identity probe unavailable: ps does not support -p and /proc is absent" >&2
     exit 2

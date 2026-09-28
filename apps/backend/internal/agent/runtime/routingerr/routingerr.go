@@ -174,6 +174,19 @@ const statusOverloaded = 529
 // Classify always returns a non-nil *Error, even for an unmatched or empty
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
+	e := classify(in)
+	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
+		// Providers such as codex state the retry time only in the human
+		// notice, not in a structured field. Deriving it here lets every
+		// consumer (short retry, circuit breaker) honor it uniformly.
+		if hint := parseResetHint(in.Stderr + "\n" + in.Stdout); hint != nil {
+			e.ResetHint = hint
+		}
+	}
+	return e
+}
+
+func classify(in Input) *Error {
 	rawText := in.Stderr + "\n" + in.Stdout
 	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {

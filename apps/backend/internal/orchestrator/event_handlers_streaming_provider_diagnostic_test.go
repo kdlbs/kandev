@@ -3,8 +3,10 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -16,6 +18,43 @@ import (
 // classification itself from the chunk text
 // (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.20).
 const gatewayServerFailureSample = "API Error: 500 Internal server error."
+
+func TestHandleAgentStreamEvent_CodexUsageLimitDiagnosticCorrelatesWithPromptError(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	armTransientPromptEvidence(svc)
+	const notice = "You've hit your usage limit. try again at Sep 27th, 2026 3:09 AM"
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "execution-1",
+		AgentType:   "codex-acp",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:                        "message_streaming",
+			MessageID:                   "msg-1",
+			Text:                        notice,
+			PromptGeneration:            7,
+			ProviderDiagnosticCandidate: true,
+		},
+	})
+
+	got := svc.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		AgentID:          "codex-acp",
+		PromptGeneration: 7,
+		ErrorMessage:     "Internal error",
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceCodexACP,
+			ProviderID: "codex-acp",
+			Message:    notice,
+			OccurredAt: time.Now().UTC(),
+		},
+	})
+	if got.OutputObserved {
+		t.Fatal("matching Codex usage-limit diagnostic and typed prompt error were treated as generated output")
+	}
+}
 
 // TestHandleAgentStreamEvent_MessageStreamingHonorsUnmarkedProviderDiagnosticText
 // proves the orchestrator no longer re-derives the provider-diagnostic

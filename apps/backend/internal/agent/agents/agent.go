@@ -248,12 +248,16 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
+	// ContainerEnv provides agent-specific environment required only when the
+	// process runs inside a container runtime. These values are independent of
+	// session mode and never reach host or SSH processes.
 	Image          string
 	Tag            string
 	Cmd            Command
 	Entrypoint     Command
 	WorkingDir     string
 	Env            map[string]string
+	ContainerEnv   map[string]string
 	RequiredEnv    []string
 	Mounts         []MountTemplate
 	ResourceLimits ResourceLimits
@@ -370,6 +374,18 @@ type PermissionSetting struct {
 	ApplyMethod  string `json:"apply_method,omitempty"`
 	CLIFlag      string `json:"cli_flag,omitempty"`
 	CLIFlagValue string `json:"cli_flag_value,omitempty"`
+
+	// PassthroughOnly marks a CLI flag that only reaches the agent in CLI
+	// passthrough mode. Over ACP the launched process is the bridge, which
+	// forwards no unrecognized argument to the CLI it wraps, so the flag is
+	// appended to a process that ignores it while the UI reports it as
+	// enabled.
+	PassthroughOnly bool `json:"passthrough_only,omitempty"`
+
+	// ACPEquivalent names the control that achieves the same thing over ACP.
+	// It is the actionable half of refusing a passthrough-only flag: a message
+	// that only says "not available here" leaves the user with no next step.
+	ACPEquivalent string `json:"acp_equivalent,omitempty"`
 }
 
 // PassthroughConfig defines configuration for CLI passthrough mode.

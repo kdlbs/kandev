@@ -129,6 +129,55 @@ func TestEngineRoutesCodexUsageLimitThroughHardPolicy(t *testing.T) {
 	}
 }
 
+// A quota failure is scoped to the shared credential binding, not just the
+// execution profile that happened to run. Every candidate on the same account
+// must be skipped so the route advances to a different provider instead of
+// re-selecting a sibling profile that shares the exhausted quota.
+func TestEngineQuotaFailureSkipsSiblingsOnSharedBinding(t *testing.T) {
+	now := time.Unix(1000, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	resetAt := now.Add(2 * time.Hour)
+	profile := Profile{
+		ID: "dynamic-quota", Version: 1,
+		Candidates: []Candidate{
+			{ID: "codex-a", Enabled: true, BindingKey: "credential:shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "codex-b", Enabled: true, BindingKey: "credential:shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "other", Enabled: true, BindingKey: "credential:other", Policies: routingpolicy.DefaultDocument()},
+		},
+	}
+	initial, err := engine.Select("session-quota", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if initial.ExecutionProfileID != "codex-a" {
+		t.Fatalf("initial candidate = %q, want codex-a", initial.ExecutionProfileID)
+	}
+
+	failure := &routingerr.Error{
+		Code: routingerr.CodeQuotaLimited, Class: routingerr.ClassHard,
+		FallbackAllowed: true, ResetHint: &resetAt,
+	}
+	decision, err := engine.ApplyFailure(
+		"session-quota", profile, initial.Generation, initial.ExecutionProfileID, failure,
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if decision.ExecutionProfileID != "other" {
+		t.Fatalf("decision = %q, want the sibling codex-b to be skipped and other selected", decision.ExecutionProfileID)
+	}
+	if !engine.circuits.IsOpen("credential:shared", now) {
+		t.Fatal("shared credential binding circuit was not opened")
+	}
+	next, err := engine.Select("session-quota", profile, decision.Generation, "")
+	if err != nil {
+		t.Fatalf("subsequent Select: %v", err)
+	}
+	if next.ExecutionProfileID != "other" {
+		t.Fatalf("subsequent candidate = %q, want other while the shared binding is open", next.ExecutionProfileID)
+	}
+}
+
 func TestEngineRetrySameKeepsTheFailedCandidate(t *testing.T) {
 	profile := Profile{
 		ID: "dynamic-1", Version: 1,

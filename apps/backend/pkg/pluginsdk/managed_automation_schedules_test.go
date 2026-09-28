@@ -60,7 +60,10 @@ func TestManagedConversationSchedulesHostRoundTrip(t *testing.T) {
 	serverHost := &managedScheduleHostFixture{exactHostFixture: &exactHostFixture{}, manager: manager}
 	plugin := &GRPCPlugin{Impl: author, Host: serverHost, HostDialTimeout: 5 * time.Second}
 	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{PluginMapKey: plugin})
-	t.Cleanup(func() { _ = client.Close(); server.Stop() })
+	t.Cleanup(func() {
+		server.Stop()
+		_ = client.Close()
+	})
 
 	_, err := client.Dispense(PluginMapKey)
 	require.NoError(t, err)

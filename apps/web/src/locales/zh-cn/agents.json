@@ -41,6 +41,7 @@
   "capabilityProbeFailed": "探测失败。请查看智能体日志了解详情。",
   "capabilityProbing": "正在检查智能体能力…",
   "changeTierMappingsFirst": "删除此配置前，请先更改这些工作区层级映射。",
+  "cliFlagsGoToBridge": "命令行参数会附加到启动的 ACP 桥接进程上，而不是它所封装的智能体 CLI。",
   "checkingAuthentication": "正在检查身份验证",
   "checkingCapabilitiesAndAuth": "正在检查智能体能力与身份验证…",
   "checkingLatestRuntimeVersion": "正在检查最新运行时版本…",

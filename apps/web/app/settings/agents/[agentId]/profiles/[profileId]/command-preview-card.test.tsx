@@ -116,3 +116,52 @@ describe("CommandPreviewCard", () => {
     expect(screen.queryByText(/will be replaced with your task description/)).toBeNull();
   });
 });
+
+describe("CommandPreviewCard flag destination", () => {
+  // AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-001.2, .4
+  // Over ACP the flags land on the bridge process, not the agent CLI it wraps.
+  // Without this line the preview showed an argv that looks like the agent's.
+  it("names the launched process when flags go to the ACP bridge", async () => {
+    previewAgentCommandActionMock.mockResolvedValue({
+      ...response("npx --yes @agentclientprotocol/claude-agent-acp --verbose"),
+      flag_destination: "acp_bridge",
+    });
+
+    render(
+      <CommandPreviewCard
+        agentName="claude"
+        model="claude-sonnet-4-5"
+        permissionSettings={{}}
+        cliPassthrough={false}
+        cliFlags={[{ description: "", flag: "--verbose", enabled: true }]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("command-preview-flag-destination")).toBeTruthy();
+    });
+  });
+
+  it("omits the destination note for a passthrough profile", async () => {
+    previewAgentCommandActionMock.mockResolvedValue({
+      ...response("npx -y @anthropic-ai/claude-code --verbose"),
+      flag_destination: "agent_cli",
+    });
+
+    render(
+      <CommandPreviewCard
+        agentName="claude"
+        model="claude-sonnet-4-5"
+        permissionSettings={{}}
+        cliPassthrough
+        cliFlags={[{ description: "", flag: "--verbose", enabled: true }]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("command-preview-flag-destination")).toBeNull();
+    });
+  });
+});

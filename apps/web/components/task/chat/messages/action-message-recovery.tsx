@@ -40,6 +40,19 @@ function recoveryActionLabel(
   return t("chat:managedRuntimeRetry");
 }
 
+function recoveryActionTooltip(action: MessageAction, t: ReturnType<typeof useTranslation>["t"]) {
+  switch (action.tooltip_key) {
+    case "sessionRecoveryResumeDescription":
+      return t("task:sessionRecoveryResumeDescription");
+    case "sessionRecoveryFreshDescription":
+      return t("task:sessionRecoveryFreshDescription");
+    case "sessionRecoveryCorruptedDescription":
+      return t("task:sessionRecoveryCorruptedDescription");
+    default:
+      return action.tooltip;
+  }
+}
+
 export function SessionRecoveryActionButtons({
   actions,
   taskId,
@@ -79,7 +92,7 @@ export function SessionRecoveryActionButtons({
             kind,
             label: recoveryActionLabel(kind, t),
             testId: action.test_id,
-            tooltip: action.tooltip,
+            tooltip: recoveryActionTooltip(action, t),
             onClick: () => void onRecoveryAction(kind),
           },
         ]

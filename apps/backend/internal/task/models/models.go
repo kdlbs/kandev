@@ -100,7 +100,12 @@ type PluginMessageFilter struct {
 
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
-	MetaKeyAgentProfileID              = "agent_profile_id"
+	MetaKeyAgentProfileID = "agent_profile_id"
+	// MetaKeyAutoStartError records why an asynchronous auto-start failed after
+	// its creating call already returned success. Without it the only evidence
+	// is a backend log line and the task sits in CREATED with no session,
+	// looking exactly like a task nobody asked to start.
+	MetaKeyAutoStartError              = "auto_start_error"
 	MetaKeyExecutorID                  = "executor_id"
 	MetaKeyExecutorProfileID           = "executor_profile_id"
 	MetaKeyManagedByPlugin             = "kandev.managed_by_plugin"
@@ -1827,6 +1832,15 @@ const (
 	PermissionStatusExpired PermissionStatus = "expired"
 )
 
+// PermissionDecision records the option and policy source that resolved a
+// permission request. Human decisions continue to use PermissionResolutionAudit;
+// this metadata shape is also available to other decision sources.
+type PermissionDecision struct {
+	OptionID   string `json:"option_id"`
+	OptionKind string `json:"option_kind"`
+	Source     string `json:"source"`
+}
+
 type PermissionResolutionActorKind string
 
 const (
@@ -1842,6 +1856,7 @@ const (
 	PermissionSourceWeb         PermissionResolutionSource = "web"
 	PermissionSourceExternalMCP PermissionResolutionSource = "external_mcp"
 	PermissionSourceAutomation  PermissionResolutionSource = "automation"
+	PermissionSourceAutoApprove PermissionResolutionSource = "auto_approve"
 	// PermissionSourceAutomationMCP identifies a resolution made by the
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.

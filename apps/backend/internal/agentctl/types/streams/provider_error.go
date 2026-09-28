@@ -59,8 +59,8 @@ const (
 	// ProviderErrorSourceOpenCodeACP marks a provider diagnostic projected
 	// from a structured ACP service-failure response.
 	ProviderErrorSourceOpenCodeACP = "opencode_acp"
-	// ProviderErrorSourceCodexACP marks a safe diagnostic reconstructed from
-	// Codex ACP metadata and its matching capacity message.
+	// ProviderErrorSourceCodexACP marks a safe diagnostic correlated with a
+	// terminal Codex ACP prompt error.
 	ProviderErrorSourceCodexACP = "codex_acp"
 	// ProviderErrorSourceCursorACP marks Cursor's bounded HTTP/2 stream-reset
 	// diagnostic reconstructed from its terminal ACP control chunk.

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   chmod,
@@ -562,6 +563,17 @@ async function readInstances(instancesDir) {
     }
   }
   return instances;
+}
+
+export async function writeInstanceRecord(instanceDir, record) {
+  const target = join(instanceDir, "instance.json");
+  const temporary = join(instanceDir, `.instance-${randomUUID()}.json`);
+  try {
+    await writeFile(temporary, JSON.stringify(record, null, 2));
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export function createAtomicRecordWriter(filePath) {
