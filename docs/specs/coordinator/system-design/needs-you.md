@@ -227,6 +227,11 @@ with `detected_at` older than 30 days. There is no timer.
   renders no shell of its own. The count strip is therefore the first thing
   under the topbar, and the content column is left-aligned rather than
   centred, as in mockup v2.1.
+- The strip spans the window rather than the content column, with the
+  derived-facts line as a caption at its far end rather than a paragraph
+  beneath it (AC-COORDINATOR-NEEDS-YOU-003.3, mockup v2.1 `.strip`). Beside
+  the counts only fits at that width, so the caption is dropped below `lg`
+  rather than allowed to wrap the row.
 - Phone: one column; the strip stays sticky; actions wrap with 44px minimum
   targets. Playwright checks run in the `mobile-chrome` project at 390px, and an
   axe scan asserts no critical violation on both screens.

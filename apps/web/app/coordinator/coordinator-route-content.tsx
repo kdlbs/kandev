@@ -141,26 +141,28 @@ export function CoordinatorRouteContent({
       }
       topbarTestId="coordinator-topbar"
     >
+      {/* Full width under the topbar, not inside the content column: the
+          derived-facts caption sits beside the counts, which only fits when
+          the strip spans the window (mockup v2.1 `.strip`). */}
+      {!tasksHardFailed && (
+        <div className="bg-background sticky top-0 z-10 border-b px-4">
+          <CountStrip
+            classification={attention.classification}
+            workspaceId={workspaceId}
+            coordinatorId={resolved.coordinator.id}
+            view={view}
+          />
+        </div>
+      )}
       <div className="w-full max-w-3xl space-y-4 p-4">
         <InputFailureBanner inputs={attention.inputs} retry={attention.retryFailed} />
-        {!tasksHardFailed && (
-          <>
-            <div className="bg-background sticky top-0 z-10">
-              <CountStrip
-                classification={attention.classification}
-                workspaceId={workspaceId}
-                coordinatorId={resolved.coordinator.id}
-                view={view}
-              />
-            </div>
-            {children({
-              coordinator: resolved.coordinator,
-              coordinators: resolved.coordinators,
-              attention,
-              canManage,
-            })}
-          </>
-        )}
+        {!tasksHardFailed &&
+          children({
+            coordinator: resolved.coordinator,
+            coordinators: resolved.coordinators,
+            attention,
+            canManage,
+          })}
         {/* Keyed on the viewed coordinator: a coordinator switch fully
           remounts the controller, so every hook, ref, and draft resets to
           its initial value by construction instead of relying on each

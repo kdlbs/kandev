@@ -59,7 +59,7 @@ export function CountStrip({ classification, workspaceId, coordinatorId, view }:
   const { t } = useTranslation();
   const onQueue = view === "queue";
   return (
-    <div className="space-y-1" data-testid="coordinator-count-strip">
+    <div className="flex items-center" data-testid="coordinator-count-strip">
       <div className="flex flex-wrap">
         <CountLink
           href={linkToCoordinatorNeedsYou(workspaceId, coordinatorId)}
@@ -90,7 +90,12 @@ export function CountStrip({ classification, workspaceId, coordinatorId, view }:
           current={onQueue}
         />
       </div>
-      <p className="text-muted-foreground text-xs">{t("coordinator:positionsDerivedLine")}</p>
+      {/* Beside the counts, not under them (AC-COORDINATOR-NEEDS-YOU-003.3):
+          it is a caption on the strip, and reading as a paragraph of its own
+          made it look like an annotation. Dropped where the row would wrap. */}
+      <p className="text-muted-foreground ml-auto hidden pl-4 text-xs lg:block">
+        {t("coordinator:positionsDerivedLine")}
+      </p>
     </div>
   );
 }

@@ -106,3 +106,41 @@ describe("CountStrip", () => {
     expect(screen.getByTestId(NEEDS_YOU_TEST_ID).className).not.toContain("bg-primary/10");
   });
 });
+
+describe("CountStrip derived-facts line", () => {
+  it("puts the derived-facts line beside the counts, not under them", () => {
+    render(
+      <CountStrip
+        classification={classification()}
+        workspaceId="ws-1"
+        coordinatorId="co-1"
+        view="queue"
+      />,
+    );
+    const caption = screen.getByText(
+      "Positions derived from session, PR, CI and review facts, as they change",
+    );
+    const strip = screen.getByTestId("coordinator-count-strip");
+    // A direct child of the strip row, pushed to its far end, rather than a
+    // block below the counts (AC-COORDINATOR-NEEDS-YOU-003.3).
+    expect(caption.parentElement).toBe(strip);
+    expect(strip.className).toContain("flex");
+    expect(caption.className).toContain("ml-auto");
+  });
+
+  it("drops the derived-facts line where the strip row would wrap", () => {
+    render(
+      <CountStrip
+        classification={classification()}
+        workspaceId="ws-1"
+        coordinatorId="co-1"
+        view="queue"
+      />,
+    );
+    const caption = screen.getByText(
+      "Positions derived from session, PR, CI and review facts, as they change",
+    );
+    expect(caption.className).toContain("hidden");
+    expect(caption.className).toContain("lg:block");
+  });
+});
