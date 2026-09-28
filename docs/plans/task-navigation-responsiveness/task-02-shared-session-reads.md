@@ -169,3 +169,15 @@ promise into duplicate requests.
 - Verification: all 78 tests in the eight affected session/tree suites pass,
   together with changed-file ESLint and frontend TypeScript. Commands and final
   delivery results are tracked in Task 04.
+
+### Terminal creation CI follow-up
+
+- The mobile terminal-close E2E exposed newly created shells missing from the
+  shared domain store. Removing one terminal rebuilt the local list from an
+  empty store and hid its sibling. Deduplicated reads no longer masked the
+  missing mutation publication with another mount-time list request.
+- Two real-store RED cases cover ordinary and script creation followed by a
+  held destroy request. Both creation paths now publish returned shell metadata
+  immediately; the surviving sibling stays usable without another list read.
+- All 29 tests in six terminal/shell suites, frontend TypeScript, and changed-file
+  ESLint pass. Task 04 records the desktop and phone browser verification.

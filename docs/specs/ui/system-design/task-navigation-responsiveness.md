@@ -80,6 +80,11 @@ a replacement. Transport timeouts continue to bound outstanding work.
 
 ## Shared session reads
 
+Successful ordinary and script terminal creation publishes the returned shell
+to the owning environment's domain store immediately. Local terminal tabs and
+optimistic removal use that same shell set; correctness cannot depend on a
+later mounting consumer issuing another list request.
+
 The coordinator owns promises and initialization/invalidation metadata. Existing
 Zustand slices remain the shell and commit result owners. Move the cumulative
 diff's module-global cache/listeners/timers into this same store scope, retaining

@@ -294,3 +294,26 @@ validation pass; the full suite is delegated to the PR CI run.
   6 files / 51 tests passed. Frontend TypeScript and changed-file ESLint pass.
   Final build, desktop/phone preview smoke, merged-result validation and CI are
   tracked in the PR's current-head delivery evidence.
+
+### Terminal creation CI follow-up
+
+- Reproduced the mobile terminal-close CI failure locally: closing one of two
+  newly created terminals removed both rows. Two failing real-store tests
+  isolated missing creation publication for ordinary and script terminals.
+- Publish successful creation to the shared shell store before updating tabs.
+  No public API, copy, or layout changes; existing terminal behavior is restored.
+- From `apps/web`, `VITEST_MAX_WORKERS=2 pnpm exec vitest run
+  hooks/domains/session/use-terminals-shell-state.test.tsx
+  hooks/domains/session/use-terminal-destroy.test.ts
+  hooks/domains/session/use-user-shells.test.tsx
+  hooks/domains/session/use-mobile-terminals.test.ts
+  hooks/domains/session/use-terminals-build.test.ts
+  lib/state/slices/session-runtime/user-shells.test.ts`: 6 files / 29 tests pass.
+  Frontend TypeScript and changed-file ESLint pass.
+- `pnpm e2e:run --project mobile-chrome
+  tests/terminal/mobile-terminal-close.spec.ts -- --repeat-each=2 --retries=0`:
+  both runs pass after a fresh managed build. `pnpm e2e:run --no-build
+  --project chromium tests/terminal/terminal-dockview-ui.spec.ts -- --retries=0`:
+  all nine tests pass against the same build. Suites ran sequentially.
+- Final committed-head CI, review, merged-result validation, and preview refresh
+  remain delivery gates tracked in the PR evidence; prior timings are historical.
