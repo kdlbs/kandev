@@ -289,8 +289,28 @@ describe("classify - proposals", () => {
     expect(result.needsYou[0]).toMatchObject({ kind: "proposal", proposal: p });
   });
 
-  it("excludes non-pending proposals", () => {
+  it("classifies an approving proposal as a Needs-you item (AC-COORDINATOR-NEEDS-YOU-001.1)", () => {
+    const p = proposal({ id: "p-1", status: "approving" });
+    const result = classify([], [], [p], NOW);
+    expect(result.needsYou).toHaveLength(1);
+    expect(result.needsYou[0]).toMatchObject({ kind: "proposal", proposal: p });
+  });
+
+  it("classifies a failed proposal as a Needs-you item (AC-COORDINATOR-NEEDS-YOU-001.1)", () => {
+    const p = proposal({ id: "p-1", status: "failed" });
+    const result = classify([], [], [p], NOW);
+    expect(result.needsYou).toHaveLength(1);
+    expect(result.needsYou[0]).toMatchObject({ kind: "proposal", proposal: p });
+  });
+
+  it("excludes a settled (approved) proposal", () => {
     const p = proposal({ id: "p-1", status: "approved" });
+    const result = classify([], [], [p], NOW);
+    expect(result.needsYou).toHaveLength(0);
+  });
+
+  it("excludes a settled (rejected) proposal", () => {
+    const p = proposal({ id: "p-1", status: "rejected" });
     const result = classify([], [], [p], NOW);
     expect(result.needsYou).toHaveLength(0);
   });

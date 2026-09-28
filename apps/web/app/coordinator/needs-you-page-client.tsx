@@ -2,14 +2,19 @@
 
 import { useTranslation } from "react-i18next";
 import { PageShell } from "@/components/page-shell";
+import type { CoordinatorInputStatus } from "./use-coordinator-attention";
 import { CoordinatorRouteContent } from "./coordinator-route-content";
-import { NeedsYouItemCard } from "./components/needs-you-item-card";
-import { EmptyNeedsYouState } from "./components/empty-needs-you-state";
+import { NeedsYouItemsPanel } from "./components/needs-you-items-panel";
 
 export type NeedsYouPageClientProps = {
   workspaceId: string;
   coordinatorId: string | null;
 };
+
+/** Loaded or errored for every input: `proposal-cards.md#cards "Forms and navigation"` waits for this before acting on a deep link. */
+function allInputsLoaded(inputs: CoordinatorInputStatus[]): boolean {
+  return inputs.every((input) => input.loadedAt !== undefined || input.error);
+}
 
 /**
  * The Needs you screen: one item card per entry the coordinator classifies
@@ -25,35 +30,24 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
         coordinatorId={coordinatorId}
         view="needs-you"
       >
-        {({ coordinator, attention, canManage }) => {
-          const items = attention.classification.needsYou;
-          if (items.length === 0) {
-            return (
-              <EmptyNeedsYouState
-                workingCount={attention.classification.queue.working.length}
-                workspaceId={workspaceId}
-                coordinatorId={coordinator.id}
-              />
-            );
-          }
-          return (
-            <div className="space-y-3" data-testid="needs-you-item-list">
-              {items.map((item) => (
-                <NeedsYouItemCard
-                  key={item.id}
-                  item={item}
-                  stepNameByTaskId={attention.stepNameByTaskId}
-                  workflowNameById={attention.workflowNameById}
-                  stepNameByWorkflowStep={attention.stepNameByWorkflowStep}
-                  openTasksById={attention.openTasksById}
-                  coordinatorName={coordinator.name}
-                  coordinatorId={coordinator.id}
-                  canManage={canManage}
-                />
-              ))}
-            </div>
-          );
-        }}
+        {({ coordinator, attention, canManage }) => (
+          <NeedsYouItemsPanel
+            items={attention.classification.needsYou}
+            workingCount={attention.classification.queue.working.length}
+            inputsLoaded={allInputsLoaded(attention.inputs)}
+            workspaceId={workspaceId}
+            coordinatorId={coordinator.id}
+            coordinatorName={coordinator.name}
+            canManage={canManage}
+            attentionMaps={{
+              stepNameByTaskId: attention.stepNameByTaskId,
+              workflowNameById: attention.workflowNameById,
+              stepNameByWorkflowStep: attention.stepNameByWorkflowStep,
+              openTasksById: attention.openTasksById,
+            }}
+            computeNeedsYouCount={attention.computeNeedsYouCount}
+          />
+        )}
       </CoordinatorRouteContent>
     </PageShell>
   );

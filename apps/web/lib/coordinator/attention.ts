@@ -126,6 +126,15 @@ const NEEDS_YOU_KIND_RANK: Record<NeedsYouItemKind, number> = {
 
 const RUNNING_SESSION_STATES = new Set(["RUNNING", "STARTING"]);
 
+/**
+ * Proposal statuses that still need a manager's decision and therefore stay
+ * on Needs you (AC-COORDINATOR-NEEDS-YOU-001.1): `pending` awaits Approve,
+ * Edit or Reject; `approving` is mid-decision with edits locked; `failed`
+ * kept all three actions after a create failure. `approved`/`rejected` are
+ * settled and never classify.
+ */
+const OPEN_PROPOSAL_STATUSES = new Set(["pending", "approving", "failed"]);
+
 /** Whether a primary session state counts as "an agent is running" (AC-COORDINATOR-NEEDS-YOU-002.6). */
 export function isRunningSessionState(state: string | undefined): boolean {
   return state !== undefined && RUNNING_SESSION_STATES.has(state);
@@ -352,7 +361,7 @@ export function classify(
   const stallsByTaskId = new Map(stalls.map((stall) => [stall.task_id, stall]));
 
   const needsYou: NeedsYouItem[] = proposals
-    .filter((proposal) => proposal.status === "pending")
+    .filter((proposal) => OPEN_PROPOSAL_STATUSES.has(proposal.status))
     .map((proposal) => proposalItem(proposal, nowMs));
 
   const queue: Record<QueueGroupKind, QueueItem[]> = {

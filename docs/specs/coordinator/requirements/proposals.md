@@ -261,9 +261,18 @@ Mockup:
 - Any `automatic` write class (decision D13, gate G2 and phase 4).
 - Expiry of pending proposals: they stay until decided or their coordinator is
   deleted.
-- The agent profile and executor of the task an approval creates. The approve
-  path (`createApprovedTask`, `apps/backend/internal/coordinator/approve.go:367`)
-  sets neither, so starting that task later relies on the workspace's default
-  agent profile; with no default it cannot start. The rule (inherit the
-  coordinator's profiles, choose one in Edit, or require a workspace default) is
-  an open product decision for a follow-up, not phase 1's proposal UI.
+- The agent profile and executor of the task an approval creates. **Decided
+  (D1), no backend change:** an approved task carries no profile of its own
+  and resolves like any task on its target workflow. The approve path
+  (`createApprovedTask`, `apps/backend/internal/coordinator/approve.go:367`)
+  sets neither `AgentProfileID` nor `AssigneeAgentProfileID` on the created
+  task. That is already Kandev's behavior for any task: at session start,
+  `resolveTaskAgentProfile`
+  (`apps/backend/internal/orchestrator/session_ensure.go:432`) resolves a
+  step-pinned profile, then the workflow's default, then `task.metadata`, then
+  the workspace default (`apps/backend/internal/orchestrator/session_ensure.go:439-448`),
+  the same chain a manually created task on that step follows; a task with no
+  workflow default and no workspace default still cannot start. Executor
+  resolution falls back the same way to the workspace's default executor
+  (`defaultExecutorID`, `apps/backend/internal/orchestrator/executor/executor_state.go:99`).
+  No phase 1 proposal-UI change follows from this.

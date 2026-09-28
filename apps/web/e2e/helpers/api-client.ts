@@ -21,6 +21,7 @@ import type {
   Coordinator,
   CoordinatorListResponse,
   CreateCoordinatorRequest,
+  Proposal,
 } from "../../lib/api/domains/coordinator-api";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -534,6 +535,18 @@ export class ApiClient {
 
   async listCoordinators(workspaceId: string): Promise<CoordinatorListResponse> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/coordinators`);
+  }
+
+  /** GET .../coordinators/:cid/proposals/:pid, for polling proposal state (e.g. status, task_id) from the backend directly. */
+  async getProposal(
+    workspaceId: string,
+    coordinatorId: string,
+    proposalId: string,
+  ): Promise<Proposal> {
+    return this.request(
+      "GET",
+      `/api/v1/workspaces/${workspaceId}/coordinators/${coordinatorId}/proposals/${proposalId}`,
+    );
   }
 
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {

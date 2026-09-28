@@ -1,13 +1,15 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proposal, Stall } from "@/lib/api/domains/coordinator-api";
 
 const listCoordinatorStallsMock = vi.fn();
 const listProposalsMock = vi.fn();
+const getProposalMock = vi.fn();
 
 vi.mock("@/lib/api/domains/coordinator-api", () => ({
   listCoordinatorStalls: (...args: unknown[]) => listCoordinatorStallsMock(...args),
   listProposals: (...args: unknown[]) => listProposalsMock(...args),
+  getProposal: (...args: unknown[]) => getProposalMock(...args),
 }));
 
 const clients = vi.hoisted(() => ({ active: undefined as unknown }));
@@ -18,6 +20,7 @@ vi.mock("@/lib/ws/connection", () => ({
 
 // Import after mocks so the hook picks up the mocked modules.
 import { useCoordinatorInputs } from "./use-coordinator-inputs";
+import { useProposalsStore } from "@/hooks/domains/coordinator/use-proposals";
 
 const WORKSPACE_ID = "workspace-1";
 const COORDINATOR_ID = "coordinator-1";
@@ -65,13 +68,34 @@ function makeWsClient() {
   };
 }
 
+/**
+ * `useCoordinatorInputs` and the `use-proposals.ts` store it now wires in
+ * each register their own `coordinator.updated` listener on the shared WS
+ * client mock, so a test that wants both inputs to react must invoke every
+ * registered handler, not just the first.
+ */
+function triggerCoordinatorUpdated(
+  wsClient: ReturnType<typeof makeWsClient>,
+  payload: Record<string, unknown>,
+) {
+  const handlers = wsClient.on.mock.calls
+    .filter(([type]) => type === "coordinator.updated")
+    .map(([, handler]) => handler as UpdatedHandler);
+  act(() => {
+    for (const handler of handlers) handler({ payload });
+  });
+}
+
 beforeEach(() => {
   listCoordinatorStallsMock.mockReset();
   listProposalsMock.mockReset();
+  getProposalMock.mockReset();
   clients.active = undefined;
+  useProposalsStore.setState({ byCoordinator: {} });
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -98,6 +122,24 @@ describe("useCoordinatorInputs - initial load", () => {
 
     expect(listCoordinatorStallsMock).not.toHaveBeenCalled();
     expect(listProposalsMock).not.toHaveBeenCalled();
+  });
+
+  it("reads proposals from the shared use-proposals.ts store, not a call of its own", async () => {
+    listCoordinatorStallsMock.mockResolvedValue({ stalls: [] });
+    // Seed the shared store directly, as another consumer (e.g. the chat
+    // card's useProposalById) would, before this hook ever mounts.
+    useProposalsStore.getState().mergePendingList(COORDINATOR_ID, [proposal("p-seeded")]);
+
+    listProposalsMock.mockResolvedValue({ proposals: [proposal("p-seeded")] });
+    const { result } = renderHook(() => useCoordinatorInputs(WORKSPACE_ID, COORDINATOR_ID));
+
+    await waitFor(() => expect(result.current.proposals.value).toEqual([proposal("p-seeded")]));
+    // The only `listProposals` caller in this tree is `use-proposals.ts`'s
+    // own `useProposals` hook (SR-10): one call for the mount-time read.
+    expect(listProposalsMock).toHaveBeenCalledTimes(1);
+    expect(useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId["p-seeded"]).toEqual(
+      proposal("p-seeded"),
+    );
   });
 });
 
@@ -149,19 +191,15 @@ describe("useCoordinatorInputs - coordinator.updated", () => {
     const { result } = renderHook(() => useCoordinatorInputs(WORKSPACE_ID, COORDINATOR_ID));
 
     await waitFor(() => expect(result.current.stalls.value).toBeDefined());
+    await waitFor(() => expect(result.current.proposals.value).toBeDefined());
     expect(wsClient.on).toHaveBeenCalledWith("coordinator.updated", expect.any(Function));
 
-    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
     listCoordinatorStallsMock.mockResolvedValueOnce({ stalls: [stall("t-3")] });
 
-    act(() => {
-      handler({
-        payload: {
-          workspace_id: WORKSPACE_ID,
-          coordinator_id: COORDINATOR_ID,
-          open_proposals: 1,
-        },
-      });
+    triggerCoordinatorUpdated(wsClient, {
+      workspace_id: WORKSPACE_ID,
+      coordinator_id: COORDINATOR_ID,
+      open_proposals: 1,
     });
 
     await waitFor(() => expect(result.current.stalls.value).toEqual([stall("t-3")]));
@@ -178,19 +216,15 @@ describe("useCoordinatorInputs - coordinator.updated", () => {
     const { result } = renderHook(() => useCoordinatorInputs(WORKSPACE_ID, COORDINATOR_ID));
 
     await waitFor(() => expect(result.current.stalls.value).toBeDefined());
-    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
+    await waitFor(() => expect(result.current.proposals.value).toBeDefined());
 
     listCoordinatorStallsMock.mockClear();
     listProposalsMock.mockClear();
 
-    act(() => {
-      handler({
-        payload: {
-          workspace_id: "other-workspace",
-          coordinator_id: COORDINATOR_ID,
-          open_proposals: 1,
-        },
-      });
+    triggerCoordinatorUpdated(wsClient, {
+      workspace_id: "other-workspace",
+      coordinator_id: COORDINATOR_ID,
+      open_proposals: 1,
     });
 
     expect(listCoordinatorStallsMock).not.toHaveBeenCalled();

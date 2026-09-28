@@ -89,6 +89,7 @@ function attention(
     tasksNeverLoaded: false,
     inputs,
     retryFailed: retryFailedMock,
+    computeNeedsYouCount: vi.fn(() => 0),
     ...overrides,
   };
 }

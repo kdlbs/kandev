@@ -19,7 +19,7 @@ export type UseCoordinatorTasksResult = {
   stepNameByWorkflowStep: Map<string, string>;
   /** Set while the workspace's tasks failed to load (docs/specs/coordinator/system-design/needs-you.md#failure-and-recovery). */
   error: boolean;
-  /** The time the screen last saw a successful tasks read complete. Undefined before the first success. */
+  /** The time this input first completed successfully for the current workspace. Undefined before the first success. */
   loadedAt: number | undefined;
   /** Re-fetches this input. */
   retry: () => void;
@@ -117,24 +117,32 @@ function useCoordinatorTasksFromActiveCache(workspaceId: string | null): UseCoor
   const matches = matchesWorkspace(workspaceContextRead, workspaceId);
   const error = matches && workspaceContextRead.snapshotError !== null;
   const pending = matches && workspaceContextRead.snapshotPending;
-  const requestId = matches ? workspaceContextRead.snapshotRequestId : null;
 
   const [loadedAt, setLoadedAt] = useState<number | undefined>(undefined);
-  const lastRecordedRequestIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!matches || pending || error || requestId === null) return;
-    if (lastRecordedRequestIdRef.current === requestId) return;
-    lastRecordedRequestIdRef.current = requestId;
-    setLoadedAt(Date.now());
-  }, [matches, pending, error, requestId]);
+  // Tracks the workspace id `loadedAt` was last recorded for, not a request
+  // id: a boot-hydrated snapshot resolves without ever setting
+  // `snapshotPending`/`snapshotRequestId` (`useAllWorkflowSnapshots` skips
+  // the fetch entirely when every workflow's snapshot is already
+  // boot-hydrated), and `snapshotRequestId` is nulled back out by the shared
+  // slice once a live fetch succeeds (`nextWorkspaceContextRequestId`), so
+  // neither can serve as a "just completed" signal. Recording once per
+  // workspace id the first time the read settles into `matches && !pending
+  // && !error` covers both the boot-hydrated and the live-fetch case.
+  const loadedWorkspaceIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!matches) {
-      lastRecordedRequestIdRef.current = null;
-      setLoadedAt(undefined);
+      if (loadedWorkspaceIdRef.current !== null) {
+        loadedWorkspaceIdRef.current = null;
+        setLoadedAt(undefined);
+      }
+      return;
     }
-  }, [matches]);
+    if (pending || error) return;
+    if (loadedWorkspaceIdRef.current === workspaceId) return;
+    loadedWorkspaceIdRef.current = workspaceId;
+    setLoadedAt(Date.now());
+  }, [matches, pending, error, workspaceId]);
 
   return {
     tasks,

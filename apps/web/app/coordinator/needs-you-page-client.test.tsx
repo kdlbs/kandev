@@ -1,12 +1,20 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import type { Coordinator } from "@/lib/api/domains/coordinator-api";
-import type { ClassifyResult, NeedsYouItem } from "@/lib/coordinator/attention";
+import { ToastProvider } from "@/components/toast-provider";
+import { useProposalsStore } from "@/hooks/domains/coordinator/use-proposals";
+import type { Coordinator, Proposal } from "@/lib/api/domains/coordinator-api";
+import type {
+  ClassifyResult,
+  NeedsYouItem,
+  NeedsYouProposalItem,
+} from "@/lib/coordinator/attention";
 import type {
   CoordinatorReadyContext,
   CoordinatorRouteContentProps,
 } from "./coordinator-route-content";
+import { needsYouItemHeadingId } from "./components/needs-you-item-card";
+import { NEEDS_YOU_EMPTY_HEADING_ID } from "./use-needs-you-focus";
 
 let readyContext: CoordinatorReadyContext;
 let capturedProps: CoordinatorRouteContentProps | undefined;
@@ -28,6 +36,8 @@ vi.mock("./coordinator-route-content", () => ({
 
 import { NeedsYouPageClient } from "./needs-you-page-client";
 
+const TIMESTAMP = "2026-09-27T00:00:00Z";
+
 afterEach(cleanup);
 
 function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
@@ -39,8 +49,8 @@ function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
     executor_profile_id: "e-1",
     context: "",
     conversation_task_id: null,
-    created_at: "2026-09-27T00:00:00Z",
-    updated_at: "2026-09-27T00:00:00Z",
+    created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
     ...overrides,
   };
 }
@@ -52,11 +62,11 @@ function emptyClassification(): ClassifyResult {
   };
 }
 
-function readyContextWith(needsYou: NeedsYouItem[]): CoordinatorReadyContext {
+function readyContextWith(needsYou: NeedsYouItem[], canManage = false): CoordinatorReadyContext {
   return {
     coordinator: coordinator(),
     coordinators: [coordinator()],
-    canManage: false,
+    canManage,
     attention: {
       classification: { ...emptyClassification(), needsYou },
       stepNameByTaskId: new Map(),
@@ -71,20 +81,85 @@ function readyContextWith(needsYou: NeedsYouItem[]): CoordinatorReadyContext {
         { kind: "proposals", error: false, loadedAt: 1 },
       ],
       retryFailed: vi.fn(),
+      computeNeedsYouCount: vi.fn(() => needsYou.length),
     },
   };
+}
+
+function proposalItem(overrides: Partial<NeedsYouProposalItem> = {}): NeedsYouProposalItem {
+  return {
+    kind: "proposal",
+    id: "p-1",
+    referenceTimeMs: 0,
+    ageMs: 60_000,
+    proposal: {
+      id: "p-1",
+      status: "pending",
+      task_id: null,
+      created_at: TIMESTAMP,
+      spec: {
+        title: "Add tests",
+        description: "desc",
+        rationale: "rationale",
+        workflow_id: "wf-1",
+        step_id: "step-1",
+        repository_id: "repo-1",
+        source_task_id: "t-4",
+      },
+    },
+    ...overrides,
+  };
+}
+
+function proposalRow(overrides: Partial<Proposal> = {}): Proposal {
+  return {
+    id: "p-1",
+    coordinator_id: "co-1",
+    workspace_id: "ws-1",
+    status: "pending",
+    spec: {
+      title: "Add tests",
+      description: "desc",
+      rationale: "rationale",
+      workflow_id: "wf-1",
+      step_id: "step-1",
+      repository_id: "repo-1",
+      source_task_id: "t-4",
+    },
+    final_spec: null,
+    claimed_at: null,
+    task_id: null,
+    error: null,
+    reject_reason: null,
+    decided_by: null,
+    created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
+    ...overrides,
+  };
+}
+
+function setLocation(path: string) {
+  window.history.replaceState({}, "", path);
 }
 
 beforeEach(() => {
   capturedProps = undefined;
   readyContext = readyContextWith([]);
+  setLocation("/workspaces/ws-1/coordinator/co-1");
+});
+
+afterEach(() => {
+  useProposalsStore.setState({ byCoordinator: {} });
+  setLocation("/workspaces/ws-1/coordinator/co-1");
 });
 
 function renderPage() {
   return render(
-    <TooltipProvider>
-      <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
-    </TooltipProvider>,
+    <ToastProvider>
+      <TooltipProvider>
+        <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+      </TooltipProvider>
+    </ToastProvider>,
   );
 }
 
@@ -118,5 +193,129 @@ describe("NeedsYouPageClient", () => {
     expect(screen.getByTestId("needs-you-item-list")).not.toBeNull();
     expect(screen.getByTestId("needs-you-item-task-1")).not.toBeNull();
     expect(screen.queryByTestId("empty-needs-you-state")).toBeNull();
+  });
+});
+
+describe("NeedsYouPageClient - deep-linked proposal form", () => {
+  it("opens the reject form with focus on Reason, and clears the query params", async () => {
+    setLocation("/workspaces/ws-1/coordinator/co-1?proposal=p-1&form=reject");
+    useProposalsStore.getState().mergeOne("co-1", proposalRow());
+    readyContext = readyContextWith([proposalItem()], true);
+
+    renderPage();
+
+    const reason = await screen.findByLabelText("Reason (optional)");
+    expect(document.activeElement).toBe(reason);
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
+  it("shows a toast and clears the query when the deep-linked id is not a current item", async () => {
+    setLocation("/workspaces/ws-1/coordinator/co-1?proposal=missing&form=edit");
+    readyContext = readyContextWith([], true);
+
+    renderPage();
+
+    expect(
+      await screen.findByText("This proposal is no longer waiting for a decision."),
+    ).not.toBeNull();
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
+  it("ignores an unrecognized form value and leaves the query untouched", () => {
+    setLocation("/workspaces/ws-1/coordinator/co-1?proposal=p-1&form=bogus");
+    useProposalsStore.getState().mergeOne("co-1", proposalRow());
+    readyContext = readyContextWith([proposalItem()], true);
+
+    renderPage();
+
+    expect(screen.queryByLabelText("Reason (optional)")).toBeNull();
+    expect(window.location.search).toBe("?proposal=p-1&form=bogus");
+  });
+});
+
+describe("NeedsYouPageClient - focus after a decision", () => {
+  function questionItem(id: string): NeedsYouItem {
+    return {
+      kind: "question",
+      id,
+      referenceTimeMs: 0,
+      ageMs: 1_000,
+      task: { id, title: `Task ${id}` },
+      pendingAction: "clarification",
+    };
+  }
+
+  it("moves focus to the next item's heading when the focused item leaves the list, and shows no toast", () => {
+    readyContext = readyContextWith([questionItem("t-1"), questionItem("t-2")]);
+    const { rerender } = renderPage();
+
+    document.getElementById(needsYouItemHeadingId("t-1"))?.focus();
+    expect(document.activeElement?.id).toBe(needsYouItemHeadingId("t-1"));
+
+    readyContext = readyContextWith([questionItem("t-2")]);
+    rerender(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+
+    expect(document.activeElement?.id).toBe(needsYouItemHeadingId("t-2"));
+    expect(screen.queryByTestId("toast-message")).toBeNull();
+  });
+
+  it("moves focus to the previous item's heading when the last, focused item leaves the list", () => {
+    readyContext = readyContextWith([questionItem("t-1"), questionItem("t-2")]);
+    const { rerender } = renderPage();
+
+    document.getElementById(needsYouItemHeadingId("t-2"))?.focus();
+
+    readyContext = readyContextWith([questionItem("t-1")]);
+    rerender(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+
+    expect(document.activeElement?.id).toBe(needsYouItemHeadingId("t-1"));
+  });
+
+  it("moves focus to the empty state's heading when the only, focused item leaves the list", () => {
+    readyContext = readyContextWith([questionItem("t-1")]);
+    const { rerender } = renderPage();
+
+    document.getElementById(needsYouItemHeadingId("t-1"))?.focus();
+
+    readyContext = readyContextWith([]);
+    rerender(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+
+    expect(document.activeElement?.id).toBe(NEEDS_YOU_EMPTY_HEADING_ID);
+  });
+
+  it("does not move focus when the removed item did not have it", () => {
+    readyContext = readyContextWith([questionItem("t-1"), questionItem("t-2")]);
+    const { rerender } = renderPage();
+
+    document.getElementById(needsYouItemHeadingId("t-2"))?.focus();
+
+    readyContext = readyContextWith([questionItem("t-2")]);
+    rerender(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+
+    expect(document.activeElement?.id).toBe(needsYouItemHeadingId("t-2"));
   });
 });

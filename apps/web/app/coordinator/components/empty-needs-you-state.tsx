@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
 import { linkToCoordinatorQueue } from "@/lib/coordinator/links";
+import { NEEDS_YOU_EMPTY_HEADING_ID } from "../use-needs-you-focus";
 
 export type EmptyNeedsYouStateProps = {
   workingCount: number;
@@ -21,7 +22,9 @@ export function EmptyNeedsYouState({
   const { t } = useTranslation();
   return (
     <div className="space-y-2 py-8 text-center" data-testid="empty-needs-you-state">
-      <p className="text-sm font-medium">{t("coordinator:emptyNeedsYouTitle")}</p>
+      <p id={NEEDS_YOU_EMPTY_HEADING_ID} tabIndex={-1} className="text-sm font-medium">
+        {t("coordinator:emptyNeedsYouTitle")}
+      </p>
       <p className="text-muted-foreground text-sm">
         {t("coordinator:emptyNeedsYouWorkingCount", { count: workingCount })}
       </p>

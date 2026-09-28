@@ -3,6 +3,7 @@ import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session-view";
 import { MessageTaskOriginProvider } from "@/components/task/chat/messages/message-task-origin-context";
+import { CoordinatorProposalProvider } from "@/components/task/chat/messages/kandev/coordinator-proposal-context";
 import type { CopilotChip } from "@/hooks/domains/coordinator/copilot-store";
 import type { OpenSequenceState } from "@/hooks/domains/coordinator/use-copilot-open-sequence";
 import type { ConversationResponse } from "@/lib/api/domains/coordinator-api";
@@ -63,19 +64,23 @@ function GoneMessage() {
 function ReadyBody({
   routeSession,
   workspaceId,
+  coordinatorId,
   chip,
   pendingDraft,
   askKey,
   onRemoveChip,
   onSuggest,
+  onClosePopover,
 }: {
   routeSession: ConversationResponse;
   workspaceId: string;
+  coordinatorId: string;
   chip: CopilotChip | null;
   pendingDraft: string | undefined;
   askKey: number;
   onRemoveChip: () => void;
   onSuggest: (text: string) => void;
+  onClosePopover: () => void;
 }) {
   const isEmpty = useAppStore(
     (state) => (state.messages.bySession[routeSession.session_id]?.length ?? 0) === 0,
@@ -93,15 +98,19 @@ function ReadyBody({
       {chip && <CoordinatorCopilotChipRow chip={chip} onRemove={onRemoveChip} />}
       {isEmpty && <CoordinatorCopilotEmptyIntro onSuggest={onSuggest} />}
       <MessageTaskOriginProvider value="coordinator">
-        <QuickChatSessionView
-          key={askKey}
-          session={session}
-          automaticRecovery={false}
-          hideSessionSelectors
-          taskArchiveState={routeSession.archive_state}
-          initialDraft={pendingDraft}
-          transformOutgoing={transformOutgoing}
-        />
+        <CoordinatorProposalProvider
+          value={{ workspaceId, coordinatorId, closePopover: onClosePopover }}
+        >
+          <QuickChatSessionView
+            key={askKey}
+            session={session}
+            automaticRecovery={false}
+            hideSessionSelectors
+            taskArchiveState={routeSession.archive_state}
+            initialDraft={pendingDraft}
+            transformOutgoing={transformOutgoing}
+          />
+        </CoordinatorProposalProvider>
       </MessageTaskOriginProvider>
     </div>
   );
@@ -109,6 +118,7 @@ function ReadyBody({
 
 export type CoordinatorCopilotBodyProps = {
   workspaceId: string;
+  coordinatorId: string;
   state: OpenSequenceState;
   routeSession: ConversationResponse | null;
   chip: CopilotChip | null;
@@ -117,6 +127,7 @@ export type CoordinatorCopilotBodyProps = {
   onRetry: () => void;
   onRemoveChip: () => void;
   onSuggest: (text: string) => void;
+  onClosePopover: () => void;
 };
 
 /** Switches the popover body on the open sequence's outcome
@@ -128,6 +139,7 @@ export type CoordinatorCopilotBodyProps = {
  *  mounted across it. */
 export function CoordinatorCopilotBody({
   workspaceId,
+  coordinatorId,
   state,
   routeSession,
   chip,
@@ -136,6 +148,7 @@ export function CoordinatorCopilotBody({
   onRetry,
   onRemoveChip,
   onSuggest,
+  onClosePopover,
 }: CoordinatorCopilotBodyProps) {
   if (state.kind === "profile-unavailable") {
     return (
@@ -151,11 +164,13 @@ export function CoordinatorCopilotBody({
       <ReadyBody
         routeSession={routeSession}
         workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
         chip={chip}
         pendingDraft={pendingDraft}
         askKey={askKey}
         onRemoveChip={onRemoveChip}
         onSuggest={onSuggest}
+        onClosePopover={onClosePopover}
       />
     );
   }
