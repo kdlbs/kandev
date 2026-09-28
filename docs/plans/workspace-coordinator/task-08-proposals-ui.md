@@ -185,8 +185,11 @@ Unit tests also pin the rules the design adds:
   Try again and disables Approve with edits, and never the "No step" line; a
   failed repository read keeps Approve with edits enabled; a deleted current
   workflow or an ineligible current step opens that field empty with its note
-  and Approve with edits disabled; a stale snapshot response for a
-  previously chosen workflow is discarded.
+  and Approve with edits disabled; for a deleted current workflow the
+  snapshot read issued at opening is made once and its response, or its
+  failure, is discarded (the step field shows neither steps nor "Could not
+  load options."), whichever of it and the workflow list settles first; a
+  stale snapshot response for a previously chosen workflow is discarded.
 - Remote change tests: with a form open, a merge that keeps `pending` keeps
   the typed values; one that makes it `approving` closes the form and moves
   focus to the card heading; one that removes the item moves focus per the

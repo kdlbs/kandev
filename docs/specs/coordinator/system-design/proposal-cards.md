@@ -195,7 +195,11 @@ already reads; no route is added.
   response for a workflow that is no longer selected is discarded. Title and
   description are editable at once. While a read is in flight its field shows
   "Loading options" and is disabled, and Approve with edits is disabled until
-  the workflow list and the chosen workflow's steps have loaded.
+  the workflow list and the chosen workflow's steps have loaded. The step
+  field shows the current workflow's snapshot outcome (steps or read failure)
+  only once the workflow list has loaded and contains that workflow; until
+  then it shows "Loading options". When the workflow list read fails, the
+  current workflow stays selected and its snapshot outcome shows as usual.
 - **Read failures.** A failed options read leaves its field disabled with an
   inline line "Could not load options." and a **Try again** button that
   re-issues only that read. While the workflow list or the step read has
@@ -207,8 +211,11 @@ already reads; no route is added.
 - **A current value missing from its options.** When the current workflow is
   not in the loaded workflow list (it was deleted), the workflow field opens
   empty with the note "The proposed workflow no longer exists. Choose a
-  workflow.", the step field is empty, and no snapshot read is made until a
-  workflow is chosen. When the current step is not among the chosen
+  workflow.", and the step field is empty with no "Loading options", no
+  "Could not load options." and no "No step" line. The current workflow's
+  snapshot read, already issued at opening, is not cancelled: its response
+  or failure, whenever it arrives, is discarded, and no further snapshot read
+  is made until a workflow is chosen. When the current step is not among the chosen
   workflow's eligible steps (deleted, or no longer eligible), the step field
   opens empty with the note "The proposed step can no longer take this task.
   Choose a step." Both keep Approve with edits disabled until a value is
