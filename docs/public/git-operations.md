@@ -222,9 +222,10 @@ Use a backend build containing the repair startup guard before applying a repair
    Set `version` to `1`, `driver` to `sqlite`, a unique `operation_id`, and absolute
    `home`, `database`, and `tasks_root` paths. Each repair names an exact worktree,
    environment, repository, source path, destination path, attached branch, HEAD
-   commit, and source-root task. Include every dependent session explicitly when
-   changing a workspace path. Include an old cleanup job only when its incomplete
-   snapshot needs a linked successor. Omit `expected_rows` and `expected_git` on
+   commit, and source-root task. Every relocation requires a matching `workspaces`
+   entry naming the environment's canonical task root and every bound session.
+   Include an old cleanup job only when its incomplete snapshot needs a linked
+   successor. Omit `expected_rows` and `expected_git` on
    the first preview; the command fills these observations.
 
 3. Review the preview and retain its `plan` object as the application input:

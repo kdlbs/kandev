@@ -16,7 +16,6 @@ import (
 const (
 	modeApply    = "apply"
 	modeRollback = "rollback"
-	modeVerify   = "verify"
 )
 
 func Apply(ctx context.Context, p Plan) error { return runRepair(ctx, p, modeApply, checkProcesses) }
@@ -118,9 +117,6 @@ func runJournal(ctx context.Context, p Plan, db *sql.DB, j *journal, mode string
 	if err = checkJournalBackup(j); err != nil {
 		return err
 	}
-	if mode == modeVerify {
-		return j.verify(ctx, db)
-	}
 	if j.Phase == "rolled_back" {
 		if mode == modeRollback {
 			return j.finish("rolled_back")
@@ -165,6 +161,7 @@ func (j *journal) verify(ctx context.Context, db queryer) error {
 }
 
 func (j *journal) reconcile(ctx context.Context, db *sql.DB, forward bool, audit func(context.Context, Plan) error) error {
+	// audit only inspects host processes; it must not query the database while tx is open.
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

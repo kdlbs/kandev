@@ -40,6 +40,7 @@ func TestApplyRelocatesWithoutChangingContentAndRollsBack(t *testing.T) {
 	if path != r.Path || branch != r.Branch {
 		t.Fatalf("path=%s branch=%s", path, branch)
 	}
+	assertWorkspacePaths(t, f, filepath.Dir(r.Path))
 	if _, err := readMarker(p.TasksRoot, filepath.Dir(r.SourcePath)); err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +50,7 @@ func TestApplyRelocatesWithoutChangingContentAndRollsBack(t *testing.T) {
 	if err := repairWithIsolatedHost(p, "rollback"); err != nil {
 		t.Fatal(err)
 	}
+	assertWorkspacePaths(t, f, f.repo)
 	if _, err := Preview(context.Background(), p); err != nil {
 		t.Fatalf("original state not restored: %v", err)
 	}
@@ -135,5 +137,24 @@ func TestApplyCleanupPreservesPredecessorAndProgress(t *testing.T) {
 // The host process census is tested separately; application fixtures isolate it
 // from unrelated processes and ptrace restrictions on the test machine.
 func repairWithIsolatedHost(p Plan, mode string) error {
+	if mode == "verify" {
+		return Verify(context.Background(), p)
+	}
 	return runRepair(context.Background(), p, mode, func(context.Context, Plan) error { return nil })
+}
+
+func assertWorkspacePaths(t *testing.T, f fixture, want string) {
+	t.Helper()
+	rows, err := queryRows(context.Background(), f.db, `SELECT workspace_path FROM task_environments WHERE id='env' UNION ALL SELECT workspace_path FROM task_sessions WHERE task_environment_id='env'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected environment and both sessions, got %d rows", len(rows))
+	}
+	for _, r := range rows {
+		if got := stringValue(r, "workspace_path"); got != want {
+			t.Fatalf("workspace path=%q, want %q", got, want)
+		}
+	}
 }

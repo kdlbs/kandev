@@ -35,6 +35,11 @@ func (in *inspection) inspectWorkspaces(ctx context.Context) error {
 			return errors.New("workspace repair must explicitly include every bound session")
 		}
 	}
+	for _, r := range in.report.Plan.Repairs {
+		if r.SourcePath != r.Path && !seen[r.EnvironmentID] {
+			return fmt.Errorf("relocation of worktree %s requires a workspace repair for environment %s", r.WorktreeID, r.EnvironmentID)
+		}
+	}
 	return nil
 }
 

@@ -84,3 +84,9 @@ Avoid turning file contents or paths into executable shell fragments.
 ## Results
 
 Implemented the bounded CLI and read-only inspector. Real SQLite/Git tests pass under the race detector for branch mismatch, missing repository ID, shared-root bindings, stale rows/content, competing path owners, unsupported executors, stopped rows with live PIDs, and unchanged preview state.
+
+PR review exposed a relocation plan that omitted its workspace repair. A failing
+regression now requires the environment and every bound session explicitly.
+The apply/rollback regression checks all saved workspace paths, and verification
+tests exercise the public read-only entry point. The repair package and CLI race
+tests pass after the correction.

@@ -79,6 +79,9 @@ Preflight the complete requested change set before any move or database write:
    and destination-root identity in the repair description. Verify the child's
    saved relationship and shared environment, but never use that relationship
    to bypass the root check in ordinary launch or cleanup.
+7. Every relocation requires a matching workspace repair for its environment,
+   naming its canonical task root and every bound session. Reject an omitted
+   workspace repair even when the Git move and inventory slot are valid.
 
 The helper does not merge slots or infer new branch slugs. An absent checkout
 cannot establish an incomplete repository identity.

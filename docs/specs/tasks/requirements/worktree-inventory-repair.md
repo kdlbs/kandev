@@ -42,8 +42,9 @@ This is explicit maintenance of selected records. It does not extend automatic
 - **AC-TASKS-WORKTREE-INVENTORY-REPAIR-001.4:** A checkout explicitly selected for
   relocation into its shared environment's canonical root shall keep its content
   and Git registration. Only its exact inventory slot and dependent workspace
-  references shall change. Parent-child membership alone shall not authorize
-  automatic adoption of a foreign root.
+  references shall change. Every relocation shall explicitly include a workspace
+  repair for its environment and every bound session. Parent-child membership
+  alone shall not authorize automatic adoption of a foreign root.
 - **AC-TASKS-WORKTREE-INVENTORY-REPAIR-001.5:** Repair shall retain a private backup
   and durable progress record. Interruption shall allow the same operation to
   continue or roll back after identity checks; it shall not permit the backend

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
@@ -42,6 +43,27 @@ func TestPreviewSharedRelocationRequiresExactBindings(t *testing.T) {
 	execSQL(t, f.db, `UPDATE task_sessions SET repository_id='foreign' WHERE id='child-session'`)
 	if _, err := Preview(context.Background(), f.plan); err == nil {
 		t.Fatal("parent-child relation alone authorized foreign-root adoption")
+	}
+}
+
+// @covers AC-TASKS-WORKTREE-INVENTORY-REPAIR-001.4
+func TestPreviewRelocationRequiresWorkspaceRepair(t *testing.T) {
+	for _, omission := range []string{"workspace", "bound-session"} {
+		t.Run(omission, func(t *testing.T) {
+			f := relocationFixture(t)
+			if _, err := Preview(context.Background(), f.plan); err != nil {
+				t.Fatal(err)
+			}
+			if omission == "workspace" {
+				f.plan.Workspaces = nil
+			} else {
+				f.plan.Workspaces[0].SessionIDs = []string{"session"}
+			}
+			_, err := Preview(context.Background(), f.plan)
+			if err == nil || !strings.Contains(err.Error(), "workspace repair") {
+				t.Fatalf("expected incomplete workspace repair to be refused, got %v", err)
+			}
+		})
 	}
 }
 
