@@ -379,7 +379,7 @@ func (m *Manager) acquireRecoveryClaim(
 		AllowCurrentSessionRuntime: false,
 	})
 	if err != nil {
-		return nil, recoveryAdmissionError(*req, err.Error())
+		return nil, recoveryAdmissionErrorWithCause(*req, err)
 	}
 	return claim, nil
 }
@@ -810,6 +810,10 @@ func recoveryClaimMatchesRequest(claim *models.TaskEnvironmentRecoveryClaim, req
 
 func recoveryAdmissionError(req RecoveryAdmissionRequest, reason string) error {
 	return &WorktreeRecoveryError{TaskID: req.TaskID, State: "admission", Reason: reason}
+}
+
+func recoveryAdmissionErrorWithCause(req RecoveryAdmissionRequest, cause error) error {
+	return &WorktreeRecoveryError{TaskID: req.TaskID, State: "admission", Reason: cause.Error(), Cause: cause}
 }
 
 func recoverySlotError(taskID, checkout, reason string) error {
