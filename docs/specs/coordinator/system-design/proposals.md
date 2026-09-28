@@ -93,10 +93,30 @@ There is no deduplication key.
    - `approving` with a stale claim and no edits: take the
      [stale re-claim](#stale-re-claim), which completes with the spec frozen
      by the first claim and does not validate it again.
-   - `pending` or `failed`: continue with step 2.
+   - `pending`: continue with step 2. A `pending` row has never been
+     claimed, so no task holds its external id.
+   - `failed`: first call `Service.GetTaskByExternalID(ctx, workspaceID,
+     "coordinator-proposal:<id>")`. A task can exist here only when an
+     earlier attempt's create committed after its claim was re-claimed and
+     failed (step 5).
+     - Found, and the body carries edits: 409 with the row. The edits are
+       neither validated nor applied, and nothing is written or published.
+       The task already exists with the frozen spec's fields and placement,
+       so no edit could take effect.
+     - Found, with no edits: skip step 2 and step 4. Claim as in step 3,
+       with the row's `final_spec_json` unchanged as the frozen spec, then
+       complete with the found task's id as step 4's `Found*` branches do,
+       whatever the step's eligibility is now. No create call runs.
+     - Not found: continue with step 2.
+     - The lookup errors: 500; nothing is written or published.
 2. Build the candidate spec: the base is `final_spec_json` when the row has
    one (a `failed` attempt), else `spec_json`; merge the edits and validate as
    in propose. 400 leaves the row unchanged. `spec_json` is never rewritten.
+   A read that errors in steps 1 or 2 (the proposal read, or any read the
+   validation makes, including the [step graph](#no-agent-starts)) returns
+   500, writes nothing and publishes nothing; the row keeps its status. A
+   workflow that no longer exists is not a read error: it is a validation
+   failure (400 naming `workflow_id`), as in propose.
 3. Claim, with a new UUID `T`: `UPDATE ... SET status='approving',
    claimed_at=now, claim_token=T, final_spec_json=?, decided_by=?, error=NULL
    WHERE id=? AND status IN ('pending','failed')`. When it matches no row, a
@@ -105,7 +125,21 @@ There is no deduplication key.
    returns 409 with that row. After a claim commits, publish
    `coordinator.updated`, so every open surface shows "Approval in progress"
    before the create runs.
-4. Create the task through the task service with the frozen spec, external
+4. Immediately before the create call, load the frozen spec's workflow step
+   graph again and run `EligibleStep` on its step
+   ([No agent starts](#no-agent-starts)). Every create call is preceded by
+   this check: the original claimer's after step 3, and a
+   [stale re-claim](#stale-re-claim)'s after its lookup found no task.
+   - Ineligible (including a deleted workflow or step, which yields an
+     empty graph or an unknown step): fail through step 5's fence with "the
+     target step is no longer eligible". No create call runs.
+   - The step-graph read errors: nothing further is written. The row stays
+     `approving` under this claim's token, the error is logged at warn with
+     the proposal id, and an approve request returns 500 (the startup pass
+     moves on to its next row). The row is recovered as the stale re-claim's
+     error rule says.
+
+   When the step is eligible, create the task through the task service with the frozen spec, external
    id `coordinator-proposal:<id>` (with `AllowReservedExternalID`), origin the
    regular board origin, and no `start_agent`, no `prepare_session` and no
    `auto_start_on_create` metadata marker. Branch on the returned
@@ -122,10 +156,12 @@ There is no deduplication key.
      log it at warn and return the error to the caller without touching the
      row (step 5 does not run for this branch); the row stays `approving`
      with its existing claim, since the task exists but is not confirmed
-     settled. The next recovery (the next startup pass, or the claim's own
-     staleness after two minutes triggering a stale re-claim) retries the
-     create, which the external id makes idempotent, and completes through
-     the `Found*` branch below.
+     settled. Nothing retries it automatically while the process runs:
+     the card shows no actions on an `approving` row
+     (`AC-COORDINATOR-PROPOSALS-005.2`), so the row is recovered by the next
+     [startup pass](#recovery), or earlier by an approve request sent
+     through the API once the claim is stale. Either finds the task through
+     the stale re-claim's external-id lookup and completes with it.
    - `CreateTaskOutcomeFoundSettled`: an earlier attempt created the task;
      complete with its id.
    - `CreateTaskOutcomeFoundUnsettled`: an earlier attempt created the task
@@ -139,8 +175,33 @@ There is no deduplication key.
    `claim_token`. When either update matches zero rows, re-read the row:
    - the row exists (another claimer re-claimed it after this one went
      stale): log at info and return 200 with the current row, writing
-     nothing; any task this request created is the one the other claimer's
-     create returns as Found;
+     nothing. When the other claimer creates, any task this request created
+     is the one its create or lookup returns as found.
+
+     When this request's outcome was `CreateTaskOutcomeCreated` and the
+     current row is `failed`, the other claimer's stale re-claim found no
+     task and failed the row on step 4's check before this request's create
+     committed. When the current row is `rejected`, a manager then also
+     rejected that `failed` row. Either way, log at warn with the proposal
+     id and the task id, and still write nothing. The task is an ordinary
+     task created with no agent start; this service never deletes it.
+     - A later approve of the `failed` row finds the task through step 1's
+       lookup. It completes with that task, or returns 409 when the request
+       carries edits.
+     - A reject leaves the task on its board.
+
+     This is an accepted limitation. Step 4's check runs immediately before
+     the create call, so reaching this state takes three things together:
+     - this request's create call itself runs for more than two minutes;
+     - the target step becomes ineligible during that call;
+     - a second caller re-claims the row during that call.
+
+     In this state the `failed` card's "Nothing was created"
+     (`AC-COORDINATOR-PROPOSALS-005.3`) is false, and so is a reject's toast
+     "Rejected. Nothing was created" (`AC-COORDINATOR-PROPOSALS-005.7`). The
+     task can also sit on a step that is no longer eligible, where feeder
+     promotion can start an agent (`AC-COORDINATOR-PROPOSALS-002.2`). The
+     warn log is the only record;
    - the row is gone (its coordinator or workspace was deleted): log at info
      with the task id and return 404; the task stays on its board.
 6. Publish `coordinator.updated`; return the proposal.
@@ -148,36 +209,50 @@ There is no deduplication key.
 ### Stale re-claim
 
 `UPDATE ... SET claimed_at=now, claim_token=T WHERE id=? AND
-status='approving' AND claimed_at < now - 2 minutes`. It never writes
+status='approving' AND claimed_at < cutoff`, where `cutoff` is `now - 2
+minutes` for an approve request and the startup time `T0` for the startup
+pass (see [Recovery](#recovery)). It never writes
 `final_spec_json` or `decided_by`, and it does not re-validate the frozen
 spec's fields (title, description, workflow and repository existence): the
 completion uses the spec frozen by the first claim and keeps the first
-approver as `decided_by`. It does re-run the [step-eligibility
-check](#no-agent-starts) against the frozen spec's workflow and step
-immediately before step 4's create call, because eligibility can have changed
-in the time between the original claim and this stale re-claim (an
-`on_enter` `auto_start_agent` action added to the target step, or a new
-`pull_from_step_id` feeder link formed into an auto-starting step), and
-recovery must not create the task on a step that is no longer eligible. Before
-deciding, it first calls `Service.GetTaskByExternalID(ctx, workspaceID,
-"coordinator-proposal:<id>")` (the same read the create sequence's step-3
-lookup and the REST lookup route already use), because an earlier attempt may
-have created the task and crashed before this claim's completion update ran:
-found, it completes with that task's id exactly as step 4's `FoundSettled` /
-`FoundUnsettled` branches do, whatever the recheck says, satisfying "a crash
-after the claim and a crash after the create recover to one task" even when
-eligibility changed in between; not found, the recheck's answer governs. When
-the recheck fails and no task was found, the re-claim still commits (the row
-leaves `approving` either way), but recovery sets the proposal `failed` with a
-descriptive error ("the target step is no longer eligible") and never calls
-the task service to create one, the same failure shape as the existing case
-where a frozen spec the task service no longer accepts (its workflow was
-deleted, for example) fails at the create in step 4 and sets the proposal
-`failed` with that error. An
+approver as `decided_by`. It does not skip the step-eligibility check:
+when its lookup finds no task, its create goes through step 4, whose
+[check](#no-agent-starts) runs against the frozen spec's workflow and step
+immediately before the create call. Eligibility can have changed since the
+original claim (an `on_enter` `auto_start_agent` action added to the target
+step, or a new `pull_from_step_id` feeder link formed into an auto-starting
+step), and recovery must not create the task on a step that is no longer
+eligible. Before that, it first calls `Service.GetTaskByExternalID(ctx,
+workspaceID, "coordinator-proposal:<id>")` (the same read the create
+sequence's step-3 lookup and the REST lookup route already use), because an
+earlier attempt may have created the task and crashed before this claim's
+completion update ran. Found, it completes with that task's id exactly as
+step 4's `FoundSettled` / `FoundUnsettled` branches do, and runs no
+eligibility check, satisfying "a crash after the claim and a crash after the
+create recover to one task" even when eligibility changed in between. Not
+found, step 4's check governs. When that check fails, the re-claim still
+commits (the row leaves `approving` either way), but the proposal is set
+`failed` with "the target step is no longer eligible" and the task service
+is never called to create one. This is the same failure shape as the
+existing case where a frozen spec the task service no longer accepts fails
+at the create in step 4 and sets the proposal `failed` with that error. A
+workflow that no longer exists yields an empty step graph, and an unknown
+step is ineligible, so a deleted workflow or step takes this same `failed`
+branch.
+
+After the re-claim commits, a lookup that errors (anything other than found
+or not found) or a step-graph read that errors writes nothing further: the
+row stays `approving` under this re-claim's token, the error is logged at
+warn with the proposal id, an approve request returns 500, and the startup
+pass moves on to its next row. The row is retried by the next startup pass,
+or by an approve request once this re-claim is itself stale. It never
+becomes `failed` on a read error, because a read error does not show that
+the task was not created. An
 approve request whose body carries edits never reaches the re-claim (step 1
 refuses it with 409), so edits are never silently dropped; recovery callers
 never send edits. A re-claim that commits publishes `coordinator.updated`,
-then runs the eligibility recheck and steps 4 to 6 with its token. When it
+then runs the lookup and, when no task is found, steps 4 to 6 with its
+token. When it
 matches no row, re-read the row: gone returns 404 (for a recovery reader, no
 action); otherwise another reader won the re-claim and the request returns
 409 with the current row (for a recovery reader, no action).
@@ -210,16 +285,38 @@ boundary: an **eligible step** (defined in
 [requirements/proposals.md](../requirements/proposals.md#terminology)) is
 also refused when it is a feeder, directly or through a chain of
 `pull_from_step_id` links, of any step with an `on_enter` `auto_start_agent`
-action. Validated at propose, again at claim time, and again by a [stale
-re-claim](#stale-re-claim) immediately before it creates the task (so a step
-or feeder graph changed after proposing, after the original claim, or during
-the recovery window is caught each time), this means a proposal can only ever
+action. It is validated at propose, again before the claim (approve step
+2), and again immediately before every create call (approve step 4, for the
+original claimer and for a [stale re-claim](#stale-re-claim) alike). A step
+or feeder graph that changed after proposing, after the claim, or during the
+recovery window is therefore caught each time, and a proposal can only ever
 land somewhere a manager could place a task by hand *and leave it there*,
 never somewhere the workflow itself would immediately relocate it into an
-auto-starting step. task-01 implements the feeder-graph walk inside its
-step-eligibility store method, which takes the workflow's full step graph,
-not just the candidate step, so it can check reachability; task-03 calls it
-at propose time and task-07 calls it again at claim time and stale re-claim.
+auto-starting step. The check has two parts:
+
+- **The walk.** task-01 implemented it as the pure function
+  `EligibleStep(steps []StepNode, stepID string) bool`
+  (`internal/coordinator/eligibility.go`). It takes the workflow's full step
+  graph, not just the candidate step, so it can check reachability; an
+  unknown step id is ineligible.
+- **The loader.** One function in `internal/coordinator/step_graph.go` reads
+  a workflow's steps through the workflow service's `ListStepsByWorkflow`
+  (behind a narrow interface the coordinator package declares) and maps
+  each step to a `StepNode`: `ID`, `IsStart` from `is_start_step`,
+  `AllowManualMove` from `allow_manual_move`, `AutoStartOnEnter` when any
+  `on_enter` action is `auto_start_agent`, and `PullFromStepID` from
+  `pull_from_step_id`. A workflow with no steps, including one that no
+  longer exists, yields an empty graph. The loader does not authorize; its
+  callers have already authorized the workspace or run as the unscoped
+  startup pass.
+
+task-03 calls the loader and the walk at propose time; task-07 calls them
+again before the claim and before every create call. Tasks 03 and 07 run in parallel,
+so each work order builds the loader at that path if it is absent when it
+branches. Whichever of the two merges second deletes its own copy and calls
+the one already on `main`, so exactly one loader exists after both merge.
+This is the same merge-last rule the work orders use for task 03's
+no-turn-start table.
 
 ### Edits
 
@@ -277,19 +374,59 @@ winner's row. A racing approve and reject cannot both succeed.
 
 ## Recovery
 
-A claim is stale after two minutes. Two callers run recovery on an
-`approving` row with a stale claim: the startup pass and an approve request.
-A proposal read, single or list, never writes; it always returns rows as
-stored. Recovery takes the stale re-claim `UPDATE` in [Approve](#approve),
-which refreshes `claimed_at` and sets a new `claim_token`, so of a startup
-pass and an approve racing on one stale claim exactly one wins it, and a slow
-original claimer's completion no longer matches the token. It then re-runs
-the step-eligibility check against the frozen spec's workflow and step
-([No agent starts](#no-agent-starts)); a step that is no longer eligible sets
-the proposal `failed` with a descriptive error and skips the create entirely.
-Otherwise it runs steps 4 to 6: the idempotent create returns the task the
-first attempt made, if any. Recovery keeps `final_spec_json` and `decided_by`
-from the first claim, and never touches a session.
+Two callers run recovery on an `approving` row: the startup pass and an
+approve request. A proposal read, single or list, never writes; it always
+returns rows as stored. Nothing else recovers a row, and no timer runs
+recovery while the process is up.
+
+- **Approve request.** A claim is stale after two minutes. An approve of an
+  `approving` row whose claim is stale, with no edits, takes the
+  [stale re-claim](#stale-re-claim) with `cutoff = now - 2 minutes`.
+- **Startup pass.** task-07's decisions registration function returns the
+  hook that `startCoordinatorBackgroundPass`
+  (`internal/backendapp/coordinator.go`) runs once per startup, after the
+  conversation and subscriber hooks, with `T0`, the time recorded before the
+  coordinator routes register. Every claim this process makes has
+  `claimed_at >= T0`, so an `approving` row with `claimed_at < T0` was
+  claimed by a process that has since stopped. The pass therefore uses
+  `cutoff = T0`, not the two-minute rule, and a restart within two minutes
+  of a claim still recovers it. Were a still-running process to hold that
+  claim, the claim token keeps the outcome to one task: that process's
+  completion matches no row and returns the current row (step 5).
+  - **Discovery.** task-07 adds the store method
+    `ListApprovingClaimedBefore(ctx, cutoff)`: `SELECT ... FROM
+    coordinator_proposals WHERE status='approving' AND claimed_at < ? ORDER
+    BY claimed_at ASC, id ASC`, across every workspace and coordinator, with
+    no limit (open proposals are capped at 25 per coordinator) and no new
+    index. It runs with the hook's context, which carries no principal, so
+    the task-service calls it leads to are unscoped, like other internal
+    passes.
+  - **Per row, in that order, one at a time.** Take the stale re-claim with
+    `cutoff = T0`. A re-claim that matches no row (an approve won it, or the
+    row is gone) skips the row with no action. A committed re-claim runs the
+    lookup and, when no task is found, steps 4 to 6 exactly as the stale
+    re-claim describes.
+  - **Errors.** A discovery query that errors is logged at warn and ends the
+    pass; nothing retries it until the next startup. An error on one row
+    (the re-claim `UPDATE`, a read after it, or a create or completion) is
+    logged at warn with the proposal id, and the pass continues with the
+    next row. The row is left as the stale re-claim's error rule says.
+  - The pass stops early when its context is cancelled (shutdown).
+
+Both callers use the same stale re-claim `UPDATE`, which refreshes
+`claimed_at` and sets a new `claim_token`. When a startup pass and an approve
+race on one row, exactly one wins, and a slow original claimer's completion
+no longer matches the token. The winner then follows the stale re-claim's
+order. First it looks the task up by the reserved external id; a found task
+completes the approval with it, whatever the step's eligibility is now. Only
+when no task is found does it run steps 4 to 6, whose pre-create check
+against the frozen spec's workflow and step
+([No agent starts](#no-agent-starts)) sets the proposal `failed` with a
+descriptive error and skips the create when the step is ineligible, and
+whose idempotent create otherwise returns the task an earlier attempt made,
+if any. Recovery keeps
+`final_spec_json` and `decided_by` from the first claim, and never touches a
+session.
 
 ## Reserved prefix
 
@@ -329,7 +466,10 @@ approve ([Recovery](#recovery)). The coordinator list response carries
 Every proposal write publishes `coordinator.updated` after it commits, with
 `{workspace_id, coordinator_id, open_proposals}`: insert, claim, stale
 re-claim, completion, failure and reject. A write that matched zero rows
-publishes nothing. The forwarder in
+publishes nothing. `open_proposals` is counted after the write commits.
+When that count or the publish fails, the error is logged at warn and the
+request's result is unchanged: the write stands and no event is sent, the
+same log-and-continue rule as the task service's own event publishing. The forwarder in
 `gateway/websocket/coordinator_notifications.go` sends it to clients
 subscribed to the workspace, as other workspace notifications do.
 

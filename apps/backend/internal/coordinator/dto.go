@@ -327,6 +327,9 @@ const (
 	ApproveFieldRepositoryID = "repository_id"
 )
 
+// fieldSourceTaskID names a proposal spec's source task in field errors.
+const fieldSourceTaskID = "source_task_id"
+
 // StringField reports field's presence and value, identically to
 // PatchCoordinatorRequest.StringField.
 func (r ApproveProposalRequest) StringField(field string) (*string, bool, error) {

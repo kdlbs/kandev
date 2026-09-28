@@ -120,6 +120,13 @@ type CreateTaskRequest struct {
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
 	// and MCP; empty means no idempotency key.
 	ExternalID string `json:"external_id,omitempty"`
+	// AllowReservedExternalID permits ExternalID to carry the
+	// ReservedExternalIDPrefixCoordinatorProposal prefix, which every other
+	// caller is refused (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
+	// Tagged json:"-" so no HTTP or MCP request body can set it; only the
+	// coordinator service sets it, when creating the task behind an approved
+	// proposal.
+	AllowReservedExternalID bool `json:"-"`
 
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`

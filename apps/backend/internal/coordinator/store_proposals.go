@@ -270,14 +270,46 @@ func (s *Store) ListProposals(ctx context.Context, workspaceID, coordinatorID st
 	return result, nil
 }
 
+// ListApprovingClaimedBefore returns every approving proposal, across every
+// workspace, whose claimed_at is strictly before cutoff, ordered by
+// claimed_at then id (docs/specs/coordinator/system-design/proposals.md#recovery).
+// Unbounded: the startup pass is expected to run against a small number of
+// stuck rows, and no new index backs this query. cutoff is normalized to UTC
+// before binding: claimed_at is always stored in UTC (see ClaimProposal,
+// ReclaimStale), and SQLite compares DATETIME columns lexicographically, so a
+// cutoff carrying a different offset would not order correctly against it.
+func (s *Store) ListApprovingClaimedBefore(ctx context.Context, cutoff time.Time) ([]*Proposal, error) {
+	var rows []proposalRow
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
+		SELECT `+proposalColumns+` FROM coordinator_proposals
+		WHERE status = ? AND claimed_at < ?
+		ORDER BY claimed_at ASC, id ASC`),
+		string(ProposalStatusApproving), cutoff.UTC()); err != nil {
+		return nil, fmt.Errorf("list approving proposals claimed before cutoff: %w", err)
+	}
+	result := make([]*Proposal, len(rows))
+	for i := range rows {
+		p, err := rows[i].toProposal()
+		if err != nil {
+			return nil, err
+		}
+		result[i] = p
+	}
+	return result, nil
+}
+
 // ClaimProposal conditionally moves a pending or failed proposal to
 // approving, storing finalSpec, decidedBy and a fresh claim token. Returns
-// matched=false (never an error) when no row satisfied the condition.
+// matched=false (never an error) when no row satisfied the condition. now is
+// normalized to UTC before binding: claimed_at is compared lexicographically
+// (ListApprovingClaimedBefore, ReclaimStale), which only orders correctly
+// when every stored value carries the same offset.
 func (s *Store) ClaimProposal(ctx context.Context, id, token string, finalSpec ProposalSpec, decidedBy string, now time.Time) (bool, error) {
 	finalJSON, err := json.Marshal(finalSpec)
 	if err != nil {
 		return false, fmt.Errorf("marshal final spec: %w", err)
 	}
+	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?
@@ -293,13 +325,16 @@ func (s *Store) ClaimProposal(ctx context.Context, id, token string, finalSpec P
 // ReclaimStale re-issues the claim token and claimed_at of a proposal stuck
 // in approving with claimed_at before staleBefore. It never rewrites
 // final_spec_json or decided_by (docs/specs/coordinator/system-design/
-// proposals.md#stale-re-claim).
+// proposals.md#stale-re-claim). now and staleBefore are normalized to UTC
+// before binding, for the same lexicographic-ordering reason as ClaimProposal
+// and ListApprovingClaimedBefore.
 func (s *Store) ReclaimStale(ctx context.Context, id, token string, now, staleBefore time.Time) (bool, error) {
+	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET claimed_at = ?, claim_token = ?, updated_at = ?
 		WHERE id = ? AND status = ? AND claimed_at < ?`),
-		now, token, now, id, string(ProposalStatusApproving), staleBefore)
+		now, token, now, id, string(ProposalStatusApproving), staleBefore.UTC())
 	if err != nil {
 		return false, fmt.Errorf("reclaim stale proposal: %w", err)
 	}
@@ -307,8 +342,11 @@ func (s *Store) ReclaimStale(ctx context.Context, id, token string, now, staleBe
 }
 
 // CompleteProposal marks an approving proposal (fenced by its current claim
-// token) approved, recording taskID and clearing the claim token.
+// token) approved, recording taskID and clearing the claim token. now is
+// normalized to UTC before binding, matching ClaimProposal and ReclaimStale,
+// so every stored timestamp in the table carries the same offset.
 func (s *Store) CompleteProposal(ctx context.Context, id, token, taskID string, now time.Time) (bool, error) {
+	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET status = ?, task_id = ?, claim_token = NULL, updated_at = ?
@@ -323,8 +361,10 @@ func (s *Store) CompleteProposal(ctx context.Context, id, token, taskID string, 
 
 // FailProposal marks an approving proposal (fenced by its current claim
 // token) failed, recording errMsg truncated to 1000 runes and clearing the
-// claim token.
+// claim token. now is normalized to UTC before binding, matching
+// ClaimProposal and ReclaimStale.
 func (s *Store) FailProposal(ctx context.Context, id, token, errMsg string, now time.Time) (bool, error) {
+	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET status = ?, error = ?, claim_token = NULL, updated_at = ?
@@ -339,8 +379,10 @@ func (s *Store) FailProposal(ctx context.Context, id, token, errMsg string, now 
 
 // RejectProposal conditionally moves a pending or failed proposal to
 // rejected, trimming and truncating reason to 500 runes (stored NULL when
-// empty after trimming).
+// empty after trimming). now is normalized to UTC before binding, matching
+// ClaimProposal and ReclaimStale.
 func (s *Store) RejectProposal(ctx context.Context, id, reason, decidedBy string, now time.Time) (bool, error) {
+	now = now.UTC()
 	trimmed := strings.TrimSpace(reason)
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
