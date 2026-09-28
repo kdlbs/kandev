@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var (
@@ -30,6 +31,24 @@ type WorkflowAgentOverrideBinding struct {
 type WorkflowAgentOverrides struct {
 	WorkflowID string                         `json:"workflow_id"`
 	Steps      []WorkflowAgentOverrideBinding `json:"steps"`
+}
+
+// WorkflowChangeRequest is the optimistic source guard and grouped profile
+// choice accepted by the explicit change-workflow action. A non-nil empty
+// AgentOverrides map means use every destination workflow default.
+type WorkflowChangeRequest struct {
+	ExpectedWorkflowID string            `json:"expected_workflow_id"`
+	ExpectedStepID     string            `json:"expected_step_id"`
+	ExpectedUpdatedAt  time.Time         `json:"expected_updated_at"`
+	AgentOverrides     map[string]string `json:"agent_overrides"`
+}
+
+// WorkflowChangeSource pins a guarded workflow-change write to the source
+// task row observed by the user before submitting the form.
+type WorkflowChangeSource struct {
+	WorkflowID string
+	StepID     string
+	UpdatedAt  time.Time
 }
 
 // NewWorkflowAgentOverrides validates and canonicalizes bindings. A self

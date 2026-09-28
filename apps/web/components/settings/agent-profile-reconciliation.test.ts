@@ -41,6 +41,15 @@ describe("sameEditableProfile", () => {
       ),
     ).toBe(false);
   });
+
+  it("treats Cursor MCP auth preference as an editable change", () => {
+    expect(
+      sameEditableProfile(
+        profile({ cursorMcpAuthEnabled: true }),
+        profile({ cursorMcpAuthEnabled: false }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("reconcileAgentProfileSnapshot", () => {
@@ -113,6 +122,23 @@ describe("reconcileAgentProfileSnapshot", () => {
     expect(result.kind).toBe("own-acknowledgement");
     expect(result.draft.name).toBe("Edited again");
     expect(result.saved.name).toBe("Submitted");
+  });
+
+  it("keeps a local Cursor MCP auth choice when a newer server snapshot conflicts", () => {
+    const previous = profile({ cursorMcpAuthEnabled: true });
+    const draft = profile({ cursorMcpAuthEnabled: false });
+    const incoming = profile({ cursorMcpAuthEnabled: true, updatedAt: UPDATED_AT });
+    const result = reconcileAgentProfileSnapshot({
+      previous,
+      incoming,
+      draft,
+      saved: previous,
+      conflicted: false,
+    });
+
+    expect(result.kind).toBe("external-conflict");
+    expect(result.draft.cursorMcpAuthEnabled).toBe(false);
+    expect(result.saved.cursorMcpAuthEnabled).toBe(true);
   });
 });
 

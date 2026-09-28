@@ -89,7 +89,6 @@
   "selectRepository": "选择仓库",
   "selectTask": "选择任务 {{title}}",
   "selectWorkflow": "选择工作流",
-  "sendToWorkflow": "发送到工作流",
   "selectedFilterCount_one": "{{label}}：已选择 {{count}} 项",
   "selectedFilterCount_other": "{{label}}：已选择 {{count}} 项",
   "sentryIssue": "Sentry 议题",

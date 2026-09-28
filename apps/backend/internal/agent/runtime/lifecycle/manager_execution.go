@@ -1035,6 +1035,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
+			ExecutorType:                   info.ExecutorType,
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
@@ -1062,6 +1063,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		profileInfo: profileInfo,
 	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
+	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
 }
 

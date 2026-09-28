@@ -219,6 +219,8 @@ export type WorkflowSnapshotData = {
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
   isPlaceholder?: boolean;
+  /** A known-empty failed fetch is retryable after a task-page remount. */
+  fetchFailed?: boolean;
 };
 
 export type KanbanMultiState = {
@@ -332,6 +334,8 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   sidebarArchivedTasks: SidebarArchivedTasksState;
+  /** Fresh status projections for bounded sidebar pages, keyed by workspace then task. */
+  sidebarStatusSummaryByWorkspaceId: Record<string, Record<string, TaskStatusSummary>>;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;

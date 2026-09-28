@@ -127,15 +127,10 @@ type InteractionHost interface {
 }
 
 // InteractionAccessor is the accessor behind Host.Interactions(). Reads
-// (ListPending/Get) require api_read:interactions; writes require
-// api_write:interactions. The two gate independently, so an attention or inbox
-// plugin can declare read-only.
-//
-// Every write is terminal-once: the first response wins, and a later attempt
-// against an already-resolved interaction returns gRPC FailedPrecondition
-// rather than dispatching a second response to the agent. An unknown id
-// returns NotFound. Those two codes are what let a reconciling cache tell
-// "someone else answered" apart from "my id is stale".
+// (ListPending/Get) require api_read:interactions. The legacy response methods
+// remain for source compatibility but return PermissionDenied because they
+// cannot carry an observed resource version or a Host-issued human response
+// receipt. Use HostExactInteractionCommands for responses.
 type InteractionAccessor interface {
 	// ListPending returns every interaction still owed a response, under the
 	// same turn/session authority kandev's own list surfaces use.
@@ -146,17 +141,19 @@ type InteractionAccessor interface {
 	// current durable result instead of disappearing.
 	Get(ctx context.Context, id string) (*Interaction, error)
 
-	// RespondToPermission answers a permission request through kandev's
-	// orchestrator — the same path the native UI uses, so the agent unblocks
-	// and every surface converges. Returns the interaction's new terminal state.
+	// RespondToPermission is retained for source compatibility and returns
+	// PermissionDenied. Use HostExactInteractionCommands with a human response
+	// receipt minted by the authenticated native UI.
 	RespondToPermission(ctx context.Context, in PermissionResponse) (*Interaction, error)
 
-	// AnswerClarification answers every question of a clarification bundle.
+	// AnswerClarification is retained for source compatibility and returns
+	// PermissionDenied. Use HostExactInteractionCommands with a human response
+	// receipt minted by the authenticated native UI.
 	AnswerClarification(ctx context.Context, in ClarificationResponse) (*Interaction, error)
 
-	// CancelClarification declines a clarification bundle on the user's
-	// behalf, surfacing reason to the agent. Works whether or not the original
-	// waiter is still parked.
+	// CancelClarification is retained for source compatibility and returns
+	// PermissionDenied. Use HostExactInteractionCommands with a human response
+	// receipt minted by the authenticated native UI.
 	CancelClarification(ctx context.Context, id, reason string) (*Interaction, error)
 }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MouseEventHandler, PointerEventHandler, RefObject } from "react";
 import type {
   ChatTopBarSlotProps as PublicChatTopBarSlotProps,
   ChatSubmitDecorationSlotProps as PublicChatSubmitDecorationSlotProps,
@@ -9,6 +10,9 @@ import type {
   PluginConversationMessage as PublicPluginConversationMessage,
   PluginConversationTurn as PublicPluginConversationTurn,
   PluginHostApi as PublicPluginHostApi,
+  PluginActionElement as PublicPluginActionElement,
+  PluginActionGroupProps as PublicPluginActionGroupProps,
+  PluginActionProps as PublicPluginActionProps,
   PluginNavSection as PublicPluginNavSection,
   PluginRegistry as PublicPluginRegistry,
   PluginSessionMessagesQuery as PublicPluginSessionMessagesQuery,
@@ -33,6 +37,9 @@ import type {
   PluginConversationMessage,
   PluginConversationTurn,
   PluginHostApi,
+  PluginActionElement,
+  PluginActionGroupProps,
+  PluginActionProps,
   PluginNavSection,
   PluginRegistry,
   PluginSessionMessagesQuery,
@@ -58,6 +65,36 @@ type HasUseLayoutEffect = "useLayoutEffect" extends keyof PublicHostReact ? true
 type HasPromptMentionText = "PromptMentionText" extends keyof PublicPluginUIApi ? true : false;
 type HasConversationApi = "conversation" extends keyof PublicPluginHostApi ? true : false;
 type HasTaskMenuItems = "items" extends keyof PublicTaskMenuActionRegistration ? true : false;
+type HasActionClassName = "className" extends keyof PublicPluginActionProps ? true : false;
+type ActionIsCallable = PublicPluginUIApi["Action"] extends (
+  props: PublicPluginActionProps,
+) => unknown
+  ? true
+  : false;
+type FeatureDetectablePluginUI = Pick<PublicPluginUIApi, "Button"> &
+  Partial<Pick<PublicPluginUIApi, "Action">>;
+
+const reactActionClick: MouseEventHandler<HTMLButtonElement> = (event) =>
+  event.currentTarget.click();
+const reactActionPointerDown: PointerEventHandler<HTMLButtonElement> = (event) =>
+  event.currentTarget.setPointerCapture(event.pointerId);
+const reactActionRef: RefObject<HTMLButtonElement | null> = { current: null };
+const pluginActionConsumerProps: PublicPluginActionProps = {
+  label: "Localized action name",
+  onClick: reactActionClick,
+  onPointerDown: reactActionPointerDown,
+  ref: reactActionRef,
+};
+
+const legacyHostUIConsumer: FeatureDetectablePluginUI = { Button: {} };
+const actionCapableHostUIConsumer: FeatureDetectablePluginUI = {
+  Button: {},
+  Action: (props) => props.label,
+};
+
+function hasStandardAction(ui: FeatureDetectablePluginUI): boolean {
+  return typeof ui.Action === "function";
+}
 
 // A registration that predates submenus must keep compiling unchanged, and the
 // submenu shape must be expressible: that pair is the whole compatibility story
@@ -209,5 +246,29 @@ describe("task menu submenu SDK contract", () => {
     // optional `items` field.
     expect(flatOnlyTaskMenuAction.run).toBeTypeOf("function");
     expect(submenuTaskMenuAction.items).toBeTypeOf("function");
+  });
+});
+
+describe("plugin Action SDK contract", () => {
+  it("matches the host runtime and accepts standard React event handlers and refs", () => {
+    const actionPropsAreCanonical: SameType<PluginActionProps, PublicPluginActionProps> = true;
+    const actionGroupPropsAreCanonical: SameType<
+      PluginActionGroupProps,
+      PublicPluginActionGroupProps
+    > = true;
+    const actionElementIsCanonical: SameType<PluginActionElement, PublicPluginActionElement> = true;
+    const actionHasNoStyleOverride: HasActionClassName = false;
+    const actionIsAvailable: ActionIsCallable = true;
+    expect(actionPropsAreCanonical).toBe(true);
+    expect(actionGroupPropsAreCanonical).toBe(true);
+    expect(actionElementIsCanonical).toBe(true);
+    expect(actionHasNoStyleOverride).toBe(false);
+    expect(actionIsAvailable).toBe(true);
+    expect(pluginActionConsumerProps.onPointerDown).toBe(reactActionPointerDown);
+  });
+
+  it("supports runtime feature detection for hosts before Action was added", () => {
+    expect(hasStandardAction(legacyHostUIConsumer)).toBe(false);
+    expect(hasStandardAction(actionCapableHostUIConsumer)).toBe(true);
   });
 });

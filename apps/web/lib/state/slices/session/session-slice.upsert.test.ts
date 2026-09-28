@@ -474,7 +474,7 @@ describe("session foreground activity reconciliation", () => {
       .setTaskSessionsForTask(
         TASK_ID,
         [makeSession({ state: "WAITING_FOR_INPUT", repository_id: "repo-1" })],
-        { [SESSION_ID]: 0 },
+        { [SESSION_ID]: { activity: 0, readCursor: 0 } },
       );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
@@ -506,7 +506,7 @@ describe("session foreground activity reconciliation", () => {
         supports_steering: false,
       }),
     );
-    const activityEpochsAtRequestStart = { [SESSION_ID]: 1 };
+    const activityEpochsAtRequestStart = { [SESSION_ID]: { activity: 1, readCursor: 0 } };
     store.getState().upsertTaskSessionFromEvent(
       TASK_ID,
       makeSession({
@@ -534,6 +534,25 @@ describe("session foreground activity reconciliation", () => {
       active_subagent_count: 2,
       supports_steering: true,
       repository_id: "repo-1",
+    });
+  });
+
+  it("preserves a read cursor advanced after a full-session request started", () => {
+    const store = makeStore();
+    store.getState().setTaskSession(makeSession({ last_read_message_id: "message-1" }));
+    const hydrationEpochAtRequestStart = { activity: 0, readCursor: 1 };
+
+    store.getState().updateSessionReadCursor(SESSION_ID, "message-2");
+    store
+      .getState()
+      .setTaskSession(
+        makeSession({ last_read_message_id: "message-1", state: "WAITING_FOR_INPUT" }),
+        hydrationEpochAtRequestStart,
+      );
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      last_read_message_id: "message-2",
+      state: "WAITING_FOR_INPUT",
     });
   });
 

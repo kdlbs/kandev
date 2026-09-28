@@ -31,7 +31,7 @@ interface ColumnsConfig {
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => void;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => void;
   deletingTaskId: string | null;
 }
@@ -71,7 +71,10 @@ function TitleCell({
 
 type ActionsCtx = {
   onArchive: (id: string, opts?: { cascade?: boolean }) => void;
-  onDelete: (id: string, opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => void;
+  onDelete: (
+    id: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
+  ) => void;
   deletingTaskId: string | null;
 };
 
@@ -138,8 +141,8 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
           workspaceModeFromMetadata(task.metadata),
         )}
         isDeleting={isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges }) =>
-          ctx.onDelete(task.id, { cascade, discardWorktreeChanges })
+        onConfirm={({ cascade, discardWorktreeChanges, confirmationId }) =>
+          ctx.onDelete(task.id, { cascade, discardWorktreeChanges, confirmationId })
         }
       />
       <TaskArchiveConfirmation

@@ -1692,6 +1692,100 @@ func (r *Repository) UpdateTaskSessionIfCurrentState(
 	return true, nil
 }
 
+// UpdateTaskSessionIfCurrentStateWithStartAttempt persists STARTING and its
+// process-attempt identity atomically. A later turn may advance updated_at
+// before asynchronous startup reports a failure, so bootstrap ownership must
+// not depend on that activity timestamp.
+func (r *Repository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if attemptID == "" {
+		return false, nil
+	}
+	payload, err := json.Marshal(attemptID)
+	if err != nil {
+		return false, fmt.Errorf("serialize start attempt identity: %w", err)
+	}
+	session.UpdatedAt = r.nowUTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	changed, err := r.updateTaskSessionWithStateGuard(ctx, tx, session, &expected)
+	if err != nil || !changed {
+		return changed, err
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
+		metadataKeyUpdateArgs(
+			r.db.DriverName(),
+			models.SessionMetaKeyAgentStartAttemptID,
+			string(payload),
+			session.UpdatedAt,
+			session.ID,
+		)...,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, fmt.Errorf("agent session not found: %s", session.ID)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
+	return true, nil
+}
+
+// UpdateTaskSessionIfCurrentSnapshot restores a full session snapshot only
+// while both its lifecycle state and row revision still match the captured
+// owner. The metadata write shares the same transaction as the row CAS.
+func (r *Repository) UpdateTaskSessionIfCurrentSnapshot(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	expectedUpdatedAt time.Time,
+	metadata map[string]interface{},
+) (bool, error) {
+	if expectedUpdatedAt.IsZero() {
+		return false, nil
+	}
+	metadataJSON, err := marshalSessionMetadata(metadata)
+	if err != nil {
+		return false, err
+	}
+	session.UpdatedAt = time.Now().UTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	changed, err := r.updateTaskSessionWithRevisionGuard(ctx, tx, session, expected, expectedUpdatedAt)
+	if err != nil || !changed {
+		return changed, err
+	}
+	if err := r.updateSessionMetadataJSON(ctx, tx, session.ID, metadataJSON, session.UpdatedAt); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // UpdateTaskSessionIfCurrentStateRemovingMetadataKeys persists a full session
 // row and removes provider-owned metadata atomically while the stored state
 // still matches expected. JSON removal preserves unrelated concurrent keys.
@@ -1814,6 +1908,26 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	session *models.TaskSession,
 	expected *models.TaskSessionState,
 ) (bool, error) {
+	return r.updateTaskSessionWithSnapshotGuard(ctx, exec, session, expected, nil)
+}
+
+func (r *Repository) updateTaskSessionWithRevisionGuard(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	expectedUpdatedAt time.Time,
+) (bool, error) {
+	return r.updateTaskSessionWithSnapshotGuard(ctx, exec, session, &expected, &expectedUpdatedAt)
+}
+
+func (r *Repository) updateTaskSessionWithSnapshotGuard(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	session *models.TaskSession,
+	expected *models.TaskSessionState,
+	expectedUpdatedAt *time.Time,
+) (bool, error) {
 	if tx, ok := exec.(*sqlx.Tx); ok {
 		if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
 			return false, err
@@ -1869,6 +1983,10 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	if expected != nil {
 		query += " AND state = ?"
 		args = append(args, string(*expected))
+	}
+	if expectedUpdatedAt != nil {
+		query += optimisticUpdatedAtPredicate
+		args = append(args, *expectedUpdatedAt)
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {

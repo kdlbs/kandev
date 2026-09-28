@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -203,6 +205,76 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	return nil
 }
 
+// AddTaskRelationExact adds one dependency relation while preserving the
+// shared workspace and cycle checks. Existing edges are a successful replay.
+//
+//nolint:cyclop // The relation command binds both task versions and cycle checks before insertion.
+func (s *Service) AddTaskRelationExact(ctx context.Context, request ExactTaskRelationRequest) (bool, error) {
+	if s.blockers == nil {
+		return false, ErrDependencyRepositoryUnavailable
+	}
+	if request.WorkspaceID == "" || request.TaskID == "" || request.RelatedTaskID == "" {
+		return false, ErrInvalidDependencySet
+	}
+	unlock := taskdependencies.AcquireMutationLock()
+	if err := s.validateDependencyPair(ctx, request.TaskID, request.RelatedTaskID); err != nil {
+		unlock()
+		return false, err
+	}
+	task, err := s.tasks.GetTask(ctx, request.TaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	related, err := s.tasks.GetTask(ctx, request.RelatedTaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	if task.WorkspaceID != request.WorkspaceID || related.WorkspaceID != request.WorkspaceID {
+		unlock()
+		return false, errDependencyCrossWorkspace
+	}
+	if err := validateExactTaskRelationVersions(request, task, related); err != nil {
+		unlock()
+		return false, err
+	}
+	existing, err := s.blockers.ListTaskBlockers(ctx, request.TaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	for _, edge := range existing {
+		if edge != nil && edge.BlockerTaskID == request.RelatedTaskID {
+			unlock()
+			return true, nil
+		}
+	}
+	cycle, err := s.checkDependencyCycle(ctx, request.TaskID, request.RelatedTaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	if cycle != nil {
+		unlock()
+		return false, cycle
+	}
+	if exactRepository, ok := s.blockers.(exactTaskBlockerRepository); ok {
+		_, err = exactRepository.AddTaskBlockerExact(
+			ctx, request.TaskID, request.RelatedTaskID, request.WorkspaceID,
+			request.ExpectedTaskResourceVersion, request.ExpectedRelatedResourceVersion, request.ClaimFence,
+		)
+	} else {
+		err = s.createBlockerEdge(ctx, request.TaskID, request.RelatedTaskID)
+	}
+	unlock()
+	if err != nil {
+		return false, err
+	}
+	s.publishDependencyChange(ctx, request.TaskID, request.RelatedTaskID)
+	return false, nil
+}
+
 // ReplaceDependencies replaces every direct predecessor of taskID in one
 // validated operation. The complete desired set is checked before storage is
 // changed, and the repository applies its edge diff in one transaction.
@@ -343,6 +415,81 @@ func (s *Service) RemoveDependency(ctx context.Context, taskID, dependsOnTaskID 
 	}
 	// Published outside the lock, for the same reason as AddDependency.
 	s.publishDependencyChange(ctx, taskID, dependsOnTaskID)
+	return nil
+}
+
+// RemoveTaskRelationExact removes one dependency relation. An absent edge is
+// a successful replay and does not publish a duplicate change event.
+//
+//nolint:cyclop // The relation command binds both task versions before deleting the edge.
+func (s *Service) RemoveTaskRelationExact(ctx context.Context, request ExactTaskRelationRequest) (bool, error) {
+	if s.blockers == nil {
+		return false, ErrDependencyRepositoryUnavailable
+	}
+	if request.WorkspaceID == "" || request.TaskID == "" || request.RelatedTaskID == "" {
+		return false, ErrInvalidDependencySet
+	}
+	unlock := taskdependencies.AcquireMutationLock()
+	if err := s.validateDependencyPair(ctx, request.TaskID, request.RelatedTaskID); err != nil {
+		unlock()
+		return false, err
+	}
+	task, err := s.tasks.GetTask(ctx, request.TaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	related, err := s.tasks.GetTask(ctx, request.RelatedTaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	if task.WorkspaceID != request.WorkspaceID || related.WorkspaceID != request.WorkspaceID {
+		unlock()
+		return false, errDependencyCrossWorkspace
+	}
+	if err := validateExactTaskRelationVersions(request, task, related); err != nil {
+		unlock()
+		return false, err
+	}
+	existing, err := s.blockers.ListTaskBlockers(ctx, request.TaskID)
+	if err != nil {
+		unlock()
+		return false, err
+	}
+	found := false
+	for _, edge := range existing {
+		if edge != nil && edge.BlockerTaskID == request.RelatedTaskID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		unlock()
+		return true, nil
+	}
+	if exactRepository, ok := s.blockers.(exactTaskBlockerRepository); ok {
+		_, err = exactRepository.RemoveTaskBlockerExact(
+			ctx, request.TaskID, request.RelatedTaskID, request.WorkspaceID,
+			request.ExpectedTaskResourceVersion, request.ExpectedRelatedResourceVersion, request.ClaimFence,
+		)
+	} else {
+		err = s.blockers.DeleteTaskBlocker(ctx, request.TaskID, request.RelatedTaskID)
+	}
+	unlock()
+	if err != nil {
+		return false, err
+	}
+	s.publishDependencyChange(ctx, request.TaskID, request.RelatedTaskID)
+	return false, nil
+}
+
+func validateExactTaskRelationVersions(request ExactTaskRelationRequest, task, related *models.Task) error {
+	expectedTask, taskErr := time.Parse(time.RFC3339Nano, request.ExpectedTaskResourceVersion)
+	expectedRelated, relatedErr := time.Parse(time.RFC3339Nano, request.ExpectedRelatedResourceVersion)
+	if taskErr != nil || relatedErr != nil || !task.UpdatedAt.Equal(expectedTask) || !related.UpdatedAt.Equal(expectedRelated) {
+		return repoerrors.ErrTaskVersionConflict
+	}
 	return nil
 }
 

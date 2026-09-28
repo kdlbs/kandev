@@ -1,6 +1,6 @@
 ---
 status: draft
-last_updated: 2026-09-21
+last_updated: 2026-09-27
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -20,14 +20,15 @@ CI owns the contributor coverage policy and its trusted execution. Application s
 | REQ-CI-PR-DOCS-001 | Classification; Artifact contract |
 | REQ-CI-PR-DOCS-002 | Events and overrides |
 | REQ-CI-PR-DOCS-003 | Reporting and consistency; Merge queue; Security |
-| REQ-CI-PR-DOCS-004 | API read strategy and events and overrides |
+| REQ-CI-PR-DOCS-004 | Exact-revision requirement lookup; API read strategy; Events and overrides |
 
 ## Components
 
 Files:
 
 - `.github/workflows/pr-docs.yml`: trusted orchestration, PR and merge-group entry points.
-- `.github/scripts/pr-docs.cjs`: pure classification and reference validation, plus a bounded GitHub API adapter.
+- `.github/scripts/pr-docs.cjs`: pure classification and reference validation, plus the bounded GitHub API adapter.
+- `.github/scripts/pr-docs-git.cjs`: bounded exact-head Git-object fetch and requirement-path lookup.
 - `.github/scripts/pr-docs.test.cjs`: Node built-in test runner, with fake GitHub responses.
 - `.github/scripts/pr-docs-workflow-contract_test.py`: workflow event, permission, and registration contract tests.
 
@@ -47,9 +48,11 @@ Initial exemptions:
 - Exact lock basenames `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, and `Cargo.lock`.
 - Recognized non-Markdown harness files: `.codex/agents/*.toml`, `.codex/config.toml`, `.claude/settings.json`, and `.cursor/rules/*.mdc`.
 - CI infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and `.github/actions/**`. These change the delivery pipeline, not shipped product behavior, and are already governed by workflow contract tests.
+- Architecture-lint tooling under `scripts/architecture_lint/**`, `scripts/architecture_lint_tests/**`, and `config/architecture-lint/**`, plus the exact entrypoints `scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`. This boundary follows the repository-tooling ownership recorded in the [architecture lint decision](../../../decisions/2026-08-01-architecture-lint-budgets.md); it does not cover other `scripts/` or `config/` paths.
 
 Keep other `plugin-registry/**` paths subject to normal coverage. Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
 These can change shipped behavior or repository contracts. The `.github/` CI exemption is a directory-scoped rule; a workflow, script, or action outside `.github/` still requires coverage.
+Architecture-lint paths are also explicit and boundary-scoped. A mixed pull request still requires coverage for each unrelated or application path, and a rename into an exempt path retains the original path for classification.
 Add exemptions later only with concrete fixtures.
 This conservative policy creates false positives for small runtime fixes and refactors. The explicit label is their escape hatch.
 
@@ -78,38 +81,58 @@ A handful of unrelated documentation changes does not establish the reference ch
 No PR-body schema is needed. The existing repository frontmatter supplies machine-readable links.
 Update the PR template and contributor guide with examples and the distinction between structural coverage and semantic review.
 
+## Exact-revision requirement lookup
+
+The changed-file list determines whether coverage is required and which work
+orders changed. It cannot locate requirements that the pull request did not
+change. Resolve those definitions from each evaluated member's exact head Git
+tree, including for fork pull requests and merge groups. See the
+[Git-object lookup decision](../../../decisions/2026-09-27-pr-documentation-git-lookup.md).
+
+Keep the workflow and validator checked out at the trusted workflow or
+merge-group base revision. Fetch `refs/pull/<number>/head` only as Git objects;
+never check out or execute its files. Compare the fetched commit ID with the
+current PR metadata's head SHA before lookup. A mismatch means the PR moved:
+refresh and retry the bounded evaluation, or report an infrastructure error.
+For a merge-group member, also require that SHA to match the queue entry.
+No result from a different head can satisfy the member being evaluated.
+
+For each distinct referenced requirement ID, use Git's own fixed-string search
+over `docs/specs/<system>/requirements/` in that head tree to find files
+mentioning it. Use argument-array process execution, with no
+shell interpolation or text-conversion hooks. Treat returned paths only as
+candidates: normalize them, keep regular Markdown files inside the owning
+directory, and read each candidate through the existing bounded exact-head
+content adapter. The existing parser establishes exact requirement headings,
+acceptance criteria, and uniqueness. Thus a new or moved definition can pass,
+while an unchanged duplicate, deletion, or missing definition cannot be hidden
+by the PR diff. GitHub code search and filename-derived fallback are removed.
+
+Cache the fetched head and each `(head SHA, directory, requirement ID)` lookup
+within one exact-head snapshot. Apply finite process time, output-size,
+candidate-count, document, and byte limits; an unavailable fetch, incomplete
+search, or exceeded bound is
+an infrastructure error. A complete search with no matching definition is a
+coverage failure. Re-evaluation after metadata changes uses a fresh snapshot.
+The evaluator does not rely on GitHub's default-branch search index.
+
 ## API read strategy
 
-The evaluator keeps a cache for one exact pull request head or one merge-group
-member. A retry after unstable pull request metadata starts a new cache. The
-stable pull request path has this request budget before transient retries:
+The stable pull request path has this budget before transient retries:
 
 | Request class | Stable evaluation budget |
 | --- | --- |
 | Pull request metadata | Two reads: the initial snapshot and the consistency read. |
 | Changed files | One request per 100-file page. |
-| File contents | At most one read for each `(revision, path)` pair. |
-| Requirement search | At most one search for each unresolved `(directory, requirement ID)` pair. |
+| File contents | At most one read for each `(head revision, path)` pair. |
+| Git object lookup | One verified head fetch per PR snapshot and one bounded search per distinct `(head SHA, directory, requirement ID)`. |
 | Commit status | One pending write and one terminal write. |
 
-The initial pull request snapshot used to choose the pending-status revision is
-also the evaluator's first snapshot. Linked work orders, plans, designs, and
-requirements reuse content already loaded at the exact head.
-
-Before code search, collect every changed Markdown requirement document in each
-referenced system directory and load it at the exact head. For an existing or
-renamed document, load its corresponding base path once. A referenced ID that
-has one exact-head definition and the same requirement heading/ID in the
-corresponding trusted base document needs no code search. The trusted base
-catalog's unique-ID validation rules out an unchanged duplicate, and scanning
-all changed requirement documents detects a duplicate introduced by the pull request.
-
-Use the existing code-search and directory fallback for a new, moved, absent,
-or unresolved ID. A moved ID needs fallback when it has no verified base
-identity. Search results name candidates only. Read every candidate
-at the exact head. Then use structural validation to establish the definition.
-Missing, incomplete, or ambiguous results fail closed. Document-count, response,
-and byte limits apply across the head and base reads.
+The initial PR snapshot used to choose the pending-status revision is also the
+evaluator's first snapshot. Linked work orders, plans, designs, and requirement
+candidates reuse content already loaded at the exact head. GitHub REST remains
+responsible for PR metadata, changed files, bounded document content, and
+status publication; the code-search endpoint is unused.
 
 ## Events and overrides
 
@@ -123,6 +146,10 @@ evaluator input, so they do not start the job.
 Read current PR metadata and labels, not just the event snapshot. Drafts follow the same policy.
 The exact current label `no-docs-allow` returns an override success before expensive file reads.
 Failure to read current metadata or labels is still an infrastructure error.
+For an exact-label transition, the evaluator also checks affected merge groups.
+An explicit `null` merge queue on an otherwise valid repository response means
+the target branch has no queue and contributes no groups. A missing repository,
+GraphQL error, or malformed queue connection remains an infrastructure error.
 
 GitHub repository permissions control who applies the label. No separate author allowlist or title-based exception exists.
 The override is PR-wide and persists across pushes. This is distinct from the revision-specific `ready-to-merge` contract.
@@ -131,12 +158,28 @@ Provide a `workflow_dispatch` PR-number input for retries, read current metadata
 
 ## Reporting and consistency
 
-Publish one commit status context, `PR documentation coverage`, on the current PR head using `statuses: write`.
+Publish the `PR documentation coverage` commit status context on the current PR head using `statuses: write`.
 Do not rely on the native `pull_request_target` job check, whose execution identity is the base revision.
 Use a distinct job name to avoid a status/check-name collision.
 Set pending before evaluation; publish success, failure for missing coverage, or error for incomplete data.
 The status target URL points to the run summary, which lists reasons, paths, references, and remediation.
 Also fail the workflow job on policy failure or infrastructure error. Do not post PR comments.
+For label transitions, complete the queue lookup and affected-group updates
+before publishing the PR-head terminal status. Keep the PR's own coverage
+decision separate from each group's policy result: a failing group fails the
+run and receives its group status, while the PR-head status still reflects the
+PR's own result. A failed queue lookup prevents premature PR-head success and
+publishes an infrastructure error there. Preserve the pending status until a
+terminal result is ready.
+Publish affected-group statuses from label-triggered reevaluation under the
+separate `PR documentation coverage (merge group reevaluation)` context. This
+prevents a group result from replacing the PR result when both refer to the
+same commit SHA. The normal `merge_group` event continues to publish the
+required `PR documentation coverage` context on its synthetic group SHA.
+Show the PR result and each affected-group result separately in the run summary.
+Write the result category and a bounded, single-line failure reason to the
+runner log when the job fails. Strip control characters and cap untrusted text;
+never log tokens, request bodies, document contents, or raw API responses.
 On each retry and terminal request failure, write a bounded runner-log
 diagnostic. Include the request class, HTTP status or transport category,
 attempt count, and selected delay or stop reason. Do not log authorization
@@ -181,6 +224,8 @@ Load only trusted base code. Never evaluate coverage against the combined diff, 
 Resolve members using the paginated GraphQL merge queue entries, including each entry's `baseCommit`, `headCommit`, and `pullRequest`.
 Find the entry for the event head and trace the entry commit boundaries back to the event base.
 Require a complete, unambiguous chain; unknown membership produces an error, not success.
+An absent queue is valid for a label-triggered PR run but cannot satisfy a
+`merge_group` event. That event still fails if membership is absent or invalid.
 Evaluate each member's own current PR diff, artifact chain, and labels. Confirm queue identities and member heads again before publication.
 Use the target-branch concurrency key shared with queued label reevaluation and
 never cancel active group evaluation. The group status itself remains on the
@@ -190,15 +235,20 @@ Integration must validate the entry-boundary mapping against real GitHub merge-g
 If GitHub cannot supply the expected chain for a supported queue mode, revise the mapping and fixtures before rollout.
 Label removal while queued must also reevaluate every active group prefix
 containing that PR, through the same group evaluator and serialization key.
+These label-triggered group statuses use the group-reevaluation context; the
+merge-group event remains authoritative for the required status context.
 Do not dequeue, requeue, or automatically merge PRs.
 
 ## Security
 
 Permissions are `contents: read`, `pull-requests: read`, and `statuses: write` only.
 Use SHA-pinned actions, GitHub-hosted runners, a trusted base checkout, and `persist-credentials: false`.
+The public repository's pull-request refs are fetched anonymously. Private-repository
+support is outside this workflow contract; unavailable refs fail closed rather
+than requiring persisted credentials.
 For dispatch, restrict the workflow definition to the default branch. For queue runs, pin consumed scripts to the event base SHA.
-Do not install PR dependencies, execute PR files, or interpolate PR text into shell or JavaScript source.
-Normalize artifact paths inside their allowed roots, bind content requests to exact repository/head identities, and escape summary text.
+The workflow may fetch PR commits into the trusted checkout's object database, but must keep its worktree and executable scripts at the trusted revision. Do not install PR dependencies, execute PR files, enable Git text-conversion hooks, or interpolate PR text into shell or JavaScript source.
+Validate PR numbers, commit IDs, system names, and returned paths before using them as process arguments or content requests. Bound Git child processes and their output; fail closed when Git objects cannot be retrieved or searched completely. Normalize artifact paths inside their allowed roots, bind content requests to exact repository/head identities, and escape summary text.
 
 ## Rollout and persistence
 

@@ -648,9 +648,16 @@ func TestLSPContinuityReconnectsToSameTaskHostStream(t *testing.T) {
 		logger:       testLogger(),
 	}
 	var fenceHeld atomic.Bool
+	fenceReleased := make(chan struct{}, 1)
 	handler.EnableContinuity(func(string) func() {
 		fenceHeld.Store(true)
-		return func() { fenceHeld.Store(false) }
+		return func() {
+			fenceHeld.Store(false)
+			select {
+			case fenceReleased <- struct{}{}:
+			default:
+			}
+		}
 	}, nil)
 	t.Cleanup(func() { _ = handler.Close() })
 
@@ -659,6 +666,11 @@ func TestLSPContinuityReconnectsToSameTaskHostStream(t *testing.T) {
 	leaseID, _ := ready["leaseId"].(string)
 	if leaseID == "" || ready["resumed"] != false {
 		t.Fatalf("first ready status = %v, want an initial lease ID and resumed=false", ready)
+	}
+	select {
+	case <-fenceReleased:
+	case <-time.After(wsTestTimeout):
+		t.Fatal("session lifecycle fence was not released after lease admission")
 	}
 	if fenceHeld.Load() {
 		t.Fatal("session lifecycle fence remained held after lease admission")

@@ -76,6 +76,7 @@ type lspLease struct {
 	detachedAt                    time.Time
 	expiryTimer                   *time.Timer
 	closed                        bool
+	expectedUpstreamClose         bool
 	readDone                      chan struct{}
 	ready                         bool
 	readyStatus                   map[string]any
@@ -615,6 +616,12 @@ func (l *lspLease) readUpstream() {
 	for {
 		messageType, message, err := l.upstream.ReadMessage()
 		if err != nil {
+			l.mu.Lock()
+			expectedClose := l.expectedUpstreamClose
+			l.mu.Unlock()
+			if expectedClose {
+				return
+			}
 			code, text, reason := classifyLSPUpstreamClose(err)
 			l.terminate(code, text, reason)
 			return

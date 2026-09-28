@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/docker-test-base";
+import fs from "node:fs";
+import path from "node:path";
 import {
   buildAlpineE2EImage,
   E2E_ALPINE_IMAGE_TAG,
@@ -62,6 +64,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
 
   test("launches a session in a real container and exposes container_id", async ({
     apiClient,
+    backend,
     seedData,
   }) => {
     const task = await apiClient.createTaskWithAgent(
@@ -88,6 +91,19 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     // lands on the same branch even when the env row predates the suffix
     // change), so the pattern is hex chars rather than a 3-char random tail.
     expect(dockerCurrentBranch(env!.container_id!)).toMatch(/^feature\/docker-launch-[0-9a-f]{6}$/);
+
+    const runtime = backend.compactRuntime;
+    expect(runtime, "container E2E backend must use a packaged standard runtime").toBeDefined();
+    expect(fs.readdirSync(path.join(runtime!.bundleDir, "bin")).sort()).toEqual([
+      "agentctl",
+      "kandev",
+    ]);
+    await expect
+      .poll(() => fs.readFileSync(backend.logPath, "utf8").includes(runtime!.cachePath), {
+        timeout: 10_000,
+        message: "Docker launch should resolve the verified helper from the standard cache",
+      })
+      .toBe(true);
   });
 
   test("shows Docker container wait progress during slow bootstrap", async ({
@@ -110,27 +126,23 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(persistedProfile.prepare_script).toBe("sleep 20");
 
     try {
-      const task = await apiClient.createTask(seedData.workspaceId, "Docker Slow Progress", {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Docker Slow Progress",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: profile.id,
+          start_agent: false,
+        },
+      );
 
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-
-      const launchPromise = apiClient.launchSession(
-        {
-          task_id: task.id,
-          agent_profile_id: seedData.agentProfileId,
-          executor_profile_id: profile.id,
-          workflow_step_id: seedData.startStepId,
-          prompt: "/e2e:simple-message",
-        },
-        90_000,
-      );
 
       const panel = testPage.getByTestId("prepare-progress-panel");
       await expect(panel).toBeVisible({ timeout: 15_000 });
@@ -141,13 +153,6 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
         timeout: 15_000,
       });
 
-      const launched = await launchPromise;
-      await waitForSessionDone(
-        apiClient,
-        task.id,
-        launched.session_id,
-        "Waiting for slow Docker session",
-      );
       await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});

@@ -84,6 +84,15 @@ var ErrAutoTitlePromptRequired = errors.New("description or title is required wh
 // that does not expose the one-shot title tool.
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
+// ErrAssigneeSeatRequiresResolvedStep rejects a create-time request that named
+// an assignee agent profile but resolved to no workflow step (e.g. the
+// workflow has no steps yet, or step resolution failed). upsertRunnerInTx
+// only writes the runner seat when both an assignee and a step ID are
+// present, so continuing past this without rejecting would repeat the
+// ISSUE-7 pattern in a second guise: the assignee is validated, task
+// creation reports success, and no runner participant is ever written.
+var ErrAssigneeSeatRequiresResolvedStep = errors.New("invalid workflow: cannot seat assignee because no workflow step could be resolved")
+
 type pendingTaskTitleSetter interface {
 	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
 }
@@ -151,6 +160,20 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 		req.Origin == models.TaskOriginAgentCreated ||
 		req.Origin == models.TaskOriginRoutine ||
 		req.Origin == models.TaskOriginOnboarding
+}
+
+func (s *Service) validateAssigneeTaskIsOffice(ctx context.Context, req *CreateTaskRequest) error {
+	if req.AssigneeAgentProfileID == "" || isOfficeRequest(req) {
+		return nil
+	}
+	_, officeWorkflowID, err := s.tasks.GetWorkspaceTaskPrefix(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("get office workflow for assignee task: %w", err)
+	}
+	if officeWorkflowID != "" && req.WorkflowID == officeWorkflowID {
+		return nil
+	}
+	return fmt.Errorf("%w: Office agent assignees require an Office task", ErrInvalidAssigneeAgentProfile)
 }
 
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
@@ -233,6 +256,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
 		return result, err
+	}
+	if err := s.validateRequestedExecutorAdmission(ctx, req); err != nil {
+		return CreateTaskResult{}, err
 	}
 
 	prepared, err := s.prepareTaskForCreation(ctx, req, externalID)
@@ -323,11 +349,31 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
 		return nil, err
 	}
+	if req.RequireAssigneeAgentProfileValidation {
+		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
+			return nil, err
+		}
+	}
+	// Gated by RequireAssigneeAgentProfileValidation (set only by the
+	// untrusted HTTP create-task handler): running here, after the duplicate
+	// external_id short-circuit in CreateTask already returned, means a
+	// duplicate retry never re-validates its own assignee.
+	if req.RequireAssigneeAgentProfileValidation {
+		if err := s.ValidateAssigneeAgentProfile(ctx, req.WorkspaceID, req.AssigneeAgentProfileID); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.prepareContributionDestination(ctx, req); err != nil {
 		return nil, err
 	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
+	// Only the untrusted HTTP create path (RequireAssigneeAgentProfileValidation)
+	// promises a runner seat for its assignee; internal callers that set
+	// AssigneeAgentProfileID without it already know their step resolves.
+	if req.RequireAssigneeAgentProfileValidation && req.AssigneeAgentProfileID != "" && workflowStepID == "" {
+		return nil, ErrAssigneeSeatRequiresResolvedStep
+	}
 	task := s.buildTask(ctx, req, workflowStepID)
 	task.ExternalID = externalID
 
@@ -2311,6 +2357,8 @@ type taskMessageRollbackRepository interface {
 		task *models.Task,
 		sessionID string,
 		expectedSessionState models.TaskSessionState,
+		expectedTaskState v1.TaskState,
+		expectedWorkflowStepID string,
 	) (bool, error)
 }
 
@@ -2323,6 +2371,8 @@ func (s *Service) RestoreTaskMessageRollback(
 	ctx context.Context,
 	taskID, ownerSessionID string,
 	expectedSessionState models.TaskSessionState,
+	expectedTaskState v1.TaskState,
+	expectedWorkflowStepID string,
 	state v1.TaskState,
 	workflowStepID string,
 ) (*models.Task, bool, error) {
@@ -2358,6 +2408,8 @@ func (s *Service) RestoreTaskMessageRollback(
 		&restoredTask,
 		ownerSessionID,
 		expectedSessionState,
+		expectedTaskState,
+		expectedWorkflowStepID,
 	)
 	if err != nil || !updated {
 		return task, updated, err
@@ -2385,6 +2437,12 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	task, err := s.tasks.GetTask(archiveCtx, id)
 	if err != nil {
 		return err
+	}
+	if exact, ok := archiveCtx.Value(exactTaskArchiveContextKey{}).(ExactTaskArchiveRequest); ok {
+		expectedVersion, parseErr := time.Parse(time.RFC3339Nano, exact.ExpectedResourceVersion)
+		if parseErr != nil || task.WorkspaceID != exact.WorkspaceID || !task.UpdatedAt.Equal(expectedVersion) {
+			return repoerrors.ErrTaskVersionConflict
+		}
 	}
 
 	if task.ArchivedAt != nil {
@@ -2446,9 +2504,23 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	// 3. Set archived_at in DB
-	if err := s.tasks.ArchiveTask(archiveCtx, id); err != nil {
+	var archiveErr error
+	if exact, ok := archiveCtx.Value(exactTaskArchiveContextKey{}).(ExactTaskArchiveRequest); ok {
+		repository, supported := s.tasks.(taskrepo.ExactTaskArchiveRepository)
+		if !supported {
+			archiveErr = errExactTaskUpdatesUnavailable
+		} else {
+			_, archiveErr = repository.ArchiveTaskExact(
+				archiveCtx, id, exact.WorkspaceID, exact.ExpectedResourceVersion,
+				exact.OperationID, exact.PayloadDigest, exact.ClaimFence,
+			)
+		}
+	} else {
+		archiveErr = s.tasks.ArchiveTask(archiveCtx, id)
+	}
+	if archiveErr != nil {
 		s.resolveTaskResourceCleanupAfterMutationError(archiveCtx, cleanupJob)
-		return err
+		return archiveErr
 	}
 
 	// Register the exact inventory before CANCELLED becomes visible. A launch
@@ -4002,7 +4074,11 @@ func (s *Service) cleanupDestructiveTaskResources(
 		if !ok {
 			return append(errs, errors.New("worktree cleaner cannot preserve branches during archive cleanup"))
 		}
-		cleanupErr = cleaner.CleanupWorktreesPreservingBranches(ctx, worktrees)
+		reclaimable, filterErrs := s.filterDirtyWorktreesForArchive(ctx, taskID, worktrees)
+		errs = append(errs, filterErrs...)
+		if len(reclaimable) > 0 {
+			cleanupErr = cleaner.CleanupWorktreesPreservingBranches(ctx, reclaimable)
+		}
 	} else if envCleanup.discardWorktreeChanges {
 		cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleanerWithOptions)
 		if !ok {
@@ -4015,12 +4091,104 @@ func (s *Service) cleanupDestructiveTaskResources(
 		cleanupErr = cleaner.CleanupWorktrees(ctx, worktrees)
 	}
 	if cleanupErr != nil {
-		s.logger.Warn("failed to cleanup task worktrees",
-			zap.String("task_id", taskID),
-			zap.Error(cleanupErr))
-		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
+		if envCleanup.preserveBranches && onlyDirtyWorktreeCleanupErrors(cleanupErr) {
+			s.logger.Info("retaining archived worktree after final cleanliness check",
+				zap.String("task_id", taskID), zap.Error(cleanupErr))
+		} else {
+			s.logger.Warn("failed to cleanup task worktrees",
+				zap.String("task_id", taskID),
+				zap.Error(cleanupErr))
+			errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
+		}
 	}
 	return errs
+}
+
+func onlyDirtyWorktreeCleanupErrors(err error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !onlyDirtyWorktreeCleanupErrors(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyDirtyWorktreeCleanupErrors(wrapped.Unwrap())
+	}
+	return errors.Is(err, worktree.ErrDirtyWorktreeCleanup)
+}
+
+// filterDirtyWorktreesForArchive drops worktrees carrying uncommitted or
+// untracked local changes from an archive cleanup batch. Archive preserves
+// the branch and the task_environment_repos row for every worktree it does
+// not physically clean up, so a dropped worktree stays reclaimable by a
+// later cleanup once it is clean, instead of being force-removed now.
+//
+// A dirty-inspection failure preserves the entire batch rather than risking
+// a force-remove of a checkout whose state could not be confirmed clean.
+func (s *Service) filterDirtyWorktreesForArchive(
+	ctx context.Context, taskID string, worktrees []*worktree.Worktree,
+) ([]*worktree.Worktree, []error) {
+	if len(worktrees) == 0 {
+		return worktrees, nil
+	}
+	inspector, ok := s.worktreeCleanup.(WorktreeDirtyInspector)
+	if !ok {
+		// No dirty inspector: pass all worktrees through unchanged (pre-fix
+		// behaviour). The production Manager always satisfies both interfaces;
+		// a WorktreeArchiveBatchCleaner that does not also implement
+		// WorktreeDirtyInspector skips the dirty guard entirely.
+		return worktrees, nil
+	}
+	dirty, err := inspector.InspectDirtyWorktrees(ctx, worktrees)
+	if err != nil {
+		s.logger.Warn("preserving all task worktrees after dirty inspection failed during archive cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil, []error{fmt.Errorf("inspect worktrees before archive cleanup: %w", err)}
+	}
+	if len(dirty) == 0 {
+		return worktrees, nil
+	}
+	// Inspection dedupes by (RepositoryPath, Path): when two worktree records
+	// share the identical checkout directory, only the first is reported here.
+	// Matching on path as well as ID catches the un-reported alias so it is
+	// preserved alongside the record inspection actually flagged.
+	dirtyIDs := make(map[string]struct{}, len(dirty))
+	dirtyPaths := make(map[string]struct{}, len(dirty))
+	for _, d := range dirty {
+		dirtyIDs[d.WorktreeID] = struct{}{}
+		if d.Path != "" {
+			dirtyPaths[d.Path] = struct{}{}
+		}
+	}
+	reclaimable := make([]*worktree.Worktree, 0, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		_, dirtyByID := dirtyIDs[wt.ID]
+		dirtyByPath := false
+		if wt.Path != "" {
+			_, dirtyByPath = dirtyPaths[filepath.Clean(wt.Path)]
+		}
+		if dirtyByID || dirtyByPath {
+			s.logger.Info("preserving dirty worktree during archive cleanup",
+				zap.String("task_id", taskID),
+				zap.String("worktree_id", wt.ID))
+			continue
+		}
+		reclaimable = append(reclaimable, wt)
+	}
+	return reclaimable, nil
 }
 
 func (s *Service) canBatchCleanupTaskWorktrees(cleanup taskEnvironmentCleanup) bool {

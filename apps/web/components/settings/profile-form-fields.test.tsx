@@ -66,6 +66,7 @@ function renderForm(
   profile: ProfileFormData,
   config: ModelConfig = modelConfig,
   onChange: (patch: Partial<ProfileFormData>) => void = vi.fn(),
+  cursorMcpAuthSupported = false,
 ) {
   return render(
     <TooltipProvider>
@@ -76,6 +77,7 @@ function renderForm(
         permissionSettings={{}}
         passthroughConfig={null}
         agentName="mock-agent"
+        cursorMcpAuthSupported={cursorMcpAuthSupported}
       />
     </TooltipProvider>,
   );
@@ -85,6 +87,7 @@ function renderStatefulForm(
   profile: ProfileFormData,
   config: ModelConfig,
   onChange: (patch: Partial<ProfileFormData>) => void,
+  cursorMcpAuthSupported = false,
 ) {
   function StatefulForm() {
     const [currentProfile, setCurrentProfile] = useState(profile);
@@ -99,6 +102,7 @@ function renderStatefulForm(
         permissionSettings={{}}
         passthroughConfig={null}
         agentName="mock-agent"
+        cursorMcpAuthSupported={cursorMcpAuthSupported}
       />
     );
   }
@@ -138,6 +142,26 @@ describe("ProfileFormFields command prefix visibility", () => {
     renderForm(formData({ cli_passthrough: true, command_prefix: "greywall --" }));
 
     expect(screen.queryByTestId("command-prefix-input")).toBeNull();
+  });
+});
+
+describe("ProfileFormFields Cursor MCP auth preference", () => {
+  it("does not show the preference for an unsupported profile", () => {
+    renderForm(formData(), modelConfig, vi.fn(), false);
+    expect(
+      screen.queryByRole("checkbox", { name: /Share local Cursor MCP credentials/ }),
+    ).toBeNull();
+  });
+
+  it("shows a default-enabled checkbox and emits an explicit false value", () => {
+    const onChange = vi.fn();
+    renderStatefulForm(formData(), modelConfig, onChange, true);
+
+    const checkbox = screen.getByRole("checkbox", { name: /Share local Cursor MCP credentials/ });
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({ cursor_mcp_auth_enabled: false });
+    expect(screen.getByText(/Running sessions keep credentials already loaded/)).toBeTruthy();
   });
 });
 

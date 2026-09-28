@@ -65,7 +65,7 @@ async function assertUserVisibleFailure(page: Page, taskId: string, expected: Re
   await session.waitForLoad(30_000);
   const chat = session.activeChat();
   const recoveryRows = chat.locator(
-    "[data-testid='session-recovery-action-message']:has([data-testid='recovery-resume-button'], [data-testid='recovery-fresh-button'], [data-testid='recovery-restart-button'])",
+    "[data-testid='session-recovery-card']:has([data-testid='recovery-resume-button'], [data-testid='recovery-fresh-button'], [data-testid='recovery-restart-button'])",
   );
   await expect(recoveryRows).toHaveCount(1, { timeout: 30_000 });
   const recovery = recoveryRows.first();
@@ -299,6 +299,19 @@ test("launches from a real in-cluster service account", async ({ cluster }) => {
     expect(task.session_id).toBeTruthy();
     const pod = await waitForKubernetesPod(cluster, task.id, task.session_id!);
     expect(pod.metadata.labels?.["kandev.ai/executor-id"]).toBe(seed.executorId);
+    const backendLogs = cluster.kubectl([
+      "-n",
+      cluster.controlNamespace,
+      "exec",
+      "pod/kandev-in-cluster",
+      "-c",
+      "backend",
+      "--",
+      "cat",
+      "/data/home/logs/backend-logs.log",
+    ]);
+    expect(backendLogs).toContain("using verified remote helper cache");
+    expect(backendLogs).toContain(cluster.remoteHelperCachePath);
   } finally {
     await apiClient.e2eReset(seed.workspaceId, [seed.workflowId]).catch(() => undefined);
     await apiClient.deleteExecutorProfile(seed.executorProfileId).catch(() => undefined);

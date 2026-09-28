@@ -13,3 +13,6 @@ type RepositoryPreparationError = lifecycle.RepositoryPreparationError
 // ErrCancelEscalated reports that cancellation released local admission after
 // the provider failed to acknowledge the cancellation within its bound.
 var ErrCancelEscalated = lifecycle.ErrCancelEscalated
+
+// ErrVirtualProfile marks a logical routing profile that has no concrete execution profile.
+var ErrVirtualProfile = lifecycle.ErrVirtualProfile

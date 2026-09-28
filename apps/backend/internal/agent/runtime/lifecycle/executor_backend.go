@@ -194,14 +194,19 @@ const (
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"
+	MetadataKeyExecutorType             = "executor_type"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
 	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyPluginExecutor           = "plugin_executor"
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
 	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
+	MetadataKeyDockerNetwork            = "docker_network"
+	MetadataKeyDockerNetworkGwPriority  = "docker_network_gw_priority"
+	MetadataKeyDockerAdditionalNetworks = "docker_additional_networks"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -375,7 +380,8 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyIsRemote: true,
+	MetadataKeyExecutorType: true,
+	MetadataKeyIsRemote:     true,
 
 	// Executor profile / auth config
 	MetadataKeyCleanupScript:            true,
@@ -389,8 +395,12 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_mcp_policy":               true,
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyPluginExecutor:           true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyAllowUserNamespaces:      true,
+	MetadataKeyDockerNetwork:            true,
+	MetadataKeyDockerNetworkGwPriority:  true,
+	MetadataKeyDockerAdditionalNetworks: true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	metadataCheckoutBranch:              true,
@@ -591,7 +601,10 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID        string
+	InstanceID string
+	// ExecutorType is retained in execution metadata so recovered sessions can
+	// safely re-check host-local filesystem eligibility.
+	ExecutorType      string
 	TaskID            string
 	TaskTitle         string
 	SessionID         string
@@ -650,6 +663,9 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
+	// values are transient and must never be copied to runtime metadata.
+	PluginExecutor *PluginExecutorLaunch
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.
@@ -732,6 +748,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	executorType := req.ExecutorType
+	if executorType != "" {
+		metadata[MetadataKeyExecutorType] = executorType
+	} else {
+		delete(metadata, MetadataKeyExecutorType)
+	}
 
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
@@ -750,6 +772,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
+		ExecutorType:         executorType,
 		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,

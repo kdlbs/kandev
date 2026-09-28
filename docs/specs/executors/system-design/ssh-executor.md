@@ -7,6 +7,7 @@ created: 2026-05-16
 owners:
   - tbd
 ---
+
 # SSH Executor System Design
 
 ## Purpose and boundaries
@@ -15,9 +16,9 @@ This design preserves the technical source detail for `REQ-EXECUTORS-SSH-EXECUTO
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-EXECUTORS-SSH-EXECUTOR-001` | [Migrated source detail](#migrated-source-detail) |
+| Requirement                                                               | Design section                                                      |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `REQ-EXECUTORS-SSH-EXECUTOR-001`                                          | [Migrated source detail](#migrated-source-detail)                   |
 | `AC-EXECUTORS-SSH-EXECUTOR-001.11` and `AC-EXECUTORS-SSH-EXECUTOR-001.12` | [Credential-file conflict policy](#credential-file-conflict-policy) |
 
 ## Migrated source detail
@@ -67,7 +68,7 @@ Execution is keyed per session (matching local + Sprites). Each session on an SS
 - Its **own SSH local port forward**: a fresh `127.0.0.1:0` listener that the kandev backend dials for HTTP + WebSocket streams to that session's agentctl. All forwards ride the single shared SSH connection for the host (see below).
 - A **session-scoped runtime dir** at `<workdir_root>/tasks/<task-dir-name>/.kandev/sessions/<session-id>/` for the agentctl PID file, port file, and log — kept under the task dir so cleanup follows the task, not orphaned across the filesystem.
 
-Multiple sessions in the *same* task share the same worktree on disk (same files, same branch state); they have independent agentctl processes and independent UI streams. Multiple sessions across *different* tasks on the same host have independent task dirs as well.
+Multiple sessions in the _same_ task share the same worktree on disk (same files, same branch state); they have independent agentctl processes and independent UI streams. Multiple sessions across _different_ tasks on the same host have independent task dirs as well.
 
 ### Auth, connectivity, and host-key trust
 
@@ -132,7 +133,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - On `CreateInstance`, detect the remote platform via `uname -s` and `uname -m`, normalize it to a Go `GOOS/GOARCH` tuple, and resolve the matching agentctl helper via `AgentctlResolver`.
 - Supported remote platforms are `linux/amd64`, `linux/arm64`, `darwin/arm64`, and `darwin/amd64`. Unsupported platforms fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}`.
   - **Validation status:** `linux/amd64` and `darwin/arm64` have been validated end-to-end on real hosts (`darwin/arm64` live over Tailscale against Apple Silicon Macs). `linux/arm64` and `darwin/amd64` are wired through the full build/upload/launch path and share the same cross-compiled helper, but have **not** yet been exercised on real ARM Linux / Intel Mac remotes — treat them as supported-but-unverified until someone confirms a task completes on that hardware.
-- Runtime bundles include `agentctl-linux-amd64`, `agentctl-linux-arm64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`. The darwin helpers are ad-hoc-signed (Go signs darwin/arm64 at link time; `make` re-signs both via `codesign`/`rcodesign`); bundle validation rejects an unsigned `agentctl-darwin-arm64` because Apple Silicon refuses to run it.
+- Current runtime bundles include `agentctl-linux-amd64`, `agentctl-linux-arm64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`. The proposed [compact runtime distribution design](../../release/system-design/compact-runtime-distribution.md) would fetch a matching helper on first remote use from standard Stable archives while retaining complete offline archives. The darwin helpers are ad-hoc-signed (Go signs darwin/arm64 at link time; `make` re-signs both via `codesign`/`rcodesign`); bundle validation rejects an unsigned `agentctl-darwin-arm64` because Apple Silicon refuses to run it.
 - Compute SHA256 locally; check `~/.kandev/bin/agentctl.sha256` on the remote via `sha256sum`. Upload only if missing or mismatched.
 - Upload via SFTP to `~/.kandev/bin/agentctl` (chmod 755), then write the sha256 sidecar.
 - Binary is shared across all tasks and sessions on the host.
@@ -180,7 +181,7 @@ This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../..
 
 ### Edit-with-live-sessions UX
 
-- On save, if the executor has any running sessions, a confirm modal warns: *"This executor has N running session(s). They will keep running on the current host. Only new sessions started after save will use the updated config."*
+- On save, if the executor has any running sessions, a confirm modal warns: _"This executor has N running session(s). They will keep running on the current host. Only new sessions started after save will use the updated config."_
 - Backend accepts the save unconditionally — the warning is pure UX. Live sessions retain their `ssh_host` / `ssh_port` / `ssh_user` snapshot in `ExecutorRunning.Metadata`, which is already how recovery works after a restart, so they're insulated from config changes by construction.
 
 ### Telemetry & errors

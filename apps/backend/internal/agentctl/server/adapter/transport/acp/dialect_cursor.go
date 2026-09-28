@@ -9,10 +9,31 @@ import (
 )
 
 const (
+	cursorAgentID                     = "cursor-acp"
 	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
 	cursorRetriableStreamResetMessage = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
 	cursorRetriableStreamResetMaxTail = 256
 )
+
+func newCursorACPDialect() acpDialect {
+	return acpDialect{mcpToolCall: parseCursorMCPToolCall}
+}
+
+func parseCursorMCPToolCall(_ map[string]any, rawInput any) (mcpToolCallFrame, bool) {
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return mcpToolCallFrame{}, false
+	}
+	provider, _ := input["providerIdentifier"].(string)
+	tool, _ := input["toolName"].(string)
+	arguments, ok := input["args"].(map[string]any)
+	provider = strings.TrimSpace(provider)
+	tool = strings.TrimSpace(tool)
+	if provider == "" || tool == "" || !ok {
+		return mcpToolCallFrame{}, false
+	}
+	return mcpToolCallFrame{name: provider + "/" + tool, arguments: arguments}, true
+}
 
 // isCursorRetriableStreamReset recognizes Cursor's bounded RetriableError
 // control chunk. The prefix check keeps the common per-token path

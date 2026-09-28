@@ -22,6 +22,9967 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type HostCommandStatus int32
+
+const (
+	HostCommandStatus_HOST_COMMAND_STATUS_UNSPECIFIED     HostCommandStatus = 0
+	HostCommandStatus_HOST_COMMAND_STATUS_APPLIED         HostCommandStatus = 1
+	HostCommandStatus_HOST_COMMAND_STATUS_ALREADY_APPLIED HostCommandStatus = 2
+	HostCommandStatus_HOST_COMMAND_STATUS_NO_CHANGE       HostCommandStatus = 3
+	HostCommandStatus_HOST_COMMAND_STATUS_CONFLICT        HostCommandStatus = 4
+	HostCommandStatus_HOST_COMMAND_STATUS_DENIED          HostCommandStatus = 5
+	HostCommandStatus_HOST_COMMAND_STATUS_NOT_FOUND       HostCommandStatus = 6
+	HostCommandStatus_HOST_COMMAND_STATUS_INVALID         HostCommandStatus = 7
+	HostCommandStatus_HOST_COMMAND_STATUS_UNSUPPORTED     HostCommandStatus = 8
+	HostCommandStatus_HOST_COMMAND_STATUS_RATE_LIMITED    HostCommandStatus = 9
+	HostCommandStatus_HOST_COMMAND_STATUS_UNAVAILABLE     HostCommandStatus = 10
+	HostCommandStatus_HOST_COMMAND_STATUS_PARTIAL         HostCommandStatus = 11
+	HostCommandStatus_HOST_COMMAND_STATUS_UNCERTAIN       HostCommandStatus = 12
+)
+
+// Enum value maps for HostCommandStatus.
+var (
+	HostCommandStatus_name = map[int32]string{
+		0:  "HOST_COMMAND_STATUS_UNSPECIFIED",
+		1:  "HOST_COMMAND_STATUS_APPLIED",
+		2:  "HOST_COMMAND_STATUS_ALREADY_APPLIED",
+		3:  "HOST_COMMAND_STATUS_NO_CHANGE",
+		4:  "HOST_COMMAND_STATUS_CONFLICT",
+		5:  "HOST_COMMAND_STATUS_DENIED",
+		6:  "HOST_COMMAND_STATUS_NOT_FOUND",
+		7:  "HOST_COMMAND_STATUS_INVALID",
+		8:  "HOST_COMMAND_STATUS_UNSUPPORTED",
+		9:  "HOST_COMMAND_STATUS_RATE_LIMITED",
+		10: "HOST_COMMAND_STATUS_UNAVAILABLE",
+		11: "HOST_COMMAND_STATUS_PARTIAL",
+		12: "HOST_COMMAND_STATUS_UNCERTAIN",
+	}
+	HostCommandStatus_value = map[string]int32{
+		"HOST_COMMAND_STATUS_UNSPECIFIED":     0,
+		"HOST_COMMAND_STATUS_APPLIED":         1,
+		"HOST_COMMAND_STATUS_ALREADY_APPLIED": 2,
+		"HOST_COMMAND_STATUS_NO_CHANGE":       3,
+		"HOST_COMMAND_STATUS_CONFLICT":        4,
+		"HOST_COMMAND_STATUS_DENIED":          5,
+		"HOST_COMMAND_STATUS_NOT_FOUND":       6,
+		"HOST_COMMAND_STATUS_INVALID":         7,
+		"HOST_COMMAND_STATUS_UNSUPPORTED":     8,
+		"HOST_COMMAND_STATUS_RATE_LIMITED":    9,
+		"HOST_COMMAND_STATUS_UNAVAILABLE":     10,
+		"HOST_COMMAND_STATUS_PARTIAL":         11,
+		"HOST_COMMAND_STATUS_UNCERTAIN":       12,
+	}
+)
+
+func (x HostCommandStatus) Enum() *HostCommandStatus {
+	p := new(HostCommandStatus)
+	*p = x
+	return p
+}
+
+func (x HostCommandStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HostCommandStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_kandev_plugin_v1_plugin_proto_enumTypes[0].Descriptor()
+}
+
+func (HostCommandStatus) Type() protoreflect.EnumType {
+	return &file_kandev_plugin_v1_plugin_proto_enumTypes[0]
+}
+
+func (x HostCommandStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HostCommandStatus.Descriptor instead.
+func (HostCommandStatus) EnumDescriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{0}
+}
+
+type ManagedAgentInputOrigin int32
+
+const (
+	ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED ManagedAgentInputOrigin = 0
+	ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_HUMAN       ManagedAgentInputOrigin = 1
+	ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_AUTOMATION  ManagedAgentInputOrigin = 2
+	ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_PERIODIC    ManagedAgentInputOrigin = 3
+	ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_INTERACTION ManagedAgentInputOrigin = 4
+)
+
+// Enum value maps for ManagedAgentInputOrigin.
+var (
+	ManagedAgentInputOrigin_name = map[int32]string{
+		0: "MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED",
+		1: "MANAGED_AGENT_INPUT_ORIGIN_HUMAN",
+		2: "MANAGED_AGENT_INPUT_ORIGIN_AUTOMATION",
+		3: "MANAGED_AGENT_INPUT_ORIGIN_PERIODIC",
+		4: "MANAGED_AGENT_INPUT_ORIGIN_INTERACTION",
+	}
+	ManagedAgentInputOrigin_value = map[string]int32{
+		"MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED": 0,
+		"MANAGED_AGENT_INPUT_ORIGIN_HUMAN":       1,
+		"MANAGED_AGENT_INPUT_ORIGIN_AUTOMATION":  2,
+		"MANAGED_AGENT_INPUT_ORIGIN_PERIODIC":    3,
+		"MANAGED_AGENT_INPUT_ORIGIN_INTERACTION": 4,
+	}
+)
+
+func (x ManagedAgentInputOrigin) Enum() *ManagedAgentInputOrigin {
+	p := new(ManagedAgentInputOrigin)
+	*p = x
+	return p
+}
+
+func (x ManagedAgentInputOrigin) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ManagedAgentInputOrigin) Descriptor() protoreflect.EnumDescriptor {
+	return file_kandev_plugin_v1_plugin_proto_enumTypes[1].Descriptor()
+}
+
+func (ManagedAgentInputOrigin) Type() protoreflect.EnumType {
+	return &file_kandev_plugin_v1_plugin_proto_enumTypes[1]
+}
+
+func (x ManagedAgentInputOrigin) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ManagedAgentInputOrigin.Descriptor instead.
+func (ManagedAgentInputOrigin) EnumDescriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{1}
+}
+
+type ManagedAgentInputState int32
+
+const (
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_UNSPECIFIED ManagedAgentInputState = 0
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_ACCEPTED    ManagedAgentInputState = 1
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_RUNNING     ManagedAgentInputState = 2
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_COMPLETED   ManagedAgentInputState = 3
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_FAILED      ManagedAgentInputState = 4
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_CANCELLED   ManagedAgentInputState = 5
+	ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_UNCERTAIN   ManagedAgentInputState = 6
+)
+
+// Enum value maps for ManagedAgentInputState.
+var (
+	ManagedAgentInputState_name = map[int32]string{
+		0: "MANAGED_AGENT_INPUT_STATE_UNSPECIFIED",
+		1: "MANAGED_AGENT_INPUT_STATE_ACCEPTED",
+		2: "MANAGED_AGENT_INPUT_STATE_RUNNING",
+		3: "MANAGED_AGENT_INPUT_STATE_COMPLETED",
+		4: "MANAGED_AGENT_INPUT_STATE_FAILED",
+		5: "MANAGED_AGENT_INPUT_STATE_CANCELLED",
+		6: "MANAGED_AGENT_INPUT_STATE_UNCERTAIN",
+	}
+	ManagedAgentInputState_value = map[string]int32{
+		"MANAGED_AGENT_INPUT_STATE_UNSPECIFIED": 0,
+		"MANAGED_AGENT_INPUT_STATE_ACCEPTED":    1,
+		"MANAGED_AGENT_INPUT_STATE_RUNNING":     2,
+		"MANAGED_AGENT_INPUT_STATE_COMPLETED":   3,
+		"MANAGED_AGENT_INPUT_STATE_FAILED":      4,
+		"MANAGED_AGENT_INPUT_STATE_CANCELLED":   5,
+		"MANAGED_AGENT_INPUT_STATE_UNCERTAIN":   6,
+	}
+)
+
+func (x ManagedAgentInputState) Enum() *ManagedAgentInputState {
+	p := new(ManagedAgentInputState)
+	*p = x
+	return p
+}
+
+func (x ManagedAgentInputState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ManagedAgentInputState) Descriptor() protoreflect.EnumDescriptor {
+	return file_kandev_plugin_v1_plugin_proto_enumTypes[2].Descriptor()
+}
+
+func (ManagedAgentInputState) Type() protoreflect.EnumType {
+	return &file_kandev_plugin_v1_plugin_proto_enumTypes[2]
+}
+
+func (x ManagedAgentInputState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ManagedAgentInputState.Descriptor instead.
+func (ManagedAgentInputState) EnumDescriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{2}
+}
+
+type ManagedAgentDispatchStatus int32
+
+const (
+	ManagedAgentDispatchStatus_MANAGED_AGENT_DISPATCH_STATUS_UNSPECIFIED ManagedAgentDispatchStatus = 0
+	ManagedAgentDispatchStatus_MANAGED_AGENT_DISPATCH_STATUS_BUSY        ManagedAgentDispatchStatus = 1
+	ManagedAgentDispatchStatus_MANAGED_AGENT_DISPATCH_STATUS_STARTED     ManagedAgentDispatchStatus = 2
+	ManagedAgentDispatchStatus_MANAGED_AGENT_DISPATCH_STATUS_SENT        ManagedAgentDispatchStatus = 3
+)
+
+// Enum value maps for ManagedAgentDispatchStatus.
+var (
+	ManagedAgentDispatchStatus_name = map[int32]string{
+		0: "MANAGED_AGENT_DISPATCH_STATUS_UNSPECIFIED",
+		1: "MANAGED_AGENT_DISPATCH_STATUS_BUSY",
+		2: "MANAGED_AGENT_DISPATCH_STATUS_STARTED",
+		3: "MANAGED_AGENT_DISPATCH_STATUS_SENT",
+	}
+	ManagedAgentDispatchStatus_value = map[string]int32{
+		"MANAGED_AGENT_DISPATCH_STATUS_UNSPECIFIED": 0,
+		"MANAGED_AGENT_DISPATCH_STATUS_BUSY":        1,
+		"MANAGED_AGENT_DISPATCH_STATUS_STARTED":     2,
+		"MANAGED_AGENT_DISPATCH_STATUS_SENT":        3,
+	}
+)
+
+func (x ManagedAgentDispatchStatus) Enum() *ManagedAgentDispatchStatus {
+	p := new(ManagedAgentDispatchStatus)
+	*p = x
+	return p
+}
+
+func (x ManagedAgentDispatchStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ManagedAgentDispatchStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_kandev_plugin_v1_plugin_proto_enumTypes[3].Descriptor()
+}
+
+func (ManagedAgentDispatchStatus) Type() protoreflect.EnumType {
+	return &file_kandev_plugin_v1_plugin_proto_enumTypes[3]
+}
+
+func (x ManagedAgentDispatchStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ManagedAgentDispatchStatus.Descriptor instead.
+func (ManagedAgentDispatchStatus) EnumDescriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{3}
+}
+
+type HostOperationSupport struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Method            string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	CapabilityId      string                 `protobuf:"bytes,2,opt,name=capability_id,json=capabilityId,proto3" json:"capability_id,omitempty"`
+	Description       string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Supported         bool                   `protobuf:"varint,4,opt,name=supported,proto3" json:"supported,omitempty"`
+	Authorized        bool                   `protobuf:"varint,5,opt,name=authorized,proto3" json:"authorized,omitempty"`
+	UnavailableReason string                 `protobuf:"bytes,6,opt,name=unavailable_reason,json=unavailableReason,proto3" json:"unavailable_reason,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *HostOperationSupport) Reset() {
+	*x = HostOperationSupport{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostOperationSupport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostOperationSupport) ProtoMessage() {}
+
+func (x *HostOperationSupport) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostOperationSupport.ProtoReflect.Descriptor instead.
+func (*HostOperationSupport) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *HostOperationSupport) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *HostOperationSupport) GetCapabilityId() string {
+	if x != nil {
+		return x.CapabilityId
+	}
+	return ""
+}
+
+func (x *HostOperationSupport) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *HostOperationSupport) GetSupported() bool {
+	if x != nil {
+		return x.Supported
+	}
+	return false
+}
+
+func (x *HostOperationSupport) GetAuthorized() bool {
+	if x != nil {
+		return x.Authorized
+	}
+	return false
+}
+
+func (x *HostOperationSupport) GetUnavailableReason() string {
+	if x != nil {
+		return x.UnavailableReason
+	}
+	return ""
+}
+
+type HostCapabilityContext struct {
+	state              protoimpl.MessageState  `protogen:"open.v1"`
+	InstallationId     string                  `protobuf:"bytes,1,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	WorkspaceId        string                  `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ManifestDigest     string                  `protobuf:"bytes,3,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ApprovalRevision   uint64                  `protobuf:"varint,4,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ApprovalState      string                  `protobuf:"bytes,5,opt,name=approval_state,json=approvalState,proto3" json:"approval_state,omitempty"`
+	Operations         []*HostOperationSupport `protobuf:"bytes,6,rep,name=operations,proto3" json:"operations,omitempty"`
+	Limits             map[string]uint64       `protobuf:"bytes,7,rep,name=limits,proto3" json:"limits,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	SupportedProviders []string                `protobuf:"bytes,8,rep,name=supported_providers,json=supportedProviders,proto3" json:"supported_providers,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *HostCapabilityContext) Reset() {
+	*x = HostCapabilityContext{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostCapabilityContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostCapabilityContext) ProtoMessage() {}
+
+func (x *HostCapabilityContext) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostCapabilityContext.ProtoReflect.Descriptor instead.
+func (*HostCapabilityContext) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *HostCapabilityContext) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *HostCapabilityContext) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *HostCapabilityContext) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *HostCapabilityContext) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *HostCapabilityContext) GetApprovalState() string {
+	if x != nil {
+		return x.ApprovalState
+	}
+	return ""
+}
+
+func (x *HostCapabilityContext) GetOperations() []*HostOperationSupport {
+	if x != nil {
+		return x.Operations
+	}
+	return nil
+}
+
+func (x *HostCapabilityContext) GetLimits() map[string]uint64 {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
+func (x *HostCapabilityContext) GetSupportedProviders() []string {
+	if x != nil {
+		return x.SupportedProviders
+	}
+	return nil
+}
+
+type GetCapabilityContextRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCapabilityContextRequest) Reset() {
+	*x = GetCapabilityContextRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCapabilityContextRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCapabilityContextRequest) ProtoMessage() {}
+
+func (x *GetCapabilityContextRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCapabilityContextRequest.ProtoReflect.Descriptor instead.
+func (*GetCapabilityContextRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetCapabilityContextRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+type GetCapabilityContextResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Context       *HostCapabilityContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCapabilityContextResponse) Reset() {
+	*x = GetCapabilityContextResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCapabilityContextResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCapabilityContextResponse) ProtoMessage() {}
+
+func (x *GetCapabilityContextResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCapabilityContextResponse.ProtoReflect.Descriptor instead.
+func (*GetCapabilityContextResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetCapabilityContextResponse) GetContext() *HostCapabilityContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+type HostCommandReceipt struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ReceiptId        string                 `protobuf:"bytes,1,opt,name=receipt_id,json=receiptId,proto3" json:"receipt_id,omitempty"`
+	OperationId      string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Status           HostCommandStatus      `protobuf:"varint,3,opt,name=status,proto3,enum=kandev.plugin.v1.HostCommandStatus" json:"status,omitempty"`
+	TargetId         string                 `protobuf:"bytes,4,opt,name=target_id,json=targetId,proto3" json:"target_id,omitempty"`
+	ResourceVersion  string                 `protobuf:"bytes,5,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	CreatedAt        string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt        string                 `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *HostCommandReceipt) Reset() {
+	*x = HostCommandReceipt{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostCommandReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostCommandReceipt) ProtoMessage() {}
+
+func (x *HostCommandReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostCommandReceipt.ProtoReflect.Descriptor instead.
+func (*HostCommandReceipt) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *HostCommandReceipt) GetReceiptId() string {
+	if x != nil {
+		return x.ReceiptId
+	}
+	return ""
+}
+
+func (x *HostCommandReceipt) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *HostCommandReceipt) GetStatus() HostCommandStatus {
+	if x != nil {
+		return x.Status
+	}
+	return HostCommandStatus_HOST_COMMAND_STATUS_UNSPECIFIED
+}
+
+func (x *HostCommandReceipt) GetTargetId() string {
+	if x != nil {
+		return x.TargetId
+	}
+	return ""
+}
+
+func (x *HostCommandReceipt) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *HostCommandReceipt) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *HostCommandReceipt) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *HostCommandReceipt) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+type HostCommandResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        HostCommandStatus      `protobuf:"varint,1,opt,name=status,proto3,enum=kandev.plugin.v1.HostCommandStatus" json:"status,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	Receipt       *HostCommandReceipt    `protobuf:"bytes,3,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostCommandResult) Reset() {
+	*x = HostCommandResult{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostCommandResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostCommandResult) ProtoMessage() {}
+
+func (x *HostCommandResult) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostCommandResult.ProtoReflect.Descriptor instead.
+func (*HostCommandResult) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HostCommandResult) GetStatus() HostCommandStatus {
+	if x != nil {
+		return x.Status
+	}
+	return HostCommandStatus_HOST_COMMAND_STATUS_UNSPECIFIED
+}
+
+func (x *HostCommandResult) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *HostCommandResult) GetReceipt() *HostCommandReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type UpdateTaskExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	Title                   *string                `protobuf:"bytes,6,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	Description             *string                `protobuf:"bytes,7,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	State                   *string                `protobuf:"bytes,8,opt,name=state,proto3,oneof" json:"state,omitempty"`
+	Priority                *string                `protobuf:"bytes,9,opt,name=priority,proto3,oneof" json:"priority,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,10,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,11,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,12,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,13,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *UpdateTaskExactRequest) Reset() {
+	*x = UpdateTaskExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTaskExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTaskExactRequest) ProtoMessage() {}
+
+func (x *UpdateTaskExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTaskExactRequest.ProtoReflect.Descriptor instead.
+func (*UpdateTaskExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *UpdateTaskExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetTitle() string {
+	if x != nil && x.Title != nil {
+		return *x.Title
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetState() string {
+	if x != nil && x.State != nil {
+		return *x.State
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetPriority() string {
+	if x != nil && x.Priority != nil {
+		return *x.Priority
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *UpdateTaskExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *UpdateTaskExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type UpdateTaskExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Task          *Task                  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTaskExactResponse) Reset() {
+	*x = UpdateTaskExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTaskExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTaskExactResponse) ProtoMessage() {}
+
+func (x *UpdateTaskExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTaskExactResponse.ProtoReflect.Descriptor instead.
+func (*UpdateTaskExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *UpdateTaskExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *UpdateTaskExactResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type CreateTaskExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RequestId        string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId      string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExternalId       string                 `protobuf:"bytes,4,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,5,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,6,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	Task             *CreateTaskRequest     `protobuf:"bytes,7,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CreateTaskExactRequest) Reset() {
+	*x = CreateTaskExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTaskExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTaskExactRequest) ProtoMessage() {}
+
+func (x *CreateTaskExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTaskExactRequest.ProtoReflect.Descriptor instead.
+func (*CreateTaskExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CreateTaskExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateTaskExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CreateTaskExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CreateTaskExactRequest) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *CreateTaskExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *CreateTaskExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *CreateTaskExactRequest) GetTask() *CreateTaskRequest {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type CreateTaskExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Task          *Task                  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTaskExactResponse) Reset() {
+	*x = CreateTaskExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTaskExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTaskExactResponse) ProtoMessage() {}
+
+func (x *CreateTaskExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTaskExactResponse.ProtoReflect.Descriptor instead.
+func (*CreateTaskExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreateTaskExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *CreateTaskExactResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type SetTaskLabelsExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	Labels                  []string               `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,7,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,8,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,9,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,10,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *SetTaskLabelsExactRequest) Reset() {
+	*x = SetTaskLabelsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetTaskLabelsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetTaskLabelsExactRequest) ProtoMessage() {}
+
+func (x *SetTaskLabelsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetTaskLabelsExactRequest.ProtoReflect.Descriptor instead.
+func (*SetTaskLabelsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SetTaskLabelsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *SetTaskLabelsExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *SetTaskLabelsExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *SetTaskLabelsExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type SetTaskLabelsExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Task          *Task                  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetTaskLabelsExactResponse) Reset() {
+	*x = SetTaskLabelsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetTaskLabelsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetTaskLabelsExactResponse) ProtoMessage() {}
+
+func (x *SetTaskLabelsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetTaskLabelsExactResponse.ProtoReflect.Descriptor instead.
+func (*SetTaskLabelsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SetTaskLabelsExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *SetTaskLabelsExactResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type AssignTaskExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	AssigneeUserId          string                 `protobuf:"bytes,6,opt,name=assignee_user_id,json=assigneeUserId,proto3" json:"assignee_user_id,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,7,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,8,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,9,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,10,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *AssignTaskExactRequest) Reset() {
+	*x = AssignTaskExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AssignTaskExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AssignTaskExactRequest) ProtoMessage() {}
+
+func (x *AssignTaskExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AssignTaskExactRequest.ProtoReflect.Descriptor instead.
+func (*AssignTaskExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AssignTaskExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetAssigneeUserId() string {
+	if x != nil {
+		return x.AssigneeUserId
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *AssignTaskExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *AssignTaskExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type AssignTaskExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Task          *Task                  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AssignTaskExactResponse) Reset() {
+	*x = AssignTaskExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AssignTaskExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AssignTaskExactResponse) ProtoMessage() {}
+
+func (x *AssignTaskExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AssignTaskExactResponse.ProtoReflect.Descriptor instead.
+func (*AssignTaskExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *AssignTaskExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *AssignTaskExactResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type MoveTaskExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	WorkflowId              string                 `protobuf:"bytes,6,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	WorkflowStepId          string                 `protobuf:"bytes,7,opt,name=workflow_step_id,json=workflowStepId,proto3" json:"workflow_step_id,omitempty"`
+	Position                int32                  `protobuf:"varint,8,opt,name=position,proto3" json:"position,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,11,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,12,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *MoveTaskExactRequest) Reset() {
+	*x = MoveTaskExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MoveTaskExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MoveTaskExactRequest) ProtoMessage() {}
+
+func (x *MoveTaskExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MoveTaskExactRequest.ProtoReflect.Descriptor instead.
+func (*MoveTaskExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *MoveTaskExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetWorkflowStepId() string {
+	if x != nil {
+		return x.WorkflowStepId
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetPosition() int32 {
+	if x != nil {
+		return x.Position
+	}
+	return 0
+}
+
+func (x *MoveTaskExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *MoveTaskExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *MoveTaskExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type MoveTaskExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Task          *Task                  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MoveTaskExactResponse) Reset() {
+	*x = MoveTaskExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MoveTaskExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MoveTaskExactResponse) ProtoMessage() {}
+
+func (x *MoveTaskExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MoveTaskExactResponse.ProtoReflect.Descriptor instead.
+func (*MoveTaskExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MoveTaskExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *MoveTaskExactResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type ArchiveTaskExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,8,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,9,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *ArchiveTaskExactRequest) Reset() {
+	*x = ArchiveTaskExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveTaskExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveTaskExactRequest) ProtoMessage() {}
+
+func (x *ArchiveTaskExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveTaskExactRequest.ProtoReflect.Descriptor instead.
+func (*ArchiveTaskExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ArchiveTaskExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ArchiveTaskExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *ArchiveTaskExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type ArchiveTaskExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Task          *Task                  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArchiveTaskExactResponse) Reset() {
+	*x = ArchiveTaskExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveTaskExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveTaskExactResponse) ProtoMessage() {}
+
+func (x *ArchiveTaskExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveTaskExactResponse.ProtoReflect.Descriptor instead.
+func (*ArchiveTaskExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ArchiveTaskExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *ArchiveTaskExactResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+type AddTaskRelationExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RelatedTaskId                  string                 `protobuf:"bytes,4,opt,name=related_task_id,json=relatedTaskId,proto3" json:"related_task_id,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ExpectedTaskResourceVersion    string                 `protobuf:"bytes,8,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedRelatedResourceVersion string                 `protobuf:"bytes,9,opt,name=expected_related_resource_version,json=expectedRelatedResourceVersion,proto3" json:"expected_related_resource_version,omitempty"`
+	ManagementInstanceKey          string                 `protobuf:"bytes,10,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration        int64                  `protobuf:"varint,11,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *AddTaskRelationExactRequest) Reset() {
+	*x = AddTaskRelationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddTaskRelationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddTaskRelationExactRequest) ProtoMessage() {}
+
+func (x *AddTaskRelationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddTaskRelationExactRequest.ProtoReflect.Descriptor instead.
+func (*AddTaskRelationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AddTaskRelationExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetRelatedTaskId() string {
+	if x != nil {
+		return x.RelatedTaskId
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *AddTaskRelationExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetExpectedRelatedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedRelatedResourceVersion
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *AddTaskRelationExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type AddTaskRelationExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddTaskRelationExactResponse) Reset() {
+	*x = AddTaskRelationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddTaskRelationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddTaskRelationExactResponse) ProtoMessage() {}
+
+func (x *AddTaskRelationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddTaskRelationExactResponse.ProtoReflect.Descriptor instead.
+func (*AddTaskRelationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AddTaskRelationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type RemoveTaskRelationExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RelatedTaskId                  string                 `protobuf:"bytes,4,opt,name=related_task_id,json=relatedTaskId,proto3" json:"related_task_id,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ExpectedTaskResourceVersion    string                 `protobuf:"bytes,8,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedRelatedResourceVersion string                 `protobuf:"bytes,9,opt,name=expected_related_resource_version,json=expectedRelatedResourceVersion,proto3" json:"expected_related_resource_version,omitempty"`
+	ManagementInstanceKey          string                 `protobuf:"bytes,10,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration        int64                  `protobuf:"varint,11,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *RemoveTaskRelationExactRequest) Reset() {
+	*x = RemoveTaskRelationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveTaskRelationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveTaskRelationExactRequest) ProtoMessage() {}
+
+func (x *RemoveTaskRelationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveTaskRelationExactRequest.ProtoReflect.Descriptor instead.
+func (*RemoveTaskRelationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *RemoveTaskRelationExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetRelatedTaskId() string {
+	if x != nil {
+		return x.RelatedTaskId
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *RemoveTaskRelationExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetExpectedRelatedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedRelatedResourceVersion
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *RemoveTaskRelationExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type RemoveTaskRelationExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveTaskRelationExactResponse) Reset() {
+	*x = RemoveTaskRelationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveTaskRelationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveTaskRelationExactResponse) ProtoMessage() {}
+
+func (x *RemoveTaskRelationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveTaskRelationExactResponse.ProtoReflect.Descriptor instead.
+func (*RemoveTaskRelationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *RemoveTaskRelationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+// SendTaskMessageExact admits one message to the durable task-session FIFO.
+// APPLIED means the Host accepted the queue entry; it does not mean an agent
+// received or acted on the message. Retries use the same idempotency key.
+type SendTaskMessageExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId                      string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedTaskResourceVersion    string                 `protobuf:"bytes,6,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedSessionResourceVersion string                 `protobuf:"bytes,7,opt,name=expected_session_resource_version,json=expectedSessionResourceVersion,proto3" json:"expected_session_resource_version,omitempty"`
+	Content                        string                 `protobuf:"bytes,8,opt,name=content,proto3" json:"content,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey          string                 `protobuf:"bytes,11,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration        int64                  `protobuf:"varint,12,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *SendTaskMessageExactRequest) Reset() {
+	*x = SendTaskMessageExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendTaskMessageExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendTaskMessageExactRequest) ProtoMessage() {}
+
+func (x *SendTaskMessageExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendTaskMessageExactRequest.ProtoReflect.Descriptor instead.
+func (*SendTaskMessageExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SendTaskMessageExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetExpectedSessionResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSessionResourceVersion
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *SendTaskMessageExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *SendTaskMessageExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type SendTaskMessageExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendTaskMessageExactResponse) Reset() {
+	*x = SendTaskMessageExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendTaskMessageExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendTaskMessageExactResponse) ProtoMessage() {}
+
+func (x *SendTaskMessageExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendTaskMessageExactResponse.ProtoReflect.Descriptor instead.
+func (*SendTaskMessageExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *SendTaskMessageExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type TaskManagementClaim struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	WorkspaceId     string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstallationId  string                 `protobuf:"bytes,3,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	InstanceKey     string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	Generation      int64                  `protobuf:"varint,5,opt,name=generation,proto3" json:"generation,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,6,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	AcquiredAt      string                 `protobuf:"bytes,7,opt,name=acquired_at,json=acquiredAt,proto3" json:"acquired_at,omitempty"`
+	UpdatedAt       string                 `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	UpdatedByActor  string                 `protobuf:"bytes,9,opt,name=updated_by_actor,json=updatedByActor,proto3" json:"updated_by_actor,omitempty"`
+	OwnerKind       string                 `protobuf:"bytes,10,opt,name=owner_kind,json=ownerKind,proto3" json:"owner_kind,omitempty"`
+	OwnerActorId    string                 `protobuf:"bytes,11,opt,name=owner_actor_id,json=ownerActorId,proto3" json:"owner_actor_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TaskManagementClaim) Reset() {
+	*x = TaskManagementClaim{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskManagementClaim) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskManagementClaim) ProtoMessage() {}
+
+func (x *TaskManagementClaim) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskManagementClaim.ProtoReflect.Descriptor instead.
+func (*TaskManagementClaim) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *TaskManagementClaim) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *TaskManagementClaim) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetAcquiredAt() string {
+	if x != nil {
+		return x.AcquiredAt
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetUpdatedByActor() string {
+	if x != nil {
+		return x.UpdatedByActor
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetOwnerKind() string {
+	if x != nil {
+		return x.OwnerKind
+	}
+	return ""
+}
+
+func (x *TaskManagementClaim) GetOwnerActorId() string {
+	if x != nil {
+		return x.OwnerActorId
+	}
+	return ""
+}
+
+type AcquireTaskManagementClaimExactRequest struct {
+	state                        protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                    string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                  string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                       string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	InstanceKey                  string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedTaskResourceVersion  string                 `protobuf:"bytes,5,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedClaimResourceVersion string                 `protobuf:"bytes,6,opt,name=expected_claim_resource_version,json=expectedClaimResourceVersion,proto3" json:"expected_claim_resource_version,omitempty"`
+	IdempotencyKey               string                 `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Reason                       string                 `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
+	ApprovalRevision             uint64                 `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest               string                 `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) Reset() {
+	*x = AcquireTaskManagementClaimExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcquireTaskManagementClaimExactRequest) ProtoMessage() {}
+
+func (x *AcquireTaskManagementClaimExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcquireTaskManagementClaimExactRequest.ProtoReflect.Descriptor instead.
+func (*AcquireTaskManagementClaimExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetExpectedClaimResourceVersion() string {
+	if x != nil {
+		return x.ExpectedClaimResourceVersion
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *AcquireTaskManagementClaimExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ReleaseTaskManagementClaimExactRequest struct {
+	state                        protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                    string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                  string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                       string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	InstanceKey                  string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedTaskResourceVersion  string                 `protobuf:"bytes,5,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedClaimResourceVersion string                 `protobuf:"bytes,6,opt,name=expected_claim_resource_version,json=expectedClaimResourceVersion,proto3" json:"expected_claim_resource_version,omitempty"`
+	IdempotencyKey               string                 `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Reason                       string                 `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
+	ApprovalRevision             uint64                 `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest               string                 `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) Reset() {
+	*x = ReleaseTaskManagementClaimExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseTaskManagementClaimExactRequest) ProtoMessage() {}
+
+func (x *ReleaseTaskManagementClaimExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseTaskManagementClaimExactRequest.ProtoReflect.Descriptor instead.
+func (*ReleaseTaskManagementClaimExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetExpectedClaimResourceVersion() string {
+	if x != nil {
+		return x.ExpectedClaimResourceVersion
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ReleaseTaskManagementClaimExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type TransferTaskManagementClaimExactRequest struct {
+	state                        protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                    string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                  string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                       string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	InstanceKey                  string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	TargetInstallationId         string                 `protobuf:"bytes,5,opt,name=target_installation_id,json=targetInstallationId,proto3" json:"target_installation_id,omitempty"`
+	TargetInstanceKey            string                 `protobuf:"bytes,6,opt,name=target_instance_key,json=targetInstanceKey,proto3" json:"target_instance_key,omitempty"`
+	ExpectedTaskResourceVersion  string                 `protobuf:"bytes,7,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedClaimResourceVersion string                 `protobuf:"bytes,8,opt,name=expected_claim_resource_version,json=expectedClaimResourceVersion,proto3" json:"expected_claim_resource_version,omitempty"`
+	IdempotencyKey               string                 `protobuf:"bytes,9,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Reason                       string                 `protobuf:"bytes,10,opt,name=reason,proto3" json:"reason,omitempty"`
+	ApprovalRevision             uint64                 `protobuf:"varint,11,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest               string                 `protobuf:"bytes,12,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
+}
+
+func (x *TransferTaskManagementClaimExactRequest) Reset() {
+	*x = TransferTaskManagementClaimExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferTaskManagementClaimExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferTaskManagementClaimExactRequest) ProtoMessage() {}
+
+func (x *TransferTaskManagementClaimExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferTaskManagementClaimExactRequest.ProtoReflect.Descriptor instead.
+func (*TransferTaskManagementClaimExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetTargetInstallationId() string {
+	if x != nil {
+		return x.TargetInstallationId
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetTargetInstanceKey() string {
+	if x != nil {
+		return x.TargetInstanceKey
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetExpectedClaimResourceVersion() string {
+	if x != nil {
+		return x.ExpectedClaimResourceVersion
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *TransferTaskManagementClaimExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type TaskManagementClaimExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Claim         *TaskManagementClaim   `protobuf:"bytes,2,opt,name=claim,proto3" json:"claim,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskManagementClaimExactResponse) Reset() {
+	*x = TaskManagementClaimExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskManagementClaimExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskManagementClaimExactResponse) ProtoMessage() {}
+
+func (x *TaskManagementClaimExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskManagementClaimExactResponse.ProtoReflect.Descriptor instead.
+func (*TaskManagementClaimExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *TaskManagementClaimExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *TaskManagementClaimExactResponse) GetClaim() *TaskManagementClaim {
+	if x != nil {
+		return x.Claim
+	}
+	return nil
+}
+
+// Completion criteria and typed evidence are task-owned. Both commands are
+// revision, task-version, and management-claim fenced. Human weakening and
+// one-move completion overrides remain native UI operations.
+type TaskCompletionEvidenceSubject struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Revision      string                 `protobuf:"bytes,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCompletionEvidenceSubject) Reset() {
+	*x = TaskCompletionEvidenceSubject{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionEvidenceSubject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionEvidenceSubject) ProtoMessage() {}
+
+func (x *TaskCompletionEvidenceSubject) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionEvidenceSubject.ProtoReflect.Descriptor instead.
+func (*TaskCompletionEvidenceSubject) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *TaskCompletionEvidenceSubject) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *TaskCompletionEvidenceSubject) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TaskCompletionEvidenceSubject) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
+type TaskCompletionEvidence struct {
+	state         protoimpl.MessageState         `protogen:"open.v1"`
+	Subject       *TaskCompletionEvidenceSubject `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	Summary       string                         `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	Reference     string                         `protobuf:"bytes,3,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCompletionEvidence) Reset() {
+	*x = TaskCompletionEvidence{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionEvidence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionEvidence) ProtoMessage() {}
+
+func (x *TaskCompletionEvidence) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionEvidence.ProtoReflect.Descriptor instead.
+func (*TaskCompletionEvidence) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *TaskCompletionEvidence) GetSubject() *TaskCompletionEvidenceSubject {
+	if x != nil {
+		return x.Subject
+	}
+	return nil
+}
+
+func (x *TaskCompletionEvidence) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *TaskCompletionEvidence) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+type TaskCompletionCriterion struct {
+	state             protoimpl.MessageState         `protogen:"open.v1"`
+	Id                string                         `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Description       string                         `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	EvidenceSubject   *TaskCompletionEvidenceSubject `protobuf:"bytes,3,opt,name=evidence_subject,json=evidenceSubject,proto3" json:"evidence_subject,omitempty"`
+	CriterionRevision int64                          `protobuf:"varint,4,opt,name=criterion_revision,json=criterionRevision,proto3" json:"criterion_revision,omitempty"`
+	VerifiedRevision  int64                          `protobuf:"varint,5,opt,name=verified_revision,json=verifiedRevision,proto3" json:"verified_revision,omitempty"`
+	Evidence          *TaskCompletionEvidence        `protobuf:"bytes,6,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	VerifierKind      string                         `protobuf:"bytes,7,opt,name=verifier_kind,json=verifierKind,proto3" json:"verifier_kind,omitempty"`
+	VerifierId        string                         `protobuf:"bytes,8,opt,name=verifier_id,json=verifierId,proto3" json:"verifier_id,omitempty"`
+	VerifiedAt        string                         `protobuf:"bytes,9,opt,name=verified_at,json=verifiedAt,proto3" json:"verified_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *TaskCompletionCriterion) Reset() {
+	*x = TaskCompletionCriterion{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionCriterion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionCriterion) ProtoMessage() {}
+
+func (x *TaskCompletionCriterion) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionCriterion.ProtoReflect.Descriptor instead.
+func (*TaskCompletionCriterion) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *TaskCompletionCriterion) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TaskCompletionCriterion) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *TaskCompletionCriterion) GetEvidenceSubject() *TaskCompletionEvidenceSubject {
+	if x != nil {
+		return x.EvidenceSubject
+	}
+	return nil
+}
+
+func (x *TaskCompletionCriterion) GetCriterionRevision() int64 {
+	if x != nil {
+		return x.CriterionRevision
+	}
+	return 0
+}
+
+func (x *TaskCompletionCriterion) GetVerifiedRevision() int64 {
+	if x != nil {
+		return x.VerifiedRevision
+	}
+	return 0
+}
+
+func (x *TaskCompletionCriterion) GetEvidence() *TaskCompletionEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+func (x *TaskCompletionCriterion) GetVerifierKind() string {
+	if x != nil {
+		return x.VerifierKind
+	}
+	return ""
+}
+
+func (x *TaskCompletionCriterion) GetVerifierId() string {
+	if x != nil {
+		return x.VerifierId
+	}
+	return ""
+}
+
+func (x *TaskCompletionCriterion) GetVerifiedAt() string {
+	if x != nil {
+		return x.VerifiedAt
+	}
+	return ""
+}
+
+type TaskCompletionCriterionInput struct {
+	state           protoimpl.MessageState         `protogen:"open.v1"`
+	Id              string                         `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Description     string                         `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	EvidenceSubject *TaskCompletionEvidenceSubject `protobuf:"bytes,3,opt,name=evidence_subject,json=evidenceSubject,proto3" json:"evidence_subject,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TaskCompletionCriterionInput) Reset() {
+	*x = TaskCompletionCriterionInput{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionCriterionInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionCriterionInput) ProtoMessage() {}
+
+func (x *TaskCompletionCriterionInput) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionCriterionInput.ProtoReflect.Descriptor instead.
+func (*TaskCompletionCriterionInput) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *TaskCompletionCriterionInput) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TaskCompletionCriterionInput) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *TaskCompletionCriterionInput) GetEvidenceSubject() *TaskCompletionEvidenceSubject {
+	if x != nil {
+		return x.EvidenceSubject
+	}
+	return nil
+}
+
+type TaskCompletionBlocker struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CriterionId   string                 `protobuf:"bytes,1,opt,name=criterion_id,json=criterionId,proto3" json:"criterion_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCompletionBlocker) Reset() {
+	*x = TaskCompletionBlocker{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionBlocker) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionBlocker) ProtoMessage() {}
+
+func (x *TaskCompletionBlocker) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionBlocker.ProtoReflect.Descriptor instead.
+func (*TaskCompletionBlocker) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *TaskCompletionBlocker) GetCriterionId() string {
+	if x != nil {
+		return x.CriterionId
+	}
+	return ""
+}
+
+func (x *TaskCompletionBlocker) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type TaskCompletionGateSnapshot struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	TaskId        string                     `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	WorkspaceId   string                     `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Revision      int64                      `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	Criteria      []*TaskCompletionCriterion `protobuf:"bytes,4,rep,name=criteria,proto3" json:"criteria,omitempty"`
+	Blockers      []*TaskCompletionBlocker   `protobuf:"bytes,5,rep,name=blockers,proto3" json:"blockers,omitempty"`
+	Blocked       bool                       `protobuf:"varint,6,opt,name=blocked,proto3" json:"blocked,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCompletionGateSnapshot) Reset() {
+	*x = TaskCompletionGateSnapshot{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionGateSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionGateSnapshot) ProtoMessage() {}
+
+func (x *TaskCompletionGateSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionGateSnapshot.ProtoReflect.Descriptor instead.
+func (*TaskCompletionGateSnapshot) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *TaskCompletionGateSnapshot) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskCompletionGateSnapshot) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TaskCompletionGateSnapshot) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *TaskCompletionGateSnapshot) GetCriteria() []*TaskCompletionCriterion {
+	if x != nil {
+		return x.Criteria
+	}
+	return nil
+}
+
+func (x *TaskCompletionGateSnapshot) GetBlockers() []*TaskCompletionBlocker {
+	if x != nil {
+		return x.Blockers
+	}
+	return nil
+}
+
+func (x *TaskCompletionGateSnapshot) GetBlocked() bool {
+	if x != nil {
+		return x.Blocked
+	}
+	return false
+}
+
+type SetTaskCompletionCriteriaExactRequest struct {
+	state                       protoimpl.MessageState          `protogen:"open.v1"`
+	RequestId                   string                          `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                 string                          `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                      string                          `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey              string                          `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedTaskResourceVersion string                          `protobuf:"bytes,5,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedRevision            int64                           `protobuf:"varint,6,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	Criteria                    []*TaskCompletionCriterionInput `protobuf:"bytes,7,rep,name=criteria,proto3" json:"criteria,omitempty"`
+	ApprovalRevision            uint64                          `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest              string                          `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey       string                          `protobuf:"bytes,10,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration     int64                           `protobuf:"varint,11,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) Reset() {
+	*x = SetTaskCompletionCriteriaExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetTaskCompletionCriteriaExactRequest) ProtoMessage() {}
+
+func (x *SetTaskCompletionCriteriaExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetTaskCompletionCriteriaExactRequest.ProtoReflect.Descriptor instead.
+func (*SetTaskCompletionCriteriaExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetExpectedRevision() int64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetCriteria() []*TaskCompletionCriterionInput {
+	if x != nil {
+		return x.Criteria
+	}
+	return nil
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *SetTaskCompletionCriteriaExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type VerifyTaskCompletionCriterionExactRequest struct {
+	state                       protoimpl.MessageState  `protogen:"open.v1"`
+	RequestId                   string                  `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                 string                  `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                      string                  `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CriterionId                 string                  `protobuf:"bytes,4,opt,name=criterion_id,json=criterionId,proto3" json:"criterion_id,omitempty"`
+	IdempotencyKey              string                  `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedTaskResourceVersion string                  `protobuf:"bytes,6,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedRevision            int64                   `protobuf:"varint,7,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	Evidence                    *TaskCompletionEvidence `protobuf:"bytes,8,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	ApprovalRevision            uint64                  `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest              string                  `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey       string                  `protobuf:"bytes,11,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration     int64                   `protobuf:"varint,12,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) Reset() {
+	*x = VerifyTaskCompletionCriterionExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyTaskCompletionCriterionExactRequest) ProtoMessage() {}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyTaskCompletionCriterionExactRequest.ProtoReflect.Descriptor instead.
+func (*VerifyTaskCompletionCriterionExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetCriterionId() string {
+	if x != nil {
+		return x.CriterionId
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetExpectedRevision() int64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetEvidence() *TaskCompletionEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *VerifyTaskCompletionCriterionExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type TaskCompletionGateExactResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Result        *HostCommandResult          `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Snapshot      *TaskCompletionGateSnapshot `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCompletionGateExactResponse) Reset() {
+	*x = TaskCompletionGateExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletionGateExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletionGateExactResponse) ProtoMessage() {}
+
+func (x *TaskCompletionGateExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletionGateExactResponse.ProtoReflect.Descriptor instead.
+func (*TaskCompletionGateExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *TaskCompletionGateExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *TaskCompletionGateExactResponse) GetSnapshot() *TaskCompletionGateSnapshot {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
+type ApplyWorkspaceAdministrationExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RequestId        string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId      string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,4,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,5,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	// Types that are valid to be assigned to Operation:
+	//
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkspaceDefaults
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkflowCreate
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkflowUpdate
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkflowReorder
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkflowStepCreate
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkflowStepUpdate
+	//	*ApplyWorkspaceAdministrationExactRequest_WorkflowStepReorder
+	//	*ApplyWorkspaceAdministrationExactRequest_RepositoryRegister
+	//	*ApplyWorkspaceAdministrationExactRequest_RepositoryUpdate
+	Operation     isApplyWorkspaceAdministrationExactRequest_Operation `protobuf_oneof:"operation"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) Reset() {
+	*x = ApplyWorkspaceAdministrationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest) ProtoMessage() {}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyWorkspaceAdministrationExactRequest.ProtoReflect.Descriptor instead.
+func (*ApplyWorkspaceAdministrationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetOperation() isApplyWorkspaceAdministrationExactRequest_Operation {
+	if x != nil {
+		return x.Operation
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkspaceDefaults() *WorkspaceDefaultsUpdateExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkspaceDefaults); ok {
+			return x.WorkspaceDefaults
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkflowCreate() *WorkspaceWorkflowCreateExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkflowCreate); ok {
+			return x.WorkflowCreate
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkflowUpdate() *WorkspaceWorkflowUpdateExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkflowUpdate); ok {
+			return x.WorkflowUpdate
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkflowReorder() *WorkspaceWorkflowReorderExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkflowReorder); ok {
+			return x.WorkflowReorder
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkflowStepCreate() *WorkspaceWorkflowStepCreateExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkflowStepCreate); ok {
+			return x.WorkflowStepCreate
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkflowStepUpdate() *WorkspaceWorkflowStepUpdateExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkflowStepUpdate); ok {
+			return x.WorkflowStepUpdate
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetWorkflowStepReorder() *WorkspaceWorkflowStepReorderExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_WorkflowStepReorder); ok {
+			return x.WorkflowStepReorder
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetRepositoryRegister() *WorkspaceRepositoryRegisterExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_RepositoryRegister); ok {
+			return x.RepositoryRegister
+		}
+	}
+	return nil
+}
+
+func (x *ApplyWorkspaceAdministrationExactRequest) GetRepositoryUpdate() *WorkspaceRepositoryUpdateExact {
+	if x != nil {
+		if x, ok := x.Operation.(*ApplyWorkspaceAdministrationExactRequest_RepositoryUpdate); ok {
+			return x.RepositoryUpdate
+		}
+	}
+	return nil
+}
+
+type isApplyWorkspaceAdministrationExactRequest_Operation interface {
+	isApplyWorkspaceAdministrationExactRequest_Operation()
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkspaceDefaults struct {
+	WorkspaceDefaults *WorkspaceDefaultsUpdateExact `protobuf:"bytes,10,opt,name=workspace_defaults,json=workspaceDefaults,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkflowCreate struct {
+	WorkflowCreate *WorkspaceWorkflowCreateExact `protobuf:"bytes,11,opt,name=workflow_create,json=workflowCreate,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkflowUpdate struct {
+	WorkflowUpdate *WorkspaceWorkflowUpdateExact `protobuf:"bytes,12,opt,name=workflow_update,json=workflowUpdate,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkflowReorder struct {
+	WorkflowReorder *WorkspaceWorkflowReorderExact `protobuf:"bytes,13,opt,name=workflow_reorder,json=workflowReorder,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkflowStepCreate struct {
+	WorkflowStepCreate *WorkspaceWorkflowStepCreateExact `protobuf:"bytes,14,opt,name=workflow_step_create,json=workflowStepCreate,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkflowStepUpdate struct {
+	WorkflowStepUpdate *WorkspaceWorkflowStepUpdateExact `protobuf:"bytes,15,opt,name=workflow_step_update,json=workflowStepUpdate,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_WorkflowStepReorder struct {
+	WorkflowStepReorder *WorkspaceWorkflowStepReorderExact `protobuf:"bytes,16,opt,name=workflow_step_reorder,json=workflowStepReorder,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_RepositoryRegister struct {
+	RepositoryRegister *WorkspaceRepositoryRegisterExact `protobuf:"bytes,17,opt,name=repository_register,json=repositoryRegister,proto3,oneof"`
+}
+
+type ApplyWorkspaceAdministrationExactRequest_RepositoryUpdate struct {
+	RepositoryUpdate *WorkspaceRepositoryUpdateExact `protobuf:"bytes,18,opt,name=repository_update,json=repositoryUpdate,proto3,oneof"`
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkspaceDefaults) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkflowCreate) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkflowUpdate) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkflowReorder) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkflowStepCreate) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkflowStepUpdate) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_WorkflowStepReorder) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_RepositoryRegister) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+func (*ApplyWorkspaceAdministrationExactRequest_RepositoryUpdate) isApplyWorkspaceAdministrationExactRequest_Operation() {
+}
+
+type WorkspaceDefaultsUpdateExact struct {
+	state                       protoimpl.MessageState `protogen:"open.v1"`
+	ExpectedResourceVersion     string                 `protobuf:"bytes,1,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	Name                        *string                `protobuf:"bytes,2,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Description                 *string                `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	DefaultExecutorId           *string                `protobuf:"bytes,4,opt,name=default_executor_id,json=defaultExecutorId,proto3,oneof" json:"default_executor_id,omitempty"`
+	DefaultEnvironmentId        *string                `protobuf:"bytes,5,opt,name=default_environment_id,json=defaultEnvironmentId,proto3,oneof" json:"default_environment_id,omitempty"`
+	DefaultAgentProfileId       *string                `protobuf:"bytes,6,opt,name=default_agent_profile_id,json=defaultAgentProfileId,proto3,oneof" json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileId *string                `protobuf:"bytes,7,opt,name=default_config_agent_profile_id,json=defaultConfigAgentProfileId,proto3,oneof" json:"default_config_agent_profile_id,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *WorkspaceDefaultsUpdateExact) Reset() {
+	*x = WorkspaceDefaultsUpdateExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceDefaultsUpdateExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceDefaultsUpdateExact) ProtoMessage() {}
+
+func (x *WorkspaceDefaultsUpdateExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceDefaultsUpdateExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceDefaultsUpdateExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetDefaultExecutorId() string {
+	if x != nil && x.DefaultExecutorId != nil {
+		return *x.DefaultExecutorId
+	}
+	return ""
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetDefaultEnvironmentId() string {
+	if x != nil && x.DefaultEnvironmentId != nil {
+		return *x.DefaultEnvironmentId
+	}
+	return ""
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetDefaultAgentProfileId() string {
+	if x != nil && x.DefaultAgentProfileId != nil {
+		return *x.DefaultAgentProfileId
+	}
+	return ""
+}
+
+func (x *WorkspaceDefaultsUpdateExact) GetDefaultConfigAgentProfileId() string {
+	if x != nil && x.DefaultConfigAgentProfileId != nil {
+		return *x.DefaultConfigAgentProfileId
+	}
+	return ""
+}
+
+type WorkspaceWorkflowConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	Prompt        string                 `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowConfig) Reset() {
+	*x = WorkspaceWorkflowConfig{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowConfig) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowConfig.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowConfig) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *WorkspaceWorkflowConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowConfig) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowConfig) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+type WorkspaceWorkflowCreateExact struct {
+	state                            protoimpl.MessageState   `protogen:"open.v1"`
+	ExpectedWorkspaceResourceVersion string                   `protobuf:"bytes,1,opt,name=expected_workspace_resource_version,json=expectedWorkspaceResourceVersion,proto3" json:"expected_workspace_resource_version,omitempty"`
+	Configuration                    *WorkspaceWorkflowConfig `protobuf:"bytes,2,opt,name=configuration,proto3" json:"configuration,omitempty"`
+	unknownFields                    protoimpl.UnknownFields
+	sizeCache                        protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowCreateExact) Reset() {
+	*x = WorkspaceWorkflowCreateExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowCreateExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowCreateExact) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowCreateExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowCreateExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowCreateExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *WorkspaceWorkflowCreateExact) GetExpectedWorkspaceResourceVersion() string {
+	if x != nil {
+		return x.ExpectedWorkspaceResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowCreateExact) GetConfiguration() *WorkspaceWorkflowConfig {
+	if x != nil {
+		return x.Configuration
+	}
+	return nil
+}
+
+type WorkspaceWorkflowUpdateExact struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	WorkflowId              string                 `protobuf:"bytes,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,2,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	Name                    *string                `protobuf:"bytes,3,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Description             *string                `protobuf:"bytes,4,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	Prompt                  *string                `protobuf:"bytes,5,opt,name=prompt,proto3,oneof" json:"prompt,omitempty"`
+	AgentProfileId          *string                `protobuf:"bytes,6,opt,name=agent_profile_id,json=agentProfileId,proto3,oneof" json:"agent_profile_id,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowUpdateExact) Reset() {
+	*x = WorkspaceWorkflowUpdateExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowUpdateExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowUpdateExact) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowUpdateExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowUpdateExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowUpdateExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *WorkspaceWorkflowUpdateExact) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowUpdateExact) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowUpdateExact) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowUpdateExact) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowUpdateExact) GetPrompt() string {
+	if x != nil && x.Prompt != nil {
+		return *x.Prompt
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowUpdateExact) GetAgentProfileId() string {
+	if x != nil && x.AgentProfileId != nil {
+		return *x.AgentProfileId
+	}
+	return ""
+}
+
+type WorkspaceWorkflowReorderExact struct {
+	state                            protoimpl.MessageState `protogen:"open.v1"`
+	ExpectedWorkspaceResourceVersion string                 `protobuf:"bytes,1,opt,name=expected_workspace_resource_version,json=expectedWorkspaceResourceVersion,proto3" json:"expected_workspace_resource_version,omitempty"`
+	WorkflowIds                      []string               `protobuf:"bytes,2,rep,name=workflow_ids,json=workflowIds,proto3" json:"workflow_ids,omitempty"`
+	WorkflowResourceVersions         []string               `protobuf:"bytes,3,rep,name=workflow_resource_versions,json=workflowResourceVersions,proto3" json:"workflow_resource_versions,omitempty"`
+	unknownFields                    protoimpl.UnknownFields
+	sizeCache                        protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowReorderExact) Reset() {
+	*x = WorkspaceWorkflowReorderExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowReorderExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowReorderExact) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowReorderExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowReorderExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowReorderExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *WorkspaceWorkflowReorderExact) GetExpectedWorkspaceResourceVersion() string {
+	if x != nil {
+		return x.ExpectedWorkspaceResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowReorderExact) GetWorkflowIds() []string {
+	if x != nil {
+		return x.WorkflowIds
+	}
+	return nil
+}
+
+func (x *WorkspaceWorkflowReorderExact) GetWorkflowResourceVersions() []string {
+	if x != nil {
+		return x.WorkflowResourceVersions
+	}
+	return nil
+}
+
+type WorkflowTransitionActionConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	TargetStepId  string                 `protobuf:"bytes,2,opt,name=target_step_id,json=targetStepId,proto3" json:"target_step_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowTransitionActionConfig) Reset() {
+	*x = WorkflowTransitionActionConfig{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowTransitionActionConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowTransitionActionConfig) ProtoMessage() {}
+
+func (x *WorkflowTransitionActionConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowTransitionActionConfig.ProtoReflect.Descriptor instead.
+func (*WorkflowTransitionActionConfig) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *WorkflowTransitionActionConfig) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *WorkflowTransitionActionConfig) GetTargetStepId() string {
+	if x != nil {
+		return x.TargetStepId
+	}
+	return ""
+}
+
+type WorkflowStepConfiguration struct {
+	state                      protoimpl.MessageState            `protogen:"open.v1"`
+	Id                         string                            `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkflowId                 string                            `protobuf:"bytes,2,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Name                       string                            `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Position                   int32                             `protobuf:"varint,4,opt,name=position,proto3" json:"position,omitempty"`
+	StageType                  string                            `protobuf:"bytes,5,opt,name=stage_type,json=stageType,proto3" json:"stage_type,omitempty"`
+	Color                      string                            `protobuf:"bytes,6,opt,name=color,proto3" json:"color,omitempty"`
+	Prompt                     string                            `protobuf:"bytes,7,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	AllowManualMove            bool                              `protobuf:"varint,8,opt,name=allow_manual_move,json=allowManualMove,proto3" json:"allow_manual_move,omitempty"`
+	IsStartStep                bool                              `protobuf:"varint,9,opt,name=is_start_step,json=isStartStep,proto3" json:"is_start_step,omitempty"`
+	ShowInCommandPanel         bool                              `protobuf:"varint,10,opt,name=show_in_command_panel,json=showInCommandPanel,proto3" json:"show_in_command_panel,omitempty"`
+	AutoArchiveAfterHours      int32                             `protobuf:"varint,11,opt,name=auto_archive_after_hours,json=autoArchiveAfterHours,proto3" json:"auto_archive_after_hours,omitempty"`
+	AgentProfileId             string                            `protobuf:"bytes,12,opt,name=agent_profile_id,json=agentProfileId,proto3" json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy  string                            `protobuf:"bytes,13,opt,name=profile_session_start_policy,json=profileSessionStartPolicy,proto3" json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    string                            `protobuf:"bytes,14,opt,name=profile_session_end_policy,json=profileSessionEndPolicy,proto3" json:"profile_session_end_policy,omitempty"`
+	WipLimit                   int32                             `protobuf:"varint,15,opt,name=wip_limit,json=wipLimit,proto3" json:"wip_limit,omitempty"`
+	PullFromStepId             string                            `protobuf:"bytes,16,opt,name=pull_from_step_id,json=pullFromStepId,proto3" json:"pull_from_step_id,omitempty"`
+	AutoAdvanceRequiresSignal  bool                              `protobuf:"varint,17,opt,name=auto_advance_requires_signal,json=autoAdvanceRequiresSignal,proto3" json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete bool                              `protobuf:"varint,18,opt,name=cancel_triggers_turn_complete,json=cancelTriggersTurnComplete,proto3" json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter        bool                              `protobuf:"varint,19,opt,name=complete_task_on_enter,json=completeTaskOnEnter,proto3" json:"complete_task_on_enter,omitempty"`
+	OnEnterActionTypes         []string                          `protobuf:"bytes,20,rep,name=on_enter_action_types,json=onEnterActionTypes,proto3" json:"on_enter_action_types,omitempty"`
+	OnTurnStartActions         []*WorkflowTransitionActionConfig `protobuf:"bytes,21,rep,name=on_turn_start_actions,json=onTurnStartActions,proto3" json:"on_turn_start_actions,omitempty"`
+	OnTurnCompleteActions      []*WorkflowTransitionActionConfig `protobuf:"bytes,22,rep,name=on_turn_complete_actions,json=onTurnCompleteActions,proto3" json:"on_turn_complete_actions,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *WorkflowStepConfiguration) Reset() {
+	*x = WorkflowStepConfiguration{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepConfiguration) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepConfiguration) ProtoMessage() {}
+
+func (x *WorkflowStepConfiguration) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepConfiguration.ProtoReflect.Descriptor instead.
+func (*WorkflowStepConfiguration) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *WorkflowStepConfiguration) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetPosition() int32 {
+	if x != nil {
+		return x.Position
+	}
+	return 0
+}
+
+func (x *WorkflowStepConfiguration) GetStageType() string {
+	if x != nil {
+		return x.StageType
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetColor() string {
+	if x != nil {
+		return x.Color
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetAllowManualMove() bool {
+	if x != nil {
+		return x.AllowManualMove
+	}
+	return false
+}
+
+func (x *WorkflowStepConfiguration) GetIsStartStep() bool {
+	if x != nil {
+		return x.IsStartStep
+	}
+	return false
+}
+
+func (x *WorkflowStepConfiguration) GetShowInCommandPanel() bool {
+	if x != nil {
+		return x.ShowInCommandPanel
+	}
+	return false
+}
+
+func (x *WorkflowStepConfiguration) GetAutoArchiveAfterHours() int32 {
+	if x != nil {
+		return x.AutoArchiveAfterHours
+	}
+	return 0
+}
+
+func (x *WorkflowStepConfiguration) GetAgentProfileId() string {
+	if x != nil {
+		return x.AgentProfileId
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetProfileSessionStartPolicy() string {
+	if x != nil {
+		return x.ProfileSessionStartPolicy
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetProfileSessionEndPolicy() string {
+	if x != nil {
+		return x.ProfileSessionEndPolicy
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetWipLimit() int32 {
+	if x != nil {
+		return x.WipLimit
+	}
+	return 0
+}
+
+func (x *WorkflowStepConfiguration) GetPullFromStepId() string {
+	if x != nil {
+		return x.PullFromStepId
+	}
+	return ""
+}
+
+func (x *WorkflowStepConfiguration) GetAutoAdvanceRequiresSignal() bool {
+	if x != nil {
+		return x.AutoAdvanceRequiresSignal
+	}
+	return false
+}
+
+func (x *WorkflowStepConfiguration) GetCancelTriggersTurnComplete() bool {
+	if x != nil {
+		return x.CancelTriggersTurnComplete
+	}
+	return false
+}
+
+func (x *WorkflowStepConfiguration) GetCompleteTaskOnEnter() bool {
+	if x != nil {
+		return x.CompleteTaskOnEnter
+	}
+	return false
+}
+
+func (x *WorkflowStepConfiguration) GetOnEnterActionTypes() []string {
+	if x != nil {
+		return x.OnEnterActionTypes
+	}
+	return nil
+}
+
+func (x *WorkflowStepConfiguration) GetOnTurnStartActions() []*WorkflowTransitionActionConfig {
+	if x != nil {
+		return x.OnTurnStartActions
+	}
+	return nil
+}
+
+func (x *WorkflowStepConfiguration) GetOnTurnCompleteActions() []*WorkflowTransitionActionConfig {
+	if x != nil {
+		return x.OnTurnCompleteActions
+	}
+	return nil
+}
+
+type WorkspaceWorkflowStepCreateExact struct {
+	state                           protoimpl.MessageState     `protogen:"open.v1"`
+	WorkflowId                      string                     `protobuf:"bytes,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	ExpectedWorkflowResourceVersion string                     `protobuf:"bytes,2,opt,name=expected_workflow_resource_version,json=expectedWorkflowResourceVersion,proto3" json:"expected_workflow_resource_version,omitempty"`
+	Configuration                   *WorkflowStepConfiguration `protobuf:"bytes,3,opt,name=configuration,proto3" json:"configuration,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowStepCreateExact) Reset() {
+	*x = WorkspaceWorkflowStepCreateExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowStepCreateExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowStepCreateExact) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowStepCreateExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowStepCreateExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowStepCreateExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *WorkspaceWorkflowStepCreateExact) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepCreateExact) GetExpectedWorkflowResourceVersion() string {
+	if x != nil {
+		return x.ExpectedWorkflowResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepCreateExact) GetConfiguration() *WorkflowStepConfiguration {
+	if x != nil {
+		return x.Configuration
+	}
+	return nil
+}
+
+type WorkspaceWorkflowStepUpdateExact struct {
+	state                           protoimpl.MessageState     `protogen:"open.v1"`
+	WorkflowId                      string                     `protobuf:"bytes,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	StepId                          string                     `protobuf:"bytes,2,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	ExpectedWorkflowResourceVersion string                     `protobuf:"bytes,3,opt,name=expected_workflow_resource_version,json=expectedWorkflowResourceVersion,proto3" json:"expected_workflow_resource_version,omitempty"`
+	ExpectedStepResourceVersion     string                     `protobuf:"bytes,4,opt,name=expected_step_resource_version,json=expectedStepResourceVersion,proto3" json:"expected_step_resource_version,omitempty"`
+	Configuration                   *WorkflowStepConfiguration `protobuf:"bytes,5,opt,name=configuration,proto3" json:"configuration,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) Reset() {
+	*x = WorkspaceWorkflowStepUpdateExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowStepUpdateExact) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowStepUpdateExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowStepUpdateExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowStepUpdateExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) GetStepId() string {
+	if x != nil {
+		return x.StepId
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) GetExpectedWorkflowResourceVersion() string {
+	if x != nil {
+		return x.ExpectedWorkflowResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) GetExpectedStepResourceVersion() string {
+	if x != nil {
+		return x.ExpectedStepResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepUpdateExact) GetConfiguration() *WorkflowStepConfiguration {
+	if x != nil {
+		return x.Configuration
+	}
+	return nil
+}
+
+type WorkspaceWorkflowStepReorderExact struct {
+	state                           protoimpl.MessageState `protogen:"open.v1"`
+	WorkflowId                      string                 `protobuf:"bytes,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	ExpectedWorkflowResourceVersion string                 `protobuf:"bytes,2,opt,name=expected_workflow_resource_version,json=expectedWorkflowResourceVersion,proto3" json:"expected_workflow_resource_version,omitempty"`
+	StepIds                         []string               `protobuf:"bytes,3,rep,name=step_ids,json=stepIds,proto3" json:"step_ids,omitempty"`
+	StepResourceVersions            []string               `protobuf:"bytes,4,rep,name=step_resource_versions,json=stepResourceVersions,proto3" json:"step_resource_versions,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
+}
+
+func (x *WorkspaceWorkflowStepReorderExact) Reset() {
+	*x = WorkspaceWorkflowStepReorderExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceWorkflowStepReorderExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceWorkflowStepReorderExact) ProtoMessage() {}
+
+func (x *WorkspaceWorkflowStepReorderExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceWorkflowStepReorderExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceWorkflowStepReorderExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *WorkspaceWorkflowStepReorderExact) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepReorderExact) GetExpectedWorkflowResourceVersion() string {
+	if x != nil {
+		return x.ExpectedWorkflowResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceWorkflowStepReorderExact) GetStepIds() []string {
+	if x != nil {
+		return x.StepIds
+	}
+	return nil
+}
+
+func (x *WorkspaceWorkflowStepReorderExact) GetStepResourceVersions() []string {
+	if x != nil {
+		return x.StepResourceVersions
+	}
+	return nil
+}
+
+type WorkspaceRepositoryRegisterExact struct {
+	state                            protoimpl.MessageState `protogen:"open.v1"`
+	ExpectedWorkspaceResourceVersion string                 `protobuf:"bytes,1,opt,name=expected_workspace_resource_version,json=expectedWorkspaceResourceVersion,proto3" json:"expected_workspace_resource_version,omitempty"`
+	Name                             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	SourceType                       string                 `protobuf:"bytes,3,opt,name=source_type,json=sourceType,proto3" json:"source_type,omitempty"`
+	LocalPath                        string                 `protobuf:"bytes,4,opt,name=local_path,json=localPath,proto3" json:"local_path,omitempty"`
+	Provider                         string                 `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
+	ProviderRepositoryId             string                 `protobuf:"bytes,6,opt,name=provider_repository_id,json=providerRepositoryId,proto3" json:"provider_repository_id,omitempty"`
+	ProviderHost                     string                 `protobuf:"bytes,7,opt,name=provider_host,json=providerHost,proto3" json:"provider_host,omitempty"`
+	ProviderScope                    string                 `protobuf:"bytes,8,opt,name=provider_scope,json=providerScope,proto3" json:"provider_scope,omitempty"`
+	ProviderOwner                    string                 `protobuf:"bytes,9,opt,name=provider_owner,json=providerOwner,proto3" json:"provider_owner,omitempty"`
+	ProviderName                     string                 `protobuf:"bytes,10,opt,name=provider_name,json=providerName,proto3" json:"provider_name,omitempty"`
+	RemoteUrl                        string                 `protobuf:"bytes,11,opt,name=remote_url,json=remoteUrl,proto3" json:"remote_url,omitempty"`
+	DefaultBranch                    string                 `protobuf:"bytes,12,opt,name=default_branch,json=defaultBranch,proto3" json:"default_branch,omitempty"`
+	WorktreeBranchPrefix             string                 `protobuf:"bytes,13,opt,name=worktree_branch_prefix,json=worktreeBranchPrefix,proto3" json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate           string                 `protobuf:"bytes,14,opt,name=worktree_branch_template,json=worktreeBranchTemplate,proto3" json:"worktree_branch_template,omitempty"`
+	PullBeforeWorktree               *bool                  `protobuf:"varint,15,opt,name=pull_before_worktree,json=pullBeforeWorktree,proto3,oneof" json:"pull_before_worktree,omitempty"`
+	unknownFields                    protoimpl.UnknownFields
+	sizeCache                        protoimpl.SizeCache
+}
+
+func (x *WorkspaceRepositoryRegisterExact) Reset() {
+	*x = WorkspaceRepositoryRegisterExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceRepositoryRegisterExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceRepositoryRegisterExact) ProtoMessage() {}
+
+func (x *WorkspaceRepositoryRegisterExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceRepositoryRegisterExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceRepositoryRegisterExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetExpectedWorkspaceResourceVersion() string {
+	if x != nil {
+		return x.ExpectedWorkspaceResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetSourceType() string {
+	if x != nil {
+		return x.SourceType
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetLocalPath() string {
+	if x != nil {
+		return x.LocalPath
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetProviderRepositoryId() string {
+	if x != nil {
+		return x.ProviderRepositoryId
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetProviderHost() string {
+	if x != nil {
+		return x.ProviderHost
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetProviderScope() string {
+	if x != nil {
+		return x.ProviderScope
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetProviderOwner() string {
+	if x != nil {
+		return x.ProviderOwner
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetProviderName() string {
+	if x != nil {
+		return x.ProviderName
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetRemoteUrl() string {
+	if x != nil {
+		return x.RemoteUrl
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetDefaultBranch() string {
+	if x != nil {
+		return x.DefaultBranch
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetWorktreeBranchPrefix() string {
+	if x != nil {
+		return x.WorktreeBranchPrefix
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetWorktreeBranchTemplate() string {
+	if x != nil {
+		return x.WorktreeBranchTemplate
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryRegisterExact) GetPullBeforeWorktree() bool {
+	if x != nil && x.PullBeforeWorktree != nil {
+		return *x.PullBeforeWorktree
+	}
+	return false
+}
+
+type WorkspaceRepositoryUpdateExact struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RepositoryId            string                 `protobuf:"bytes,1,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,2,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	Name                    *string                `protobuf:"bytes,3,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	DefaultBranch           *string                `protobuf:"bytes,4,opt,name=default_branch,json=defaultBranch,proto3,oneof" json:"default_branch,omitempty"`
+	WorktreeBranchPrefix    *string                `protobuf:"bytes,5,opt,name=worktree_branch_prefix,json=worktreeBranchPrefix,proto3,oneof" json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate  *string                `protobuf:"bytes,6,opt,name=worktree_branch_template,json=worktreeBranchTemplate,proto3,oneof" json:"worktree_branch_template,omitempty"`
+	PullBeforeWorktree      *bool                  `protobuf:"varint,7,opt,name=pull_before_worktree,json=pullBeforeWorktree,proto3,oneof" json:"pull_before_worktree,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *WorkspaceRepositoryUpdateExact) Reset() {
+	*x = WorkspaceRepositoryUpdateExact{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceRepositoryUpdateExact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceRepositoryUpdateExact) ProtoMessage() {}
+
+func (x *WorkspaceRepositoryUpdateExact) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceRepositoryUpdateExact.ProtoReflect.Descriptor instead.
+func (*WorkspaceRepositoryUpdateExact) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetRepositoryId() string {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetDefaultBranch() string {
+	if x != nil && x.DefaultBranch != nil {
+		return *x.DefaultBranch
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetWorktreeBranchPrefix() string {
+	if x != nil && x.WorktreeBranchPrefix != nil {
+		return *x.WorktreeBranchPrefix
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetWorktreeBranchTemplate() string {
+	if x != nil && x.WorktreeBranchTemplate != nil {
+		return *x.WorktreeBranchTemplate
+	}
+	return ""
+}
+
+func (x *WorkspaceRepositoryUpdateExact) GetPullBeforeWorktree() bool {
+	if x != nil && x.PullBeforeWorktree != nil {
+		return *x.PullBeforeWorktree
+	}
+	return false
+}
+
+type WorkspaceAdministrationExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceAdministrationExactResponse) Reset() {
+	*x = WorkspaceAdministrationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceAdministrationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceAdministrationExactResponse) ProtoMessage() {}
+
+func (x *WorkspaceAdministrationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceAdministrationExactResponse.ProtoReflect.Descriptor instead.
+func (*WorkspaceAdministrationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *WorkspaceAdministrationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type SourceIssueTransition struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TargetId      string                 `protobuf:"bytes,1,opt,name=target_id,json=targetId,proto3" json:"target_id,omitempty"`
+	TargetName    string                 `protobuf:"bytes,2,opt,name=target_name,json=targetName,proto3" json:"target_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SourceIssueTransition) Reset() {
+	*x = SourceIssueTransition{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SourceIssueTransition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SourceIssueTransition) ProtoMessage() {}
+
+func (x *SourceIssueTransition) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SourceIssueTransition.ProtoReflect.Descriptor instead.
+func (*SourceIssueTransition) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *SourceIssueTransition) GetTargetId() string {
+	if x != nil {
+		return x.TargetId
+	}
+	return ""
+}
+
+func (x *SourceIssueTransition) GetTargetName() string {
+	if x != nil {
+		return x.TargetName
+	}
+	return ""
+}
+
+type ExactSourceIssueCapabilities struct {
+	state               protoimpl.MessageState   `protogen:"open.v1"`
+	TaskId              string                   `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskResourceVersion string                   `protobuf:"bytes,2,opt,name=task_resource_version,json=taskResourceVersion,proto3" json:"task_resource_version,omitempty"`
+	Provider            string                   `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	SourceId            string                   `protobuf:"bytes,4,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	Identifier          string                   `protobuf:"bytes,5,opt,name=identifier,proto3" json:"identifier,omitempty"`
+	Url                 string                   `protobuf:"bytes,6,opt,name=url,proto3" json:"url,omitempty"`
+	Title               string                   `protobuf:"bytes,7,opt,name=title,proto3" json:"title,omitempty"`
+	StatusId            string                   `protobuf:"bytes,8,opt,name=status_id,json=statusId,proto3" json:"status_id,omitempty"`
+	StatusName          string                   `protobuf:"bytes,9,opt,name=status_name,json=statusName,proto3" json:"status_name,omitempty"`
+	Transitions         []*SourceIssueTransition `protobuf:"bytes,10,rep,name=transitions,proto3" json:"transitions,omitempty"`
+	ResourceVersion     string                   `protobuf:"bytes,11,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt          string                   `protobuf:"bytes,12,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	WorkspaceId         string                   `protobuf:"bytes,13,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ExactSourceIssueCapabilities) Reset() {
+	*x = ExactSourceIssueCapabilities{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactSourceIssueCapabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactSourceIssueCapabilities) ProtoMessage() {}
+
+func (x *ExactSourceIssueCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactSourceIssueCapabilities.ProtoReflect.Descriptor instead.
+func (*ExactSourceIssueCapabilities) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *ExactSourceIssueCapabilities) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetTaskResourceVersion() string {
+	if x != nil {
+		return x.TaskResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetIdentifier() string {
+	if x != nil {
+		return x.Identifier
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetStatusId() string {
+	if x != nil {
+		return x.StatusId
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetStatusName() string {
+	if x != nil {
+		return x.StatusName
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetTransitions() []*SourceIssueTransition {
+	if x != nil {
+		return x.Transitions
+	}
+	return nil
+}
+
+func (x *ExactSourceIssueCapabilities) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+func (x *ExactSourceIssueCapabilities) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+type GetSourceIssueCapabilitiesExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSourceIssueCapabilitiesExactRequest) Reset() {
+	*x = GetSourceIssueCapabilitiesExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSourceIssueCapabilitiesExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSourceIssueCapabilitiesExactRequest) ProtoMessage() {}
+
+func (x *GetSourceIssueCapabilitiesExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSourceIssueCapabilitiesExactRequest.ProtoReflect.Descriptor instead.
+func (*GetSourceIssueCapabilitiesExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *GetSourceIssueCapabilitiesExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetSourceIssueCapabilitiesExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetSourceIssueCapabilitiesExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type GetSourceIssueCapabilitiesExactResponse struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	Result        *HostCommandResult            `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Item          *ExactSourceIssueCapabilities `protobuf:"bytes,2,opt,name=item,proto3" json:"item,omitempty"`
+	Receipt       *HostReadReceipt              `protobuf:"bytes,3,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSourceIssueCapabilitiesExactResponse) Reset() {
+	*x = GetSourceIssueCapabilitiesExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSourceIssueCapabilitiesExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSourceIssueCapabilitiesExactResponse) ProtoMessage() {}
+
+func (x *GetSourceIssueCapabilitiesExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSourceIssueCapabilitiesExactResponse.ProtoReflect.Descriptor instead.
+func (*GetSourceIssueCapabilitiesExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *GetSourceIssueCapabilitiesExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *GetSourceIssueCapabilitiesExactResponse) GetItem() *ExactSourceIssueCapabilities {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *GetSourceIssueCapabilitiesExactResponse) GetReceipt() *HostReadReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type SourceIssueWritebackReceipt struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	ReceiptId             string                 `protobuf:"bytes,1,opt,name=receipt_id,json=receiptId,proto3" json:"receipt_id,omitempty"`
+	OperationId           string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	InstallationId        string                 `protobuf:"bytes,3,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	WorkspaceId           string                 `protobuf:"bytes,4,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                string                 `protobuf:"bytes,5,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Provider              string                 `protobuf:"bytes,6,opt,name=provider,proto3" json:"provider,omitempty"`
+	SourceId              string                 `protobuf:"bytes,7,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	Operation             string                 `protobuf:"bytes,8,opt,name=operation,proto3" json:"operation,omitempty"`
+	State                 string                 `protobuf:"bytes,9,opt,name=state,proto3" json:"state,omitempty"`
+	Status                HostCommandStatus      `protobuf:"varint,10,opt,name=status,proto3,enum=kandev.plugin.v1.HostCommandStatus" json:"status,omitempty"`
+	Reason                string                 `protobuf:"bytes,11,opt,name=reason,proto3" json:"reason,omitempty"`
+	ProviderReceiptId     string                 `protobuf:"bytes,12,opt,name=provider_receipt_id,json=providerReceiptId,proto3" json:"provider_receipt_id,omitempty"`
+	ExpectedSourceVersion string                 `protobuf:"bytes,13,opt,name=expected_source_version,json=expectedSourceVersion,proto3" json:"expected_source_version,omitempty"`
+	CreatedAt             string                 `protobuf:"bytes,14,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt             string                 `protobuf:"bytes,15,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *SourceIssueWritebackReceipt) Reset() {
+	*x = SourceIssueWritebackReceipt{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SourceIssueWritebackReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SourceIssueWritebackReceipt) ProtoMessage() {}
+
+func (x *SourceIssueWritebackReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SourceIssueWritebackReceipt.ProtoReflect.Descriptor instead.
+func (*SourceIssueWritebackReceipt) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *SourceIssueWritebackReceipt) GetReceiptId() string {
+	if x != nil {
+		return x.ReceiptId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetStatus() HostCommandStatus {
+	if x != nil {
+		return x.Status
+	}
+	return HostCommandStatus_HOST_COMMAND_STATUS_UNSPECIFIED
+}
+
+func (x *SourceIssueWritebackReceipt) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetProviderReceiptId() string {
+	if x != nil {
+		return x.ProviderReceiptId
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetExpectedSourceVersion() string {
+	if x != nil {
+		return x.ExpectedSourceVersion
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *SourceIssueWritebackReceipt) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+type CommentSourceIssueExactRequest struct {
+	state                         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey                string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedTaskResourceVersion   string                 `protobuf:"bytes,5,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedSourceResourceVersion string                 `protobuf:"bytes,6,opt,name=expected_source_resource_version,json=expectedSourceResourceVersion,proto3" json:"expected_source_resource_version,omitempty"`
+	Body                          string                 `protobuf:"bytes,7,opt,name=body,proto3" json:"body,omitempty"`
+	ApprovalRevision              uint64                 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                string                 `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields                 protoimpl.UnknownFields
+	sizeCache                     protoimpl.SizeCache
+}
+
+func (x *CommentSourceIssueExactRequest) Reset() {
+	*x = CommentSourceIssueExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommentSourceIssueExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommentSourceIssueExactRequest) ProtoMessage() {}
+
+func (x *CommentSourceIssueExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommentSourceIssueExactRequest.ProtoReflect.Descriptor instead.
+func (*CommentSourceIssueExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *CommentSourceIssueExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetExpectedSourceResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSourceResourceVersion
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *CommentSourceIssueExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *CommentSourceIssueExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type TransitionSourceIssueExactRequest struct {
+	state                         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey                string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedTaskResourceVersion   string                 `protobuf:"bytes,5,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedSourceResourceVersion string                 `protobuf:"bytes,6,opt,name=expected_source_resource_version,json=expectedSourceResourceVersion,proto3" json:"expected_source_resource_version,omitempty"`
+	TargetId                      string                 `protobuf:"bytes,7,opt,name=target_id,json=targetId,proto3" json:"target_id,omitempty"`
+	ApprovalRevision              uint64                 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                string                 `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields                 protoimpl.UnknownFields
+	sizeCache                     protoimpl.SizeCache
+}
+
+func (x *TransitionSourceIssueExactRequest) Reset() {
+	*x = TransitionSourceIssueExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransitionSourceIssueExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransitionSourceIssueExactRequest) ProtoMessage() {}
+
+func (x *TransitionSourceIssueExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransitionSourceIssueExactRequest.ProtoReflect.Descriptor instead.
+func (*TransitionSourceIssueExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *TransitionSourceIssueExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetExpectedSourceResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSourceResourceVersion
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetTargetId() string {
+	if x != nil {
+		return x.TargetId
+	}
+	return ""
+}
+
+func (x *TransitionSourceIssueExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *TransitionSourceIssueExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type SourceIssueWritebackExactResponse struct {
+	state         protoimpl.MessageState       `protogen:"open.v1"`
+	Result        *HostCommandResult           `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Receipt       *SourceIssueWritebackReceipt `protobuf:"bytes,2,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SourceIssueWritebackExactResponse) Reset() {
+	*x = SourceIssueWritebackExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SourceIssueWritebackExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SourceIssueWritebackExactResponse) ProtoMessage() {}
+
+func (x *SourceIssueWritebackExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SourceIssueWritebackExactResponse.ProtoReflect.Descriptor instead.
+func (*SourceIssueWritebackExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *SourceIssueWritebackExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *SourceIssueWritebackExactResponse) GetReceipt() *SourceIssueWritebackReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+// IssueTaskDirectiveExact records a short-lived, version-bound directive. Its
+// capability class remains subject to the current workspace approval and
+// managed-agent tool policy; the directive does not grant permission by itself.
+type IssueTaskDirectiveExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId                      string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	CapabilityClass                string                 `protobuf:"bytes,5,opt,name=capability_class,json=capabilityClass,proto3" json:"capability_class,omitempty"`
+	InstructionDigest              string                 `protobuf:"bytes,6,opt,name=instruction_digest,json=instructionDigest,proto3" json:"instruction_digest,omitempty"`
+	ExpectedTaskResourceVersion    string                 `protobuf:"bytes,7,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ExpectedSessionResourceVersion string                 `protobuf:"bytes,8,opt,name=expected_session_resource_version,json=expectedSessionResourceVersion,proto3" json:"expected_session_resource_version,omitempty"`
+	ExpiresAt                      string                 `protobuf:"bytes,9,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,10,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,11,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,12,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *IssueTaskDirectiveExactRequest) Reset() {
+	*x = IssueTaskDirectiveExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IssueTaskDirectiveExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IssueTaskDirectiveExactRequest) ProtoMessage() {}
+
+func (x *IssueTaskDirectiveExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IssueTaskDirectiveExactRequest.ProtoReflect.Descriptor instead.
+func (*IssueTaskDirectiveExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetCapabilityClass() string {
+	if x != nil {
+		return x.CapabilityClass
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetInstructionDigest() string {
+	if x != nil {
+		return x.InstructionDigest
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetExpectedSessionResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSessionResourceVersion
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *IssueTaskDirectiveExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type IssueTaskDirectiveExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Directive     *TaskDirective         `protobuf:"bytes,2,opt,name=directive,proto3" json:"directive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IssueTaskDirectiveExactResponse) Reset() {
+	*x = IssueTaskDirectiveExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IssueTaskDirectiveExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IssueTaskDirectiveExactResponse) ProtoMessage() {}
+
+func (x *IssueTaskDirectiveExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IssueTaskDirectiveExactResponse.ProtoReflect.Descriptor instead.
+func (*IssueTaskDirectiveExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *IssueTaskDirectiveExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *IssueTaskDirectiveExactResponse) GetDirective() *TaskDirective {
+	if x != nil {
+		return x.Directive
+	}
+	return nil
+}
+
+type ResolveTaskDirectiveExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	DirectiveId             string                 `protobuf:"bytes,3,opt,name=directive_id,json=directiveId,proto3" json:"directive_id,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,4,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Resolution              string                 `protobuf:"bytes,6,opt,name=resolution,proto3" json:"resolution,omitempty"`
+	ResolutionDigest        string                 `protobuf:"bytes,7,opt,name=resolution_digest,json=resolutionDigest,proto3" json:"resolution_digest,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *ResolveTaskDirectiveExactRequest) Reset() {
+	*x = ResolveTaskDirectiveExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveTaskDirectiveExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveTaskDirectiveExactRequest) ProtoMessage() {}
+
+func (x *ResolveTaskDirectiveExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveTaskDirectiveExactRequest.ProtoReflect.Descriptor instead.
+func (*ResolveTaskDirectiveExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetDirectiveId() string {
+	if x != nil {
+		return x.DirectiveId
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetResolution() string {
+	if x != nil {
+		return x.Resolution
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetResolutionDigest() string {
+	if x != nil {
+		return x.ResolutionDigest
+	}
+	return ""
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ResolveTaskDirectiveExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ResolveTaskDirectiveExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Directive     *TaskDirective         `protobuf:"bytes,2,opt,name=directive,proto3" json:"directive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveTaskDirectiveExactResponse) Reset() {
+	*x = ResolveTaskDirectiveExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveTaskDirectiveExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveTaskDirectiveExactResponse) ProtoMessage() {}
+
+func (x *ResolveTaskDirectiveExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveTaskDirectiveExactResponse.ProtoReflect.Descriptor instead.
+func (*ResolveTaskDirectiveExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *ResolveTaskDirectiveExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *ResolveTaskDirectiveExactResponse) GetDirective() *TaskDirective {
+	if x != nil {
+		return x.Directive
+	}
+	return nil
+}
+
+type ManagedAgentConversationDescriptor struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	InstallationId     string                 `protobuf:"bytes,1,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	TaskId             string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId          string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	WorkspaceId        string                 `protobuf:"bytes,4,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey        string                 `protobuf:"bytes,5,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	Revision           uint64                 `protobuf:"varint,6,opt,name=revision,proto3" json:"revision,omitempty"`
+	AgentProfileId     string                 `protobuf:"bytes,7,opt,name=agent_profile_id,json=agentProfileId,proto3" json:"agent_profile_id,omitempty"`
+	ExecutorId         string                 `protobuf:"bytes,8,opt,name=executor_id,json=executorId,proto3" json:"executor_id,omitempty"`
+	ExecutorProfileId  string                 `protobuf:"bytes,9,opt,name=executor_profile_id,json=executorProfileId,proto3" json:"executor_profile_id,omitempty"`
+	BasePrompt         string                 `protobuf:"bytes,10,opt,name=base_prompt,json=basePrompt,proto3" json:"base_prompt,omitempty"`
+	InstructionVersion string                 `protobuf:"bytes,11,opt,name=instruction_version,json=instructionVersion,proto3" json:"instruction_version,omitempty"`
+	DesiredPaused      bool                   `protobuf:"varint,12,opt,name=desired_paused,json=desiredPaused,proto3" json:"desired_paused,omitempty"`
+	RetentionMode      string                 `protobuf:"bytes,13,opt,name=retention_mode,json=retentionMode,proto3" json:"retention_mode,omitempty"`
+	Detached           bool                   `protobuf:"varint,14,opt,name=detached,proto3" json:"detached,omitempty"`
+	AgentToolNames     []string               `protobuf:"bytes,15,rep,name=agent_tool_names,json=agentToolNames,proto3" json:"agent_tool_names,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ManagedAgentConversationDescriptor) Reset() {
+	*x = ManagedAgentConversationDescriptor{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedAgentConversationDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedAgentConversationDescriptor) ProtoMessage() {}
+
+func (x *ManagedAgentConversationDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedAgentConversationDescriptor.ProtoReflect.Descriptor instead.
+func (*ManagedAgentConversationDescriptor) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *ManagedAgentConversationDescriptor) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ManagedAgentConversationDescriptor) GetAgentProfileId() string {
+	if x != nil {
+		return x.AgentProfileId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetExecutorId() string {
+	if x != nil {
+		return x.ExecutorId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetExecutorProfileId() string {
+	if x != nil {
+		return x.ExecutorProfileId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetBasePrompt() string {
+	if x != nil {
+		return x.BasePrompt
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetInstructionVersion() string {
+	if x != nil {
+		return x.InstructionVersion
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetDesiredPaused() bool {
+	if x != nil {
+		return x.DesiredPaused
+	}
+	return false
+}
+
+func (x *ManagedAgentConversationDescriptor) GetRetentionMode() string {
+	if x != nil {
+		return x.RetentionMode
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationDescriptor) GetDetached() bool {
+	if x != nil {
+		return x.Detached
+	}
+	return false
+}
+
+func (x *ManagedAgentConversationDescriptor) GetAgentToolNames() []string {
+	if x != nil {
+		return x.AgentToolNames
+	}
+	return nil
+}
+
+type ManagedAgentConversationSpec struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	RequestId          string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey     string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId        string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey        string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedRevision   uint64                 `protobuf:"varint,5,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	ApprovalRevision   uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest     string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	AgentProfileId     string                 `protobuf:"bytes,8,opt,name=agent_profile_id,json=agentProfileId,proto3" json:"agent_profile_id,omitempty"`
+	ExecutorId         string                 `protobuf:"bytes,9,opt,name=executor_id,json=executorId,proto3" json:"executor_id,omitempty"`
+	ExecutorProfileId  string                 `protobuf:"bytes,10,opt,name=executor_profile_id,json=executorProfileId,proto3" json:"executor_profile_id,omitempty"`
+	BasePrompt         string                 `protobuf:"bytes,11,opt,name=base_prompt,json=basePrompt,proto3" json:"base_prompt,omitempty"`
+	InstructionVersion string                 `protobuf:"bytes,12,opt,name=instruction_version,json=instructionVersion,proto3" json:"instruction_version,omitempty"`
+	AgentToolNames     []string               `protobuf:"bytes,13,rep,name=agent_tool_names,json=agentToolNames,proto3" json:"agent_tool_names,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ManagedAgentConversationSpec) Reset() {
+	*x = ManagedAgentConversationSpec{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedAgentConversationSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedAgentConversationSpec) ProtoMessage() {}
+
+func (x *ManagedAgentConversationSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedAgentConversationSpec.ProtoReflect.Descriptor instead.
+func (*ManagedAgentConversationSpec) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *ManagedAgentConversationSpec) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *ManagedAgentConversationSpec) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ManagedAgentConversationSpec) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetAgentProfileId() string {
+	if x != nil {
+		return x.AgentProfileId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetExecutorId() string {
+	if x != nil {
+		return x.ExecutorId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetExecutorProfileId() string {
+	if x != nil {
+		return x.ExecutorProfileId
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetBasePrompt() string {
+	if x != nil {
+		return x.BasePrompt
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetInstructionVersion() string {
+	if x != nil {
+		return x.InstructionVersion
+	}
+	return ""
+}
+
+func (x *ManagedAgentConversationSpec) GetAgentToolNames() []string {
+	if x != nil {
+		return x.AgentToolNames
+	}
+	return nil
+}
+
+type EnsureManagedAgentConversationExactRequest struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	Spec          *ManagedAgentConversationSpec `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureManagedAgentConversationExactRequest) Reset() {
+	*x = EnsureManagedAgentConversationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureManagedAgentConversationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureManagedAgentConversationExactRequest) ProtoMessage() {}
+
+func (x *EnsureManagedAgentConversationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureManagedAgentConversationExactRequest.ProtoReflect.Descriptor instead.
+func (*EnsureManagedAgentConversationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *EnsureManagedAgentConversationExactRequest) GetSpec() *ManagedAgentConversationSpec {
+	if x != nil {
+		return x.Spec
+	}
+	return nil
+}
+
+type EnsureManagedAgentConversationExactResponse struct {
+	state         protoimpl.MessageState              `protogen:"open.v1"`
+	Result        *HostCommandResult                  `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Conversation  *ManagedAgentConversationDescriptor `protobuf:"bytes,2,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureManagedAgentConversationExactResponse) Reset() {
+	*x = EnsureManagedAgentConversationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureManagedAgentConversationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureManagedAgentConversationExactResponse) ProtoMessage() {}
+
+func (x *EnsureManagedAgentConversationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureManagedAgentConversationExactResponse.ProtoReflect.Descriptor instead.
+func (*EnsureManagedAgentConversationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *EnsureManagedAgentConversationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *EnsureManagedAgentConversationExactResponse) GetConversation() *ManagedAgentConversationDescriptor {
+	if x != nil {
+		return x.Conversation
+	}
+	return nil
+}
+
+type GetManagedAgentConversationStatusExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId      string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey      string                 `protobuf:"bytes,2,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,3,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,4,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetManagedAgentConversationStatusExactRequest) Reset() {
+	*x = GetManagedAgentConversationStatusExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetManagedAgentConversationStatusExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetManagedAgentConversationStatusExactRequest) ProtoMessage() {}
+
+func (x *GetManagedAgentConversationStatusExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetManagedAgentConversationStatusExactRequest.ProtoReflect.Descriptor instead.
+func (*GetManagedAgentConversationStatusExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{68}
+}
+
+func (x *GetManagedAgentConversationStatusExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetManagedAgentConversationStatusExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *GetManagedAgentConversationStatusExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *GetManagedAgentConversationStatusExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type GetManagedAgentConversationStatusExactResponse struct {
+	state         protoimpl.MessageState              `protogen:"open.v1"`
+	Conversation  *ManagedAgentConversationDescriptor `protobuf:"bytes,1,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetManagedAgentConversationStatusExactResponse) Reset() {
+	*x = GetManagedAgentConversationStatusExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetManagedAgentConversationStatusExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetManagedAgentConversationStatusExactResponse) ProtoMessage() {}
+
+func (x *GetManagedAgentConversationStatusExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetManagedAgentConversationStatusExactResponse.ProtoReflect.Descriptor instead.
+func (*GetManagedAgentConversationStatusExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{69}
+}
+
+func (x *GetManagedAgentConversationStatusExactResponse) GetConversation() *ManagedAgentConversationDescriptor {
+	if x != nil {
+		return x.Conversation
+	}
+	return nil
+}
+
+type ListManagedAgentConversationsExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId      string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,2,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,3,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ListManagedAgentConversationsExactRequest) Reset() {
+	*x = ListManagedAgentConversationsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListManagedAgentConversationsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListManagedAgentConversationsExactRequest) ProtoMessage() {}
+
+func (x *ListManagedAgentConversationsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListManagedAgentConversationsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListManagedAgentConversationsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{70}
+}
+
+func (x *ListManagedAgentConversationsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListManagedAgentConversationsExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ListManagedAgentConversationsExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ListManagedAgentConversationsExactResponse struct {
+	state         protoimpl.MessageState                `protogen:"open.v1"`
+	Conversations []*ManagedAgentConversationDescriptor `protobuf:"bytes,1,rep,name=conversations,proto3" json:"conversations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListManagedAgentConversationsExactResponse) Reset() {
+	*x = ListManagedAgentConversationsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListManagedAgentConversationsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListManagedAgentConversationsExactResponse) ProtoMessage() {}
+
+func (x *ListManagedAgentConversationsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListManagedAgentConversationsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListManagedAgentConversationsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *ListManagedAgentConversationsExactResponse) GetConversations() []*ManagedAgentConversationDescriptor {
+	if x != nil {
+		return x.Conversations
+	}
+	return nil
+}
+
+type SetManagedAgentConversationPausedExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RequestId        string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId      string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey      string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedRevision uint64                 `protobuf:"varint,5,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	Paused           bool                   `protobuf:"varint,8,opt,name=paused,proto3" json:"paused,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) Reset() {
+	*x = SetManagedAgentConversationPausedExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedAgentConversationPausedExactRequest) ProtoMessage() {}
+
+func (x *SetManagedAgentConversationPausedExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedAgentConversationPausedExactRequest.ProtoReflect.Descriptor instead.
+func (*SetManagedAgentConversationPausedExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *SetManagedAgentConversationPausedExactRequest) GetPaused() bool {
+	if x != nil {
+		return x.Paused
+	}
+	return false
+}
+
+type SetManagedAgentConversationPausedExactResponse struct {
+	state         protoimpl.MessageState              `protogen:"open.v1"`
+	Result        *HostCommandResult                  `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Conversation  *ManagedAgentConversationDescriptor `protobuf:"bytes,2,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetManagedAgentConversationPausedExactResponse) Reset() {
+	*x = SetManagedAgentConversationPausedExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedAgentConversationPausedExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedAgentConversationPausedExactResponse) ProtoMessage() {}
+
+func (x *SetManagedAgentConversationPausedExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedAgentConversationPausedExactResponse.ProtoReflect.Descriptor instead.
+func (*SetManagedAgentConversationPausedExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *SetManagedAgentConversationPausedExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *SetManagedAgentConversationPausedExactResponse) GetConversation() *ManagedAgentConversationDescriptor {
+	if x != nil {
+		return x.Conversation
+	}
+	return nil
+}
+
+type DeleteManagedAgentConversationExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RequestId        string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId      string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey      string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedRevision uint64                 `protobuf:"varint,5,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) Reset() {
+	*x = DeleteManagedAgentConversationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteManagedAgentConversationExactRequest) ProtoMessage() {}
+
+func (x *DeleteManagedAgentConversationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteManagedAgentConversationExactRequest.ProtoReflect.Descriptor instead.
+func (*DeleteManagedAgentConversationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *DeleteManagedAgentConversationExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type DeleteManagedAgentConversationExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteManagedAgentConversationExactResponse) Reset() {
+	*x = DeleteManagedAgentConversationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteManagedAgentConversationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteManagedAgentConversationExactResponse) ProtoMessage() {}
+
+func (x *DeleteManagedAgentConversationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteManagedAgentConversationExactResponse.ProtoReflect.Descriptor instead.
+func (*DeleteManagedAgentConversationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{75}
+}
+
+func (x *DeleteManagedAgentConversationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type ManagedAgentInputReceipt struct {
+	state                protoimpl.MessageState  `protogen:"open.v1"`
+	HostInputId          string                  `protobuf:"bytes,1,opt,name=host_input_id,json=hostInputId,proto3" json:"host_input_id,omitempty"`
+	OccurrenceKey        string                  `protobuf:"bytes,2,opt,name=occurrence_key,json=occurrenceKey,proto3" json:"occurrence_key,omitempty"`
+	Sequence             uint64                  `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Origin               ManagedAgentInputOrigin `protobuf:"varint,4,opt,name=origin,proto3,enum=kandev.plugin.v1.ManagedAgentInputOrigin" json:"origin,omitempty"`
+	Payload              string                  `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	CoalesceKey          string                  `protobuf:"bytes,6,opt,name=coalesce_key,json=coalesceKey,proto3" json:"coalesce_key,omitempty"`
+	ConversationRevision uint64                  `protobuf:"varint,7,opt,name=conversation_revision,json=conversationRevision,proto3" json:"conversation_revision,omitempty"`
+	State                ManagedAgentInputState  `protobuf:"varint,8,opt,name=state,proto3,enum=kandev.plugin.v1.ManagedAgentInputState" json:"state,omitempty"`
+	CreatedAt            string                  `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt            string                  `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	QueueEntryId         string                  `protobuf:"bytes,11,opt,name=queue_entry_id,json=queueEntryId,proto3" json:"queue_entry_id,omitempty"`
+	ExecutionId          string                  `protobuf:"bytes,12,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	TurnId               string                  `protobuf:"bytes,13,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	SupersededById       string                  `protobuf:"bytes,14,opt,name=superseded_by_id,json=supersededById,proto3" json:"superseded_by_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *ManagedAgentInputReceipt) Reset() {
+	*x = ManagedAgentInputReceipt{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedAgentInputReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedAgentInputReceipt) ProtoMessage() {}
+
+func (x *ManagedAgentInputReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedAgentInputReceipt.ProtoReflect.Descriptor instead.
+func (*ManagedAgentInputReceipt) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *ManagedAgentInputReceipt) GetHostInputId() string {
+	if x != nil {
+		return x.HostInputId
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetOccurrenceKey() string {
+	if x != nil {
+		return x.OccurrenceKey
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *ManagedAgentInputReceipt) GetOrigin() ManagedAgentInputOrigin {
+	if x != nil {
+		return x.Origin
+	}
+	return ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED
+}
+
+func (x *ManagedAgentInputReceipt) GetPayload() string {
+	if x != nil {
+		return x.Payload
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetCoalesceKey() string {
+	if x != nil {
+		return x.CoalesceKey
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetConversationRevision() uint64 {
+	if x != nil {
+		return x.ConversationRevision
+	}
+	return 0
+}
+
+func (x *ManagedAgentInputReceipt) GetState() ManagedAgentInputState {
+	if x != nil {
+		return x.State
+	}
+	return ManagedAgentInputState_MANAGED_AGENT_INPUT_STATE_UNSPECIFIED
+}
+
+func (x *ManagedAgentInputReceipt) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetQueueEntryId() string {
+	if x != nil {
+		return x.QueueEntryId
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetTurnId() string {
+	if x != nil {
+		return x.TurnId
+	}
+	return ""
+}
+
+func (x *ManagedAgentInputReceipt) GetSupersededById() string {
+	if x != nil {
+		return x.SupersededById
+	}
+	return ""
+}
+
+type EnqueueManagedAgentInputExactRequest struct {
+	state                        protoimpl.MessageState  `protogen:"open.v1"`
+	RequestId                    string                  `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey               string                  `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId                  string                  `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey                  string                  `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedConversationRevision uint64                  `protobuf:"varint,5,opt,name=expected_conversation_revision,json=expectedConversationRevision,proto3" json:"expected_conversation_revision,omitempty"`
+	ApprovalRevision             uint64                  `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest               string                  `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	OccurrenceKey                string                  `protobuf:"bytes,8,opt,name=occurrence_key,json=occurrenceKey,proto3" json:"occurrence_key,omitempty"`
+	Origin                       ManagedAgentInputOrigin `protobuf:"varint,9,opt,name=origin,proto3,enum=kandev.plugin.v1.ManagedAgentInputOrigin" json:"origin,omitempty"`
+	Payload                      string                  `protobuf:"bytes,10,opt,name=payload,proto3" json:"payload,omitempty"`
+	CoalesceKey                  string                  `protobuf:"bytes,11,opt,name=coalesce_key,json=coalesceKey,proto3" json:"coalesce_key,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) Reset() {
+	*x = EnqueueManagedAgentInputExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnqueueManagedAgentInputExactRequest) ProtoMessage() {}
+
+func (x *EnqueueManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnqueueManagedAgentInputExactRequest.ProtoReflect.Descriptor instead.
+func (*EnqueueManagedAgentInputExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{77}
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetExpectedConversationRevision() uint64 {
+	if x != nil {
+		return x.ExpectedConversationRevision
+	}
+	return 0
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetOccurrenceKey() string {
+	if x != nil {
+		return x.OccurrenceKey
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetOrigin() ManagedAgentInputOrigin {
+	if x != nil {
+		return x.Origin
+	}
+	return ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetPayload() string {
+	if x != nil {
+		return x.Payload
+	}
+	return ""
+}
+
+func (x *EnqueueManagedAgentInputExactRequest) GetCoalesceKey() string {
+	if x != nil {
+		return x.CoalesceKey
+	}
+	return ""
+}
+
+type EnqueueManagedAgentInputExactResponse struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Result        *HostCommandResult        `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Input         *ManagedAgentInputReceipt `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnqueueManagedAgentInputExactResponse) Reset() {
+	*x = EnqueueManagedAgentInputExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnqueueManagedAgentInputExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnqueueManagedAgentInputExactResponse) ProtoMessage() {}
+
+func (x *EnqueueManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnqueueManagedAgentInputExactResponse.ProtoReflect.Descriptor instead.
+func (*EnqueueManagedAgentInputExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{78}
+}
+
+func (x *EnqueueManagedAgentInputExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *EnqueueManagedAgentInputExactResponse) GetInput() *ManagedAgentInputReceipt {
+	if x != nil {
+		return x.Input
+	}
+	return nil
+}
+
+type GetManagedAgentInputExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId      string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey      string                 `protobuf:"bytes,2,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	HostInputId      string                 `protobuf:"bytes,3,opt,name=host_input_id,json=hostInputId,proto3" json:"host_input_id,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,4,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,5,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetManagedAgentInputExactRequest) Reset() {
+	*x = GetManagedAgentInputExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetManagedAgentInputExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetManagedAgentInputExactRequest) ProtoMessage() {}
+
+func (x *GetManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetManagedAgentInputExactRequest.ProtoReflect.Descriptor instead.
+func (*GetManagedAgentInputExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{79}
+}
+
+func (x *GetManagedAgentInputExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetManagedAgentInputExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *GetManagedAgentInputExactRequest) GetHostInputId() string {
+	if x != nil {
+		return x.HostInputId
+	}
+	return ""
+}
+
+func (x *GetManagedAgentInputExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *GetManagedAgentInputExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type GetManagedAgentInputExactResponse struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Input         *ManagedAgentInputReceipt `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetManagedAgentInputExactResponse) Reset() {
+	*x = GetManagedAgentInputExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetManagedAgentInputExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetManagedAgentInputExactResponse) ProtoMessage() {}
+
+func (x *GetManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetManagedAgentInputExactResponse.ProtoReflect.Descriptor instead.
+func (*GetManagedAgentInputExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{80}
+}
+
+func (x *GetManagedAgentInputExactResponse) GetInput() *ManagedAgentInputReceipt {
+	if x != nil {
+		return x.Input
+	}
+	return nil
+}
+
+type ListManagedAgentInputsExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId      string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey      string                 `protobuf:"bytes,2,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	SequenceCursor   uint64                 `protobuf:"varint,3,opt,name=sequence_cursor,json=sequenceCursor,proto3" json:"sequence_cursor,omitempty"`
+	Limit            uint32                 `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,5,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,6,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ListManagedAgentInputsExactRequest) Reset() {
+	*x = ListManagedAgentInputsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListManagedAgentInputsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListManagedAgentInputsExactRequest) ProtoMessage() {}
+
+func (x *ListManagedAgentInputsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListManagedAgentInputsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListManagedAgentInputsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *ListManagedAgentInputsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListManagedAgentInputsExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *ListManagedAgentInputsExactRequest) GetSequenceCursor() uint64 {
+	if x != nil {
+		return x.SequenceCursor
+	}
+	return 0
+}
+
+func (x *ListManagedAgentInputsExactRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListManagedAgentInputsExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ListManagedAgentInputsExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ListManagedAgentInputsExactResponse struct {
+	state              protoimpl.MessageState      `protogen:"open.v1"`
+	Inputs             []*ManagedAgentInputReceipt `protobuf:"bytes,1,rep,name=inputs,proto3" json:"inputs,omitempty"`
+	NextSequenceCursor uint64                      `protobuf:"varint,2,opt,name=next_sequence_cursor,json=nextSequenceCursor,proto3" json:"next_sequence_cursor,omitempty"`
+	HasMore            bool                        `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ListManagedAgentInputsExactResponse) Reset() {
+	*x = ListManagedAgentInputsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListManagedAgentInputsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListManagedAgentInputsExactResponse) ProtoMessage() {}
+
+func (x *ListManagedAgentInputsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListManagedAgentInputsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListManagedAgentInputsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *ListManagedAgentInputsExactResponse) GetInputs() []*ManagedAgentInputReceipt {
+	if x != nil {
+		return x.Inputs
+	}
+	return nil
+}
+
+func (x *ListManagedAgentInputsExactResponse) GetNextSequenceCursor() uint64 {
+	if x != nil {
+		return x.NextSequenceCursor
+	}
+	return 0
+}
+
+func (x *ListManagedAgentInputsExactResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+type CancelManagedAgentInputExactRequest struct {
+	state                        protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                    string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey               string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId                  string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey                  string                 `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	HostInputId                  string                 `protobuf:"bytes,5,opt,name=host_input_id,json=hostInputId,proto3" json:"host_input_id,omitempty"`
+	ExpectedConversationRevision uint64                 `protobuf:"varint,6,opt,name=expected_conversation_revision,json=expectedConversationRevision,proto3" json:"expected_conversation_revision,omitempty"`
+	// Empty only when cancelling an input that is still accepted. Once running,
+	// callers must supply the exact execution generation they observed.
+	ExpectedExecutionId string `protobuf:"bytes,7,opt,name=expected_execution_id,json=expectedExecutionId,proto3" json:"expected_execution_id,omitempty"`
+	ApprovalRevision    uint64 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest      string `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *CancelManagedAgentInputExactRequest) Reset() {
+	*x = CancelManagedAgentInputExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelManagedAgentInputExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelManagedAgentInputExactRequest) ProtoMessage() {}
+
+func (x *CancelManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelManagedAgentInputExactRequest.ProtoReflect.Descriptor instead.
+func (*CancelManagedAgentInputExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetHostInputId() string {
+	if x != nil {
+		return x.HostInputId
+	}
+	return ""
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetExpectedConversationRevision() uint64 {
+	if x != nil {
+		return x.ExpectedConversationRevision
+	}
+	return 0
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetExpectedExecutionId() string {
+	if x != nil {
+		return x.ExpectedExecutionId
+	}
+	return ""
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *CancelManagedAgentInputExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type CancelManagedAgentInputExactResponse struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Result        *HostCommandResult        `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Input         *ManagedAgentInputReceipt `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelManagedAgentInputExactResponse) Reset() {
+	*x = CancelManagedAgentInputExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelManagedAgentInputExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelManagedAgentInputExactResponse) ProtoMessage() {}
+
+func (x *CancelManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelManagedAgentInputExactResponse.ProtoReflect.Descriptor instead.
+func (*CancelManagedAgentInputExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{84}
+}
+
+func (x *CancelManagedAgentInputExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *CancelManagedAgentInputExactResponse) GetInput() *ManagedAgentInputReceipt {
+	if x != nil {
+		return x.Input
+	}
+	return nil
+}
+
+type DispatchManagedAgentConversationExactRequest struct {
+	state                        protoimpl.MessageState  `protogen:"open.v1"`
+	RequestId                    string                  `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey               string                  `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId                  string                  `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InstanceKey                  string                  `protobuf:"bytes,4,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	ExpectedConversationRevision uint64                  `protobuf:"varint,5,opt,name=expected_conversation_revision,json=expectedConversationRevision,proto3" json:"expected_conversation_revision,omitempty"`
+	ApprovalRevision             uint64                  `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest               string                  `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	OccurrenceKey                string                  `protobuf:"bytes,8,opt,name=occurrence_key,json=occurrenceKey,proto3" json:"occurrence_key,omitempty"`
+	Origin                       ManagedAgentInputOrigin `protobuf:"varint,9,opt,name=origin,proto3,enum=kandev.plugin.v1.ManagedAgentInputOrigin" json:"origin,omitempty"`
+	Payload                      string                  `protobuf:"bytes,10,opt,name=payload,proto3" json:"payload,omitempty"`
+	CoalesceKey                  string                  `protobuf:"bytes,11,opt,name=coalesce_key,json=coalesceKey,proto3" json:"coalesce_key,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) Reset() {
+	*x = DispatchManagedAgentConversationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchManagedAgentConversationExactRequest) ProtoMessage() {}
+
+func (x *DispatchManagedAgentConversationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchManagedAgentConversationExactRequest.ProtoReflect.Descriptor instead.
+func (*DispatchManagedAgentConversationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{85}
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetExpectedConversationRevision() uint64 {
+	if x != nil {
+		return x.ExpectedConversationRevision
+	}
+	return 0
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetOccurrenceKey() string {
+	if x != nil {
+		return x.OccurrenceKey
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetOrigin() ManagedAgentInputOrigin {
+	if x != nil {
+		return x.Origin
+	}
+	return ManagedAgentInputOrigin_MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetPayload() string {
+	if x != nil {
+		return x.Payload
+	}
+	return ""
+}
+
+func (x *DispatchManagedAgentConversationExactRequest) GetCoalesceKey() string {
+	if x != nil {
+		return x.CoalesceKey
+	}
+	return ""
+}
+
+type DispatchManagedAgentConversationExactResponse struct {
+	state          protoimpl.MessageState              `protogen:"open.v1"`
+	Result         *HostCommandResult                  `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	DispatchStatus ManagedAgentDispatchStatus          `protobuf:"varint,2,opt,name=dispatch_status,json=dispatchStatus,proto3,enum=kandev.plugin.v1.ManagedAgentDispatchStatus" json:"dispatch_status,omitempty"`
+	Conversation   *ManagedAgentConversationDescriptor `protobuf:"bytes,3,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DispatchManagedAgentConversationExactResponse) Reset() {
+	*x = DispatchManagedAgentConversationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchManagedAgentConversationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchManagedAgentConversationExactResponse) ProtoMessage() {}
+
+func (x *DispatchManagedAgentConversationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchManagedAgentConversationExactResponse.ProtoReflect.Descriptor instead.
+func (*DispatchManagedAgentConversationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{86}
+}
+
+func (x *DispatchManagedAgentConversationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *DispatchManagedAgentConversationExactResponse) GetDispatchStatus() ManagedAgentDispatchStatus {
+	if x != nil {
+		return x.DispatchStatus
+	}
+	return ManagedAgentDispatchStatus_MANAGED_AGENT_DISPATCH_STATUS_UNSPECIFIED
+}
+
+func (x *DispatchManagedAgentConversationExactResponse) GetConversation() *ManagedAgentConversationDescriptor {
+	if x != nil {
+		return x.Conversation
+	}
+	return nil
+}
+
+type ManagedConversationScheduleTrigger struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	ConfigJson    string                 `protobuf:"bytes,2,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
+	Enabled       bool                   `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ManagedConversationScheduleTrigger) Reset() {
+	*x = ManagedConversationScheduleTrigger{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedConversationScheduleTrigger) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedConversationScheduleTrigger) ProtoMessage() {}
+
+func (x *ManagedConversationScheduleTrigger) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedConversationScheduleTrigger.ProtoReflect.Descriptor instead.
+func (*ManagedConversationScheduleTrigger) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{87}
+}
+
+func (x *ManagedConversationScheduleTrigger) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ManagedConversationScheduleTrigger) GetConfigJson() string {
+	if x != nil {
+		return x.ConfigJson
+	}
+	return ""
+}
+
+func (x *ManagedConversationScheduleTrigger) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+type ManagedConversationSchedule struct {
+	state               protoimpl.MessageState                `protogen:"open.v1"`
+	Id                  string                                `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId         string                                `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Name                string                                `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Description         string                                `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+	Prompt              string                                `protobuf:"bytes,5,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	PluginId            string                                `protobuf:"bytes,6,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	InstanceKey         string                                `protobuf:"bytes,7,opt,name=instance_key,json=instanceKey,proto3" json:"instance_key,omitempty"`
+	DestinationRevision uint64                                `protobuf:"varint,8,opt,name=destination_revision,json=destinationRevision,proto3" json:"destination_revision,omitempty"`
+	ResourceRevision    uint64                                `protobuf:"varint,9,opt,name=resource_revision,json=resourceRevision,proto3" json:"resource_revision,omitempty"`
+	Enabled             bool                                  `protobuf:"varint,10,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Triggers            []*ManagedConversationScheduleTrigger `protobuf:"bytes,11,rep,name=triggers,proto3" json:"triggers,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ManagedConversationSchedule) Reset() {
+	*x = ManagedConversationSchedule{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedConversationSchedule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedConversationSchedule) ProtoMessage() {}
+
+func (x *ManagedConversationSchedule) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedConversationSchedule.ProtoReflect.Descriptor instead.
+func (*ManagedConversationSchedule) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{88}
+}
+
+func (x *ManagedConversationSchedule) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetInstanceKey() string {
+	if x != nil {
+		return x.InstanceKey
+	}
+	return ""
+}
+
+func (x *ManagedConversationSchedule) GetDestinationRevision() uint64 {
+	if x != nil {
+		return x.DestinationRevision
+	}
+	return 0
+}
+
+func (x *ManagedConversationSchedule) GetResourceRevision() uint64 {
+	if x != nil {
+		return x.ResourceRevision
+	}
+	return 0
+}
+
+func (x *ManagedConversationSchedule) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *ManagedConversationSchedule) GetTriggers() []*ManagedConversationScheduleTrigger {
+	if x != nil {
+		return x.Triggers
+	}
+	return nil
+}
+
+type ListManagedConversationSchedulesExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId      string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,2,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,3,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ListManagedConversationSchedulesExactRequest) Reset() {
+	*x = ListManagedConversationSchedulesExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListManagedConversationSchedulesExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListManagedConversationSchedulesExactRequest) ProtoMessage() {}
+
+func (x *ListManagedConversationSchedulesExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListManagedConversationSchedulesExactRequest.ProtoReflect.Descriptor instead.
+func (*ListManagedConversationSchedulesExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{89}
+}
+
+func (x *ListManagedConversationSchedulesExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListManagedConversationSchedulesExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ListManagedConversationSchedulesExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ListManagedConversationSchedulesExactResponse struct {
+	state         protoimpl.MessageState         `protogen:"open.v1"`
+	Schedules     []*ManagedConversationSchedule `protobuf:"bytes,1,rep,name=schedules,proto3" json:"schedules,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListManagedConversationSchedulesExactResponse) Reset() {
+	*x = ListManagedConversationSchedulesExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListManagedConversationSchedulesExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListManagedConversationSchedulesExactResponse) ProtoMessage() {}
+
+func (x *ListManagedConversationSchedulesExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListManagedConversationSchedulesExactResponse.ProtoReflect.Descriptor instead.
+func (*ListManagedConversationSchedulesExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *ListManagedConversationSchedulesExactResponse) GetSchedules() []*ManagedConversationSchedule {
+	if x != nil {
+		return x.Schedules
+	}
+	return nil
+}
+
+type CreateManagedConversationScheduleExactRequest struct {
+	state            protoimpl.MessageState       `protogen:"open.v1"`
+	RequestId        string                       `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey   string                       `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision uint64                       `protobuf:"varint,3,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                       `protobuf:"bytes,4,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	Schedule         *ManagedConversationSchedule `protobuf:"bytes,5,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) Reset() {
+	*x = CreateManagedConversationScheduleExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateManagedConversationScheduleExactRequest) ProtoMessage() {}
+
+func (x *CreateManagedConversationScheduleExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateManagedConversationScheduleExactRequest.ProtoReflect.Descriptor instead.
+func (*CreateManagedConversationScheduleExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{91}
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *CreateManagedConversationScheduleExactRequest) GetSchedule() *ManagedConversationSchedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+type UpdateManagedConversationScheduleExactRequest struct {
+	state                    protoimpl.MessageState       `protogen:"open.v1"`
+	RequestId                string                       `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey           string                       `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	AutomationId             string                       `protobuf:"bytes,3,opt,name=automation_id,json=automationId,proto3" json:"automation_id,omitempty"`
+	ExpectedResourceRevision uint64                       `protobuf:"varint,4,opt,name=expected_resource_revision,json=expectedResourceRevision,proto3" json:"expected_resource_revision,omitempty"`
+	ApprovalRevision         uint64                       `protobuf:"varint,5,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest           string                       `protobuf:"bytes,6,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	Schedule                 *ManagedConversationSchedule `protobuf:"bytes,7,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) Reset() {
+	*x = UpdateManagedConversationScheduleExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateManagedConversationScheduleExactRequest) ProtoMessage() {}
+
+func (x *UpdateManagedConversationScheduleExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateManagedConversationScheduleExactRequest.ProtoReflect.Descriptor instead.
+func (*UpdateManagedConversationScheduleExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetAutomationId() string {
+	if x != nil {
+		return x.AutomationId
+	}
+	return ""
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetExpectedResourceRevision() uint64 {
+	if x != nil {
+		return x.ExpectedResourceRevision
+	}
+	return 0
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *UpdateManagedConversationScheduleExactRequest) GetSchedule() *ManagedConversationSchedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+type SetManagedConversationScheduleEnabledExactRequest struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey           string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId              string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	AutomationId             string                 `protobuf:"bytes,4,opt,name=automation_id,json=automationId,proto3" json:"automation_id,omitempty"`
+	ExpectedResourceRevision uint64                 `protobuf:"varint,5,opt,name=expected_resource_revision,json=expectedResourceRevision,proto3" json:"expected_resource_revision,omitempty"`
+	Enabled                  bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	ApprovalRevision         uint64                 `protobuf:"varint,7,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest           string                 `protobuf:"bytes,8,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) Reset() {
+	*x = SetManagedConversationScheduleEnabledExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedConversationScheduleEnabledExactRequest) ProtoMessage() {}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedConversationScheduleEnabledExactRequest.ProtoReflect.Descriptor instead.
+func (*SetManagedConversationScheduleEnabledExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetAutomationId() string {
+	if x != nil {
+		return x.AutomationId
+	}
+	return ""
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetExpectedResourceRevision() uint64 {
+	if x != nil {
+		return x.ExpectedResourceRevision
+	}
+	return 0
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *SetManagedConversationScheduleEnabledExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type DeleteManagedConversationScheduleExactRequest struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	IdempotencyKey           string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	WorkspaceId              string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	AutomationId             string                 `protobuf:"bytes,4,opt,name=automation_id,json=automationId,proto3" json:"automation_id,omitempty"`
+	ExpectedResourceRevision uint64                 `protobuf:"varint,5,opt,name=expected_resource_revision,json=expectedResourceRevision,proto3" json:"expected_resource_revision,omitempty"`
+	ApprovalRevision         uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest           string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) Reset() {
+	*x = DeleteManagedConversationScheduleExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteManagedConversationScheduleExactRequest) ProtoMessage() {}
+
+func (x *DeleteManagedConversationScheduleExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteManagedConversationScheduleExactRequest.ProtoReflect.Descriptor instead.
+func (*DeleteManagedConversationScheduleExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{94}
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetAutomationId() string {
+	if x != nil {
+		return x.AutomationId
+	}
+	return ""
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetExpectedResourceRevision() uint64 {
+	if x != nil {
+		return x.ExpectedResourceRevision
+	}
+	return 0
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *DeleteManagedConversationScheduleExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ManagedConversationScheduleExactResponse struct {
+	state         protoimpl.MessageState       `protogen:"open.v1"`
+	Result        *HostCommandResult           `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Schedule      *ManagedConversationSchedule `protobuf:"bytes,2,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ManagedConversationScheduleExactResponse) Reset() {
+	*x = ManagedConversationScheduleExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedConversationScheduleExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedConversationScheduleExactResponse) ProtoMessage() {}
+
+func (x *ManagedConversationScheduleExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedConversationScheduleExactResponse.ProtoReflect.Descriptor instead.
+func (*ManagedConversationScheduleExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{95}
+}
+
+func (x *ManagedConversationScheduleExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *ManagedConversationScheduleExactResponse) GetSchedule() *ManagedConversationSchedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+type EnsureTaskRunExactRequest struct {
+	state                       protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                 string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                      string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey              string                 `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ExpectedTaskResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_task_resource_version,json=expectedTaskResourceVersion,proto3" json:"expected_task_resource_version,omitempty"`
+	ApprovalRevision            uint64                 `protobuf:"varint,6,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest              string                 `protobuf:"bytes,7,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey       string                 `protobuf:"bytes,8,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration     int64                  `protobuf:"varint,9,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *EnsureTaskRunExactRequest) Reset() {
+	*x = EnsureTaskRunExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureTaskRunExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureTaskRunExactRequest) ProtoMessage() {}
+
+func (x *EnsureTaskRunExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureTaskRunExactRequest.ProtoReflect.Descriptor instead.
+func (*EnsureTaskRunExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{96}
+}
+
+func (x *EnsureTaskRunExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetExpectedTaskResourceVersion() string {
+	if x != nil {
+		return x.ExpectedTaskResourceVersion
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *EnsureTaskRunExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type EnsureTaskRunExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SessionState  string                 `protobuf:"bytes,3,opt,name=session_state,json=sessionState,proto3" json:"session_state,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,4,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureTaskRunExactResponse) Reset() {
+	*x = EnsureTaskRunExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureTaskRunExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureTaskRunExactResponse) ProtoMessage() {}
+
+func (x *EnsureTaskRunExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureTaskRunExactResponse.ProtoReflect.Descriptor instead.
+func (*EnsureTaskRunExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{97}
+}
+
+func (x *EnsureTaskRunExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *EnsureTaskRunExactResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactResponse) GetSessionState() string {
+	if x != nil {
+		return x.SessionState
+	}
+	return ""
+}
+
+func (x *EnsureTaskRunExactResponse) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+type StopTaskRunExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId                      string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExpectedSessionResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_session_resource_version,json=expectedSessionResourceVersion,proto3" json:"expected_session_resource_version,omitempty"`
+	ExpectedExecutionId            string                 `protobuf:"bytes,6,opt,name=expected_execution_id,json=expectedExecutionId,proto3" json:"expected_execution_id,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey          string                 `protobuf:"bytes,10,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration        int64                  `protobuf:"varint,11,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *StopTaskRunExactRequest) Reset() {
+	*x = StopTaskRunExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopTaskRunExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopTaskRunExactRequest) ProtoMessage() {}
+
+func (x *StopTaskRunExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopTaskRunExactRequest.ProtoReflect.Descriptor instead.
+func (*StopTaskRunExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{98}
+}
+
+func (x *StopTaskRunExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetExpectedSessionResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSessionResourceVersion
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetExpectedExecutionId() string {
+	if x != nil {
+		return x.ExpectedExecutionId
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *StopTaskRunExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *StopTaskRunExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type StopTaskRunExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Stopped       bool                   `protobuf:"varint,2,opt,name=stopped,proto3" json:"stopped,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopTaskRunExactResponse) Reset() {
+	*x = StopTaskRunExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopTaskRunExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopTaskRunExactResponse) ProtoMessage() {}
+
+func (x *StopTaskRunExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopTaskRunExactResponse.ProtoReflect.Descriptor instead.
+func (*StopTaskRunExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{99}
+}
+
+func (x *StopTaskRunExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *StopTaskRunExactResponse) GetStopped() bool {
+	if x != nil {
+		return x.Stopped
+	}
+	return false
+}
+
+type RecoverSessionExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId                      string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExpectedSessionResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_session_resource_version,json=expectedSessionResourceVersion,proto3" json:"expected_session_resource_version,omitempty"`
+	ExpectedExecutionId            string                 `protobuf:"bytes,6,opt,name=expected_execution_id,json=expectedExecutionId,proto3" json:"expected_execution_id,omitempty"`
+	Action                         string                 `protobuf:"bytes,7,opt,name=action,proto3" json:"action,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,8,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey          string                 `protobuf:"bytes,11,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration        int64                  `protobuf:"varint,12,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *RecoverSessionExactRequest) Reset() {
+	*x = RecoverSessionExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecoverSessionExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecoverSessionExactRequest) ProtoMessage() {}
+
+func (x *RecoverSessionExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecoverSessionExactRequest.ProtoReflect.Descriptor instead.
+func (*RecoverSessionExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{100}
+}
+
+func (x *RecoverSessionExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetExpectedSessionResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSessionResourceVersion
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetExpectedExecutionId() string {
+	if x != nil {
+		return x.ExpectedExecutionId
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *RecoverSessionExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type RecoverSessionExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExecutionId   string                 `protobuf:"bytes,3,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecoverSessionExactResponse) Reset() {
+	*x = RecoverSessionExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecoverSessionExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecoverSessionExactResponse) ProtoMessage() {}
+
+func (x *RecoverSessionExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecoverSessionExactResponse.ProtoReflect.Descriptor instead.
+func (*RecoverSessionExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{101}
+}
+
+func (x *RecoverSessionExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *RecoverSessionExactResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RecoverSessionExactResponse) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+type CancelPendingTaskTransitionExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TransitionId            string                 `protobuf:"bytes,4,opt,name=transition_id,json=transitionId,proto3" json:"transition_id,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	IdempotencyKey          string                 `protobuf:"bytes,6,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,7,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,8,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,9,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,10,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) Reset() {
+	*x = CancelPendingTaskTransitionExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelPendingTaskTransitionExactRequest) ProtoMessage() {}
+
+func (x *CancelPendingTaskTransitionExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelPendingTaskTransitionExactRequest.ProtoReflect.Descriptor instead.
+func (*CancelPendingTaskTransitionExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{102}
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetTransitionId() string {
+	if x != nil {
+		return x.TransitionId
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *CancelPendingTaskTransitionExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type CancelPendingTaskTransitionExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelPendingTaskTransitionExactResponse) Reset() {
+	*x = CancelPendingTaskTransitionExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelPendingTaskTransitionExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelPendingTaskTransitionExactResponse) ProtoMessage() {}
+
+func (x *CancelPendingTaskTransitionExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelPendingTaskTransitionExactResponse.ProtoReflect.Descriptor instead.
+func (*CancelPendingTaskTransitionExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *CancelPendingTaskTransitionExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type SessionModeOption struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionModeOption) Reset() {
+	*x = SessionModeOption{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionModeOption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionModeOption) ProtoMessage() {}
+
+func (x *SessionModeOption) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionModeOption.ProtoReflect.Descriptor instead.
+func (*SessionModeOption) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{104}
+}
+
+func (x *SessionModeOption) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SessionModeOption) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionModeOption) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+type GetSessionModeContextExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId               string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,5,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,6,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey   string                 `protobuf:"bytes,7,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration int64                  `protobuf:"varint,8,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *GetSessionModeContextExactRequest) Reset() {
+	*x = GetSessionModeContextExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSessionModeContextExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSessionModeContextExactRequest) ProtoMessage() {}
+
+func (x *GetSessionModeContextExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSessionModeContextExactRequest.ProtoReflect.Descriptor instead.
+func (*GetSessionModeContextExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{105}
+}
+
+func (x *GetSessionModeContextExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *GetSessionModeContextExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type GetSessionModeContextExactResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	SessionId       string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExecutionId     string                 `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	CurrentModeId   string                 `protobuf:"bytes,3,opt,name=current_mode_id,json=currentModeId,proto3" json:"current_mode_id,omitempty"`
+	AvailableModes  []*SessionModeOption   `protobuf:"bytes,4,rep,name=available_modes,json=availableModes,proto3" json:"available_modes,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,5,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,6,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *GetSessionModeContextExactResponse) Reset() {
+	*x = GetSessionModeContextExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSessionModeContextExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSessionModeContextExactResponse) ProtoMessage() {}
+
+func (x *GetSessionModeContextExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSessionModeContextExactResponse.ProtoReflect.Descriptor instead.
+func (*GetSessionModeContextExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{106}
+}
+
+func (x *GetSessionModeContextExactResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactResponse) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactResponse) GetCurrentModeId() string {
+	if x != nil {
+		return x.CurrentModeId
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactResponse) GetAvailableModes() []*SessionModeOption {
+	if x != nil {
+		return x.AvailableModes
+	}
+	return nil
+}
+
+func (x *GetSessionModeContextExactResponse) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *GetSessionModeContextExactResponse) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type SetSessionModeExactRequest struct {
+	state                          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId                      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId                    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                         string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId                      string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ExpectedSessionResourceVersion string                 `protobuf:"bytes,5,opt,name=expected_session_resource_version,json=expectedSessionResourceVersion,proto3" json:"expected_session_resource_version,omitempty"`
+	ExpectedExecutionId            string                 `protobuf:"bytes,6,opt,name=expected_execution_id,json=expectedExecutionId,proto3" json:"expected_execution_id,omitempty"`
+	ModeId                         string                 `protobuf:"bytes,7,opt,name=mode_id,json=modeId,proto3" json:"mode_id,omitempty"`
+	IdempotencyKey                 string                 `protobuf:"bytes,8,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision               uint64                 `protobuf:"varint,9,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest                 string                 `protobuf:"bytes,10,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	ManagementInstanceKey          string                 `protobuf:"bytes,11,opt,name=management_instance_key,json=managementInstanceKey,proto3" json:"management_instance_key,omitempty"`
+	ExpectedClaimGeneration        int64                  `protobuf:"varint,12,opt,name=expected_claim_generation,json=expectedClaimGeneration,proto3" json:"expected_claim_generation,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
+}
+
+func (x *SetSessionModeExactRequest) Reset() {
+	*x = SetSessionModeExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionModeExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionModeExactRequest) ProtoMessage() {}
+
+func (x *SetSessionModeExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionModeExactRequest.ProtoReflect.Descriptor instead.
+func (*SetSessionModeExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{107}
+}
+
+func (x *SetSessionModeExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetExpectedSessionResourceVersion() string {
+	if x != nil {
+		return x.ExpectedSessionResourceVersion
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetExpectedExecutionId() string {
+	if x != nil {
+		return x.ExpectedExecutionId
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetModeId() string {
+	if x != nil {
+		return x.ModeId
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *SetSessionModeExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetManagementInstanceKey() string {
+	if x != nil {
+		return x.ManagementInstanceKey
+	}
+	return ""
+}
+
+func (x *SetSessionModeExactRequest) GetExpectedClaimGeneration() int64 {
+	if x != nil {
+		return x.ExpectedClaimGeneration
+	}
+	return 0
+}
+
+type SetSessionModeExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	CurrentModeId string                 `protobuf:"bytes,2,opt,name=current_mode_id,json=currentModeId,proto3" json:"current_mode_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSessionModeExactResponse) Reset() {
+	*x = SetSessionModeExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionModeExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionModeExactResponse) ProtoMessage() {}
+
+func (x *SetSessionModeExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionModeExactResponse.ProtoReflect.Descriptor instead.
+func (*SetSessionModeExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{108}
+}
+
+func (x *SetSessionModeExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *SetSessionModeExactResponse) GetCurrentModeId() string {
+	if x != nil {
+		return x.CurrentModeId
+	}
+	return ""
+}
+
+type HumanInteractionResponseReceipt struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	InteractionId   string                 `protobuf:"bytes,2,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,3,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ExpiresAt       string                 `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *HumanInteractionResponseReceipt) Reset() {
+	*x = HumanInteractionResponseReceipt{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HumanInteractionResponseReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HumanInteractionResponseReceipt) ProtoMessage() {}
+
+func (x *HumanInteractionResponseReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HumanInteractionResponseReceipt.ProtoReflect.Descriptor instead.
+func (*HumanInteractionResponseReceipt) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *HumanInteractionResponseReceipt) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *HumanInteractionResponseReceipt) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+func (x *HumanInteractionResponseReceipt) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *HumanInteractionResponseReceipt) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
+type RespondPermissionExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InteractionId           string                 `protobuf:"bytes,3,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,4,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	OptionId                string                 `protobuf:"bytes,5,opt,name=option_id,json=optionId,proto3" json:"option_id,omitempty"`
+	Cancelled               bool                   `protobuf:"varint,6,opt,name=cancelled,proto3" json:"cancelled,omitempty"`
+	HumanResponseReceiptId  string                 `protobuf:"bytes,7,opt,name=human_response_receipt_id,json=humanResponseReceiptId,proto3" json:"human_response_receipt_id,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *RespondPermissionExactRequest) Reset() {
+	*x = RespondPermissionExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespondPermissionExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespondPermissionExactRequest) ProtoMessage() {}
+
+func (x *RespondPermissionExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespondPermissionExactRequest.ProtoReflect.Descriptor instead.
+func (*RespondPermissionExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{110}
+}
+
+func (x *RespondPermissionExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RespondPermissionExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RespondPermissionExactRequest) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+func (x *RespondPermissionExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *RespondPermissionExactRequest) GetOptionId() string {
+	if x != nil {
+		return x.OptionId
+	}
+	return ""
+}
+
+func (x *RespondPermissionExactRequest) GetCancelled() bool {
+	if x != nil {
+		return x.Cancelled
+	}
+	return false
+}
+
+func (x *RespondPermissionExactRequest) GetHumanResponseReceiptId() string {
+	if x != nil {
+		return x.HumanResponseReceiptId
+	}
+	return ""
+}
+
+func (x *RespondPermissionExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *RespondPermissionExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type RespondPermissionExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Interaction   *Interaction           `protobuf:"bytes,2,opt,name=interaction,proto3" json:"interaction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RespondPermissionExactResponse) Reset() {
+	*x = RespondPermissionExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespondPermissionExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespondPermissionExactResponse) ProtoMessage() {}
+
+func (x *RespondPermissionExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespondPermissionExactResponse.ProtoReflect.Descriptor instead.
+func (*RespondPermissionExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{111}
+}
+
+func (x *RespondPermissionExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *RespondPermissionExactResponse) GetInteraction() *Interaction {
+	if x != nil {
+		return x.Interaction
+	}
+	return nil
+}
+
+type AnswerClarificationExactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	RequestId               string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId             string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InteractionId           string                 `protobuf:"bytes,3,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	ExpectedResourceVersion string                 `protobuf:"bytes,4,opt,name=expected_resource_version,json=expectedResourceVersion,proto3" json:"expected_resource_version,omitempty"`
+	Answers                 []*ClarificationAnswer `protobuf:"bytes,5,rep,name=answers,proto3" json:"answers,omitempty"`
+	HumanResponseReceiptId  string                 `protobuf:"bytes,6,opt,name=human_response_receipt_id,json=humanResponseReceiptId,proto3" json:"human_response_receipt_id,omitempty"`
+	ApprovalRevision        uint64                 `protobuf:"varint,7,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest          string                 `protobuf:"bytes,8,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *AnswerClarificationExactRequest) Reset() {
+	*x = AnswerClarificationExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerClarificationExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerClarificationExactRequest) ProtoMessage() {}
+
+func (x *AnswerClarificationExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerClarificationExactRequest.ProtoReflect.Descriptor instead.
+func (*AnswerClarificationExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{112}
+}
+
+func (x *AnswerClarificationExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AnswerClarificationExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AnswerClarificationExactRequest) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+func (x *AnswerClarificationExactRequest) GetExpectedResourceVersion() string {
+	if x != nil {
+		return x.ExpectedResourceVersion
+	}
+	return ""
+}
+
+func (x *AnswerClarificationExactRequest) GetAnswers() []*ClarificationAnswer {
+	if x != nil {
+		return x.Answers
+	}
+	return nil
+}
+
+func (x *AnswerClarificationExactRequest) GetHumanResponseReceiptId() string {
+	if x != nil {
+		return x.HumanResponseReceiptId
+	}
+	return ""
+}
+
+func (x *AnswerClarificationExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *AnswerClarificationExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type AnswerClarificationExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Interaction   *Interaction           `protobuf:"bytes,2,opt,name=interaction,proto3" json:"interaction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerClarificationExactResponse) Reset() {
+	*x = AnswerClarificationExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerClarificationExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerClarificationExactResponse) ProtoMessage() {}
+
+func (x *AnswerClarificationExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerClarificationExactResponse.ProtoReflect.Descriptor instead.
+func (*AnswerClarificationExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *AnswerClarificationExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *AnswerClarificationExactResponse) GetInteraction() *Interaction {
+	if x != nil {
+		return x.Interaction
+	}
+	return nil
+}
+
 type Event struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`             // fresh uuid per delivery
@@ -35,7 +9996,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[0]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -47,7 +10008,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[0]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -60,7 +10021,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{0}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *Event) GetEventId() string {
@@ -106,7 +10067,7 @@ type EventAck struct {
 
 func (x *EventAck) Reset() {
 	*x = EventAck{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[1]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -118,7 +10079,7 @@ func (x *EventAck) String() string {
 func (*EventAck) ProtoMessage() {}
 
 func (x *EventAck) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[1]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -131,7 +10092,7 @@ func (x *EventAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventAck.ProtoReflect.Descriptor instead.
 func (*EventAck) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{1}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{115}
 }
 
 type AgentToolRequest struct {
@@ -146,7 +10107,7 @@ type AgentToolRequest struct {
 
 func (x *AgentToolRequest) Reset() {
 	*x = AgentToolRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[2]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -158,7 +10119,7 @@ func (x *AgentToolRequest) String() string {
 func (*AgentToolRequest) ProtoMessage() {}
 
 func (x *AgentToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[2]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -171,7 +10132,7 @@ func (x *AgentToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentToolRequest.ProtoReflect.Descriptor instead.
 func (*AgentToolRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{2}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *AgentToolRequest) GetInvocationId() string {
@@ -203,18 +10164,24 @@ func (x *AgentToolRequest) GetContext() *AgentToolContext {
 }
 
 type AgentToolContext struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	WorkspaceId   string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Surface       string                 `protobuf:"bytes,4,opt,name=surface,proto3" json:"surface,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	TaskId               string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId            string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	WorkspaceId          string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Surface              string                 `protobuf:"bytes,4,opt,name=surface,proto3" json:"surface,omitempty"`
+	ExecutionId          string                 `protobuf:"bytes,5,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	InstallationId       string                 `protobuf:"bytes,6,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	ConversationRevision uint64                 `protobuf:"varint,7,opt,name=conversation_revision,json=conversationRevision,proto3" json:"conversation_revision,omitempty"`
+	ApprovalRevision     uint64                 `protobuf:"varint,8,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest       string                 `protobuf:"bytes,9,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	AgentToolNames       []string               `protobuf:"bytes,10,rep,name=agent_tool_names,json=agentToolNames,proto3" json:"agent_tool_names,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *AgentToolContext) Reset() {
 	*x = AgentToolContext{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[3]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -226,7 +10193,7 @@ func (x *AgentToolContext) String() string {
 func (*AgentToolContext) ProtoMessage() {}
 
 func (x *AgentToolContext) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[3]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -239,7 +10206,7 @@ func (x *AgentToolContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentToolContext.ProtoReflect.Descriptor instead.
 func (*AgentToolContext) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{3}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *AgentToolContext) GetTaskId() string {
@@ -270,6 +10237,48 @@ func (x *AgentToolContext) GetSurface() string {
 	return ""
 }
 
+func (x *AgentToolContext) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+func (x *AgentToolContext) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *AgentToolContext) GetConversationRevision() uint64 {
+	if x != nil {
+		return x.ConversationRevision
+	}
+	return 0
+}
+
+func (x *AgentToolContext) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *AgentToolContext) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *AgentToolContext) GetAgentToolNames() []string {
+	if x != nil {
+		return x.AgentToolNames
+	}
+	return nil
+}
+
 type AgentToolResponse struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Text              string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -281,7 +10290,7 @@ type AgentToolResponse struct {
 
 func (x *AgentToolResponse) Reset() {
 	*x = AgentToolResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[4]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +10302,7 @@ func (x *AgentToolResponse) String() string {
 func (*AgentToolResponse) ProtoMessage() {}
 
 func (x *AgentToolResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[4]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +10315,7 @@ func (x *AgentToolResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentToolResponse.ProtoReflect.Descriptor instead.
 func (*AgentToolResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{4}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *AgentToolResponse) GetText() string {
@@ -344,7 +10353,7 @@ type WebhookRequest struct {
 
 func (x *WebhookRequest) Reset() {
 	*x = WebhookRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[5]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -356,7 +10365,7 @@ func (x *WebhookRequest) String() string {
 func (*WebhookRequest) ProtoMessage() {}
 
 func (x *WebhookRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[5]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -369,7 +10378,7 @@ func (x *WebhookRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookRequest.ProtoReflect.Descriptor instead.
 func (*WebhookRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{5}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{119}
 }
 
 func (x *WebhookRequest) GetWebhookKey() string {
@@ -425,7 +10434,7 @@ type WebhookResponse struct {
 
 func (x *WebhookResponse) Reset() {
 	*x = WebhookResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[6]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -437,7 +10446,7 @@ func (x *WebhookResponse) String() string {
 func (*WebhookResponse) ProtoMessage() {}
 
 func (x *WebhookResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[6]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -450,7 +10459,7 @@ func (x *WebhookResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookResponse.ProtoReflect.Descriptor instead.
 func (*WebhookResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{6}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *WebhookResponse) GetStatus() int32 {
@@ -487,7 +10496,7 @@ type PluginActionRequest struct {
 
 func (x *PluginActionRequest) Reset() {
 	*x = PluginActionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[7]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -499,7 +10508,7 @@ func (x *PluginActionRequest) String() string {
 func (*PluginActionRequest) ProtoMessage() {}
 
 func (x *PluginActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[7]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -512,7 +10521,7 @@ func (x *PluginActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginActionRequest.ProtoReflect.Descriptor instead.
 func (*PluginActionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{7}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *PluginActionRequest) GetActionKey() string {
@@ -550,7 +10559,7 @@ type VerifiedActionContext struct {
 
 func (x *VerifiedActionContext) Reset() {
 	*x = VerifiedActionContext{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[8]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +10571,7 @@ func (x *VerifiedActionContext) String() string {
 func (*VerifiedActionContext) ProtoMessage() {}
 
 func (x *VerifiedActionContext) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[8]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +10584,7 @@ func (x *VerifiedActionContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifiedActionContext.ProtoReflect.Descriptor instead.
 func (*VerifiedActionContext) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{8}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *VerifiedActionContext) GetActorId() string {
@@ -632,7 +10641,7 @@ type PluginActionResponse struct {
 
 func (x *PluginActionResponse) Reset() {
 	*x = PluginActionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[9]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -644,7 +10653,7 @@ func (x *PluginActionResponse) String() string {
 func (*PluginActionResponse) ProtoMessage() {}
 
 func (x *PluginActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[9]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -657,7 +10666,7 @@ func (x *PluginActionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginActionResponse.ProtoReflect.Descriptor instead.
 func (*PluginActionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{9}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{123}
 }
 
 func (x *PluginActionResponse) GetBody() []byte {
@@ -693,7 +10702,7 @@ type SearchEntityReferencesRequest struct {
 
 func (x *SearchEntityReferencesRequest) Reset() {
 	*x = SearchEntityReferencesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[10]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -705,7 +10714,7 @@ func (x *SearchEntityReferencesRequest) String() string {
 func (*SearchEntityReferencesRequest) ProtoMessage() {}
 
 func (x *SearchEntityReferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[10]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -718,7 +10727,7 @@ func (x *SearchEntityReferencesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchEntityReferencesRequest.ProtoReflect.Descriptor instead.
 func (*SearchEntityReferencesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{10}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *SearchEntityReferencesRequest) GetSource() string {
@@ -758,7 +10767,7 @@ type SearchEntityReferencesResponse struct {
 
 func (x *SearchEntityReferencesResponse) Reset() {
 	*x = SearchEntityReferencesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[11]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +10779,7 @@ func (x *SearchEntityReferencesResponse) String() string {
 func (*SearchEntityReferencesResponse) ProtoMessage() {}
 
 func (x *SearchEntityReferencesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[11]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +10792,7 @@ func (x *SearchEntityReferencesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchEntityReferencesResponse.ProtoReflect.Descriptor instead.
 func (*SearchEntityReferencesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{11}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *SearchEntityReferencesResponse) GetCandidates() []*EntityReferenceCandidate {
@@ -805,7 +10814,7 @@ type EntityReferenceCandidate struct {
 
 func (x *EntityReferenceCandidate) Reset() {
 	*x = EntityReferenceCandidate{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[12]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -817,7 +10826,7 @@ func (x *EntityReferenceCandidate) String() string {
 func (*EntityReferenceCandidate) ProtoMessage() {}
 
 func (x *EntityReferenceCandidate) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[12]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -830,7 +10839,7 @@ func (x *EntityReferenceCandidate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityReferenceCandidate.ProtoReflect.Descriptor instead.
 func (*EntityReferenceCandidate) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{12}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{126}
 }
 
 func (x *EntityReferenceCandidate) GetProviderLocalId() string {
@@ -873,7 +10882,7 @@ type AuthorizeEntityReferenceRequest struct {
 
 func (x *AuthorizeEntityReferenceRequest) Reset() {
 	*x = AuthorizeEntityReferenceRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[13]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -885,7 +10894,7 @@ func (x *AuthorizeEntityReferenceRequest) String() string {
 func (*AuthorizeEntityReferenceRequest) ProtoMessage() {}
 
 func (x *AuthorizeEntityReferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[13]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -898,7 +10907,7 @@ func (x *AuthorizeEntityReferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeEntityReferenceRequest.ProtoReflect.Descriptor instead.
 func (*AuthorizeEntityReferenceRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{13}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{127}
 }
 
 func (x *AuthorizeEntityReferenceRequest) GetSource() string {
@@ -939,7 +10948,7 @@ type AuthorizeEntityReferenceResponse struct {
 
 func (x *AuthorizeEntityReferenceResponse) Reset() {
 	*x = AuthorizeEntityReferenceResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[14]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -951,7 +10960,7 @@ func (x *AuthorizeEntityReferenceResponse) String() string {
 func (*AuthorizeEntityReferenceResponse) ProtoMessage() {}
 
 func (x *AuthorizeEntityReferenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[14]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -964,7 +10973,7 @@ func (x *AuthorizeEntityReferenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeEntityReferenceResponse.ProtoReflect.Descriptor instead.
 func (*AuthorizeEntityReferenceResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{14}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *AuthorizeEntityReferenceResponse) GetAllowed() bool {
@@ -996,7 +11005,7 @@ type ResolveGitCredentialRequest struct {
 
 func (x *ResolveGitCredentialRequest) Reset() {
 	*x = ResolveGitCredentialRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[15]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1008,7 +11017,7 @@ func (x *ResolveGitCredentialRequest) String() string {
 func (*ResolveGitCredentialRequest) ProtoMessage() {}
 
 func (x *ResolveGitCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[15]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1021,7 +11030,7 @@ func (x *ResolveGitCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveGitCredentialRequest.ProtoReflect.Descriptor instead.
 func (*ResolveGitCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{15}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{129}
 }
 
 func (x *ResolveGitCredentialRequest) GetProviderId() string {
@@ -1084,7 +11093,7 @@ type ResolveGitCredentialResponse struct {
 
 func (x *ResolveGitCredentialResponse) Reset() {
 	*x = ResolveGitCredentialResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[16]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1096,7 +11105,7 @@ func (x *ResolveGitCredentialResponse) String() string {
 func (*ResolveGitCredentialResponse) ProtoMessage() {}
 
 func (x *ResolveGitCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[16]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1109,7 +11118,7 @@ func (x *ResolveGitCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveGitCredentialResponse.ProtoReflect.Descriptor instead.
 func (*ResolveGitCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{16}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{130}
 }
 
 func (x *ResolveGitCredentialResponse) GetUsername() string {
@@ -1148,7 +11157,7 @@ type GitCredentialBindingRequest struct {
 
 func (x *GitCredentialBindingRequest) Reset() {
 	*x = GitCredentialBindingRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[17]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1160,7 +11169,7 @@ func (x *GitCredentialBindingRequest) String() string {
 func (*GitCredentialBindingRequest) ProtoMessage() {}
 
 func (x *GitCredentialBindingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[17]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1173,7 +11182,7 @@ func (x *GitCredentialBindingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitCredentialBindingRequest.ProtoReflect.Descriptor instead.
 func (*GitCredentialBindingRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{17}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{131}
 }
 
 func (x *GitCredentialBindingRequest) GetProviderId() string {
@@ -1234,7 +11243,7 @@ type GitCredentialBindingResponse struct {
 
 func (x *GitCredentialBindingResponse) Reset() {
 	*x = GitCredentialBindingResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[18]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1246,7 +11255,7 @@ func (x *GitCredentialBindingResponse) String() string {
 func (*GitCredentialBindingResponse) ProtoMessage() {}
 
 func (x *GitCredentialBindingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[18]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1259,7 +11268,7 @@ func (x *GitCredentialBindingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitCredentialBindingResponse.ProtoReflect.Descriptor instead.
 func (*GitCredentialBindingResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{18}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *GitCredentialBindingResponse) GetBinding() string {
@@ -1280,7 +11289,7 @@ type GetStateRequest struct {
 
 func (x *GetStateRequest) Reset() {
 	*x = GetStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[19]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1292,7 +11301,7 @@ func (x *GetStateRequest) String() string {
 func (*GetStateRequest) ProtoMessage() {}
 
 func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[19]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1305,7 +11314,7 @@ func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateRequest.ProtoReflect.Descriptor instead.
 func (*GetStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{19}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{133}
 }
 
 func (x *GetStateRequest) GetScope() string {
@@ -1339,7 +11348,7 @@ type GetStateResponse struct {
 
 func (x *GetStateResponse) Reset() {
 	*x = GetStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[20]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +11360,7 @@ func (x *GetStateResponse) String() string {
 func (*GetStateResponse) ProtoMessage() {}
 
 func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[20]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +11373,7 @@ func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateResponse.ProtoReflect.Descriptor instead.
 func (*GetStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{20}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *GetStateResponse) GetFound() bool {
@@ -1393,7 +11402,7 @@ type SetStateRequest struct {
 
 func (x *SetStateRequest) Reset() {
 	*x = SetStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[21]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1405,7 +11414,7 @@ func (x *SetStateRequest) String() string {
 func (*SetStateRequest) ProtoMessage() {}
 
 func (x *SetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[21]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1418,7 +11427,7 @@ func (x *SetStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetStateRequest.ProtoReflect.Descriptor instead.
 func (*SetStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{21}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *SetStateRequest) GetScope() string {
@@ -1457,7 +11466,7 @@ type SetStateResponse struct {
 
 func (x *SetStateResponse) Reset() {
 	*x = SetStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[22]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1469,7 +11478,7 @@ func (x *SetStateResponse) String() string {
 func (*SetStateResponse) ProtoMessage() {}
 
 func (x *SetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[22]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1482,7 +11491,7 @@ func (x *SetStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetStateResponse.ProtoReflect.Descriptor instead.
 func (*SetStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{22}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{136}
 }
 
 type DeleteStateRequest struct {
@@ -1496,7 +11505,7 @@ type DeleteStateRequest struct {
 
 func (x *DeleteStateRequest) Reset() {
 	*x = DeleteStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[23]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1508,7 +11517,7 @@ func (x *DeleteStateRequest) String() string {
 func (*DeleteStateRequest) ProtoMessage() {}
 
 func (x *DeleteStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[23]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1521,7 +11530,7 @@ func (x *DeleteStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteStateRequest.ProtoReflect.Descriptor instead.
 func (*DeleteStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{23}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *DeleteStateRequest) GetScope() string {
@@ -1553,7 +11562,7 @@ type DeleteStateResponse struct {
 
 func (x *DeleteStateResponse) Reset() {
 	*x = DeleteStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[24]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1565,7 +11574,7 @@ func (x *DeleteStateResponse) String() string {
 func (*DeleteStateResponse) ProtoMessage() {}
 
 func (x *DeleteStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[24]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1578,7 +11587,7 @@ func (x *DeleteStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteStateResponse.ProtoReflect.Descriptor instead.
 func (*DeleteStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{24}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{138}
 }
 
 type ListStateRequest struct {
@@ -1591,7 +11600,7 @@ type ListStateRequest struct {
 
 func (x *ListStateRequest) Reset() {
 	*x = ListStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[25]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1603,7 +11612,7 @@ func (x *ListStateRequest) String() string {
 func (*ListStateRequest) ProtoMessage() {}
 
 func (x *ListStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[25]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1616,7 +11625,7 @@ func (x *ListStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStateRequest.ProtoReflect.Descriptor instead.
 func (*ListStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{25}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *ListStateRequest) GetScope() string {
@@ -1642,7 +11651,7 @@ type ListStateResponse struct {
 
 func (x *ListStateResponse) Reset() {
 	*x = ListStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[26]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1654,7 +11663,7 @@ func (x *ListStateResponse) String() string {
 func (*ListStateResponse) ProtoMessage() {}
 
 func (x *ListStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[26]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1667,7 +11676,7 @@ func (x *ListStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStateResponse.ProtoReflect.Descriptor instead.
 func (*ListStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{26}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *ListStateResponse) GetEntries() []*StateEntry {
@@ -1688,7 +11697,7 @@ type StateEntry struct {
 
 func (x *StateEntry) Reset() {
 	*x = StateEntry{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[27]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1700,7 +11709,7 @@ func (x *StateEntry) String() string {
 func (*StateEntry) ProtoMessage() {}
 
 func (x *StateEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[27]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1713,7 +11722,7 @@ func (x *StateEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateEntry.ProtoReflect.Descriptor instead.
 func (*StateEntry) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{27}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *StateEntry) GetKey() string {
@@ -1745,7 +11754,7 @@ type GetConfigRequest struct {
 
 func (x *GetConfigRequest) Reset() {
 	*x = GetConfigRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[28]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1757,7 +11766,7 @@ func (x *GetConfigRequest) String() string {
 func (*GetConfigRequest) ProtoMessage() {}
 
 func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[28]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1770,7 +11779,7 @@ func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConfigRequest.ProtoReflect.Descriptor instead.
 func (*GetConfigRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{28}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{142}
 }
 
 type GetConfigResponse struct {
@@ -1782,7 +11791,7 @@ type GetConfigResponse struct {
 
 func (x *GetConfigResponse) Reset() {
 	*x = GetConfigResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[29]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1794,7 +11803,7 @@ func (x *GetConfigResponse) String() string {
 func (*GetConfigResponse) ProtoMessage() {}
 
 func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[29]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1807,7 +11816,7 @@ func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConfigResponse.ProtoReflect.Descriptor instead.
 func (*GetConfigResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{29}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *GetConfigResponse) GetConfig() *structpb.Struct {
@@ -1826,7 +11835,7 @@ type GetSecretRequest struct {
 
 func (x *GetSecretRequest) Reset() {
 	*x = GetSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[30]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1838,7 +11847,7 @@ func (x *GetSecretRequest) String() string {
 func (*GetSecretRequest) ProtoMessage() {}
 
 func (x *GetSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[30]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1851,7 +11860,7 @@ func (x *GetSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretRequest.ProtoReflect.Descriptor instead.
 func (*GetSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{30}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *GetSecretRequest) GetKey() string {
@@ -1871,7 +11880,7 @@ type GetSecretResponse struct {
 
 func (x *GetSecretResponse) Reset() {
 	*x = GetSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[31]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1883,7 +11892,7 @@ func (x *GetSecretResponse) String() string {
 func (*GetSecretResponse) ProtoMessage() {}
 
 func (x *GetSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[31]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1896,7 +11905,7 @@ func (x *GetSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretResponse.ProtoReflect.Descriptor instead.
 func (*GetSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{31}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *GetSecretResponse) GetFound() bool {
@@ -1923,7 +11932,7 @@ type SetSecretRequest struct {
 
 func (x *SetSecretRequest) Reset() {
 	*x = SetSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[32]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1935,7 +11944,7 @@ func (x *SetSecretRequest) String() string {
 func (*SetSecretRequest) ProtoMessage() {}
 
 func (x *SetSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[32]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1948,7 +11957,7 @@ func (x *SetSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSecretRequest.ProtoReflect.Descriptor instead.
 func (*SetSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{32}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *SetSecretRequest) GetKey() string {
@@ -1973,7 +11982,7 @@ type SetSecretResponse struct {
 
 func (x *SetSecretResponse) Reset() {
 	*x = SetSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[33]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1985,7 +11994,7 @@ func (x *SetSecretResponse) String() string {
 func (*SetSecretResponse) ProtoMessage() {}
 
 func (x *SetSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[33]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1998,7 +12007,7 @@ func (x *SetSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSecretResponse.ProtoReflect.Descriptor instead.
 func (*SetSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{33}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{147}
 }
 
 type DeleteSecretRequest struct {
@@ -2010,7 +12019,7 @@ type DeleteSecretRequest struct {
 
 func (x *DeleteSecretRequest) Reset() {
 	*x = DeleteSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[34]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[148]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2022,7 +12031,7 @@ func (x *DeleteSecretRequest) String() string {
 func (*DeleteSecretRequest) ProtoMessage() {}
 
 func (x *DeleteSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[34]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[148]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2035,7 +12044,7 @@ func (x *DeleteSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSecretRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{34}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *DeleteSecretRequest) GetKey() string {
@@ -2053,7 +12062,7 @@ type DeleteSecretResponse struct {
 
 func (x *DeleteSecretResponse) Reset() {
 	*x = DeleteSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[35]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[149]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2065,7 +12074,7 @@ func (x *DeleteSecretResponse) String() string {
 func (*DeleteSecretResponse) ProtoMessage() {}
 
 func (x *DeleteSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[35]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[149]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2078,7 +12087,7 @@ func (x *DeleteSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSecretResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{35}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{149}
 }
 
 type RevealSecretRequest struct {
@@ -2090,7 +12099,7 @@ type RevealSecretRequest struct {
 
 func (x *RevealSecretRequest) Reset() {
 	*x = RevealSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[36]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[150]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2102,7 +12111,7 @@ func (x *RevealSecretRequest) String() string {
 func (*RevealSecretRequest) ProtoMessage() {}
 
 func (x *RevealSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[36]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[150]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2115,7 +12124,7 @@ func (x *RevealSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevealSecretRequest.ProtoReflect.Descriptor instead.
 func (*RevealSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{36}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{150}
 }
 
 func (x *RevealSecretRequest) GetRef() string {
@@ -2134,7 +12143,7 @@ type RevealSecretResponse struct {
 
 func (x *RevealSecretResponse) Reset() {
 	*x = RevealSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[37]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[151]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2146,7 +12155,7 @@ func (x *RevealSecretResponse) String() string {
 func (*RevealSecretResponse) ProtoMessage() {}
 
 func (x *RevealSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[37]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[151]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2159,7 +12168,7 @@ func (x *RevealSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevealSecretResponse.ProtoReflect.Descriptor instead.
 func (*RevealSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{37}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{151}
 }
 
 func (x *RevealSecretResponse) GetValue() string {
@@ -2179,7 +12188,7 @@ type EmitEventRequest struct {
 
 func (x *EmitEventRequest) Reset() {
 	*x = EmitEventRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[38]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[152]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2191,7 +12200,7 @@ func (x *EmitEventRequest) String() string {
 func (*EmitEventRequest) ProtoMessage() {}
 
 func (x *EmitEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[38]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[152]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2204,7 +12213,7 @@ func (x *EmitEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmitEventRequest.ProtoReflect.Descriptor instead.
 func (*EmitEventRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{38}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *EmitEventRequest) GetEventName() string {
@@ -2229,7 +12238,7 @@ type EmitEventResponse struct {
 
 func (x *EmitEventResponse) Reset() {
 	*x = EmitEventResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[39]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[153]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2241,7 +12250,7 @@ func (x *EmitEventResponse) String() string {
 func (*EmitEventResponse) ProtoMessage() {}
 
 func (x *EmitEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[39]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[153]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2254,7 +12263,7 @@ func (x *EmitEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmitEventResponse.ProtoReflect.Descriptor instead.
 func (*EmitEventResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{39}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{153}
 }
 
 // ── Host data API (ADR 0043) ─────────────────────────────────────────────────
@@ -2270,7 +12279,7 @@ type Page struct {
 
 func (x *Page) Reset() {
 	*x = Page{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[40]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[154]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2282,7 +12291,7 @@ func (x *Page) String() string {
 func (*Page) ProtoMessage() {}
 
 func (x *Page) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[40]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[154]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2295,7 +12304,7 @@ func (x *Page) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Page.ProtoReflect.Descriptor instead.
 func (*Page) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{40}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{154}
 }
 
 func (x *Page) GetLimit() int32 {
@@ -2322,7 +12331,7 @@ type PageInfo struct {
 
 func (x *PageInfo) Reset() {
 	*x = PageInfo{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[41]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[155]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2334,7 +12343,7 @@ func (x *PageInfo) String() string {
 func (*PageInfo) ProtoMessage() {}
 
 func (x *PageInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[41]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[155]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2347,7 +12356,7 @@ func (x *PageInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageInfo.ProtoReflect.Descriptor instead.
 func (*PageInfo) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{41}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{155}
 }
 
 func (x *PageInfo) GetNextCursor() string {
@@ -2437,14 +12446,15 @@ type Task struct {
 	// Whether this task is configured to auto-start once every predecessor in
 	// depends_on resolves. Always false when blocked_reason is "unknown",
 	// regardless of the underlying stored configuration.
-	StartWhenUnblocked bool `protobuf:"varint,36,opt,name=start_when_unblocked,json=startWhenUnblocked,proto3" json:"start_when_unblocked,omitempty"`
+	StartWhenUnblocked bool   `protobuf:"varint,36,opt,name=start_when_unblocked,json=startWhenUnblocked,proto3" json:"start_when_unblocked,omitempty"`
+	ResourceVersion    string `protobuf:"bytes,37,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"` // RFC3339Nano task row version for exact writes
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
 	*x = Task{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[42]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[156]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2456,7 +12466,7 @@ func (x *Task) String() string {
 func (*Task) ProtoMessage() {}
 
 func (x *Task) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[42]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[156]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2469,7 +12479,7 @@ func (x *Task) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Task.ProtoReflect.Descriptor instead.
 func (*Task) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{42}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{156}
 }
 
 func (x *Task) GetId() string {
@@ -2725,6 +12735,13 @@ func (x *Task) GetStartWhenUnblocked() bool {
 	return false
 }
 
+func (x *Task) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
 type TaskRepository struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -2738,7 +12755,7 @@ type TaskRepository struct {
 
 func (x *TaskRepository) Reset() {
 	*x = TaskRepository{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[43]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[157]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2750,7 +12767,7 @@ func (x *TaskRepository) String() string {
 func (*TaskRepository) ProtoMessage() {}
 
 func (x *TaskRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[43]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[157]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2763,7 +12780,7 @@ func (x *TaskRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRepository.ProtoReflect.Descriptor instead.
 func (*TaskRepository) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{43}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{157}
 }
 
 func (x *TaskRepository) GetId() string {
@@ -2834,7 +12851,7 @@ type TaskPullRequest struct {
 
 func (x *TaskPullRequest) Reset() {
 	*x = TaskPullRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[44]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[158]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2846,7 +12863,7 @@ func (x *TaskPullRequest) String() string {
 func (*TaskPullRequest) ProtoMessage() {}
 
 func (x *TaskPullRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[44]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[158]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2859,7 +12876,7 @@ func (x *TaskPullRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPullRequest.ProtoReflect.Descriptor instead.
 func (*TaskPullRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{44}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{158}
 }
 
 func (x *TaskPullRequest) GetNumber() int64 {
@@ -3015,7 +13032,7 @@ type TaskDependencyRef struct {
 
 func (x *TaskDependencyRef) Reset() {
 	*x = TaskDependencyRef{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[45]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[159]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3027,7 +13044,7 @@ func (x *TaskDependencyRef) String() string {
 func (*TaskDependencyRef) ProtoMessage() {}
 
 func (x *TaskDependencyRef) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[45]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[159]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3040,7 +13057,7 @@ func (x *TaskDependencyRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskDependencyRef.ProtoReflect.Descriptor instead.
 func (*TaskDependencyRef) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{45}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{159}
 }
 
 func (x *TaskDependencyRef) GetId() string {
@@ -3087,7 +13104,7 @@ type TaskFilter struct {
 
 func (x *TaskFilter) Reset() {
 	*x = TaskFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[46]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[160]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3099,7 +13116,7 @@ func (x *TaskFilter) String() string {
 func (*TaskFilter) ProtoMessage() {}
 
 func (x *TaskFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[46]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[160]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3112,7 +13129,7 @@ func (x *TaskFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskFilter.ProtoReflect.Descriptor instead.
 func (*TaskFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{46}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *TaskFilter) GetWorkspaceIds() []string {
@@ -3167,7 +13184,7 @@ type ListTasksRequest struct {
 
 func (x *ListTasksRequest) Reset() {
 	*x = ListTasksRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[47]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3179,7 +13196,7 @@ func (x *ListTasksRequest) String() string {
 func (*ListTasksRequest) ProtoMessage() {}
 
 func (x *ListTasksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[47]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3192,7 +13209,7 @@ func (x *ListTasksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksRequest.ProtoReflect.Descriptor instead.
 func (*ListTasksRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{47}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *ListTasksRequest) GetFilter() *TaskFilter {
@@ -3219,7 +13236,7 @@ type ListTasksResponse struct {
 
 func (x *ListTasksResponse) Reset() {
 	*x = ListTasksResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[48]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[162]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3231,7 +13248,7 @@ func (x *ListTasksResponse) String() string {
 func (*ListTasksResponse) ProtoMessage() {}
 
 func (x *ListTasksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[48]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[162]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3244,7 +13261,7 @@ func (x *ListTasksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksResponse.ProtoReflect.Descriptor instead.
 func (*ListTasksResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{48}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{162}
 }
 
 func (x *ListTasksResponse) GetTasks() []*Task {
@@ -3270,7 +13287,7 @@ type GetTaskRequest struct {
 
 func (x *GetTaskRequest) Reset() {
 	*x = GetTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[49]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[163]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3282,7 +13299,7 @@ func (x *GetTaskRequest) String() string {
 func (*GetTaskRequest) ProtoMessage() {}
 
 func (x *GetTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[49]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[163]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3295,7 +13312,7 @@ func (x *GetTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{49}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{163}
 }
 
 func (x *GetTaskRequest) GetId() string {
@@ -3314,7 +13331,7 @@ type GetTaskResponse struct {
 
 func (x *GetTaskResponse) Reset() {
 	*x = GetTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[50]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[164]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3326,7 +13343,7 @@ func (x *GetTaskResponse) String() string {
 func (*GetTaskResponse) ProtoMessage() {}
 
 func (x *GetTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[50]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[164]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3339,7 +13356,7 @@ func (x *GetTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{50}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{164}
 }
 
 func (x *GetTaskResponse) GetTask() *Task {
@@ -3364,7 +13381,7 @@ type TaskStepTransition struct {
 
 func (x *TaskStepTransition) Reset() {
 	*x = TaskStepTransition{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[51]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[165]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3376,7 +13393,7 @@ func (x *TaskStepTransition) String() string {
 func (*TaskStepTransition) ProtoMessage() {}
 
 func (x *TaskStepTransition) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[51]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[165]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3389,7 +13406,7 @@ func (x *TaskStepTransition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStepTransition.ProtoReflect.Descriptor instead.
 func (*TaskStepTransition) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{51}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{165}
 }
 
 func (x *TaskStepTransition) GetId() string {
@@ -3451,7 +13468,7 @@ type ListTaskStepTransitionsRequest struct {
 
 func (x *ListTaskStepTransitionsRequest) Reset() {
 	*x = ListTaskStepTransitionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[52]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[166]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3463,7 +13480,7 @@ func (x *ListTaskStepTransitionsRequest) String() string {
 func (*ListTaskStepTransitionsRequest) ProtoMessage() {}
 
 func (x *ListTaskStepTransitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[52]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[166]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3476,7 +13493,7 @@ func (x *ListTaskStepTransitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskStepTransitionsRequest.ProtoReflect.Descriptor instead.
 func (*ListTaskStepTransitionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{52}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{166}
 }
 
 func (x *ListTaskStepTransitionsRequest) GetTaskId() string {
@@ -3503,7 +13520,7 @@ type ListTaskStepTransitionsResponse struct {
 
 func (x *ListTaskStepTransitionsResponse) Reset() {
 	*x = ListTaskStepTransitionsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[53]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[167]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3515,7 +13532,7 @@ func (x *ListTaskStepTransitionsResponse) String() string {
 func (*ListTaskStepTransitionsResponse) ProtoMessage() {}
 
 func (x *ListTaskStepTransitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[53]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[167]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3528,7 +13545,7 @@ func (x *ListTaskStepTransitionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskStepTransitionsResponse.ProtoReflect.Descriptor instead.
 func (*ListTaskStepTransitionsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{53}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{167}
 }
 
 func (x *ListTaskStepTransitionsResponse) GetItems() []*TaskStepTransition {
@@ -3558,7 +13575,7 @@ type RelationTask struct {
 
 func (x *RelationTask) Reset() {
 	*x = RelationTask{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[54]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[168]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3570,7 +13587,7 @@ func (x *RelationTask) String() string {
 func (*RelationTask) ProtoMessage() {}
 
 func (x *RelationTask) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[54]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[168]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3583,7 +13600,7 @@ func (x *RelationTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RelationTask.ProtoReflect.Descriptor instead.
 func (*RelationTask) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{54}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{168}
 }
 
 func (x *RelationTask) GetId() string {
@@ -3635,7 +13652,7 @@ type TaskRelations struct {
 
 func (x *TaskRelations) Reset() {
 	*x = TaskRelations{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[55]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[169]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3647,7 +13664,7 @@ func (x *TaskRelations) String() string {
 func (*TaskRelations) ProtoMessage() {}
 
 func (x *TaskRelations) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[55]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[169]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3660,7 +13677,7 @@ func (x *TaskRelations) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRelations.ProtoReflect.Descriptor instead.
 func (*TaskRelations) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{55}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{169}
 }
 
 func (x *TaskRelations) GetTask() *RelationTask {
@@ -3715,7 +13732,7 @@ type GetTaskRelationsRequest struct {
 
 func (x *GetTaskRelationsRequest) Reset() {
 	*x = GetTaskRelationsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[56]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[170]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3727,7 +13744,7 @@ func (x *GetTaskRelationsRequest) String() string {
 func (*GetTaskRelationsRequest) ProtoMessage() {}
 
 func (x *GetTaskRelationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[56]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[170]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3740,7 +13757,7 @@ func (x *GetTaskRelationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRelationsRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskRelationsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{56}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{170}
 }
 
 func (x *GetTaskRelationsRequest) GetWorkspaceId() string {
@@ -3766,7 +13783,7 @@ type GetTaskRelationsResponse struct {
 
 func (x *GetTaskRelationsResponse) Reset() {
 	*x = GetTaskRelationsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[57]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[171]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3778,7 +13795,7 @@ func (x *GetTaskRelationsResponse) String() string {
 func (*GetTaskRelationsResponse) ProtoMessage() {}
 
 func (x *GetTaskRelationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[57]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[171]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3791,7 +13808,7 @@ func (x *GetTaskRelationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRelationsResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskRelationsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{57}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{171}
 }
 
 func (x *GetTaskRelationsResponse) GetRelations() *TaskRelations {
@@ -3818,7 +13835,7 @@ type Workspace struct {
 
 func (x *Workspace) Reset() {
 	*x = Workspace{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[58]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[172]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3830,7 +13847,7 @@ func (x *Workspace) String() string {
 func (*Workspace) ProtoMessage() {}
 
 func (x *Workspace) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[58]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[172]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3843,7 +13860,7 @@ func (x *Workspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workspace.ProtoReflect.Descriptor instead.
 func (*Workspace) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{58}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{172}
 }
 
 func (x *Workspace) GetId() string {
@@ -3911,7 +13928,7 @@ type ListWorkspacesRequest struct {
 
 func (x *ListWorkspacesRequest) Reset() {
 	*x = ListWorkspacesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[59]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[173]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3923,7 +13940,7 @@ func (x *ListWorkspacesRequest) String() string {
 func (*ListWorkspacesRequest) ProtoMessage() {}
 
 func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[59]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[173]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3936,7 +13953,7 @@ func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{59}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{173}
 }
 
 func (x *ListWorkspacesRequest) GetPage() *Page {
@@ -3956,7 +13973,7 @@ type ListWorkspacesResponse struct {
 
 func (x *ListWorkspacesResponse) Reset() {
 	*x = ListWorkspacesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[60]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[174]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3968,7 +13985,7 @@ func (x *ListWorkspacesResponse) String() string {
 func (*ListWorkspacesResponse) ProtoMessage() {}
 
 func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[60]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[174]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3981,7 +13998,7 @@ func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{60}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{174}
 }
 
 func (x *ListWorkspacesResponse) GetWorkspaces() []*Workspace {
@@ -4013,7 +14030,7 @@ type Workflow struct {
 
 func (x *Workflow) Reset() {
 	*x = Workflow{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[61]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[175]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4025,7 +14042,7 @@ func (x *Workflow) String() string {
 func (*Workflow) ProtoMessage() {}
 
 func (x *Workflow) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[61]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[175]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4038,7 +14055,7 @@ func (x *Workflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workflow.ProtoReflect.Descriptor instead.
 func (*Workflow) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{61}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *Workflow) GetId() string {
@@ -4100,7 +14117,7 @@ type ListWorkflowsRequest struct {
 
 func (x *ListWorkflowsRequest) Reset() {
 	*x = ListWorkflowsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[62]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[176]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4112,7 +14129,7 @@ func (x *ListWorkflowsRequest) String() string {
 func (*ListWorkflowsRequest) ProtoMessage() {}
 
 func (x *ListWorkflowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[62]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[176]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4125,7 +14142,7 @@ func (x *ListWorkflowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{62}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{176}
 }
 
 func (x *ListWorkflowsRequest) GetWorkspaceId() string {
@@ -4152,7 +14169,7 @@ type ListWorkflowsResponse struct {
 
 func (x *ListWorkflowsResponse) Reset() {
 	*x = ListWorkflowsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[63]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[177]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4164,7 +14181,7 @@ func (x *ListWorkflowsResponse) String() string {
 func (*ListWorkflowsResponse) ProtoMessage() {}
 
 func (x *ListWorkflowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[63]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[177]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4177,7 +14194,7 @@ func (x *ListWorkflowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{63}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *ListWorkflowsResponse) GetWorkflows() []*Workflow {
@@ -4206,7 +14223,7 @@ type WorkflowTransitionGroup struct {
 
 func (x *WorkflowTransitionGroup) Reset() {
 	*x = WorkflowTransitionGroup{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[178]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4218,7 +14235,7 @@ func (x *WorkflowTransitionGroup) String() string {
 func (*WorkflowTransitionGroup) ProtoMessage() {}
 
 func (x *WorkflowTransitionGroup) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[178]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4231,7 +14248,7 @@ func (x *WorkflowTransitionGroup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowTransitionGroup.ProtoReflect.Descriptor instead.
 func (*WorkflowTransitionGroup) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{64}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{178}
 }
 
 func (x *WorkflowTransitionGroup) GetKind() string {
@@ -4272,7 +14289,7 @@ type ListWorkflowTransitionGroupsRequest struct {
 
 func (x *ListWorkflowTransitionGroupsRequest) Reset() {
 	*x = ListWorkflowTransitionGroupsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[179]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4284,7 +14301,7 @@ func (x *ListWorkflowTransitionGroupsRequest) String() string {
 func (*ListWorkflowTransitionGroupsRequest) ProtoMessage() {}
 
 func (x *ListWorkflowTransitionGroupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[179]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4297,7 +14314,7 @@ func (x *ListWorkflowTransitionGroupsRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ListWorkflowTransitionGroupsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowTransitionGroupsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{65}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *ListWorkflowTransitionGroupsRequest) GetWorkflowId() string {
@@ -4324,7 +14341,7 @@ type ListWorkflowTransitionGroupsResponse struct {
 
 func (x *ListWorkflowTransitionGroupsResponse) Reset() {
 	*x = ListWorkflowTransitionGroupsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[180]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4336,7 +14353,7 @@ func (x *ListWorkflowTransitionGroupsResponse) String() string {
 func (*ListWorkflowTransitionGroupsResponse) ProtoMessage() {}
 
 func (x *ListWorkflowTransitionGroupsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[180]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4349,7 +14366,7 @@ func (x *ListWorkflowTransitionGroupsResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ListWorkflowTransitionGroupsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowTransitionGroupsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{66}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *ListWorkflowTransitionGroupsResponse) GetItems() []*WorkflowTransitionGroup {
@@ -4398,7 +14415,7 @@ type WorkflowStep struct {
 
 func (x *WorkflowStep) Reset() {
 	*x = WorkflowStep{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[181]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4410,7 +14427,7 @@ func (x *WorkflowStep) String() string {
 func (*WorkflowStep) ProtoMessage() {}
 
 func (x *WorkflowStep) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[181]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4423,7 +14440,7 @@ func (x *WorkflowStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowStep.ProtoReflect.Descriptor instead.
 func (*WorkflowStep) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{67}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{181}
 }
 
 func (x *WorkflowStep) GetId() string {
@@ -4505,7 +14522,7 @@ type ListWorkflowStepsRequest struct {
 
 func (x *ListWorkflowStepsRequest) Reset() {
 	*x = ListWorkflowStepsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[182]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4517,7 +14534,7 @@ func (x *ListWorkflowStepsRequest) String() string {
 func (*ListWorkflowStepsRequest) ProtoMessage() {}
 
 func (x *ListWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[182]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4530,7 +14547,7 @@ func (x *ListWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowStepsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowStepsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{68}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{182}
 }
 
 func (x *ListWorkflowStepsRequest) GetWorkflowId() string {
@@ -4549,7 +14566,7 @@ type ListWorkflowStepsResponse struct {
 
 func (x *ListWorkflowStepsResponse) Reset() {
 	*x = ListWorkflowStepsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[183]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4561,7 +14578,7 @@ func (x *ListWorkflowStepsResponse) String() string {
 func (*ListWorkflowStepsResponse) ProtoMessage() {}
 
 func (x *ListWorkflowStepsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[183]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4574,7 +14591,7 @@ func (x *ListWorkflowStepsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowStepsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowStepsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{69}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{183}
 }
 
 func (x *ListWorkflowStepsResponse) GetSteps() []*WorkflowStep {
@@ -4599,7 +14616,7 @@ type AgentProfile struct {
 
 func (x *AgentProfile) Reset() {
 	*x = AgentProfile{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[184]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4611,7 +14628,7 @@ func (x *AgentProfile) String() string {
 func (*AgentProfile) ProtoMessage() {}
 
 func (x *AgentProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[184]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4624,7 +14641,7 @@ func (x *AgentProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentProfile.ProtoReflect.Descriptor instead.
 func (*AgentProfile) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{70}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{184}
 }
 
 func (x *AgentProfile) GetId() string {
@@ -4678,7 +14695,7 @@ type ListAgentProfilesRequest struct {
 
 func (x *ListAgentProfilesRequest) Reset() {
 	*x = ListAgentProfilesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[185]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4690,7 +14707,7 @@ func (x *ListAgentProfilesRequest) String() string {
 func (*ListAgentProfilesRequest) ProtoMessage() {}
 
 func (x *ListAgentProfilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[185]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4703,7 +14720,7 @@ func (x *ListAgentProfilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentProfilesRequest.ProtoReflect.Descriptor instead.
 func (*ListAgentProfilesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{71}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{185}
 }
 
 func (x *ListAgentProfilesRequest) GetPage() *Page {
@@ -4723,7 +14740,7 @@ type ListAgentProfilesResponse struct {
 
 func (x *ListAgentProfilesResponse) Reset() {
 	*x = ListAgentProfilesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[186]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4735,7 +14752,7 @@ func (x *ListAgentProfilesResponse) String() string {
 func (*ListAgentProfilesResponse) ProtoMessage() {}
 
 func (x *ListAgentProfilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[186]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4748,7 +14765,7 @@ func (x *ListAgentProfilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentProfilesResponse.ProtoReflect.Descriptor instead.
 func (*ListAgentProfilesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{72}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{186}
 }
 
 func (x *ListAgentProfilesResponse) GetProfiles() []*AgentProfile {
@@ -4776,7 +14793,7 @@ type ExecutorProfile struct {
 
 func (x *ExecutorProfile) Reset() {
 	*x = ExecutorProfile{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[187]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4788,7 +14805,7 @@ func (x *ExecutorProfile) String() string {
 func (*ExecutorProfile) ProtoMessage() {}
 
 func (x *ExecutorProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[187]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4801,7 +14818,7 @@ func (x *ExecutorProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProfile.ProtoReflect.Descriptor instead.
 func (*ExecutorProfile) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{73}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{187}
 }
 
 func (x *ExecutorProfile) GetId() string {
@@ -4834,7 +14851,7 @@ type ListExecutorProfilesRequest struct {
 
 func (x *ListExecutorProfilesRequest) Reset() {
 	*x = ListExecutorProfilesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[188]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4846,7 +14863,7 @@ func (x *ListExecutorProfilesRequest) String() string {
 func (*ListExecutorProfilesRequest) ProtoMessage() {}
 
 func (x *ListExecutorProfilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[188]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4859,7 +14876,7 @@ func (x *ListExecutorProfilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutorProfilesRequest.ProtoReflect.Descriptor instead.
 func (*ListExecutorProfilesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{74}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{188}
 }
 
 func (x *ListExecutorProfilesRequest) GetPage() *Page {
@@ -4879,7 +14896,7 @@ type ListExecutorProfilesResponse struct {
 
 func (x *ListExecutorProfilesResponse) Reset() {
 	*x = ListExecutorProfilesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[189]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4891,7 +14908,7 @@ func (x *ListExecutorProfilesResponse) String() string {
 func (*ListExecutorProfilesResponse) ProtoMessage() {}
 
 func (x *ListExecutorProfilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[189]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4904,7 +14921,7 @@ func (x *ListExecutorProfilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutorProfilesResponse.ProtoReflect.Descriptor instead.
 func (*ListExecutorProfilesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{75}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{189}
 }
 
 func (x *ListExecutorProfilesResponse) GetProfiles() []*ExecutorProfile {
@@ -4919,6 +14936,1798 @@ func (x *ListExecutorProfilesResponse) GetPageInfo() *PageInfo {
 		return x.PageInfo
 	}
 	return nil
+}
+
+// The host derives this authority from the admitted operation. Values from a
+// plugin or browser never grant access to another installation or environment.
+type ExecutorProviderRequestContext struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	PluginId              string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	InstallationId        string                 `protobuf:"bytes,2,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	ProviderKey           string                 `protobuf:"bytes,3,opt,name=provider_key,json=providerKey,proto3" json:"provider_key,omitempty"`
+	ContractVersion       int32                  `protobuf:"varint,4,opt,name=contract_version,json=contractVersion,proto3" json:"contract_version,omitempty"`
+	WorkspaceId           string                 `protobuf:"bytes,5,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId                string                 `protobuf:"bytes,6,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId             string                 `protobuf:"bytes,7,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	EnvironmentId         string                 `protobuf:"bytes,8,opt,name=environment_id,json=environmentId,proto3" json:"environment_id,omitempty"`
+	ExecutionId           string                 `protobuf:"bytes,9,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	OperationId           string                 `protobuf:"bytes,10,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Deadline              string                 `protobuf:"bytes,11,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	EnvironmentGeneration uint64                 `protobuf:"varint,12,opt,name=environment_generation,json=environmentGeneration,proto3" json:"environment_generation,omitempty"`
+	InputDigest           string                 `protobuf:"bytes,13,opt,name=input_digest,json=inputDigest,proto3" json:"input_digest,omitempty"`
+	DispatchGeneration    uint64                 `protobuf:"varint,14,opt,name=dispatch_generation,json=dispatchGeneration,proto3" json:"dispatch_generation,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *ExecutorProviderRequestContext) Reset() {
+	*x = ExecutorProviderRequestContext{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[190]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorProviderRequestContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorProviderRequestContext) ProtoMessage() {}
+
+func (x *ExecutorProviderRequestContext) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[190]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorProviderRequestContext.ProtoReflect.Descriptor instead.
+func (*ExecutorProviderRequestContext) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{190}
+}
+
+func (x *ExecutorProviderRequestContext) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetProviderKey() string {
+	if x != nil {
+		return x.ProviderKey
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetContractVersion() int32 {
+	if x != nil {
+		return x.ContractVersion
+	}
+	return 0
+}
+
+func (x *ExecutorProviderRequestContext) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetEnvironmentId() string {
+	if x != nil {
+		return x.EnvironmentId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetDeadline() string {
+	if x != nil {
+		return x.Deadline
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetEnvironmentGeneration() uint64 {
+	if x != nil {
+		return x.EnvironmentGeneration
+	}
+	return 0
+}
+
+func (x *ExecutorProviderRequestContext) GetInputDigest() string {
+	if x != nil {
+		return x.InputDigest
+	}
+	return ""
+}
+
+func (x *ExecutorProviderRequestContext) GetDispatchGeneration() uint64 {
+	if x != nil {
+		return x.DispatchGeneration
+	}
+	return 0
+}
+
+type ExecutorProfileSnapshot struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ProfileId string                 `protobuf:"bytes,1,opt,name=profile_id,json=profileId,proto3" json:"profile_id,omitempty"`
+	Config    map[string]string      `protobuf:"bytes,2,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Secret values are transient and scoped to this operation/profile. Never
+	// place them in profile snapshots, checkpoints, or persisted provider state.
+	SecretValues  map[string]string `protobuf:"bytes,3,rep,name=secret_values,json=secretValues,proto3" json:"secret_values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecutorProfileSnapshot) Reset() {
+	*x = ExecutorProfileSnapshot{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[191]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorProfileSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorProfileSnapshot) ProtoMessage() {}
+
+func (x *ExecutorProfileSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[191]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorProfileSnapshot.ProtoReflect.Descriptor instead.
+func (*ExecutorProfileSnapshot) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{191}
+}
+
+func (x *ExecutorProfileSnapshot) GetProfileId() string {
+	if x != nil {
+		return x.ProfileId
+	}
+	return ""
+}
+
+func (x *ExecutorProfileSnapshot) GetConfig() map[string]string {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+func (x *ExecutorProfileSnapshot) GetSecretValues() map[string]string {
+	if x != nil {
+		return x.SecretValues
+	}
+	return nil
+}
+
+type ExecutorProviderFieldError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Field         string                 `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	MessageId     string                 `protobuf:"bytes,3,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecutorProviderFieldError) Reset() {
+	*x = ExecutorProviderFieldError{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[192]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorProviderFieldError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorProviderFieldError) ProtoMessage() {}
+
+func (x *ExecutorProviderFieldError) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[192]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorProviderFieldError.ProtoReflect.Descriptor instead.
+func (*ExecutorProviderFieldError) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{192}
+}
+
+func (x *ExecutorProviderFieldError) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+func (x *ExecutorProviderFieldError) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *ExecutorProviderFieldError) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+type ExecutorProviderError struct {
+	state             protoimpl.MessageState        `protogen:"open.v1"`
+	Code              string                        `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	MessageId         string                        `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	Fields            []*ExecutorProviderFieldError `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty"`
+	RetryAfterSeconds uint32                        `protobuf:"varint,4,opt,name=retry_after_seconds,json=retryAfterSeconds,proto3" json:"retry_after_seconds,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ExecutorProviderError) Reset() {
+	*x = ExecutorProviderError{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[193]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorProviderError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorProviderError) ProtoMessage() {}
+
+func (x *ExecutorProviderError) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[193]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorProviderError.ProtoReflect.Descriptor instead.
+func (*ExecutorProviderError) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{193}
+}
+
+func (x *ExecutorProviderError) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *ExecutorProviderError) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *ExecutorProviderError) GetFields() []*ExecutorProviderFieldError {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+func (x *ExecutorProviderError) GetRetryAfterSeconds() uint32 {
+	if x != nil {
+		return x.RetryAfterSeconds
+	}
+	return 0
+}
+
+type ExecutorProviderCapabilities struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Terminal               bool                   `protobuf:"varint,1,opt,name=terminal,proto3" json:"terminal,omitempty"`
+	Files                  bool                   `protobuf:"varint,2,opt,name=files,proto3" json:"files,omitempty"`
+	Git                    bool                   `protobuf:"varint,3,opt,name=git,proto3" json:"git,omitempty"`
+	EmbeddedEditor         bool                   `protobuf:"varint,4,opt,name=embedded_editor,json=embeddedEditor,proto3" json:"embedded_editor,omitempty"`
+	Preview                bool                   `protobuf:"varint,5,opt,name=preview,proto3" json:"preview,omitempty"`
+	Reattach               bool                   `protobuf:"varint,6,opt,name=reattach,proto3" json:"reattach,omitempty"`
+	Retention              string                 `protobuf:"bytes,7,opt,name=retention,proto3" json:"retention,omitempty"`
+	MaximumLifetimeSeconds uint64                 `protobuf:"varint,8,opt,name=maximum_lifetime_seconds,json=maximumLifetimeSeconds,proto3" json:"maximum_lifetime_seconds,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *ExecutorProviderCapabilities) Reset() {
+	*x = ExecutorProviderCapabilities{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[194]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorProviderCapabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorProviderCapabilities) ProtoMessage() {}
+
+func (x *ExecutorProviderCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[194]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorProviderCapabilities.ProtoReflect.Descriptor instead.
+func (*ExecutorProviderCapabilities) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{194}
+}
+
+func (x *ExecutorProviderCapabilities) GetTerminal() bool {
+	if x != nil {
+		return x.Terminal
+	}
+	return false
+}
+
+func (x *ExecutorProviderCapabilities) GetFiles() bool {
+	if x != nil {
+		return x.Files
+	}
+	return false
+}
+
+func (x *ExecutorProviderCapabilities) GetGit() bool {
+	if x != nil {
+		return x.Git
+	}
+	return false
+}
+
+func (x *ExecutorProviderCapabilities) GetEmbeddedEditor() bool {
+	if x != nil {
+		return x.EmbeddedEditor
+	}
+	return false
+}
+
+func (x *ExecutorProviderCapabilities) GetPreview() bool {
+	if x != nil {
+		return x.Preview
+	}
+	return false
+}
+
+func (x *ExecutorProviderCapabilities) GetReattach() bool {
+	if x != nil {
+		return x.Reattach
+	}
+	return false
+}
+
+func (x *ExecutorProviderCapabilities) GetRetention() string {
+	if x != nil {
+		return x.Retention
+	}
+	return ""
+}
+
+func (x *ExecutorProviderCapabilities) GetMaximumLifetimeSeconds() uint64 {
+	if x != nil {
+		return x.MaximumLifetimeSeconds
+	}
+	return 0
+}
+
+type ExecutorResourceDescriptor struct {
+	state          protoimpl.MessageState        `protogen:"open.v1"`
+	ResourceHandle string                        `protobuf:"bytes,1,opt,name=resource_handle,json=resourceHandle,proto3" json:"resource_handle,omitempty"`
+	StateJson      string                        `protobuf:"bytes,2,opt,name=state_json,json=stateJson,proto3" json:"state_json,omitempty"`
+	Platform       string                        `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	Capabilities   *ExecutorProviderCapabilities `protobuf:"bytes,4,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	ExpiresAt      string                        `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Retention      string                        `protobuf:"bytes,6,opt,name=retention,proto3" json:"retention,omitempty"`
+	StateVersion   uint32                        `protobuf:"varint,7,opt,name=state_version,json=stateVersion,proto3" json:"state_version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ExecutorResourceDescriptor) Reset() {
+	*x = ExecutorResourceDescriptor{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[195]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorResourceDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorResourceDescriptor) ProtoMessage() {}
+
+func (x *ExecutorResourceDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[195]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorResourceDescriptor.ProtoReflect.Descriptor instead.
+func (*ExecutorResourceDescriptor) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{195}
+}
+
+func (x *ExecutorResourceDescriptor) GetResourceHandle() string {
+	if x != nil {
+		return x.ResourceHandle
+	}
+	return ""
+}
+
+func (x *ExecutorResourceDescriptor) GetStateJson() string {
+	if x != nil {
+		return x.StateJson
+	}
+	return ""
+}
+
+func (x *ExecutorResourceDescriptor) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ExecutorResourceDescriptor) GetCapabilities() *ExecutorProviderCapabilities {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *ExecutorResourceDescriptor) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *ExecutorResourceDescriptor) GetRetention() string {
+	if x != nil {
+		return x.Retention
+	}
+	return ""
+}
+
+func (x *ExecutorResourceDescriptor) GetStateVersion() uint32 {
+	if x != nil {
+		return x.StateVersion
+	}
+	return 0
+}
+
+type ValidateExecutorProfileRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Profile       *ExecutorProfileSnapshot        `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateExecutorProfileRequest) Reset() {
+	*x = ValidateExecutorProfileRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[196]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateExecutorProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateExecutorProfileRequest) ProtoMessage() {}
+
+func (x *ValidateExecutorProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[196]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateExecutorProfileRequest.ProtoReflect.Descriptor instead.
+func (*ValidateExecutorProfileRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{196}
+}
+
+func (x *ValidateExecutorProfileRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ValidateExecutorProfileRequest) GetProfile() *ExecutorProfileSnapshot {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+type ValidateExecutorProfileResponse struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	FieldErrors   []*ExecutorProviderFieldError `protobuf:"bytes,1,rep,name=field_errors,json=fieldErrors,proto3" json:"field_errors,omitempty"`
+	Capabilities  *ExecutorProviderCapabilities `protobuf:"bytes,2,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Error         *ExecutorProviderError        `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateExecutorProfileResponse) Reset() {
+	*x = ValidateExecutorProfileResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[197]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateExecutorProfileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateExecutorProfileResponse) ProtoMessage() {}
+
+func (x *ValidateExecutorProfileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[197]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateExecutorProfileResponse.ProtoReflect.Descriptor instead.
+func (*ValidateExecutorProfileResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{197}
+}
+
+func (x *ValidateExecutorProfileResponse) GetFieldErrors() []*ExecutorProviderFieldError {
+	if x != nil {
+		return x.FieldErrors
+	}
+	return nil
+}
+
+func (x *ValidateExecutorProfileResponse) GetCapabilities() *ExecutorProviderCapabilities {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *ValidateExecutorProfileResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type ProvisionExecutorEnvironmentRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Profile       *ExecutorProfileSnapshot        `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	BootstrapJson string                          `protobuf:"bytes,3,opt,name=bootstrap_json,json=bootstrapJson,proto3" json:"bootstrap_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionExecutorEnvironmentRequest) Reset() {
+	*x = ProvisionExecutorEnvironmentRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[198]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionExecutorEnvironmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionExecutorEnvironmentRequest) ProtoMessage() {}
+
+func (x *ProvisionExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[198]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
+func (*ProvisionExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{198}
+}
+
+func (x *ProvisionExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ProvisionExecutorEnvironmentRequest) GetProfile() *ExecutorProfileSnapshot {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *ProvisionExecutorEnvironmentRequest) GetBootstrapJson() string {
+	if x != nil {
+		return x.BootstrapJson
+	}
+	return ""
+}
+
+type ProvisionExecutorEnvironmentResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Resource      *ExecutorResourceDescriptor `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	Error         *ExecutorProviderError      `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionExecutorEnvironmentResponse) Reset() {
+	*x = ProvisionExecutorEnvironmentResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[199]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionExecutorEnvironmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionExecutorEnvironmentResponse) ProtoMessage() {}
+
+func (x *ProvisionExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[199]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
+func (*ProvisionExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{199}
+}
+
+func (x *ProvisionExecutorEnvironmentResponse) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *ProvisionExecutorEnvironmentResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type RecoverExecutorOperationRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Profile       *ExecutorProfileSnapshot        `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecoverExecutorOperationRequest) Reset() {
+	*x = RecoverExecutorOperationRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[200]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecoverExecutorOperationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecoverExecutorOperationRequest) ProtoMessage() {}
+
+func (x *RecoverExecutorOperationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[200]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecoverExecutorOperationRequest.ProtoReflect.Descriptor instead.
+func (*RecoverExecutorOperationRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{200}
+}
+
+func (x *RecoverExecutorOperationRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *RecoverExecutorOperationRequest) GetProfile() *ExecutorProfileSnapshot {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+type RecoverExecutorOperationResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Outcome       string                      `protobuf:"bytes,1,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Resource      *ExecutorResourceDescriptor `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	Error         *ExecutorProviderError      `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecoverExecutorOperationResponse) Reset() {
+	*x = RecoverExecutorOperationResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[201]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecoverExecutorOperationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecoverExecutorOperationResponse) ProtoMessage() {}
+
+func (x *RecoverExecutorOperationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[201]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecoverExecutorOperationResponse.ProtoReflect.Descriptor instead.
+func (*RecoverExecutorOperationResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{201}
+}
+
+func (x *RecoverExecutorOperationResponse) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *RecoverExecutorOperationResponse) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *RecoverExecutorOperationResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type AttachExecutorEnvironmentRequest struct {
+	state                   protoimpl.MessageState          `protogen:"open.v1"`
+	Context                 *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource                *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	ExpectedRuntimeIdentity string                          `protobuf:"bytes,3,opt,name=expected_runtime_identity,json=expectedRuntimeIdentity,proto3" json:"expected_runtime_identity,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *AttachExecutorEnvironmentRequest) Reset() {
+	*x = AttachExecutorEnvironmentRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[202]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttachExecutorEnvironmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttachExecutorEnvironmentRequest) ProtoMessage() {}
+
+func (x *AttachExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[202]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttachExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
+func (*AttachExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{202}
+}
+
+func (x *AttachExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *AttachExecutorEnvironmentRequest) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *AttachExecutorEnvironmentRequest) GetExpectedRuntimeIdentity() string {
+	if x != nil {
+		return x.ExpectedRuntimeIdentity
+	}
+	return ""
+}
+
+type AttachExecutorEnvironmentResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Resource      *ExecutorResourceDescriptor `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	Error         *ExecutorProviderError      `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttachExecutorEnvironmentResponse) Reset() {
+	*x = AttachExecutorEnvironmentResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[203]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttachExecutorEnvironmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttachExecutorEnvironmentResponse) ProtoMessage() {}
+
+func (x *AttachExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[203]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttachExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
+func (*AttachExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{203}
+}
+
+func (x *AttachExecutorEnvironmentResponse) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *AttachExecutorEnvironmentResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type InspectExecutorEnvironmentRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource      *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectExecutorEnvironmentRequest) Reset() {
+	*x = InspectExecutorEnvironmentRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[204]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectExecutorEnvironmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectExecutorEnvironmentRequest) ProtoMessage() {}
+
+func (x *InspectExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[204]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
+func (*InspectExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{204}
+}
+
+func (x *InspectExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *InspectExecutorEnvironmentRequest) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+type InspectExecutorEnvironmentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	ExpiresAt     string                 `protobuf:"bytes,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Error         *ExecutorProviderError `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectExecutorEnvironmentResponse) Reset() {
+	*x = InspectExecutorEnvironmentResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[205]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectExecutorEnvironmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectExecutorEnvironmentResponse) ProtoMessage() {}
+
+func (x *InspectExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[205]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
+func (*InspectExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{205}
+}
+
+func (x *InspectExecutorEnvironmentResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *InspectExecutorEnvironmentResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *InspectExecutorEnvironmentResponse) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *InspectExecutorEnvironmentResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type ResolveExecutorConnectionRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource      *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	Purpose       string                          `protobuf:"bytes,3,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	RuntimePort   uint32                          `protobuf:"varint,4,opt,name=runtime_port,json=runtimePort,proto3" json:"runtime_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveExecutorConnectionRequest) Reset() {
+	*x = ResolveExecutorConnectionRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[206]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveExecutorConnectionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveExecutorConnectionRequest) ProtoMessage() {}
+
+func (x *ResolveExecutorConnectionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[206]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveExecutorConnectionRequest.ProtoReflect.Descriptor instead.
+func (*ResolveExecutorConnectionRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{206}
+}
+
+func (x *ResolveExecutorConnectionRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ResolveExecutorConnectionRequest) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *ResolveExecutorConnectionRequest) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *ResolveExecutorConnectionRequest) GetRuntimePort() uint32 {
+	if x != nil {
+		return x.RuntimePort
+	}
+	return 0
+}
+
+type ExecutorConnectionLease struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	BaseUrl               string                 `protobuf:"bytes,1,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	HttpHeaders           map[string]string      `protobuf:"bytes,2,rep,name=http_headers,json=httpHeaders,proto3" json:"http_headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	WebsocketHeaders      map[string]string      `protobuf:"bytes,3,rep,name=websocket_headers,json=websocketHeaders,proto3" json:"websocket_headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	WebsocketSubprotocols []string               `protobuf:"bytes,4,rep,name=websocket_subprotocols,json=websocketSubprotocols,proto3" json:"websocket_subprotocols,omitempty"`
+	ExpiresAt             string                 `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Generation            string                 `protobuf:"bytes,6,opt,name=generation,proto3" json:"generation,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *ExecutorConnectionLease) Reset() {
+	*x = ExecutorConnectionLease{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[207]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorConnectionLease) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorConnectionLease) ProtoMessage() {}
+
+func (x *ExecutorConnectionLease) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[207]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorConnectionLease.ProtoReflect.Descriptor instead.
+func (*ExecutorConnectionLease) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{207}
+}
+
+func (x *ExecutorConnectionLease) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *ExecutorConnectionLease) GetHttpHeaders() map[string]string {
+	if x != nil {
+		return x.HttpHeaders
+	}
+	return nil
+}
+
+func (x *ExecutorConnectionLease) GetWebsocketHeaders() map[string]string {
+	if x != nil {
+		return x.WebsocketHeaders
+	}
+	return nil
+}
+
+func (x *ExecutorConnectionLease) GetWebsocketSubprotocols() []string {
+	if x != nil {
+		return x.WebsocketSubprotocols
+	}
+	return nil
+}
+
+func (x *ExecutorConnectionLease) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *ExecutorConnectionLease) GetGeneration() string {
+	if x != nil {
+		return x.Generation
+	}
+	return ""
+}
+
+type ResolveExecutorConnectionResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Lease         *ExecutorConnectionLease `protobuf:"bytes,1,opt,name=lease,proto3" json:"lease,omitempty"`
+	Error         *ExecutorProviderError   `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveExecutorConnectionResponse) Reset() {
+	*x = ResolveExecutorConnectionResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[208]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveExecutorConnectionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveExecutorConnectionResponse) ProtoMessage() {}
+
+func (x *ResolveExecutorConnectionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[208]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveExecutorConnectionResponse.ProtoReflect.Descriptor instead.
+func (*ResolveExecutorConnectionResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{208}
+}
+
+func (x *ResolveExecutorConnectionResponse) GetLease() *ExecutorConnectionLease {
+	if x != nil {
+		return x.Lease
+	}
+	return nil
+}
+
+func (x *ResolveExecutorConnectionResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type DestroyExecutorEnvironmentRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource      *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	CleanupReason string                          `protobuf:"bytes,3,opt,name=cleanup_reason,json=cleanupReason,proto3" json:"cleanup_reason,omitempty"`
+	CleanupClaim  string                          `protobuf:"bytes,4,opt,name=cleanup_claim,json=cleanupClaim,proto3" json:"cleanup_claim,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DestroyExecutorEnvironmentRequest) Reset() {
+	*x = DestroyExecutorEnvironmentRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[209]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestroyExecutorEnvironmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestroyExecutorEnvironmentRequest) ProtoMessage() {}
+
+func (x *DestroyExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[209]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestroyExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
+func (*DestroyExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{209}
+}
+
+func (x *DestroyExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *DestroyExecutorEnvironmentRequest) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *DestroyExecutorEnvironmentRequest) GetCleanupReason() string {
+	if x != nil {
+		return x.CleanupReason
+	}
+	return ""
+}
+
+func (x *DestroyExecutorEnvironmentRequest) GetCleanupClaim() string {
+	if x != nil {
+		return x.CleanupClaim
+	}
+	return ""
+}
+
+type DestroyExecutorEnvironmentResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ConfirmedAbsent bool                   `protobuf:"varint,1,opt,name=confirmed_absent,json=confirmedAbsent,proto3" json:"confirmed_absent,omitempty"`
+	Error           *ExecutorProviderError `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *DestroyExecutorEnvironmentResponse) Reset() {
+	*x = DestroyExecutorEnvironmentResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[210]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestroyExecutorEnvironmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestroyExecutorEnvironmentResponse) ProtoMessage() {}
+
+func (x *DestroyExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[210]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestroyExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
+func (*DestroyExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{210}
+}
+
+func (x *DestroyExecutorEnvironmentResponse) GetConfirmedAbsent() bool {
+	if x != nil {
+		return x.ConfirmedAbsent
+	}
+	return false
+}
+
+func (x *DestroyExecutorEnvironmentResponse) GetError() *ExecutorProviderError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+type CheckpointExecutorResourceRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource      *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	Phase         string                          `protobuf:"bytes,3,opt,name=phase,proto3" json:"phase,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckpointExecutorResourceRequest) Reset() {
+	*x = CheckpointExecutorResourceRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[211]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckpointExecutorResourceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckpointExecutorResourceRequest) ProtoMessage() {}
+
+func (x *CheckpointExecutorResourceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[211]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckpointExecutorResourceRequest.ProtoReflect.Descriptor instead.
+func (*CheckpointExecutorResourceRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{211}
+}
+
+func (x *CheckpointExecutorResourceRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *CheckpointExecutorResourceRequest) GetResource() *ExecutorResourceDescriptor {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *CheckpointExecutorResourceRequest) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+type CheckpointExecutorResourceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckpointExecutorResourceResponse) Reset() {
+	*x = CheckpointExecutorResourceResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[212]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckpointExecutorResourceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckpointExecutorResourceResponse) ProtoMessage() {}
+
+func (x *CheckpointExecutorResourceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[212]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckpointExecutorResourceResponse.ProtoReflect.Descriptor instead.
+func (*CheckpointExecutorResourceResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{212}
+}
+
+func (x *CheckpointExecutorResourceResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+type ReportExecutorProgressRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Stage         string                          `protobuf:"bytes,2,opt,name=stage,proto3" json:"stage,omitempty"`
+	Completed     uint32                          `protobuf:"varint,3,opt,name=completed,proto3" json:"completed,omitempty"`
+	Total         uint32                          `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportExecutorProgressRequest) Reset() {
+	*x = ReportExecutorProgressRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[213]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportExecutorProgressRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportExecutorProgressRequest) ProtoMessage() {}
+
+func (x *ReportExecutorProgressRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[213]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportExecutorProgressRequest.ProtoReflect.Descriptor instead.
+func (*ReportExecutorProgressRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{213}
+}
+
+func (x *ReportExecutorProgressRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ReportExecutorProgressRequest) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *ReportExecutorProgressRequest) GetCompleted() uint32 {
+	if x != nil {
+		return x.Completed
+	}
+	return 0
+}
+
+func (x *ReportExecutorProgressRequest) GetTotal() uint32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type ReportExecutorProgressResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportExecutorProgressResponse) Reset() {
+	*x = ReportExecutorProgressResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[214]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportExecutorProgressResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportExecutorProgressResponse) ProtoMessage() {}
+
+func (x *ReportExecutorProgressResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[214]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportExecutorProgressResponse.ProtoReflect.Descriptor instead.
+func (*ReportExecutorProgressResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{214}
+}
+
+func (x *ReportExecutorProgressResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+type ReadExecutorRuntimeArtifactRequest struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	ArtifactId    string                          `protobuf:"bytes,2,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Platform      string                          `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadExecutorRuntimeArtifactRequest) Reset() {
+	*x = ReadExecutorRuntimeArtifactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[215]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadExecutorRuntimeArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadExecutorRuntimeArtifactRequest) ProtoMessage() {}
+
+func (x *ReadExecutorRuntimeArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[215]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadExecutorRuntimeArtifactRequest.ProtoReflect.Descriptor instead.
+func (*ReadExecutorRuntimeArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{215}
+}
+
+func (x *ReadExecutorRuntimeArtifactRequest) GetContext() *ExecutorProviderRequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ReadExecutorRuntimeArtifactRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *ReadExecutorRuntimeArtifactRequest) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+type ExecutorRuntimeArtifactChunk struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ArtifactId     string                 `protobuf:"bytes,1,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Version        string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	TotalSizeBytes uint64                 `protobuf:"varint,3,opt,name=total_size_bytes,json=totalSizeBytes,proto3" json:"total_size_bytes,omitempty"`
+	Sha256         string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	ChunkIndex     uint32                 `protobuf:"varint,5,opt,name=chunk_index,json=chunkIndex,proto3" json:"chunk_index,omitempty"`
+	Data           []byte                 `protobuf:"bytes,6,opt,name=data,proto3" json:"data,omitempty"`
+	Final          bool                   `protobuf:"varint,7,opt,name=final,proto3" json:"final,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ExecutorRuntimeArtifactChunk) Reset() {
+	*x = ExecutorRuntimeArtifactChunk{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[216]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutorRuntimeArtifactChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutorRuntimeArtifactChunk) ProtoMessage() {}
+
+func (x *ExecutorRuntimeArtifactChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[216]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutorRuntimeArtifactChunk.ProtoReflect.Descriptor instead.
+func (*ExecutorRuntimeArtifactChunk) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{216}
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetTotalSizeBytes() uint64 {
+	if x != nil {
+		return x.TotalSizeBytes
+	}
+	return 0
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetChunkIndex() uint32 {
+	if x != nil {
+		return x.ChunkIndex
+	}
+	return 0
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *ExecutorRuntimeArtifactChunk) GetFinal() bool {
+	if x != nil {
+		return x.Final
+	}
+	return false
 }
 
 type Repository struct {
@@ -4946,7 +16755,7 @@ type Repository struct {
 
 func (x *Repository) Reset() {
 	*x = Repository{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4958,7 +16767,7 @@ func (x *Repository) String() string {
 func (*Repository) ProtoMessage() {}
 
 func (x *Repository) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4971,7 +16780,7 @@ func (x *Repository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Repository.ProtoReflect.Descriptor instead.
 func (*Repository) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{76}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *Repository) GetId() string {
@@ -5068,7 +16877,7 @@ type ListRepositoriesRequest struct {
 
 func (x *ListRepositoriesRequest) Reset() {
 	*x = ListRepositoriesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5080,7 +16889,7 @@ func (x *ListRepositoriesRequest) String() string {
 func (*ListRepositoriesRequest) ProtoMessage() {}
 
 func (x *ListRepositoriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5093,7 +16902,7 @@ func (x *ListRepositoriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRepositoriesRequest.ProtoReflect.Descriptor instead.
 func (*ListRepositoriesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{77}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *ListRepositoriesRequest) GetWorkspaceId() string {
@@ -5120,7 +16929,7 @@ type ListRepositoriesResponse struct {
 
 func (x *ListRepositoriesResponse) Reset() {
 	*x = ListRepositoriesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5132,7 +16941,7 @@ func (x *ListRepositoriesResponse) String() string {
 func (*ListRepositoriesResponse) ProtoMessage() {}
 
 func (x *ListRepositoriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5145,7 +16954,7 @@ func (x *ListRepositoriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRepositoriesResponse.ProtoReflect.Descriptor instead.
 func (*ListRepositoriesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{78}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *ListRepositoriesResponse) GetRepositories() []*Repository {
@@ -5190,7 +16999,7 @@ type Session struct {
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[220]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5202,7 +17011,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[220]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5215,7 +17024,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{79}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{220}
 }
 
 func (x *Session) GetId() string {
@@ -5299,7 +17108,7 @@ type SessionFilter struct {
 
 func (x *SessionFilter) Reset() {
 	*x = SessionFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5311,7 +17120,7 @@ func (x *SessionFilter) String() string {
 func (*SessionFilter) ProtoMessage() {}
 
 func (x *SessionFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5324,7 +17133,7 @@ func (x *SessionFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFilter.ProtoReflect.Descriptor instead.
 func (*SessionFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{80}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{221}
 }
 
 func (x *SessionFilter) GetTaskIds() []string {
@@ -5358,7 +17167,7 @@ type ListSessionsRequest struct {
 
 func (x *ListSessionsRequest) Reset() {
 	*x = ListSessionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5370,7 +17179,7 @@ func (x *ListSessionsRequest) String() string {
 func (*ListSessionsRequest) ProtoMessage() {}
 
 func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5383,7 +17192,7 @@ func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{81}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{222}
 }
 
 func (x *ListSessionsRequest) GetFilter() *SessionFilter {
@@ -5410,7 +17219,7 @@ type ListSessionsResponse struct {
 
 func (x *ListSessionsResponse) Reset() {
 	*x = ListSessionsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5422,7 +17231,7 @@ func (x *ListSessionsResponse) String() string {
 func (*ListSessionsResponse) ProtoMessage() {}
 
 func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5435,7 +17244,7 @@ func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{82}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *ListSessionsResponse) GetSessions() []*Session {
@@ -5479,7 +17288,7 @@ type SessionCodeStats struct {
 
 func (x *SessionCodeStats) Reset() {
 	*x = SessionCodeStats{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5491,7 +17300,7 @@ func (x *SessionCodeStats) String() string {
 func (*SessionCodeStats) ProtoMessage() {}
 
 func (x *SessionCodeStats) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5504,7 +17313,7 @@ func (x *SessionCodeStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCodeStats.ProtoReflect.Descriptor instead.
 func (*SessionCodeStats) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{83}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{224}
 }
 
 func (x *SessionCodeStats) GetSessionId() string {
@@ -5559,7 +17368,7 @@ type ListSessionCodeStatsRequest struct {
 
 func (x *ListSessionCodeStatsRequest) Reset() {
 	*x = ListSessionCodeStatsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5571,7 +17380,7 @@ func (x *ListSessionCodeStatsRequest) String() string {
 func (*ListSessionCodeStatsRequest) ProtoMessage() {}
 
 func (x *ListSessionCodeStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5584,7 +17393,7 @@ func (x *ListSessionCodeStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionCodeStatsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionCodeStatsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{84}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{225}
 }
 
 func (x *ListSessionCodeStatsRequest) GetFilter() *SessionFilter {
@@ -5611,7 +17420,7 @@ type ListSessionCodeStatsResponse struct {
 
 func (x *ListSessionCodeStatsResponse) Reset() {
 	*x = ListSessionCodeStatsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5623,7 +17432,7 @@ func (x *ListSessionCodeStatsResponse) String() string {
 func (*ListSessionCodeStatsResponse) ProtoMessage() {}
 
 func (x *ListSessionCodeStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5636,7 +17445,7 @@ func (x *ListSessionCodeStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionCodeStatsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionCodeStatsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{85}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{226}
 }
 
 func (x *ListSessionCodeStatsResponse) GetStats() []*SessionCodeStats {
@@ -5675,7 +17484,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5687,7 +17496,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5700,7 +17509,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{86}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{227}
 }
 
 func (x *Message) GetId() string {
@@ -5772,7 +17581,7 @@ type MessageFilter struct {
 
 func (x *MessageFilter) Reset() {
 	*x = MessageFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5784,7 +17593,7 @@ func (x *MessageFilter) String() string {
 func (*MessageFilter) ProtoMessage() {}
 
 func (x *MessageFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5797,7 +17606,7 @@ func (x *MessageFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageFilter.ProtoReflect.Descriptor instead.
 func (*MessageFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{87}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{228}
 }
 
 func (x *MessageFilter) GetSessionIds() []string {
@@ -5845,7 +17654,7 @@ type ListMessagesRequest struct {
 
 func (x *ListMessagesRequest) Reset() {
 	*x = ListMessagesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5857,7 +17666,7 @@ func (x *ListMessagesRequest) String() string {
 func (*ListMessagesRequest) ProtoMessage() {}
 
 func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5870,7 +17679,7 @@ func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesRequest.ProtoReflect.Descriptor instead.
 func (*ListMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{88}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *ListMessagesRequest) GetFilter() *MessageFilter {
@@ -5897,7 +17706,7 @@ type ListMessagesResponse struct {
 
 func (x *ListMessagesResponse) Reset() {
 	*x = ListMessagesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[230]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5909,7 +17718,7 @@ func (x *ListMessagesResponse) String() string {
 func (*ListMessagesResponse) ProtoMessage() {}
 
 func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[230]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5922,7 +17731,7 @@ func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesResponse.ProtoReflect.Descriptor instead.
 func (*ListMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{89}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{230}
 }
 
 func (x *ListMessagesResponse) GetMessages() []*Message {
@@ -5963,7 +17772,7 @@ type InteractionOption struct {
 
 func (x *InteractionOption) Reset() {
 	*x = InteractionOption{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[231]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5975,7 +17784,7 @@ func (x *InteractionOption) String() string {
 func (*InteractionOption) ProtoMessage() {}
 
 func (x *InteractionOption) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[231]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5988,7 +17797,7 @@ func (x *InteractionOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionOption.ProtoReflect.Descriptor instead.
 func (*InteractionOption) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{90}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{231}
 }
 
 func (x *InteractionOption) GetOptionId() string {
@@ -6031,7 +17840,7 @@ type InteractionQuestion struct {
 
 func (x *InteractionQuestion) Reset() {
 	*x = InteractionQuestion{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[232]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6043,7 +17852,7 @@ func (x *InteractionQuestion) String() string {
 func (*InteractionQuestion) ProtoMessage() {}
 
 func (x *InteractionQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[232]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6056,7 +17865,7 @@ func (x *InteractionQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionQuestion.ProtoReflect.Descriptor instead.
 func (*InteractionQuestion) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{91}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{232}
 }
 
 func (x *InteractionQuestion) GetId() string {
@@ -6116,7 +17925,7 @@ type Interaction struct {
 
 func (x *Interaction) Reset() {
 	*x = Interaction{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[233]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6128,7 +17937,7 @@ func (x *Interaction) String() string {
 func (*Interaction) ProtoMessage() {}
 
 func (x *Interaction) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[233]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6141,7 +17950,7 @@ func (x *Interaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Interaction.ProtoReflect.Descriptor instead.
 func (*Interaction) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{92}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{233}
 }
 
 func (x *Interaction) GetId() string {
@@ -6260,7 +18069,7 @@ type InteractionFilter struct {
 
 func (x *InteractionFilter) Reset() {
 	*x = InteractionFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[234]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6272,7 +18081,7 @@ func (x *InteractionFilter) String() string {
 func (*InteractionFilter) ProtoMessage() {}
 
 func (x *InteractionFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[234]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6285,7 +18094,7 @@ func (x *InteractionFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionFilter.ProtoReflect.Descriptor instead.
 func (*InteractionFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{93}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{234}
 }
 
 func (x *InteractionFilter) GetSessionIds() []string {
@@ -6319,7 +18128,7 @@ type ListPendingInteractionsRequest struct {
 
 func (x *ListPendingInteractionsRequest) Reset() {
 	*x = ListPendingInteractionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6331,7 +18140,7 @@ func (x *ListPendingInteractionsRequest) String() string {
 func (*ListPendingInteractionsRequest) ProtoMessage() {}
 
 func (x *ListPendingInteractionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6344,7 +18153,7 @@ func (x *ListPendingInteractionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPendingInteractionsRequest.ProtoReflect.Descriptor instead.
 func (*ListPendingInteractionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{94}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{235}
 }
 
 func (x *ListPendingInteractionsRequest) GetFilter() *InteractionFilter {
@@ -6371,7 +18180,7 @@ type ListPendingInteractionsResponse struct {
 
 func (x *ListPendingInteractionsResponse) Reset() {
 	*x = ListPendingInteractionsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6383,7 +18192,7 @@ func (x *ListPendingInteractionsResponse) String() string {
 func (*ListPendingInteractionsResponse) ProtoMessage() {}
 
 func (x *ListPendingInteractionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6396,7 +18205,7 @@ func (x *ListPendingInteractionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPendingInteractionsResponse.ProtoReflect.Descriptor instead.
 func (*ListPendingInteractionsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{95}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{236}
 }
 
 func (x *ListPendingInteractionsResponse) GetInteractions() []*Interaction {
@@ -6422,7 +18231,7 @@ type GetInteractionRequest struct {
 
 func (x *GetInteractionRequest) Reset() {
 	*x = GetInteractionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6434,7 +18243,7 @@ func (x *GetInteractionRequest) String() string {
 func (*GetInteractionRequest) ProtoMessage() {}
 
 func (x *GetInteractionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6447,7 +18256,7 @@ func (x *GetInteractionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInteractionRequest.ProtoReflect.Descriptor instead.
 func (*GetInteractionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{96}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{237}
 }
 
 func (x *GetInteractionRequest) GetId() string {
@@ -6466,7 +18275,7 @@ type GetInteractionResponse struct {
 
 func (x *GetInteractionResponse) Reset() {
 	*x = GetInteractionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[238]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6478,7 +18287,7 @@ func (x *GetInteractionResponse) String() string {
 func (*GetInteractionResponse) ProtoMessage() {}
 
 func (x *GetInteractionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[238]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6491,7 +18300,7 @@ func (x *GetInteractionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInteractionResponse.ProtoReflect.Descriptor instead.
 func (*GetInteractionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{97}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{238}
 }
 
 func (x *GetInteractionResponse) GetInteraction() *Interaction {
@@ -6518,7 +18327,7 @@ type RespondToPermissionRequest struct {
 
 func (x *RespondToPermissionRequest) Reset() {
 	*x = RespondToPermissionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6530,7 +18339,7 @@ func (x *RespondToPermissionRequest) String() string {
 func (*RespondToPermissionRequest) ProtoMessage() {}
 
 func (x *RespondToPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6543,7 +18352,7 @@ func (x *RespondToPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondToPermissionRequest.ProtoReflect.Descriptor instead.
 func (*RespondToPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{98}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{239}
 }
 
 func (x *RespondToPermissionRequest) GetId() string {
@@ -6576,7 +18385,7 @@ type RespondToPermissionResponse struct {
 
 func (x *RespondToPermissionResponse) Reset() {
 	*x = RespondToPermissionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6588,7 +18397,7 @@ func (x *RespondToPermissionResponse) String() string {
 func (*RespondToPermissionResponse) ProtoMessage() {}
 
 func (x *RespondToPermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6601,7 +18410,7 @@ func (x *RespondToPermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondToPermissionResponse.ProtoReflect.Descriptor instead.
 func (*RespondToPermissionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{99}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{240}
 }
 
 func (x *RespondToPermissionResponse) GetInteraction() *Interaction {
@@ -6622,7 +18431,7 @@ type ClarificationAnswer struct {
 
 func (x *ClarificationAnswer) Reset() {
 	*x = ClarificationAnswer{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[241]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6634,7 +18443,7 @@ func (x *ClarificationAnswer) String() string {
 func (*ClarificationAnswer) ProtoMessage() {}
 
 func (x *ClarificationAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[241]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6647,7 +18456,7 @@ func (x *ClarificationAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClarificationAnswer.ProtoReflect.Descriptor instead.
 func (*ClarificationAnswer) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{100}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{241}
 }
 
 func (x *ClarificationAnswer) GetQuestionId() string {
@@ -6683,7 +18492,7 @@ type AnswerClarificationRequest struct {
 
 func (x *AnswerClarificationRequest) Reset() {
 	*x = AnswerClarificationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[242]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6695,7 +18504,7 @@ func (x *AnswerClarificationRequest) String() string {
 func (*AnswerClarificationRequest) ProtoMessage() {}
 
 func (x *AnswerClarificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[242]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6708,7 +18517,7 @@ func (x *AnswerClarificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerClarificationRequest.ProtoReflect.Descriptor instead.
 func (*AnswerClarificationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{101}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{242}
 }
 
 func (x *AnswerClarificationRequest) GetId() string {
@@ -6734,7 +18543,7 @@ type AnswerClarificationResponse struct {
 
 func (x *AnswerClarificationResponse) Reset() {
 	*x = AnswerClarificationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[243]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6746,7 +18555,7 @@ func (x *AnswerClarificationResponse) String() string {
 func (*AnswerClarificationResponse) ProtoMessage() {}
 
 func (x *AnswerClarificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[243]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6759,7 +18568,7 @@ func (x *AnswerClarificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerClarificationResponse.ProtoReflect.Descriptor instead.
 func (*AnswerClarificationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{102}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{243}
 }
 
 func (x *AnswerClarificationResponse) GetInteraction() *Interaction {
@@ -6779,7 +18588,7 @@ type CancelClarificationRequest struct {
 
 func (x *CancelClarificationRequest) Reset() {
 	*x = CancelClarificationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[244]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6791,7 +18600,7 @@ func (x *CancelClarificationRequest) String() string {
 func (*CancelClarificationRequest) ProtoMessage() {}
 
 func (x *CancelClarificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[244]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6804,7 +18613,7 @@ func (x *CancelClarificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelClarificationRequest.ProtoReflect.Descriptor instead.
 func (*CancelClarificationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{103}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{244}
 }
 
 func (x *CancelClarificationRequest) GetId() string {
@@ -6830,7 +18639,7 @@ type CancelClarificationResponse struct {
 
 func (x *CancelClarificationResponse) Reset() {
 	*x = CancelClarificationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[245]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6842,7 +18651,7 @@ func (x *CancelClarificationResponse) String() string {
 func (*CancelClarificationResponse) ProtoMessage() {}
 
 func (x *CancelClarificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[245]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6855,7 +18664,7 @@ func (x *CancelClarificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelClarificationResponse.ProtoReflect.Descriptor instead.
 func (*CancelClarificationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{104}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{245}
 }
 
 func (x *CancelClarificationResponse) GetInteraction() *Interaction {
@@ -6876,7 +18685,7 @@ type InvokeUtilityAgentRequest struct {
 
 func (x *InvokeUtilityAgentRequest) Reset() {
 	*x = InvokeUtilityAgentRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[246]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6888,7 +18697,7 @@ func (x *InvokeUtilityAgentRequest) String() string {
 func (*InvokeUtilityAgentRequest) ProtoMessage() {}
 
 func (x *InvokeUtilityAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[246]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6901,7 +18710,7 @@ func (x *InvokeUtilityAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeUtilityAgentRequest.ProtoReflect.Descriptor instead.
 func (*InvokeUtilityAgentRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{105}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{246}
 }
 
 func (x *InvokeUtilityAgentRequest) GetPrompt() string {
@@ -6921,7 +18730,7 @@ type InvokeUtilityAgentWithOptionsRequest struct {
 
 func (x *InvokeUtilityAgentWithOptionsRequest) Reset() {
 	*x = InvokeUtilityAgentWithOptionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[247]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6933,7 +18742,7 @@ func (x *InvokeUtilityAgentWithOptionsRequest) String() string {
 func (*InvokeUtilityAgentWithOptionsRequest) ProtoMessage() {}
 
 func (x *InvokeUtilityAgentWithOptionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[247]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6946,7 +18755,7 @@ func (x *InvokeUtilityAgentWithOptionsRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use InvokeUtilityAgentWithOptionsRequest.ProtoReflect.Descriptor instead.
 func (*InvokeUtilityAgentWithOptionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{106}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{247}
 }
 
 func (x *InvokeUtilityAgentWithOptionsRequest) GetPrompt() string {
@@ -6972,7 +18781,7 @@ type InvokeUtilityAgentResponse struct {
 
 func (x *InvokeUtilityAgentResponse) Reset() {
 	*x = InvokeUtilityAgentResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[248]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6984,7 +18793,7 @@ func (x *InvokeUtilityAgentResponse) String() string {
 func (*InvokeUtilityAgentResponse) ProtoMessage() {}
 
 func (x *InvokeUtilityAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[248]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6997,7 +18806,7 @@ func (x *InvokeUtilityAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeUtilityAgentResponse.ProtoReflect.Descriptor instead.
 func (*InvokeUtilityAgentResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{107}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{248}
 }
 
 func (x *InvokeUtilityAgentResponse) GetText() string {
@@ -7029,7 +18838,7 @@ type CreateTaskRequest struct {
 
 func (x *CreateTaskRequest) Reset() {
 	*x = CreateTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[249]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7041,7 +18850,7 @@ func (x *CreateTaskRequest) String() string {
 func (*CreateTaskRequest) ProtoMessage() {}
 
 func (x *CreateTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[249]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7054,7 +18863,7 @@ func (x *CreateTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskRequest.ProtoReflect.Descriptor instead.
 func (*CreateTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{108}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{249}
 }
 
 func (x *CreateTaskRequest) GetWorkspaceId() string {
@@ -7147,7 +18956,7 @@ type PluginTaskRepository struct {
 
 func (x *PluginTaskRepository) Reset() {
 	*x = PluginTaskRepository{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[250]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7159,7 +18968,7 @@ func (x *PluginTaskRepository) String() string {
 func (*PluginTaskRepository) ProtoMessage() {}
 
 func (x *PluginTaskRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[250]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7172,7 +18981,7 @@ func (x *PluginTaskRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginTaskRepository.ProtoReflect.Descriptor instead.
 func (*PluginTaskRepository) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{109}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{250}
 }
 
 func (x *PluginTaskRepository) GetRepositoryId() string {
@@ -7231,7 +19040,7 @@ type RemoteRepositoryDescriptor struct {
 
 func (x *RemoteRepositoryDescriptor) Reset() {
 	*x = RemoteRepositoryDescriptor{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[251]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7243,7 +19052,7 @@ func (x *RemoteRepositoryDescriptor) String() string {
 func (*RemoteRepositoryDescriptor) ProtoMessage() {}
 
 func (x *RemoteRepositoryDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[251]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7256,7 +19065,7 @@ func (x *RemoteRepositoryDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteRepositoryDescriptor.ProtoReflect.Descriptor instead.
 func (*RemoteRepositoryDescriptor) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{110}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{251}
 }
 
 func (x *RemoteRepositoryDescriptor) GetProviderId() string {
@@ -7348,7 +19157,7 @@ type PluginTaskLaunchOptions struct {
 
 func (x *PluginTaskLaunchOptions) Reset() {
 	*x = PluginTaskLaunchOptions{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[252]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7360,7 +19169,7 @@ func (x *PluginTaskLaunchOptions) String() string {
 func (*PluginTaskLaunchOptions) ProtoMessage() {}
 
 func (x *PluginTaskLaunchOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[252]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7373,7 +19182,7 @@ func (x *PluginTaskLaunchOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginTaskLaunchOptions.ProtoReflect.Descriptor instead.
 func (*PluginTaskLaunchOptions) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{111}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{252}
 }
 
 func (x *PluginTaskLaunchOptions) GetAgentProfileId() string {
@@ -7413,7 +19222,7 @@ type CreateTaskResponse struct {
 
 func (x *CreateTaskResponse) Reset() {
 	*x = CreateTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[253]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7425,7 +19234,7 @@ func (x *CreateTaskResponse) String() string {
 func (*CreateTaskResponse) ProtoMessage() {}
 
 func (x *CreateTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[253]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7438,7 +19247,7 @@ func (x *CreateTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskResponse.ProtoReflect.Descriptor instead.
 func (*CreateTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{112}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{253}
 }
 
 func (x *CreateTaskResponse) GetTask() *Task {
@@ -7462,7 +19271,7 @@ type UpdateTaskRequest struct {
 
 func (x *UpdateTaskRequest) Reset() {
 	*x = UpdateTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[254]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7474,7 +19283,7 @@ func (x *UpdateTaskRequest) String() string {
 func (*UpdateTaskRequest) ProtoMessage() {}
 
 func (x *UpdateTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[254]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7487,7 +19296,7 @@ func (x *UpdateTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTaskRequest.ProtoReflect.Descriptor instead.
 func (*UpdateTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{113}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{254}
 }
 
 func (x *UpdateTaskRequest) GetId() string {
@@ -7541,7 +19350,7 @@ type UpdateTaskResponse struct {
 
 func (x *UpdateTaskResponse) Reset() {
 	*x = UpdateTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7553,7 +19362,7 @@ func (x *UpdateTaskResponse) String() string {
 func (*UpdateTaskResponse) ProtoMessage() {}
 
 func (x *UpdateTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7566,7 +19375,7 @@ func (x *UpdateTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTaskResponse.ProtoReflect.Descriptor instead.
 func (*UpdateTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{114}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{255}
 }
 
 func (x *UpdateTaskResponse) GetTask() *Task {
@@ -7595,7 +19404,7 @@ type MoveTaskRequest struct {
 
 func (x *MoveTaskRequest) Reset() {
 	*x = MoveTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7607,7 +19416,7 @@ func (x *MoveTaskRequest) String() string {
 func (*MoveTaskRequest) ProtoMessage() {}
 
 func (x *MoveTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7620,7 +19429,7 @@ func (x *MoveTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveTaskRequest.ProtoReflect.Descriptor instead.
 func (*MoveTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{115}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{256}
 }
 
 func (x *MoveTaskRequest) GetTaskId() string {
@@ -7669,7 +19478,7 @@ type MoveTaskResponse struct {
 
 func (x *MoveTaskResponse) Reset() {
 	*x = MoveTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7681,7 +19490,7 @@ func (x *MoveTaskResponse) String() string {
 func (*MoveTaskResponse) ProtoMessage() {}
 
 func (x *MoveTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7694,7 +19503,7 @@ func (x *MoveTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveTaskResponse.ProtoReflect.Descriptor instead.
 func (*MoveTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{116}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *MoveTaskResponse) GetTask() *Task {
@@ -7742,7 +19551,7 @@ type SendMessageRequest struct {
 
 func (x *SendMessageRequest) Reset() {
 	*x = SendMessageRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7754,7 +19563,7 @@ func (x *SendMessageRequest) String() string {
 func (*SendMessageRequest) ProtoMessage() {}
 
 func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7767,7 +19576,7 @@ func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageRequest.ProtoReflect.Descriptor instead.
 func (*SendMessageRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{117}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *SendMessageRequest) GetTaskId() string {
@@ -7801,7 +19610,7 @@ type SendMessageResponse struct {
 
 func (x *SendMessageResponse) Reset() {
 	*x = SendMessageResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7813,7 +19622,7 @@ func (x *SendMessageResponse) String() string {
 func (*SendMessageResponse) ProtoMessage() {}
 
 func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7826,7 +19635,7 @@ func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageResponse.ProtoReflect.Descriptor instead.
 func (*SendMessageResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{118}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *SendMessageResponse) GetSessionId() string {
@@ -7852,7 +19661,7 @@ type PreviewPluginOwnedTaskTreeRequest struct {
 
 func (x *PreviewPluginOwnedTaskTreeRequest) Reset() {
 	*x = PreviewPluginOwnedTaskTreeRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7864,7 +19673,7 @@ func (x *PreviewPluginOwnedTaskTreeRequest) String() string {
 func (*PreviewPluginOwnedTaskTreeRequest) ProtoMessage() {}
 
 func (x *PreviewPluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7877,7 +19686,7 @@ func (x *PreviewPluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PreviewPluginOwnedTaskTreeRequest.ProtoReflect.Descriptor instead.
 func (*PreviewPluginOwnedTaskTreeRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{119}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{260}
 }
 
 func (x *PreviewPluginOwnedTaskTreeRequest) GetRootTaskId() string {
@@ -7896,7 +19705,7 @@ type PreviewPluginOwnedTaskTreeResponse struct {
 
 func (x *PreviewPluginOwnedTaskTreeResponse) Reset() {
 	*x = PreviewPluginOwnedTaskTreeResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[261]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7908,7 +19717,7 @@ func (x *PreviewPluginOwnedTaskTreeResponse) String() string {
 func (*PreviewPluginOwnedTaskTreeResponse) ProtoMessage() {}
 
 func (x *PreviewPluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[261]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7921,7 +19730,7 @@ func (x *PreviewPluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use PreviewPluginOwnedTaskTreeResponse.ProtoReflect.Descriptor instead.
 func (*PreviewPluginOwnedTaskTreeResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{120}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{261}
 }
 
 func (x *PreviewPluginOwnedTaskTreeResponse) GetTasks() []*Task {
@@ -7940,7 +19749,7 @@ type DeletePluginOwnedTaskTreeRequest struct {
 
 func (x *DeletePluginOwnedTaskTreeRequest) Reset() {
 	*x = DeletePluginOwnedTaskTreeRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[262]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7952,7 +19761,7 @@ func (x *DeletePluginOwnedTaskTreeRequest) String() string {
 func (*DeletePluginOwnedTaskTreeRequest) ProtoMessage() {}
 
 func (x *DeletePluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[262]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7965,7 +19774,7 @@ func (x *DeletePluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePluginOwnedTaskTreeRequest.ProtoReflect.Descriptor instead.
 func (*DeletePluginOwnedTaskTreeRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{121}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{262}
 }
 
 func (x *DeletePluginOwnedTaskTreeRequest) GetRootTaskId() string {
@@ -7984,7 +19793,7 @@ type DeletePluginOwnedTaskTreeResponse struct {
 
 func (x *DeletePluginOwnedTaskTreeResponse) Reset() {
 	*x = DeletePluginOwnedTaskTreeResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[263]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7996,7 +19805,7 @@ func (x *DeletePluginOwnedTaskTreeResponse) String() string {
 func (*DeletePluginOwnedTaskTreeResponse) ProtoMessage() {}
 
 func (x *DeletePluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[263]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8009,7 +19818,7 @@ func (x *DeletePluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DeletePluginOwnedTaskTreeResponse.ProtoReflect.Descriptor instead.
 func (*DeletePluginOwnedTaskTreeResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{122}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{263}
 }
 
 func (x *DeletePluginOwnedTaskTreeResponse) GetDeletedTaskIds() []string {
@@ -8019,9 +19828,8 @@ func (x *DeletePluginOwnedTaskTreeResponse) GetDeletedTaskIds() []string {
 	return nil
 }
 
-// Attached to a non-OK DeletePluginOwnedTaskTree gRPC status when one or more
-// descendants were already deleted. Callers must reconcile these ids before
-// retrying the remaining idempotent cleanup.
+// Legacy progress detail retained for wire compatibility. The current Kandev
+// Host denies DeletePluginOwnedTaskTree before any task deletion can occur.
 type DeletePluginOwnedTaskTreeProgress struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	DeletedTaskIds []string               `protobuf:"bytes,1,rep,name=deleted_task_ids,json=deletedTaskIds,proto3" json:"deleted_task_ids,omitempty"`
@@ -8031,7 +19839,7 @@ type DeletePluginOwnedTaskTreeProgress struct {
 
 func (x *DeletePluginOwnedTaskTreeProgress) Reset() {
 	*x = DeletePluginOwnedTaskTreeProgress{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[264]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8043,7 +19851,7 @@ func (x *DeletePluginOwnedTaskTreeProgress) String() string {
 func (*DeletePluginOwnedTaskTreeProgress) ProtoMessage() {}
 
 func (x *DeletePluginOwnedTaskTreeProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[264]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8056,7 +19864,7 @@ func (x *DeletePluginOwnedTaskTreeProgress) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DeletePluginOwnedTaskTreeProgress.ProtoReflect.Descriptor instead.
 func (*DeletePluginOwnedTaskTreeProgress) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{123}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{264}
 }
 
 func (x *DeletePluginOwnedTaskTreeProgress) GetDeletedTaskIds() []string {
@@ -8082,7 +19890,7 @@ type AgentConversationDescriptor struct {
 
 func (x *AgentConversationDescriptor) Reset() {
 	*x = AgentConversationDescriptor{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[265]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8094,7 +19902,7 @@ func (x *AgentConversationDescriptor) String() string {
 func (*AgentConversationDescriptor) ProtoMessage() {}
 
 func (x *AgentConversationDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[265]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8107,7 +19915,7 @@ func (x *AgentConversationDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentConversationDescriptor.ProtoReflect.Descriptor instead.
 func (*AgentConversationDescriptor) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{124}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{265}
 }
 
 func (x *AgentConversationDescriptor) GetTaskId() string {
@@ -8163,7 +19971,7 @@ type AgentConversationSpec struct {
 
 func (x *AgentConversationSpec) Reset() {
 	*x = AgentConversationSpec{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[266]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8175,7 +19983,7 @@ func (x *AgentConversationSpec) String() string {
 func (*AgentConversationSpec) ProtoMessage() {}
 
 func (x *AgentConversationSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[266]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8188,7 +19996,7 @@ func (x *AgentConversationSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentConversationSpec.ProtoReflect.Descriptor instead.
 func (*AgentConversationSpec) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{125}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{266}
 }
 
 func (x *AgentConversationSpec) GetWorkspaceId() string {
@@ -8229,7 +20037,7 @@ type EnsureAgentConversationRequest struct {
 
 func (x *EnsureAgentConversationRequest) Reset() {
 	*x = EnsureAgentConversationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[267]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8241,7 +20049,7 @@ func (x *EnsureAgentConversationRequest) String() string {
 func (*EnsureAgentConversationRequest) ProtoMessage() {}
 
 func (x *EnsureAgentConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[267]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8254,7 +20062,7 @@ func (x *EnsureAgentConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureAgentConversationRequest.ProtoReflect.Descriptor instead.
 func (*EnsureAgentConversationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{126}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{267}
 }
 
 func (x *EnsureAgentConversationRequest) GetSpec() *AgentConversationSpec {
@@ -8276,7 +20084,7 @@ type EnsureAgentConversationResponse struct {
 
 func (x *EnsureAgentConversationResponse) Reset() {
 	*x = EnsureAgentConversationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[268]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8288,7 +20096,7 @@ func (x *EnsureAgentConversationResponse) String() string {
 func (*EnsureAgentConversationResponse) ProtoMessage() {}
 
 func (x *EnsureAgentConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[268]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8301,7 +20109,7 @@ func (x *EnsureAgentConversationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureAgentConversationResponse.ProtoReflect.Descriptor instead.
 func (*EnsureAgentConversationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{127}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{268}
 }
 
 func (x *EnsureAgentConversationResponse) GetConvDescriptor() *AgentConversationDescriptor {
@@ -8334,7 +20142,7 @@ type DispatchAgentConversationRequest struct {
 
 func (x *DispatchAgentConversationRequest) Reset() {
 	*x = DispatchAgentConversationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[269]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8346,7 +20154,7 @@ func (x *DispatchAgentConversationRequest) String() string {
 func (*DispatchAgentConversationRequest) ProtoMessage() {}
 
 func (x *DispatchAgentConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[269]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8359,7 +20167,7 @@ func (x *DispatchAgentConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchAgentConversationRequest.ProtoReflect.Descriptor instead.
 func (*DispatchAgentConversationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{128}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{269}
 }
 
 func (x *DispatchAgentConversationRequest) GetWorkspaceId() string {
@@ -8403,7 +20211,7 @@ type DispatchAgentConversationResponse struct {
 
 func (x *DispatchAgentConversationResponse) Reset() {
 	*x = DispatchAgentConversationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[270]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8415,7 +20223,7 @@ func (x *DispatchAgentConversationResponse) String() string {
 func (*DispatchAgentConversationResponse) ProtoMessage() {}
 
 func (x *DispatchAgentConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[270]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8428,7 +20236,7 @@ func (x *DispatchAgentConversationResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DispatchAgentConversationResponse.ProtoReflect.Descriptor instead.
 func (*DispatchAgentConversationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{129}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{270}
 }
 
 func (x *DispatchAgentConversationResponse) GetSessionId() string {
@@ -8464,7 +20272,7 @@ type DeleteAgentConversationRequest struct {
 
 func (x *DeleteAgentConversationRequest) Reset() {
 	*x = DeleteAgentConversationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[271]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8476,7 +20284,7 @@ func (x *DeleteAgentConversationRequest) String() string {
 func (*DeleteAgentConversationRequest) ProtoMessage() {}
 
 func (x *DeleteAgentConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[271]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8489,7 +20297,7 @@ func (x *DeleteAgentConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAgentConversationRequest.ProtoReflect.Descriptor instead.
 func (*DeleteAgentConversationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{130}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{271}
 }
 
 func (x *DeleteAgentConversationRequest) GetWorkspaceId() string {
@@ -8516,7 +20324,7 @@ type DeleteAgentConversationResponse struct {
 
 func (x *DeleteAgentConversationResponse) Reset() {
 	*x = DeleteAgentConversationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[272]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8528,7 +20336,7 @@ func (x *DeleteAgentConversationResponse) String() string {
 func (*DeleteAgentConversationResponse) ProtoMessage() {}
 
 func (x *DeleteAgentConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[272]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8541,7 +20349,7 @@ func (x *DeleteAgentConversationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAgentConversationResponse.ProtoReflect.Descriptor instead.
 func (*DeleteAgentConversationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{131}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{272}
 }
 
 func (x *DeleteAgentConversationResponse) GetDeletedCount() int32 {
@@ -8563,7 +20371,7 @@ type AutomationConditionRequest struct {
 
 func (x *AutomationConditionRequest) Reset() {
 	*x = AutomationConditionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[273]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8575,7 +20383,7 @@ func (x *AutomationConditionRequest) String() string {
 func (*AutomationConditionRequest) ProtoMessage() {}
 
 func (x *AutomationConditionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[273]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8588,7 +20396,7 @@ func (x *AutomationConditionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationConditionRequest.ProtoReflect.Descriptor instead.
 func (*AutomationConditionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{132}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{273}
 }
 
 func (x *AutomationConditionRequest) GetWorkspaceId() string {
@@ -8626,7 +20434,7 @@ type AutomationConditionResponse struct {
 
 func (x *AutomationConditionResponse) Reset() {
 	*x = AutomationConditionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[274]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8638,7 +20446,7 @@ func (x *AutomationConditionResponse) String() string {
 func (*AutomationConditionResponse) ProtoMessage() {}
 
 func (x *AutomationConditionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[274]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8651,7 +20459,7 @@ func (x *AutomationConditionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationConditionResponse.ProtoReflect.Descriptor instead.
 func (*AutomationConditionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{133}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{274}
 }
 
 func (x *AutomationConditionResponse) GetAvailable() bool {
@@ -8705,7 +20513,7 @@ type AutomationWebhookRequest struct {
 
 func (x *AutomationWebhookRequest) Reset() {
 	*x = AutomationWebhookRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[275]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8717,7 +20525,7 @@ func (x *AutomationWebhookRequest) String() string {
 func (*AutomationWebhookRequest) ProtoMessage() {}
 
 func (x *AutomationWebhookRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[275]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8730,7 +20538,7 @@ func (x *AutomationWebhookRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationWebhookRequest.ProtoReflect.Descriptor instead.
 func (*AutomationWebhookRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{134}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{275}
 }
 
 func (x *AutomationWebhookRequest) GetWorkspaceId() string {
@@ -8801,7 +20609,7 @@ type AutomationWebhookResponse struct {
 
 func (x *AutomationWebhookResponse) Reset() {
 	*x = AutomationWebhookResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[276]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8813,7 +20621,7 @@ func (x *AutomationWebhookResponse) String() string {
 func (*AutomationWebhookResponse) ProtoMessage() {}
 
 func (x *AutomationWebhookResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[276]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8826,7 +20634,7 @@ func (x *AutomationWebhookResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationWebhookResponse.ProtoReflect.Descriptor instead.
 func (*AutomationWebhookResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{135}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{276}
 }
 
 func (x *AutomationWebhookResponse) GetOutcome() string {
@@ -8850,11 +20658,4491 @@ func (x *AutomationWebhookResponse) GetData() []byte {
 	return nil
 }
 
+// Exact Host reads are workspace-explicit and use a cursor bound to the
+// installation, capability revision, query, and immutable response snapshot.
+type ExactReadPage struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Limit           int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor          string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	SnapshotVersion string                 `protobuf:"bytes,3,opt,name=snapshot_version,json=snapshotVersion,proto3" json:"snapshot_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactReadPage) Reset() {
+	*x = ExactReadPage{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[277]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactReadPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactReadPage) ProtoMessage() {}
+
+func (x *ExactReadPage) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[277]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactReadPage.ProtoReflect.Descriptor instead.
+func (*ExactReadPage) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{277}
+}
+
+func (x *ExactReadPage) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ExactReadPage) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ExactReadPage) GetSnapshotVersion() string {
+	if x != nil {
+		return x.SnapshotVersion
+	}
+	return ""
+}
+
+type HostReadReceipt struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	InstallationId     string                 `protobuf:"bytes,1,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	WorkspaceId        string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	CapabilityRevision uint64                 `protobuf:"varint,3,opt,name=capability_revision,json=capabilityRevision,proto3" json:"capability_revision,omitempty"`
+	RequestId          string                 `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SnapshotVersion    string                 `protobuf:"bytes,5,opt,name=snapshot_version,json=snapshotVersion,proto3" json:"snapshot_version,omitempty"`
+	ObservedAt         string                 `protobuf:"bytes,6,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *HostReadReceipt) Reset() {
+	*x = HostReadReceipt{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[278]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostReadReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostReadReceipt) ProtoMessage() {}
+
+func (x *HostReadReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[278]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostReadReceipt.ProtoReflect.Descriptor instead.
+func (*HostReadReceipt) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{278}
+}
+
+func (x *HostReadReceipt) GetInstallationId() string {
+	if x != nil {
+		return x.InstallationId
+	}
+	return ""
+}
+
+func (x *HostReadReceipt) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *HostReadReceipt) GetCapabilityRevision() uint64 {
+	if x != nil {
+		return x.CapabilityRevision
+	}
+	return 0
+}
+
+func (x *HostReadReceipt) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *HostReadReceipt) GetSnapshotVersion() string {
+	if x != nil {
+		return x.SnapshotVersion
+	}
+	return ""
+}
+
+func (x *HostReadReceipt) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type ExactReadPageInfo struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	NextCursor      string                 `protobuf:"bytes,1,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore         bool                   `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	SnapshotVersion string                 `protobuf:"bytes,3,opt,name=snapshot_version,json=snapshotVersion,proto3" json:"snapshot_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	Receipt         *HostReadReceipt       `protobuf:"bytes,5,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactReadPageInfo) Reset() {
+	*x = ExactReadPageInfo{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[279]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactReadPageInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactReadPageInfo) ProtoMessage() {}
+
+func (x *ExactReadPageInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[279]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactReadPageInfo.ProtoReflect.Descriptor instead.
+func (*ExactReadPageInfo) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{279}
+}
+
+func (x *ExactReadPageInfo) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *ExactReadPageInfo) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+func (x *ExactReadPageInfo) GetSnapshotVersion() string {
+	if x != nil {
+		return x.SnapshotVersion
+	}
+	return ""
+}
+
+func (x *ExactReadPageInfo) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+func (x *ExactReadPageInfo) GetReceipt() *HostReadReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type ExactWorkspaceObservation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Workspace       *Workspace             `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,2,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,3,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactWorkspaceObservation) Reset() {
+	*x = ExactWorkspaceObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[280]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactWorkspaceObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactWorkspaceObservation) ProtoMessage() {}
+
+func (x *ExactWorkspaceObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[280]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactWorkspaceObservation.ProtoReflect.Descriptor instead.
+func (*ExactWorkspaceObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{280}
+}
+
+func (x *ExactWorkspaceObservation) GetWorkspace() *Workspace {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+func (x *ExactWorkspaceObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactWorkspaceObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type ExactWorkflowObservation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Workflow        *Workflow              `protobuf:"bytes,1,opt,name=workflow,proto3" json:"workflow,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,2,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,3,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactWorkflowObservation) Reset() {
+	*x = ExactWorkflowObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[281]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactWorkflowObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactWorkflowObservation) ProtoMessage() {}
+
+func (x *ExactWorkflowObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[281]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactWorkflowObservation.ProtoReflect.Descriptor instead.
+func (*ExactWorkflowObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{281}
+}
+
+func (x *ExactWorkflowObservation) GetWorkflow() *Workflow {
+	if x != nil {
+		return x.Workflow
+	}
+	return nil
+}
+
+func (x *ExactWorkflowObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactWorkflowObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type ExactWorkflowStepObservation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Step            *WorkflowStep          `protobuf:"bytes,1,opt,name=step,proto3" json:"step,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,2,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,3,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactWorkflowStepObservation) Reset() {
+	*x = ExactWorkflowStepObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[282]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactWorkflowStepObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactWorkflowStepObservation) ProtoMessage() {}
+
+func (x *ExactWorkflowStepObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[282]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactWorkflowStepObservation.ProtoReflect.Descriptor instead.
+func (*ExactWorkflowStepObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{282}
+}
+
+func (x *ExactWorkflowStepObservation) GetStep() *WorkflowStep {
+	if x != nil {
+		return x.Step
+	}
+	return nil
+}
+
+func (x *ExactWorkflowStepObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactWorkflowStepObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type ExactTaskObservation struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Task                     *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	CanonicalStatus          string                 `protobuf:"bytes,2,opt,name=canonical_status,json=canonicalStatus,proto3" json:"canonical_status,omitempty"`
+	SemanticActivity         string                 `protobuf:"bytes,3,opt,name=semantic_activity,json=semanticActivity,proto3" json:"semantic_activity,omitempty"`
+	LastMeaningfulActivityAt *string                `protobuf:"bytes,4,opt,name=last_meaningful_activity_at,json=lastMeaningfulActivityAt,proto3,oneof" json:"last_meaningful_activity_at,omitempty"`
+	ExecutionState           string                 `protobuf:"bytes,5,opt,name=execution_state,json=executionState,proto3" json:"execution_state,omitempty"`
+	BlockingReasons          []string               `protobuf:"bytes,6,rep,name=blocking_reasons,json=blockingReasons,proto3" json:"blocking_reasons,omitempty"`
+	StatusKnown              bool                   `protobuf:"varint,7,opt,name=status_known,json=statusKnown,proto3" json:"status_known,omitempty"`
+	ResourceVersion          string                 `protobuf:"bytes,8,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt               string                 `protobuf:"bytes,9,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *ExactTaskObservation) Reset() {
+	*x = ExactTaskObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[283]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactTaskObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactTaskObservation) ProtoMessage() {}
+
+func (x *ExactTaskObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[283]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactTaskObservation.ProtoReflect.Descriptor instead.
+func (*ExactTaskObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{283}
+}
+
+func (x *ExactTaskObservation) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+func (x *ExactTaskObservation) GetCanonicalStatus() string {
+	if x != nil {
+		return x.CanonicalStatus
+	}
+	return ""
+}
+
+func (x *ExactTaskObservation) GetSemanticActivity() string {
+	if x != nil {
+		return x.SemanticActivity
+	}
+	return ""
+}
+
+func (x *ExactTaskObservation) GetLastMeaningfulActivityAt() string {
+	if x != nil && x.LastMeaningfulActivityAt != nil {
+		return *x.LastMeaningfulActivityAt
+	}
+	return ""
+}
+
+func (x *ExactTaskObservation) GetExecutionState() string {
+	if x != nil {
+		return x.ExecutionState
+	}
+	return ""
+}
+
+func (x *ExactTaskObservation) GetBlockingReasons() []string {
+	if x != nil {
+		return x.BlockingReasons
+	}
+	return nil
+}
+
+func (x *ExactTaskObservation) GetStatusKnown() bool {
+	if x != nil {
+		return x.StatusKnown
+	}
+	return false
+}
+
+func (x *ExactTaskObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactTaskObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type ExactSessionObservation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Session         *Session               `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	ExecutionState  string                 `protobuf:"bytes,2,opt,name=execution_state,json=executionState,proto3" json:"execution_state,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,3,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	// Opaque live execution generation for exact stop/recovery fencing. Empty
+	// when the session has no associated agent execution.
+	ExecutionId   string `protobuf:"bytes,5,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExactSessionObservation) Reset() {
+	*x = ExactSessionObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[284]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactSessionObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactSessionObservation) ProtoMessage() {}
+
+func (x *ExactSessionObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[284]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactSessionObservation.ProtoReflect.Descriptor instead.
+func (*ExactSessionObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{284}
+}
+
+func (x *ExactSessionObservation) GetSession() *Session {
+	if x != nil {
+		return x.Session
+	}
+	return nil
+}
+
+func (x *ExactSessionObservation) GetExecutionState() string {
+	if x != nil {
+		return x.ExecutionState
+	}
+	return ""
+}
+
+func (x *ExactSessionObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactSessionObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+func (x *ExactSessionObservation) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+type ExactInteractionObservation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Interaction     *Interaction           `protobuf:"bytes,1,opt,name=interaction,proto3" json:"interaction,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,2,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,3,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactInteractionObservation) Reset() {
+	*x = ExactInteractionObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[285]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactInteractionObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactInteractionObservation) ProtoMessage() {}
+
+func (x *ExactInteractionObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[285]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactInteractionObservation.ProtoReflect.Descriptor instead.
+func (*ExactInteractionObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{285}
+}
+
+func (x *ExactInteractionObservation) GetInteraction() *Interaction {
+	if x != nil {
+		return x.Interaction
+	}
+	return nil
+}
+
+func (x *ExactInteractionObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactInteractionObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type ExactMessageObservation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Message         *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,2,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt      string                 `protobuf:"bytes,3,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	Sanitization    string                 `protobuf:"bytes,4,opt,name=sanitization,proto3" json:"sanitization,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExactMessageObservation) Reset() {
+	*x = ExactMessageObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[286]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExactMessageObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExactMessageObservation) ProtoMessage() {}
+
+func (x *ExactMessageObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[286]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExactMessageObservation.ProtoReflect.Descriptor instead.
+func (*ExactMessageObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{286}
+}
+
+func (x *ExactMessageObservation) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *ExactMessageObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ExactMessageObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+func (x *ExactMessageObservation) GetSanitization() string {
+	if x != nil {
+		return x.Sanitization
+	}
+	return ""
+}
+
+type TaskRelation struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId           string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	SourceTaskId          string                 `protobuf:"bytes,2,opt,name=source_task_id,json=sourceTaskId,proto3" json:"source_task_id,omitempty"`
+	TargetTaskId          string                 `protobuf:"bytes,3,opt,name=target_task_id,json=targetTaskId,proto3" json:"target_task_id,omitempty"`
+	Kind                  string                 `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
+	SourceResourceVersion string                 `protobuf:"bytes,5,opt,name=source_resource_version,json=sourceResourceVersion,proto3" json:"source_resource_version,omitempty"`
+	TargetResourceVersion string                 `protobuf:"bytes,6,opt,name=target_resource_version,json=targetResourceVersion,proto3" json:"target_resource_version,omitempty"`
+	ResourceVersion       string                 `protobuf:"bytes,7,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *TaskRelation) Reset() {
+	*x = TaskRelation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[287]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskRelation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskRelation) ProtoMessage() {}
+
+func (x *TaskRelation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[287]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskRelation.ProtoReflect.Descriptor instead.
+func (*TaskRelation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{287}
+}
+
+func (x *TaskRelation) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TaskRelation) GetSourceTaskId() string {
+	if x != nil {
+		return x.SourceTaskId
+	}
+	return ""
+}
+
+func (x *TaskRelation) GetTargetTaskId() string {
+	if x != nil {
+		return x.TargetTaskId
+	}
+	return ""
+}
+
+func (x *TaskRelation) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *TaskRelation) GetSourceResourceVersion() string {
+	if x != nil {
+		return x.SourceResourceVersion
+	}
+	return ""
+}
+
+func (x *TaskRelation) GetTargetResourceVersion() string {
+	if x != nil {
+		return x.TargetResourceVersion
+	}
+	return ""
+}
+
+func (x *TaskRelation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+type TaskInboxItem struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId     string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId          string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId       string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Kind            string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	State           string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
+	CreatedAt       string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,8,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TaskInboxItem) Reset() {
+	*x = TaskInboxItem{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[288]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskInboxItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskInboxItem) ProtoMessage() {}
+
+func (x *TaskInboxItem) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[288]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskInboxItem.ProtoReflect.Descriptor instead.
+func (*TaskInboxItem) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{288}
+}
+
+func (x *TaskInboxItem) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *TaskInboxItem) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+type TaskDirective struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId            string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CapabilityClass   string                 `protobuf:"bytes,4,opt,name=capability_class,json=capabilityClass,proto3" json:"capability_class,omitempty"`
+	State             string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	InstructionDigest string                 `protobuf:"bytes,6,opt,name=instruction_digest,json=instructionDigest,proto3" json:"instruction_digest,omitempty"`
+	ExpiresAt         *string                `protobuf:"bytes,7,opt,name=expires_at,json=expiresAt,proto3,oneof" json:"expires_at,omitempty"`
+	ResourceVersion   string                 `protobuf:"bytes,8,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *TaskDirective) Reset() {
+	*x = TaskDirective{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[289]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskDirective) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskDirective) ProtoMessage() {}
+
+func (x *TaskDirective) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[289]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskDirective.ProtoReflect.Descriptor instead.
+func (*TaskDirective) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{289}
+}
+
+func (x *TaskDirective) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetCapabilityClass() string {
+	if x != nil {
+		return x.CapabilityClass
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetInstructionDigest() string {
+	if x != nil {
+		return x.InstructionDigest
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetExpiresAt() string {
+	if x != nil && x.ExpiresAt != nil {
+		return *x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *TaskDirective) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+type PendingTaskTransition struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId     string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId          string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	FromWorkflowId  string                 `protobuf:"bytes,4,opt,name=from_workflow_id,json=fromWorkflowId,proto3" json:"from_workflow_id,omitempty"`
+	FromStepId      string                 `protobuf:"bytes,5,opt,name=from_step_id,json=fromStepId,proto3" json:"from_step_id,omitempty"`
+	ToWorkflowId    string                 `protobuf:"bytes,6,opt,name=to_workflow_id,json=toWorkflowId,proto3" json:"to_workflow_id,omitempty"`
+	ToStepId        string                 `protobuf:"bytes,7,opt,name=to_step_id,json=toStepId,proto3" json:"to_step_id,omitempty"`
+	State           string                 `protobuf:"bytes,8,opt,name=state,proto3" json:"state,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,9,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	CreatedAt       string                 `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *PendingTaskTransition) Reset() {
+	*x = PendingTaskTransition{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[290]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PendingTaskTransition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PendingTaskTransition) ProtoMessage() {}
+
+func (x *PendingTaskTransition) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[290]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PendingTaskTransition.ProtoReflect.Descriptor instead.
+func (*PendingTaskTransition) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{290}
+}
+
+func (x *PendingTaskTransition) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetFromWorkflowId() string {
+	if x != nil {
+		return x.FromWorkflowId
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetFromStepId() string {
+	if x != nil {
+		return x.FromStepId
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetToWorkflowId() string {
+	if x != nil {
+		return x.ToWorkflowId
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetToStepId() string {
+	if x != nil {
+		return x.ToStepId
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *PendingTaskTransition) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+type ChangeRequestEvidence struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	TaskId                  string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Provider                string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	RepositoryId            string                 `protobuf:"bytes,3,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	RepositoryOwner         string                 `protobuf:"bytes,4,opt,name=repository_owner,json=repositoryOwner,proto3" json:"repository_owner,omitempty"`
+	RepositoryName          string                 `protobuf:"bytes,5,opt,name=repository_name,json=repositoryName,proto3" json:"repository_name,omitempty"`
+	Number                  int64                  `protobuf:"varint,6,opt,name=number,proto3" json:"number,omitempty"`
+	Url                     string                 `protobuf:"bytes,7,opt,name=url,proto3" json:"url,omitempty"`
+	HeadRevision            string                 `protobuf:"bytes,8,opt,name=head_revision,json=headRevision,proto3" json:"head_revision,omitempty"`
+	ReviewState             string                 `protobuf:"bytes,9,opt,name=review_state,json=reviewState,proto3" json:"review_state,omitempty"`
+	ChecksState             string                 `protobuf:"bytes,10,opt,name=checks_state,json=checksState,proto3" json:"checks_state,omitempty"`
+	MergeableState          string                 `protobuf:"bytes,11,opt,name=mergeable_state,json=mergeableState,proto3" json:"mergeable_state,omitempty"`
+	UnresolvedReviewThreads int32                  `protobuf:"varint,12,opt,name=unresolved_review_threads,json=unresolvedReviewThreads,proto3" json:"unresolved_review_threads,omitempty"`
+	ChecksTotal             int32                  `protobuf:"varint,13,opt,name=checks_total,json=checksTotal,proto3" json:"checks_total,omitempty"`
+	ChecksPassing           int32                  `protobuf:"varint,14,opt,name=checks_passing,json=checksPassing,proto3" json:"checks_passing,omitempty"`
+	ProviderState           string                 `protobuf:"bytes,15,opt,name=provider_state,json=providerState,proto3" json:"provider_state,omitempty"` // available | no_evidence | unsupported | unavailable
+	ProviderError           *string                `protobuf:"bytes,16,opt,name=provider_error,json=providerError,proto3,oneof" json:"provider_error,omitempty"`
+	FetchedAt               *string                `protobuf:"bytes,17,opt,name=fetched_at,json=fetchedAt,proto3,oneof" json:"fetched_at,omitempty"`
+	ResourceVersion         string                 `protobuf:"bytes,18,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt              string                 `protobuf:"bytes,19,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *ChangeRequestEvidence) Reset() {
+	*x = ChangeRequestEvidence{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[291]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangeRequestEvidence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangeRequestEvidence) ProtoMessage() {}
+
+func (x *ChangeRequestEvidence) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[291]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangeRequestEvidence.ProtoReflect.Descriptor instead.
+func (*ChangeRequestEvidence) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{291}
+}
+
+func (x *ChangeRequestEvidence) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetRepositoryId() string {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetRepositoryOwner() string {
+	if x != nil {
+		return x.RepositoryOwner
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetRepositoryName() string {
+	if x != nil {
+		return x.RepositoryName
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetNumber() int64 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *ChangeRequestEvidence) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetHeadRevision() string {
+	if x != nil {
+		return x.HeadRevision
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetReviewState() string {
+	if x != nil {
+		return x.ReviewState
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetChecksState() string {
+	if x != nil {
+		return x.ChecksState
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetMergeableState() string {
+	if x != nil {
+		return x.MergeableState
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetUnresolvedReviewThreads() int32 {
+	if x != nil {
+		return x.UnresolvedReviewThreads
+	}
+	return 0
+}
+
+func (x *ChangeRequestEvidence) GetChecksTotal() int32 {
+	if x != nil {
+		return x.ChecksTotal
+	}
+	return 0
+}
+
+func (x *ChangeRequestEvidence) GetChecksPassing() int32 {
+	if x != nil {
+		return x.ChecksPassing
+	}
+	return 0
+}
+
+func (x *ChangeRequestEvidence) GetProviderState() string {
+	if x != nil {
+		return x.ProviderState
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetProviderError() string {
+	if x != nil && x.ProviderError != nil {
+		return *x.ProviderError
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetFetchedAt() string {
+	if x != nil && x.FetchedAt != nil {
+		return *x.FetchedAt
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *ChangeRequestEvidence) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+type TaskUsageObservation struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	TaskId               string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId            *string                `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3,oneof" json:"session_id,omitempty"`
+	TokensIn             int64                  `protobuf:"varint,3,opt,name=tokens_in,json=tokensIn,proto3" json:"tokens_in,omitempty"`
+	TokensCachedRead     int64                  `protobuf:"varint,4,opt,name=tokens_cached_read,json=tokensCachedRead,proto3" json:"tokens_cached_read,omitempty"`
+	TokensCachedWrite    int64                  `protobuf:"varint,5,opt,name=tokens_cached_write,json=tokensCachedWrite,proto3" json:"tokens_cached_write,omitempty"`
+	TokensOut            int64                  `protobuf:"varint,6,opt,name=tokens_out,json=tokensOut,proto3" json:"tokens_out,omitempty"`
+	TokensThought        int64                  `protobuf:"varint,7,opt,name=tokens_thought,json=tokensThought,proto3" json:"tokens_thought,omitempty"`
+	TokensTotal          int64                  `protobuf:"varint,8,opt,name=tokens_total,json=tokensTotal,proto3" json:"tokens_total,omitempty"`
+	CostSubcents         *int64                 `protobuf:"varint,9,opt,name=cost_subcents,json=costSubcents,proto3,oneof" json:"cost_subcents,omitempty"`
+	Currency             string                 `protobuf:"bytes,10,opt,name=currency,proto3" json:"currency,omitempty"`
+	EventCount           int64                  `protobuf:"varint,11,opt,name=event_count,json=eventCount,proto3" json:"event_count,omitempty"`
+	EstimatedEventCount  int64                  `protobuf:"varint,12,opt,name=estimated_event_count,json=estimatedEventCount,proto3" json:"estimated_event_count,omitempty"`
+	UnpricedEventCount   int64                  `protobuf:"varint,13,opt,name=unpriced_event_count,json=unpricedEventCount,proto3" json:"unpriced_event_count,omitempty"`
+	OutputTokensComplete bool                   `protobuf:"varint,14,opt,name=output_tokens_complete,json=outputTokensComplete,proto3" json:"output_tokens_complete,omitempty"`
+	ObservationState     string                 `protobuf:"bytes,15,opt,name=observation_state,json=observationState,proto3" json:"observation_state,omitempty"` // observed | no_observations | unavailable
+	CostUnknownReason    *string                `protobuf:"bytes,16,opt,name=cost_unknown_reason,json=costUnknownReason,proto3,oneof" json:"cost_unknown_reason,omitempty"`
+	FirstEventAt         *string                `protobuf:"bytes,17,opt,name=first_event_at,json=firstEventAt,proto3,oneof" json:"first_event_at,omitempty"`
+	LastEventAt          *string                `protobuf:"bytes,18,opt,name=last_event_at,json=lastEventAt,proto3,oneof" json:"last_event_at,omitempty"`
+	ElapsedMilliseconds  *int64                 `protobuf:"varint,19,opt,name=elapsed_milliseconds,json=elapsedMilliseconds,proto3,oneof" json:"elapsed_milliseconds,omitempty"`
+	ResourceVersion      string                 `protobuf:"bytes,20,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	ObservedAt           string                 `protobuf:"bytes,21,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	CostComplete         bool                   `protobuf:"varint,22,opt,name=cost_complete,json=costComplete,proto3" json:"cost_complete,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *TaskUsageObservation) Reset() {
+	*x = TaskUsageObservation{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[292]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskUsageObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskUsageObservation) ProtoMessage() {}
+
+func (x *TaskUsageObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[292]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskUsageObservation.ProtoReflect.Descriptor instead.
+func (*TaskUsageObservation) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{292}
+}
+
+func (x *TaskUsageObservation) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetSessionId() string {
+	if x != nil && x.SessionId != nil {
+		return *x.SessionId
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetTokensIn() int64 {
+	if x != nil {
+		return x.TokensIn
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetTokensCachedRead() int64 {
+	if x != nil {
+		return x.TokensCachedRead
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetTokensCachedWrite() int64 {
+	if x != nil {
+		return x.TokensCachedWrite
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetTokensOut() int64 {
+	if x != nil {
+		return x.TokensOut
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetTokensThought() int64 {
+	if x != nil {
+		return x.TokensThought
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetTokensTotal() int64 {
+	if x != nil {
+		return x.TokensTotal
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetCostSubcents() int64 {
+	if x != nil && x.CostSubcents != nil {
+		return *x.CostSubcents
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetEventCount() int64 {
+	if x != nil {
+		return x.EventCount
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetEstimatedEventCount() int64 {
+	if x != nil {
+		return x.EstimatedEventCount
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetUnpricedEventCount() int64 {
+	if x != nil {
+		return x.UnpricedEventCount
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetOutputTokensComplete() bool {
+	if x != nil {
+		return x.OutputTokensComplete
+	}
+	return false
+}
+
+func (x *TaskUsageObservation) GetObservationState() string {
+	if x != nil {
+		return x.ObservationState
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetCostUnknownReason() string {
+	if x != nil && x.CostUnknownReason != nil {
+		return *x.CostUnknownReason
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetFirstEventAt() string {
+	if x != nil && x.FirstEventAt != nil {
+		return *x.FirstEventAt
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetLastEventAt() string {
+	if x != nil && x.LastEventAt != nil {
+		return *x.LastEventAt
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetElapsedMilliseconds() int64 {
+	if x != nil && x.ElapsedMilliseconds != nil {
+		return *x.ElapsedMilliseconds
+	}
+	return 0
+}
+
+func (x *TaskUsageObservation) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetObservedAt() string {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return ""
+}
+
+func (x *TaskUsageObservation) GetCostComplete() bool {
+	if x != nil {
+		return x.CostComplete
+	}
+	return false
+}
+
+type ListWorkspacesExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWorkspacesExactRequest) Reset() {
+	*x = ListWorkspacesExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[293]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWorkspacesExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWorkspacesExactRequest) ProtoMessage() {}
+
+func (x *ListWorkspacesExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[293]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWorkspacesExactRequest.ProtoReflect.Descriptor instead.
+func (*ListWorkspacesExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{293}
+}
+
+func (x *ListWorkspacesExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListWorkspacesExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListWorkspacesExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListWorkspacesExactResponse struct {
+	state         protoimpl.MessageState       `protogen:"open.v1"`
+	Items         []*ExactWorkspaceObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo           `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWorkspacesExactResponse) Reset() {
+	*x = ListWorkspacesExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[294]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWorkspacesExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWorkspacesExactResponse) ProtoMessage() {}
+
+func (x *ListWorkspacesExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[294]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWorkspacesExactResponse.ProtoReflect.Descriptor instead.
+func (*ListWorkspacesExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{294}
+}
+
+func (x *ListWorkspacesExactResponse) GetItems() []*ExactWorkspaceObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListWorkspacesExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListWorkflowsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,3,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWorkflowsExactRequest) Reset() {
+	*x = ListWorkflowsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[295]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWorkflowsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWorkflowsExactRequest) ProtoMessage() {}
+
+func (x *ListWorkflowsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[295]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWorkflowsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListWorkflowsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{295}
+}
+
+func (x *ListWorkflowsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListWorkflowsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListWorkflowsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListWorkflowsExactResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Items         []*ExactWorkflowObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo          `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWorkflowsExactResponse) Reset() {
+	*x = ListWorkflowsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[296]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWorkflowsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWorkflowsExactResponse) ProtoMessage() {}
+
+func (x *ListWorkflowsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[296]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWorkflowsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListWorkflowsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{296}
+}
+
+func (x *ListWorkflowsExactResponse) GetItems() []*ExactWorkflowObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListWorkflowsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListWorkflowStepsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	WorkflowId    string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWorkflowStepsExactRequest) Reset() {
+	*x = ListWorkflowStepsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[297]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWorkflowStepsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWorkflowStepsExactRequest) ProtoMessage() {}
+
+func (x *ListWorkflowStepsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[297]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWorkflowStepsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListWorkflowStepsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{297}
+}
+
+func (x *ListWorkflowStepsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListWorkflowStepsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListWorkflowStepsExactRequest) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *ListWorkflowStepsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListWorkflowStepsExactResponse struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Items         []*ExactWorkflowStepObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo              `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWorkflowStepsExactResponse) Reset() {
+	*x = ListWorkflowStepsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[298]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWorkflowStepsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWorkflowStepsExactResponse) ProtoMessage() {}
+
+func (x *ListWorkflowStepsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[298]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWorkflowStepsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListWorkflowStepsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{298}
+}
+
+func (x *ListWorkflowStepsExactResponse) GetItems() []*ExactWorkflowStepObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListWorkflowStepsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListTasksExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Filter        *TaskFilter            `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTasksExactRequest) Reset() {
+	*x = ListTasksExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[299]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTasksExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTasksExactRequest) ProtoMessage() {}
+
+func (x *ListTasksExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[299]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTasksExactRequest.ProtoReflect.Descriptor instead.
+func (*ListTasksExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{299}
+}
+
+func (x *ListTasksExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListTasksExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListTasksExactRequest) GetFilter() *TaskFilter {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+func (x *ListTasksExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListTasksExactResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Items         []*ExactTaskObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo      `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTasksExactResponse) Reset() {
+	*x = ListTasksExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[300]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTasksExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTasksExactResponse) ProtoMessage() {}
+
+func (x *ListTasksExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[300]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTasksExactResponse.ProtoReflect.Descriptor instead.
+func (*ListTasksExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{300}
+}
+
+func (x *ListTasksExactResponse) GetItems() []*ExactTaskObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListTasksExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type GetTaskExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTaskExactRequest) Reset() {
+	*x = GetTaskExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[301]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTaskExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTaskExactRequest) ProtoMessage() {}
+
+func (x *GetTaskExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[301]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTaskExactRequest.ProtoReflect.Descriptor instead.
+func (*GetTaskExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{301}
+}
+
+func (x *GetTaskExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetTaskExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetTaskExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type GetTaskExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Item          *ExactTaskObservation  `protobuf:"bytes,1,opt,name=item,proto3" json:"item,omitempty"`
+	Receipt       *HostReadReceipt       `protobuf:"bytes,2,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTaskExactResponse) Reset() {
+	*x = GetTaskExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[302]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTaskExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTaskExactResponse) ProtoMessage() {}
+
+func (x *GetTaskExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[302]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTaskExactResponse.ProtoReflect.Descriptor instead.
+func (*GetTaskExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{302}
+}
+
+func (x *GetTaskExactResponse) GetItem() *ExactTaskObservation {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *GetTaskExactResponse) GetReceipt() *HostReadReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type ListSessionsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Filter        *SessionFilter         `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSessionsExactRequest) Reset() {
+	*x = ListSessionsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[303]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSessionsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSessionsExactRequest) ProtoMessage() {}
+
+func (x *ListSessionsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[303]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSessionsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListSessionsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{303}
+}
+
+func (x *ListSessionsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListSessionsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListSessionsExactRequest) GetFilter() *SessionFilter {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+func (x *ListSessionsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListSessionsExactResponse struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Items         []*ExactSessionObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo         `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSessionsExactResponse) Reset() {
+	*x = ListSessionsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[304]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSessionsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSessionsExactResponse) ProtoMessage() {}
+
+func (x *ListSessionsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[304]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSessionsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListSessionsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{304}
+}
+
+func (x *ListSessionsExactResponse) GetItems() []*ExactSessionObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListSessionsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListPendingInteractionsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Filter        *InteractionFilter     `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPendingInteractionsExactRequest) Reset() {
+	*x = ListPendingInteractionsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[305]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPendingInteractionsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPendingInteractionsExactRequest) ProtoMessage() {}
+
+func (x *ListPendingInteractionsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[305]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPendingInteractionsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListPendingInteractionsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{305}
+}
+
+func (x *ListPendingInteractionsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListPendingInteractionsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListPendingInteractionsExactRequest) GetFilter() *InteractionFilter {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+func (x *ListPendingInteractionsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListPendingInteractionsExactResponse struct {
+	state         protoimpl.MessageState         `protogen:"open.v1"`
+	Items         []*ExactInteractionObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo             `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPendingInteractionsExactResponse) Reset() {
+	*x = ListPendingInteractionsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[306]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPendingInteractionsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPendingInteractionsExactResponse) ProtoMessage() {}
+
+func (x *ListPendingInteractionsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[306]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPendingInteractionsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListPendingInteractionsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{306}
+}
+
+func (x *ListPendingInteractionsExactResponse) GetItems() []*ExactInteractionObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListPendingInteractionsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type GetInteractionExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	InteractionId string                 `protobuf:"bytes,3,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetInteractionExactRequest) Reset() {
+	*x = GetInteractionExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[307]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetInteractionExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetInteractionExactRequest) ProtoMessage() {}
+
+func (x *GetInteractionExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[307]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetInteractionExactRequest.ProtoReflect.Descriptor instead.
+func (*GetInteractionExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{307}
+}
+
+func (x *GetInteractionExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetInteractionExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetInteractionExactRequest) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+type GetInteractionExactResponse struct {
+	state         protoimpl.MessageState       `protogen:"open.v1"`
+	Item          *ExactInteractionObservation `protobuf:"bytes,1,opt,name=item,proto3" json:"item,omitempty"`
+	Receipt       *HostReadReceipt             `protobuf:"bytes,2,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetInteractionExactResponse) Reset() {
+	*x = GetInteractionExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[308]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetInteractionExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetInteractionExactResponse) ProtoMessage() {}
+
+func (x *GetInteractionExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[308]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetInteractionExactResponse.ProtoReflect.Descriptor instead.
+func (*GetInteractionExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{308}
+}
+
+func (x *GetInteractionExactResponse) GetItem() *ExactInteractionObservation {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *GetInteractionExactResponse) GetReceipt() *HostReadReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type ListSanitizedMessagesExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Filter        *MessageFilter         `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSanitizedMessagesExactRequest) Reset() {
+	*x = ListSanitizedMessagesExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[309]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSanitizedMessagesExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSanitizedMessagesExactRequest) ProtoMessage() {}
+
+func (x *ListSanitizedMessagesExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[309]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSanitizedMessagesExactRequest.ProtoReflect.Descriptor instead.
+func (*ListSanitizedMessagesExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{309}
+}
+
+func (x *ListSanitizedMessagesExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListSanitizedMessagesExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListSanitizedMessagesExactRequest) GetFilter() *MessageFilter {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+func (x *ListSanitizedMessagesExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListSanitizedMessagesExactResponse struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Items         []*ExactMessageObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo         `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSanitizedMessagesExactResponse) Reset() {
+	*x = ListSanitizedMessagesExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[310]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSanitizedMessagesExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSanitizedMessagesExactResponse) ProtoMessage() {}
+
+func (x *ListSanitizedMessagesExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[310]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSanitizedMessagesExactResponse.ProtoReflect.Descriptor instead.
+func (*ListSanitizedMessagesExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{310}
+}
+
+func (x *ListSanitizedMessagesExactResponse) GetItems() []*ExactMessageObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListSanitizedMessagesExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListTaskInboxExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,5,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskInboxExactRequest) Reset() {
+	*x = ListTaskInboxExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[311]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskInboxExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskInboxExactRequest) ProtoMessage() {}
+
+func (x *ListTaskInboxExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[311]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskInboxExactRequest.ProtoReflect.Descriptor instead.
+func (*ListTaskInboxExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{311}
+}
+
+func (x *ListTaskInboxExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListTaskInboxExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListTaskInboxExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ListTaskInboxExactRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ListTaskInboxExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListTaskInboxExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TaskInboxItem       `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo     `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskInboxExactResponse) Reset() {
+	*x = ListTaskInboxExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[312]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskInboxExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskInboxExactResponse) ProtoMessage() {}
+
+func (x *ListTaskInboxExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[312]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskInboxExactResponse.ProtoReflect.Descriptor instead.
+func (*ListTaskInboxExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{312}
+}
+
+func (x *ListTaskInboxExactResponse) GetItems() []*TaskInboxItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListTaskInboxExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type GetTaskDirectiveExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	DirectiveId   string                 `protobuf:"bytes,3,opt,name=directive_id,json=directiveId,proto3" json:"directive_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTaskDirectiveExactRequest) Reset() {
+	*x = GetTaskDirectiveExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[313]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTaskDirectiveExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTaskDirectiveExactRequest) ProtoMessage() {}
+
+func (x *GetTaskDirectiveExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[313]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTaskDirectiveExactRequest.ProtoReflect.Descriptor instead.
+func (*GetTaskDirectiveExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{313}
+}
+
+func (x *GetTaskDirectiveExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetTaskDirectiveExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetTaskDirectiveExactRequest) GetDirectiveId() string {
+	if x != nil {
+		return x.DirectiveId
+	}
+	return ""
+}
+
+type GetTaskDirectiveExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Item          *TaskDirective         `protobuf:"bytes,1,opt,name=item,proto3" json:"item,omitempty"`
+	Receipt       *HostReadReceipt       `protobuf:"bytes,2,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTaskDirectiveExactResponse) Reset() {
+	*x = GetTaskDirectiveExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[314]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTaskDirectiveExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTaskDirectiveExactResponse) ProtoMessage() {}
+
+func (x *GetTaskDirectiveExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[314]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTaskDirectiveExactResponse.ProtoReflect.Descriptor instead.
+func (*GetTaskDirectiveExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{314}
+}
+
+func (x *GetTaskDirectiveExactResponse) GetItem() *TaskDirective {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *GetTaskDirectiveExactResponse) GetReceipt() *HostReadReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type ListTaskDirectivesExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskDirectivesExactRequest) Reset() {
+	*x = ListTaskDirectivesExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[315]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskDirectivesExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskDirectivesExactRequest) ProtoMessage() {}
+
+func (x *ListTaskDirectivesExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[315]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskDirectivesExactRequest.ProtoReflect.Descriptor instead.
+func (*ListTaskDirectivesExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{315}
+}
+
+func (x *ListTaskDirectivesExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListTaskDirectivesExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListTaskDirectivesExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ListTaskDirectivesExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListTaskDirectivesExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TaskDirective       `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo     `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskDirectivesExactResponse) Reset() {
+	*x = ListTaskDirectivesExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[316]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskDirectivesExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskDirectivesExactResponse) ProtoMessage() {}
+
+func (x *ListTaskDirectivesExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[316]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskDirectivesExactResponse.ProtoReflect.Descriptor instead.
+func (*ListTaskDirectivesExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{316}
+}
+
+func (x *ListTaskDirectivesExactResponse) GetItems() []*TaskDirective {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListTaskDirectivesExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type GetTaskRelationsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTaskRelationsExactRequest) Reset() {
+	*x = GetTaskRelationsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[317]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTaskRelationsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTaskRelationsExactRequest) ProtoMessage() {}
+
+func (x *GetTaskRelationsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[317]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTaskRelationsExactRequest.ProtoReflect.Descriptor instead.
+func (*GetTaskRelationsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{317}
+}
+
+func (x *GetTaskRelationsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetTaskRelationsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *GetTaskRelationsExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *GetTaskRelationsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type GetTaskRelationsExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TaskRelation        `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo     `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTaskRelationsExactResponse) Reset() {
+	*x = GetTaskRelationsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[318]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTaskRelationsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTaskRelationsExactResponse) ProtoMessage() {}
+
+func (x *GetTaskRelationsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[318]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTaskRelationsExactResponse.ProtoReflect.Descriptor instead.
+func (*GetTaskRelationsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{318}
+}
+
+func (x *GetTaskRelationsExactResponse) GetItems() []*TaskRelation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *GetTaskRelationsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListTaskRelationsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskRelationsExactRequest) Reset() {
+	*x = ListTaskRelationsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[319]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskRelationsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskRelationsExactRequest) ProtoMessage() {}
+
+func (x *ListTaskRelationsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[319]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskRelationsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListTaskRelationsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{319}
+}
+
+func (x *ListTaskRelationsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListTaskRelationsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListTaskRelationsExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ListTaskRelationsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListTaskRelationsExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TaskRelation        `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo     `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskRelationsExactResponse) Reset() {
+	*x = ListTaskRelationsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[320]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskRelationsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskRelationsExactResponse) ProtoMessage() {}
+
+func (x *ListTaskRelationsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[320]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskRelationsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListTaskRelationsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{320}
+}
+
+func (x *ListTaskRelationsExactResponse) GetItems() []*TaskRelation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListTaskRelationsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListPendingTaskTransitionsExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPendingTaskTransitionsExactRequest) Reset() {
+	*x = ListPendingTaskTransitionsExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[321]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPendingTaskTransitionsExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPendingTaskTransitionsExactRequest) ProtoMessage() {}
+
+func (x *ListPendingTaskTransitionsExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[321]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPendingTaskTransitionsExactRequest.ProtoReflect.Descriptor instead.
+func (*ListPendingTaskTransitionsExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{321}
+}
+
+func (x *ListPendingTaskTransitionsExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListPendingTaskTransitionsExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListPendingTaskTransitionsExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ListPendingTaskTransitionsExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListPendingTaskTransitionsExactResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Items         []*PendingTaskTransition `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo       `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPendingTaskTransitionsExactResponse) Reset() {
+	*x = ListPendingTaskTransitionsExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[322]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPendingTaskTransitionsExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPendingTaskTransitionsExactResponse) ProtoMessage() {}
+
+func (x *ListPendingTaskTransitionsExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[322]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPendingTaskTransitionsExactResponse.ProtoReflect.Descriptor instead.
+func (*ListPendingTaskTransitionsExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{322}
+}
+
+func (x *ListPendingTaskTransitionsExactResponse) GetItems() []*PendingTaskTransition {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListPendingTaskTransitionsExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListChangeRequestEvidenceExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskIds       []string               `protobuf:"bytes,3,rep,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListChangeRequestEvidenceExactRequest) Reset() {
+	*x = ListChangeRequestEvidenceExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[323]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListChangeRequestEvidenceExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListChangeRequestEvidenceExactRequest) ProtoMessage() {}
+
+func (x *ListChangeRequestEvidenceExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[323]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListChangeRequestEvidenceExactRequest.ProtoReflect.Descriptor instead.
+func (*ListChangeRequestEvidenceExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{323}
+}
+
+func (x *ListChangeRequestEvidenceExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListChangeRequestEvidenceExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListChangeRequestEvidenceExactRequest) GetTaskIds() []string {
+	if x != nil {
+		return x.TaskIds
+	}
+	return nil
+}
+
+func (x *ListChangeRequestEvidenceExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListChangeRequestEvidenceExactResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Items         []*ChangeRequestEvidence `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo       `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListChangeRequestEvidenceExactResponse) Reset() {
+	*x = ListChangeRequestEvidenceExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[324]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListChangeRequestEvidenceExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListChangeRequestEvidenceExactResponse) ProtoMessage() {}
+
+func (x *ListChangeRequestEvidenceExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[324]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListChangeRequestEvidenceExactResponse.ProtoReflect.Descriptor instead.
+func (*ListChangeRequestEvidenceExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{324}
+}
+
+func (x *ListChangeRequestEvidenceExactResponse) GetItems() []*ChangeRequestEvidence {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListChangeRequestEvidenceExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
+type ListTaskUsageExactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskIds       []string               `protobuf:"bytes,3,rep,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
+	Page          *ExactReadPage         `protobuf:"bytes,4,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskUsageExactRequest) Reset() {
+	*x = ListTaskUsageExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[325]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskUsageExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskUsageExactRequest) ProtoMessage() {}
+
+func (x *ListTaskUsageExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[325]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskUsageExactRequest.ProtoReflect.Descriptor instead.
+func (*ListTaskUsageExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{325}
+}
+
+func (x *ListTaskUsageExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ListTaskUsageExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListTaskUsageExactRequest) GetTaskIds() []string {
+	if x != nil {
+		return x.TaskIds
+	}
+	return nil
+}
+
+func (x *ListTaskUsageExactRequest) GetPage() *ExactReadPage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+type ListTaskUsageExactResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Items         []*TaskUsageObservation `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	PageInfo      *ExactReadPageInfo      `protobuf:"bytes,2,opt,name=page_info,json=pageInfo,proto3" json:"page_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaskUsageExactResponse) Reset() {
+	*x = ListTaskUsageExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[326]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaskUsageExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaskUsageExactResponse) ProtoMessage() {}
+
+func (x *ListTaskUsageExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[326]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaskUsageExactResponse.ProtoReflect.Descriptor instead.
+func (*ListTaskUsageExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{326}
+}
+
+func (x *ListTaskUsageExactResponse) GetItems() []*TaskUsageObservation {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListTaskUsageExactResponse) GetPageInfo() *ExactReadPageInfo {
+	if x != nil {
+		return x.PageInfo
+	}
+	return nil
+}
+
 var File_kandev_plugin_v1_plugin_proto protoreflect.FileDescriptor
 
 const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\x1dkandev/plugin/v1/plugin.proto\x12\x10kandev.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xb8\x01\n" +
+	"\x1dkandev/plugin/v1/plugin.proto\x12\x10kandev.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xe2\x01\n" +
+	"\x14HostOperationSupport\x12\x16\n" +
+	"\x06method\x18\x01 \x01(\tR\x06method\x12#\n" +
+	"\rcapability_id\x18\x02 \x01(\tR\fcapabilityId\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x1c\n" +
+	"\tsupported\x18\x04 \x01(\bR\tsupported\x12\x1e\n" +
+	"\n" +
+	"authorized\x18\x05 \x01(\bR\n" +
+	"authorized\x12-\n" +
+	"\x12unavailable_reason\x18\x06 \x01(\tR\x11unavailableReason\"\xe1\x03\n" +
+	"\x15HostCapabilityContext\x12'\n" +
+	"\x0finstallation_id\x18\x01 \x01(\tR\x0einstallationId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
+	"\x0fmanifest_digest\x18\x03 \x01(\tR\x0emanifestDigest\x12+\n" +
+	"\x11approval_revision\x18\x04 \x01(\x04R\x10approvalRevision\x12%\n" +
+	"\x0eapproval_state\x18\x05 \x01(\tR\rapprovalState\x12F\n" +
+	"\n" +
+	"operations\x18\x06 \x03(\v2&.kandev.plugin.v1.HostOperationSupportR\n" +
+	"operations\x12K\n" +
+	"\x06limits\x18\a \x03(\v23.kandev.plugin.v1.HostCapabilityContext.LimitsEntryR\x06limits\x12/\n" +
+	"\x13supported_providers\x18\b \x03(\tR\x12supportedProviders\x1a9\n" +
+	"\vLimitsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"@\n" +
+	"\x1bGetCapabilityContextRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\"a\n" +
+	"\x1cGetCapabilityContextResponse\x12A\n" +
+	"\acontext\x18\x01 \x01(\v2'.kandev.plugin.v1.HostCapabilityContextR\acontext\"\xc6\x02\n" +
+	"\x12HostCommandReceipt\x12\x1d\n" +
+	"\n" +
+	"receipt_id\x18\x01 \x01(\tR\treceiptId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12;\n" +
+	"\x06status\x18\x03 \x01(\x0e2#.kandev.plugin.v1.HostCommandStatusR\x06status\x12\x1b\n" +
+	"\ttarget_id\x18\x04 \x01(\tR\btargetId\x12)\n" +
+	"\x10resource_version\x18\x05 \x01(\tR\x0fresourceVersion\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\a \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\b \x01(\tR\tupdatedAt\"\xa8\x01\n" +
+	"\x11HostCommandResult\x12;\n" +
+	"\x06status\x18\x01 \x01(\x0e2#.kandev.plugin.v1.HostCommandStatusR\x06status\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12>\n" +
+	"\areceipt\x18\x03 \x01(\v2$.kandev.plugin.v1.HostCommandReceiptR\areceipt\"\xd1\x04\n" +
+	"\x16UpdateTaskExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12:\n" +
+	"\x19expected_resource_version\x18\x05 \x01(\tR\x17expectedResourceVersion\x12\x19\n" +
+	"\x05title\x18\x06 \x01(\tH\x00R\x05title\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\a \x01(\tH\x01R\vdescription\x88\x01\x01\x12\x19\n" +
+	"\x05state\x18\b \x01(\tH\x02R\x05state\x88\x01\x01\x12\x1f\n" +
+	"\bpriority\x18\t \x01(\tH\x03R\bpriority\x88\x01\x01\x12+\n" +
+	"\x11approval_revision\x18\n" +
+	" \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\v \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\f \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\r \x01(\x03R\x17expectedClaimGenerationB\b\n" +
+	"\x06_titleB\x0e\n" +
+	"\f_descriptionB\b\n" +
+	"\x06_stateB\v\n" +
+	"\t_priority\"\x82\x01\n" +
+	"\x17UpdateTaskExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12*\n" +
+	"\x04task\x18\x02 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xb3\x02\n" +
+	"\x16CreateTaskExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
+	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\x12\x1f\n" +
+	"\vexternal_id\x18\x04 \x01(\tR\n" +
+	"externalId\x12+\n" +
+	"\x11approval_revision\x18\x05 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x06 \x01(\tR\x0emanifestDigest\x127\n" +
+	"\x04task\x18\a \x01(\v2#.kandev.plugin.v1.CreateTaskRequestR\x04task\"\x82\x01\n" +
+	"\x17CreateTaskExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12*\n" +
+	"\x04task\x18\x02 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xbd\x03\n" +
+	"\x19SetTaskLabelsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12:\n" +
+	"\x19expected_resource_version\x18\x05 \x01(\tR\x17expectedResourceVersion\x12\x16\n" +
+	"\x06labels\x18\x06 \x03(\tR\x06labels\x12+\n" +
+	"\x11approval_revision\x18\a \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\b \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\t \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\n" +
+	" \x01(\x03R\x17expectedClaimGeneration\"\x85\x01\n" +
+	"\x1aSetTaskLabelsExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12*\n" +
+	"\x04task\x18\x02 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xcc\x03\n" +
+	"\x16AssignTaskExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12:\n" +
+	"\x19expected_resource_version\x18\x05 \x01(\tR\x17expectedResourceVersion\x12(\n" +
+	"\x10assignee_user_id\x18\x06 \x01(\tR\x0eassigneeUserId\x12+\n" +
+	"\x11approval_revision\x18\a \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\b \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\t \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\n" +
+	" \x01(\x03R\x17expectedClaimGeneration\"\x82\x01\n" +
+	"\x17AssignTaskExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12*\n" +
+	"\x04task\x18\x02 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\x87\x04\n" +
+	"\x14MoveTaskExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12:\n" +
+	"\x19expected_resource_version\x18\x05 \x01(\tR\x17expectedResourceVersion\x12\x1f\n" +
+	"\vworkflow_id\x18\x06 \x01(\tR\n" +
+	"workflowId\x12(\n" +
+	"\x10workflow_step_id\x18\a \x01(\tR\x0eworkflowStepId\x12\x1a\n" +
+	"\bposition\x18\b \x01(\x05R\bposition\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\v \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\f \x01(\x03R\x17expectedClaimGeneration\"\x80\x01\n" +
+	"\x15MoveTaskExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12*\n" +
+	"\x04task\x18\x02 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xa3\x03\n" +
+	"\x17ArchiveTaskExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12:\n" +
+	"\x19expected_resource_version\x18\x05 \x01(\tR\x17expectedResourceVersion\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\b \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\t \x01(\x03R\x17expectedClaimGeneration\"\x83\x01\n" +
+	"\x18ArchiveTaskExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12*\n" +
+	"\x04task\x18\x02 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\"\xa3\x04\n" +
+	"\x1bAddTaskRelationExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12&\n" +
+	"\x0frelated_task_id\x18\x04 \x01(\tR\rrelatedTaskId\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\b \x01(\tR\x1bexpectedTaskResourceVersion\x12I\n" +
+	"!expected_related_resource_version\x18\t \x01(\tR\x1eexpectedRelatedResourceVersion\x126\n" +
+	"\x17management_instance_key\x18\n" +
+	" \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\v \x01(\x03R\x17expectedClaimGeneration\"[\n" +
+	"\x1cAddTaskRelationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"\xa6\x04\n" +
+	"\x1eRemoveTaskRelationExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12&\n" +
+	"\x0frelated_task_id\x18\x04 \x01(\tR\rrelatedTaskId\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\b \x01(\tR\x1bexpectedTaskResourceVersion\x12I\n" +
+	"!expected_related_resource_version\x18\t \x01(\tR\x1eexpectedRelatedResourceVersion\x126\n" +
+	"\x17management_instance_key\x18\n" +
+	" \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\v \x01(\x03R\x17expectedClaimGeneration\"^\n" +
+	"\x1fRemoveTaskRelationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"\xb4\x04\n" +
+	"\x1bSendTaskMessageExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x06 \x01(\tR\x1bexpectedTaskResourceVersion\x12I\n" +
+	"!expected_session_resource_version\x18\a \x01(\tR\x1eexpectedSessionResourceVersion\x12\x18\n" +
+	"\acontent\x18\b \x01(\tR\acontent\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\v \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\f \x01(\x03R\x17expectedClaimGeneration\"[\n" +
+	"\x1cSendTaskMessageExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"\x97\x03\n" +
+	"\x13TaskManagementClaim\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
+	"\x0finstallation_id\x18\x03 \x01(\tR\x0einstallationId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x05 \x01(\x03R\n" +
+	"generation\x12)\n" +
+	"\x10resource_version\x18\x06 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vacquired_at\x18\a \x01(\tR\n" +
+	"acquiredAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\b \x01(\tR\tupdatedAt\x12(\n" +
+	"\x10updated_by_actor\x18\t \x01(\tR\x0eupdatedByActor\x12\x1d\n" +
+	"\n" +
+	"owner_kind\x18\n" +
+	" \x01(\tR\townerKind\x12$\n" +
+	"\x0eowner_actor_id\x18\v \x01(\tR\fownerActorId\"\xc9\x03\n" +
+	"&AcquireTaskManagementClaimExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x05 \x01(\tR\x1bexpectedTaskResourceVersion\x12E\n" +
+	"\x1fexpected_claim_resource_version\x18\x06 \x01(\tR\x1cexpectedClaimResourceVersion\x12'\n" +
+	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\x12\x16\n" +
+	"\x06reason\x18\b \x01(\tR\x06reason\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\"\xc9\x03\n" +
+	"&ReleaseTaskManagementClaimExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x05 \x01(\tR\x1bexpectedTaskResourceVersion\x12E\n" +
+	"\x1fexpected_claim_resource_version\x18\x06 \x01(\tR\x1cexpectedClaimResourceVersion\x12'\n" +
+	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\x12\x16\n" +
+	"\x06reason\x18\b \x01(\tR\x06reason\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\"\xb0\x04\n" +
+	"'TransferTaskManagementClaimExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x124\n" +
+	"\x16target_installation_id\x18\x05 \x01(\tR\x14targetInstallationId\x12.\n" +
+	"\x13target_instance_key\x18\x06 \x01(\tR\x11targetInstanceKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\a \x01(\tR\x1bexpectedTaskResourceVersion\x12E\n" +
+	"\x1fexpected_claim_resource_version\x18\b \x01(\tR\x1cexpectedClaimResourceVersion\x12'\n" +
+	"\x0fidempotency_key\x18\t \x01(\tR\x0eidempotencyKey\x12\x16\n" +
+	"\x06reason\x18\n" +
+	" \x01(\tR\x06reason\x12+\n" +
+	"\x11approval_revision\x18\v \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\f \x01(\tR\x0emanifestDigest\"\x9c\x01\n" +
+	" TaskManagementClaimExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12;\n" +
+	"\x05claim\x18\x02 \x01(\v2%.kandev.plugin.v1.TaskManagementClaimR\x05claim\"_\n" +
+	"\x1dTaskCompletionEvidenceSubject\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1a\n" +
+	"\brevision\x18\x03 \x01(\tR\brevision\"\x9b\x01\n" +
+	"\x16TaskCompletionEvidence\x12I\n" +
+	"\asubject\x18\x01 \x01(\v2/.kandev.plugin.v1.TaskCompletionEvidenceSubjectR\asubject\x12\x18\n" +
+	"\asummary\x18\x02 \x01(\tR\asummary\x12\x1c\n" +
+	"\treference\x18\x03 \x01(\tR\treference\"\xb0\x03\n" +
+	"\x17TaskCompletionCriterion\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12Z\n" +
+	"\x10evidence_subject\x18\x03 \x01(\v2/.kandev.plugin.v1.TaskCompletionEvidenceSubjectR\x0fevidenceSubject\x12-\n" +
+	"\x12criterion_revision\x18\x04 \x01(\x03R\x11criterionRevision\x12+\n" +
+	"\x11verified_revision\x18\x05 \x01(\x03R\x10verifiedRevision\x12D\n" +
+	"\bevidence\x18\x06 \x01(\v2(.kandev.plugin.v1.TaskCompletionEvidenceR\bevidence\x12#\n" +
+	"\rverifier_kind\x18\a \x01(\tR\fverifierKind\x12\x1f\n" +
+	"\vverifier_id\x18\b \x01(\tR\n" +
+	"verifierId\x12\x1f\n" +
+	"\vverified_at\x18\t \x01(\tR\n" +
+	"verifiedAt\"\xac\x01\n" +
+	"\x1cTaskCompletionCriterionInput\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12Z\n" +
+	"\x10evidence_subject\x18\x03 \x01(\v2/.kandev.plugin.v1.TaskCompletionEvidenceSubjectR\x0fevidenceSubject\"R\n" +
+	"\x15TaskCompletionBlocker\x12!\n" +
+	"\fcriterion_id\x18\x01 \x01(\tR\vcriterionId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x9a\x02\n" +
+	"\x1aTaskCompletionGateSnapshot\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1a\n" +
+	"\brevision\x18\x03 \x01(\x03R\brevision\x12E\n" +
+	"\bcriteria\x18\x04 \x03(\v2).kandev.plugin.v1.TaskCompletionCriterionR\bcriteria\x12C\n" +
+	"\bblockers\x18\x05 \x03(\v2'.kandev.plugin.v1.TaskCompletionBlockerR\bblockers\x12\x18\n" +
+	"\ablocked\x18\x06 \x01(\bR\ablocked\"\xb3\x04\n" +
+	"%SetTaskCompletionCriteriaExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x05 \x01(\tR\x1bexpectedTaskResourceVersion\x12+\n" +
+	"\x11expected_revision\x18\x06 \x01(\x03R\x10expectedRevision\x12J\n" +
+	"\bcriteria\x18\a \x03(\v2..kandev.plugin.v1.TaskCompletionCriterionInputR\bcriteria\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\n" +
+	" \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\v \x01(\x03R\x17expectedClaimGeneration\"\xd4\x04\n" +
+	")VerifyTaskCompletionCriterionExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12!\n" +
+	"\fcriterion_id\x18\x04 \x01(\tR\vcriterionId\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x06 \x01(\tR\x1bexpectedTaskResourceVersion\x12+\n" +
+	"\x11expected_revision\x18\a \x01(\x03R\x10expectedRevision\x12D\n" +
+	"\bevidence\x18\b \x01(\v2(.kandev.plugin.v1.TaskCompletionEvidenceR\bevidence\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\v \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\f \x01(\x03R\x17expectedClaimGeneration\"\xa8\x01\n" +
+	"\x1fTaskCompletionGateExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12H\n" +
+	"\bsnapshot\x18\x02 \x01(\v2,.kandev.plugin.v1.TaskCompletionGateSnapshotR\bsnapshot\"\xf0\b\n" +
+	"(ApplyWorkspaceAdministrationExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
+	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\x04 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x05 \x01(\tR\x0emanifestDigest\x12_\n" +
+	"\x12workspace_defaults\x18\n" +
+	" \x01(\v2..kandev.plugin.v1.WorkspaceDefaultsUpdateExactH\x00R\x11workspaceDefaults\x12Y\n" +
+	"\x0fworkflow_create\x18\v \x01(\v2..kandev.plugin.v1.WorkspaceWorkflowCreateExactH\x00R\x0eworkflowCreate\x12Y\n" +
+	"\x0fworkflow_update\x18\f \x01(\v2..kandev.plugin.v1.WorkspaceWorkflowUpdateExactH\x00R\x0eworkflowUpdate\x12\\\n" +
+	"\x10workflow_reorder\x18\r \x01(\v2/.kandev.plugin.v1.WorkspaceWorkflowReorderExactH\x00R\x0fworkflowReorder\x12f\n" +
+	"\x14workflow_step_create\x18\x0e \x01(\v22.kandev.plugin.v1.WorkspaceWorkflowStepCreateExactH\x00R\x12workflowStepCreate\x12f\n" +
+	"\x14workflow_step_update\x18\x0f \x01(\v22.kandev.plugin.v1.WorkspaceWorkflowStepUpdateExactH\x00R\x12workflowStepUpdate\x12i\n" +
+	"\x15workflow_step_reorder\x18\x10 \x01(\v23.kandev.plugin.v1.WorkspaceWorkflowStepReorderExactH\x00R\x13workflowStepReorder\x12e\n" +
+	"\x13repository_register\x18\x11 \x01(\v22.kandev.plugin.v1.WorkspaceRepositoryRegisterExactH\x00R\x12repositoryRegister\x12_\n" +
+	"\x11repository_update\x18\x12 \x01(\v20.kandev.plugin.v1.WorkspaceRepositoryUpdateExactH\x00R\x10repositoryUpdateB\v\n" +
+	"\toperation\"\xa0\x04\n" +
+	"\x1cWorkspaceDefaultsUpdateExact\x12:\n" +
+	"\x19expected_resource_version\x18\x01 \x01(\tR\x17expectedResourceVersion\x12\x17\n" +
+	"\x04name\x18\x02 \x01(\tH\x00R\x04name\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x03 \x01(\tH\x01R\vdescription\x88\x01\x01\x123\n" +
+	"\x13default_executor_id\x18\x04 \x01(\tH\x02R\x11defaultExecutorId\x88\x01\x01\x129\n" +
+	"\x16default_environment_id\x18\x05 \x01(\tH\x03R\x14defaultEnvironmentId\x88\x01\x01\x12<\n" +
+	"\x18default_agent_profile_id\x18\x06 \x01(\tH\x04R\x15defaultAgentProfileId\x88\x01\x01\x12I\n" +
+	"\x1fdefault_config_agent_profile_id\x18\a \x01(\tH\x05R\x1bdefaultConfigAgentProfileId\x88\x01\x01B\a\n" +
+	"\x05_nameB\x0e\n" +
+	"\f_descriptionB\x16\n" +
+	"\x14_default_executor_idB\x19\n" +
+	"\x17_default_environment_idB\x1b\n" +
+	"\x19_default_agent_profile_idB\"\n" +
+	" _default_config_agent_profile_id\"g\n" +
+	"\x17WorkspaceWorkflowConfig\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x16\n" +
+	"\x06prompt\x18\x03 \x01(\tR\x06prompt\"\xbe\x01\n" +
+	"\x1cWorkspaceWorkflowCreateExact\x12M\n" +
+	"#expected_workspace_resource_version\x18\x01 \x01(\tR expectedWorkspaceResourceVersion\x12O\n" +
+	"\rconfiguration\x18\x02 \x01(\v2).kandev.plugin.v1.WorkspaceWorkflowConfigR\rconfiguration\"\xc0\x02\n" +
+	"\x1cWorkspaceWorkflowUpdateExact\x12\x1f\n" +
+	"\vworkflow_id\x18\x01 \x01(\tR\n" +
+	"workflowId\x12:\n" +
+	"\x19expected_resource_version\x18\x02 \x01(\tR\x17expectedResourceVersion\x12\x17\n" +
+	"\x04name\x18\x03 \x01(\tH\x00R\x04name\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x04 \x01(\tH\x01R\vdescription\x88\x01\x01\x12\x1b\n" +
+	"\x06prompt\x18\x05 \x01(\tH\x02R\x06prompt\x88\x01\x01\x12-\n" +
+	"\x10agent_profile_id\x18\x06 \x01(\tH\x03R\x0eagentProfileId\x88\x01\x01B\a\n" +
+	"\x05_nameB\x0e\n" +
+	"\f_descriptionB\t\n" +
+	"\a_promptB\x13\n" +
+	"\x11_agent_profile_id\"\xcf\x01\n" +
+	"\x1dWorkspaceWorkflowReorderExact\x12M\n" +
+	"#expected_workspace_resource_version\x18\x01 \x01(\tR expectedWorkspaceResourceVersion\x12!\n" +
+	"\fworkflow_ids\x18\x02 \x03(\tR\vworkflowIds\x12<\n" +
+	"\x1aworkflow_resource_versions\x18\x03 \x03(\tR\x18workflowResourceVersions\"Z\n" +
+	"\x1eWorkflowTransitionActionConfig\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12$\n" +
+	"\x0etarget_step_id\x18\x02 \x01(\tR\ftargetStepId\"\xb1\b\n" +
+	"\x19WorkflowStepConfiguration\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\vworkflow_id\x18\x02 \x01(\tR\n" +
+	"workflowId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1a\n" +
+	"\bposition\x18\x04 \x01(\x05R\bposition\x12\x1d\n" +
+	"\n" +
+	"stage_type\x18\x05 \x01(\tR\tstageType\x12\x14\n" +
+	"\x05color\x18\x06 \x01(\tR\x05color\x12\x16\n" +
+	"\x06prompt\x18\a \x01(\tR\x06prompt\x12*\n" +
+	"\x11allow_manual_move\x18\b \x01(\bR\x0fallowManualMove\x12\"\n" +
+	"\ris_start_step\x18\t \x01(\bR\visStartStep\x121\n" +
+	"\x15show_in_command_panel\x18\n" +
+	" \x01(\bR\x12showInCommandPanel\x127\n" +
+	"\x18auto_archive_after_hours\x18\v \x01(\x05R\x15autoArchiveAfterHours\x12(\n" +
+	"\x10agent_profile_id\x18\f \x01(\tR\x0eagentProfileId\x12?\n" +
+	"\x1cprofile_session_start_policy\x18\r \x01(\tR\x19profileSessionStartPolicy\x12;\n" +
+	"\x1aprofile_session_end_policy\x18\x0e \x01(\tR\x17profileSessionEndPolicy\x12\x1b\n" +
+	"\twip_limit\x18\x0f \x01(\x05R\bwipLimit\x12)\n" +
+	"\x11pull_from_step_id\x18\x10 \x01(\tR\x0epullFromStepId\x12?\n" +
+	"\x1cauto_advance_requires_signal\x18\x11 \x01(\bR\x19autoAdvanceRequiresSignal\x12A\n" +
+	"\x1dcancel_triggers_turn_complete\x18\x12 \x01(\bR\x1acancelTriggersTurnComplete\x123\n" +
+	"\x16complete_task_on_enter\x18\x13 \x01(\bR\x13completeTaskOnEnter\x121\n" +
+	"\x15on_enter_action_types\x18\x14 \x03(\tR\x12onEnterActionTypes\x12c\n" +
+	"\x15on_turn_start_actions\x18\x15 \x03(\v20.kandev.plugin.v1.WorkflowTransitionActionConfigR\x12onTurnStartActions\x12i\n" +
+	"\x18on_turn_complete_actions\x18\x16 \x03(\v20.kandev.plugin.v1.WorkflowTransitionActionConfigR\x15onTurnCompleteActions\"\xe3\x01\n" +
+	" WorkspaceWorkflowStepCreateExact\x12\x1f\n" +
+	"\vworkflow_id\x18\x01 \x01(\tR\n" +
+	"workflowId\x12K\n" +
+	"\"expected_workflow_resource_version\x18\x02 \x01(\tR\x1fexpectedWorkflowResourceVersion\x12Q\n" +
+	"\rconfiguration\x18\x03 \x01(\v2+.kandev.plugin.v1.WorkflowStepConfigurationR\rconfiguration\"\xc1\x02\n" +
+	" WorkspaceWorkflowStepUpdateExact\x12\x1f\n" +
+	"\vworkflow_id\x18\x01 \x01(\tR\n" +
+	"workflowId\x12\x17\n" +
+	"\astep_id\x18\x02 \x01(\tR\x06stepId\x12K\n" +
+	"\"expected_workflow_resource_version\x18\x03 \x01(\tR\x1fexpectedWorkflowResourceVersion\x12C\n" +
+	"\x1eexpected_step_resource_version\x18\x04 \x01(\tR\x1bexpectedStepResourceVersion\x12Q\n" +
+	"\rconfiguration\x18\x05 \x01(\v2+.kandev.plugin.v1.WorkflowStepConfigurationR\rconfiguration\"\xe2\x01\n" +
+	"!WorkspaceWorkflowStepReorderExact\x12\x1f\n" +
+	"\vworkflow_id\x18\x01 \x01(\tR\n" +
+	"workflowId\x12K\n" +
+	"\"expected_workflow_resource_version\x18\x02 \x01(\tR\x1fexpectedWorkflowResourceVersion\x12\x19\n" +
+	"\bstep_ids\x18\x03 \x03(\tR\astepIds\x124\n" +
+	"\x16step_resource_versions\x18\x04 \x03(\tR\x14stepResourceVersions\"\xb5\x05\n" +
+	" WorkspaceRepositoryRegisterExact\x12M\n" +
+	"#expected_workspace_resource_version\x18\x01 \x01(\tR expectedWorkspaceResourceVersion\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
+	"\vsource_type\x18\x03 \x01(\tR\n" +
+	"sourceType\x12\x1d\n" +
+	"\n" +
+	"local_path\x18\x04 \x01(\tR\tlocalPath\x12\x1a\n" +
+	"\bprovider\x18\x05 \x01(\tR\bprovider\x124\n" +
+	"\x16provider_repository_id\x18\x06 \x01(\tR\x14providerRepositoryId\x12#\n" +
+	"\rprovider_host\x18\a \x01(\tR\fproviderHost\x12%\n" +
+	"\x0eprovider_scope\x18\b \x01(\tR\rproviderScope\x12%\n" +
+	"\x0eprovider_owner\x18\t \x01(\tR\rproviderOwner\x12#\n" +
+	"\rprovider_name\x18\n" +
+	" \x01(\tR\fproviderName\x12\x1d\n" +
+	"\n" +
+	"remote_url\x18\v \x01(\tR\tremoteUrl\x12%\n" +
+	"\x0edefault_branch\x18\f \x01(\tR\rdefaultBranch\x124\n" +
+	"\x16worktree_branch_prefix\x18\r \x01(\tR\x14worktreeBranchPrefix\x128\n" +
+	"\x18worktree_branch_template\x18\x0e \x01(\tR\x16worktreeBranchTemplate\x125\n" +
+	"\x14pull_before_worktree\x18\x0f \x01(\bH\x00R\x12pullBeforeWorktree\x88\x01\x01B\x17\n" +
+	"\x15_pull_before_worktree\"\xe4\x03\n" +
+	"\x1eWorkspaceRepositoryUpdateExact\x12#\n" +
+	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12:\n" +
+	"\x19expected_resource_version\x18\x02 \x01(\tR\x17expectedResourceVersion\x12\x17\n" +
+	"\x04name\x18\x03 \x01(\tH\x00R\x04name\x88\x01\x01\x12*\n" +
+	"\x0edefault_branch\x18\x04 \x01(\tH\x01R\rdefaultBranch\x88\x01\x01\x129\n" +
+	"\x16worktree_branch_prefix\x18\x05 \x01(\tH\x02R\x14worktreeBranchPrefix\x88\x01\x01\x12=\n" +
+	"\x18worktree_branch_template\x18\x06 \x01(\tH\x03R\x16worktreeBranchTemplate\x88\x01\x01\x125\n" +
+	"\x14pull_before_worktree\x18\a \x01(\bH\x04R\x12pullBeforeWorktree\x88\x01\x01B\a\n" +
+	"\x05_nameB\x11\n" +
+	"\x0f_default_branchB\x19\n" +
+	"\x17_worktree_branch_prefixB\x1b\n" +
+	"\x19_worktree_branch_templateB\x17\n" +
+	"\x15_pull_before_worktree\"c\n" +
+	"$WorkspaceAdministrationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"U\n" +
+	"\x15SourceIssueTransition\x12\x1b\n" +
+	"\ttarget_id\x18\x01 \x01(\tR\btargetId\x12\x1f\n" +
+	"\vtarget_name\x18\x02 \x01(\tR\n" +
+	"targetName\"\xe4\x03\n" +
+	"\x1cExactSourceIssueCapabilities\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x122\n" +
+	"\x15task_resource_version\x18\x02 \x01(\tR\x13taskResourceVersion\x12\x1a\n" +
+	"\bprovider\x18\x03 \x01(\tR\bprovider\x12\x1b\n" +
+	"\tsource_id\x18\x04 \x01(\tR\bsourceId\x12\x1e\n" +
+	"\n" +
+	"identifier\x18\x05 \x01(\tR\n" +
+	"identifier\x12\x10\n" +
+	"\x03url\x18\x06 \x01(\tR\x03url\x12\x14\n" +
+	"\x05title\x18\a \x01(\tR\x05title\x12\x1b\n" +
+	"\tstatus_id\x18\b \x01(\tR\bstatusId\x12\x1f\n" +
+	"\vstatus_name\x18\t \x01(\tR\n" +
+	"statusName\x12I\n" +
+	"\vtransitions\x18\n" +
+	" \x03(\v2'.kandev.plugin.v1.SourceIssueTransitionR\vtransitions\x12)\n" +
+	"\x10resource_version\x18\v \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\f \x01(\tR\n" +
+	"observedAt\x12!\n" +
+	"\fworkspace_id\x18\r \x01(\tR\vworkspaceId\"\x83\x01\n" +
+	"&GetSourceIssueCapabilitiesExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\"\xe7\x01\n" +
+	"'GetSourceIssueCapabilitiesExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12B\n" +
+	"\x04item\x18\x02 \x01(\v2..kandev.plugin.v1.ExactSourceIssueCapabilitiesR\x04item\x12;\n" +
+	"\areceipt\x18\x03 \x01(\v2!.kandev.plugin.v1.HostReadReceiptR\areceipt\"\xac\x04\n" +
+	"\x1bSourceIssueWritebackReceipt\x12\x1d\n" +
+	"\n" +
+	"receipt_id\x18\x01 \x01(\tR\treceiptId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12'\n" +
+	"\x0finstallation_id\x18\x03 \x01(\tR\x0einstallationId\x12!\n" +
+	"\fworkspace_id\x18\x04 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x05 \x01(\tR\x06taskId\x12\x1a\n" +
+	"\bprovider\x18\x06 \x01(\tR\bprovider\x12\x1b\n" +
+	"\tsource_id\x18\a \x01(\tR\bsourceId\x12\x1c\n" +
+	"\toperation\x18\b \x01(\tR\toperation\x12\x14\n" +
+	"\x05state\x18\t \x01(\tR\x05state\x12;\n" +
+	"\x06status\x18\n" +
+	" \x01(\x0e2#.kandev.plugin.v1.HostCommandStatusR\x06status\x12\x16\n" +
+	"\x06reason\x18\v \x01(\tR\x06reason\x12.\n" +
+	"\x13provider_receipt_id\x18\f \x01(\tR\x11providerReceiptId\x126\n" +
+	"\x17expected_source_version\x18\r \x01(\tR\x15expectedSourceVersion\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x0e \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x0f \x01(\tR\tupdatedAt\"\x9c\x03\n" +
+	"\x1eCommentSourceIssueExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x05 \x01(\tR\x1bexpectedTaskResourceVersion\x12G\n" +
+	" expected_source_resource_version\x18\x06 \x01(\tR\x1dexpectedSourceResourceVersion\x12\x12\n" +
+	"\x04body\x18\a \x01(\tR\x04body\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\"\xa8\x03\n" +
+	"!TransitionSourceIssueExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x05 \x01(\tR\x1bexpectedTaskResourceVersion\x12G\n" +
+	" expected_source_resource_version\x18\x06 \x01(\tR\x1dexpectedSourceResourceVersion\x12\x1b\n" +
+	"\ttarget_id\x18\a \x01(\tR\btargetId\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\"\xa9\x01\n" +
+	"!SourceIssueWritebackExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12G\n" +
+	"\areceipt\x18\x02 \x01(\v2-.kandev.plugin.v1.SourceIssueWritebackReceiptR\areceipt\"\xa2\x04\n" +
+	"\x1eIssueTaskDirectiveExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12)\n" +
+	"\x10capability_class\x18\x05 \x01(\tR\x0fcapabilityClass\x12-\n" +
+	"\x12instruction_digest\x18\x06 \x01(\tR\x11instructionDigest\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\a \x01(\tR\x1bexpectedTaskResourceVersion\x12I\n" +
+	"!expected_session_resource_version\x18\b \x01(\tR\x1eexpectedSessionResourceVersion\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\t \x01(\tR\texpiresAt\x12'\n" +
+	"\x0fidempotency_key\x18\n" +
+	" \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\v \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\f \x01(\tR\x0emanifestDigest\"\x9d\x01\n" +
+	"\x1fIssueTaskDirectiveExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12=\n" +
+	"\tdirective\x18\x02 \x01(\v2\x1f.kandev.plugin.v1.TaskDirectiveR\tdirective\"\x8f\x03\n" +
+	" ResolveTaskDirectiveExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12!\n" +
+	"\fdirective_id\x18\x03 \x01(\tR\vdirectiveId\x12:\n" +
+	"\x19expected_resource_version\x18\x04 \x01(\tR\x17expectedResourceVersion\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12\x1e\n" +
+	"\n" +
+	"resolution\x18\x06 \x01(\tR\n" +
+	"resolution\x12+\n" +
+	"\x11resolution_digest\x18\a \x01(\tR\x10resolutionDigest\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\"\x9f\x01\n" +
+	"!ResolveTaskDirectiveExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12=\n" +
+	"\tdirective\x18\x02 \x01(\v2\x1f.kandev.plugin.v1.TaskDirectiveR\tdirective\"\xc8\x04\n" +
+	"\"ManagedAgentConversationDescriptor\x12'\n" +
+	"\x0finstallation_id\x18\x01 \x01(\tR\x0einstallationId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12!\n" +
+	"\fworkspace_id\x18\x04 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x05 \x01(\tR\vinstanceKey\x12\x1a\n" +
+	"\brevision\x18\x06 \x01(\x04R\brevision\x12(\n" +
+	"\x10agent_profile_id\x18\a \x01(\tR\x0eagentProfileId\x12\x1f\n" +
+	"\vexecutor_id\x18\b \x01(\tR\n" +
+	"executorId\x12.\n" +
+	"\x13executor_profile_id\x18\t \x01(\tR\x11executorProfileId\x12\x1f\n" +
+	"\vbase_prompt\x18\n" +
+	" \x01(\tR\n" +
+	"basePrompt\x12/\n" +
+	"\x13instruction_version\x18\v \x01(\tR\x12instructionVersion\x12%\n" +
+	"\x0edesired_paused\x18\f \x01(\bR\rdesiredPaused\x12%\n" +
+	"\x0eretention_mode\x18\r \x01(\tR\rretentionMode\x12\x1a\n" +
+	"\bdetached\x18\x0e \x01(\bR\bdetached\x12(\n" +
+	"\x10agent_tool_names\x18\x0f \x03(\tR\x0eagentToolNames\"\xa6\x04\n" +
+	"\x1cManagedAgentConversationSpec\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12+\n" +
+	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x12(\n" +
+	"\x10agent_profile_id\x18\b \x01(\tR\x0eagentProfileId\x12\x1f\n" +
+	"\vexecutor_id\x18\t \x01(\tR\n" +
+	"executorId\x12.\n" +
+	"\x13executor_profile_id\x18\n" +
+	" \x01(\tR\x11executorProfileId\x12\x1f\n" +
+	"\vbase_prompt\x18\v \x01(\tR\n" +
+	"basePrompt\x12/\n" +
+	"\x13instruction_version\x18\f \x01(\tR\x12instructionVersion\x12(\n" +
+	"\x10agent_tool_names\x18\r \x03(\tR\x0eagentToolNames\"p\n" +
+	"*EnsureManagedAgentConversationExactRequest\x12B\n" +
+	"\x04spec\x18\x01 \x01(\v2..kandev.plugin.v1.ManagedAgentConversationSpecR\x04spec\"\xc4\x01\n" +
+	"+EnsureManagedAgentConversationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12X\n" +
+	"\fconversation\x18\x02 \x01(\v24.kandev.plugin.v1.ManagedAgentConversationDescriptorR\fconversation\"\xcb\x01\n" +
+	"-GetManagedAgentConversationStatusExactRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x02 \x01(\tR\vinstanceKey\x12+\n" +
+	"\x11approval_revision\x18\x03 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x04 \x01(\tR\x0emanifestDigest\"\x8a\x01\n" +
+	".GetManagedAgentConversationStatusExactResponse\x12X\n" +
+	"\fconversation\x18\x01 \x01(\v24.kandev.plugin.v1.ManagedAgentConversationDescriptorR\fconversation\"\xa4\x01\n" +
+	")ListManagedAgentConversationsExactRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12+\n" +
+	"\x11approval_revision\x18\x02 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x03 \x01(\tR\x0emanifestDigest\"\x88\x01\n" +
+	"*ListManagedAgentConversationsExactResponse\x12Z\n" +
+	"\rconversations\x18\x01 \x03(\v24.kandev.plugin.v1.ManagedAgentConversationDescriptorR\rconversations\"\xd8\x02\n" +
+	"-SetManagedAgentConversationPausedExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12+\n" +
+	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x12\x16\n" +
+	"\x06paused\x18\b \x01(\bR\x06paused\"\xc7\x01\n" +
+	".SetManagedAgentConversationPausedExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12X\n" +
+	"\fconversation\x18\x02 \x01(\v24.kandev.plugin.v1.ManagedAgentConversationDescriptorR\fconversation\"\xbd\x02\n" +
+	"*DeleteManagedAgentConversationExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12+\n" +
+	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\"j\n" +
+	"+DeleteManagedAgentConversationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"\xc0\x04\n" +
+	"\x18ManagedAgentInputReceipt\x12\"\n" +
+	"\rhost_input_id\x18\x01 \x01(\tR\vhostInputId\x12%\n" +
+	"\x0eoccurrence_key\x18\x02 \x01(\tR\roccurrenceKey\x12\x1a\n" +
+	"\bsequence\x18\x03 \x01(\x04R\bsequence\x12A\n" +
+	"\x06origin\x18\x04 \x01(\x0e2).kandev.plugin.v1.ManagedAgentInputOriginR\x06origin\x12\x18\n" +
+	"\apayload\x18\x05 \x01(\tR\apayload\x12!\n" +
+	"\fcoalesce_key\x18\x06 \x01(\tR\vcoalesceKey\x123\n" +
+	"\x15conversation_revision\x18\a \x01(\x04R\x14conversationRevision\x12>\n" +
+	"\x05state\x18\b \x01(\x0e2(.kandev.plugin.v1.ManagedAgentInputStateR\x05state\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\t \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\n" +
+	" \x01(\tR\tupdatedAt\x12$\n" +
+	"\x0equeue_entry_id\x18\v \x01(\tR\fqueueEntryId\x12!\n" +
+	"\fexecution_id\x18\f \x01(\tR\vexecutionId\x12\x17\n" +
+	"\aturn_id\x18\r \x01(\tR\x06turnId\x12(\n" +
+	"\x10superseded_by_id\x18\x0e \x01(\tR\x0esupersededById\"\xf7\x03\n" +
+	"$EnqueueManagedAgentInputExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12D\n" +
+	"\x1eexpected_conversation_revision\x18\x05 \x01(\x04R\x1cexpectedConversationRevision\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x12%\n" +
+	"\x0eoccurrence_key\x18\b \x01(\tR\roccurrenceKey\x12A\n" +
+	"\x06origin\x18\t \x01(\x0e2).kandev.plugin.v1.ManagedAgentInputOriginR\x06origin\x12\x18\n" +
+	"\apayload\x18\n" +
+	" \x01(\tR\apayload\x12!\n" +
+	"\fcoalesce_key\x18\v \x01(\tR\vcoalesceKey\"\xa6\x01\n" +
+	"%EnqueueManagedAgentInputExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12@\n" +
+	"\x05input\x18\x02 \x01(\v2*.kandev.plugin.v1.ManagedAgentInputReceiptR\x05input\"\xe2\x01\n" +
+	" GetManagedAgentInputExactRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x02 \x01(\tR\vinstanceKey\x12\"\n" +
+	"\rhost_input_id\x18\x03 \x01(\tR\vhostInputId\x12+\n" +
+	"\x11approval_revision\x18\x04 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x05 \x01(\tR\x0emanifestDigest\"e\n" +
+	"!GetManagedAgentInputExactResponse\x12@\n" +
+	"\x05input\x18\x01 \x01(\v2*.kandev.plugin.v1.ManagedAgentInputReceiptR\x05input\"\xff\x01\n" +
+	"\"ListManagedAgentInputsExactRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x02 \x01(\tR\vinstanceKey\x12'\n" +
+	"\x0fsequence_cursor\x18\x03 \x01(\x04R\x0esequenceCursor\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\rR\x05limit\x12+\n" +
+	"\x11approval_revision\x18\x05 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x06 \x01(\tR\x0emanifestDigest\"\xb6\x01\n" +
+	"#ListManagedAgentInputsExactResponse\x12B\n" +
+	"\x06inputs\x18\x01 \x03(\v2*.kandev.plugin.v1.ManagedAgentInputReceiptR\x06inputs\x120\n" +
+	"\x14next_sequence_cursor\x18\x02 \x01(\x04R\x12nextSequenceCursor\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xa7\x03\n" +
+	"#CancelManagedAgentInputExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12\"\n" +
+	"\rhost_input_id\x18\x05 \x01(\tR\vhostInputId\x12D\n" +
+	"\x1eexpected_conversation_revision\x18\x06 \x01(\x04R\x1cexpectedConversationRevision\x122\n" +
+	"\x15expected_execution_id\x18\a \x01(\tR\x13expectedExecutionId\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\"\xa5\x01\n" +
+	"$CancelManagedAgentInputExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12@\n" +
+	"\x05input\x18\x02 \x01(\v2*.kandev.plugin.v1.ManagedAgentInputReceiptR\x05input\"\xff\x03\n" +
+	",DispatchManagedAgentConversationExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12!\n" +
+	"\finstance_key\x18\x04 \x01(\tR\vinstanceKey\x12D\n" +
+	"\x1eexpected_conversation_revision\x18\x05 \x01(\x04R\x1cexpectedConversationRevision\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x12%\n" +
+	"\x0eoccurrence_key\x18\b \x01(\tR\roccurrenceKey\x12A\n" +
+	"\x06origin\x18\t \x01(\x0e2).kandev.plugin.v1.ManagedAgentInputOriginR\x06origin\x12\x18\n" +
+	"\apayload\x18\n" +
+	" \x01(\tR\apayload\x12!\n" +
+	"\fcoalesce_key\x18\v \x01(\tR\vcoalesceKey\"\x9d\x02\n" +
+	"-DispatchManagedAgentConversationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12U\n" +
+	"\x0fdispatch_status\x18\x02 \x01(\x0e2,.kandev.plugin.v1.ManagedAgentDispatchStatusR\x0edispatchStatus\x12X\n" +
+	"\fconversation\x18\x03 \x01(\v24.kandev.plugin.v1.ManagedAgentConversationDescriptorR\fconversation\"s\n" +
+	"\"ManagedConversationScheduleTrigger\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1f\n" +
+	"\vconfig_json\x18\x02 \x01(\tR\n" +
+	"configJson\x12\x18\n" +
+	"\aenabled\x18\x03 \x01(\bR\aenabled\"\xaa\x03\n" +
+	"\x1bManagedConversationSchedule\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x16\n" +
+	"\x06prompt\x18\x05 \x01(\tR\x06prompt\x12\x1b\n" +
+	"\tplugin_id\x18\x06 \x01(\tR\bpluginId\x12!\n" +
+	"\finstance_key\x18\a \x01(\tR\vinstanceKey\x121\n" +
+	"\x14destination_revision\x18\b \x01(\x04R\x13destinationRevision\x12+\n" +
+	"\x11resource_revision\x18\t \x01(\x04R\x10resourceRevision\x12\x18\n" +
+	"\aenabled\x18\n" +
+	" \x01(\bR\aenabled\x12P\n" +
+	"\btriggers\x18\v \x03(\v24.kandev.plugin.v1.ManagedConversationScheduleTriggerR\btriggers\"\xa7\x01\n" +
+	",ListManagedConversationSchedulesExactRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12+\n" +
+	"\x11approval_revision\x18\x02 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x03 \x01(\tR\x0emanifestDigest\"|\n" +
+	"-ListManagedConversationSchedulesExactResponse\x12K\n" +
+	"\tschedules\x18\x01 \x03(\v2-.kandev.plugin.v1.ManagedConversationScheduleR\tschedules\"\x98\x02\n" +
+	"-CreateManagedConversationScheduleExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\x03 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x04 \x01(\tR\x0emanifestDigest\x12I\n" +
+	"\bschedule\x18\x05 \x01(\v2-.kandev.plugin.v1.ManagedConversationScheduleR\bschedule\"\xfb\x02\n" +
+	"-UpdateManagedConversationScheduleExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12#\n" +
+	"\rautomation_id\x18\x03 \x01(\tR\fautomationId\x12<\n" +
+	"\x1aexpected_resource_revision\x18\x04 \x01(\x04R\x18expectedResourceRevision\x12+\n" +
+	"\x11approval_revision\x18\x05 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x06 \x01(\tR\x0emanifestDigest\x12I\n" +
+	"\bschedule\x18\a \x01(\v2-.kandev.plugin.v1.ManagedConversationScheduleR\bschedule\"\xf1\x02\n" +
+	"1SetManagedConversationScheduleEnabledExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12#\n" +
+	"\rautomation_id\x18\x04 \x01(\tR\fautomationId\x12<\n" +
+	"\x1aexpected_resource_revision\x18\x05 \x01(\x04R\x18expectedResourceRevision\x12\x18\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x12+\n" +
+	"\x11approval_revision\x18\a \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\b \x01(\tR\x0emanifestDigest\"\xd3\x02\n" +
+	"-DeleteManagedConversationScheduleExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12#\n" +
+	"\rautomation_id\x18\x04 \x01(\tR\fautomationId\x12<\n" +
+	"\x1aexpected_resource_revision\x18\x05 \x01(\x04R\x18expectedResourceRevision\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\"\xb2\x01\n" +
+	"(ManagedConversationScheduleExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12I\n" +
+	"\bschedule\x18\x02 \x01(\v2-.kandev.plugin.v1.ManagedConversationScheduleR\bschedule\"\xae\x03\n" +
+	"\x19EnsureTaskRunExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\x12C\n" +
+	"\x1eexpected_task_resource_version\x18\x05 \x01(\tR\x1bexpectedTaskResourceVersion\x12+\n" +
+	"\x11approval_revision\x18\x06 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\a \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\b \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\t \x01(\x03R\x17expectedClaimGeneration\"\xc0\x01\n" +
+	"\x1aEnsureTaskRunExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12#\n" +
+	"\rsession_state\x18\x03 \x01(\tR\fsessionState\x12!\n" +
+	"\fexecution_id\x18\x04 \x01(\tR\vexecutionId\"\x85\x04\n" +
+	"\x17StopTaskRunExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12I\n" +
+	"!expected_session_resource_version\x18\x05 \x01(\tR\x1eexpectedSessionResourceVersion\x122\n" +
+	"\x15expected_execution_id\x18\x06 \x01(\tR\x13expectedExecutionId\x12'\n" +
+	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\n" +
+	" \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\v \x01(\x03R\x17expectedClaimGeneration\"q\n" +
+	"\x18StopTaskRunExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12\x18\n" +
+	"\astopped\x18\x02 \x01(\bR\astopped\"\xa0\x04\n" +
+	"\x1aRecoverSessionExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12I\n" +
+	"!expected_session_resource_version\x18\x05 \x01(\tR\x1eexpectedSessionResourceVersion\x122\n" +
+	"\x15expected_execution_id\x18\x06 \x01(\tR\x13expectedExecutionId\x12\x16\n" +
+	"\x06action\x18\a \x01(\tR\x06action\x12'\n" +
+	"\x0fidempotency_key\x18\b \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\v \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\f \x01(\x03R\x17expectedClaimGeneration\"\x9c\x01\n" +
+	"\x1bRecoverSessionExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12!\n" +
+	"\fexecution_id\x18\x03 \x01(\tR\vexecutionId\"\xd8\x03\n" +
+	"'CancelPendingTaskTransitionExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12#\n" +
+	"\rtransition_id\x18\x04 \x01(\tR\ftransitionId\x12:\n" +
+	"\x19expected_resource_version\x18\x05 \x01(\tR\x17expectedResourceVersion\x12'\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\a \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\b \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\t \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\n" +
+	" \x01(\x03R\x17expectedClaimGeneration\"g\n" +
+	"(CancelPendingTaskTransitionExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"Y\n" +
+	"\x11SessionModeOption\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"\xe7\x02\n" +
+	"!GetSessionModeContextExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12+\n" +
+	"\x11approval_revision\x18\x05 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x06 \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\a \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\b \x01(\x03R\x17expectedClaimGeneration\"\xa8\x02\n" +
+	"\"GetSessionModeContextExactResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12!\n" +
+	"\fexecution_id\x18\x02 \x01(\tR\vexecutionId\x12&\n" +
+	"\x0fcurrent_mode_id\x18\x03 \x01(\tR\rcurrentModeId\x12L\n" +
+	"\x0favailable_modes\x18\x04 \x03(\v2#.kandev.plugin.v1.SessionModeOptionR\x0eavailableModes\x12)\n" +
+	"\x10resource_version\x18\x05 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x06 \x01(\tR\n" +
+	"observedAt\"\xa1\x04\n" +
+	"\x1aSetSessionModeExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12I\n" +
+	"!expected_session_resource_version\x18\x05 \x01(\tR\x1eexpectedSessionResourceVersion\x122\n" +
+	"\x15expected_execution_id\x18\x06 \x01(\tR\x13expectedExecutionId\x12\x17\n" +
+	"\amode_id\x18\a \x01(\tR\x06modeId\x12'\n" +
+	"\x0fidempotency_key\x18\b \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\t \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\n" +
+	" \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17management_instance_key\x18\v \x01(\tR\x15managementInstanceKey\x12:\n" +
+	"\x19expected_claim_generation\x18\f \x01(\x03R\x17expectedClaimGeneration\"\x82\x01\n" +
+	"\x1bSetSessionModeExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12&\n" +
+	"\x0fcurrent_mode_id\x18\x02 \x01(\tR\rcurrentModeId\"\xa2\x01\n" +
+	"\x1fHumanInteractionResponseReceipt\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
+	"\x0einteraction_id\x18\x02 \x01(\tR\rinteractionId\x12)\n" +
+	"\x10resource_version\x18\x03 \x01(\tR\x0fresourceVersion\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\tR\texpiresAt\"\x90\x03\n" +
+	"\x1dRespondPermissionExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12%\n" +
+	"\x0einteraction_id\x18\x03 \x01(\tR\rinteractionId\x12:\n" +
+	"\x19expected_resource_version\x18\x04 \x01(\tR\x17expectedResourceVersion\x12\x1b\n" +
+	"\toption_id\x18\x05 \x01(\tR\boptionId\x12\x1c\n" +
+	"\tcancelled\x18\x06 \x01(\bR\tcancelled\x129\n" +
+	"\x19human_response_receipt_id\x18\a \x01(\tR\x16humanResponseReceiptId\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\"\x9e\x01\n" +
+	"\x1eRespondPermissionExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12?\n" +
+	"\vinteraction\x18\x02 \x01(\v2\x1d.kandev.plugin.v1.InteractionR\vinteraction\"\x98\x03\n" +
+	"\x1fAnswerClarificationExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12%\n" +
+	"\x0einteraction_id\x18\x03 \x01(\tR\rinteractionId\x12:\n" +
+	"\x19expected_resource_version\x18\x04 \x01(\tR\x17expectedResourceVersion\x12?\n" +
+	"\aanswers\x18\x05 \x03(\v2%.kandev.plugin.v1.ClarificationAnswerR\aanswers\x129\n" +
+	"\x19human_response_receipt_id\x18\x06 \x01(\tR\x16humanResponseReceiptId\x12+\n" +
+	"\x11approval_revision\x18\a \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\b \x01(\tR\x0emanifestDigest\"\xa0\x01\n" +
+	" AnswerClarificationExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12?\n" +
+	"\vinteraction\x18\x02 \x01(\v2\x1d.kandev.plugin.v1.InteractionR\vinteraction\"\xb8\x01\n" +
 	"\x05Event\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1d\n" +
 	"\n" +
@@ -8869,13 +25157,20 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\rinvocation_id\x18\x01 \x01(\tR\finvocationId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x125\n" +
 	"\targuments\x18\x03 \x01(\v2\x17.google.protobuf.StructR\targuments\x12<\n" +
-	"\acontext\x18\x04 \x01(\v2\".kandev.plugin.v1.AgentToolContextR\acontext\"\x87\x01\n" +
+	"\acontext\x18\x04 \x01(\v2\".kandev.plugin.v1.AgentToolContextR\acontext\"\x88\x03\n" +
 	"\x10AgentToolContext\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12!\n" +
 	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12\x18\n" +
-	"\asurface\x18\x04 \x01(\tR\asurface\"\x8a\x01\n" +
+	"\asurface\x18\x04 \x01(\tR\asurface\x12!\n" +
+	"\fexecution_id\x18\x05 \x01(\tR\vexecutionId\x12'\n" +
+	"\x0finstallation_id\x18\x06 \x01(\tR\x0einstallationId\x123\n" +
+	"\x15conversation_revision\x18\a \x01(\x04R\x14conversationRevision\x12+\n" +
+	"\x11approval_revision\x18\b \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\x12(\n" +
+	"\x10agent_tool_names\x18\n" +
+	" \x03(\tR\x0eagentToolNames\"\x8a\x01\n" +
 	"\x11AgentToolResponse\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12F\n" +
 	"\x12structured_content\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x11structuredContent\x12\x19\n" +
@@ -9029,7 +25324,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\bPageInfo\x12\x1f\n" +
 	"\vnext_cursor\x18\x01 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xc5\v\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xf0\v\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
@@ -9078,7 +25373,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x06blocks\x18! \x03(\v2#.kandev.plugin.v1.TaskDependencyRefR\x06blocks\x120\n" +
 	"\x14depends_on_truncated\x18\" \x01(\bR\x12dependsOnTruncated\x12)\n" +
 	"\x10blocks_truncated\x18# \x01(\bR\x0fblocksTruncated\x120\n" +
-	"\x14start_when_unblocked\x18$ \x01(\bR\x12startWhenUnblockedB\r\n" +
+	"\x14start_when_unblocked\x18$ \x01(\bR\x12startWhenUnblocked\x12)\n" +
+	"\x10resource_version\x18% \x01(\tR\x0fresourceVersionB\r\n" +
 	"\v_started_atB\x0f\n" +
 	"\r_completed_atB\f\n" +
 	"\n" +
@@ -9279,7 +25575,162 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x01 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x96\x01\n" +
 	"\x1cListExecutorProfilesResponse\x12=\n" +
 	"\bprofiles\x18\x01 \x03(\v2!.kandev.plugin.v1.ExecutorProfileR\bprofiles\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xc4\x03\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xa3\x04\n" +
+	"\x1eExecutorProviderRequestContext\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12'\n" +
+	"\x0finstallation_id\x18\x02 \x01(\tR\x0einstallationId\x12!\n" +
+	"\fprovider_key\x18\x03 \x01(\tR\vproviderKey\x12)\n" +
+	"\x10contract_version\x18\x04 \x01(\x05R\x0fcontractVersion\x12!\n" +
+	"\fworkspace_id\x18\x05 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x06 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\a \x01(\tR\tsessionId\x12%\n" +
+	"\x0eenvironment_id\x18\b \x01(\tR\renvironmentId\x12!\n" +
+	"\fexecution_id\x18\t \x01(\tR\vexecutionId\x12!\n" +
+	"\foperation_id\x18\n" +
+	" \x01(\tR\voperationId\x12\x1a\n" +
+	"\bdeadline\x18\v \x01(\tR\bdeadline\x125\n" +
+	"\x16environment_generation\x18\f \x01(\x04R\x15environmentGeneration\x12!\n" +
+	"\finput_digest\x18\r \x01(\tR\vinputDigest\x12/\n" +
+	"\x13dispatch_generation\x18\x0e \x01(\x04R\x12dispatchGeneration\"\xe5\x02\n" +
+	"\x17ExecutorProfileSnapshot\x12\x1d\n" +
+	"\n" +
+	"profile_id\x18\x01 \x01(\tR\tprofileId\x12M\n" +
+	"\x06config\x18\x02 \x03(\v25.kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntryR\x06config\x12`\n" +
+	"\rsecret_values\x18\x03 \x03(\v2;.kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntryR\fsecretValues\x1a9\n" +
+	"\vConfigEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11SecretValuesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"e\n" +
+	"\x1aExecutorProviderFieldError\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\tR\x04code\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x03 \x01(\tR\tmessageId\"\xc0\x01\n" +
+	"\x15ExecutorProviderError\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x02 \x01(\tR\tmessageId\x12D\n" +
+	"\x06fields\x18\x03 \x03(\v2,.kandev.plugin.v1.ExecutorProviderFieldErrorR\x06fields\x12.\n" +
+	"\x13retry_after_seconds\x18\x04 \x01(\rR\x11retryAfterSeconds\"\x99\x02\n" +
+	"\x1cExecutorProviderCapabilities\x12\x1a\n" +
+	"\bterminal\x18\x01 \x01(\bR\bterminal\x12\x14\n" +
+	"\x05files\x18\x02 \x01(\bR\x05files\x12\x10\n" +
+	"\x03git\x18\x03 \x01(\bR\x03git\x12'\n" +
+	"\x0fembedded_editor\x18\x04 \x01(\bR\x0eembeddedEditor\x12\x18\n" +
+	"\apreview\x18\x05 \x01(\bR\apreview\x12\x1a\n" +
+	"\breattach\x18\x06 \x01(\bR\breattach\x12\x1c\n" +
+	"\tretention\x18\a \x01(\tR\tretention\x128\n" +
+	"\x18maximum_lifetime_seconds\x18\b \x01(\x04R\x16maximumLifetimeSeconds\"\xb6\x02\n" +
+	"\x1aExecutorResourceDescriptor\x12'\n" +
+	"\x0fresource_handle\x18\x01 \x01(\tR\x0eresourceHandle\x12\x1d\n" +
+	"\n" +
+	"state_json\x18\x02 \x01(\tR\tstateJson\x12\x1a\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\x12R\n" +
+	"\fcapabilities\x18\x04 \x01(\v2..kandev.plugin.v1.ExecutorProviderCapabilitiesR\fcapabilities\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x05 \x01(\tR\texpiresAt\x12\x1c\n" +
+	"\tretention\x18\x06 \x01(\tR\tretention\x12#\n" +
+	"\rstate_version\x18\a \x01(\rR\fstateVersion\"\xb1\x01\n" +
+	"\x1eValidateExecutorProfileRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12C\n" +
+	"\aprofile\x18\x02 \x01(\v2).kandev.plugin.v1.ExecutorProfileSnapshotR\aprofile\"\x85\x02\n" +
+	"\x1fValidateExecutorProfileResponse\x12O\n" +
+	"\ffield_errors\x18\x01 \x03(\v2,.kandev.plugin.v1.ExecutorProviderFieldErrorR\vfieldErrors\x12R\n" +
+	"\fcapabilities\x18\x02 \x01(\v2..kandev.plugin.v1.ExecutorProviderCapabilitiesR\fcapabilities\x12=\n" +
+	"\x05error\x18\x03 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xdd\x01\n" +
+	"#ProvisionExecutorEnvironmentRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12C\n" +
+	"\aprofile\x18\x02 \x01(\v2).kandev.plugin.v1.ExecutorProfileSnapshotR\aprofile\x12%\n" +
+	"\x0ebootstrap_json\x18\x03 \x01(\tR\rbootstrapJson\"\xaf\x01\n" +
+	"$ProvisionExecutorEnvironmentResponse\x12H\n" +
+	"\bresource\x18\x01 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12=\n" +
+	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xb2\x01\n" +
+	"\x1fRecoverExecutorOperationRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12C\n" +
+	"\aprofile\x18\x02 \x01(\v2).kandev.plugin.v1.ExecutorProfileSnapshotR\aprofile\"\xc5\x01\n" +
+	" RecoverExecutorOperationResponse\x12\x18\n" +
+	"\aoutcome\x18\x01 \x01(\tR\aoutcome\x12H\n" +
+	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12=\n" +
+	"\x05error\x18\x03 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xf4\x01\n" +
+	" AttachExecutorEnvironmentRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
+	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12:\n" +
+	"\x19expected_runtime_identity\x18\x03 \x01(\tR\x17expectedRuntimeIdentity\"\xac\x01\n" +
+	"!AttachExecutorEnvironmentResponse\x12H\n" +
+	"\bresource\x18\x01 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12=\n" +
+	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xb9\x01\n" +
+	"!InspectExecutorEnvironmentRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
+	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\"\xb0\x01\n" +
+	"\"InspectExecutorEnvironmentResponse\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\tR\texpiresAt\x12=\n" +
+	"\x05error\x18\x04 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xf5\x01\n" +
+	" ResolveExecutorConnectionRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
+	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12\x18\n" +
+	"\apurpose\x18\x03 \x01(\tR\apurpose\x12!\n" +
+	"\fruntime_port\x18\x04 \x01(\rR\vruntimePort\"\xfc\x03\n" +
+	"\x17ExecutorConnectionLease\x12\x19\n" +
+	"\bbase_url\x18\x01 \x01(\tR\abaseUrl\x12]\n" +
+	"\fhttp_headers\x18\x02 \x03(\v2:.kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntryR\vhttpHeaders\x12l\n" +
+	"\x11websocket_headers\x18\x03 \x03(\v2?.kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntryR\x10websocketHeaders\x125\n" +
+	"\x16websocket_subprotocols\x18\x04 \x03(\tR\x15websocketSubprotocols\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x05 \x01(\tR\texpiresAt\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x06 \x01(\tR\n" +
+	"generation\x1a>\n" +
+	"\x10HttpHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aC\n" +
+	"\x15WebsocketHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa3\x01\n" +
+	"!ResolveExecutorConnectionResponse\x12?\n" +
+	"\x05lease\x18\x01 \x01(\v2).kandev.plugin.v1.ExecutorConnectionLeaseR\x05lease\x12=\n" +
+	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\x85\x02\n" +
+	"!DestroyExecutorEnvironmentRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
+	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12%\n" +
+	"\x0ecleanup_reason\x18\x03 \x01(\tR\rcleanupReason\x12#\n" +
+	"\rcleanup_claim\x18\x04 \x01(\tR\fcleanupClaim\"\x8e\x01\n" +
+	"\"DestroyExecutorEnvironmentResponse\x12)\n" +
+	"\x10confirmed_absent\x18\x01 \x01(\bR\x0fconfirmedAbsent\x12=\n" +
+	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xcf\x01\n" +
+	"!CheckpointExecutorResourceRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
+	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12\x14\n" +
+	"\x05phase\x18\x03 \x01(\tR\x05phase\"@\n" +
+	"\"CheckpointExecutorResourceResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"\xb5\x01\n" +
+	"\x1dReportExecutorProgressRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12\x14\n" +
+	"\x05stage\x18\x02 \x01(\tR\x05stage\x12\x1c\n" +
+	"\tcompleted\x18\x03 \x01(\rR\tcompleted\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\rR\x05total\"<\n" +
+	"\x1eReportExecutorProgressResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"\xad\x01\n" +
+	"\"ReadExecutorRuntimeArtifactRequest\x12J\n" +
+	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12\x1f\n" +
+	"\vartifact_id\x18\x02 \x01(\tR\n" +
+	"artifactId\x12\x1a\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\"\xe6\x01\n" +
+	"\x1cExecutorRuntimeArtifactChunk\x12\x1f\n" +
+	"\vartifact_id\x18\x01 \x01(\tR\n" +
+	"artifactId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12(\n" +
+	"\x10total_size_bytes\x18\x03 \x01(\x04R\x0etotalSizeBytes\x12\x16\n" +
+	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1f\n" +
+	"\vchunk_index\x18\x05 \x01(\rR\n" +
+	"chunkIndex\x12\x12\n" +
+	"\x04data\x18\x06 \x01(\fR\x04data\x12\x14\n" +
+	"\x05final\x18\a \x01(\bR\x05final\"\xc4\x03\n" +
 	"\n" +
 	"Repository\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
@@ -9617,7 +26068,362 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\aoutcome\x18\x01 \x01(\tR\aoutcome\x12\x1d\n" +
 	"\n" +
 	"event_kind\x18\x02 \x01(\tR\teventKind\x12\x12\n" +
-	"\x04data\x18\x03 \x01(\fR\x04data2\xc0\b\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\"h\n" +
+	"\rExactReadPage\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12)\n" +
+	"\x10snapshot_version\x18\x03 \x01(\tR\x0fsnapshotVersion\"\xf9\x01\n" +
+	"\x0fHostReadReceipt\x12'\n" +
+	"\x0finstallation_id\x18\x01 \x01(\tR\x0einstallationId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12/\n" +
+	"\x13capability_revision\x18\x03 \x01(\x04R\x12capabilityRevision\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x04 \x01(\tR\trequestId\x12)\n" +
+	"\x10snapshot_version\x18\x05 \x01(\tR\x0fsnapshotVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x06 \x01(\tR\n" +
+	"observedAt\"\xd8\x01\n" +
+	"\x11ExactReadPageInfo\x12\x1f\n" +
+	"\vnext_cursor\x18\x01 \x01(\tR\n" +
+	"nextCursor\x12\x19\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\x12)\n" +
+	"\x10snapshot_version\x18\x03 \x01(\tR\x0fsnapshotVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x04 \x01(\tR\n" +
+	"observedAt\x12;\n" +
+	"\areceipt\x18\x05 \x01(\v2!.kandev.plugin.v1.HostReadReceiptR\areceipt\"\xa2\x01\n" +
+	"\x19ExactWorkspaceObservation\x129\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1b.kandev.plugin.v1.WorkspaceR\tworkspace\x12)\n" +
+	"\x10resource_version\x18\x02 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x03 \x01(\tR\n" +
+	"observedAt\"\x9e\x01\n" +
+	"\x18ExactWorkflowObservation\x126\n" +
+	"\bworkflow\x18\x01 \x01(\v2\x1a.kandev.plugin.v1.WorkflowR\bworkflow\x12)\n" +
+	"\x10resource_version\x18\x02 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x03 \x01(\tR\n" +
+	"observedAt\"\x9e\x01\n" +
+	"\x1cExactWorkflowStepObservation\x122\n" +
+	"\x04step\x18\x01 \x01(\v2\x1e.kandev.plugin.v1.WorkflowStepR\x04step\x12)\n" +
+	"\x10resource_version\x18\x02 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x03 \x01(\tR\n" +
+	"observedAt\"\xc1\x03\n" +
+	"\x14ExactTaskObservation\x12*\n" +
+	"\x04task\x18\x01 \x01(\v2\x16.kandev.plugin.v1.TaskR\x04task\x12)\n" +
+	"\x10canonical_status\x18\x02 \x01(\tR\x0fcanonicalStatus\x12+\n" +
+	"\x11semantic_activity\x18\x03 \x01(\tR\x10semanticActivity\x12B\n" +
+	"\x1blast_meaningful_activity_at\x18\x04 \x01(\tH\x00R\x18lastMeaningfulActivityAt\x88\x01\x01\x12'\n" +
+	"\x0fexecution_state\x18\x05 \x01(\tR\x0eexecutionState\x12)\n" +
+	"\x10blocking_reasons\x18\x06 \x03(\tR\x0fblockingReasons\x12!\n" +
+	"\fstatus_known\x18\a \x01(\bR\vstatusKnown\x12)\n" +
+	"\x10resource_version\x18\b \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\t \x01(\tR\n" +
+	"observedAtB\x1e\n" +
+	"\x1c_last_meaningful_activity_at\"\xe6\x01\n" +
+	"\x17ExactSessionObservation\x123\n" +
+	"\asession\x18\x01 \x01(\v2\x19.kandev.plugin.v1.SessionR\asession\x12'\n" +
+	"\x0fexecution_state\x18\x02 \x01(\tR\x0eexecutionState\x12)\n" +
+	"\x10resource_version\x18\x03 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x04 \x01(\tR\n" +
+	"observedAt\x12!\n" +
+	"\fexecution_id\x18\x05 \x01(\tR\vexecutionId\"\xaa\x01\n" +
+	"\x1bExactInteractionObservation\x12?\n" +
+	"\vinteraction\x18\x01 \x01(\v2\x1d.kandev.plugin.v1.InteractionR\vinteraction\x12)\n" +
+	"\x10resource_version\x18\x02 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x03 \x01(\tR\n" +
+	"observedAt\"\xbe\x01\n" +
+	"\x17ExactMessageObservation\x123\n" +
+	"\amessage\x18\x01 \x01(\v2\x19.kandev.plugin.v1.MessageR\amessage\x12)\n" +
+	"\x10resource_version\x18\x02 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x03 \x01(\tR\n" +
+	"observedAt\x12\"\n" +
+	"\fsanitization\x18\x04 \x01(\tR\fsanitization\"\xac\x02\n" +
+	"\fTaskRelation\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12$\n" +
+	"\x0esource_task_id\x18\x02 \x01(\tR\fsourceTaskId\x12$\n" +
+	"\x0etarget_task_id\x18\x03 \x01(\tR\ftargetTaskId\x12\x12\n" +
+	"\x04kind\x18\x04 \x01(\tR\x04kind\x126\n" +
+	"\x17source_resource_version\x18\x05 \x01(\tR\x15sourceResourceVersion\x126\n" +
+	"\x17target_resource_version\x18\x06 \x01(\tR\x15targetResourceVersion\x12)\n" +
+	"\x10resource_version\x18\a \x01(\tR\x0fresourceVersion\"\xee\x01\n" +
+	"\rTaskInboxItem\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05state\x18\x06 \x01(\tR\x05state\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\a \x01(\tR\tcreatedAt\x12)\n" +
+	"\x10resource_version\x18\b \x01(\tR\x0fresourceVersion\"\xa9\x02\n" +
+	"\rTaskDirective\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12)\n" +
+	"\x10capability_class\x18\x04 \x01(\tR\x0fcapabilityClass\x12\x14\n" +
+	"\x05state\x18\x05 \x01(\tR\x05state\x12-\n" +
+	"\x12instruction_digest\x18\x06 \x01(\tR\x11instructionDigest\x12\"\n" +
+	"\n" +
+	"expires_at\x18\a \x01(\tH\x00R\texpiresAt\x88\x01\x01\x12)\n" +
+	"\x10resource_version\x18\b \x01(\tR\x0fresourceVersionB\r\n" +
+	"\v_expires_at\"\xd3\x02\n" +
+	"\x15PendingTaskTransition\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12(\n" +
+	"\x10from_workflow_id\x18\x04 \x01(\tR\x0efromWorkflowId\x12 \n" +
+	"\ffrom_step_id\x18\x05 \x01(\tR\n" +
+	"fromStepId\x12$\n" +
+	"\x0eto_workflow_id\x18\x06 \x01(\tR\ftoWorkflowId\x12\x1c\n" +
+	"\n" +
+	"to_step_id\x18\a \x01(\tR\btoStepId\x12\x14\n" +
+	"\x05state\x18\b \x01(\tR\x05state\x12)\n" +
+	"\x10resource_version\x18\t \x01(\tR\x0fresourceVersion\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\n" +
+	" \x01(\tR\tcreatedAt\"\xee\x05\n" +
+	"\x15ChangeRequestEvidence\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\tR\bprovider\x12#\n" +
+	"\rrepository_id\x18\x03 \x01(\tR\frepositoryId\x12)\n" +
+	"\x10repository_owner\x18\x04 \x01(\tR\x0frepositoryOwner\x12'\n" +
+	"\x0frepository_name\x18\x05 \x01(\tR\x0erepositoryName\x12\x16\n" +
+	"\x06number\x18\x06 \x01(\x03R\x06number\x12\x10\n" +
+	"\x03url\x18\a \x01(\tR\x03url\x12#\n" +
+	"\rhead_revision\x18\b \x01(\tR\fheadRevision\x12!\n" +
+	"\freview_state\x18\t \x01(\tR\vreviewState\x12!\n" +
+	"\fchecks_state\x18\n" +
+	" \x01(\tR\vchecksState\x12'\n" +
+	"\x0fmergeable_state\x18\v \x01(\tR\x0emergeableState\x12:\n" +
+	"\x19unresolved_review_threads\x18\f \x01(\x05R\x17unresolvedReviewThreads\x12!\n" +
+	"\fchecks_total\x18\r \x01(\x05R\vchecksTotal\x12%\n" +
+	"\x0echecks_passing\x18\x0e \x01(\x05R\rchecksPassing\x12%\n" +
+	"\x0eprovider_state\x18\x0f \x01(\tR\rproviderState\x12*\n" +
+	"\x0eprovider_error\x18\x10 \x01(\tH\x00R\rproviderError\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"fetched_at\x18\x11 \x01(\tH\x01R\tfetchedAt\x88\x01\x01\x12)\n" +
+	"\x10resource_version\x18\x12 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x13 \x01(\tR\n" +
+	"observedAtB\x11\n" +
+	"\x0f_provider_errorB\r\n" +
+	"\v_fetched_at\"\x90\b\n" +
+	"\x14TaskUsageObservation\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\"\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tH\x00R\tsessionId\x88\x01\x01\x12\x1b\n" +
+	"\ttokens_in\x18\x03 \x01(\x03R\btokensIn\x12,\n" +
+	"\x12tokens_cached_read\x18\x04 \x01(\x03R\x10tokensCachedRead\x12.\n" +
+	"\x13tokens_cached_write\x18\x05 \x01(\x03R\x11tokensCachedWrite\x12\x1d\n" +
+	"\n" +
+	"tokens_out\x18\x06 \x01(\x03R\ttokensOut\x12%\n" +
+	"\x0etokens_thought\x18\a \x01(\x03R\rtokensThought\x12!\n" +
+	"\ftokens_total\x18\b \x01(\x03R\vtokensTotal\x12(\n" +
+	"\rcost_subcents\x18\t \x01(\x03H\x01R\fcostSubcents\x88\x01\x01\x12\x1a\n" +
+	"\bcurrency\x18\n" +
+	" \x01(\tR\bcurrency\x12\x1f\n" +
+	"\vevent_count\x18\v \x01(\x03R\n" +
+	"eventCount\x122\n" +
+	"\x15estimated_event_count\x18\f \x01(\x03R\x13estimatedEventCount\x120\n" +
+	"\x14unpriced_event_count\x18\r \x01(\x03R\x12unpricedEventCount\x124\n" +
+	"\x16output_tokens_complete\x18\x0e \x01(\bR\x14outputTokensComplete\x12+\n" +
+	"\x11observation_state\x18\x0f \x01(\tR\x10observationState\x123\n" +
+	"\x13cost_unknown_reason\x18\x10 \x01(\tH\x02R\x11costUnknownReason\x88\x01\x01\x12)\n" +
+	"\x0efirst_event_at\x18\x11 \x01(\tH\x03R\ffirstEventAt\x88\x01\x01\x12'\n" +
+	"\rlast_event_at\x18\x12 \x01(\tH\x04R\vlastEventAt\x88\x01\x01\x126\n" +
+	"\x14elapsed_milliseconds\x18\x13 \x01(\x03H\x05R\x13elapsedMilliseconds\x88\x01\x01\x12)\n" +
+	"\x10resource_version\x18\x14 \x01(\tR\x0fresourceVersion\x12\x1f\n" +
+	"\vobserved_at\x18\x15 \x01(\tR\n" +
+	"observedAt\x12#\n" +
+	"\rcost_complete\x18\x16 \x01(\bR\fcostCompleteB\r\n" +
+	"\v_session_idB\x10\n" +
+	"\x0e_cost_subcentsB\x16\n" +
+	"\x14_cost_unknown_reasonB\x11\n" +
+	"\x0f_first_event_atB\x10\n" +
+	"\x0e_last_event_atB\x17\n" +
+	"\x15_elapsed_milliseconds\"\x93\x01\n" +
+	"\x1aListWorkspacesExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x123\n" +
+	"\x04page\x18\x03 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xa2\x01\n" +
+	"\x1bListWorkspacesExactResponse\x12A\n" +
+	"\x05items\x18\x01 \x03(\v2+.kandev.plugin.v1.ExactWorkspaceObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\x92\x01\n" +
+	"\x19ListWorkflowsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x123\n" +
+	"\x04page\x18\x03 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xa0\x01\n" +
+	"\x1aListWorkflowsExactResponse\x12@\n" +
+	"\x05items\x18\x01 \x03(\v2*.kandev.plugin.v1.ExactWorkflowObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xb7\x01\n" +
+	"\x1dListWorkflowStepsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
+	"\vworkflow_id\x18\x03 \x01(\tR\n" +
+	"workflowId\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xa8\x01\n" +
+	"\x1eListWorkflowStepsExactResponse\x12D\n" +
+	"\x05items\x18\x01 \x03(\v2..kandev.plugin.v1.ExactWorkflowStepObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xc4\x01\n" +
+	"\x15ListTasksExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x124\n" +
+	"\x06filter\x18\x03 \x01(\v2\x1c.kandev.plugin.v1.TaskFilterR\x06filter\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x98\x01\n" +
+	"\x16ListTasksExactResponse\x12<\n" +
+	"\x05items\x18\x01 \x03(\v2&.kandev.plugin.v1.ExactTaskObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"p\n" +
+	"\x13GetTaskExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\"\x8f\x01\n" +
+	"\x14GetTaskExactResponse\x12:\n" +
+	"\x04item\x18\x01 \x01(\v2&.kandev.plugin.v1.ExactTaskObservationR\x04item\x12;\n" +
+	"\areceipt\x18\x02 \x01(\v2!.kandev.plugin.v1.HostReadReceiptR\areceipt\"\xca\x01\n" +
+	"\x18ListSessionsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x127\n" +
+	"\x06filter\x18\x03 \x01(\v2\x1f.kandev.plugin.v1.SessionFilterR\x06filter\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x9e\x01\n" +
+	"\x19ListSessionsExactResponse\x12?\n" +
+	"\x05items\x18\x01 \x03(\v2).kandev.plugin.v1.ExactSessionObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xd9\x01\n" +
+	"#ListPendingInteractionsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12;\n" +
+	"\x06filter\x18\x03 \x01(\v2#.kandev.plugin.v1.InteractionFilterR\x06filter\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xad\x01\n" +
+	"$ListPendingInteractionsExactResponse\x12C\n" +
+	"\x05items\x18\x01 \x03(\v2-.kandev.plugin.v1.ExactInteractionObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\x85\x01\n" +
+	"\x1aGetInteractionExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12%\n" +
+	"\x0einteraction_id\x18\x03 \x01(\tR\rinteractionId\"\x9d\x01\n" +
+	"\x1bGetInteractionExactResponse\x12A\n" +
+	"\x04item\x18\x01 \x01(\v2-.kandev.plugin.v1.ExactInteractionObservationR\x04item\x12;\n" +
+	"\areceipt\x18\x02 \x01(\v2!.kandev.plugin.v1.HostReadReceiptR\areceipt\"\xd3\x01\n" +
+	"!ListSanitizedMessagesExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x127\n" +
+	"\x06filter\x18\x03 \x01(\v2\x1f.kandev.plugin.v1.MessageFilterR\x06filter\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xa7\x01\n" +
+	"\"ListSanitizedMessagesExactResponse\x12?\n" +
+	"\x05items\x18\x01 \x03(\v2).kandev.plugin.v1.ExactMessageObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xca\x01\n" +
+	"\x19ListTaskInboxExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x123\n" +
+	"\x04page\x18\x05 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x95\x01\n" +
+	"\x1aListTaskInboxExactResponse\x125\n" +
+	"\x05items\x18\x01 \x03(\v2\x1f.kandev.plugin.v1.TaskInboxItemR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\x83\x01\n" +
+	"\x1cGetTaskDirectiveExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12!\n" +
+	"\fdirective_id\x18\x03 \x01(\tR\vdirectiveId\"\x91\x01\n" +
+	"\x1dGetTaskDirectiveExactResponse\x123\n" +
+	"\x04item\x18\x01 \x01(\v2\x1f.kandev.plugin.v1.TaskDirectiveR\x04item\x12;\n" +
+	"\areceipt\x18\x02 \x01(\v2!.kandev.plugin.v1.HostReadReceiptR\areceipt\"\xb0\x01\n" +
+	"\x1eListTaskDirectivesExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x9a\x01\n" +
+	"\x1fListTaskDirectivesExactResponse\x125\n" +
+	"\x05items\x18\x01 \x03(\v2\x1f.kandev.plugin.v1.TaskDirectiveR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xae\x01\n" +
+	"\x1cGetTaskRelationsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x97\x01\n" +
+	"\x1dGetTaskRelationsExactResponse\x124\n" +
+	"\x05items\x18\x01 \x03(\v2\x1e.kandev.plugin.v1.TaskRelationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xaf\x01\n" +
+	"\x1dListTaskRelationsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x98\x01\n" +
+	"\x1eListTaskRelationsExactResponse\x124\n" +
+	"\x05items\x18\x01 \x03(\v2\x1e.kandev.plugin.v1.TaskRelationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xb8\x01\n" +
+	"&ListPendingTaskTransitionsExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xaa\x01\n" +
+	"'ListPendingTaskTransitionsExactResponse\x12=\n" +
+	"\x05items\x18\x01 \x03(\v2'.kandev.plugin.v1.PendingTaskTransitionR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xb9\x01\n" +
+	"%ListChangeRequestEvidenceExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x19\n" +
+	"\btask_ids\x18\x03 \x03(\tR\ataskIds\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\xa9\x01\n" +
+	"&ListChangeRequestEvidenceExactResponse\x12=\n" +
+	"\x05items\x18\x01 \x03(\v2'.kandev.plugin.v1.ChangeRequestEvidenceR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo\"\xad\x01\n" +
+	"\x19ListTaskUsageExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x19\n" +
+	"\btask_ids\x18\x03 \x03(\tR\ataskIds\x123\n" +
+	"\x04page\x18\x04 \x01(\v2\x1f.kandev.plugin.v1.ExactReadPageR\x04page\"\x9c\x01\n" +
+	"\x1aListTaskUsageExactResponse\x12<\n" +
+	"\x05items\x18\x01 \x03(\v2&.kandev.plugin.v1.TaskUsageObservationR\x05items\x12@\n" +
+	"\tpage_info\x18\x02 \x01(\v2#.kandev.plugin.v1.ExactReadPageInfoR\bpageInfo*\xdf\x03\n" +
+	"\x11HostCommandStatus\x12#\n" +
+	"\x1fHOST_COMMAND_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bHOST_COMMAND_STATUS_APPLIED\x10\x01\x12'\n" +
+	"#HOST_COMMAND_STATUS_ALREADY_APPLIED\x10\x02\x12!\n" +
+	"\x1dHOST_COMMAND_STATUS_NO_CHANGE\x10\x03\x12 \n" +
+	"\x1cHOST_COMMAND_STATUS_CONFLICT\x10\x04\x12\x1e\n" +
+	"\x1aHOST_COMMAND_STATUS_DENIED\x10\x05\x12!\n" +
+	"\x1dHOST_COMMAND_STATUS_NOT_FOUND\x10\x06\x12\x1f\n" +
+	"\x1bHOST_COMMAND_STATUS_INVALID\x10\a\x12#\n" +
+	"\x1fHOST_COMMAND_STATUS_UNSUPPORTED\x10\b\x12$\n" +
+	" HOST_COMMAND_STATUS_RATE_LIMITED\x10\t\x12#\n" +
+	"\x1fHOST_COMMAND_STATUS_UNAVAILABLE\x10\n" +
+	"\x12\x1f\n" +
+	"\x1bHOST_COMMAND_STATUS_PARTIAL\x10\v\x12!\n" +
+	"\x1dHOST_COMMAND_STATUS_UNCERTAIN\x10\f*\xeb\x01\n" +
+	"\x17ManagedAgentInputOrigin\x12*\n" +
+	"&MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED\x10\x00\x12$\n" +
+	" MANAGED_AGENT_INPUT_ORIGIN_HUMAN\x10\x01\x12)\n" +
+	"%MANAGED_AGENT_INPUT_ORIGIN_AUTOMATION\x10\x02\x12'\n" +
+	"#MANAGED_AGENT_INPUT_ORIGIN_PERIODIC\x10\x03\x12*\n" +
+	"&MANAGED_AGENT_INPUT_ORIGIN_INTERACTION\x10\x04*\xb3\x02\n" +
+	"\x16ManagedAgentInputState\x12)\n" +
+	"%MANAGED_AGENT_INPUT_STATE_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"MANAGED_AGENT_INPUT_STATE_ACCEPTED\x10\x01\x12%\n" +
+	"!MANAGED_AGENT_INPUT_STATE_RUNNING\x10\x02\x12'\n" +
+	"#MANAGED_AGENT_INPUT_STATE_COMPLETED\x10\x03\x12$\n" +
+	" MANAGED_AGENT_INPUT_STATE_FAILED\x10\x04\x12'\n" +
+	"#MANAGED_AGENT_INPUT_STATE_CANCELLED\x10\x05\x12'\n" +
+	"#MANAGED_AGENT_INPUT_STATE_UNCERTAIN\x10\x06*\xc6\x01\n" +
+	"\x1aManagedAgentDispatchStatus\x12-\n" +
+	")MANAGED_AGENT_DISPATCH_STATUS_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"MANAGED_AGENT_DISPATCH_STATUS_BUSY\x10\x01\x12)\n" +
+	"%MANAGED_AGENT_DISPATCH_STATUS_STARTED\x10\x02\x12&\n" +
+	"\"MANAGED_AGENT_DISPATCH_STATUS_SENT\x10\x032\xf6\x0f\n" +
 	"\x06Plugin\x12C\n" +
 	"\fDeliverEvent\x12\x17.kandev.plugin.v1.Event\x1a\x1a.kandev.plugin.v1.EventAck\x12T\n" +
 	"\rHandleWebhook\x12 .kandev.plugin.v1.WebhookRequest\x1a!.kandev.plugin.v1.WebhookResponse\x12z\n" +
@@ -9628,8 +26434,76 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x18AuthorizeEntityReference\x121.kandev.plugin.v1.AuthorizeEntityReferenceRequest\x1a2.kandev.plugin.v1.AuthorizeEntityReferenceResponse\x12u\n" +
 	"\x14ResolveGitCredential\x12-.kandev.plugin.v1.ResolveGitCredentialRequest\x1a..kandev.plugin.v1.ResolveGitCredentialResponse\x12x\n" +
 	"\x17GetGitCredentialBinding\x12-.kandev.plugin.v1.GitCredentialBindingRequest\x1a..kandev.plugin.v1.GitCredentialBindingResponse\x12Z\n" +
-	"\x0fInvokeAgentTool\x12\".kandev.plugin.v1.AgentToolRequest\x1a#.kandev.plugin.v1.AgentToolResponse2\x82!\n" +
-	"\x04Host\x12Q\n" +
+	"\x0fInvokeAgentTool\x12\".kandev.plugin.v1.AgentToolRequest\x1a#.kandev.plugin.v1.AgentToolResponse\x12~\n" +
+	"\x17ValidateExecutorProfile\x120.kandev.plugin.v1.ValidateExecutorProfileRequest\x1a1.kandev.plugin.v1.ValidateExecutorProfileResponse\x12\x8d\x01\n" +
+	"\x1cProvisionExecutorEnvironment\x125.kandev.plugin.v1.ProvisionExecutorEnvironmentRequest\x1a6.kandev.plugin.v1.ProvisionExecutorEnvironmentResponse\x12\x81\x01\n" +
+	"\x18RecoverExecutorOperation\x121.kandev.plugin.v1.RecoverExecutorOperationRequest\x1a2.kandev.plugin.v1.RecoverExecutorOperationResponse\x12\x84\x01\n" +
+	"\x19AttachExecutorEnvironment\x122.kandev.plugin.v1.AttachExecutorEnvironmentRequest\x1a3.kandev.plugin.v1.AttachExecutorEnvironmentResponse\x12\x87\x01\n" +
+	"\x1aInspectExecutorEnvironment\x123.kandev.plugin.v1.InspectExecutorEnvironmentRequest\x1a4.kandev.plugin.v1.InspectExecutorEnvironmentResponse\x12\x84\x01\n" +
+	"\x19ResolveExecutorConnection\x122.kandev.plugin.v1.ResolveExecutorConnectionRequest\x1a3.kandev.plugin.v1.ResolveExecutorConnectionResponse\x12\x87\x01\n" +
+	"\x1aDestroyExecutorEnvironment\x123.kandev.plugin.v1.DestroyExecutorEnvironmentRequest\x1a4.kandev.plugin.v1.DestroyExecutorEnvironmentResponse2\x85d\n" +
+	"\x04Host\x12u\n" +
+	"\x14GetCapabilityContext\x12-.kandev.plugin.v1.GetCapabilityContextRequest\x1a..kandev.plugin.v1.GetCapabilityContextResponse\x12f\n" +
+	"\x0fUpdateTaskExact\x12(.kandev.plugin.v1.UpdateTaskExactRequest\x1a).kandev.plugin.v1.UpdateTaskExactResponse\x12f\n" +
+	"\x0fCreateTaskExact\x12(.kandev.plugin.v1.CreateTaskExactRequest\x1a).kandev.plugin.v1.CreateTaskExactResponse\x12o\n" +
+	"\x12SetTaskLabelsExact\x12+.kandev.plugin.v1.SetTaskLabelsExactRequest\x1a,.kandev.plugin.v1.SetTaskLabelsExactResponse\x12f\n" +
+	"\x0fAssignTaskExact\x12(.kandev.plugin.v1.AssignTaskExactRequest\x1a).kandev.plugin.v1.AssignTaskExactResponse\x12`\n" +
+	"\rMoveTaskExact\x12&.kandev.plugin.v1.MoveTaskExactRequest\x1a'.kandev.plugin.v1.MoveTaskExactResponse\x12i\n" +
+	"\x10ArchiveTaskExact\x12).kandev.plugin.v1.ArchiveTaskExactRequest\x1a*.kandev.plugin.v1.ArchiveTaskExactResponse\x12u\n" +
+	"\x14AddTaskRelationExact\x12-.kandev.plugin.v1.AddTaskRelationExactRequest\x1a..kandev.plugin.v1.AddTaskRelationExactResponse\x12~\n" +
+	"\x17RemoveTaskRelationExact\x120.kandev.plugin.v1.RemoveTaskRelationExactRequest\x1a1.kandev.plugin.v1.RemoveTaskRelationExactResponse\x12u\n" +
+	"\x14SendTaskMessageExact\x12-.kandev.plugin.v1.SendTaskMessageExactRequest\x1a..kandev.plugin.v1.SendTaskMessageExactResponse\x12~\n" +
+	"\x17IssueTaskDirectiveExact\x120.kandev.plugin.v1.IssueTaskDirectiveExactRequest\x1a1.kandev.plugin.v1.IssueTaskDirectiveExactResponse\x12\x84\x01\n" +
+	"\x19ResolveTaskDirectiveExact\x122.kandev.plugin.v1.ResolveTaskDirectiveExactRequest\x1a3.kandev.plugin.v1.ResolveTaskDirectiveExactResponse\x12\x8f\x01\n" +
+	"\x1fAcquireTaskManagementClaimExact\x128.kandev.plugin.v1.AcquireTaskManagementClaimExactRequest\x1a2.kandev.plugin.v1.TaskManagementClaimExactResponse\x12\x8f\x01\n" +
+	"\x1fReleaseTaskManagementClaimExact\x128.kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest\x1a2.kandev.plugin.v1.TaskManagementClaimExactResponse\x12\x91\x01\n" +
+	" TransferTaskManagementClaimExact\x129.kandev.plugin.v1.TransferTaskManagementClaimExactRequest\x1a2.kandev.plugin.v1.TaskManagementClaimExactResponse\x12\x8c\x01\n" +
+	"\x1eSetTaskCompletionCriteriaExact\x127.kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest\x1a1.kandev.plugin.v1.TaskCompletionGateExactResponse\x12\x94\x01\n" +
+	"\"VerifyTaskCompletionCriterionExact\x12;.kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest\x1a1.kandev.plugin.v1.TaskCompletionGateExactResponse\x12\x97\x01\n" +
+	"!ApplyWorkspaceAdministrationExact\x12:.kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest\x1a6.kandev.plugin.v1.WorkspaceAdministrationExactResponse\x12\x96\x01\n" +
+	"\x1fGetSourceIssueCapabilitiesExact\x128.kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest\x1a9.kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse\x12\x80\x01\n" +
+	"\x17CommentSourceIssueExact\x120.kandev.plugin.v1.CommentSourceIssueExactRequest\x1a3.kandev.plugin.v1.SourceIssueWritebackExactResponse\x12\x86\x01\n" +
+	"\x1aTransitionSourceIssueExact\x123.kandev.plugin.v1.TransitionSourceIssueExactRequest\x1a3.kandev.plugin.v1.SourceIssueWritebackExactResponse\x12\xa2\x01\n" +
+	"#EnsureManagedAgentConversationExact\x12<.kandev.plugin.v1.EnsureManagedAgentConversationExactRequest\x1a=.kandev.plugin.v1.EnsureManagedAgentConversationExactResponse\x12\xab\x01\n" +
+	"&GetManagedAgentConversationStatusExact\x12?.kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest\x1a@.kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse\x12\x9f\x01\n" +
+	"\"ListManagedAgentConversationsExact\x12;.kandev.plugin.v1.ListManagedAgentConversationsExactRequest\x1a<.kandev.plugin.v1.ListManagedAgentConversationsExactResponse\x12\xab\x01\n" +
+	"&SetManagedAgentConversationPausedExact\x12?.kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest\x1a@.kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse\x12\xa2\x01\n" +
+	"#DeleteManagedAgentConversationExact\x12<.kandev.plugin.v1.DeleteManagedAgentConversationExactRequest\x1a=.kandev.plugin.v1.DeleteManagedAgentConversationExactResponse\x12\x90\x01\n" +
+	"\x1dEnqueueManagedAgentInputExact\x126.kandev.plugin.v1.EnqueueManagedAgentInputExactRequest\x1a7.kandev.plugin.v1.EnqueueManagedAgentInputExactResponse\x12\x84\x01\n" +
+	"\x19GetManagedAgentInputExact\x122.kandev.plugin.v1.GetManagedAgentInputExactRequest\x1a3.kandev.plugin.v1.GetManagedAgentInputExactResponse\x12\x8a\x01\n" +
+	"\x1bListManagedAgentInputsExact\x124.kandev.plugin.v1.ListManagedAgentInputsExactRequest\x1a5.kandev.plugin.v1.ListManagedAgentInputsExactResponse\x12\x8d\x01\n" +
+	"\x1cCancelManagedAgentInputExact\x125.kandev.plugin.v1.CancelManagedAgentInputExactRequest\x1a6.kandev.plugin.v1.CancelManagedAgentInputExactResponse\x12\xa8\x01\n" +
+	"%DispatchManagedAgentConversationExact\x12>.kandev.plugin.v1.DispatchManagedAgentConversationExactRequest\x1a?.kandev.plugin.v1.DispatchManagedAgentConversationExactResponse\x12\xa8\x01\n" +
+	"%ListManagedConversationSchedulesExact\x12>.kandev.plugin.v1.ListManagedConversationSchedulesExactRequest\x1a?.kandev.plugin.v1.ListManagedConversationSchedulesExactResponse\x12\xa5\x01\n" +
+	"&CreateManagedConversationScheduleExact\x12?.kandev.plugin.v1.CreateManagedConversationScheduleExactRequest\x1a:.kandev.plugin.v1.ManagedConversationScheduleExactResponse\x12\xa5\x01\n" +
+	"&UpdateManagedConversationScheduleExact\x12?.kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest\x1a:.kandev.plugin.v1.ManagedConversationScheduleExactResponse\x12\xad\x01\n" +
+	"*SetManagedConversationScheduleEnabledExact\x12C.kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest\x1a:.kandev.plugin.v1.ManagedConversationScheduleExactResponse\x12\x8e\x01\n" +
+	"&DeleteManagedConversationScheduleExact\x12?.kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest\x1a#.kandev.plugin.v1.HostCommandResult\x12o\n" +
+	"\x12EnsureTaskRunExact\x12+.kandev.plugin.v1.EnsureTaskRunExactRequest\x1a,.kandev.plugin.v1.EnsureTaskRunExactResponse\x12i\n" +
+	"\x10StopTaskRunExact\x12).kandev.plugin.v1.StopTaskRunExactRequest\x1a*.kandev.plugin.v1.StopTaskRunExactResponse\x12r\n" +
+	"\x13RecoverSessionExact\x12,.kandev.plugin.v1.RecoverSessionExactRequest\x1a-.kandev.plugin.v1.RecoverSessionExactResponse\x12\x99\x01\n" +
+	" CancelPendingTaskTransitionExact\x129.kandev.plugin.v1.CancelPendingTaskTransitionExactRequest\x1a:.kandev.plugin.v1.CancelPendingTaskTransitionExactResponse\x12\x87\x01\n" +
+	"\x1aGetSessionModeContextExact\x123.kandev.plugin.v1.GetSessionModeContextExactRequest\x1a4.kandev.plugin.v1.GetSessionModeContextExactResponse\x12r\n" +
+	"\x13SetSessionModeExact\x12,.kandev.plugin.v1.SetSessionModeExactRequest\x1a-.kandev.plugin.v1.SetSessionModeExactResponse\x12{\n" +
+	"\x16RespondPermissionExact\x12/.kandev.plugin.v1.RespondPermissionExactRequest\x1a0.kandev.plugin.v1.RespondPermissionExactResponse\x12\x81\x01\n" +
+	"\x18AnswerClarificationExact\x121.kandev.plugin.v1.AnswerClarificationExactRequest\x1a2.kandev.plugin.v1.AnswerClarificationExactResponse\x12r\n" +
+	"\x13ListWorkspacesExact\x12,.kandev.plugin.v1.ListWorkspacesExactRequest\x1a-.kandev.plugin.v1.ListWorkspacesExactResponse\x12o\n" +
+	"\x12ListWorkflowsExact\x12+.kandev.plugin.v1.ListWorkflowsExactRequest\x1a,.kandev.plugin.v1.ListWorkflowsExactResponse\x12{\n" +
+	"\x16ListWorkflowStepsExact\x12/.kandev.plugin.v1.ListWorkflowStepsExactRequest\x1a0.kandev.plugin.v1.ListWorkflowStepsExactResponse\x12c\n" +
+	"\x0eListTasksExact\x12'.kandev.plugin.v1.ListTasksExactRequest\x1a(.kandev.plugin.v1.ListTasksExactResponse\x12]\n" +
+	"\fGetTaskExact\x12%.kandev.plugin.v1.GetTaskExactRequest\x1a&.kandev.plugin.v1.GetTaskExactResponse\x12l\n" +
+	"\x11ListSessionsExact\x12*.kandev.plugin.v1.ListSessionsExactRequest\x1a+.kandev.plugin.v1.ListSessionsExactResponse\x12\x8d\x01\n" +
+	"\x1cListPendingInteractionsExact\x125.kandev.plugin.v1.ListPendingInteractionsExactRequest\x1a6.kandev.plugin.v1.ListPendingInteractionsExactResponse\x12r\n" +
+	"\x13GetInteractionExact\x12,.kandev.plugin.v1.GetInteractionExactRequest\x1a-.kandev.plugin.v1.GetInteractionExactResponse\x12\x87\x01\n" +
+	"\x1aListSanitizedMessagesExact\x123.kandev.plugin.v1.ListSanitizedMessagesExactRequest\x1a4.kandev.plugin.v1.ListSanitizedMessagesExactResponse\x12o\n" +
+	"\x12ListTaskInboxExact\x12+.kandev.plugin.v1.ListTaskInboxExactRequest\x1a,.kandev.plugin.v1.ListTaskInboxExactResponse\x12x\n" +
+	"\x15GetTaskDirectiveExact\x12..kandev.plugin.v1.GetTaskDirectiveExactRequest\x1a/.kandev.plugin.v1.GetTaskDirectiveExactResponse\x12~\n" +
+	"\x17ListTaskDirectivesExact\x120.kandev.plugin.v1.ListTaskDirectivesExactRequest\x1a1.kandev.plugin.v1.ListTaskDirectivesExactResponse\x12x\n" +
+	"\x15GetTaskRelationsExact\x12..kandev.plugin.v1.GetTaskRelationsExactRequest\x1a/.kandev.plugin.v1.GetTaskRelationsExactResponse\x12{\n" +
+	"\x16ListTaskRelationsExact\x12/.kandev.plugin.v1.ListTaskRelationsExactRequest\x1a0.kandev.plugin.v1.ListTaskRelationsExactResponse\x12\x96\x01\n" +
+	"\x1fListPendingTaskTransitionsExact\x128.kandev.plugin.v1.ListPendingTaskTransitionsExactRequest\x1a9.kandev.plugin.v1.ListPendingTaskTransitionsExactResponse\x12\x93\x01\n" +
+	"\x1eListChangeRequestEvidenceExact\x127.kandev.plugin.v1.ListChangeRequestEvidenceExactRequest\x1a8.kandev.plugin.v1.ListChangeRequestEvidenceExactResponse\x12o\n" +
+	"\x12ListTaskUsageExact\x12+.kandev.plugin.v1.ListTaskUsageExactRequest\x1a,.kandev.plugin.v1.ListTaskUsageExactResponse\x12Q\n" +
 	"\bGetState\x12!.kandev.plugin.v1.GetStateRequest\x1a\".kandev.plugin.v1.GetStateResponse\x12Q\n" +
 	"\bSetState\x12!.kandev.plugin.v1.SetStateRequest\x1a\".kandev.plugin.v1.SetStateResponse\x12Z\n" +
 	"\vDeleteState\x12$.kandev.plugin.v1.DeleteStateRequest\x1a%.kandev.plugin.v1.DeleteStateResponse\x12T\n" +
@@ -9649,7 +26523,10 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x11ListWorkflowSteps\x12*.kandev.plugin.v1.ListWorkflowStepsRequest\x1a+.kandev.plugin.v1.ListWorkflowStepsResponse\x12\x8d\x01\n" +
 	"\x1cListWorkflowTransitionGroups\x125.kandev.plugin.v1.ListWorkflowTransitionGroupsRequest\x1a6.kandev.plugin.v1.ListWorkflowTransitionGroupsResponse\x12l\n" +
 	"\x11ListAgentProfiles\x12*.kandev.plugin.v1.ListAgentProfilesRequest\x1a+.kandev.plugin.v1.ListAgentProfilesResponse\x12u\n" +
-	"\x14ListExecutorProfiles\x12-.kandev.plugin.v1.ListExecutorProfilesRequest\x1a..kandev.plugin.v1.ListExecutorProfilesResponse\x12i\n" +
+	"\x14ListExecutorProfiles\x12-.kandev.plugin.v1.ListExecutorProfilesRequest\x1a..kandev.plugin.v1.ListExecutorProfilesResponse\x12\x87\x01\n" +
+	"\x1aCheckpointExecutorResource\x123.kandev.plugin.v1.CheckpointExecutorResourceRequest\x1a4.kandev.plugin.v1.CheckpointExecutorResourceResponse\x12{\n" +
+	"\x16ReportExecutorProgress\x12/.kandev.plugin.v1.ReportExecutorProgressRequest\x1a0.kandev.plugin.v1.ReportExecutorProgressResponse\x12\x85\x01\n" +
+	"\x1bReadExecutorRuntimeArtifact\x124.kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest\x1a..kandev.plugin.v1.ExecutorRuntimeArtifactChunk0\x01\x12i\n" +
 	"\x10ListRepositories\x12).kandev.plugin.v1.ListRepositoriesRequest\x1a*.kandev.plugin.v1.ListRepositoriesResponse\x12]\n" +
 	"\fListSessions\x12%.kandev.plugin.v1.ListSessionsRequest\x1a&.kandev.plugin.v1.ListSessionsResponse\x12u\n" +
 	"\x14ListSessionCodeStats\x12-.kandev.plugin.v1.ListSessionCodeStatsRequest\x1a..kandev.plugin.v1.ListSessionCodeStatsResponse\x12]\n" +
@@ -9685,348 +26562,886 @@ func file_kandev_plugin_v1_plugin_proto_rawDescGZIP() []byte {
 	return file_kandev_plugin_v1_plugin_proto_rawDescData
 }
 
-var file_kandev_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 140)
+var file_kandev_plugin_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_kandev_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 336)
 var file_kandev_plugin_v1_plugin_proto_goTypes = []any{
-	(*Event)(nil),                                // 0: kandev.plugin.v1.Event
-	(*EventAck)(nil),                             // 1: kandev.plugin.v1.EventAck
-	(*AgentToolRequest)(nil),                     // 2: kandev.plugin.v1.AgentToolRequest
-	(*AgentToolContext)(nil),                     // 3: kandev.plugin.v1.AgentToolContext
-	(*AgentToolResponse)(nil),                    // 4: kandev.plugin.v1.AgentToolResponse
-	(*WebhookRequest)(nil),                       // 5: kandev.plugin.v1.WebhookRequest
-	(*WebhookResponse)(nil),                      // 6: kandev.plugin.v1.WebhookResponse
-	(*PluginActionRequest)(nil),                  // 7: kandev.plugin.v1.PluginActionRequest
-	(*VerifiedActionContext)(nil),                // 8: kandev.plugin.v1.VerifiedActionContext
-	(*PluginActionResponse)(nil),                 // 9: kandev.plugin.v1.PluginActionResponse
-	(*SearchEntityReferencesRequest)(nil),        // 10: kandev.plugin.v1.SearchEntityReferencesRequest
-	(*SearchEntityReferencesResponse)(nil),       // 11: kandev.plugin.v1.SearchEntityReferencesResponse
-	(*EntityReferenceCandidate)(nil),             // 12: kandev.plugin.v1.EntityReferenceCandidate
-	(*AuthorizeEntityReferenceRequest)(nil),      // 13: kandev.plugin.v1.AuthorizeEntityReferenceRequest
-	(*AuthorizeEntityReferenceResponse)(nil),     // 14: kandev.plugin.v1.AuthorizeEntityReferenceResponse
-	(*ResolveGitCredentialRequest)(nil),          // 15: kandev.plugin.v1.ResolveGitCredentialRequest
-	(*ResolveGitCredentialResponse)(nil),         // 16: kandev.plugin.v1.ResolveGitCredentialResponse
-	(*GitCredentialBindingRequest)(nil),          // 17: kandev.plugin.v1.GitCredentialBindingRequest
-	(*GitCredentialBindingResponse)(nil),         // 18: kandev.plugin.v1.GitCredentialBindingResponse
-	(*GetStateRequest)(nil),                      // 19: kandev.plugin.v1.GetStateRequest
-	(*GetStateResponse)(nil),                     // 20: kandev.plugin.v1.GetStateResponse
-	(*SetStateRequest)(nil),                      // 21: kandev.plugin.v1.SetStateRequest
-	(*SetStateResponse)(nil),                     // 22: kandev.plugin.v1.SetStateResponse
-	(*DeleteStateRequest)(nil),                   // 23: kandev.plugin.v1.DeleteStateRequest
-	(*DeleteStateResponse)(nil),                  // 24: kandev.plugin.v1.DeleteStateResponse
-	(*ListStateRequest)(nil),                     // 25: kandev.plugin.v1.ListStateRequest
-	(*ListStateResponse)(nil),                    // 26: kandev.plugin.v1.ListStateResponse
-	(*StateEntry)(nil),                           // 27: kandev.plugin.v1.StateEntry
-	(*GetConfigRequest)(nil),                     // 28: kandev.plugin.v1.GetConfigRequest
-	(*GetConfigResponse)(nil),                    // 29: kandev.plugin.v1.GetConfigResponse
-	(*GetSecretRequest)(nil),                     // 30: kandev.plugin.v1.GetSecretRequest
-	(*GetSecretResponse)(nil),                    // 31: kandev.plugin.v1.GetSecretResponse
-	(*SetSecretRequest)(nil),                     // 32: kandev.plugin.v1.SetSecretRequest
-	(*SetSecretResponse)(nil),                    // 33: kandev.plugin.v1.SetSecretResponse
-	(*DeleteSecretRequest)(nil),                  // 34: kandev.plugin.v1.DeleteSecretRequest
-	(*DeleteSecretResponse)(nil),                 // 35: kandev.plugin.v1.DeleteSecretResponse
-	(*RevealSecretRequest)(nil),                  // 36: kandev.plugin.v1.RevealSecretRequest
-	(*RevealSecretResponse)(nil),                 // 37: kandev.plugin.v1.RevealSecretResponse
-	(*EmitEventRequest)(nil),                     // 38: kandev.plugin.v1.EmitEventRequest
-	(*EmitEventResponse)(nil),                    // 39: kandev.plugin.v1.EmitEventResponse
-	(*Page)(nil),                                 // 40: kandev.plugin.v1.Page
-	(*PageInfo)(nil),                             // 41: kandev.plugin.v1.PageInfo
-	(*Task)(nil),                                 // 42: kandev.plugin.v1.Task
-	(*TaskRepository)(nil),                       // 43: kandev.plugin.v1.TaskRepository
-	(*TaskPullRequest)(nil),                      // 44: kandev.plugin.v1.TaskPullRequest
-	(*TaskDependencyRef)(nil),                    // 45: kandev.plugin.v1.TaskDependencyRef
-	(*TaskFilter)(nil),                           // 46: kandev.plugin.v1.TaskFilter
-	(*ListTasksRequest)(nil),                     // 47: kandev.plugin.v1.ListTasksRequest
-	(*ListTasksResponse)(nil),                    // 48: kandev.plugin.v1.ListTasksResponse
-	(*GetTaskRequest)(nil),                       // 49: kandev.plugin.v1.GetTaskRequest
-	(*GetTaskResponse)(nil),                      // 50: kandev.plugin.v1.GetTaskResponse
-	(*TaskStepTransition)(nil),                   // 51: kandev.plugin.v1.TaskStepTransition
-	(*ListTaskStepTransitionsRequest)(nil),       // 52: kandev.plugin.v1.ListTaskStepTransitionsRequest
-	(*ListTaskStepTransitionsResponse)(nil),      // 53: kandev.plugin.v1.ListTaskStepTransitionsResponse
-	(*RelationTask)(nil),                         // 54: kandev.plugin.v1.RelationTask
-	(*TaskRelations)(nil),                        // 55: kandev.plugin.v1.TaskRelations
-	(*GetTaskRelationsRequest)(nil),              // 56: kandev.plugin.v1.GetTaskRelationsRequest
-	(*GetTaskRelationsResponse)(nil),             // 57: kandev.plugin.v1.GetTaskRelationsResponse
-	(*Workspace)(nil),                            // 58: kandev.plugin.v1.Workspace
-	(*ListWorkspacesRequest)(nil),                // 59: kandev.plugin.v1.ListWorkspacesRequest
-	(*ListWorkspacesResponse)(nil),               // 60: kandev.plugin.v1.ListWorkspacesResponse
-	(*Workflow)(nil),                             // 61: kandev.plugin.v1.Workflow
-	(*ListWorkflowsRequest)(nil),                 // 62: kandev.plugin.v1.ListWorkflowsRequest
-	(*ListWorkflowsResponse)(nil),                // 63: kandev.plugin.v1.ListWorkflowsResponse
-	(*WorkflowTransitionGroup)(nil),              // 64: kandev.plugin.v1.WorkflowTransitionGroup
-	(*ListWorkflowTransitionGroupsRequest)(nil),  // 65: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
-	(*ListWorkflowTransitionGroupsResponse)(nil), // 66: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
-	(*WorkflowStep)(nil),                         // 67: kandev.plugin.v1.WorkflowStep
-	(*ListWorkflowStepsRequest)(nil),             // 68: kandev.plugin.v1.ListWorkflowStepsRequest
-	(*ListWorkflowStepsResponse)(nil),            // 69: kandev.plugin.v1.ListWorkflowStepsResponse
-	(*AgentProfile)(nil),                         // 70: kandev.plugin.v1.AgentProfile
-	(*ListAgentProfilesRequest)(nil),             // 71: kandev.plugin.v1.ListAgentProfilesRequest
-	(*ListAgentProfilesResponse)(nil),            // 72: kandev.plugin.v1.ListAgentProfilesResponse
-	(*ExecutorProfile)(nil),                      // 73: kandev.plugin.v1.ExecutorProfile
-	(*ListExecutorProfilesRequest)(nil),          // 74: kandev.plugin.v1.ListExecutorProfilesRequest
-	(*ListExecutorProfilesResponse)(nil),         // 75: kandev.plugin.v1.ListExecutorProfilesResponse
-	(*Repository)(nil),                           // 76: kandev.plugin.v1.Repository
-	(*ListRepositoriesRequest)(nil),              // 77: kandev.plugin.v1.ListRepositoriesRequest
-	(*ListRepositoriesResponse)(nil),             // 78: kandev.plugin.v1.ListRepositoriesResponse
-	(*Session)(nil),                              // 79: kandev.plugin.v1.Session
-	(*SessionFilter)(nil),                        // 80: kandev.plugin.v1.SessionFilter
-	(*ListSessionsRequest)(nil),                  // 81: kandev.plugin.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),                 // 82: kandev.plugin.v1.ListSessionsResponse
-	(*SessionCodeStats)(nil),                     // 83: kandev.plugin.v1.SessionCodeStats
-	(*ListSessionCodeStatsRequest)(nil),          // 84: kandev.plugin.v1.ListSessionCodeStatsRequest
-	(*ListSessionCodeStatsResponse)(nil),         // 85: kandev.plugin.v1.ListSessionCodeStatsResponse
-	(*Message)(nil),                              // 86: kandev.plugin.v1.Message
-	(*MessageFilter)(nil),                        // 87: kandev.plugin.v1.MessageFilter
-	(*ListMessagesRequest)(nil),                  // 88: kandev.plugin.v1.ListMessagesRequest
-	(*ListMessagesResponse)(nil),                 // 89: kandev.plugin.v1.ListMessagesResponse
-	(*InteractionOption)(nil),                    // 90: kandev.plugin.v1.InteractionOption
-	(*InteractionQuestion)(nil),                  // 91: kandev.plugin.v1.InteractionQuestion
-	(*Interaction)(nil),                          // 92: kandev.plugin.v1.Interaction
-	(*InteractionFilter)(nil),                    // 93: kandev.plugin.v1.InteractionFilter
-	(*ListPendingInteractionsRequest)(nil),       // 94: kandev.plugin.v1.ListPendingInteractionsRequest
-	(*ListPendingInteractionsResponse)(nil),      // 95: kandev.plugin.v1.ListPendingInteractionsResponse
-	(*GetInteractionRequest)(nil),                // 96: kandev.plugin.v1.GetInteractionRequest
-	(*GetInteractionResponse)(nil),               // 97: kandev.plugin.v1.GetInteractionResponse
-	(*RespondToPermissionRequest)(nil),           // 98: kandev.plugin.v1.RespondToPermissionRequest
-	(*RespondToPermissionResponse)(nil),          // 99: kandev.plugin.v1.RespondToPermissionResponse
-	(*ClarificationAnswer)(nil),                  // 100: kandev.plugin.v1.ClarificationAnswer
-	(*AnswerClarificationRequest)(nil),           // 101: kandev.plugin.v1.AnswerClarificationRequest
-	(*AnswerClarificationResponse)(nil),          // 102: kandev.plugin.v1.AnswerClarificationResponse
-	(*CancelClarificationRequest)(nil),           // 103: kandev.plugin.v1.CancelClarificationRequest
-	(*CancelClarificationResponse)(nil),          // 104: kandev.plugin.v1.CancelClarificationResponse
-	(*InvokeUtilityAgentRequest)(nil),            // 105: kandev.plugin.v1.InvokeUtilityAgentRequest
-	(*InvokeUtilityAgentWithOptionsRequest)(nil), // 106: kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
-	(*InvokeUtilityAgentResponse)(nil),           // 107: kandev.plugin.v1.InvokeUtilityAgentResponse
-	(*CreateTaskRequest)(nil),                    // 108: kandev.plugin.v1.CreateTaskRequest
-	(*PluginTaskRepository)(nil),                 // 109: kandev.plugin.v1.PluginTaskRepository
-	(*RemoteRepositoryDescriptor)(nil),           // 110: kandev.plugin.v1.RemoteRepositoryDescriptor
-	(*PluginTaskLaunchOptions)(nil),              // 111: kandev.plugin.v1.PluginTaskLaunchOptions
-	(*CreateTaskResponse)(nil),                   // 112: kandev.plugin.v1.CreateTaskResponse
-	(*UpdateTaskRequest)(nil),                    // 113: kandev.plugin.v1.UpdateTaskRequest
-	(*UpdateTaskResponse)(nil),                   // 114: kandev.plugin.v1.UpdateTaskResponse
-	(*MoveTaskRequest)(nil),                      // 115: kandev.plugin.v1.MoveTaskRequest
-	(*MoveTaskResponse)(nil),                     // 116: kandev.plugin.v1.MoveTaskResponse
-	(*SendMessageRequest)(nil),                   // 117: kandev.plugin.v1.SendMessageRequest
-	(*SendMessageResponse)(nil),                  // 118: kandev.plugin.v1.SendMessageResponse
-	(*PreviewPluginOwnedTaskTreeRequest)(nil),    // 119: kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
-	(*PreviewPluginOwnedTaskTreeResponse)(nil),   // 120: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
-	(*DeletePluginOwnedTaskTreeRequest)(nil),     // 121: kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
-	(*DeletePluginOwnedTaskTreeResponse)(nil),    // 122: kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
-	(*DeletePluginOwnedTaskTreeProgress)(nil),    // 123: kandev.plugin.v1.DeletePluginOwnedTaskTreeProgress
-	(*AgentConversationDescriptor)(nil),          // 124: kandev.plugin.v1.AgentConversationDescriptor
-	(*AgentConversationSpec)(nil),                // 125: kandev.plugin.v1.AgentConversationSpec
-	(*EnsureAgentConversationRequest)(nil),       // 126: kandev.plugin.v1.EnsureAgentConversationRequest
-	(*EnsureAgentConversationResponse)(nil),      // 127: kandev.plugin.v1.EnsureAgentConversationResponse
-	(*DispatchAgentConversationRequest)(nil),     // 128: kandev.plugin.v1.DispatchAgentConversationRequest
-	(*DispatchAgentConversationResponse)(nil),    // 129: kandev.plugin.v1.DispatchAgentConversationResponse
-	(*DeleteAgentConversationRequest)(nil),       // 130: kandev.plugin.v1.DeleteAgentConversationRequest
-	(*DeleteAgentConversationResponse)(nil),      // 131: kandev.plugin.v1.DeleteAgentConversationResponse
-	(*AutomationConditionRequest)(nil),           // 132: kandev.plugin.v1.AutomationConditionRequest
-	(*AutomationConditionResponse)(nil),          // 133: kandev.plugin.v1.AutomationConditionResponse
-	(*AutomationWebhookRequest)(nil),             // 134: kandev.plugin.v1.AutomationWebhookRequest
-	(*AutomationWebhookResponse)(nil),            // 135: kandev.plugin.v1.AutomationWebhookResponse
-	nil,                                          // 136: kandev.plugin.v1.WebhookRequest.HeadersEntry
-	nil,                                          // 137: kandev.plugin.v1.WebhookResponse.HeadersEntry
-	nil,                                          // 138: kandev.plugin.v1.PluginActionResponse.HeadersEntry
-	nil,                                          // 139: kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
-	(*structpb.Struct)(nil),                      // 140: google.protobuf.Struct
+	(HostCommandStatus)(0),                                    // 0: kandev.plugin.v1.HostCommandStatus
+	(ManagedAgentInputOrigin)(0),                              // 1: kandev.plugin.v1.ManagedAgentInputOrigin
+	(ManagedAgentInputState)(0),                               // 2: kandev.plugin.v1.ManagedAgentInputState
+	(ManagedAgentDispatchStatus)(0),                           // 3: kandev.plugin.v1.ManagedAgentDispatchStatus
+	(*HostOperationSupport)(nil),                              // 4: kandev.plugin.v1.HostOperationSupport
+	(*HostCapabilityContext)(nil),                             // 5: kandev.plugin.v1.HostCapabilityContext
+	(*GetCapabilityContextRequest)(nil),                       // 6: kandev.plugin.v1.GetCapabilityContextRequest
+	(*GetCapabilityContextResponse)(nil),                      // 7: kandev.plugin.v1.GetCapabilityContextResponse
+	(*HostCommandReceipt)(nil),                                // 8: kandev.plugin.v1.HostCommandReceipt
+	(*HostCommandResult)(nil),                                 // 9: kandev.plugin.v1.HostCommandResult
+	(*UpdateTaskExactRequest)(nil),                            // 10: kandev.plugin.v1.UpdateTaskExactRequest
+	(*UpdateTaskExactResponse)(nil),                           // 11: kandev.plugin.v1.UpdateTaskExactResponse
+	(*CreateTaskExactRequest)(nil),                            // 12: kandev.plugin.v1.CreateTaskExactRequest
+	(*CreateTaskExactResponse)(nil),                           // 13: kandev.plugin.v1.CreateTaskExactResponse
+	(*SetTaskLabelsExactRequest)(nil),                         // 14: kandev.plugin.v1.SetTaskLabelsExactRequest
+	(*SetTaskLabelsExactResponse)(nil),                        // 15: kandev.plugin.v1.SetTaskLabelsExactResponse
+	(*AssignTaskExactRequest)(nil),                            // 16: kandev.plugin.v1.AssignTaskExactRequest
+	(*AssignTaskExactResponse)(nil),                           // 17: kandev.plugin.v1.AssignTaskExactResponse
+	(*MoveTaskExactRequest)(nil),                              // 18: kandev.plugin.v1.MoveTaskExactRequest
+	(*MoveTaskExactResponse)(nil),                             // 19: kandev.plugin.v1.MoveTaskExactResponse
+	(*ArchiveTaskExactRequest)(nil),                           // 20: kandev.plugin.v1.ArchiveTaskExactRequest
+	(*ArchiveTaskExactResponse)(nil),                          // 21: kandev.plugin.v1.ArchiveTaskExactResponse
+	(*AddTaskRelationExactRequest)(nil),                       // 22: kandev.plugin.v1.AddTaskRelationExactRequest
+	(*AddTaskRelationExactResponse)(nil),                      // 23: kandev.plugin.v1.AddTaskRelationExactResponse
+	(*RemoveTaskRelationExactRequest)(nil),                    // 24: kandev.plugin.v1.RemoveTaskRelationExactRequest
+	(*RemoveTaskRelationExactResponse)(nil),                   // 25: kandev.plugin.v1.RemoveTaskRelationExactResponse
+	(*SendTaskMessageExactRequest)(nil),                       // 26: kandev.plugin.v1.SendTaskMessageExactRequest
+	(*SendTaskMessageExactResponse)(nil),                      // 27: kandev.plugin.v1.SendTaskMessageExactResponse
+	(*TaskManagementClaim)(nil),                               // 28: kandev.plugin.v1.TaskManagementClaim
+	(*AcquireTaskManagementClaimExactRequest)(nil),            // 29: kandev.plugin.v1.AcquireTaskManagementClaimExactRequest
+	(*ReleaseTaskManagementClaimExactRequest)(nil),            // 30: kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest
+	(*TransferTaskManagementClaimExactRequest)(nil),           // 31: kandev.plugin.v1.TransferTaskManagementClaimExactRequest
+	(*TaskManagementClaimExactResponse)(nil),                  // 32: kandev.plugin.v1.TaskManagementClaimExactResponse
+	(*TaskCompletionEvidenceSubject)(nil),                     // 33: kandev.plugin.v1.TaskCompletionEvidenceSubject
+	(*TaskCompletionEvidence)(nil),                            // 34: kandev.plugin.v1.TaskCompletionEvidence
+	(*TaskCompletionCriterion)(nil),                           // 35: kandev.plugin.v1.TaskCompletionCriterion
+	(*TaskCompletionCriterionInput)(nil),                      // 36: kandev.plugin.v1.TaskCompletionCriterionInput
+	(*TaskCompletionBlocker)(nil),                             // 37: kandev.plugin.v1.TaskCompletionBlocker
+	(*TaskCompletionGateSnapshot)(nil),                        // 38: kandev.plugin.v1.TaskCompletionGateSnapshot
+	(*SetTaskCompletionCriteriaExactRequest)(nil),             // 39: kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest
+	(*VerifyTaskCompletionCriterionExactRequest)(nil),         // 40: kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest
+	(*TaskCompletionGateExactResponse)(nil),                   // 41: kandev.plugin.v1.TaskCompletionGateExactResponse
+	(*ApplyWorkspaceAdministrationExactRequest)(nil),          // 42: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest
+	(*WorkspaceDefaultsUpdateExact)(nil),                      // 43: kandev.plugin.v1.WorkspaceDefaultsUpdateExact
+	(*WorkspaceWorkflowConfig)(nil),                           // 44: kandev.plugin.v1.WorkspaceWorkflowConfig
+	(*WorkspaceWorkflowCreateExact)(nil),                      // 45: kandev.plugin.v1.WorkspaceWorkflowCreateExact
+	(*WorkspaceWorkflowUpdateExact)(nil),                      // 46: kandev.plugin.v1.WorkspaceWorkflowUpdateExact
+	(*WorkspaceWorkflowReorderExact)(nil),                     // 47: kandev.plugin.v1.WorkspaceWorkflowReorderExact
+	(*WorkflowTransitionActionConfig)(nil),                    // 48: kandev.plugin.v1.WorkflowTransitionActionConfig
+	(*WorkflowStepConfiguration)(nil),                         // 49: kandev.plugin.v1.WorkflowStepConfiguration
+	(*WorkspaceWorkflowStepCreateExact)(nil),                  // 50: kandev.plugin.v1.WorkspaceWorkflowStepCreateExact
+	(*WorkspaceWorkflowStepUpdateExact)(nil),                  // 51: kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact
+	(*WorkspaceWorkflowStepReorderExact)(nil),                 // 52: kandev.plugin.v1.WorkspaceWorkflowStepReorderExact
+	(*WorkspaceRepositoryRegisterExact)(nil),                  // 53: kandev.plugin.v1.WorkspaceRepositoryRegisterExact
+	(*WorkspaceRepositoryUpdateExact)(nil),                    // 54: kandev.plugin.v1.WorkspaceRepositoryUpdateExact
+	(*WorkspaceAdministrationExactResponse)(nil),              // 55: kandev.plugin.v1.WorkspaceAdministrationExactResponse
+	(*SourceIssueTransition)(nil),                             // 56: kandev.plugin.v1.SourceIssueTransition
+	(*ExactSourceIssueCapabilities)(nil),                      // 57: kandev.plugin.v1.ExactSourceIssueCapabilities
+	(*GetSourceIssueCapabilitiesExactRequest)(nil),            // 58: kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest
+	(*GetSourceIssueCapabilitiesExactResponse)(nil),           // 59: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse
+	(*SourceIssueWritebackReceipt)(nil),                       // 60: kandev.plugin.v1.SourceIssueWritebackReceipt
+	(*CommentSourceIssueExactRequest)(nil),                    // 61: kandev.plugin.v1.CommentSourceIssueExactRequest
+	(*TransitionSourceIssueExactRequest)(nil),                 // 62: kandev.plugin.v1.TransitionSourceIssueExactRequest
+	(*SourceIssueWritebackExactResponse)(nil),                 // 63: kandev.plugin.v1.SourceIssueWritebackExactResponse
+	(*IssueTaskDirectiveExactRequest)(nil),                    // 64: kandev.plugin.v1.IssueTaskDirectiveExactRequest
+	(*IssueTaskDirectiveExactResponse)(nil),                   // 65: kandev.plugin.v1.IssueTaskDirectiveExactResponse
+	(*ResolveTaskDirectiveExactRequest)(nil),                  // 66: kandev.plugin.v1.ResolveTaskDirectiveExactRequest
+	(*ResolveTaskDirectiveExactResponse)(nil),                 // 67: kandev.plugin.v1.ResolveTaskDirectiveExactResponse
+	(*ManagedAgentConversationDescriptor)(nil),                // 68: kandev.plugin.v1.ManagedAgentConversationDescriptor
+	(*ManagedAgentConversationSpec)(nil),                      // 69: kandev.plugin.v1.ManagedAgentConversationSpec
+	(*EnsureManagedAgentConversationExactRequest)(nil),        // 70: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
+	(*EnsureManagedAgentConversationExactResponse)(nil),       // 71: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
+	(*GetManagedAgentConversationStatusExactRequest)(nil),     // 72: kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
+	(*GetManagedAgentConversationStatusExactResponse)(nil),    // 73: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
+	(*ListManagedAgentConversationsExactRequest)(nil),         // 74: kandev.plugin.v1.ListManagedAgentConversationsExactRequest
+	(*ListManagedAgentConversationsExactResponse)(nil),        // 75: kandev.plugin.v1.ListManagedAgentConversationsExactResponse
+	(*SetManagedAgentConversationPausedExactRequest)(nil),     // 76: kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
+	(*SetManagedAgentConversationPausedExactResponse)(nil),    // 77: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
+	(*DeleteManagedAgentConversationExactRequest)(nil),        // 78: kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
+	(*DeleteManagedAgentConversationExactResponse)(nil),       // 79: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
+	(*ManagedAgentInputReceipt)(nil),                          // 80: kandev.plugin.v1.ManagedAgentInputReceipt
+	(*EnqueueManagedAgentInputExactRequest)(nil),              // 81: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
+	(*EnqueueManagedAgentInputExactResponse)(nil),             // 82: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
+	(*GetManagedAgentInputExactRequest)(nil),                  // 83: kandev.plugin.v1.GetManagedAgentInputExactRequest
+	(*GetManagedAgentInputExactResponse)(nil),                 // 84: kandev.plugin.v1.GetManagedAgentInputExactResponse
+	(*ListManagedAgentInputsExactRequest)(nil),                // 85: kandev.plugin.v1.ListManagedAgentInputsExactRequest
+	(*ListManagedAgentInputsExactResponse)(nil),               // 86: kandev.plugin.v1.ListManagedAgentInputsExactResponse
+	(*CancelManagedAgentInputExactRequest)(nil),               // 87: kandev.plugin.v1.CancelManagedAgentInputExactRequest
+	(*CancelManagedAgentInputExactResponse)(nil),              // 88: kandev.plugin.v1.CancelManagedAgentInputExactResponse
+	(*DispatchManagedAgentConversationExactRequest)(nil),      // 89: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
+	(*DispatchManagedAgentConversationExactResponse)(nil),     // 90: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
+	(*ManagedConversationScheduleTrigger)(nil),                // 91: kandev.plugin.v1.ManagedConversationScheduleTrigger
+	(*ManagedConversationSchedule)(nil),                       // 92: kandev.plugin.v1.ManagedConversationSchedule
+	(*ListManagedConversationSchedulesExactRequest)(nil),      // 93: kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
+	(*ListManagedConversationSchedulesExactResponse)(nil),     // 94: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
+	(*CreateManagedConversationScheduleExactRequest)(nil),     // 95: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
+	(*UpdateManagedConversationScheduleExactRequest)(nil),     // 96: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
+	(*SetManagedConversationScheduleEnabledExactRequest)(nil), // 97: kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
+	(*DeleteManagedConversationScheduleExactRequest)(nil),     // 98: kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
+	(*ManagedConversationScheduleExactResponse)(nil),          // 99: kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	(*EnsureTaskRunExactRequest)(nil),                         // 100: kandev.plugin.v1.EnsureTaskRunExactRequest
+	(*EnsureTaskRunExactResponse)(nil),                        // 101: kandev.plugin.v1.EnsureTaskRunExactResponse
+	(*StopTaskRunExactRequest)(nil),                           // 102: kandev.plugin.v1.StopTaskRunExactRequest
+	(*StopTaskRunExactResponse)(nil),                          // 103: kandev.plugin.v1.StopTaskRunExactResponse
+	(*RecoverSessionExactRequest)(nil),                        // 104: kandev.plugin.v1.RecoverSessionExactRequest
+	(*RecoverSessionExactResponse)(nil),                       // 105: kandev.plugin.v1.RecoverSessionExactResponse
+	(*CancelPendingTaskTransitionExactRequest)(nil),           // 106: kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
+	(*CancelPendingTaskTransitionExactResponse)(nil),          // 107: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
+	(*SessionModeOption)(nil),                                 // 108: kandev.plugin.v1.SessionModeOption
+	(*GetSessionModeContextExactRequest)(nil),                 // 109: kandev.plugin.v1.GetSessionModeContextExactRequest
+	(*GetSessionModeContextExactResponse)(nil),                // 110: kandev.plugin.v1.GetSessionModeContextExactResponse
+	(*SetSessionModeExactRequest)(nil),                        // 111: kandev.plugin.v1.SetSessionModeExactRequest
+	(*SetSessionModeExactResponse)(nil),                       // 112: kandev.plugin.v1.SetSessionModeExactResponse
+	(*HumanInteractionResponseReceipt)(nil),                   // 113: kandev.plugin.v1.HumanInteractionResponseReceipt
+	(*RespondPermissionExactRequest)(nil),                     // 114: kandev.plugin.v1.RespondPermissionExactRequest
+	(*RespondPermissionExactResponse)(nil),                    // 115: kandev.plugin.v1.RespondPermissionExactResponse
+	(*AnswerClarificationExactRequest)(nil),                   // 116: kandev.plugin.v1.AnswerClarificationExactRequest
+	(*AnswerClarificationExactResponse)(nil),                  // 117: kandev.plugin.v1.AnswerClarificationExactResponse
+	(*Event)(nil),                                             // 118: kandev.plugin.v1.Event
+	(*EventAck)(nil),                                          // 119: kandev.plugin.v1.EventAck
+	(*AgentToolRequest)(nil),                                  // 120: kandev.plugin.v1.AgentToolRequest
+	(*AgentToolContext)(nil),                                  // 121: kandev.plugin.v1.AgentToolContext
+	(*AgentToolResponse)(nil),                                 // 122: kandev.plugin.v1.AgentToolResponse
+	(*WebhookRequest)(nil),                                    // 123: kandev.plugin.v1.WebhookRequest
+	(*WebhookResponse)(nil),                                   // 124: kandev.plugin.v1.WebhookResponse
+	(*PluginActionRequest)(nil),                               // 125: kandev.plugin.v1.PluginActionRequest
+	(*VerifiedActionContext)(nil),                             // 126: kandev.plugin.v1.VerifiedActionContext
+	(*PluginActionResponse)(nil),                              // 127: kandev.plugin.v1.PluginActionResponse
+	(*SearchEntityReferencesRequest)(nil),                     // 128: kandev.plugin.v1.SearchEntityReferencesRequest
+	(*SearchEntityReferencesResponse)(nil),                    // 129: kandev.plugin.v1.SearchEntityReferencesResponse
+	(*EntityReferenceCandidate)(nil),                          // 130: kandev.plugin.v1.EntityReferenceCandidate
+	(*AuthorizeEntityReferenceRequest)(nil),                   // 131: kandev.plugin.v1.AuthorizeEntityReferenceRequest
+	(*AuthorizeEntityReferenceResponse)(nil),                  // 132: kandev.plugin.v1.AuthorizeEntityReferenceResponse
+	(*ResolveGitCredentialRequest)(nil),                       // 133: kandev.plugin.v1.ResolveGitCredentialRequest
+	(*ResolveGitCredentialResponse)(nil),                      // 134: kandev.plugin.v1.ResolveGitCredentialResponse
+	(*GitCredentialBindingRequest)(nil),                       // 135: kandev.plugin.v1.GitCredentialBindingRequest
+	(*GitCredentialBindingResponse)(nil),                      // 136: kandev.plugin.v1.GitCredentialBindingResponse
+	(*GetStateRequest)(nil),                                   // 137: kandev.plugin.v1.GetStateRequest
+	(*GetStateResponse)(nil),                                  // 138: kandev.plugin.v1.GetStateResponse
+	(*SetStateRequest)(nil),                                   // 139: kandev.plugin.v1.SetStateRequest
+	(*SetStateResponse)(nil),                                  // 140: kandev.plugin.v1.SetStateResponse
+	(*DeleteStateRequest)(nil),                                // 141: kandev.plugin.v1.DeleteStateRequest
+	(*DeleteStateResponse)(nil),                               // 142: kandev.plugin.v1.DeleteStateResponse
+	(*ListStateRequest)(nil),                                  // 143: kandev.plugin.v1.ListStateRequest
+	(*ListStateResponse)(nil),                                 // 144: kandev.plugin.v1.ListStateResponse
+	(*StateEntry)(nil),                                        // 145: kandev.plugin.v1.StateEntry
+	(*GetConfigRequest)(nil),                                  // 146: kandev.plugin.v1.GetConfigRequest
+	(*GetConfigResponse)(nil),                                 // 147: kandev.plugin.v1.GetConfigResponse
+	(*GetSecretRequest)(nil),                                  // 148: kandev.plugin.v1.GetSecretRequest
+	(*GetSecretResponse)(nil),                                 // 149: kandev.plugin.v1.GetSecretResponse
+	(*SetSecretRequest)(nil),                                  // 150: kandev.plugin.v1.SetSecretRequest
+	(*SetSecretResponse)(nil),                                 // 151: kandev.plugin.v1.SetSecretResponse
+	(*DeleteSecretRequest)(nil),                               // 152: kandev.plugin.v1.DeleteSecretRequest
+	(*DeleteSecretResponse)(nil),                              // 153: kandev.plugin.v1.DeleteSecretResponse
+	(*RevealSecretRequest)(nil),                               // 154: kandev.plugin.v1.RevealSecretRequest
+	(*RevealSecretResponse)(nil),                              // 155: kandev.plugin.v1.RevealSecretResponse
+	(*EmitEventRequest)(nil),                                  // 156: kandev.plugin.v1.EmitEventRequest
+	(*EmitEventResponse)(nil),                                 // 157: kandev.plugin.v1.EmitEventResponse
+	(*Page)(nil),                                              // 158: kandev.plugin.v1.Page
+	(*PageInfo)(nil),                                          // 159: kandev.plugin.v1.PageInfo
+	(*Task)(nil),                                              // 160: kandev.plugin.v1.Task
+	(*TaskRepository)(nil),                                    // 161: kandev.plugin.v1.TaskRepository
+	(*TaskPullRequest)(nil),                                   // 162: kandev.plugin.v1.TaskPullRequest
+	(*TaskDependencyRef)(nil),                                 // 163: kandev.plugin.v1.TaskDependencyRef
+	(*TaskFilter)(nil),                                        // 164: kandev.plugin.v1.TaskFilter
+	(*ListTasksRequest)(nil),                                  // 165: kandev.plugin.v1.ListTasksRequest
+	(*ListTasksResponse)(nil),                                 // 166: kandev.plugin.v1.ListTasksResponse
+	(*GetTaskRequest)(nil),                                    // 167: kandev.plugin.v1.GetTaskRequest
+	(*GetTaskResponse)(nil),                                   // 168: kandev.plugin.v1.GetTaskResponse
+	(*TaskStepTransition)(nil),                                // 169: kandev.plugin.v1.TaskStepTransition
+	(*ListTaskStepTransitionsRequest)(nil),                    // 170: kandev.plugin.v1.ListTaskStepTransitionsRequest
+	(*ListTaskStepTransitionsResponse)(nil),                   // 171: kandev.plugin.v1.ListTaskStepTransitionsResponse
+	(*RelationTask)(nil),                                      // 172: kandev.plugin.v1.RelationTask
+	(*TaskRelations)(nil),                                     // 173: kandev.plugin.v1.TaskRelations
+	(*GetTaskRelationsRequest)(nil),                           // 174: kandev.plugin.v1.GetTaskRelationsRequest
+	(*GetTaskRelationsResponse)(nil),                          // 175: kandev.plugin.v1.GetTaskRelationsResponse
+	(*Workspace)(nil),                                         // 176: kandev.plugin.v1.Workspace
+	(*ListWorkspacesRequest)(nil),                             // 177: kandev.plugin.v1.ListWorkspacesRequest
+	(*ListWorkspacesResponse)(nil),                            // 178: kandev.plugin.v1.ListWorkspacesResponse
+	(*Workflow)(nil),                                          // 179: kandev.plugin.v1.Workflow
+	(*ListWorkflowsRequest)(nil),                              // 180: kandev.plugin.v1.ListWorkflowsRequest
+	(*ListWorkflowsResponse)(nil),                             // 181: kandev.plugin.v1.ListWorkflowsResponse
+	(*WorkflowTransitionGroup)(nil),                           // 182: kandev.plugin.v1.WorkflowTransitionGroup
+	(*ListWorkflowTransitionGroupsRequest)(nil),               // 183: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
+	(*ListWorkflowTransitionGroupsResponse)(nil),              // 184: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
+	(*WorkflowStep)(nil),                                      // 185: kandev.plugin.v1.WorkflowStep
+	(*ListWorkflowStepsRequest)(nil),                          // 186: kandev.plugin.v1.ListWorkflowStepsRequest
+	(*ListWorkflowStepsResponse)(nil),                         // 187: kandev.plugin.v1.ListWorkflowStepsResponse
+	(*AgentProfile)(nil),                                      // 188: kandev.plugin.v1.AgentProfile
+	(*ListAgentProfilesRequest)(nil),                          // 189: kandev.plugin.v1.ListAgentProfilesRequest
+	(*ListAgentProfilesResponse)(nil),                         // 190: kandev.plugin.v1.ListAgentProfilesResponse
+	(*ExecutorProfile)(nil),                                   // 191: kandev.plugin.v1.ExecutorProfile
+	(*ListExecutorProfilesRequest)(nil),                       // 192: kandev.plugin.v1.ListExecutorProfilesRequest
+	(*ListExecutorProfilesResponse)(nil),                      // 193: kandev.plugin.v1.ListExecutorProfilesResponse
+	(*ExecutorProviderRequestContext)(nil),                    // 194: kandev.plugin.v1.ExecutorProviderRequestContext
+	(*ExecutorProfileSnapshot)(nil),                           // 195: kandev.plugin.v1.ExecutorProfileSnapshot
+	(*ExecutorProviderFieldError)(nil),                        // 196: kandev.plugin.v1.ExecutorProviderFieldError
+	(*ExecutorProviderError)(nil),                             // 197: kandev.plugin.v1.ExecutorProviderError
+	(*ExecutorProviderCapabilities)(nil),                      // 198: kandev.plugin.v1.ExecutorProviderCapabilities
+	(*ExecutorResourceDescriptor)(nil),                        // 199: kandev.plugin.v1.ExecutorResourceDescriptor
+	(*ValidateExecutorProfileRequest)(nil),                    // 200: kandev.plugin.v1.ValidateExecutorProfileRequest
+	(*ValidateExecutorProfileResponse)(nil),                   // 201: kandev.plugin.v1.ValidateExecutorProfileResponse
+	(*ProvisionExecutorEnvironmentRequest)(nil),               // 202: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
+	(*ProvisionExecutorEnvironmentResponse)(nil),              // 203: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
+	(*RecoverExecutorOperationRequest)(nil),                   // 204: kandev.plugin.v1.RecoverExecutorOperationRequest
+	(*RecoverExecutorOperationResponse)(nil),                  // 205: kandev.plugin.v1.RecoverExecutorOperationResponse
+	(*AttachExecutorEnvironmentRequest)(nil),                  // 206: kandev.plugin.v1.AttachExecutorEnvironmentRequest
+	(*AttachExecutorEnvironmentResponse)(nil),                 // 207: kandev.plugin.v1.AttachExecutorEnvironmentResponse
+	(*InspectExecutorEnvironmentRequest)(nil),                 // 208: kandev.plugin.v1.InspectExecutorEnvironmentRequest
+	(*InspectExecutorEnvironmentResponse)(nil),                // 209: kandev.plugin.v1.InspectExecutorEnvironmentResponse
+	(*ResolveExecutorConnectionRequest)(nil),                  // 210: kandev.plugin.v1.ResolveExecutorConnectionRequest
+	(*ExecutorConnectionLease)(nil),                           // 211: kandev.plugin.v1.ExecutorConnectionLease
+	(*ResolveExecutorConnectionResponse)(nil),                 // 212: kandev.plugin.v1.ResolveExecutorConnectionResponse
+	(*DestroyExecutorEnvironmentRequest)(nil),                 // 213: kandev.plugin.v1.DestroyExecutorEnvironmentRequest
+	(*DestroyExecutorEnvironmentResponse)(nil),                // 214: kandev.plugin.v1.DestroyExecutorEnvironmentResponse
+	(*CheckpointExecutorResourceRequest)(nil),                 // 215: kandev.plugin.v1.CheckpointExecutorResourceRequest
+	(*CheckpointExecutorResourceResponse)(nil),                // 216: kandev.plugin.v1.CheckpointExecutorResourceResponse
+	(*ReportExecutorProgressRequest)(nil),                     // 217: kandev.plugin.v1.ReportExecutorProgressRequest
+	(*ReportExecutorProgressResponse)(nil),                    // 218: kandev.plugin.v1.ReportExecutorProgressResponse
+	(*ReadExecutorRuntimeArtifactRequest)(nil),                // 219: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
+	(*ExecutorRuntimeArtifactChunk)(nil),                      // 220: kandev.plugin.v1.ExecutorRuntimeArtifactChunk
+	(*Repository)(nil),                                        // 221: kandev.plugin.v1.Repository
+	(*ListRepositoriesRequest)(nil),                           // 222: kandev.plugin.v1.ListRepositoriesRequest
+	(*ListRepositoriesResponse)(nil),                          // 223: kandev.plugin.v1.ListRepositoriesResponse
+	(*Session)(nil),                                           // 224: kandev.plugin.v1.Session
+	(*SessionFilter)(nil),                                     // 225: kandev.plugin.v1.SessionFilter
+	(*ListSessionsRequest)(nil),                               // 226: kandev.plugin.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),                              // 227: kandev.plugin.v1.ListSessionsResponse
+	(*SessionCodeStats)(nil),                                  // 228: kandev.plugin.v1.SessionCodeStats
+	(*ListSessionCodeStatsRequest)(nil),                       // 229: kandev.plugin.v1.ListSessionCodeStatsRequest
+	(*ListSessionCodeStatsResponse)(nil),                      // 230: kandev.plugin.v1.ListSessionCodeStatsResponse
+	(*Message)(nil),                                           // 231: kandev.plugin.v1.Message
+	(*MessageFilter)(nil),                                     // 232: kandev.plugin.v1.MessageFilter
+	(*ListMessagesRequest)(nil),                               // 233: kandev.plugin.v1.ListMessagesRequest
+	(*ListMessagesResponse)(nil),                              // 234: kandev.plugin.v1.ListMessagesResponse
+	(*InteractionOption)(nil),                                 // 235: kandev.plugin.v1.InteractionOption
+	(*InteractionQuestion)(nil),                               // 236: kandev.plugin.v1.InteractionQuestion
+	(*Interaction)(nil),                                       // 237: kandev.plugin.v1.Interaction
+	(*InteractionFilter)(nil),                                 // 238: kandev.plugin.v1.InteractionFilter
+	(*ListPendingInteractionsRequest)(nil),                    // 239: kandev.plugin.v1.ListPendingInteractionsRequest
+	(*ListPendingInteractionsResponse)(nil),                   // 240: kandev.plugin.v1.ListPendingInteractionsResponse
+	(*GetInteractionRequest)(nil),                             // 241: kandev.plugin.v1.GetInteractionRequest
+	(*GetInteractionResponse)(nil),                            // 242: kandev.plugin.v1.GetInteractionResponse
+	(*RespondToPermissionRequest)(nil),                        // 243: kandev.plugin.v1.RespondToPermissionRequest
+	(*RespondToPermissionResponse)(nil),                       // 244: kandev.plugin.v1.RespondToPermissionResponse
+	(*ClarificationAnswer)(nil),                               // 245: kandev.plugin.v1.ClarificationAnswer
+	(*AnswerClarificationRequest)(nil),                        // 246: kandev.plugin.v1.AnswerClarificationRequest
+	(*AnswerClarificationResponse)(nil),                       // 247: kandev.plugin.v1.AnswerClarificationResponse
+	(*CancelClarificationRequest)(nil),                        // 248: kandev.plugin.v1.CancelClarificationRequest
+	(*CancelClarificationResponse)(nil),                       // 249: kandev.plugin.v1.CancelClarificationResponse
+	(*InvokeUtilityAgentRequest)(nil),                         // 250: kandev.plugin.v1.InvokeUtilityAgentRequest
+	(*InvokeUtilityAgentWithOptionsRequest)(nil),              // 251: kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
+	(*InvokeUtilityAgentResponse)(nil),                        // 252: kandev.plugin.v1.InvokeUtilityAgentResponse
+	(*CreateTaskRequest)(nil),                                 // 253: kandev.plugin.v1.CreateTaskRequest
+	(*PluginTaskRepository)(nil),                              // 254: kandev.plugin.v1.PluginTaskRepository
+	(*RemoteRepositoryDescriptor)(nil),                        // 255: kandev.plugin.v1.RemoteRepositoryDescriptor
+	(*PluginTaskLaunchOptions)(nil),                           // 256: kandev.plugin.v1.PluginTaskLaunchOptions
+	(*CreateTaskResponse)(nil),                                // 257: kandev.plugin.v1.CreateTaskResponse
+	(*UpdateTaskRequest)(nil),                                 // 258: kandev.plugin.v1.UpdateTaskRequest
+	(*UpdateTaskResponse)(nil),                                // 259: kandev.plugin.v1.UpdateTaskResponse
+	(*MoveTaskRequest)(nil),                                   // 260: kandev.plugin.v1.MoveTaskRequest
+	(*MoveTaskResponse)(nil),                                  // 261: kandev.plugin.v1.MoveTaskResponse
+	(*SendMessageRequest)(nil),                                // 262: kandev.plugin.v1.SendMessageRequest
+	(*SendMessageResponse)(nil),                               // 263: kandev.plugin.v1.SendMessageResponse
+	(*PreviewPluginOwnedTaskTreeRequest)(nil),                 // 264: kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
+	(*PreviewPluginOwnedTaskTreeResponse)(nil),                // 265: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
+	(*DeletePluginOwnedTaskTreeRequest)(nil),                  // 266: kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
+	(*DeletePluginOwnedTaskTreeResponse)(nil),                 // 267: kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
+	(*DeletePluginOwnedTaskTreeProgress)(nil),                 // 268: kandev.plugin.v1.DeletePluginOwnedTaskTreeProgress
+	(*AgentConversationDescriptor)(nil),                       // 269: kandev.plugin.v1.AgentConversationDescriptor
+	(*AgentConversationSpec)(nil),                             // 270: kandev.plugin.v1.AgentConversationSpec
+	(*EnsureAgentConversationRequest)(nil),                    // 271: kandev.plugin.v1.EnsureAgentConversationRequest
+	(*EnsureAgentConversationResponse)(nil),                   // 272: kandev.plugin.v1.EnsureAgentConversationResponse
+	(*DispatchAgentConversationRequest)(nil),                  // 273: kandev.plugin.v1.DispatchAgentConversationRequest
+	(*DispatchAgentConversationResponse)(nil),                 // 274: kandev.plugin.v1.DispatchAgentConversationResponse
+	(*DeleteAgentConversationRequest)(nil),                    // 275: kandev.plugin.v1.DeleteAgentConversationRequest
+	(*DeleteAgentConversationResponse)(nil),                   // 276: kandev.plugin.v1.DeleteAgentConversationResponse
+	(*AutomationConditionRequest)(nil),                        // 277: kandev.plugin.v1.AutomationConditionRequest
+	(*AutomationConditionResponse)(nil),                       // 278: kandev.plugin.v1.AutomationConditionResponse
+	(*AutomationWebhookRequest)(nil),                          // 279: kandev.plugin.v1.AutomationWebhookRequest
+	(*AutomationWebhookResponse)(nil),                         // 280: kandev.plugin.v1.AutomationWebhookResponse
+	(*ExactReadPage)(nil),                                     // 281: kandev.plugin.v1.ExactReadPage
+	(*HostReadReceipt)(nil),                                   // 282: kandev.plugin.v1.HostReadReceipt
+	(*ExactReadPageInfo)(nil),                                 // 283: kandev.plugin.v1.ExactReadPageInfo
+	(*ExactWorkspaceObservation)(nil),                         // 284: kandev.plugin.v1.ExactWorkspaceObservation
+	(*ExactWorkflowObservation)(nil),                          // 285: kandev.plugin.v1.ExactWorkflowObservation
+	(*ExactWorkflowStepObservation)(nil),                      // 286: kandev.plugin.v1.ExactWorkflowStepObservation
+	(*ExactTaskObservation)(nil),                              // 287: kandev.plugin.v1.ExactTaskObservation
+	(*ExactSessionObservation)(nil),                           // 288: kandev.plugin.v1.ExactSessionObservation
+	(*ExactInteractionObservation)(nil),                       // 289: kandev.plugin.v1.ExactInteractionObservation
+	(*ExactMessageObservation)(nil),                           // 290: kandev.plugin.v1.ExactMessageObservation
+	(*TaskRelation)(nil),                                      // 291: kandev.plugin.v1.TaskRelation
+	(*TaskInboxItem)(nil),                                     // 292: kandev.plugin.v1.TaskInboxItem
+	(*TaskDirective)(nil),                                     // 293: kandev.plugin.v1.TaskDirective
+	(*PendingTaskTransition)(nil),                             // 294: kandev.plugin.v1.PendingTaskTransition
+	(*ChangeRequestEvidence)(nil),                             // 295: kandev.plugin.v1.ChangeRequestEvidence
+	(*TaskUsageObservation)(nil),                              // 296: kandev.plugin.v1.TaskUsageObservation
+	(*ListWorkspacesExactRequest)(nil),                        // 297: kandev.plugin.v1.ListWorkspacesExactRequest
+	(*ListWorkspacesExactResponse)(nil),                       // 298: kandev.plugin.v1.ListWorkspacesExactResponse
+	(*ListWorkflowsExactRequest)(nil),                         // 299: kandev.plugin.v1.ListWorkflowsExactRequest
+	(*ListWorkflowsExactResponse)(nil),                        // 300: kandev.plugin.v1.ListWorkflowsExactResponse
+	(*ListWorkflowStepsExactRequest)(nil),                     // 301: kandev.plugin.v1.ListWorkflowStepsExactRequest
+	(*ListWorkflowStepsExactResponse)(nil),                    // 302: kandev.plugin.v1.ListWorkflowStepsExactResponse
+	(*ListTasksExactRequest)(nil),                             // 303: kandev.plugin.v1.ListTasksExactRequest
+	(*ListTasksExactResponse)(nil),                            // 304: kandev.plugin.v1.ListTasksExactResponse
+	(*GetTaskExactRequest)(nil),                               // 305: kandev.plugin.v1.GetTaskExactRequest
+	(*GetTaskExactResponse)(nil),                              // 306: kandev.plugin.v1.GetTaskExactResponse
+	(*ListSessionsExactRequest)(nil),                          // 307: kandev.plugin.v1.ListSessionsExactRequest
+	(*ListSessionsExactResponse)(nil),                         // 308: kandev.plugin.v1.ListSessionsExactResponse
+	(*ListPendingInteractionsExactRequest)(nil),               // 309: kandev.plugin.v1.ListPendingInteractionsExactRequest
+	(*ListPendingInteractionsExactResponse)(nil),              // 310: kandev.plugin.v1.ListPendingInteractionsExactResponse
+	(*GetInteractionExactRequest)(nil),                        // 311: kandev.plugin.v1.GetInteractionExactRequest
+	(*GetInteractionExactResponse)(nil),                       // 312: kandev.plugin.v1.GetInteractionExactResponse
+	(*ListSanitizedMessagesExactRequest)(nil),                 // 313: kandev.plugin.v1.ListSanitizedMessagesExactRequest
+	(*ListSanitizedMessagesExactResponse)(nil),                // 314: kandev.plugin.v1.ListSanitizedMessagesExactResponse
+	(*ListTaskInboxExactRequest)(nil),                         // 315: kandev.plugin.v1.ListTaskInboxExactRequest
+	(*ListTaskInboxExactResponse)(nil),                        // 316: kandev.plugin.v1.ListTaskInboxExactResponse
+	(*GetTaskDirectiveExactRequest)(nil),                      // 317: kandev.plugin.v1.GetTaskDirectiveExactRequest
+	(*GetTaskDirectiveExactResponse)(nil),                     // 318: kandev.plugin.v1.GetTaskDirectiveExactResponse
+	(*ListTaskDirectivesExactRequest)(nil),                    // 319: kandev.plugin.v1.ListTaskDirectivesExactRequest
+	(*ListTaskDirectivesExactResponse)(nil),                   // 320: kandev.plugin.v1.ListTaskDirectivesExactResponse
+	(*GetTaskRelationsExactRequest)(nil),                      // 321: kandev.plugin.v1.GetTaskRelationsExactRequest
+	(*GetTaskRelationsExactResponse)(nil),                     // 322: kandev.plugin.v1.GetTaskRelationsExactResponse
+	(*ListTaskRelationsExactRequest)(nil),                     // 323: kandev.plugin.v1.ListTaskRelationsExactRequest
+	(*ListTaskRelationsExactResponse)(nil),                    // 324: kandev.plugin.v1.ListTaskRelationsExactResponse
+	(*ListPendingTaskTransitionsExactRequest)(nil),            // 325: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
+	(*ListPendingTaskTransitionsExactResponse)(nil),           // 326: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
+	(*ListChangeRequestEvidenceExactRequest)(nil),             // 327: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
+	(*ListChangeRequestEvidenceExactResponse)(nil),            // 328: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
+	(*ListTaskUsageExactRequest)(nil),                         // 329: kandev.plugin.v1.ListTaskUsageExactRequest
+	(*ListTaskUsageExactResponse)(nil),                        // 330: kandev.plugin.v1.ListTaskUsageExactResponse
+	nil,                                                       // 331: kandev.plugin.v1.HostCapabilityContext.LimitsEntry
+	nil,                                                       // 332: kandev.plugin.v1.WebhookRequest.HeadersEntry
+	nil,                                                       // 333: kandev.plugin.v1.WebhookResponse.HeadersEntry
+	nil,                                                       // 334: kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	nil,                                                       // 335: kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
+	nil,                                                       // 336: kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
+	nil,                                                       // 337: kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
+	nil,                                                       // 338: kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
+	nil,                                                       // 339: kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
+	(*structpb.Struct)(nil),                                   // 340: google.protobuf.Struct
 }
 var file_kandev_plugin_v1_plugin_proto_depIdxs = []int32{
-	140, // 0: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
-	140, // 1: kandev.plugin.v1.AgentToolRequest.arguments:type_name -> google.protobuf.Struct
-	3,   // 2: kandev.plugin.v1.AgentToolRequest.context:type_name -> kandev.plugin.v1.AgentToolContext
-	140, // 3: kandev.plugin.v1.AgentToolResponse.structured_content:type_name -> google.protobuf.Struct
-	136, // 4: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
-	137, // 5: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
-	8,   // 6: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
-	138, // 7: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
-	12,  // 8: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
-	140, // 9: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
-	140, // 10: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
-	140, // 11: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
-	140, // 12: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
-	27,  // 13: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
-	140, // 14: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
-	140, // 15: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
-	140, // 16: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
-	43,  // 17: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
-	140, // 18: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
-	44,  // 19: kandev.plugin.v1.Task.pull_requests:type_name -> kandev.plugin.v1.TaskPullRequest
-	45,  // 20: kandev.plugin.v1.Task.depends_on:type_name -> kandev.plugin.v1.TaskDependencyRef
-	45,  // 21: kandev.plugin.v1.Task.blocks:type_name -> kandev.plugin.v1.TaskDependencyRef
-	46,  // 22: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
-	40,  // 23: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
-	42,  // 24: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
-	41,  // 25: kandev.plugin.v1.ListTasksResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	42,  // 26: kandev.plugin.v1.GetTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	40,  // 27: kandev.plugin.v1.ListTaskStepTransitionsRequest.page:type_name -> kandev.plugin.v1.Page
-	51,  // 28: kandev.plugin.v1.ListTaskStepTransitionsResponse.items:type_name -> kandev.plugin.v1.TaskStepTransition
-	41,  // 29: kandev.plugin.v1.ListTaskStepTransitionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	54,  // 30: kandev.plugin.v1.TaskRelations.task:type_name -> kandev.plugin.v1.RelationTask
-	54,  // 31: kandev.plugin.v1.TaskRelations.parent:type_name -> kandev.plugin.v1.RelationTask
-	54,  // 32: kandev.plugin.v1.TaskRelations.children:type_name -> kandev.plugin.v1.RelationTask
-	54,  // 33: kandev.plugin.v1.TaskRelations.siblings:type_name -> kandev.plugin.v1.RelationTask
-	54,  // 34: kandev.plugin.v1.TaskRelations.blockers:type_name -> kandev.plugin.v1.RelationTask
-	54,  // 35: kandev.plugin.v1.TaskRelations.blocked_by:type_name -> kandev.plugin.v1.RelationTask
-	55,  // 36: kandev.plugin.v1.GetTaskRelationsResponse.relations:type_name -> kandev.plugin.v1.TaskRelations
-	40,  // 37: kandev.plugin.v1.ListWorkspacesRequest.page:type_name -> kandev.plugin.v1.Page
-	58,  // 38: kandev.plugin.v1.ListWorkspacesResponse.workspaces:type_name -> kandev.plugin.v1.Workspace
-	41,  // 39: kandev.plugin.v1.ListWorkspacesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	40,  // 40: kandev.plugin.v1.ListWorkflowsRequest.page:type_name -> kandev.plugin.v1.Page
-	61,  // 41: kandev.plugin.v1.ListWorkflowsResponse.workflows:type_name -> kandev.plugin.v1.Workflow
-	41,  // 42: kandev.plugin.v1.ListWorkflowsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	40,  // 43: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest.page:type_name -> kandev.plugin.v1.Page
-	64,  // 44: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.items:type_name -> kandev.plugin.v1.WorkflowTransitionGroup
-	41,  // 45: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	67,  // 46: kandev.plugin.v1.ListWorkflowStepsResponse.steps:type_name -> kandev.plugin.v1.WorkflowStep
-	40,  // 47: kandev.plugin.v1.ListAgentProfilesRequest.page:type_name -> kandev.plugin.v1.Page
-	70,  // 48: kandev.plugin.v1.ListAgentProfilesResponse.profiles:type_name -> kandev.plugin.v1.AgentProfile
-	41,  // 49: kandev.plugin.v1.ListAgentProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	40,  // 50: kandev.plugin.v1.ListExecutorProfilesRequest.page:type_name -> kandev.plugin.v1.Page
-	73,  // 51: kandev.plugin.v1.ListExecutorProfilesResponse.profiles:type_name -> kandev.plugin.v1.ExecutorProfile
-	41,  // 52: kandev.plugin.v1.ListExecutorProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	40,  // 53: kandev.plugin.v1.ListRepositoriesRequest.page:type_name -> kandev.plugin.v1.Page
-	76,  // 54: kandev.plugin.v1.ListRepositoriesResponse.repositories:type_name -> kandev.plugin.v1.Repository
-	41,  // 55: kandev.plugin.v1.ListRepositoriesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	80,  // 56: kandev.plugin.v1.ListSessionsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	40,  // 57: kandev.plugin.v1.ListSessionsRequest.page:type_name -> kandev.plugin.v1.Page
-	79,  // 58: kandev.plugin.v1.ListSessionsResponse.sessions:type_name -> kandev.plugin.v1.Session
-	41,  // 59: kandev.plugin.v1.ListSessionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	80,  // 60: kandev.plugin.v1.ListSessionCodeStatsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	40,  // 61: kandev.plugin.v1.ListSessionCodeStatsRequest.page:type_name -> kandev.plugin.v1.Page
-	83,  // 62: kandev.plugin.v1.ListSessionCodeStatsResponse.stats:type_name -> kandev.plugin.v1.SessionCodeStats
-	41,  // 63: kandev.plugin.v1.ListSessionCodeStatsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	87,  // 64: kandev.plugin.v1.ListMessagesRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
-	40,  // 65: kandev.plugin.v1.ListMessagesRequest.page:type_name -> kandev.plugin.v1.Page
-	86,  // 66: kandev.plugin.v1.ListMessagesResponse.messages:type_name -> kandev.plugin.v1.Message
-	41,  // 67: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	90,  // 68: kandev.plugin.v1.InteractionQuestion.options:type_name -> kandev.plugin.v1.InteractionOption
-	90,  // 69: kandev.plugin.v1.Interaction.options:type_name -> kandev.plugin.v1.InteractionOption
-	91,  // 70: kandev.plugin.v1.Interaction.questions:type_name -> kandev.plugin.v1.InteractionQuestion
-	93,  // 71: kandev.plugin.v1.ListPendingInteractionsRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
-	40,  // 72: kandev.plugin.v1.ListPendingInteractionsRequest.page:type_name -> kandev.plugin.v1.Page
-	92,  // 73: kandev.plugin.v1.ListPendingInteractionsResponse.interactions:type_name -> kandev.plugin.v1.Interaction
-	41,  // 74: kandev.plugin.v1.ListPendingInteractionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	92,  // 75: kandev.plugin.v1.GetInteractionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	92,  // 76: kandev.plugin.v1.RespondToPermissionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	100, // 77: kandev.plugin.v1.AnswerClarificationRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
-	92,  // 78: kandev.plugin.v1.AnswerClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	92,  // 79: kandev.plugin.v1.CancelClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	109, // 80: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
-	111, // 81: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
-	140, // 82: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
-	110, // 83: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
-	42,  // 84: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	42,  // 85: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	42,  // 86: kandev.plugin.v1.MoveTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	42,  // 87: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse.tasks:type_name -> kandev.plugin.v1.Task
-	125, // 88: kandev.plugin.v1.EnsureAgentConversationRequest.spec:type_name -> kandev.plugin.v1.AgentConversationSpec
-	124, // 89: kandev.plugin.v1.EnsureAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
-	124, // 90: kandev.plugin.v1.DispatchAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
-	139, // 91: kandev.plugin.v1.AutomationWebhookRequest.headers:type_name -> kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
-	0,   // 92: kandev.plugin.v1.Plugin.DeliverEvent:input_type -> kandev.plugin.v1.Event
-	5,   // 93: kandev.plugin.v1.Plugin.HandleWebhook:input_type -> kandev.plugin.v1.WebhookRequest
-	132, // 94: kandev.plugin.v1.Plugin.DescribeAutomationCondition:input_type -> kandev.plugin.v1.AutomationConditionRequest
-	134, // 95: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:input_type -> kandev.plugin.v1.AutomationWebhookRequest
-	7,   // 96: kandev.plugin.v1.Plugin.HandleAction:input_type -> kandev.plugin.v1.PluginActionRequest
-	10,  // 97: kandev.plugin.v1.Plugin.SearchEntityReferences:input_type -> kandev.plugin.v1.SearchEntityReferencesRequest
-	13,  // 98: kandev.plugin.v1.Plugin.AuthorizeEntityReference:input_type -> kandev.plugin.v1.AuthorizeEntityReferenceRequest
-	15,  // 99: kandev.plugin.v1.Plugin.ResolveGitCredential:input_type -> kandev.plugin.v1.ResolveGitCredentialRequest
-	17,  // 100: kandev.plugin.v1.Plugin.GetGitCredentialBinding:input_type -> kandev.plugin.v1.GitCredentialBindingRequest
-	2,   // 101: kandev.plugin.v1.Plugin.InvokeAgentTool:input_type -> kandev.plugin.v1.AgentToolRequest
-	19,  // 102: kandev.plugin.v1.Host.GetState:input_type -> kandev.plugin.v1.GetStateRequest
-	21,  // 103: kandev.plugin.v1.Host.SetState:input_type -> kandev.plugin.v1.SetStateRequest
-	23,  // 104: kandev.plugin.v1.Host.DeleteState:input_type -> kandev.plugin.v1.DeleteStateRequest
-	25,  // 105: kandev.plugin.v1.Host.ListState:input_type -> kandev.plugin.v1.ListStateRequest
-	36,  // 106: kandev.plugin.v1.Host.RevealSecret:input_type -> kandev.plugin.v1.RevealSecretRequest
-	38,  // 107: kandev.plugin.v1.Host.EmitEvent:input_type -> kandev.plugin.v1.EmitEventRequest
-	30,  // 108: kandev.plugin.v1.Host.GetSecret:input_type -> kandev.plugin.v1.GetSecretRequest
-	32,  // 109: kandev.plugin.v1.Host.SetSecret:input_type -> kandev.plugin.v1.SetSecretRequest
-	34,  // 110: kandev.plugin.v1.Host.DeleteSecret:input_type -> kandev.plugin.v1.DeleteSecretRequest
-	28,  // 111: kandev.plugin.v1.Host.GetConfig:input_type -> kandev.plugin.v1.GetConfigRequest
-	47,  // 112: kandev.plugin.v1.Host.ListTasks:input_type -> kandev.plugin.v1.ListTasksRequest
-	49,  // 113: kandev.plugin.v1.Host.GetTask:input_type -> kandev.plugin.v1.GetTaskRequest
-	56,  // 114: kandev.plugin.v1.Host.GetTaskRelations:input_type -> kandev.plugin.v1.GetTaskRelationsRequest
-	52,  // 115: kandev.plugin.v1.Host.ListTaskStepTransitions:input_type -> kandev.plugin.v1.ListTaskStepTransitionsRequest
-	59,  // 116: kandev.plugin.v1.Host.ListWorkspaces:input_type -> kandev.plugin.v1.ListWorkspacesRequest
-	62,  // 117: kandev.plugin.v1.Host.ListWorkflows:input_type -> kandev.plugin.v1.ListWorkflowsRequest
-	68,  // 118: kandev.plugin.v1.Host.ListWorkflowSteps:input_type -> kandev.plugin.v1.ListWorkflowStepsRequest
-	65,  // 119: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:input_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
-	71,  // 120: kandev.plugin.v1.Host.ListAgentProfiles:input_type -> kandev.plugin.v1.ListAgentProfilesRequest
-	74,  // 121: kandev.plugin.v1.Host.ListExecutorProfiles:input_type -> kandev.plugin.v1.ListExecutorProfilesRequest
-	77,  // 122: kandev.plugin.v1.Host.ListRepositories:input_type -> kandev.plugin.v1.ListRepositoriesRequest
-	81,  // 123: kandev.plugin.v1.Host.ListSessions:input_type -> kandev.plugin.v1.ListSessionsRequest
-	84,  // 124: kandev.plugin.v1.Host.ListSessionCodeStats:input_type -> kandev.plugin.v1.ListSessionCodeStatsRequest
-	88,  // 125: kandev.plugin.v1.Host.ListMessages:input_type -> kandev.plugin.v1.ListMessagesRequest
-	94,  // 126: kandev.plugin.v1.Host.ListPendingInteractions:input_type -> kandev.plugin.v1.ListPendingInteractionsRequest
-	96,  // 127: kandev.plugin.v1.Host.GetInteraction:input_type -> kandev.plugin.v1.GetInteractionRequest
-	105, // 128: kandev.plugin.v1.Host.InvokeUtilityAgent:input_type -> kandev.plugin.v1.InvokeUtilityAgentRequest
-	106, // 129: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:input_type -> kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
-	108, // 130: kandev.plugin.v1.Host.CreateTask:input_type -> kandev.plugin.v1.CreateTaskRequest
-	113, // 131: kandev.plugin.v1.Host.UpdateTask:input_type -> kandev.plugin.v1.UpdateTaskRequest
-	115, // 132: kandev.plugin.v1.Host.MoveTask:input_type -> kandev.plugin.v1.MoveTaskRequest
-	117, // 133: kandev.plugin.v1.Host.SendMessage:input_type -> kandev.plugin.v1.SendMessageRequest
-	119, // 134: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:input_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
-	121, // 135: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:input_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
-	126, // 136: kandev.plugin.v1.Host.EnsureAgentConversation:input_type -> kandev.plugin.v1.EnsureAgentConversationRequest
-	128, // 137: kandev.plugin.v1.Host.DispatchAgentConversation:input_type -> kandev.plugin.v1.DispatchAgentConversationRequest
-	130, // 138: kandev.plugin.v1.Host.DeleteAgentConversation:input_type -> kandev.plugin.v1.DeleteAgentConversationRequest
-	98,  // 139: kandev.plugin.v1.Host.RespondToPermission:input_type -> kandev.plugin.v1.RespondToPermissionRequest
-	101, // 140: kandev.plugin.v1.Host.AnswerClarification:input_type -> kandev.plugin.v1.AnswerClarificationRequest
-	103, // 141: kandev.plugin.v1.Host.CancelClarification:input_type -> kandev.plugin.v1.CancelClarificationRequest
-	1,   // 142: kandev.plugin.v1.Plugin.DeliverEvent:output_type -> kandev.plugin.v1.EventAck
-	6,   // 143: kandev.plugin.v1.Plugin.HandleWebhook:output_type -> kandev.plugin.v1.WebhookResponse
-	133, // 144: kandev.plugin.v1.Plugin.DescribeAutomationCondition:output_type -> kandev.plugin.v1.AutomationConditionResponse
-	135, // 145: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:output_type -> kandev.plugin.v1.AutomationWebhookResponse
-	9,   // 146: kandev.plugin.v1.Plugin.HandleAction:output_type -> kandev.plugin.v1.PluginActionResponse
-	11,  // 147: kandev.plugin.v1.Plugin.SearchEntityReferences:output_type -> kandev.plugin.v1.SearchEntityReferencesResponse
-	14,  // 148: kandev.plugin.v1.Plugin.AuthorizeEntityReference:output_type -> kandev.plugin.v1.AuthorizeEntityReferenceResponse
-	16,  // 149: kandev.plugin.v1.Plugin.ResolveGitCredential:output_type -> kandev.plugin.v1.ResolveGitCredentialResponse
-	18,  // 150: kandev.plugin.v1.Plugin.GetGitCredentialBinding:output_type -> kandev.plugin.v1.GitCredentialBindingResponse
-	4,   // 151: kandev.plugin.v1.Plugin.InvokeAgentTool:output_type -> kandev.plugin.v1.AgentToolResponse
-	20,  // 152: kandev.plugin.v1.Host.GetState:output_type -> kandev.plugin.v1.GetStateResponse
-	22,  // 153: kandev.plugin.v1.Host.SetState:output_type -> kandev.plugin.v1.SetStateResponse
-	24,  // 154: kandev.plugin.v1.Host.DeleteState:output_type -> kandev.plugin.v1.DeleteStateResponse
-	26,  // 155: kandev.plugin.v1.Host.ListState:output_type -> kandev.plugin.v1.ListStateResponse
-	37,  // 156: kandev.plugin.v1.Host.RevealSecret:output_type -> kandev.plugin.v1.RevealSecretResponse
-	39,  // 157: kandev.plugin.v1.Host.EmitEvent:output_type -> kandev.plugin.v1.EmitEventResponse
-	31,  // 158: kandev.plugin.v1.Host.GetSecret:output_type -> kandev.plugin.v1.GetSecretResponse
-	33,  // 159: kandev.plugin.v1.Host.SetSecret:output_type -> kandev.plugin.v1.SetSecretResponse
-	35,  // 160: kandev.plugin.v1.Host.DeleteSecret:output_type -> kandev.plugin.v1.DeleteSecretResponse
-	29,  // 161: kandev.plugin.v1.Host.GetConfig:output_type -> kandev.plugin.v1.GetConfigResponse
-	48,  // 162: kandev.plugin.v1.Host.ListTasks:output_type -> kandev.plugin.v1.ListTasksResponse
-	50,  // 163: kandev.plugin.v1.Host.GetTask:output_type -> kandev.plugin.v1.GetTaskResponse
-	57,  // 164: kandev.plugin.v1.Host.GetTaskRelations:output_type -> kandev.plugin.v1.GetTaskRelationsResponse
-	53,  // 165: kandev.plugin.v1.Host.ListTaskStepTransitions:output_type -> kandev.plugin.v1.ListTaskStepTransitionsResponse
-	60,  // 166: kandev.plugin.v1.Host.ListWorkspaces:output_type -> kandev.plugin.v1.ListWorkspacesResponse
-	63,  // 167: kandev.plugin.v1.Host.ListWorkflows:output_type -> kandev.plugin.v1.ListWorkflowsResponse
-	69,  // 168: kandev.plugin.v1.Host.ListWorkflowSteps:output_type -> kandev.plugin.v1.ListWorkflowStepsResponse
-	66,  // 169: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:output_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
-	72,  // 170: kandev.plugin.v1.Host.ListAgentProfiles:output_type -> kandev.plugin.v1.ListAgentProfilesResponse
-	75,  // 171: kandev.plugin.v1.Host.ListExecutorProfiles:output_type -> kandev.plugin.v1.ListExecutorProfilesResponse
-	78,  // 172: kandev.plugin.v1.Host.ListRepositories:output_type -> kandev.plugin.v1.ListRepositoriesResponse
-	82,  // 173: kandev.plugin.v1.Host.ListSessions:output_type -> kandev.plugin.v1.ListSessionsResponse
-	85,  // 174: kandev.plugin.v1.Host.ListSessionCodeStats:output_type -> kandev.plugin.v1.ListSessionCodeStatsResponse
-	89,  // 175: kandev.plugin.v1.Host.ListMessages:output_type -> kandev.plugin.v1.ListMessagesResponse
-	95,  // 176: kandev.plugin.v1.Host.ListPendingInteractions:output_type -> kandev.plugin.v1.ListPendingInteractionsResponse
-	97,  // 177: kandev.plugin.v1.Host.GetInteraction:output_type -> kandev.plugin.v1.GetInteractionResponse
-	107, // 178: kandev.plugin.v1.Host.InvokeUtilityAgent:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
-	107, // 179: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
-	112, // 180: kandev.plugin.v1.Host.CreateTask:output_type -> kandev.plugin.v1.CreateTaskResponse
-	114, // 181: kandev.plugin.v1.Host.UpdateTask:output_type -> kandev.plugin.v1.UpdateTaskResponse
-	116, // 182: kandev.plugin.v1.Host.MoveTask:output_type -> kandev.plugin.v1.MoveTaskResponse
-	118, // 183: kandev.plugin.v1.Host.SendMessage:output_type -> kandev.plugin.v1.SendMessageResponse
-	120, // 184: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:output_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
-	122, // 185: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:output_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
-	127, // 186: kandev.plugin.v1.Host.EnsureAgentConversation:output_type -> kandev.plugin.v1.EnsureAgentConversationResponse
-	129, // 187: kandev.plugin.v1.Host.DispatchAgentConversation:output_type -> kandev.plugin.v1.DispatchAgentConversationResponse
-	131, // 188: kandev.plugin.v1.Host.DeleteAgentConversation:output_type -> kandev.plugin.v1.DeleteAgentConversationResponse
-	99,  // 189: kandev.plugin.v1.Host.RespondToPermission:output_type -> kandev.plugin.v1.RespondToPermissionResponse
-	102, // 190: kandev.plugin.v1.Host.AnswerClarification:output_type -> kandev.plugin.v1.AnswerClarificationResponse
-	104, // 191: kandev.plugin.v1.Host.CancelClarification:output_type -> kandev.plugin.v1.CancelClarificationResponse
-	142, // [142:192] is the sub-list for method output_type
-	92,  // [92:142] is the sub-list for method input_type
-	92,  // [92:92] is the sub-list for extension type_name
-	92,  // [92:92] is the sub-list for extension extendee
-	0,   // [0:92] is the sub-list for field type_name
+	4,   // 0: kandev.plugin.v1.HostCapabilityContext.operations:type_name -> kandev.plugin.v1.HostOperationSupport
+	331, // 1: kandev.plugin.v1.HostCapabilityContext.limits:type_name -> kandev.plugin.v1.HostCapabilityContext.LimitsEntry
+	5,   // 2: kandev.plugin.v1.GetCapabilityContextResponse.context:type_name -> kandev.plugin.v1.HostCapabilityContext
+	0,   // 3: kandev.plugin.v1.HostCommandReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
+	0,   // 4: kandev.plugin.v1.HostCommandResult.status:type_name -> kandev.plugin.v1.HostCommandStatus
+	8,   // 5: kandev.plugin.v1.HostCommandResult.receipt:type_name -> kandev.plugin.v1.HostCommandReceipt
+	9,   // 6: kandev.plugin.v1.UpdateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	160, // 7: kandev.plugin.v1.UpdateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	253, // 8: kandev.plugin.v1.CreateTaskExactRequest.task:type_name -> kandev.plugin.v1.CreateTaskRequest
+	9,   // 9: kandev.plugin.v1.CreateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	160, // 10: kandev.plugin.v1.CreateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	9,   // 11: kandev.plugin.v1.SetTaskLabelsExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	160, // 12: kandev.plugin.v1.SetTaskLabelsExactResponse.task:type_name -> kandev.plugin.v1.Task
+	9,   // 13: kandev.plugin.v1.AssignTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	160, // 14: kandev.plugin.v1.AssignTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	9,   // 15: kandev.plugin.v1.MoveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	160, // 16: kandev.plugin.v1.MoveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	9,   // 17: kandev.plugin.v1.ArchiveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	160, // 18: kandev.plugin.v1.ArchiveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	9,   // 19: kandev.plugin.v1.AddTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 20: kandev.plugin.v1.RemoveTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 21: kandev.plugin.v1.SendTaskMessageExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 22: kandev.plugin.v1.TaskManagementClaimExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	28,  // 23: kandev.plugin.v1.TaskManagementClaimExactResponse.claim:type_name -> kandev.plugin.v1.TaskManagementClaim
+	33,  // 24: kandev.plugin.v1.TaskCompletionEvidence.subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
+	33,  // 25: kandev.plugin.v1.TaskCompletionCriterion.evidence_subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
+	34,  // 26: kandev.plugin.v1.TaskCompletionCriterion.evidence:type_name -> kandev.plugin.v1.TaskCompletionEvidence
+	33,  // 27: kandev.plugin.v1.TaskCompletionCriterionInput.evidence_subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
+	35,  // 28: kandev.plugin.v1.TaskCompletionGateSnapshot.criteria:type_name -> kandev.plugin.v1.TaskCompletionCriterion
+	37,  // 29: kandev.plugin.v1.TaskCompletionGateSnapshot.blockers:type_name -> kandev.plugin.v1.TaskCompletionBlocker
+	36,  // 30: kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest.criteria:type_name -> kandev.plugin.v1.TaskCompletionCriterionInput
+	34,  // 31: kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest.evidence:type_name -> kandev.plugin.v1.TaskCompletionEvidence
+	9,   // 32: kandev.plugin.v1.TaskCompletionGateExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	38,  // 33: kandev.plugin.v1.TaskCompletionGateExactResponse.snapshot:type_name -> kandev.plugin.v1.TaskCompletionGateSnapshot
+	43,  // 34: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workspace_defaults:type_name -> kandev.plugin.v1.WorkspaceDefaultsUpdateExact
+	45,  // 35: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_create:type_name -> kandev.plugin.v1.WorkspaceWorkflowCreateExact
+	46,  // 36: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_update:type_name -> kandev.plugin.v1.WorkspaceWorkflowUpdateExact
+	47,  // 37: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_reorder:type_name -> kandev.plugin.v1.WorkspaceWorkflowReorderExact
+	50,  // 38: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_create:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepCreateExact
+	51,  // 39: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_update:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact
+	52,  // 40: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_reorder:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepReorderExact
+	53,  // 41: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.repository_register:type_name -> kandev.plugin.v1.WorkspaceRepositoryRegisterExact
+	54,  // 42: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.repository_update:type_name -> kandev.plugin.v1.WorkspaceRepositoryUpdateExact
+	44,  // 43: kandev.plugin.v1.WorkspaceWorkflowCreateExact.configuration:type_name -> kandev.plugin.v1.WorkspaceWorkflowConfig
+	48,  // 44: kandev.plugin.v1.WorkflowStepConfiguration.on_turn_start_actions:type_name -> kandev.plugin.v1.WorkflowTransitionActionConfig
+	48,  // 45: kandev.plugin.v1.WorkflowStepConfiguration.on_turn_complete_actions:type_name -> kandev.plugin.v1.WorkflowTransitionActionConfig
+	49,  // 46: kandev.plugin.v1.WorkspaceWorkflowStepCreateExact.configuration:type_name -> kandev.plugin.v1.WorkflowStepConfiguration
+	49,  // 47: kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact.configuration:type_name -> kandev.plugin.v1.WorkflowStepConfiguration
+	9,   // 48: kandev.plugin.v1.WorkspaceAdministrationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	56,  // 49: kandev.plugin.v1.ExactSourceIssueCapabilities.transitions:type_name -> kandev.plugin.v1.SourceIssueTransition
+	9,   // 50: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	57,  // 51: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.item:type_name -> kandev.plugin.v1.ExactSourceIssueCapabilities
+	282, // 52: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	0,   // 53: kandev.plugin.v1.SourceIssueWritebackReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
+	9,   // 54: kandev.plugin.v1.SourceIssueWritebackExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	60,  // 55: kandev.plugin.v1.SourceIssueWritebackExactResponse.receipt:type_name -> kandev.plugin.v1.SourceIssueWritebackReceipt
+	9,   // 56: kandev.plugin.v1.IssueTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	293, // 57: kandev.plugin.v1.IssueTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
+	9,   // 58: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	293, // 59: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
+	69,  // 60: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest.spec:type_name -> kandev.plugin.v1.ManagedAgentConversationSpec
+	9,   // 61: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	68,  // 62: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	68,  // 63: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	68,  // 64: kandev.plugin.v1.ListManagedAgentConversationsExactResponse.conversations:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	9,   // 65: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	68,  // 66: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	9,   // 67: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	1,   // 68: kandev.plugin.v1.ManagedAgentInputReceipt.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	2,   // 69: kandev.plugin.v1.ManagedAgentInputReceipt.state:type_name -> kandev.plugin.v1.ManagedAgentInputState
+	1,   // 70: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	9,   // 71: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	80,  // 72: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	80,  // 73: kandev.plugin.v1.GetManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	80,  // 74: kandev.plugin.v1.ListManagedAgentInputsExactResponse.inputs:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	9,   // 75: kandev.plugin.v1.CancelManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	80,  // 76: kandev.plugin.v1.CancelManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	1,   // 77: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	9,   // 78: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	3,   // 79: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.dispatch_status:type_name -> kandev.plugin.v1.ManagedAgentDispatchStatus
+	68,  // 80: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	91,  // 81: kandev.plugin.v1.ManagedConversationSchedule.triggers:type_name -> kandev.plugin.v1.ManagedConversationScheduleTrigger
+	92,  // 82: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse.schedules:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	92,  // 83: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	92,  // 84: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	9,   // 85: kandev.plugin.v1.ManagedConversationScheduleExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	92,  // 86: kandev.plugin.v1.ManagedConversationScheduleExactResponse.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	9,   // 87: kandev.plugin.v1.EnsureTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 88: kandev.plugin.v1.StopTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 89: kandev.plugin.v1.RecoverSessionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 90: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	108, // 91: kandev.plugin.v1.GetSessionModeContextExactResponse.available_modes:type_name -> kandev.plugin.v1.SessionModeOption
+	9,   // 92: kandev.plugin.v1.SetSessionModeExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 93: kandev.plugin.v1.RespondPermissionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	237, // 94: kandev.plugin.v1.RespondPermissionExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	245, // 95: kandev.plugin.v1.AnswerClarificationExactRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
+	9,   // 96: kandev.plugin.v1.AnswerClarificationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	237, // 97: kandev.plugin.v1.AnswerClarificationExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	340, // 98: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
+	340, // 99: kandev.plugin.v1.AgentToolRequest.arguments:type_name -> google.protobuf.Struct
+	121, // 100: kandev.plugin.v1.AgentToolRequest.context:type_name -> kandev.plugin.v1.AgentToolContext
+	340, // 101: kandev.plugin.v1.AgentToolResponse.structured_content:type_name -> google.protobuf.Struct
+	332, // 102: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
+	333, // 103: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
+	126, // 104: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
+	334, // 105: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	130, // 106: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
+	340, // 107: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
+	340, // 108: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
+	340, // 109: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
+	340, // 110: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
+	145, // 111: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
+	340, // 112: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
+	340, // 113: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
+	340, // 114: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
+	161, // 115: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
+	340, // 116: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
+	162, // 117: kandev.plugin.v1.Task.pull_requests:type_name -> kandev.plugin.v1.TaskPullRequest
+	163, // 118: kandev.plugin.v1.Task.depends_on:type_name -> kandev.plugin.v1.TaskDependencyRef
+	163, // 119: kandev.plugin.v1.Task.blocks:type_name -> kandev.plugin.v1.TaskDependencyRef
+	164, // 120: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
+	158, // 121: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
+	160, // 122: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
+	159, // 123: kandev.plugin.v1.ListTasksResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	160, // 124: kandev.plugin.v1.GetTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	158, // 125: kandev.plugin.v1.ListTaskStepTransitionsRequest.page:type_name -> kandev.plugin.v1.Page
+	169, // 126: kandev.plugin.v1.ListTaskStepTransitionsResponse.items:type_name -> kandev.plugin.v1.TaskStepTransition
+	159, // 127: kandev.plugin.v1.ListTaskStepTransitionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	172, // 128: kandev.plugin.v1.TaskRelations.task:type_name -> kandev.plugin.v1.RelationTask
+	172, // 129: kandev.plugin.v1.TaskRelations.parent:type_name -> kandev.plugin.v1.RelationTask
+	172, // 130: kandev.plugin.v1.TaskRelations.children:type_name -> kandev.plugin.v1.RelationTask
+	172, // 131: kandev.plugin.v1.TaskRelations.siblings:type_name -> kandev.plugin.v1.RelationTask
+	172, // 132: kandev.plugin.v1.TaskRelations.blockers:type_name -> kandev.plugin.v1.RelationTask
+	172, // 133: kandev.plugin.v1.TaskRelations.blocked_by:type_name -> kandev.plugin.v1.RelationTask
+	173, // 134: kandev.plugin.v1.GetTaskRelationsResponse.relations:type_name -> kandev.plugin.v1.TaskRelations
+	158, // 135: kandev.plugin.v1.ListWorkspacesRequest.page:type_name -> kandev.plugin.v1.Page
+	176, // 136: kandev.plugin.v1.ListWorkspacesResponse.workspaces:type_name -> kandev.plugin.v1.Workspace
+	159, // 137: kandev.plugin.v1.ListWorkspacesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	158, // 138: kandev.plugin.v1.ListWorkflowsRequest.page:type_name -> kandev.plugin.v1.Page
+	179, // 139: kandev.plugin.v1.ListWorkflowsResponse.workflows:type_name -> kandev.plugin.v1.Workflow
+	159, // 140: kandev.plugin.v1.ListWorkflowsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	158, // 141: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest.page:type_name -> kandev.plugin.v1.Page
+	182, // 142: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.items:type_name -> kandev.plugin.v1.WorkflowTransitionGroup
+	159, // 143: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	185, // 144: kandev.plugin.v1.ListWorkflowStepsResponse.steps:type_name -> kandev.plugin.v1.WorkflowStep
+	158, // 145: kandev.plugin.v1.ListAgentProfilesRequest.page:type_name -> kandev.plugin.v1.Page
+	188, // 146: kandev.plugin.v1.ListAgentProfilesResponse.profiles:type_name -> kandev.plugin.v1.AgentProfile
+	159, // 147: kandev.plugin.v1.ListAgentProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	158, // 148: kandev.plugin.v1.ListExecutorProfilesRequest.page:type_name -> kandev.plugin.v1.Page
+	191, // 149: kandev.plugin.v1.ListExecutorProfilesResponse.profiles:type_name -> kandev.plugin.v1.ExecutorProfile
+	159, // 150: kandev.plugin.v1.ListExecutorProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	335, // 151: kandev.plugin.v1.ExecutorProfileSnapshot.config:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
+	336, // 152: kandev.plugin.v1.ExecutorProfileSnapshot.secret_values:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
+	196, // 153: kandev.plugin.v1.ExecutorProviderError.fields:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
+	198, // 154: kandev.plugin.v1.ExecutorResourceDescriptor.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
+	194, // 155: kandev.plugin.v1.ValidateExecutorProfileRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	195, // 156: kandev.plugin.v1.ValidateExecutorProfileRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	196, // 157: kandev.plugin.v1.ValidateExecutorProfileResponse.field_errors:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
+	198, // 158: kandev.plugin.v1.ValidateExecutorProfileResponse.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
+	197, // 159: kandev.plugin.v1.ValidateExecutorProfileResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 160: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	195, // 161: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	199, // 162: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 163: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 164: kandev.plugin.v1.RecoverExecutorOperationRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	195, // 165: kandev.plugin.v1.RecoverExecutorOperationRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	199, // 166: kandev.plugin.v1.RecoverExecutorOperationResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 167: kandev.plugin.v1.RecoverExecutorOperationResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 168: kandev.plugin.v1.AttachExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 169: kandev.plugin.v1.AttachExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	199, // 170: kandev.plugin.v1.AttachExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 171: kandev.plugin.v1.AttachExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 172: kandev.plugin.v1.InspectExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 173: kandev.plugin.v1.InspectExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 174: kandev.plugin.v1.InspectExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 175: kandev.plugin.v1.ResolveExecutorConnectionRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 176: kandev.plugin.v1.ResolveExecutorConnectionRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	337, // 177: kandev.plugin.v1.ExecutorConnectionLease.http_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
+	338, // 178: kandev.plugin.v1.ExecutorConnectionLease.websocket_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
+	211, // 179: kandev.plugin.v1.ResolveExecutorConnectionResponse.lease:type_name -> kandev.plugin.v1.ExecutorConnectionLease
+	197, // 180: kandev.plugin.v1.ResolveExecutorConnectionResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 181: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 182: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 183: kandev.plugin.v1.DestroyExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 184: kandev.plugin.v1.CheckpointExecutorResourceRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 185: kandev.plugin.v1.CheckpointExecutorResourceRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	194, // 186: kandev.plugin.v1.ReportExecutorProgressRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	194, // 187: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	158, // 188: kandev.plugin.v1.ListRepositoriesRequest.page:type_name -> kandev.plugin.v1.Page
+	221, // 189: kandev.plugin.v1.ListRepositoriesResponse.repositories:type_name -> kandev.plugin.v1.Repository
+	159, // 190: kandev.plugin.v1.ListRepositoriesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	225, // 191: kandev.plugin.v1.ListSessionsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	158, // 192: kandev.plugin.v1.ListSessionsRequest.page:type_name -> kandev.plugin.v1.Page
+	224, // 193: kandev.plugin.v1.ListSessionsResponse.sessions:type_name -> kandev.plugin.v1.Session
+	159, // 194: kandev.plugin.v1.ListSessionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	225, // 195: kandev.plugin.v1.ListSessionCodeStatsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	158, // 196: kandev.plugin.v1.ListSessionCodeStatsRequest.page:type_name -> kandev.plugin.v1.Page
+	228, // 197: kandev.plugin.v1.ListSessionCodeStatsResponse.stats:type_name -> kandev.plugin.v1.SessionCodeStats
+	159, // 198: kandev.plugin.v1.ListSessionCodeStatsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	232, // 199: kandev.plugin.v1.ListMessagesRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
+	158, // 200: kandev.plugin.v1.ListMessagesRequest.page:type_name -> kandev.plugin.v1.Page
+	231, // 201: kandev.plugin.v1.ListMessagesResponse.messages:type_name -> kandev.plugin.v1.Message
+	159, // 202: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	235, // 203: kandev.plugin.v1.InteractionQuestion.options:type_name -> kandev.plugin.v1.InteractionOption
+	235, // 204: kandev.plugin.v1.Interaction.options:type_name -> kandev.plugin.v1.InteractionOption
+	236, // 205: kandev.plugin.v1.Interaction.questions:type_name -> kandev.plugin.v1.InteractionQuestion
+	238, // 206: kandev.plugin.v1.ListPendingInteractionsRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
+	158, // 207: kandev.plugin.v1.ListPendingInteractionsRequest.page:type_name -> kandev.plugin.v1.Page
+	237, // 208: kandev.plugin.v1.ListPendingInteractionsResponse.interactions:type_name -> kandev.plugin.v1.Interaction
+	159, // 209: kandev.plugin.v1.ListPendingInteractionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	237, // 210: kandev.plugin.v1.GetInteractionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	237, // 211: kandev.plugin.v1.RespondToPermissionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	245, // 212: kandev.plugin.v1.AnswerClarificationRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
+	237, // 213: kandev.plugin.v1.AnswerClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	237, // 214: kandev.plugin.v1.CancelClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	254, // 215: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
+	256, // 216: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
+	340, // 217: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
+	255, // 218: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
+	160, // 219: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	160, // 220: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	160, // 221: kandev.plugin.v1.MoveTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	160, // 222: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse.tasks:type_name -> kandev.plugin.v1.Task
+	270, // 223: kandev.plugin.v1.EnsureAgentConversationRequest.spec:type_name -> kandev.plugin.v1.AgentConversationSpec
+	269, // 224: kandev.plugin.v1.EnsureAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
+	269, // 225: kandev.plugin.v1.DispatchAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
+	339, // 226: kandev.plugin.v1.AutomationWebhookRequest.headers:type_name -> kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
+	282, // 227: kandev.plugin.v1.ExactReadPageInfo.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	176, // 228: kandev.plugin.v1.ExactWorkspaceObservation.workspace:type_name -> kandev.plugin.v1.Workspace
+	179, // 229: kandev.plugin.v1.ExactWorkflowObservation.workflow:type_name -> kandev.plugin.v1.Workflow
+	185, // 230: kandev.plugin.v1.ExactWorkflowStepObservation.step:type_name -> kandev.plugin.v1.WorkflowStep
+	160, // 231: kandev.plugin.v1.ExactTaskObservation.task:type_name -> kandev.plugin.v1.Task
+	224, // 232: kandev.plugin.v1.ExactSessionObservation.session:type_name -> kandev.plugin.v1.Session
+	237, // 233: kandev.plugin.v1.ExactInteractionObservation.interaction:type_name -> kandev.plugin.v1.Interaction
+	231, // 234: kandev.plugin.v1.ExactMessageObservation.message:type_name -> kandev.plugin.v1.Message
+	281, // 235: kandev.plugin.v1.ListWorkspacesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	284, // 236: kandev.plugin.v1.ListWorkspacesExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkspaceObservation
+	283, // 237: kandev.plugin.v1.ListWorkspacesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 238: kandev.plugin.v1.ListWorkflowsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	285, // 239: kandev.plugin.v1.ListWorkflowsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowObservation
+	283, // 240: kandev.plugin.v1.ListWorkflowsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 241: kandev.plugin.v1.ListWorkflowStepsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	286, // 242: kandev.plugin.v1.ListWorkflowStepsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowStepObservation
+	283, // 243: kandev.plugin.v1.ListWorkflowStepsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	164, // 244: kandev.plugin.v1.ListTasksExactRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
+	281, // 245: kandev.plugin.v1.ListTasksExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	287, // 246: kandev.plugin.v1.ListTasksExactResponse.items:type_name -> kandev.plugin.v1.ExactTaskObservation
+	283, // 247: kandev.plugin.v1.ListTasksExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	287, // 248: kandev.plugin.v1.GetTaskExactResponse.item:type_name -> kandev.plugin.v1.ExactTaskObservation
+	282, // 249: kandev.plugin.v1.GetTaskExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	225, // 250: kandev.plugin.v1.ListSessionsExactRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	281, // 251: kandev.plugin.v1.ListSessionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	288, // 252: kandev.plugin.v1.ListSessionsExactResponse.items:type_name -> kandev.plugin.v1.ExactSessionObservation
+	283, // 253: kandev.plugin.v1.ListSessionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	238, // 254: kandev.plugin.v1.ListPendingInteractionsExactRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
+	281, // 255: kandev.plugin.v1.ListPendingInteractionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	289, // 256: kandev.plugin.v1.ListPendingInteractionsExactResponse.items:type_name -> kandev.plugin.v1.ExactInteractionObservation
+	283, // 257: kandev.plugin.v1.ListPendingInteractionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	289, // 258: kandev.plugin.v1.GetInteractionExactResponse.item:type_name -> kandev.plugin.v1.ExactInteractionObservation
+	282, // 259: kandev.plugin.v1.GetInteractionExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	232, // 260: kandev.plugin.v1.ListSanitizedMessagesExactRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
+	281, // 261: kandev.plugin.v1.ListSanitizedMessagesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	290, // 262: kandev.plugin.v1.ListSanitizedMessagesExactResponse.items:type_name -> kandev.plugin.v1.ExactMessageObservation
+	283, // 263: kandev.plugin.v1.ListSanitizedMessagesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 264: kandev.plugin.v1.ListTaskInboxExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	292, // 265: kandev.plugin.v1.ListTaskInboxExactResponse.items:type_name -> kandev.plugin.v1.TaskInboxItem
+	283, // 266: kandev.plugin.v1.ListTaskInboxExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	293, // 267: kandev.plugin.v1.GetTaskDirectiveExactResponse.item:type_name -> kandev.plugin.v1.TaskDirective
+	282, // 268: kandev.plugin.v1.GetTaskDirectiveExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	281, // 269: kandev.plugin.v1.ListTaskDirectivesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	293, // 270: kandev.plugin.v1.ListTaskDirectivesExactResponse.items:type_name -> kandev.plugin.v1.TaskDirective
+	283, // 271: kandev.plugin.v1.ListTaskDirectivesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 272: kandev.plugin.v1.GetTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	291, // 273: kandev.plugin.v1.GetTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
+	283, // 274: kandev.plugin.v1.GetTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 275: kandev.plugin.v1.ListTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	291, // 276: kandev.plugin.v1.ListTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
+	283, // 277: kandev.plugin.v1.ListTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 278: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	294, // 279: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.items:type_name -> kandev.plugin.v1.PendingTaskTransition
+	283, // 280: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 281: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	295, // 282: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.items:type_name -> kandev.plugin.v1.ChangeRequestEvidence
+	283, // 283: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 284: kandev.plugin.v1.ListTaskUsageExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	296, // 285: kandev.plugin.v1.ListTaskUsageExactResponse.items:type_name -> kandev.plugin.v1.TaskUsageObservation
+	283, // 286: kandev.plugin.v1.ListTaskUsageExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	118, // 287: kandev.plugin.v1.Plugin.DeliverEvent:input_type -> kandev.plugin.v1.Event
+	123, // 288: kandev.plugin.v1.Plugin.HandleWebhook:input_type -> kandev.plugin.v1.WebhookRequest
+	277, // 289: kandev.plugin.v1.Plugin.DescribeAutomationCondition:input_type -> kandev.plugin.v1.AutomationConditionRequest
+	279, // 290: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:input_type -> kandev.plugin.v1.AutomationWebhookRequest
+	125, // 291: kandev.plugin.v1.Plugin.HandleAction:input_type -> kandev.plugin.v1.PluginActionRequest
+	128, // 292: kandev.plugin.v1.Plugin.SearchEntityReferences:input_type -> kandev.plugin.v1.SearchEntityReferencesRequest
+	131, // 293: kandev.plugin.v1.Plugin.AuthorizeEntityReference:input_type -> kandev.plugin.v1.AuthorizeEntityReferenceRequest
+	133, // 294: kandev.plugin.v1.Plugin.ResolveGitCredential:input_type -> kandev.plugin.v1.ResolveGitCredentialRequest
+	135, // 295: kandev.plugin.v1.Plugin.GetGitCredentialBinding:input_type -> kandev.plugin.v1.GitCredentialBindingRequest
+	120, // 296: kandev.plugin.v1.Plugin.InvokeAgentTool:input_type -> kandev.plugin.v1.AgentToolRequest
+	200, // 297: kandev.plugin.v1.Plugin.ValidateExecutorProfile:input_type -> kandev.plugin.v1.ValidateExecutorProfileRequest
+	202, // 298: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:input_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
+	204, // 299: kandev.plugin.v1.Plugin.RecoverExecutorOperation:input_type -> kandev.plugin.v1.RecoverExecutorOperationRequest
+	206, // 300: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:input_type -> kandev.plugin.v1.AttachExecutorEnvironmentRequest
+	208, // 301: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:input_type -> kandev.plugin.v1.InspectExecutorEnvironmentRequest
+	210, // 302: kandev.plugin.v1.Plugin.ResolveExecutorConnection:input_type -> kandev.plugin.v1.ResolveExecutorConnectionRequest
+	213, // 303: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:input_type -> kandev.plugin.v1.DestroyExecutorEnvironmentRequest
+	6,   // 304: kandev.plugin.v1.Host.GetCapabilityContext:input_type -> kandev.plugin.v1.GetCapabilityContextRequest
+	10,  // 305: kandev.plugin.v1.Host.UpdateTaskExact:input_type -> kandev.plugin.v1.UpdateTaskExactRequest
+	12,  // 306: kandev.plugin.v1.Host.CreateTaskExact:input_type -> kandev.plugin.v1.CreateTaskExactRequest
+	14,  // 307: kandev.plugin.v1.Host.SetTaskLabelsExact:input_type -> kandev.plugin.v1.SetTaskLabelsExactRequest
+	16,  // 308: kandev.plugin.v1.Host.AssignTaskExact:input_type -> kandev.plugin.v1.AssignTaskExactRequest
+	18,  // 309: kandev.plugin.v1.Host.MoveTaskExact:input_type -> kandev.plugin.v1.MoveTaskExactRequest
+	20,  // 310: kandev.plugin.v1.Host.ArchiveTaskExact:input_type -> kandev.plugin.v1.ArchiveTaskExactRequest
+	22,  // 311: kandev.plugin.v1.Host.AddTaskRelationExact:input_type -> kandev.plugin.v1.AddTaskRelationExactRequest
+	24,  // 312: kandev.plugin.v1.Host.RemoveTaskRelationExact:input_type -> kandev.plugin.v1.RemoveTaskRelationExactRequest
+	26,  // 313: kandev.plugin.v1.Host.SendTaskMessageExact:input_type -> kandev.plugin.v1.SendTaskMessageExactRequest
+	64,  // 314: kandev.plugin.v1.Host.IssueTaskDirectiveExact:input_type -> kandev.plugin.v1.IssueTaskDirectiveExactRequest
+	66,  // 315: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:input_type -> kandev.plugin.v1.ResolveTaskDirectiveExactRequest
+	29,  // 316: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:input_type -> kandev.plugin.v1.AcquireTaskManagementClaimExactRequest
+	30,  // 317: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:input_type -> kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest
+	31,  // 318: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:input_type -> kandev.plugin.v1.TransferTaskManagementClaimExactRequest
+	39,  // 319: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:input_type -> kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest
+	40,  // 320: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:input_type -> kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest
+	42,  // 321: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:input_type -> kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest
+	58,  // 322: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:input_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest
+	61,  // 323: kandev.plugin.v1.Host.CommentSourceIssueExact:input_type -> kandev.plugin.v1.CommentSourceIssueExactRequest
+	62,  // 324: kandev.plugin.v1.Host.TransitionSourceIssueExact:input_type -> kandev.plugin.v1.TransitionSourceIssueExactRequest
+	70,  // 325: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:input_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
+	72,  // 326: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:input_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
+	74,  // 327: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:input_type -> kandev.plugin.v1.ListManagedAgentConversationsExactRequest
+	76,  // 328: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:input_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
+	78,  // 329: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:input_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
+	81,  // 330: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:input_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
+	83,  // 331: kandev.plugin.v1.Host.GetManagedAgentInputExact:input_type -> kandev.plugin.v1.GetManagedAgentInputExactRequest
+	85,  // 332: kandev.plugin.v1.Host.ListManagedAgentInputsExact:input_type -> kandev.plugin.v1.ListManagedAgentInputsExactRequest
+	87,  // 333: kandev.plugin.v1.Host.CancelManagedAgentInputExact:input_type -> kandev.plugin.v1.CancelManagedAgentInputExactRequest
+	89,  // 334: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:input_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
+	93,  // 335: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:input_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
+	95,  // 336: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
+	96,  // 337: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
+	97,  // 338: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:input_type -> kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
+	98,  // 339: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:input_type -> kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
+	100, // 340: kandev.plugin.v1.Host.EnsureTaskRunExact:input_type -> kandev.plugin.v1.EnsureTaskRunExactRequest
+	102, // 341: kandev.plugin.v1.Host.StopTaskRunExact:input_type -> kandev.plugin.v1.StopTaskRunExactRequest
+	104, // 342: kandev.plugin.v1.Host.RecoverSessionExact:input_type -> kandev.plugin.v1.RecoverSessionExactRequest
+	106, // 343: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:input_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
+	109, // 344: kandev.plugin.v1.Host.GetSessionModeContextExact:input_type -> kandev.plugin.v1.GetSessionModeContextExactRequest
+	111, // 345: kandev.plugin.v1.Host.SetSessionModeExact:input_type -> kandev.plugin.v1.SetSessionModeExactRequest
+	114, // 346: kandev.plugin.v1.Host.RespondPermissionExact:input_type -> kandev.plugin.v1.RespondPermissionExactRequest
+	116, // 347: kandev.plugin.v1.Host.AnswerClarificationExact:input_type -> kandev.plugin.v1.AnswerClarificationExactRequest
+	297, // 348: kandev.plugin.v1.Host.ListWorkspacesExact:input_type -> kandev.plugin.v1.ListWorkspacesExactRequest
+	299, // 349: kandev.plugin.v1.Host.ListWorkflowsExact:input_type -> kandev.plugin.v1.ListWorkflowsExactRequest
+	301, // 350: kandev.plugin.v1.Host.ListWorkflowStepsExact:input_type -> kandev.plugin.v1.ListWorkflowStepsExactRequest
+	303, // 351: kandev.plugin.v1.Host.ListTasksExact:input_type -> kandev.plugin.v1.ListTasksExactRequest
+	305, // 352: kandev.plugin.v1.Host.GetTaskExact:input_type -> kandev.plugin.v1.GetTaskExactRequest
+	307, // 353: kandev.plugin.v1.Host.ListSessionsExact:input_type -> kandev.plugin.v1.ListSessionsExactRequest
+	309, // 354: kandev.plugin.v1.Host.ListPendingInteractionsExact:input_type -> kandev.plugin.v1.ListPendingInteractionsExactRequest
+	311, // 355: kandev.plugin.v1.Host.GetInteractionExact:input_type -> kandev.plugin.v1.GetInteractionExactRequest
+	313, // 356: kandev.plugin.v1.Host.ListSanitizedMessagesExact:input_type -> kandev.plugin.v1.ListSanitizedMessagesExactRequest
+	315, // 357: kandev.plugin.v1.Host.ListTaskInboxExact:input_type -> kandev.plugin.v1.ListTaskInboxExactRequest
+	317, // 358: kandev.plugin.v1.Host.GetTaskDirectiveExact:input_type -> kandev.plugin.v1.GetTaskDirectiveExactRequest
+	319, // 359: kandev.plugin.v1.Host.ListTaskDirectivesExact:input_type -> kandev.plugin.v1.ListTaskDirectivesExactRequest
+	321, // 360: kandev.plugin.v1.Host.GetTaskRelationsExact:input_type -> kandev.plugin.v1.GetTaskRelationsExactRequest
+	323, // 361: kandev.plugin.v1.Host.ListTaskRelationsExact:input_type -> kandev.plugin.v1.ListTaskRelationsExactRequest
+	325, // 362: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:input_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
+	327, // 363: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:input_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
+	329, // 364: kandev.plugin.v1.Host.ListTaskUsageExact:input_type -> kandev.plugin.v1.ListTaskUsageExactRequest
+	137, // 365: kandev.plugin.v1.Host.GetState:input_type -> kandev.plugin.v1.GetStateRequest
+	139, // 366: kandev.plugin.v1.Host.SetState:input_type -> kandev.plugin.v1.SetStateRequest
+	141, // 367: kandev.plugin.v1.Host.DeleteState:input_type -> kandev.plugin.v1.DeleteStateRequest
+	143, // 368: kandev.plugin.v1.Host.ListState:input_type -> kandev.plugin.v1.ListStateRequest
+	154, // 369: kandev.plugin.v1.Host.RevealSecret:input_type -> kandev.plugin.v1.RevealSecretRequest
+	156, // 370: kandev.plugin.v1.Host.EmitEvent:input_type -> kandev.plugin.v1.EmitEventRequest
+	148, // 371: kandev.plugin.v1.Host.GetSecret:input_type -> kandev.plugin.v1.GetSecretRequest
+	150, // 372: kandev.plugin.v1.Host.SetSecret:input_type -> kandev.plugin.v1.SetSecretRequest
+	152, // 373: kandev.plugin.v1.Host.DeleteSecret:input_type -> kandev.plugin.v1.DeleteSecretRequest
+	146, // 374: kandev.plugin.v1.Host.GetConfig:input_type -> kandev.plugin.v1.GetConfigRequest
+	165, // 375: kandev.plugin.v1.Host.ListTasks:input_type -> kandev.plugin.v1.ListTasksRequest
+	167, // 376: kandev.plugin.v1.Host.GetTask:input_type -> kandev.plugin.v1.GetTaskRequest
+	174, // 377: kandev.plugin.v1.Host.GetTaskRelations:input_type -> kandev.plugin.v1.GetTaskRelationsRequest
+	170, // 378: kandev.plugin.v1.Host.ListTaskStepTransitions:input_type -> kandev.plugin.v1.ListTaskStepTransitionsRequest
+	177, // 379: kandev.plugin.v1.Host.ListWorkspaces:input_type -> kandev.plugin.v1.ListWorkspacesRequest
+	180, // 380: kandev.plugin.v1.Host.ListWorkflows:input_type -> kandev.plugin.v1.ListWorkflowsRequest
+	186, // 381: kandev.plugin.v1.Host.ListWorkflowSteps:input_type -> kandev.plugin.v1.ListWorkflowStepsRequest
+	183, // 382: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:input_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
+	189, // 383: kandev.plugin.v1.Host.ListAgentProfiles:input_type -> kandev.plugin.v1.ListAgentProfilesRequest
+	192, // 384: kandev.plugin.v1.Host.ListExecutorProfiles:input_type -> kandev.plugin.v1.ListExecutorProfilesRequest
+	215, // 385: kandev.plugin.v1.Host.CheckpointExecutorResource:input_type -> kandev.plugin.v1.CheckpointExecutorResourceRequest
+	217, // 386: kandev.plugin.v1.Host.ReportExecutorProgress:input_type -> kandev.plugin.v1.ReportExecutorProgressRequest
+	219, // 387: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:input_type -> kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
+	222, // 388: kandev.plugin.v1.Host.ListRepositories:input_type -> kandev.plugin.v1.ListRepositoriesRequest
+	226, // 389: kandev.plugin.v1.Host.ListSessions:input_type -> kandev.plugin.v1.ListSessionsRequest
+	229, // 390: kandev.plugin.v1.Host.ListSessionCodeStats:input_type -> kandev.plugin.v1.ListSessionCodeStatsRequest
+	233, // 391: kandev.plugin.v1.Host.ListMessages:input_type -> kandev.plugin.v1.ListMessagesRequest
+	239, // 392: kandev.plugin.v1.Host.ListPendingInteractions:input_type -> kandev.plugin.v1.ListPendingInteractionsRequest
+	241, // 393: kandev.plugin.v1.Host.GetInteraction:input_type -> kandev.plugin.v1.GetInteractionRequest
+	250, // 394: kandev.plugin.v1.Host.InvokeUtilityAgent:input_type -> kandev.plugin.v1.InvokeUtilityAgentRequest
+	251, // 395: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:input_type -> kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
+	253, // 396: kandev.plugin.v1.Host.CreateTask:input_type -> kandev.plugin.v1.CreateTaskRequest
+	258, // 397: kandev.plugin.v1.Host.UpdateTask:input_type -> kandev.plugin.v1.UpdateTaskRequest
+	260, // 398: kandev.plugin.v1.Host.MoveTask:input_type -> kandev.plugin.v1.MoveTaskRequest
+	262, // 399: kandev.plugin.v1.Host.SendMessage:input_type -> kandev.plugin.v1.SendMessageRequest
+	264, // 400: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:input_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
+	266, // 401: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:input_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
+	271, // 402: kandev.plugin.v1.Host.EnsureAgentConversation:input_type -> kandev.plugin.v1.EnsureAgentConversationRequest
+	273, // 403: kandev.plugin.v1.Host.DispatchAgentConversation:input_type -> kandev.plugin.v1.DispatchAgentConversationRequest
+	275, // 404: kandev.plugin.v1.Host.DeleteAgentConversation:input_type -> kandev.plugin.v1.DeleteAgentConversationRequest
+	243, // 405: kandev.plugin.v1.Host.RespondToPermission:input_type -> kandev.plugin.v1.RespondToPermissionRequest
+	246, // 406: kandev.plugin.v1.Host.AnswerClarification:input_type -> kandev.plugin.v1.AnswerClarificationRequest
+	248, // 407: kandev.plugin.v1.Host.CancelClarification:input_type -> kandev.plugin.v1.CancelClarificationRequest
+	119, // 408: kandev.plugin.v1.Plugin.DeliverEvent:output_type -> kandev.plugin.v1.EventAck
+	124, // 409: kandev.plugin.v1.Plugin.HandleWebhook:output_type -> kandev.plugin.v1.WebhookResponse
+	278, // 410: kandev.plugin.v1.Plugin.DescribeAutomationCondition:output_type -> kandev.plugin.v1.AutomationConditionResponse
+	280, // 411: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:output_type -> kandev.plugin.v1.AutomationWebhookResponse
+	127, // 412: kandev.plugin.v1.Plugin.HandleAction:output_type -> kandev.plugin.v1.PluginActionResponse
+	129, // 413: kandev.plugin.v1.Plugin.SearchEntityReferences:output_type -> kandev.plugin.v1.SearchEntityReferencesResponse
+	132, // 414: kandev.plugin.v1.Plugin.AuthorizeEntityReference:output_type -> kandev.plugin.v1.AuthorizeEntityReferenceResponse
+	134, // 415: kandev.plugin.v1.Plugin.ResolveGitCredential:output_type -> kandev.plugin.v1.ResolveGitCredentialResponse
+	136, // 416: kandev.plugin.v1.Plugin.GetGitCredentialBinding:output_type -> kandev.plugin.v1.GitCredentialBindingResponse
+	122, // 417: kandev.plugin.v1.Plugin.InvokeAgentTool:output_type -> kandev.plugin.v1.AgentToolResponse
+	201, // 418: kandev.plugin.v1.Plugin.ValidateExecutorProfile:output_type -> kandev.plugin.v1.ValidateExecutorProfileResponse
+	203, // 419: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:output_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
+	205, // 420: kandev.plugin.v1.Plugin.RecoverExecutorOperation:output_type -> kandev.plugin.v1.RecoverExecutorOperationResponse
+	207, // 421: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:output_type -> kandev.plugin.v1.AttachExecutorEnvironmentResponse
+	209, // 422: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:output_type -> kandev.plugin.v1.InspectExecutorEnvironmentResponse
+	212, // 423: kandev.plugin.v1.Plugin.ResolveExecutorConnection:output_type -> kandev.plugin.v1.ResolveExecutorConnectionResponse
+	214, // 424: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:output_type -> kandev.plugin.v1.DestroyExecutorEnvironmentResponse
+	7,   // 425: kandev.plugin.v1.Host.GetCapabilityContext:output_type -> kandev.plugin.v1.GetCapabilityContextResponse
+	11,  // 426: kandev.plugin.v1.Host.UpdateTaskExact:output_type -> kandev.plugin.v1.UpdateTaskExactResponse
+	13,  // 427: kandev.plugin.v1.Host.CreateTaskExact:output_type -> kandev.plugin.v1.CreateTaskExactResponse
+	15,  // 428: kandev.plugin.v1.Host.SetTaskLabelsExact:output_type -> kandev.plugin.v1.SetTaskLabelsExactResponse
+	17,  // 429: kandev.plugin.v1.Host.AssignTaskExact:output_type -> kandev.plugin.v1.AssignTaskExactResponse
+	19,  // 430: kandev.plugin.v1.Host.MoveTaskExact:output_type -> kandev.plugin.v1.MoveTaskExactResponse
+	21,  // 431: kandev.plugin.v1.Host.ArchiveTaskExact:output_type -> kandev.plugin.v1.ArchiveTaskExactResponse
+	23,  // 432: kandev.plugin.v1.Host.AddTaskRelationExact:output_type -> kandev.plugin.v1.AddTaskRelationExactResponse
+	25,  // 433: kandev.plugin.v1.Host.RemoveTaskRelationExact:output_type -> kandev.plugin.v1.RemoveTaskRelationExactResponse
+	27,  // 434: kandev.plugin.v1.Host.SendTaskMessageExact:output_type -> kandev.plugin.v1.SendTaskMessageExactResponse
+	65,  // 435: kandev.plugin.v1.Host.IssueTaskDirectiveExact:output_type -> kandev.plugin.v1.IssueTaskDirectiveExactResponse
+	67,  // 436: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:output_type -> kandev.plugin.v1.ResolveTaskDirectiveExactResponse
+	32,  // 437: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	32,  // 438: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	32,  // 439: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	41,  // 440: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
+	41,  // 441: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
+	55,  // 442: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:output_type -> kandev.plugin.v1.WorkspaceAdministrationExactResponse
+	59,  // 443: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:output_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse
+	63,  // 444: kandev.plugin.v1.Host.CommentSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
+	63,  // 445: kandev.plugin.v1.Host.TransitionSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
+	71,  // 446: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:output_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
+	73,  // 447: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:output_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
+	75,  // 448: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:output_type -> kandev.plugin.v1.ListManagedAgentConversationsExactResponse
+	77,  // 449: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:output_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
+	79,  // 450: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:output_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
+	82,  // 451: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:output_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
+	84,  // 452: kandev.plugin.v1.Host.GetManagedAgentInputExact:output_type -> kandev.plugin.v1.GetManagedAgentInputExactResponse
+	86,  // 453: kandev.plugin.v1.Host.ListManagedAgentInputsExact:output_type -> kandev.plugin.v1.ListManagedAgentInputsExactResponse
+	88,  // 454: kandev.plugin.v1.Host.CancelManagedAgentInputExact:output_type -> kandev.plugin.v1.CancelManagedAgentInputExactResponse
+	90,  // 455: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:output_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
+	94,  // 456: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:output_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
+	99,  // 457: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	99,  // 458: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	99,  // 459: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	9,   // 460: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:output_type -> kandev.plugin.v1.HostCommandResult
+	101, // 461: kandev.plugin.v1.Host.EnsureTaskRunExact:output_type -> kandev.plugin.v1.EnsureTaskRunExactResponse
+	103, // 462: kandev.plugin.v1.Host.StopTaskRunExact:output_type -> kandev.plugin.v1.StopTaskRunExactResponse
+	105, // 463: kandev.plugin.v1.Host.RecoverSessionExact:output_type -> kandev.plugin.v1.RecoverSessionExactResponse
+	107, // 464: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:output_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
+	110, // 465: kandev.plugin.v1.Host.GetSessionModeContextExact:output_type -> kandev.plugin.v1.GetSessionModeContextExactResponse
+	112, // 466: kandev.plugin.v1.Host.SetSessionModeExact:output_type -> kandev.plugin.v1.SetSessionModeExactResponse
+	115, // 467: kandev.plugin.v1.Host.RespondPermissionExact:output_type -> kandev.plugin.v1.RespondPermissionExactResponse
+	117, // 468: kandev.plugin.v1.Host.AnswerClarificationExact:output_type -> kandev.plugin.v1.AnswerClarificationExactResponse
+	298, // 469: kandev.plugin.v1.Host.ListWorkspacesExact:output_type -> kandev.plugin.v1.ListWorkspacesExactResponse
+	300, // 470: kandev.plugin.v1.Host.ListWorkflowsExact:output_type -> kandev.plugin.v1.ListWorkflowsExactResponse
+	302, // 471: kandev.plugin.v1.Host.ListWorkflowStepsExact:output_type -> kandev.plugin.v1.ListWorkflowStepsExactResponse
+	304, // 472: kandev.plugin.v1.Host.ListTasksExact:output_type -> kandev.plugin.v1.ListTasksExactResponse
+	306, // 473: kandev.plugin.v1.Host.GetTaskExact:output_type -> kandev.plugin.v1.GetTaskExactResponse
+	308, // 474: kandev.plugin.v1.Host.ListSessionsExact:output_type -> kandev.plugin.v1.ListSessionsExactResponse
+	310, // 475: kandev.plugin.v1.Host.ListPendingInteractionsExact:output_type -> kandev.plugin.v1.ListPendingInteractionsExactResponse
+	312, // 476: kandev.plugin.v1.Host.GetInteractionExact:output_type -> kandev.plugin.v1.GetInteractionExactResponse
+	314, // 477: kandev.plugin.v1.Host.ListSanitizedMessagesExact:output_type -> kandev.plugin.v1.ListSanitizedMessagesExactResponse
+	316, // 478: kandev.plugin.v1.Host.ListTaskInboxExact:output_type -> kandev.plugin.v1.ListTaskInboxExactResponse
+	318, // 479: kandev.plugin.v1.Host.GetTaskDirectiveExact:output_type -> kandev.plugin.v1.GetTaskDirectiveExactResponse
+	320, // 480: kandev.plugin.v1.Host.ListTaskDirectivesExact:output_type -> kandev.plugin.v1.ListTaskDirectivesExactResponse
+	322, // 481: kandev.plugin.v1.Host.GetTaskRelationsExact:output_type -> kandev.plugin.v1.GetTaskRelationsExactResponse
+	324, // 482: kandev.plugin.v1.Host.ListTaskRelationsExact:output_type -> kandev.plugin.v1.ListTaskRelationsExactResponse
+	326, // 483: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:output_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
+	328, // 484: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:output_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
+	330, // 485: kandev.plugin.v1.Host.ListTaskUsageExact:output_type -> kandev.plugin.v1.ListTaskUsageExactResponse
+	138, // 486: kandev.plugin.v1.Host.GetState:output_type -> kandev.plugin.v1.GetStateResponse
+	140, // 487: kandev.plugin.v1.Host.SetState:output_type -> kandev.plugin.v1.SetStateResponse
+	142, // 488: kandev.plugin.v1.Host.DeleteState:output_type -> kandev.plugin.v1.DeleteStateResponse
+	144, // 489: kandev.plugin.v1.Host.ListState:output_type -> kandev.plugin.v1.ListStateResponse
+	155, // 490: kandev.plugin.v1.Host.RevealSecret:output_type -> kandev.plugin.v1.RevealSecretResponse
+	157, // 491: kandev.plugin.v1.Host.EmitEvent:output_type -> kandev.plugin.v1.EmitEventResponse
+	149, // 492: kandev.plugin.v1.Host.GetSecret:output_type -> kandev.plugin.v1.GetSecretResponse
+	151, // 493: kandev.plugin.v1.Host.SetSecret:output_type -> kandev.plugin.v1.SetSecretResponse
+	153, // 494: kandev.plugin.v1.Host.DeleteSecret:output_type -> kandev.plugin.v1.DeleteSecretResponse
+	147, // 495: kandev.plugin.v1.Host.GetConfig:output_type -> kandev.plugin.v1.GetConfigResponse
+	166, // 496: kandev.plugin.v1.Host.ListTasks:output_type -> kandev.plugin.v1.ListTasksResponse
+	168, // 497: kandev.plugin.v1.Host.GetTask:output_type -> kandev.plugin.v1.GetTaskResponse
+	175, // 498: kandev.plugin.v1.Host.GetTaskRelations:output_type -> kandev.plugin.v1.GetTaskRelationsResponse
+	171, // 499: kandev.plugin.v1.Host.ListTaskStepTransitions:output_type -> kandev.plugin.v1.ListTaskStepTransitionsResponse
+	178, // 500: kandev.plugin.v1.Host.ListWorkspaces:output_type -> kandev.plugin.v1.ListWorkspacesResponse
+	181, // 501: kandev.plugin.v1.Host.ListWorkflows:output_type -> kandev.plugin.v1.ListWorkflowsResponse
+	187, // 502: kandev.plugin.v1.Host.ListWorkflowSteps:output_type -> kandev.plugin.v1.ListWorkflowStepsResponse
+	184, // 503: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:output_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
+	190, // 504: kandev.plugin.v1.Host.ListAgentProfiles:output_type -> kandev.plugin.v1.ListAgentProfilesResponse
+	193, // 505: kandev.plugin.v1.Host.ListExecutorProfiles:output_type -> kandev.plugin.v1.ListExecutorProfilesResponse
+	216, // 506: kandev.plugin.v1.Host.CheckpointExecutorResource:output_type -> kandev.plugin.v1.CheckpointExecutorResourceResponse
+	218, // 507: kandev.plugin.v1.Host.ReportExecutorProgress:output_type -> kandev.plugin.v1.ReportExecutorProgressResponse
+	220, // 508: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:output_type -> kandev.plugin.v1.ExecutorRuntimeArtifactChunk
+	223, // 509: kandev.plugin.v1.Host.ListRepositories:output_type -> kandev.plugin.v1.ListRepositoriesResponse
+	227, // 510: kandev.plugin.v1.Host.ListSessions:output_type -> kandev.plugin.v1.ListSessionsResponse
+	230, // 511: kandev.plugin.v1.Host.ListSessionCodeStats:output_type -> kandev.plugin.v1.ListSessionCodeStatsResponse
+	234, // 512: kandev.plugin.v1.Host.ListMessages:output_type -> kandev.plugin.v1.ListMessagesResponse
+	240, // 513: kandev.plugin.v1.Host.ListPendingInteractions:output_type -> kandev.plugin.v1.ListPendingInteractionsResponse
+	242, // 514: kandev.plugin.v1.Host.GetInteraction:output_type -> kandev.plugin.v1.GetInteractionResponse
+	252, // 515: kandev.plugin.v1.Host.InvokeUtilityAgent:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
+	252, // 516: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
+	257, // 517: kandev.plugin.v1.Host.CreateTask:output_type -> kandev.plugin.v1.CreateTaskResponse
+	259, // 518: kandev.plugin.v1.Host.UpdateTask:output_type -> kandev.plugin.v1.UpdateTaskResponse
+	261, // 519: kandev.plugin.v1.Host.MoveTask:output_type -> kandev.plugin.v1.MoveTaskResponse
+	263, // 520: kandev.plugin.v1.Host.SendMessage:output_type -> kandev.plugin.v1.SendMessageResponse
+	265, // 521: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:output_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
+	267, // 522: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:output_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
+	272, // 523: kandev.plugin.v1.Host.EnsureAgentConversation:output_type -> kandev.plugin.v1.EnsureAgentConversationResponse
+	274, // 524: kandev.plugin.v1.Host.DispatchAgentConversation:output_type -> kandev.plugin.v1.DispatchAgentConversationResponse
+	276, // 525: kandev.plugin.v1.Host.DeleteAgentConversation:output_type -> kandev.plugin.v1.DeleteAgentConversationResponse
+	244, // 526: kandev.plugin.v1.Host.RespondToPermission:output_type -> kandev.plugin.v1.RespondToPermissionResponse
+	247, // 527: kandev.plugin.v1.Host.AnswerClarification:output_type -> kandev.plugin.v1.AnswerClarificationResponse
+	249, // 528: kandev.plugin.v1.Host.CancelClarification:output_type -> kandev.plugin.v1.CancelClarificationResponse
+	408, // [408:529] is the sub-list for method output_type
+	287, // [287:408] is the sub-list for method input_type
+	287, // [287:287] is the sub-list for extension type_name
+	287, // [287:287] is the sub-list for extension extendee
+	0,   // [0:287] is the sub-list for field type_name
 }
 
 func init() { file_kandev_plugin_v1_plugin_proto_init() }
@@ -10034,35 +27449,56 @@ func file_kandev_plugin_v1_plugin_proto_init() {
 	if File_kandev_plugin_v1_plugin_proto != nil {
 		return
 	}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[6].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[38].OneofWrappers = []any{
+		(*ApplyWorkspaceAdministrationExactRequest_WorkspaceDefaults)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_WorkflowCreate)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_WorkflowUpdate)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_WorkflowReorder)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_WorkflowStepCreate)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_WorkflowStepUpdate)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_WorkflowStepReorder)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_RepositoryRegister)(nil),
+		(*ApplyWorkspaceAdministrationExactRequest_RepositoryUpdate)(nil),
+	}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[39].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[42].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[44].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[46].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[51].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[58].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[61].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[64].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[76].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[79].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[87].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[108].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[109].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[110].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[111].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[113].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[115].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[116].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[49].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[50].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[156].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[158].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[160].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[165].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[172].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[175].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[178].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[217].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[220].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[228].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[249].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[250].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[251].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[252].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[254].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[256].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[257].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[283].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[289].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[291].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[292].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kandev_plugin_v1_plugin_proto_rawDesc), len(file_kandev_plugin_v1_plugin_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   140,
+			NumEnums:      4,
+			NumMessages:   336,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
 		GoTypes:           file_kandev_plugin_v1_plugin_proto_goTypes,
 		DependencyIndexes: file_kandev_plugin_v1_plugin_proto_depIdxs,
+		EnumInfos:         file_kandev_plugin_v1_plugin_proto_enumTypes,
 		MessageInfos:      file_kandev_plugin_v1_plugin_proto_msgTypes,
 	}.Build()
 	File_kandev_plugin_v1_plugin_proto = out.File

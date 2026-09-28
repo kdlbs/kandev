@@ -94,7 +94,6 @@
   "selectRepository": "Select repository",
   "selectTask": "Select task {{title}}",
   "selectWorkflow": "Select workflow",
-  "sendToWorkflow": "Send to workflow",
   "selectedFilterCount_one": "{{label}}: {{count}} selected",
   "selectedFilterCount_other": "{{label}}: {{count}} selected",
   "sentryIssue": "Sentry Issue",

@@ -46,6 +46,7 @@ export type WorkflowStepperStep = {
   prompt?: string;
   is_start_step?: boolean;
   agent_profile_id?: string;
+  complete_task_on_enter?: boolean;
 };
 
 type Step = WorkflowStepperStep;

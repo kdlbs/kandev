@@ -331,14 +331,14 @@ func TestPluginHost_PluginOwnedTaskTreePreviewAttachesPullRequests(t *testing.T)
 	}
 }
 
-func TestPluginHost_PluginOwnedTaskTreeDeleteIsIdempotentAfterRootDeletion(t *testing.T) {
+func TestPluginHost_PluginOwnedTaskTreeDeleteRequiresNativeConfirmation(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
 	d.tasks.tasksByID = map[string]*taskmodels.Task{}
 
 	deleted, err := d.host.PluginOwnedTaskTrees().Delete(context.Background(), "already-deleted")
 
-	if err != nil {
-		t.Fatalf("Delete() unexpected error for an absent root: %v", err)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("Delete() error = %v, want PermissionDenied", err)
 	}
 	if len(deleted) != 0 || len(d.taskWriter.deletedIDs) != 0 {
 		t.Fatalf("Delete() = %v, writer deleted=%v, want idempotent no-op", deleted, d.taskWriter.deletedIDs)
@@ -364,8 +364,8 @@ func TestPluginHost_PluginOwnedTaskTreeRejectsDeleteWithAdoptedDescendants(t *te
 		t.Fatalf("Preview() = %+v, want only contiguous plugin-owned tree", preview)
 	}
 	deleted, err := d.host.PluginOwnedTaskTrees().Delete(context.Background(), "root")
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("Delete() error = %v, want FailedPrecondition", err)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("Delete() error = %v, want PermissionDenied until native confirmation", err)
 	}
 	if len(deleted) != 0 || len(d.taskWriter.deletedIDs) != 0 {
 		t.Fatalf("Delete() mutated mixed-ownership tree: result=%v deleted=%v", deleted, d.taskWriter.deletedIDs)

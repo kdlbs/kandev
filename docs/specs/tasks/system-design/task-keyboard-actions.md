@@ -79,9 +79,11 @@ Move to expands into current-workflow step choices from the same eligibility
 projection used by `TaskMoveContextMenuItems`. Choosing a step closes the palette
 and opens `TaskMoveOptionsSurface` with the chosen task/workflow/step captured and
 instructions focused. The captured IDs are checked against live active context
-before dispatch; a context change dismisses the surface. Send to workflow uses
-the same single-task options surface and move endpoint with the selected target
-workflow ID. An optional `immediateAction` on destination commands handles
+before dispatch; a context change dismisses the surface. Change workflow opens
+the task's shared workflow-change form and uses its version-checked move
+contract, including destination step and task-only agent mappings, as defined
+in [Change workflow](../requirements/change-workflow.md). It does not use the
+immediate-move shortcut. An optional `immediateAction` on destination commands handles
 Mod+Enter, closes the palette and sends normal defaults. Ignore repeated and
 composing modified Enter events. Guard both action variants against stale task
 context. Color and step rows use existing color classes; destination rows show a

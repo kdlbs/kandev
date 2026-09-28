@@ -42,12 +42,21 @@ func isConfigModeSession(session *models.TaskSession) bool {
 // ownership and session purpose. Config mode wins because those sessions need
 // config tools even if their backing task is Office-owned.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
-	if isConfigModeSession(session) {
-		return McpModeConfig, nil
-	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return "", fmt.Errorf("load task for MCP mode: %w", err)
+	}
+	if task != nil {
+		_, managed, policyErr := models.ManagedToolPolicyFromTask(task)
+		if policyErr != nil {
+			return "", fmt.Errorf("resolve managed conversation MCP policy: %w", policyErr)
+		}
+		if managed {
+			return McpModeManagedConversation, nil
+		}
+	}
+	if isConfigModeSession(session) {
+		return McpModeConfig, nil
 	}
 	if task != nil && task.Origin == models.TaskOriginAutomationRun {
 		return McpModeAutomation, nil
@@ -62,16 +71,25 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+	}
+	if task != nil {
+		policy, managed, policyErr := models.ManagedToolPolicyFromTask(task)
+		if policyErr != nil {
+			return mcpprofile.Context{}, fmt.Errorf("resolve managed conversation MCP policy: %w", policyErr)
+		}
+		if managed {
+			return mcpprofile.New(mcpprofile.SurfaceManagedConversation, nil, nil).WithManagedToolPolicy(*policy), nil
+		}
+	}
 	if isConfigModeSession(session) {
 		capabilities := []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}
 		if session.IsPassthrough {
 			capabilities = nil
 		}
 		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
-	}
-	task, err := e.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
 	}
 	if task == nil {
 		// A few lifecycle paths can prepare a request from a session snapshot
@@ -168,6 +186,15 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 		models.ExecutorType(executorType) == models.ExecutorTypeSSH
 }
 
+func claimAgentStartAttempt(session *models.TaskSession) string {
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	attemptID := uuid.NewString()
+	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
+	return attemptID
+}
+
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
 // On error it marks the session as FAILED. The task is also marked FAILED only
 // when escalateTaskOnFailure is true; resume callers pass false so a transient
@@ -183,6 +210,7 @@ func (e *Executor) runAgentProcessAsync(
 	taskID, sessionID, agentExecutionID string,
 	onSuccess func(context.Context),
 	escalateTaskOnFailure, fromResume bool,
+	expectedStartAttemptID ...string,
 ) {
 	e.runAgentProcessAsyncWithObservation(
 		ctx,
@@ -193,6 +221,7 @@ func (e *Executor) runAgentProcessAsync(
 		onSuccess,
 		escalateTaskOnFailure,
 		fromResume,
+		expectedStartAttemptID...,
 	)
 }
 
@@ -205,8 +234,13 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 	taskID, sessionID, agentExecutionID, observationSite string,
 	onSuccess func(context.Context),
 	escalateTaskOnFailure, fromResume bool,
+	expectedStartAttemptID ...string,
 ) {
 	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
+	var startAttemptID string
+	if len(expectedStartAttemptID) > 0 {
+		startAttemptID = expectedStartAttemptID[0]
+	}
 	go func() {
 		startParent := context.WithoutCancel(ctx)
 		updateCtx := startParent
@@ -227,17 +261,19 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 				// execution ID for bounded cleanup, then let the orchestrator
 				// release any launch-side claim without publishing FAILED.
 				cleanupCtx := context.WithoutCancel(ctx)
-				e.stopFailedStartExecution(cleanupCtx, agentExecutionID, "cancelled resume startup")
-				if e.onAgentProcessStartFailed != nil {
+				attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
+					cleanupCtx, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+				)
+				if attemptOwned && e.onAgentProcessStartFailed != nil {
 					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
 				}
 				return
 			}
-			e.handleAgentProcessStartFailure(
+			attemptOwned := e.handleAgentProcessStartFailure(
 				updateCtx, taskID, sessionID, agentExecutionID, err,
-				escalateTaskOnFailure, fromResume,
+				escalateTaskOnFailure, fromResume, startAttemptID,
 			)
-			if e.onAgentProcessStartFailed != nil {
+			if attemptOwned && e.onAgentProcessStartFailed != nil {
 				e.onAgentProcessStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err)
 			}
 			return
@@ -247,6 +283,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			sessionID,
 			agentExecutionID,
 			"terminal post-start race",
+			startAttemptID,
 		); terminal {
 			return
 		}
@@ -254,8 +291,10 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			// The provider ignored cancellation and reported success late. Do
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
-			e.stopFailedStartExecution(context.WithoutCancel(ctx), agentExecutionID, "cancelled resume startup")
-			if e.onAgentProcessStartFailed != nil {
+			attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
+				context.WithoutCancel(ctx), sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+			)
+			if attemptOwned && e.onAgentProcessStartFailed != nil {
 				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
 			}
 			return
@@ -273,7 +312,12 @@ func (e *Executor) handleAgentProcessStartFailure(
 	taskID, sessionID, agentExecutionID string,
 	startErr error,
 	escalateTaskOnFailure, fromResume bool,
-) {
+	expectedStartAttemptID ...string,
+) bool {
+	var startAttemptID string
+	if len(expectedStartAttemptID) > 0 {
+		startAttemptID = expectedStartAttemptID[0]
+	}
 	// A cancelled context or a terminal-session error is a benign teardown race
 	// (the session ended while StartAgentProcess was blocked), not a genuine
 	// start fault, so it logs at WARN without a stacktrace. DeadlineExceeded
@@ -295,6 +339,31 @@ func (e *Executor) handleAgentProcessStartFailure(
 			zap.Error(startErr))
 	}
 
+	owned, cleanupSafe, ownershipErr := e.bootstrapFailureOwnsSession(
+		ctx, sessionID, agentExecutionID, startAttemptID,
+	)
+	if ownershipErr != nil {
+		e.logger.Warn("failed to verify execution before bootstrap failure projection",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(ownershipErr))
+		if startAttemptID == "" {
+			e.stopFailedStartExecution(ctx, agentExecutionID, "bootstrap ownership check")
+		}
+		return false
+	}
+	if !owned {
+		e.logger.Info("ignoring bootstrap failure from superseded start attempt",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID))
+		if cleanupSafe {
+			e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
+		}
+		return false
+	}
+
 	// A terminal transition may have landed while StartAgentProcess was
 	// blocked. Drop all failure/recovery side effects in that case. CANCELLED
 	// owns teardown only when another path has claimed this exact execution.
@@ -303,26 +372,7 @@ func (e *Executor) handleAgentProcessStartFailure(
 			e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 			e.stopFailedStartExecution(ctx, agentExecutionID, "terminal start race")
 		}
-		return
-	}
-
-	owned, ownershipErr := e.bootstrapFailureOwnsSession(ctx, sessionID, agentExecutionID)
-	if ownershipErr != nil {
-		e.logger.Warn("failed to verify execution before bootstrap failure projection",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("agent_execution_id", agentExecutionID),
-			zap.Error(ownershipErr))
-		e.stopFailedStartExecution(ctx, agentExecutionID, "bootstrap ownership check")
-		return
-	}
-	if !owned {
-		e.logger.Info("ignoring bootstrap failure from superseded execution",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("agent_execution_id", agentExecutionID))
-		e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
-		return
+		return true
 	}
 
 	// Let the orchestrator handle auth errors as recoverable failures and
@@ -330,14 +380,14 @@ func (e *Executor) handleAgentProcessStartFailure(
 	if e.onAgentStartFailed != nil && e.onAgentStartFailed(
 		ctx, taskID, sessionID, agentExecutionID, startErr, fromResume,
 	) {
-		return
+		return true
 	}
 
 	errorValue := e.buildBootstrapLastAgentError(
 		ctx, taskID, sessionID, agentExecutionID, startErr, fromResume,
 	)
 	changed, finalState, transitionErr := e.commitBootstrapFailure(
-		ctx, taskID, sessionID, agentExecutionID, errorValue,
+		ctx, taskID, sessionID, agentExecutionID, startAttemptID, errorValue,
 	)
 	if transitionErr != nil {
 		e.logger.Warn("failed to commit bootstrap failure projection",
@@ -357,11 +407,13 @@ func (e *Executor) handleAgentProcessStartFailure(
 			}
 		}
 	} else if !changed {
-		// An ownership or compare-and-set miss means a newer execution won the
-		// race. Do not
-		// transition the successor's session or replace its cleanup owner.
-		e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
-		return
+		// A compare-and-set miss leaves cleanup ownership unknown. Startup
+		// retries may reuse the same execution ID, so only legacy callers
+		// without attempt evidence can safely use the execution-wide cleanup.
+		if startAttemptID == "" {
+			e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
+		}
+		return false
 	}
 
 	if changed && finalState == models.TaskSessionStateFailed && escalateTaskOnFailure {
@@ -380,6 +432,7 @@ func (e *Executor) handleAgentProcessStartFailure(
 		e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 		e.stopFailedStartExecution(ctx, agentExecutionID, "start failure")
 	}
+	return true
 }
 
 func (e *Executor) claimForcedExecutionCleanup(sessionID, agentExecutionID string) bool {
@@ -399,6 +452,30 @@ func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionI
 	}
 }
 
+func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+	expectedStartAttemptID string,
+	phase string,
+) bool {
+	if expectedStartAttemptID == "" {
+		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		return true
+	}
+	owned, cleanupSafe, err := e.bootstrapFailureOwnsSession(ctx, sessionID, agentExecutionID, expectedStartAttemptID)
+	if err != nil {
+		e.logger.Warn("failed to verify execution before startup cleanup",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(err))
+		return false
+	}
+	if owned || cleanupSafe {
+		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+	}
+	return owned
+}
+
 func (e *Executor) currentTerminalSessionState(
 	ctx context.Context,
 	sessionID string,
@@ -413,12 +490,31 @@ func (e *Executor) currentTerminalSessionState(
 func (e *Executor) stopStartedExecutionIfSessionTerminal(
 	ctx context.Context,
 	sessionID, agentExecutionID, phase string,
+	expectedStartAttemptID ...string,
 ) (models.TaskSessionState, bool) {
 	terminalState, terminal := e.currentTerminalSessionState(ctx, sessionID)
 	if !terminal {
 		return "", false
 	}
-	if e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+	var expected string
+	if len(expectedStartAttemptID) > 0 {
+		expected = expectedStartAttemptID[0]
+	}
+	if expected == "" {
+		if e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+			e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		}
+		return terminalState, true
+	}
+	owned, cleanupSafe, ownershipErr := e.bootstrapFailureOwnsSession(ctx, sessionID, agentExecutionID, expected)
+	if ownershipErr != nil {
+		e.logger.Warn("failed to verify execution before terminal startup cleanup",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(ownershipErr))
+		return terminalState, true
+	}
+	if (owned || cleanupSafe) && e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
 	}
 	return terminalState, true
@@ -426,7 +522,7 @@ func (e *Executor) stopStartedExecutionIfSessionTerminal(
 
 // startAgentProcessAsync starts the agent subprocess and transitions its session
 // to RUNNING before reconciling the owning task to IN_PROGRESS on success.
-func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
+func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, expectedStartAttemptID ...string) {
 	e.runAgentProcessAsyncWithObservation(ctx, taskID, sessionID, agentExecutionID, sessionCoresidencySiteLaunch, func(updCtx context.Context) {
 		if !e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
 			return
@@ -437,7 +533,7 @@ func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID
 				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
-	}, true, false)
+	}, true, false, expectedStartAttemptID...)
 }
 
 // markSessionRunningAfterProcessStart records that a successfully started
@@ -860,7 +956,24 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) error {
-	changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	var changed bool
+	var err error
+	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
+		updater, ok := e.repo.(interface {
+			UpdateTaskSessionIfCurrentStateWithStartAttempt(
+				context.Context,
+				*models.TaskSession,
+				models.TaskSessionState,
+				string,
+			) (bool, error)
+		})
+		if !ok {
+			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
+		}
+		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
+	} else {
+		changed, err = e.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	}
 	if err != nil {
 		return err
 	}
@@ -876,6 +989,25 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	}
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
+	}
+	if current.State == models.TaskSessionStateStarting || current.State == models.TaskSessionStateRunning {
+		if current.State == models.TaskSessionStateRunning {
+			return fmt.Errorf(
+				"%w: %w: session %s state changed from %s to %s before runtime persistence",
+				ErrExecutionAlreadyRunning,
+				errSessionAdvancedToRunning,
+				session.ID,
+				expected,
+				current.State,
+			)
+		}
+		return fmt.Errorf(
+			"%w: session %s state changed from %s to %s before runtime persistence",
+			ErrExecutionAlreadyRunning,
+			session.ID,
+			expected,
+			current.State,
+		)
 	}
 	return fmt.Errorf(
 		"session %s state changed from %s to %s before runtime persistence",
@@ -1597,6 +1729,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 		return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
 	}
+	if startAgent && (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+		((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, sessionID)) {
+		return nil, ErrExecutionAlreadyRunning
+	}
+	if startAgent && opts.RefuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
+		return nil, ErrExecutionAlreadyRunning
+	}
 	if running != nil && running.ExecutionProfileID != "" &&
 		running.ExecutionProfileID != agentProfileID {
 		if running.AgentExecutionID != "" {
@@ -1716,7 +1855,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.McpMode = opts.McpMode
 	}
 	if opts.McpProfile != nil {
-		profileContext := *opts.McpProfile
+		profileContext := mcpprofile.Normalize(*opts.McpProfile)
 		profileContext.Providers = deriveMCPProviders(allRepos)
 		req.McpProfile = &profileContext
 	}
@@ -1781,10 +1920,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
-	if startAgent {
-		e.observeSessionCoresidency(launchCtx, sessionCoresidencySiteLaunch, task.ID, sessionID)
-	}
-
 	// Fast path: workspace already launched (executors_running row exists).
 	// The selected-environment recovery gate above must run first, including
 	// when this path only starts an agent process on an existing workspace.
@@ -1793,7 +1928,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
 	}
 	if hasRunning {
-		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(launchCtx, task, session, prompt, startAgent, opts.McpMode, req, opts.OnExecutionAdmitted, opts.TurnID)
+		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
+			launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
+			opts.OnExecutionAdmitted, opts.RefuseIfAgentRunning, opts.TurnID,
+		)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
 			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 				return nil, errors.Join(existingErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
@@ -2102,7 +2240,10 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	}
 
 	if startAgent {
-		e.startAgentProcessAsync(worktree.WithoutRecoveryClaim(ctx), task.ID, sessionID, resp.AgentExecutionID)
+		e.startAgentProcessAsync(
+			worktree.WithoutRecoveryClaim(ctx), task.ID, sessionID, resp.AgentExecutionID,
+			models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]),
+		)
 	} else {
 		// Prepare-only launch: the workspace + agentctl are up but the agent
 		// process is intentionally not being started. The lifecycle manager
@@ -2496,7 +2637,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),
 	}
-	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, nil, turnIDs...)
+	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, nil, false, turnIDs...)
 }
 
 func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
@@ -2508,6 +2649,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	refuseIfAgentRunning bool,
 	turnIDs ...string,
 ) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
@@ -2534,6 +2676,17 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			LastUpdate:       now,
 			SessionID:        session.ID,
 		}, nil
+	}
+	running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("check existing workspace runtime: %w", runningErr)
+	}
+	if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+		((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, session.ID)) {
+		return nil, ErrExecutionAlreadyRunning
+	}
+	if refuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
+		return nil, ErrExecutionAlreadyRunning
 	}
 
 	// Update the task description in the existing execution so StartAgentProcess picks it up
@@ -2566,7 +2719,11 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
+	startAttemptID := claimAgentStartAttempt(session)
 	if err := e.updateSessionStarting(ctx, task.ID, session, expectedState, true); err != nil {
+		if errors.Is(err, errSessionAdvancedToRunning) {
+			return nil, fmt.Errorf("%w: %w", ErrExecutionAlreadyRunning, err)
+		}
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))
@@ -2587,7 +2744,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	}
 
 	// Start the agent process asynchronously
-	e.startAgentProcessAsync(ctx, task.ID, session.ID, executionID)
+	e.startAgentProcessAsync(ctx, task.ID, session.ID, executionID, startAttemptID)
 
 	e.logger.Info("agent starting on existing workspace",
 		zap.String("task_id", task.ID),
@@ -2595,6 +2752,49 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		zap.String("agent_execution_id", executionID))
 
 	return execution, nil
+}
+
+func executorRunningStatusMayOwnAgent(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusStarting,
+		models.ExecutorRunningStatusRunning:
+		return true
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+		models.ExecutorRunningStatusPrepared,
+		models.ExecutorRunningStatusReady:
+		return false
+	default:
+		return false
+	}
+}
+
+func (e *Executor) executorHasActiveAgent(
+	ctx context.Context,
+	session *models.TaskSession,
+	running *models.ExecutorRunning,
+) bool {
+	if e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		return true
+	}
+	if running == nil {
+		return false
+	}
+	switch running.Status {
+	case models.ExecutorRunningStatusRunning:
+		return true
+	case models.ExecutorRunningStatusStarting:
+		return session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+		models.ExecutorRunningStatusPrepared,
+		models.ExecutorRunningStatusReady:
+		return false
+	default:
+		return true
+	}
 }
 
 func (e *Executor) configureExistingWorkspace(

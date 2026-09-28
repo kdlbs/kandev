@@ -223,5 +223,9 @@
   "oauthPopupBlocked": "浏览器已阻止授权窗口。请允许弹出窗口，然后重试。",
   "oauthComplete": "完成",
   "oauthCancel": "取消",
-  "oauthPasteInvalid": "网址无效。请确保复制了包含 code 和 state 参数的完整重定向网址。"
+  "oauthPasteInvalid": "网址无效。请确保复制了包含 code 和 state 参数的完整重定向网址。",
+  "clearViewAsDefault": "取消 {{name}} 的默认视图",
+  "defaultViewDeleteFailed": "无法删除已保存的 Jira 视图。请重试。",
+  "defaultViewSaveFailed": "无法保存 Jira 默认视图。请重试。",
+  "setViewAsDefault": "将 {{name}} 设为默认视图"
 }

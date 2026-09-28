@@ -3,6 +3,7 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-SCHEDULER-001
+  - REQ-OFFICE-SCHEDULER-002
 created: 2026-04-25
 owners:
   - cfl
@@ -18,6 +19,7 @@ This design preserves the technical source detail for `REQ-OFFICE-SCHEDULER-001`
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-SCHEDULER-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-SCHEDULER-002` | [Assignment wake step eligibility](#assignment-wake-step-eligibility) |
 
 ## Migrated source detail
 
@@ -140,7 +142,7 @@ Evaluated at dispatch by querying for an in-flight run for the same routine fing
 - `coalesce_if_active` (default): merge into the existing run. Mark `coalesced`.
 - `always_enqueue` / `always_create`: always proceed.
 
-"Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age.
+"Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age. A `task_created` run with no linked task is never active either — current code never produces that shape, so a row like it can only be a pre-upgrade fossil (AC-OFFICE-SCHEDULER-001.13); the next dispatch that finds it closes it as `failed` instead of skipping or coalescing into it.
 
 #### Catch-up policy
 
@@ -276,6 +278,28 @@ Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `pars
 
 Office maintenance performs a recovery sweep separately from the shared queue-drain tick. It finds authoritative Office `TODO` tasks created inside the workspace recovery lookback window and dispatches them as `task_assigned` runs only when no queued, claimed, or finished run exists for the task. The task-creation timestamp is bounded by the lookback; matching run rows are not, so a task that already started is never reclassified as unstarted merely because its prior run is old. Failed and cancelled rows do not block recovery. Assignment on an ordinary Kanban task does not imply autonomy.
 
+### Assignment wake step eligibility
+
+Every producer of a `task_assigned` wake for an Office task's assignee — reactivity's
+assignee-change handler, the event-subscriber path (`task.created` / `task.updated`), and the
+recovery sweep above — shares one eligibility predicate before queueing: the task's current
+workflow step must have an `auto_start_agent` on_enter action
+(`wfmodels.WorkflowStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)`), the same predicate the
+orchestrator's own auto-start path already uses. A step with no such action (Backlog, `events:{}`)
+means the workflow has not yet decided this task should run; queueing a wake there launches an
+agent outside the workflow, which then calls `step_complete_kandev` on a step that never reads the
+signal and gets moved into conflict with the legitimate Work auto-start run. The gate only
+suppresses the wake — a reassignment's interrupt of the previous assignee's session still fires.
+
+Edge cases: a task with no workflow step bound (`workflow_step_id` empty) is eligible, preserving
+behaviour for tasks outside a workflow. A step lookup failure (repository error, nil step getter, or
+an unresolved step ID) fails open — the wake is still queued — and is logged at Warn. A resolved
+ineligible step logs `office.assignment_wake.step_ineligible` at Info; a resolved eligible step,
+including a task with no bound step, logs `office.assignment_wake.step_eligible` at Info. Both
+outcomes include `task_id`, `step_id`, and `source`.
+This does not change Review/Approval's separate `queue_run_for_each_participant` reviewer/approver
+wake, which the assignee eligibility gate never touches.
+
 Selection:
 
 ```sql
@@ -301,6 +325,10 @@ Per-candidate guards:
 - Skip if agent is paused or stopped.
 - Skip if a wakeup is already queued for this task (prevents duplicates on concurrent ticks).
 - Skip if the agent's invocation budget is exhausted.
+
+The recovery sweep fills its per-tick dispatch quota with eligible tasks. It excludes every
+candidate inspected during the tick before fetching the next batch, so ineligible tasks cannot
+starve later eligible tasks.
 
 Logged: `recovery_dispatch` per dispatched task, `recovery_sweep_complete` summary entry with `dispatched_count` per sweep.
 

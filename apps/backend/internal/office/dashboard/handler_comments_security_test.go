@@ -31,6 +31,7 @@ type commentSecurityFixture struct {
 	agentsSvc *agents.AgentService
 	repo      *sqlite.Repository
 	handoff   *taskservice.HandoffService
+	svc       *dashboard.DashboardService
 }
 
 // commentWindowReaderAdapter bridges the office repo's Office-model comment
@@ -170,7 +171,7 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 	group := r.Group("/api/v1/office")
 	dashboard.RegisterRoutes(group, svc, repo, nil, handoff, nil, log)
 
-	return &commentSecurityFixture{router: r, agentsSvc: agentsSvc, repo: repo, handoff: handoff}
+	return &commentSecurityFixture{router: r, agentsSvc: agentsSvc, repo: repo, handoff: handoff, svc: svc}
 }
 
 // seedCommentWorkspace inserts a minimal workspace row. Required because the

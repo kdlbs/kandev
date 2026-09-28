@@ -45,8 +45,8 @@ export function resolveQuickChatTaskId(
 }
 
 async function deleteQuickChatTask(taskId: string) {
-  const { deleteTask } = await import("@/lib/api/domains/kanban-api");
-  await deleteTask(taskId);
+  const { deleteTaskAfterUserAction } = await import("@/lib/api/domains/kanban-api");
+  await deleteTaskAfterUserAction(taskId);
 }
 
 type QuickChatTabCloseNavigation = {
