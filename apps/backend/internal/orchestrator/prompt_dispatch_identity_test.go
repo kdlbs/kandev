@@ -25,6 +25,24 @@ func (m *modelSwitchGateAgentManager) SetSessionModelBySessionID(context.Context
 	return nil
 }
 
+func (m *modelSwitchGateAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 func TestPromptTaskExpectedIdentityRejectsReplacementAfterClaim(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -151,7 +169,7 @@ func TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery(t *testin
 	}
 }
 
-func TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch(t *testing.T) {
+func TestPromptTaskReleasesQueuedDispatchGuardDuringModelSwitch(t *testing.T) {
 	ctx := context.Background()
 	const taskID, sessionID = "task-prompt-model-switch", "session-prompt-model-switch"
 	repo := setupTestRepo(t)
@@ -206,6 +224,10 @@ func TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch(t *testing.T) {
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}
+	claimed, err := svc.claimQueuedDispatchForExecution(sessionID, queued.ID, reservation)
+	if err != nil || !claimed {
+		t.Fatalf("claim queued dispatch for execution: claimed=%v err=%v", claimed, err)
+	}
 
 	promptDone := make(chan error, 1)
 	go func() {
@@ -224,8 +246,8 @@ func TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for model switch")
 	}
-	if !hasCancelInFlightGuard(svc, sessionID) {
-		t.Fatal("queued dispatch guard was not held during model switch")
+	if !cancelInFlightGuardIsAvailable(svc, sessionID) {
+		t.Fatal("queued dispatch guard remained physically locked during model switch")
 	}
 	close(agentMgr.allowSwitch)
 	select {
@@ -236,4 +258,28 @@ func TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("promptTask did not return after model switch")
 	}
+}
+
+func cancelInFlightGuardIsAvailable(s *Service, sessionID string) bool {
+	s.cancelInFlightMu.Lock()
+	guard := s.cancelInFlight[sessionID]
+	s.cancelInFlightMu.Unlock()
+	if guard == nil || !guard.mu.TryLock() {
+		return false
+	}
+	guard.mu.Unlock()
+	return true
+}
+
+func cancelInFlightGuardIsHeld(s *Service, sessionID string) bool {
+	s.cancelInFlightMu.Lock()
+	guard := s.cancelInFlight[sessionID]
+	s.cancelInFlightMu.Unlock()
+	if guard == nil || guard.mu.TryLock() {
+		if guard != nil {
+			guard.mu.Unlock()
+		}
+		return false
+	}
+	return true
 }

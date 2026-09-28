@@ -2605,6 +2605,7 @@ export class ApiClient {
       content: string;
       author_type: string;
       type?: string;
+      turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
       created_at?: string;

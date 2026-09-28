@@ -809,6 +809,24 @@ func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithDispatchCallback(
 	return result.result, result.err
 }
 
+func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.2
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.7
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.9

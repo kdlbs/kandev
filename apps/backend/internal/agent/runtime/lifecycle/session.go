@@ -94,8 +94,9 @@ type InitialPromptFailure struct {
 }
 
 type sendPromptCallbacks struct {
-	onDispatched func()
-	onFailure    func(InitialPromptFailure)
+	beforeAdmission func() error
+	onDispatched    func()
+	onFailure       func(InitialPromptFailure)
 }
 
 // NewSessionManager creates a new SessionManager
@@ -952,7 +953,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				zap.Int("effective_length", len(effectivePrompt)))
 		}
 		acpAttachments := convertAttachments(attachments)
-		onDispatched, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		beforeAdmission, onDispatched, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
 		var failureHandler func(InitialPromptFailure)
 		if onInitialPromptFailure != nil {
 			initialPromptFailure := sm.initialPromptFailure
@@ -975,7 +976,11 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				sendPromptCallbacks{onDispatched: onDispatched, onFailure: failureHandler},
+				sendPromptCallbacks{
+					beforeAdmission: beforeAdmission,
+					onDispatched:    onDispatched,
+					onFailure:       failureHandler,
+				},
 				false,
 			)
 			if err != nil {
@@ -1226,6 +1231,31 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 		attachments,
 		dispatchOnly,
 		sendPromptCallbacks{onDispatched: onDispatched},
+		false,
+	)
+}
+
+// SendPromptWithAdmissionCallback reports the final point before a new prompt
+// generation is allocated. Callers can revalidate dispatch ownership after
+// stream preparation and reject work that was cancelled or superseded.
+func (sm *SessionManager) SendPromptWithAdmissionCallback(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*PromptResult, error) {
+	return sm.sendPrompt(
+		ctx,
+		execution,
+		prompt,
+		validateStatus,
+		attachments,
+		dispatchOnly,
+		sendPromptCallbacks{beforeAdmission: beforeAdmission, onDispatched: onDispatched},
 		false,
 	)
 }
@@ -1485,12 +1515,29 @@ func (sm *SessionManager) sendPrompt(
 		defer beginPromptBarrier(execution)()
 	}
 
-	preparedCtx, effectivePrompt, promptGeneration, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
+	preparedCtx, effectivePrompt, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
 	if err != nil {
-		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
 		return nil, err
 	}
 	materializedAttachments, err := sm.materializeAttachments(preparedCtx, execution, attachments)
+	if err != nil {
+		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
+		return nil, err
+	}
+	flushStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
+	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
+		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
+			sm.logger.Warn("failed to store user message to history", zap.Error(err))
+		}
+	}
+	if callbacks.beforeAdmission != nil {
+		if err := callbacks.beforeAdmission(); err != nil {
+			sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
+			return nil, err
+		}
+	}
+	promptGeneration, err := sm.admitPrompt(execution, validateStatus)
 	if err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
@@ -1616,56 +1663,49 @@ func (sm *SessionManager) preparePrompt(
 	prompt string,
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
-) (context.Context, string, uint64, error) {
+) (context.Context, string, error) {
 	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
 		ctx = trace.ContextWithSpan(ctx, sessionSpan)
 	}
 	// For follow-up prompts, validate status before claiming a new generation.
 	if validateStatus {
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
-			return ctx, "", 0, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+			return ctx, "", fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
 	}
+	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
+	sm.logger.Info("sending prompt to agent",
+		zap.String("execution_id", execution.ID),
+		zap.Int("prompt_length", len(effectivePrompt)),
+		zap.Int("attachments_count", len(attachments)))
+	return ctx, effectivePrompt, nil
+}
 
-	// Every dispatch attempt gets a distinct identity, including initial prompts
-	// and replacements accepted while the execution is already running.
+func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus bool) (uint64, error) {
+	if validateStatus && execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
+		return 0, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+	}
 	var promptGeneration uint64
 	switch {
 	case sm.promptStarter != nil:
 		var err error
 		promptGeneration, err = sm.promptStarter(execution.ID)
 		if err != nil {
-			return ctx, "", 0, err
+			return 0, err
 		}
 	case sm.executionStore != nil:
 		var err error
 		promptGeneration, err = sm.executionStore.BeginPrompt(execution.ID)
 		if err != nil {
-			return ctx, "", 0, err
+			return 0, err
 		}
 	default:
-		// Tests that construct SessionManager without lifecycle dependencies
-		// still need a generation, but no concurrent owner can mutate it here.
 		promptGeneration = beginExecutionPrompt(execution)
 	}
-
-	// A disconnect can release the prior SendPrompt before its disconnect
-	// callback has persisted a partial assistant response. Drain that history
-	// segment before resetting the streaming state; the callback uses the same
-	// locked drain, so the segment is persisted at most once.
-	resetStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
-
-	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
-	sm.logger.Info("sending prompt to agent",
-		zap.String("execution_id", execution.ID),
-		zap.Int("prompt_length", len(effectivePrompt)),
-		zap.Int("attachments_count", len(attachments)))
-	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
-			sm.logger.Warn("failed to store user message to history", zap.Error(err))
-		}
-	}
-	return ctx, effectivePrompt, promptGeneration, nil
+	execution.messageMu.Lock()
+	execution.resetStreamingStateLocked()
+	execution.messageMu.Unlock()
+	return promptGeneration, nil
 }
 
 func (sm *SessionManager) triggerPrompt(
