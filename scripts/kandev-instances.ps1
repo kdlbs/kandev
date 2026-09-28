@@ -83,13 +83,22 @@ function Get-AgentctlPort {
 
 function Get-IsolatedHome {
   param([int]$BackendPid)
-  $pattern = Join-Path $env:TEMP ('kandev-dev-isolated-*-*.pid')
-  $candidates = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
+  $candidates = Get-ChildItem -LiteralPath $env:TEMP -Filter 'kandev-dev-isolated-*.pid' -File -ErrorAction SilentlyContinue
   foreach ($candidate in $candidates) {
+    if ($candidate.Name -notmatch '^kandev-dev-isolated-[0-9]+\.pid$') { continue }
     $raw = (Get-Content -LiteralPath $candidate.FullName -Raw).Trim()
     if ($raw -eq "$BackendPid") {
-      # The isolated home is fixed at %USERPROFILE%\.kandev-test by default.
-      return (Join-Path $env:USERPROFILE '.kandev-test')
+      $startedFile = $candidate.FullName -replace '\.pid$', '.backend.started'
+      if (-not (Test-Path -LiteralPath $startedFile)) { continue }
+      $recordedStart = (Get-Content -LiteralPath $startedFile -Raw).Trim()
+      $backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $BackendPid" -ErrorAction SilentlyContinue
+      if (-not $backendInfo -or $recordedStart -notmatch '^[0-9]+$' -or
+        $backendInfo.CreationDate.ToUniversalTime().Ticks -ne [long]$recordedStart) { continue }
+      $homeFile = $candidate.FullName -replace '\.pid$', '.home'
+      if (-not (Test-Path -LiteralPath $homeFile)) { continue }
+      $recordedHome = (Get-Content -LiteralPath $homeFile -Raw).Trim()
+      if ($recordedHome) { return $recordedHome }
+      continue
     }
   }
   return '?'
@@ -116,4 +125,8 @@ $rows = foreach ($pidValue in ($pairs.Keys | Sort-Object)) {
     '{0,-7}  {1,-13}  {2,-13}  {3,-24}  {4}  {5}' -f $pidValue, $backendPort, $agentctlPort, $homeDir, $repoPath, $marker
   }
 }
-$rows | ForEach-Object { Write-Host $_ }
+if ($Raw) {
+  $rows
+} else {
+  $rows | ForEach-Object { Write-Host $_ }
+}

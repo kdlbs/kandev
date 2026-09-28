@@ -39,43 +39,54 @@ The helpers are Windows-only and PowerShell 5.1 compatible; they depend on
 
 `$GuardedPorts` holds the well-known production ports. `Assert-NotGuarded`
 refuses an explicitly requested guarded port, and `Select-FreePort` scans
-upward from a non-production base and skips a port when `Test-PortInUse`
-reports a listener, so an isolated instance never collides with a running
-instance or a production process.
+upward from a non-production base. Agentctl bases use separate 200-port slots:
+the base is followed by a reserved 100-port instance range. The entire block
+is checked against listeners and guarded ports before launch.
 
 ## Home isolation
 
-`$IsolatedHome` defaults to `%USERPROFILE%\.kandev-test`. `Resolve-SafeIsolatedHome`
+`$IsolatedHome` defaults to a unique `%USERPROFILE%\.kandev-test-<port>-<id>`
+directory for each launch. An explicit `-HomeDir` may reuse a safe home.
+`Resolve-SafeIsolatedHome`
 canonicalizes the resolved path and fails closed when it is the real user
 profile root, the production `~/.kandev` home, a drive or filesystem root, or a
 git workspace root; it returns the resolved path so later reads and writes use
-the same value the guard checked. The script then creates `data`, writes a
-minimal `.gitconfig`, and starts the backend with `KANDEV_HOME_DIR`,
+the same value the guard checked. An existing `.gitconfig` must match the
+minimal isolated configuration, and `-CopyDb` refuses an existing destination
+database instead of replacing it. The script then creates `data`, writes a
+minimal `.gitconfig` only when absent, and starts the backend with `KANDEV_HOME_DIR`,
 `HOME`, and `USERPROFILE` pointing at the isolated home, so the fresh SQLite
 database and provider state never touch live data.
 
 ## Loopback binding
 
-The backend and the Vite dev server bind `127.0.0.1` by default. The web host
-is a `-WebHost` parameter that defaults to `127.0.0.1`; the frontend is started
-as `pnpm exec vite --host <host>`, so a network-reachable binding requires the
-operator to pass an explicit host instead of inheriting the package script's
-wildcard default.
+The backend, its agentctl child, and the Vite dev server bind `127.0.0.1` by
+default. The launcher passes `AGENTCTL_LISTEN_HOST=127.0.0.1` explicitly so an
+older backend/agentctl build cannot expose the control port. The web host
+is a `-WebHost` parameter that defaults to `127.0.0.1`. The launcher starts the
+installed Vite CLI directly through Node, so the recorded web PID is the actual
+listener rather than a pnpm/cmd wrapper. A network-reachable binding requires
+the operator to pass an explicit host instead of inheriting the package
+script's wildcard default.
 
 ## Teardown
 
-The pidfile records the backend process and the launched web wrapper process.
-`kandev-kill.ps1` expands the full descendant tree of the recorded web process
-with `Get-DescendantPids` before calling `Stop-Process`, so the actual Vite
-listener is terminated instead of orphaned when the recorded wrapper exits
-first. Teardown refuses a pidfile entry or explicit target whose port is a
-guarded production port unless `-Force` is given, and acts only on the
-processes named by that pidfile.
+The numeric pidfile records the backend process; sidecars record backend/web
+start times, the Vite listener PID, and the actual isolated home. The listing
+script uses those records rather than guessing the home from its own shell.
+`kandev-kill.ps1` verifies process start times and web launch identity before
+expanding the web descendant tree. It can find the matching pidfile from an
+explicit backend port and can stop the verified web tree when the backend has
+already exited. It rechecks each process identity before `Stop-Process` to
+avoid stopping a process that reused a PID. Missing or stale identity records
+fail closed. Teardown refuses guarded production ports unless `-Force` is given.
 
 ## Failure and recovery
 
 The launcher reports an actionable error before any write when the home fails
-the safety guard or a requested port is guarded. Teardown leaves no listening
-process on the instance's ports; the launcher returns once the backend is
-healthy and leaves it detached, so a non-interactive caller tears it down in the
-same run.
+the safety guard or a requested port is guarded. Web prerequisites are checked
+before backend startup. `-Install` runs the Unix-oriented root recipes through
+Git Bash on Windows. A fatal web-launch error tears down the backend; teardown
+leaves no listener owned by the verified instance. The launcher returns once
+the backend is healthy and leaves it detached, so a non-interactive caller
+tears it down in the same run.

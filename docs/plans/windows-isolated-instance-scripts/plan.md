@@ -29,22 +29,24 @@ production data; remote-executor or desktop behavior.
 
 Mirror the Unix helper flow in `scripts/dev-isolated.ps1`,
 `scripts/kandev-kill.ps1`, and `scripts/kandev-instances.ps1`. Reuse the native
-launcher binaries and the `dev` profile via `make -C apps/backend build`. Reuse
-the existing pidfile shape; fix teardown by expanding the recorded web process's
-descendant tree instead of trusting the single wrapper PID. Default the Vite
-host to `127.0.0.1` and refuse a resolved home that is a live-state boundary
-before any write.
+launcher binaries and the `dev` profile via `make -C apps/backend build`. Keep
+the numeric backend pidfile and record process start times and the isolated home
+in sidecars. Launch Vite directly through Node so its pidfile names the actual
+listener; verify process identity before terminating either process tree.
+Default the Vite host to `127.0.0.1` and refuse a resolved home that is a
+live-state boundary before any write.
 
 ## Verification
 
 | Criteria | Evidence |
 | --- | --- |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.1` | Guarded-port refusal and free-port selection in `scripts/dev-isolated.ps1` |
-| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.2` | Isolated `KANDEV_HOME_DIR`, `HOME`, `USERPROFILE`, and fresh `data` database |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.2` | Unique default home, isolated `KANDEV_HOME_DIR`, `HOME`, `USERPROFILE`, and fresh `data` database |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.3` | `Resolve-SafeIsolatedHome` refuses profile/production/drive/workspace boundaries before any write |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.4` | `-WebHost` default `127.0.0.1` and `pnpm exec vite --host` |
-| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | `Get-DescendantPids` full-tree teardown of the web process |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | Direct Vite PID, start-time verification, and full-tree teardown after backend exit |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.6` | `kandev-kill.ps1` guarded-port refusal unless `-Force` |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.7` | Recorded home and pipeline-friendly `-Raw` listing |
 
 Run from the repository root:
 
@@ -66,8 +68,7 @@ disposable fake profile.
 
 - The helper depends on Windows-only cmdlets, which is acceptable for the
   Windows mirror of the Unix helpers.
-- A descendant walk covers the common case where the web wrapper is still alive;
-  an orphaned grandchild with no live ancestor is outside this package.
+- A stale pidfile is rejected rather than used to stop an unrelated process.
 
 ## References
 

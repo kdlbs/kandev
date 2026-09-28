@@ -45,15 +45,18 @@ loopback, and tear the instance down exactly without orphaning the Vite listener
 
 ## Acceptance
 
-- Port selection skips in-use and guarded production ports, and an explicit
-  guarded port is refused.
-- The instance uses a dedicated isolated home and fresh database.
+- Port selection skips in-use and guarded production ports, and agentctl
+  instance ranges do not overlap across automatic launches.
+- Each default launch uses a distinct isolated home and fresh database.
 - A resolved `-HomeDir` that is the real user profile root, the production
   `~/.kandev` home, a drive/filesystem root, or a git workspace root is refused
   before any write.
 - The backend and Vite dev server bind `127.0.0.1` by default.
-- Teardown terminates the recorded backend and the full web process tree.
+- Teardown validates recorded process identities and terminates the backend and
+  full web process tree even if the backend already exited.
 - Teardown refuses a guarded production port unless `-Force` is given.
+- Instance listing reports the recorded home and produces pipeline-friendly raw
+  rows.
 
 ## Verification
 
@@ -86,8 +89,8 @@ None.
 ## Risks
 
 - The helper depends on Windows-only cmdlets; acceptable for the Windows mirror.
-- Descendant teardown covers the common case where the recorded wrapper is still
-  alive.
+- A missing or stale process identity record prevents automatic termination of
+  that process; the operator must inspect it before cleanup.
 
 ## Parallelism
 
@@ -101,12 +104,14 @@ None.
 
 ## Results
 
-Added the three PowerShell helpers with safe port selection and guarded-port
-refusal, a fail-closed `Resolve-SafeIsolatedHome` guard, default `127.0.0.1`
-binding with `-WebHost`, and full descendant-tree teardown of the web process.
-The guard rejects the real user profile root, the production kandev home, a
-drive/filesystem root, and a git workspace root before any write, and was
-verified with a disposable fake profile (never a real home).
+Added the three PowerShell helpers with non-overlapping agentctl port slots,
+guarded-port refusal, a unique default home, and fail-closed
+`Resolve-SafeIsolatedHome` validation before any write. The scripts refuse to
+replace an existing git configuration or copied database. Backend, agentctl,
+and Vite bind loopback by default; Vite runs directly so its recorded PID is
+the listener. Teardown verifies process start times before stopping the backend
+and web trees, including when the backend has already exited. The home guard
+was verified with a disposable fake profile (never a real user home).
 
 Verification:
 
@@ -115,3 +120,8 @@ Verification:
 - `python3 scripts/list-docs.py validate`: passed.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
+- Disposable instances: loopback binding for backend/web/agentctl, scriptable
+  instance listing, port-based teardown, and backend-exited web teardown passed.
+- A deliberately mismatched test-owned web start-time record was refused; the
+  web process stayed live until its correct record was restored and teardown
+  completed.

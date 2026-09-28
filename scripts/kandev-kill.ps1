@@ -7,8 +7,9 @@
 .DESCRIPTION
   Windows/PowerShell equivalent of the Unix-only scripts/kandev-kill. It NEVER
   does a blanket pkill. It resolves the backend PID from the port, confirms the
-  process is actually a kandev backend, computes the exact set of PIDs it will
-  terminate, PRINTS that set, and only then (after confirmation) stops them.
+  process is actually a kandev backend, checks the recorded process start times,
+  computes the exact set of PIDs it will terminate, PRINTS that set, and only
+  then (after confirmation) stops them.
 
   Safety:
     - Refuses to act unless you explicitly pass a port or a -Pidfile.
@@ -28,8 +29,8 @@
   Backend port to terminate (positional).
 
 .PARAMETER Pidfile
-  Pidfile written by dev-isolated.ps1. A sibling '.web.pid' sidecar, when
-  present, is included in the termination set.
+  Pidfile written by dev-isolated.ps1. Its sidecars record process start times
+  and the Vite PID. Stale or missing web identity is never stopped by PID alone.
 
 .PARAMETER Yes
   Skip the confirmation prompt (for scripted teardown).
@@ -102,7 +103,6 @@ function Test-KandevBackend {
   if ($null -eq $info) { return $false }
   if ($info.Name -ieq 'kandev.exe' -or $info.Name -ieq 'kandev') { return $true }
   if ($info.ExecutablePath -and ($info.ExecutablePath -match '(\\|/)kandev(\.exe)?$')) { return $true }
-  if ($info.CommandLine -and ($info.CommandLine -match 'kandev')) { return $true }
   return $false
 }
 
@@ -122,7 +122,7 @@ function Get-DescendantPids {
   $queue.Enqueue([pscustomobject]@{ Pid = $RootPid; Created = $rootCreated })
   while ($queue.Count -gt 0) {
     $current = $queue.Dequeue()
-    $result += $current.Pid
+    $result += $current
     foreach ($child in $all) {
       if ([int]$child.ParentProcessId -ne $current.Pid) { continue }
       if (-not $child.CreationDate -or $child.CreationDate -lt $current.Created) { continue }
@@ -137,12 +137,51 @@ function Test-PidAlive {
   return ($null -ne (Get-Process -Id $TargetPid -ErrorAction SilentlyContinue))
 }
 
+function Stop-VerifiedProcess {
+  param([pscustomobject]$ProcessRecord)
+  $info = Get-ProcessInfo -TargetPid $ProcessRecord.Pid
+  if ($info -and $info.CreationDate -eq $ProcessRecord.Created) {
+    Stop-Process -Id $ProcessRecord.Pid -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Test-AnyVerifiedProcessAlive {
+  param([array]$ProcessRecords)
+  foreach ($record in $ProcessRecords) {
+    $info = Get-ProcessInfo -TargetPid $record.Pid
+    if ($info -and $info.CreationDate -eq $record.Created) { return $true }
+  }
+  return $false
+}
+
+function Test-AnyPidAlive {
+  param([array]$ProcessRecords)
+  foreach ($record in $ProcessRecords) {
+    if (Test-PidAlive -TargetPid $record.Pid) { return $true }
+  }
+  return $false
+}
+
 # --- Resolve the target backend PID + port ---
 $backendPid = $null
-$resolvedByPidfile = $false
+$resolvedByPidfile = [bool]$Pidfile
 
-if ($Pidfile) {
-  $resolvedByPidfile = $true
+if ($Port) {
+  if ((Test-GuardedPort -Port $Port) -and -not $Force) {
+    Write-Fail "kandev-kill: port $Port is guarded. Refusing without -Force."
+    exit 3
+  }
+  $backendPid = Get-PidForPort -Port $Port
+  if (-not $backendPid) {
+    Write-Fail "kandev-kill: no listening process found on port $Port"
+    exit 1
+  }
+  $candidatePidfile = Join-Path $env:TEMP ("kandev-dev-isolated-$Port.pid")
+  if (Test-Path -LiteralPath $candidatePidfile) {
+    $candidatePid = (Get-Content -LiteralPath $candidatePidfile -Raw).Trim()
+    if ($candidatePid -eq "$backendPid") { $Pidfile = $candidatePidfile }
+  }
+} elseif ($Pidfile) {
   if (-not (Test-Path -LiteralPath $Pidfile)) {
     Write-Fail "kandev-kill: pidfile not found: $Pidfile"
     exit 1
@@ -153,17 +192,6 @@ if ($Pidfile) {
     exit 1
   }
   $backendPid = [int]$raw
-  if (-not (Test-PidAlive -TargetPid $backendPid)) {
-    Write-Host "kandev-kill: process $backendPid from pidfile is already gone; nothing to do."
-    Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
-    exit 0
-  }
-} elseif ($Port) {
-  $backendPid = Get-PidForPort -Port $Port
-  if (-not $backendPid) {
-    Write-Fail "kandev-kill: no listening process found on port $Port"
-    exit 1
-  }
 } else {
   Write-Host 'kandev-kill: refusing to run without an explicit <port> or -Pidfile.' -ForegroundColor Red
   Write-Host 'Usage: scripts\kandev-kill.ps1 <port> [-Yes] [-Force]'
@@ -171,61 +199,103 @@ if ($Pidfile) {
   exit 2
 }
 
-# --- Resolve EVERY listening port of the target PID (for the guard) ---
+# --- Check the backend identity before collecting any process to stop ---
+$backendInfo = Get-ProcessInfo -TargetPid $backendPid
 $targetPorts = @(Get-ListeningPortsForPid -TargetPid $backendPid)
+$expectedPort = $null
+if ($Pidfile -and (Split-Path -Leaf $Pidfile) -match '^kandev-dev-isolated-([0-9]+)\.pid$') {
+  $expectedPort = [int]$Matches[1]
+}
+$backendStartedFile = if ($Pidfile) { $Pidfile -replace '\.pid$', '.backend.started' } else { $null }
+$homeFile = if ($Pidfile) { $Pidfile -replace '\.pid$', '.home' } else { $null }
+$webPidfile = if ($Pidfile) { $Pidfile -replace '\.pid$', '.web.pid' } else { $null }
+$webStartedFile = if ($Pidfile) { $Pidfile -replace '\.pid$', '.web.started' } else { $null }
 
-# Fail closed: in pidfile mode the guard relies entirely on resolving the
-# target's listening ports. If none resolve and no port was supplied, we cannot
-# prove the target is not a guarded production instance.
-if ($resolvedByPidfile -and -not $Port -and $targetPorts.Count -eq 0 -and -not $Force) {
-  Write-Fail "kandev-kill: cannot resolve listening ports for PID $backendPid. Refusing a pidfile kill without -Force."
+if ($expectedPort -and (Test-GuardedPort -Port $expectedPort) -and -not $Force) {
+  Write-Fail "kandev-kill: pidfile names guarded port $expectedPort. Refusing without -Force."
   exit 3
 }
-
-$displayPort = if ($Port) { $Port } elseif ($targetPorts.Count -gt 0) { $targetPorts[0] } else { $null }
-
-# --- Safety guards ---
-$guardedHit = $null
-if ($Port -and (Test-GuardedPort -Port $Port)) { $guardedHit = $Port }
-if (-not $guardedHit) {
-  foreach ($p in $targetPorts) {
-    if (Test-GuardedPort -Port $p) { $guardedHit = $p; break }
+foreach ($listeningPort in $targetPorts) {
+  if ((Test-GuardedPort -Port $listeningPort) -and -not $Force) {
+    Write-Fail "kandev-kill: backend PID $backendPid listens on guarded port $listeningPort."
+    exit 3
   }
 }
-if ($guardedHit -and -not $Force) {
-  Write-Fail "kandev-kill: port $guardedHit is a guarded production port. Refusing to kill PID $backendPid without -Force."
-  exit 3
+if ($backendInfo) {
+  if (-not (Test-KandevBackend -TargetPid $backendPid)) {
+    Write-Fail "kandev-kill: PID $backendPid is not a kandev backend. Refusing to stop it."
+    exit 4
+  }
+  if ($backendStartedFile -and (Test-Path -LiteralPath $backendStartedFile)) {
+    $recordedStart = (Get-Content -LiteralPath $backendStartedFile -Raw).Trim()
+    if ($recordedStart -notmatch '^[0-9]+$' -or
+      $backendInfo.CreationDate.ToUniversalTime().Ticks -ne [long]$recordedStart) {
+      Write-Fail "kandev-kill: backend PID $backendPid was reused. Refusing to stop it."
+      exit 4
+    }
+  } elseif ($resolvedByPidfile -and ($targetPorts.Count -eq 0 -or ($expectedPort -and $targetPorts -notcontains $expectedPort))) {
+    Write-Fail "kandev-kill: cannot verify backend PID $backendPid against its recorded port."
+    exit 4
+  }
 }
 
-if (-not (Test-KandevBackend -TargetPid $backendPid)) {
-  Write-Fail "kandev-kill: PID $backendPid does not look like a kandev backend. Aborting."
-  exit 4
+# --- Compute the termination set: backend, then a separately verified web tree ---
+$displayPort = if ($Port) { $Port } elseif ($expectedPort) { $expectedPort } elseif ($targetPorts.Count) { $targetPorts[0] } else { '?' }
+$killSet = @()
+if ($backendInfo) {
+  $backendTree = @(Get-DescendantPids -RootPid $backendPid)
+  if (-not $backendTree.Count -or $backendTree[0].Created -ne $backendInfo.CreationDate) {
+    Write-Fail "kandev-kill: backend PID $backendPid changed while reading its process tree."
+    exit 4
+  }
+  $killSet += $backendTree
 }
-
-# --- Compute the termination set: backend + descendants (+ optional web pid) ---
-$killSet = @(Get-DescendantPids -RootPid $backendPid)
-if ($Pidfile) {
-  $webPidfile = $Pidfile -replace '\.pid$', '.web.pid'
-  if ($webPidfile -ne $Pidfile -and (Test-Path -LiteralPath $webPidfile)) {
-    $webRaw = (Get-Content -LiteralPath $webPidfile -Raw).Trim()
-    if ($webRaw -match '^[0-9]+$' -and (Test-PidAlive -TargetPid ([int]$webRaw))) {
-      # The recorded web PID is the launcher wrapper; the Vite listener is a
-      # descendant, so terminate the full tree rather than a single PID.
-      $killSet += @(Get-DescendantPids -RootPid ([int]$webRaw))
+$webPid = $null
+$unverifiedWeb = $false
+if ($webPidfile -and (Test-Path -LiteralPath $webPidfile)) {
+  $webRaw = (Get-Content -LiteralPath $webPidfile -Raw).Trim()
+  if ($webRaw -match '^[0-9]+$') {
+    $webPid = [int]$webRaw
+    $webInfo = Get-ProcessInfo -TargetPid $webPid
+    if ($webInfo) {
+      $recordedWebStart = if ($webStartedFile -and (Test-Path -LiteralPath $webStartedFile)) {
+        (Get-Content -LiteralPath $webStartedFile -Raw).Trim()
+      } else { '' }
+      if ($recordedWebStart -match '^[0-9]+$' -and
+        $webInfo.CreationDate.ToUniversalTime().Ticks -eq [long]$recordedWebStart -and
+        $webInfo.Name -ieq 'node.exe' -and
+        $webInfo.CommandLine -match 'node_modules[\\/]+vite[\\/]+bin[\\/]+vite\.js') {
+        $webTree = @(Get-DescendantPids -RootPid $webPid)
+        if (-not $webTree.Count -or $webTree[0].Created -ne $webInfo.CreationDate) {
+          Write-Fail "kandev-kill: web PID $webPid changed while reading its process tree."
+          exit 4
+        }
+        $killSet += $webTree
+      } else {
+        $unverifiedWeb = $true
+        Write-Warning "kandev-kill: web PID $webPid has no matching launch identity; leaving it running."
+      }
     }
   }
 }
-$killSet = $killSet | Sort-Object -Unique
+$killSet = @($killSet | Sort-Object Pid -Unique)
+
+foreach ($record in $killSet) {
+  foreach ($listeningPort in @(Get-ListeningPortsForPid -TargetPid $record.Pid)) {
+    if ((Test-GuardedPort -Port $listeningPort) -and -not $Force) {
+      Write-Fail "kandev-kill: PID $($record.Pid) listens on guarded port $listeningPort."
+      exit 3
+    }
+  }
+}
 
 Write-Host "kandev-kill: will terminate the following processes (backend port $displayPort):"
-foreach ($p in $killSet) {
-  $info = Get-ProcessInfo -TargetPid $p
+foreach ($record in $killSet) {
+  $info = Get-ProcessInfo -TargetPid $record.Pid
   if ($info) {
-    $cmd = $info.CommandLine
-    if ($cmd -and $cmd.Length -gt 90) { $cmd = $cmd.Substring(0, 90) }
-    Write-Host "  PID $p  $cmd"
+    Write-Host "  PID $($record.Pid)  $($info.Name)"
   } else {
-    Write-Host "  PID $p  <gone>"
+    Write-Host "  PID $($record.Pid)  <gone>"
   }
 }
 
@@ -238,36 +308,23 @@ if (-not $Yes) {
 }
 
 # --- Terminate: stop the set, wait for the grace period, force stragglers. ---
-foreach ($p in $killSet) {
-  Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-}
+foreach ($record in $killSet) { Stop-VerifiedProcess -ProcessRecord $record }
 
 $waited = 0
-while ((Test-PidAlive -TargetPid $backendPid) -and ($waited -lt $GraceSeconds)) {
+while ((Test-AnyPidAlive -ProcessRecords $killSet) -and ($waited -lt $GraceSeconds)) {
   Start-Sleep -Seconds 1
   $waited = $waited + 1
 }
-if (Test-PidAlive -TargetPid $backendPid) {
-  Write-Host "kandev-kill: backend still alive after ${GraceSeconds}s, forcing."
-  foreach ($p in $killSet) {
-    Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-  }
-  Start-Sleep -Seconds 1
-}
-foreach ($p in $killSet) {
-  if (Test-PidAlive -TargetPid $p) {
-    Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-  }
-}
+foreach ($record in $killSet) { Stop-VerifiedProcess -ProcessRecord $record }
 
-if (Test-PidAlive -TargetPid $backendPid) {
-  Write-Fail "kandev-kill: WARNING - backend PID $backendPid is still present."
+if (Test-AnyVerifiedProcessAlive -ProcessRecords $killSet) {
+  Write-Fail 'kandev-kill: a verified instance process is still running.'
   exit 5
 }
+if ($unverifiedWeb) { exit 4 }
 
 if ($Pidfile) {
-  Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath ($Pidfile -replace '\.pid$', '.web.pid') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $Pidfile, $backendStartedFile, $homeFile, $webPidfile, $webStartedFile -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "kandev-kill: done. Backend on port $displayPort (PID $backendPid) terminated."
