@@ -22,6 +22,13 @@ type launchFailureClassification struct {
 }
 
 func classifyLaunchFailure(err error) launchFailureClassification {
+	var relocationErr *worktree.ManagedCloneRelocationRequiredError
+	if errors.As(err, &relocationErr) {
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryManagedCloneRelocationRequired,
+			message: "The task workspace contains local changes and needs explicit relocation.",
+		}
+	}
 	var recoveryErr *worktree.WorktreeRecoveryError
 	if errors.As(err, &recoveryErr) {
 		return launchFailureClassification{
@@ -70,6 +77,9 @@ func launchFailureRecoveryActions(category, taskRepositoryID string, markReviewD
 	}
 	if category == models.LaunchErrorCategoryWorkspaceCheckoutFailed || category == models.LaunchErrorCategoryGenericLaunchFailure {
 		actions = append(actions, models.RecoveryActionRetryLaunch)
+	}
+	if category == models.LaunchErrorCategoryManagedCloneRelocationRequired {
+		actions = append(actions, models.RecoveryActionRelocateAndResume)
 	}
 	if category == models.LaunchErrorCategoryPRAlreadyClosed && markReviewDone {
 		actions = append(actions, models.RecoveryActionMarkReviewDone)

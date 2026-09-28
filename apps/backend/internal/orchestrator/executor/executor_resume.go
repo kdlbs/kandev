@@ -1191,7 +1191,7 @@ func (e *Executor) resumeSession(
 
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	// Selected recovery may replace canonical worktree rows. Reapply the
 	// environment projection after admission so lifecycle receives the
@@ -1746,6 +1746,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 		return "", nil, nil, err
 	}
 	applyResumeRepositoryFlags(req, allRepos)
+	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
 		return "", existingEnv, nil, err
 	}

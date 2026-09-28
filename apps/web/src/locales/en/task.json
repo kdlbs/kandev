@@ -2534,5 +2534,12 @@
   "completionGateNoHistory": "No completion changes have been recorded.",
   "completionGateAction_criteria_set": "Criteria changed",
   "completionGateAction_criterion_verified": "Evidence recorded",
-  "completionGateAction_completion_overridden": "Completion override used"
+  "completionGateAction_completion_overridden": "Completion override used",
+  "managedCloneRelocationBody": "This worktree belongs to an older repository clone and has local changes. Your files remain in the original checkout. Move them to the current clone to resume the same session.",
+  "managedCloneRelocationConfirmTitle": "Move files and resume this session?",
+  "managedCloneRelocationConfirmWarning": "The original checkout and a file snapshot will remain on disk. Git staging choices do not transfer, so review the changes before you commit.",
+  "managedCloneRelocationTitle": "Workspace needs repair",
+  "managedCloneRelocateResume": "Move files and resume",
+  "managedCloneRelocationConfirmBody": "Kandev will create a worktree in the current repository clone and continue this session.",
+  "managedCloneRelocationConfirm": "Move and resume"
 }

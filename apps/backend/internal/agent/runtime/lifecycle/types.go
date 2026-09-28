@@ -20,6 +20,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -1199,23 +1200,28 @@ type WorkspaceFolderSpec struct {
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepoName               string
-	IntegrationRef         string
-	BaseBranch             string
-	DefaultBranch          string
-	CheckoutBranch         string
-	PRNumber               int
-	QualifiedPRBase        *models.PRBase
-	ComparisonTarget       *models.ComparisonTarget
-	WorktreeID             string
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	BranchSlug             string
-	BranchIdentitySlug     string
+	RepositoryID            string
+	RepositoryPath          string
+	WorktreePath            string
+	WorktreeBranch          string
+	CloneRelocation         *worktree.ManagedCloneRelocationProof
+	WorktreeSourceClonePath string
+	WorktreeSourceCommonDir string
+	RepoName                string
+	IntegrationRef          string
+	BaseBranch              string
+	DefaultBranch           string
+	CheckoutBranch          string
+	PRNumber                int
+	QualifiedPRBase         *models.PRBase
+	ComparisonTarget        *models.ComparisonTarget
+	WorktreeID              string
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	BranchSlug              string
+	BranchIdentitySlug      string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -1520,6 +1526,7 @@ type WorkspaceInfo struct {
 	// concurrent environment ownership transfer. A zero value is retained for
 	// legacy callers that do not project the generation.
 	ValidatedTaskEnvironmentGeneration int64
+	WorktreeRecoveryAdmitted           bool
 	// TaskArchived and WorkspaceOwnerArchived are projected by the task service
 	// so lifecycle callers cannot restore an archived task through a cached or
 	// direct workspace entry point.

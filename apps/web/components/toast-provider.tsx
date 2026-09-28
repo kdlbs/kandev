@@ -6,12 +6,14 @@ import { cn, generateUUID } from "@/lib/utils";
 import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
 
 type ToastVariant = "default" | "success" | "error" | "loading";
+type ToastPlacement = "top";
 
 type Toast = {
   id: string;
   title?: string;
   description?: string;
   variant?: ToastVariant;
+  placement?: ToastPlacement;
 };
 
 type ToastInput = Omit<Toast, "id"> & { duration?: number };
@@ -80,6 +82,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         title: input.title,
         description: input.description,
         variant: input.variant ?? "default",
+        placement: input.placement,
       };
       toastsRef.current.set(id, nextToast);
       setToasts((prev) => [...prev, nextToast]);
@@ -108,6 +111,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           ...(input.title !== undefined && { title: input.title }),
           ...(input.description !== undefined && { description: input.description }),
           ...(input.variant !== undefined && { variant: input.variant }),
+          ...(input.placement !== undefined && { placement: input.placement }),
         };
         toastsRef.current.set(id, next);
         setToasts((current) => current.map((item) => (item.id === id ? next : item)));
@@ -148,13 +152,31 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 function ToastList({ toasts }: { toasts: Toast[] }) {
+  const bottomToasts = toasts.filter((toast) => toast.placement !== "top");
+  const topToasts = toasts.filter((toast) => toast.placement === "top");
   return (
     <div
-      className="fixed bottom-[calc(1rem+var(--app-status-bar-height))] right-4 z-[60] flex w-[calc(100vw-2rem)] max-w-[360px] flex-col-reverse gap-2"
+      className="pointer-events-none fixed inset-0 z-[60]"
       data-testid="toast-container"
       aria-live="polite"
       aria-relevant="additions text"
     >
+      <ToastStack
+        toasts={bottomToasts}
+        className="absolute bottom-[calc(1rem+var(--app-status-bar-height))] right-4 flex w-[calc(100vw-2rem)] max-w-[360px] flex-col-reverse gap-2"
+      />
+      <ToastStack
+        toasts={topToasts}
+        className="absolute top-[calc(3.25rem+env(safe-area-inset-top,0px)+var(--app-status-bar-height))] right-4 flex w-[calc(100vw-2rem)] max-w-[360px] flex-col-reverse gap-2"
+      />
+    </div>
+  );
+}
+
+function ToastStack({ toasts, className }: { toasts: Toast[]; className: string }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className={cn("pointer-events-none", className)}>
       {toasts.map((t) => {
         const variant = t.variant ?? "default";
         const styles = variantStyles[variant];
@@ -164,7 +186,7 @@ function ToastList({ toasts }: { toasts: Toast[] }) {
             key={t.id}
             data-testid="toast-message"
             className={cn(
-              "flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm",
+              "pointer-events-none flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm",
               "animate-in slide-in-from-right-full duration-300",
               styles.container,
             )}

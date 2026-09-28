@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
@@ -350,6 +351,22 @@ func TestWorktreeRecoveryResumeAdmitsBeforeStartingState(t *testing.T) {
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions[sessionID], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
+	}
+}
+
+func TestManagedCloneRelocationProofIncludesLegacyOwnerNamePath(t *testing.T) {
+	root := t.TempDir()
+	cloner := repoclone.NewCloner(repoclone.Config{BasePath: root}, repoclone.ProtocolHTTPS, "", nil)
+	repository := &models.Repository{
+		ID: "repo-legacy", WorkspaceID: "workspace-legacy", SourceType: "provider", Provider: "github",
+		ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget",
+	}
+	proof := managedCloneRelocationProof(cloner, repository, "", "")
+	if proof == nil {
+		t.Fatal("managedCloneRelocationProof() returned nil for a managed provider repository")
+	}
+	if want := filepath.Join(root, "acme", "widget"); proof.LegacyOwnerNameSourcePath != want {
+		t.Fatalf("legacy owner/name source = %q, want %q", proof.LegacyOwnerNameSourcePath, want)
 	}
 }
 

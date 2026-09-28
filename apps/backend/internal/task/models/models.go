@@ -2810,6 +2810,8 @@ type TaskEnvironmentRepo struct {
 	WorktreeBranchOwner       string     `json:"-"`
 	WorktreeIntegrationRef    string     `json:"-"`
 	WorktreeRecoveryHeadSHA   string     `json:"-"`
+	WorktreeSourceClonePath   string     `json:"-"`
+	WorktreeSourceCommonDir   string     `json:"-"`
 	WorktreeBranchCompactedAt *time.Time `json:"-"`
 	Position                  int        `json:"position"`
 	ErrorMessage              string     `json:"error_message,omitempty"`

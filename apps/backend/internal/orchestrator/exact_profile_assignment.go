@@ -18,7 +18,10 @@ import (
 // contract: a changed, disabled, or cross-workspace profile is never replaced.
 var ErrExactProfileAssignmentInvalid = errors.New("exact profile assignment is no longer valid")
 
-const exactProfileThinkingStreamingEvent = "thinking_streaming"
+const (
+	exactProfileMessageStreamingEvent  = "message_streaming"
+	exactProfileThinkingStreamingEvent = "thinking_streaming"
+)
 
 // ErrExactProfileAssignmentTargetChanged rejects a selector write when the
 // task no longer matches the caller's expected workflow lane or state.
@@ -428,7 +431,7 @@ func (s *Service) recordExactProfileInferenceEvidence(
 }
 
 func exactProfileInferenceProgress(eventType, text, toolCallID string) bool {
-	if eventType == "message_streaming" || eventType == exactProfileThinkingStreamingEvent {
+	if eventType == exactProfileMessageStreamingEvent || eventType == exactProfileThinkingStreamingEvent {
 		return strings.TrimSpace(text) != ""
 	}
 	return (eventType == agentEventToolCall || eventType == agentEventToolUpdate) && strings.TrimSpace(toolCallID) != ""

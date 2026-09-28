@@ -2534,5 +2534,12 @@
   "completionGateNoHistory": "Não foram registadas alterações de conclusão.",
   "completionGateAction_criteria_set": "Critérios alterados",
   "completionGateAction_criterion_verified": "Prova registada",
-  "completionGateAction_completion_overridden": "Exceção de conclusão utilizada"
+  "completionGateAction_completion_overridden": "Exceção de conclusão utilizada",
+  "managedCloneRelocationBody": "Este worktree pertence a um clone antigo do repositório e tem alterações locais. Os ficheiros permanecem no checkout original. Mova-os para o clone atual para retomar a mesma sessão.",
+  "managedCloneRelocationConfirmTitle": "Mover os ficheiros e retomar esta sessão?",
+  "managedCloneRelocationConfirmWarning": "O checkout original e uma cópia dos ficheiros permanecem no disco. As opções de preparação do Git não são transferidas. Reveja as alterações antes de criar um commit.",
+  "managedCloneRelocationTitle": "O espaço de trabalho precisa de reparação",
+  "managedCloneRelocateResume": "Mover ficheiros e retomar",
+  "managedCloneRelocationConfirmBody": "O Kandev vai criar um worktree no clone atual do repositório e continuar esta sessão.",
+  "managedCloneRelocationConfirm": "Mover e retomar"
 }

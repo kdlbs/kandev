@@ -1264,8 +1264,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		now := time.Now()
 		exec.FinishedAt = &now
 	})
+	preservePassthroughConversation := reason == StopReasonBackendShutdown && execution.IsPassthrough
 
-	if execution.Owner.Kind == ExecutionOwnerRun {
+	// Persist terminal runtime state before publishing the stop event so
+	// environment recovery cannot mistake a stopped resumable session for a
+	// live consumer. A passthrough TUI also needs its stopped execution ID to
+	// resume the same conversation after a graceful backend restart.
+	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 			return err
 		}
@@ -1274,6 +1279,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	execution.EndSessionSpan()
 
 	m.removeExecutionLocked(executionID, execution)
+	if execution.Owner.Kind != ExecutionOwnerRun && !preservePassthroughConversation {
+		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
+	}
 	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("agent stopped and removed from tracking",

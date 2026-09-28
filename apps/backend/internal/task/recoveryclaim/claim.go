@@ -344,6 +344,32 @@ func Release(ctx context.Context, db *sqlx.DB, claim *models.TaskEnvironmentReco
 	return tx.Commit()
 }
 
+// Get returns the durable recovery claim for an environment, if one exists.
+// Callers use it to reconcile an operation that published its filesystem
+// replacement before the owning process stopped.
+func Get(ctx context.Context, db *sqlx.DB, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
+	if db == nil || environmentID == "" {
+		return nil, errors.New("task environment recovery claim: database and environment are required")
+	}
+	claim := &models.TaskEnvironmentRecoveryClaim{}
+	err := db.QueryRowxContext(ctx, db.Rebind(`
+		SELECT task_environment_id, owner_task_id, ownership_generation, session_id,
+			operation_id, executor_type, created_at, updated_at
+		FROM task_environment_recovery_claims WHERE task_environment_id = ?
+	`), environmentID).Scan(
+		&claim.TaskEnvironmentID, &claim.OwnerTaskID, &claim.OwnershipGeneration,
+		&claim.SessionID, &claim.OperationID, &claim.ExecutorType,
+		&claim.CreatedAt, &claim.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
 // EnsureAvailableTx rejects mutations that would overlap recovery. A caller
 // carrying the exact claim may continue its own guarded operation.
 func EnsureAvailableTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) error {

@@ -11,11 +11,16 @@ import (
 
 func TestManagerAdmitWorkspaceRecoveryForwardsSessionIncarnation(t *testing.T) {
 	mgr := newTestManager(t)
+	store := newInMemoryWorktreeStore()
+	store.worktrees["worktree-1"] = &worktree.Worktree{
+		ID: "worktree-1", TaskID: "task-1", RepositoryID: "repository-1",
+		BranchSlug: "main", Status: worktree.StatusActive,
+	}
 	worktreeMgr, err := worktree.NewManager(worktree.Config{
 		Enabled:       true,
 		TasksBasePath: filepath.Join(t.TempDir(), "tasks"),
 		BranchPrefix:  "feature/",
-	}, newInMemoryWorktreeStore(), newTestLogger())
+	}, store, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
