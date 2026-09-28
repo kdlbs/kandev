@@ -697,9 +697,13 @@ if kill -0 "$TARGET_PID" 2>/dev/null; then
   # does not word-split an unquoted expansion the way sh/bash/dash do — a
   # multi-line $CHILDREN would collapse into a single bogus argument there,
   # leaving every child but the first process group unsignalled.
+  # No "--" before "-$cpid": dash's kill builtin (the /bin/sh on most Linux
+  # remotes) does not recognize "--" as an end-of-options marker and rejects
+  # the whole invocation ("Illegal number: -"); cpid is always a bare digit
+  # string from ps, so "-$cpid" can never be mistaken for another option.
   printf '%%s\n' "$CHILDREN" | while read -r cpid; do
     [ -n "$cpid" ] || continue
-    kill -9 -- "-$cpid" 2>/dev/null || true
+    kill -9 -$cpid 2>/dev/null || true
   done
 fi
 if kill -0 "$TARGET_PID" 2>/dev/null; then
