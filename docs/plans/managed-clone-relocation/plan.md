@@ -153,6 +153,9 @@ relocation to the exact worktree selected by its session when task branch
 settings have changed. The complete executor and worktree packages, changed-code
 backend lint, backend build, frontend E2E build, frontend typecheck, desktop
 dirty-relocation E2E, and mobile clarification E2E passed after this fix.
+The mobile sidebar archive and mobile thread-action E2Es also passed after
+isolating update-notice placement from ordinary action toasts. The SSH
+repository-secret container E2E passed in a focused local run.
 PostgreSQL-specific migration and concurrency checks were not run because
 `KANDEV_TEST_POSTGRES_DSN` was unset.
 

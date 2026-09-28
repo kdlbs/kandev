@@ -137,4 +137,7 @@ retries disabled; both tests waited for the resumable runtime row to become
 durably `stopped` before offering relocation.
 The mobile clarification E2E now displays an update toast during the flow and
 checks that it does not cover the submit control. Mobile toast placement was
-moved below the task header, and the focused mobile-chrome regression passed.
+split by purpose: update notices use a separate top position, while ordinary
+action toasts keep their bottom position. Toast surfaces pass pointer
+events through to the underlying controls. The mobile clarification, mobile
+sidebar archive, and mobile thread-action E2Es passed after this change.
