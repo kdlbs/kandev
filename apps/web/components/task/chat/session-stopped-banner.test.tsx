@@ -6,6 +6,7 @@ import type { SessionStoppedBannerProps } from "./session-stopped-banner";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
 const MORE_OPTIONS = "More options";
+const FAILED_TO_RESUME_MESSAGE = "Failed to resume session";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -56,8 +57,16 @@ vi.mock("react-i18next", () => ({
         "task:retry": "Retry",
         "task:recoveryMoreOptions": MORE_OPTIONS,
         "task:couldnTStartASession": "Session recovery failed",
-        "task:failedToResumeSession": "Failed to resume session",
+        "task:failedToResumeSession": FAILED_TO_RESUME_MESSAGE,
         "task:failedToRestoreWorkspace": "Failed to restore workspace",
+        "task:managedCloneRelocationTitle": "Workspace needs repair",
+        "task:managedCloneRelocationBody": "Move files to the current clone to resume.",
+        "task:managedCloneRelocateResume": "Move files and resume",
+        "task:managedCloneRelocationConfirmTitle": "Move workspace files?",
+        "task:managedCloneRelocationConfirmBody": "A snapshot will be kept.",
+        "task:managedCloneRelocationConfirmWarning": "Git staging choices do not transfer.",
+        "task:managedCloneRelocationConfirm": "Move files and resume",
+        "common:cancel": "Cancel",
       })[key] ?? key,
   }),
 }));
@@ -241,6 +250,51 @@ describe("SessionStoppedBanner recovery failures", () => {
 
     expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
   });
+
+  it("offers only confirmed relocation after a typed managed clone refusal", () => {
+    const relocate = vi.fn();
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={{
+          ...guardRecoveryActions(FAILED_TO_RESUME_MESSAGE, "resume"),
+          guardDetails: null,
+          managedCloneRecoveryStamp: "managed-stamp",
+          handleManagedCloneRelocation: relocate,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Workspace needs repair")).toBeTruthy();
+    expect(screen.getByText("Move files to the current clone to resume.")).toBeTruthy();
+    expect(screen.getByTestId("managed-clone-relocate-button")).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+
+    fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
+    expect(screen.getByTestId("managed-clone-relocation-confirm")).toBeTruthy();
+    expect(document.body.textContent).toContain("Git staging choices do not transfer.");
+    fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
+    expect(relocate).toHaveBeenCalledOnce();
+  });
+
+  it("shows a retryable failure when explicit relocation is refused", () => {
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={{
+          ...guardRecoveryActions("workspace is still active", "resume"),
+          guardDetails: null,
+          managedCloneRecoveryStamp: "managed-stamp",
+          lastFailedAction: "relocate_and_resume",
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-recovery-error").textContent).toBe(FAILED_TO_RESUME_MESSAGE);
+    expect(screen.getByTestId("managed-clone-relocate-button")).toBeTruthy();
+  });
 });
 
 it("does not claim a deleted profile when there is no session", () => {
@@ -264,7 +318,7 @@ it("redacts retained workspace diagnostics alongside a retryable guard", () => {
 const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
 
 it.each([
-  ["resume", "Failed to resume session"],
+  ["resume", FAILED_TO_RESUME_MESSAGE],
   ["restore_workspace", "Failed to restore workspace"],
 ] as const)(
   "keeps an operation-specific explanation for empty %s diagnostics",
@@ -308,10 +362,13 @@ function guardRecoveryActions(
     branchDetails: null,
     guardDetails: { kind: "session_recovery_in_progress", retryable: true },
     recoveryNotice: null,
+    managedCloneRecoveryStamp: null,
+    lastFailedAction: null,
     manualRecoveryFailure: { operation },
     handleRecover: vi.fn().mockResolvedValue(false),
     handleRestore: vi.fn().mockResolvedValue(undefined),
     handleRetry: vi.fn().mockResolvedValue(false),
     handleNewBranch: vi.fn().mockResolvedValue(false),
+    handleManagedCloneRelocation: vi.fn().mockResolvedValue(false),
   };
 }

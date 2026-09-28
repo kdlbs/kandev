@@ -35,8 +35,8 @@ manager sends. The coordinator's Kandev tool surface can only read and propose.
   by position.
 - **Stall record:** the coordinator's durable copy of one `task.stalled`
   observation for a coordinated workspace.
-- **Copilot:** the chat popover on the Coordinator screens backed by the
-  coordinator's conversation session.
+- **Copilot:** the chat panel on the right side of the Coordinator screens,
+  backed by the coordinator's conversation session.
 
 ## Ownership
 

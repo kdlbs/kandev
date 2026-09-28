@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 ---
 
 # Task proposals Requirements
@@ -103,6 +103,17 @@ Mockup:
   eligible step, it shall also never be a feeder of an auto-starting step, so
   no automatic queue or WIP-limit promotion following the create can start an
   agent either.
+- **AC-COORDINATOR-PROPOSALS-002.13:** The created task shall not inherit the
+  coordinator's agent profile. When it is later started, it shall resolve its
+  agent the way any task of its target workflow does: the step's agent
+  profile, then the workflow's default, then the workspace default.
+- **AC-COORDINATOR-PROPOSALS-002.14:** When a claim goes stale while the
+  process keeps running, the system shall recover it (`AC-COORDINATOR-PROPOSALS-002.7`)
+  within one minute of it going stale, with no manager action and no restart.
+- **AC-COORDINATOR-PROPOSALS-002.15:** Approve and reject shall not be
+  reachable from a coordinator session's Kandev surface: a coordinator
+  principal that calls either shall be refused and change nothing, and a
+  principal that cannot be resolved shall be refused.
 - **AC-COORDINATOR-PROPOSALS-002.3:** When a manager approves with edits, the
   system shall merge the edited title, description, workflow, step and
   repository into the spec and validate it as in
@@ -250,6 +261,10 @@ Mockup:
   and forms shall stack with touch targets of at least 44px and no horizontal
   scroll.
 
+- **AC-COORDINATOR-PROPOSALS-005.10:** An `approving` proposal whose claim is
+  stale shall show "Approval did not finish." and **Retry**, which runs the
+  same recovery as an approve without edits; a claim that is not stale keeps
+  "Approval in progress. Edits are locked." with no actions.
 ## Out of scope
 
 - Undo of an approval (needs the phase 2 "What it did" log).

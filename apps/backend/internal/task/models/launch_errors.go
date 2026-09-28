@@ -17,19 +17,22 @@ const MetaKeyLastLaunchError = "last_launch_error"
 // Launch error categories are stable wire and persistence values. Keep these
 // values independent from human-readable messages.
 const (
-	LaunchErrorCategoryBaseBranchMissing       = "base_branch_missing"
-	LaunchErrorCategoryPRAlreadyClosed         = "pr_already_closed"
-	LaunchErrorCategoryDefaultBranchUnresolved = "default_branch_unresolved"
-	LaunchErrorCategoryWorkspaceCheckoutFailed = "workspace_checkout_failed"
-	LaunchErrorCategoryGenericLaunchFailure    = "generic_launch_failure"
+	LaunchErrorCategoryBaseBranchMissing              = "base_branch_missing"
+	LaunchErrorCategoryPRAlreadyClosed                = "pr_already_closed"
+	LaunchErrorCategoryDefaultBranchUnresolved        = "default_branch_unresolved"
+	LaunchErrorCategoryWorkspaceCheckoutFailed        = "workspace_checkout_failed"
+	LaunchErrorCategoryGenericLaunchFailure           = "generic_launch_failure"
+	LaunchErrorCategoryManagedCloneRelocationRequired = "managed_clone_relocation_required"
 )
 
 // Recovery actions are stable wire values shared by backend and frontend.
 const (
-	RecoveryActionRetryDefault   = "retry_default"
-	RecoveryActionPickBaseBranch = "pick_base_branch"
-	RecoveryActionMarkReviewDone = "mark_review_done"
-	RecoveryActionRetryLaunch    = "retry_launch"
+	RecoveryActionRetryDefault      = "retry_default"
+	RecoveryActionPickBaseBranch    = "pick_base_branch"
+	RecoveryActionMarkReviewDone    = "mark_review_done"
+	RecoveryActionRetryLaunch       = "retry_launch"
+	RecoveryActionRelocateAndResume = "relocate_and_resume"
+	RecoveryActionResumeNewBranch   = "resume_new_branch"
 )
 
 const (
@@ -195,6 +198,8 @@ func NormalizeRecoveryActionsForCategory(category string, actions []string) []st
 		return []string{RecoveryActionRetryLaunch}
 	case LaunchErrorCategoryPRAlreadyClosed:
 		allowed = map[string]struct{}{RecoveryActionMarkReviewDone: {}}
+	case LaunchErrorCategoryManagedCloneRelocationRequired:
+		allowed = map[string]struct{}{RecoveryActionRelocateAndResume: {}}
 	default:
 		return normalized
 	}
@@ -210,7 +215,7 @@ func NormalizeRecoveryActionsForCategory(category string, actions []string) []st
 
 func isKnownRecoveryAction(action string) bool {
 	switch action {
-	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone, RecoveryActionRetryLaunch:
+	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone, RecoveryActionRetryLaunch, RecoveryActionRelocateAndResume:
 		return true
 	default:
 		return false

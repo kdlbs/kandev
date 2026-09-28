@@ -263,7 +263,7 @@ that loaded, with the banner. When no workflow snapshot is present and the
 read failed, the lists and the count strip are replaced by the banner.
 **Try again** for tasks calls `requestWorkspaceContextRefresh()`, which makes
 the hook re-fetch only the workflows that failed. A failed PR detail read is not a banner case: rows fall back
-as described in [Classification](#classification). A copilot session failure is contained in the popover and does not
+as described in [Classification](#classification). A copilot session failure is contained in the copilot panel and does not
 affect these inputs.
 
 ## Security

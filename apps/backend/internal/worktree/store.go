@@ -42,6 +42,15 @@ func (s *SQLiteStore) AcquireTaskEnvironmentRecoveryClaim(
 	return recoveryclaim.Acquire(ctx, s.db, req)
 }
 
+// GetTaskEnvironmentRecoveryClaim reads the durable authority held by an
+// interrupted recovery operation.
+func (s *SQLiteStore) GetTaskEnvironmentRecoveryClaim(
+	ctx context.Context,
+	environmentID string,
+) (*models.TaskEnvironmentRecoveryClaim, error) {
+	return recoveryclaim.Get(ctx, s.db, environmentID)
+}
+
 // ReleaseTaskEnvironmentRecoveryClaim releases the exact recovery authority
 // previously acquired for an environment.
 func (s *SQLiteStore) ReleaseTaskEnvironmentRecoveryClaim(
@@ -69,6 +78,8 @@ const worktreeSelectCols = `
 	COALESCE(ter.worktree_branch_owner, 'unknown'),
 	COALESCE(ter.worktree_integration_ref, ''),
 	COALESCE(ter.worktree_recovery_head_sha, ''),
+	COALESCE(ter.worktree_source_clone_path, ''),
+	COALESCE(ter.worktree_source_common_dir, ''),
 	ter.worktree_branch_compacted_at,
 	ter.status,
 	ter.created_at,
@@ -103,6 +114,8 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.BranchOwner,
 		&wt.IntegrationRef,
 		&wt.RecoveryHeadSHA,
+		&wt.SourceClonePath,
+		&wt.SourceCommonDir,
 		&compactedAt,
 		&wt.Status,
 		&wt.CreatedAt,
@@ -231,9 +244,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
@@ -241,6 +255,8 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			worktree_branch_owner = excluded.worktree_branch_owner,
 			worktree_integration_ref = excluded.worktree_integration_ref,
 			worktree_recovery_head_sha = excluded.worktree_recovery_head_sha,
+			worktree_source_clone_path = CASE WHEN excluded.worktree_source_clone_path <> '' THEN excluded.worktree_source_clone_path ELSE task_environment_repos.worktree_source_clone_path END,
+			worktree_source_common_dir = CASE WHEN excluded.worktree_source_common_dir <> '' THEN excluded.worktree_source_common_dir ELSE task_environment_repos.worktree_source_common_dir END,
 			worktree_branch_compacted_at = excluded.worktree_branch_compacted_at,
 			status = excluded.status,
 			updated_at = excluded.updated_at,
@@ -248,6 +264,7 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			deleted_at = excluded.deleted_at
 	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
 		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA,
+		wt.SourceClonePath, wt.SourceCommonDir,
 		wt.BranchCompactedAt, 0,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
@@ -265,11 +282,13 @@ func (s *SQLiteStore) CompareAndSwapWorktree(ctx context.Context, expected, repl
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE task_environment_repos
-		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+		    worktree_source_clone_path = ?, worktree_source_common_dir = ?, updated_at = ?
 		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
 		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
 		  AND status = ? AND deleted_at IS NULL
-	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+	`), replacement.ID, replacement.Path, replacement.Branch,
+		replacement.SourceClonePath, replacement.SourceCommonDir, replacement.UpdatedAt,
 		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
 		expected.ID, expected.Path, expected.Branch, StatusActive)
 	if err != nil {
@@ -300,11 +319,13 @@ func (s *SQLiteStore) CompareAndSwapWorktreeWithRecoveryClaim(
 	}
 	result, err := tx.ExecContext(ctx, s.db.Rebind(`
 		UPDATE task_environment_repos
-		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+		    worktree_source_clone_path = ?, worktree_source_common_dir = ?, updated_at = ?
 		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
 		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
 		  AND status = ? AND deleted_at IS NULL
-	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+	`), replacement.ID, replacement.Path, replacement.Branch,
+		replacement.SourceClonePath, replacement.SourceCommonDir, replacement.UpdatedAt,
 		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
 		expected.ID, expected.Path, expected.Branch, StatusActive)
 	if err != nil {
@@ -863,6 +884,8 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 			&wt.BranchOwner,
 			&wt.IntegrationRef,
 			&wt.RecoveryHeadSHA,
+			&wt.SourceClonePath,
+			&wt.SourceCommonDir,
 			&compactedAt,
 			&wt.Status,
 			&wt.CreatedAt,

@@ -2,6 +2,7 @@
 
 import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
@@ -11,6 +12,7 @@ import {
   useSessionRecoveryActions,
   type SessionRecoveryActions,
 } from "@/hooks/domains/session/use-session-recovery-actions";
+import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
 export type SessionStoppedBannerProps = {
@@ -37,7 +39,8 @@ export function useSessionProfileExists(sessionId: string | null): boolean {
 function useStoppedRecoveryChoices(
   props: SessionStoppedBannerProps & { actions: SessionRecoveryActions },
   profileExists: boolean,
-) {
+  onRelocateRequested: () => void,
+): RecoveryChoice[] {
   const { t } = useTranslation();
 
   const {
@@ -49,6 +52,17 @@ function useStoppedRecoveryChoices(
     handleNewBranch,
   } = props.actions;
   const completed = props.mode === "completed";
+
+  if (props.actions.managedCloneRecoveryStamp) {
+    return [
+      {
+        kind: "relocate_and_resume",
+        label: t("task:managedCloneRelocateResume"),
+        testId: "managed-clone-relocate-button",
+        onClick: onRelocateRequested,
+      },
+    ];
+  }
 
   const choices: RecoveryChoice[] = [];
   if (props.taskId && props.sessionId)
@@ -104,16 +118,50 @@ function stoppedRecoveryCause(
   return message || fallback;
 }
 
+function stoppedSessionTitle(
+  completed: boolean,
+  managedCloneRecovery: boolean,
+  message: string,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (managedCloneRecovery) return t("task:managedCloneRelocationTitle");
+  if (completed) return t("task:sessionCompleted");
+  return sanitizeSessionErrorDetails(message, 240) || t("task:agentHasStopped");
+}
+
+function stoppedRecoveryErrorMessage(
+  actions: SessionRecoveryActions,
+  managedCloneRecovery: boolean,
+  cause: string,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (!actions.recoveryError) return null;
+  if (managedCloneRecovery && actions.lastFailedAction !== "relocate_and_resume") return null;
+  if (managedCloneRecovery) return t("task:failedToResumeSession");
+  return cause;
+}
+
 function StoppedSessionContent(
   props: SessionStoppedBannerProps & { actions: SessionRecoveryActions },
 ) {
   const { t } = useTranslation();
+  const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
   const profileExists = useSessionProfileExists(props.sessionId);
   const { busyAction, recoveryError, recoveryNotice, guardDetails } = props.actions;
   const completed = props.mode === "completed";
   const blocked = Boolean(guardDetails && !guardDetails.retryable);
-  const choices = useStoppedRecoveryChoices(props, profileExists);
+  const managedCloneRecovery = Boolean(props.actions.managedCloneRecoveryStamp);
+  const choices = useStoppedRecoveryChoices(props, profileExists, () =>
+    setRelocationConfirmationOpen(true),
+  );
   const cause = stoppedRecoveryCause(props.actions, t);
+  const recoveryErrorMessage = stoppedRecoveryErrorMessage(
+    props.actions,
+    managedCloneRecovery,
+    cause,
+    t,
+  );
+  const title = stoppedSessionTitle(completed, managedCloneRecovery, props.message ?? "", t);
   const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>
@@ -125,23 +173,24 @@ function StoppedSessionContent(
         <div className="flex min-w-0 items-start gap-2">
           <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="min-w-0 flex-1">
-            <p className="wrap-anywhere text-sm">
-              {completed
-                ? t("task:sessionCompleted")
-                : sanitizeSessionErrorDetails(props.message, 240) || t("task:agentHasStopped")}
-            </p>
+            <p className="wrap-anywhere text-sm">{title}</p>
+            {managedCloneRecovery && (
+              <p className="mt-1 wrap-anywhere text-sm text-muted-foreground">
+                {t("task:managedCloneRelocationBody")}
+              </p>
+            )}
             {props.sessionId && !profileExists && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {t("task:agentProfileNoLongerExists")}
               </p>
             )}
-            {recoveryError && (
+            {recoveryErrorMessage && (
               <p
                 role="status"
                 data-testid="session-recovery-error"
                 className="mt-1 text-xs text-muted-foreground"
               >
-                {cause}
+                {recoveryErrorMessage}
               </p>
             )}
             {recoveryNotice && (
@@ -169,6 +218,13 @@ function StoppedSessionContent(
           workspaceId={props.workspaceId}
         />
       )}
+      <ManagedCloneRelocationConfirmation
+        open={relocationConfirmationOpen}
+        targetKey={`${props.sessionId ?? ""}:${props.actions.managedCloneRecoveryStamp ?? ""}`}
+        onOpenChange={setRelocationConfirmationOpen}
+        onConfirm={() => props.actions.handleManagedCloneRelocation()}
+        disabled={busyAction !== null}
+      />
     </>
   );
 }

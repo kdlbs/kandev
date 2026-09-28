@@ -18,6 +18,12 @@ system_design:
 
 # Task 05: Popover Shell and Chat Props (WP-4a)
 
+> **Built as a popover.** This work order is built. The copilot first ships in
+> the popover shell below; the requirement now specifies a right-side panel,
+> and [task 11](task-11-panel-swap.md) swaps the popover for it.
+> `ConfigChatPanel` keeps this shell after the swap, so
+> `AC-COORDINATOR-COPILOT-004.9` stays pinned here.
+
 ## Summary
 
 A frontend refactor with no coordinator wiring, so it needs no backend: split

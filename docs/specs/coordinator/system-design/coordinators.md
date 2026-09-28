@@ -84,6 +84,7 @@ logger, SQLite and PostgreSQL. It is registered in
 | `executor_profile_id` | text not null | |
 | `context` | text not null default '' | stored trimmed, at most 4,000 characters |
 | `conversation_task_id` | text null | see [copilot](copilot.md) |
+| `config_revision` | integer not null default 0 | incremented by every PATCH that changes `context`, `agent_profile_id` or `executor_profile_id`; the conversation open checks it ([copilot](copilot.md#conversation-task)) |
 | `created_at`, `updated_at` | timestamp not null | UTC |
 
 The index `(workspace_id, created_at, id)` serves the list order. The proposal
@@ -103,6 +104,9 @@ All routes authorise through the task service's `AuthorizeWorkspaceScope`:
 | `PATCH /api/v1/workspaces/:id/coordinators/:cid` | the updated coordinator; see PATCH body below |
 | `DELETE /api/v1/workspaces/:id/coordinators/:cid` | 204 |
 
+Every coordinator in a GET or list response carries all the columns above,
+including `conversation_task_id` (JSON `null` when there is none).
+
 A coordinator whose `workspace_id` differs from `:id` is treated as absent
 (404). PATCH runs in one transaction that reads the row, validates, and writes
 it with `UPDATE ... WHERE id = ? AND workspace_id = ?`. There is no version
@@ -118,7 +122,8 @@ is sent as `""`. Unknown fields are ignored.
 before validation and stored trimmed, on create and PATCH. When PATCH carries
 `context`, `agent_profile_id` or `executor_profile_id`, the transaction
 compares each field's trimmed (for `context`) new value with its stored value;
-when any of the three differ it clears `conversation_task_id`, and after
+when any of the three differ it clears `conversation_task_id` and increments
+`config_revision` in the same `UPDATE`, and after
 commit the service archives the old conversation task through the task
 service's `ArchiveTask`, which stops a running turn. The archived task is kept
 until the coordinator or the workspace is deleted
@@ -135,7 +140,7 @@ A profile change takes effect only for the *next* conversation: the running
 session was created with the old profile pair, and Kandev does not migrate a
 live agentctl session onto a different agent or executor profile mid-session,
 so archiving is the only way a changed profile can take effect at all. The
-next popover open creates a fresh conversation task and session from the
+next panel open creates a fresh conversation task and session from the
 coordinator's current `agent_profile_id` and `executor_profile_id`
 ([copilot](copilot.md#conversation-task)), which is also when
 `AC-COORDINATOR-COORDINATORS-005.1` recovery is evaluated against the

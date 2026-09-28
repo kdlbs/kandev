@@ -2534,5 +2534,15 @@
   "completionGateNoHistory": "尚未记录完成相关更改。",
   "completionGateAction_criteria_set": "条件已更改",
   "completionGateAction_criterion_verified": "已记录证据",
-  "completionGateAction_completion_overridden": "已使用完成例外"
+  "completionGateAction_completion_overridden": "已使用完成例外",
+  "managedCloneRelocationBody": "此 worktree 属于较旧的仓库克隆，并包含本地更改。文件仍保留在原始检出目录中。将文件移到当前克隆后，即可继续同一会话。",
+  "managedCloneRelocationConfirmTitle": "移动文件并继续此会话？",
+  "managedCloneRelocationConfirmWarning": "原始检出目录和文件快照都会保留在磁盘上。Git 暂存状态不会迁移，请在提交前检查更改。",
+  "managedCloneRelocationTitle": "工作区需要修复",
+  "managedCloneRelocateResume": "移动文件并继续",
+  "managedCloneRelocationConfirmBody": "Kandev 将在当前仓库克隆中创建 worktree，并继续此会话。",
+  "managedCloneRelocationConfirm": "移动并继续",
+  "sessionRecoveryResumeDescription": "恢复会保留之前的消息和上下文。",
+  "sessionRecoveryFreshDescription": "重新开始会使用同一工作区，但不保留之前的对话上下文。",
+  "sessionRecoveryCorruptedDescription": "此会话的已保存状态已损坏，恢复可能会再次失败。请开始新会话。"
 }

@@ -39,15 +39,21 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		if row.WorktreeID == "" {
 			continue
 		}
-		repositoryPath, err := e.repositoryLocalPath(ctx, row.RepositoryID)
+		repository, err := e.repo.GetRepository(ctx, row.RepositoryID)
 		if err != nil {
 			return nil, err
 		}
+		if repository == nil || strings.TrimSpace(repository.LocalPath) == "" {
+			return nil, fmt.Errorf("load repository %q for worktree recovery: local path is missing", row.RepositoryID)
+		}
+		repositoryPath := repository.LocalPath
+		cloneRelocation := managedCloneRelocationProof(e.repoCloner, repository, row.WorktreeSourceClonePath, row.WorktreeSourceCommonDir)
 		slots = append(slots, worktree.RecoverySlot{
-			WorktreeID:     row.WorktreeID,
-			RepositoryID:   row.RepositoryID,
-			BranchSlug:     row.BranchSlug,
-			RepositoryPath: repositoryPath,
+			WorktreeID:      row.WorktreeID,
+			RepositoryID:    row.RepositoryID,
+			BranchSlug:      row.BranchSlug,
+			RepositoryPath:  repositoryPath,
+			CloneRelocation: cloneRelocation,
 			Worktree: &worktree.Worktree{
 				ID:                row.WorktreeID,
 				TaskID:            env.TaskID,
@@ -56,6 +62,8 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 				RepositoryID:      row.RepositoryID,
 				BranchSlug:        row.BranchSlug,
 				RepositoryPath:    repositoryPath,
+				SourceClonePath:   row.WorktreeSourceClonePath,
+				SourceCommonDir:   row.WorktreeSourceCommonDir,
 				Path:              row.WorktreePath,
 				Branch:            row.WorktreeBranch,
 				BaseBranch:        session.BaseBranch,
@@ -96,10 +104,56 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 			row.WorktreeID = slot.Worktree.ID
 			row.WorktreePath = slot.Worktree.Path
 			row.WorktreeBranch = slot.Worktree.Branch
+			row.WorktreeSourceClonePath = slot.Worktree.SourceClonePath
+			row.WorktreeSourceCommonDir = slot.Worktree.SourceCommonDir
 			break
 		}
 	}
 	return admission, nil
+}
+
+// PreflightSessionWorktreeRecovery performs selected-environment recovery
+// before a recovery action mutates provider state such as its resume token.
+// The returned admission must remain held through LaunchSession.
+func (e *Executor) PreflightSessionWorktreeRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (*worktree.RecoveryAdmission, error) {
+	if e == nil || e.repo == nil || session == nil || taskID == "" || session.TaskID != taskID {
+		return nil, nil
+	}
+	env, err := e.resolveEnvironmentForAdmission(ctx, taskID, session.TaskEnvironmentID)
+	if err != nil || env == nil {
+		return nil, err
+	}
+	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType)
+}
+
+type managedClonePathResolver interface {
+	ManagedCloneRelocationPaths(
+		*models.Repository,
+	) (root, providerSource, ownerNameSource, destination string, ok bool, err error)
+}
+
+func managedCloneRelocationProof(cloner any, repository *models.Repository, recordedPath, recordedCommonDir string) *worktree.ManagedCloneRelocationProof {
+	paths, ok := cloner.(managedClonePathResolver)
+	if !ok || repository == nil {
+		return nil
+	}
+	root, source, ownerNameSource, destination, managed, err := paths.ManagedCloneRelocationPaths(repository)
+	if err != nil || !managed {
+		return nil
+	}
+	return &worktree.ManagedCloneRelocationProof{
+		ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
+		ExpectedDestinationPath: destination,
+		RecordedSourcePath:      recordedPath, RecordedSourceCommonDir: recordedCommonDir,
+		Identity: worktree.ManagedRepositoryIdentity{
+			Provider: repository.Provider, Host: repository.ProviderHost,
+			Owner: repository.ProviderOwner, Name: repository.ProviderName,
+		},
+	}
 }
 
 func (e *Executor) repositoryLocalPath(ctx context.Context, repositoryID string) (string, error) {

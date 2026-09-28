@@ -32,7 +32,7 @@ type exactExecutionClaimGuard interface {
 
 type exactExecutionOrchestrator interface {
 	EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
-	RecoverSession(context.Context, string, string, string) (*orchestrator.LaunchSessionResponse, error)
+	RecoverSession(context.Context, string, string, string, ...string) (*orchestrator.LaunchSessionResponse, error)
 	StopExecution(context.Context, string, string, bool) error
 }
 

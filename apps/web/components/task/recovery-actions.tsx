@@ -119,6 +119,7 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
     restore: IconFolder,
     runtime_retry: IconRefresh,
     resume_new_branch: IconGitBranch,
+    relocate_and_resume: IconFolder,
     resume: IconPlayerPlay,
   };
   const Icon = icons[kind];

@@ -53,7 +53,7 @@ func (f *exactExecutionOrchestratorFake) EnsureSession(_ context.Context, taskID
 	return &orchestrator.EnsureSessionResponse{Success: true, TaskID: taskID, SessionID: "session-claimed", State: "RUNNING"}, nil
 }
 
-func (f *exactExecutionOrchestratorFake) RecoverSession(context.Context, string, string, string) (*orchestrator.LaunchSessionResponse, error) {
+func (f *exactExecutionOrchestratorFake) RecoverSession(context.Context, string, string, string, ...string) (*orchestrator.LaunchSessionResponse, error) {
 	f.recoverCalls++
 	return &orchestrator.LaunchSessionResponse{Success: true, SessionID: "session-1", State: "RUNNING", AgentExecutionID: "next-execution"}, nil
 }

@@ -11,15 +11,21 @@ requirements:
   - REQ-COORDINATOR-COPILOT-001
   - REQ-COORDINATOR-COPILOT-002
   - REQ-COORDINATOR-COPILOT-003
+  - REQ-COORDINATOR-COPILOT-004
+  - REQ-COORDINATOR-COPILOT-005
+  - REQ-COORDINATOR-COPILOT-006
 ---
 
 # Coordinator copilot and tool surface System Design
 
 ## Purpose and boundaries
 
+Panel and Ask about this: [copilot panel](copilot-panel.md).
+
 The copilot is an ordinary Kandev session on an ephemeral task whose origin is
 `coordinator`. This design adds one task origin, one MCP surface, one mcpmode,
-one authorization guard and one popover shell. It reuses the session
+one authorization guard and one right-side panel shared with the board
+preview. It reuses the session
 lifecycle, the agentctl MCP server, the permission UI and the Quick Chat
 session view unchanged in behaviour for every other origin.
 
@@ -34,8 +40,9 @@ see [Residual](#residual-external-surface).
 | `REQ-COORDINATOR-COPILOT-001` | [Conversation task](#conversation-task), [Standing instructions](#standing-instructions) |
 | `REQ-COORDINATOR-COPILOT-002` | [Attended only](#attended-only) |
 | `REQ-COORDINATOR-COPILOT-003` | [Principal and mode](#principal-and-mode), [Tool surface](#tool-surface), [Fail closed](#fail-closed), [Permission policy](#permission-policy) |
-| `REQ-COORDINATOR-COPILOT-004` | [Copilot popover](copilot-popover.md#popover) |
-| `REQ-COORDINATOR-COPILOT-005` | [Copilot popover](copilot-popover.md#ask-about-this) |
+| `REQ-COORDINATOR-COPILOT-004` | [Copilot panel](copilot-panel.md#panel) |
+| `REQ-COORDINATOR-COPILOT-005` | [Copilot panel](copilot-panel.md#ask-about-this) |
+| `REQ-COORDINATOR-COPILOT-006` | [Copilot panel](copilot-panel.md#activity-display) |
 
 ## Conversation task
 
@@ -46,12 +53,17 @@ see [Residual](#residual-external-surface).
   tasks, through the task service's internal create call.
 - `POST /api/v1/workspaces/:id/coordinators/:cid/conversation`
   (`workspace.manage`) returns `{task_id, session_id, archive_state}`:
-  1. Load the coordinator (404) and check both profiles with `profileStatus`
+  1. Load the coordinator (404), keeping its `config_revision`
+     ([coordinators](coordinators.md#store)), and check both profiles with `profileStatus`
      (409 with the `coordinator_profile_unavailable` body of
      [coordinators](coordinators.md#validation) when the agent profile is
      `missing` or `passthrough`, or the executor profile is `missing`).
-  2. When `conversation_task_id` names a live, unarchived task, ensure its
-     session (step 6) and return it.
+  2. When `conversation_task_id` names a live, unarchived task whose primary
+     session is not terminal, ensure its session (step 6) and return it. When
+     that session is `FAILED`, `CANCELLED` or `COMPLETED` it rejects every
+     message, so the task is not reusable: archive it through the task
+     service's `ArchiveTask`, clear the reference with the same conditional
+     update as step 4, and continue at step 3 (`AC-COORDINATOR-COPILOT-001.10`).
   3. Otherwise create an ephemeral task through the task service's internal
      create call: origin `coordinator`, `IsEphemeral`, title
      `Coordinator: <name>`, no workflow and no workflow step, metadata
@@ -74,15 +86,20 @@ see [Residual](#residual-external-surface).
      asserts the prepared session's agent profile and executor profile equal
      the coordinator's, with a different workspace default agent profile set.
   4. Run `UPDATE coordinators SET conversation_task_id = ? WHERE id = ? AND
-     (conversation_task_id IS NULL OR conversation_task_id = ?)` with the stale
+     config_revision = ? AND (conversation_task_id IS NULL OR
+     conversation_task_id = ?)` with the revision read in step 1 and the stale
      value read in step 2. One row updated: go to step 6 with the new task.
-     Zero rows: re-read the coordinator row, delete the task just created
+     Zero rows: re-read the coordinator row. When its `config_revision`
+     differs from step 1's, a context or profile change was saved while this
+     open created its task under the earlier configuration, even if the
+     reference is NULL on both sides: delete the task just created and return
+     409 (`AC-COORDINATOR-COPILOT-001.11`). Otherwise delete the task just created
      through the task service and go to step 6 with the row's current task,
      so racing opens converge on one task with one session. When the re-read
      instead finds `conversation_task_id` NULL (a concurrent context or
      profile change cleared it after the stale value was read in step 2, so
      no other task exists to converge on), delete the task just created and
-     return 409; the popover's next open retries with the fresh row.
+     return 409; the panel's next open retries with the fresh row.
   5. When the re-read in step 4 finds no coordinator row (the coordinator was
      deleted between steps 1 and 4), the route deletes the task it created and
      returns 404. When a delete in step 4 or 5 fails, the route still answers
@@ -103,7 +120,7 @@ see [Residual](#residual-external-surface).
      [coordinators](coordinators.md#routes)) can archive exactly this task
      and clear the reference between step 2's read (the reuse path) or step
      4's commit (the create path) and this point, in which case they no
-     longer match: return 409, with no task, so the popover's next open
+     longer match: return 409, with no task, so the panel's next open
      retries with the fresh value, the same shape as step 4's own race.
      When the re-read finds no coordinator row (checked before that
      comparison, so a deleted coordinator is never answered 409; the
@@ -133,12 +150,13 @@ see [Residual](#residual-external-surface).
 | Event | Current conversation task | Earlier conversation tasks |
 | --- | --- | --- |
 | Context change ([coordinators](coordinators.md#routes)) | archived through the task service's `ArchiveTask`, which stops a running turn; the reference is cleared | unchanged (archived) |
+| Current session ended (`FAILED`, `CANCELLED`, `COMPLETED`) | archived by the next open (step 2); a new task is created | unchanged (archived) |
 | Coordinator deletion | deleted through the task service, which stops a running turn | deleted |
 | Workspace deletion | deleted with the workspace's tasks | deleted with the workspace's tasks |
 
 An archived conversation task is never returned by the route, never resolves
 to a coordinator (see [Principal and mode](#principal-and-mode)) and is never
-listed. The popover of an archived conversation shows the missing-conversation
+listed. The panel of an archived conversation shows the missing-conversation
 state and a new open creates the next task.
 
 ### Conversation cleanup
@@ -208,7 +226,7 @@ editing the stored user message.
   `wsAddMessage` handler and any HTTP create-message route call
   `CreateMessage`, so neither transport can bypass it. A reader's message is
   refused before any session action.
-- The popover passes `automaticRecovery={false}` to the Quick Chat session
+- The panel passes `automaticRecovery={false}` to the Quick Chat session
   view, which forwards it to `useSessionResumption` as the new option
   `skipAutomaticRecovery`. With it set, the hook sends no check, resume or
   restore request on mount, on reload or on reconnect; it still reads the
@@ -216,6 +234,16 @@ editing the stored user message.
   shows as running and the launcher shows busy (`AC-COORDINATOR-COPILOT-002.4`).
   The Retry action of the recovery feedback stays a manual action; it restores
   the execution and sends no message, so it starts no turn.
+- Because the hook sets its error and notice only on its automatic path, the
+  copilot does not rely on it for `AC-COORDINATOR-COPILOT-004.6`. The panel
+  reads the session state from the store and keeps a coordinator-local
+  recovery state: when the session is terminal or its start failed, it shows
+  the recovery feedback with an action that re-runs the conversation open,
+  which returns a fresh task and session (step 2). `useSessionResumption` is
+  unchanged, so the task page, mobile and Settings chat keep their behaviour.
+- While the session is running, the composer's send is disabled and Stop is
+  offered (`AC-COORDINATOR-COPILOT-004.10`), so a message never queues behind a
+  running turn.
 
 ## Principal and mode
 
@@ -276,7 +304,7 @@ editing the stored user message.
   recognise to `SurfaceKanbanTask`, the full task tool set. Adding
   `SurfaceCoordinator` to the `Surface` consts and to `Legacy` without also
   adding it here would leave the coordinator session on the full Kanban tool
-  set instead of the six-tool allowlist below, so this switch is a required
+  set instead of the phase-1 tool profile below, so this switch is a required
   touch point, not an incidental one.
 - **Wiring.** The shared hook call site in `registerCoordinatorRoutes`
   (`internal/backendapp/coordinator.go`) and the signature
@@ -329,7 +357,8 @@ editing the stored user message.
 ## Tool surface
 
 `registerCoordinatorTools` in `internal/mcp/server` registers exactly these
-six tools, reusing the existing handlers unchanged:
+seven tools, the phase-1 tool profile, reusing the existing handlers
+unchanged except for the new two:
 
 | Tool | Why |
 | --- | --- |
@@ -338,6 +367,7 @@ six tools, reusing the existing handlers unchanged:
 | `list_workflows_kandev` | target workflow of a proposal |
 | `list_workflow_steps_kandev` | target step of a proposal |
 | `list_repositories_kandev` | repository of a proposal |
+| `get_coordinator_item_kandev` | new; the record behind an Ask about this reference: `{kind: "proposal", id}` returns the coordinator's own proposal row (spec, status, error, timestamps), `{kind: "stall", id}` the stall record of that task ([needs-you](needs-you.md#stall-records)) |
 | `propose_task_kandev` | new; sends the `coordinator.propose_task` action |
 
 It registers no other tool: in particular no `list_related_tasks_kandev`, no
@@ -352,7 +382,8 @@ argument must equal `principal.WorkspaceID`; `list_workflows_kandev` and
 `list_repositories_kandev` take a client-supplied `workspace_id` as their only
 scope (`internal/mcp/server/config_handlers.go`), so without this check they
 would enumerate any workspace. Every task, workflow, step and repository id
-must resolve inside the coordinator's workspace. A call failing either check is
+must resolve inside the coordinator's workspace, and a proposal id must belong
+to the calling coordinator. A call failing either check is
 refused with an error naming the argument, before the handler runs, and
 returns no data.
 `coordinator.propose_task` from a principal that is not a coordinator is
@@ -381,7 +412,7 @@ and hands it to `configureExistingWorkspace` before `LaunchAgent` promotes
 the execution (`executor_execute.go`), so every fail-closed check runs again
 at promotion. Nothing carries prepare's decision forward; a coordinator
 whose flag, row or profile went away between prepare and promotion gets no
-agent (tested in task 03's Verification).
+agent.
 `WorkspaceInfo.McpMode` ([Permission policy](#permission-policy)) only sets
 the mode of the agentctl instance that the lifecycle builds on its own
 without an agent (workspace-only restore); it starts nothing. For a
@@ -409,13 +440,13 @@ phase-1 residual: a deleted task's sessions go with it, so the only such
 start is the existing transient case the fallback's own comment describes,
 and a readable coordinator-origin task still fails closed on the missing
 lookup. A test covers a coordinator start whose task row is absent, in both
-"no row" forms: an error and no instance, with the flag on. The popover follows the profile statuses of
+"no row" forms: an error and no instance, with the flag on. The panel follows the profile statuses of
 [coordinators](coordinators.md#validation): when the coordinator GET reports
 `agent_profile_status` or `executor_profile_status` other than `ok`, it does
 not call the conversation route and shows the matching messages in place of
 the composer. A 409 from the route
 (a profile deleted or switched to passthrough since the GET) carries both
-statuses in its `coordinator_profile_unavailable` body, and the popover shows
+statuses in its `coordinator_profile_unavailable` body, and the panel shows
 the messages built from them.
 
 ## Permission policy
@@ -453,7 +484,7 @@ the messages built from them.
   `mcp__kandev__list_tasks_kandev`) to server `kandev` and a tool that is one
   of the six names above, each compared as the full string, never by prefix.
   A name that does not parse is not auto-approved.
-- Every other request reaches the popover through the existing permission
+- Every other request reaches the panel through the existing permission
   message flow with Approve and Deny.
 
 ## Residual external surface
@@ -478,10 +509,6 @@ unattended turn to be steered this way. The
 [ADR](../../../decisions/2026-09-26-workspace-coordinator.md) records this
 risk as accepted and unmitigated for phase 1.
 
-## Popover and Ask about this
-
-The popover, its launcher, the open sequence and **Ask about this** are
-designed in [copilot popover](copilot-popover.md).
 
 ## Security
 

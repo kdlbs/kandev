@@ -6,15 +6,15 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 ---
 
 # Coordinator copilot and tool surface Requirements
 
 ## Overview
 
-A manager talks to a coordinator through a chat popover on the Coordinator
-screens. The conversation is an ordinary Kandev session on an ephemeral task.
+A manager talks to a coordinator through a chat panel on the right side of
+the Coordinator screens, laid out like the board's task preview panel. The conversation is an ordinary Kandev session on an ephemeral task.
 Phase 1 is attended: only a manager's message starts a turn. The coordinator's
 Kandev tools can read the workspace and propose tasks, and nothing else.
 
@@ -40,6 +40,13 @@ a screenshot and an acceptance criterion differ, the criterion governs. The
 prototype banner, the demo controls and the `P1` and `WC-` labels are mockup
 chrome, not product; the data is seeded fiction.
 
+The mockup draws the copilot as a floating popover. The copilot is a
+right-side panel instead (maintainer direction on PR #3981, 2026-09-28), so
+the screenshots are the reference for the copilot's content (header,
+transcript, context chip, composer and proposal card), not for its frame, size
+or position; [REQ-COORDINATOR-COPILOT-004](#req-coordinator-copilot-004-copilot-panel)
+governs those.
+
 - [`docs/plans/workspace-coordinator/assets/p1-02-ask-about-this.png`](../../../plans/workspace-coordinator/assets/p1-02-ask-about-this.png)
 - [`docs/plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png`](../../../plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png)
 
@@ -54,7 +61,7 @@ something needs me, so that I can decide without reading the board.
 
 Mockup:
 
-- [`docs/plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png`](../../../plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png): a conversation in the popover: the user message with its about tag and a Kandev read tool call.
+- [`docs/plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png`](../../../plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png): a conversation in the panel: the user message with its about tag and a Kandev read tool call.
 
 #### Acceptance criteria
 
@@ -86,11 +93,21 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-001.9:** When an open loses the race described in
   `AC-COORDINATOR-COPILOT-001.2` and finds no other task to converge on
   because a context or profile change cleared the reference concurrently, the
-  open shall return 409; the popover's next open retries with the fresh
+  open shall return 409; the panel's next open retries with the fresh
   value. The same applies when a context or profile change archives the task
   an open is about to return, whether that task was reused or just created,
   between the open reading it as current and the open's own response: the
   open shall return 409 rather than a task that is actually archived.
+- **AC-COORDINATOR-COPILOT-001.11:** When a context or profile change is saved
+  while an open is creating a conversation task, the open shall not attach a
+  task created under the earlier configuration: it shall delete that task and
+  return 409, even when the conversation reference is empty both before and
+  after the change.
+- **AC-COORDINATOR-COPILOT-001.10:** When the current conversation task's
+  session has ended (failed, cancelled or completed), so it can no longer
+  accept a message, the next open shall archive that task and return a new
+  conversation task, as after a context change; the open itself still starts
+  no agent.
 
 ### REQ-COORDINATOR-COPILOT-002: Attended turns
 
@@ -106,11 +123,15 @@ Mockup:
   shall not send a message to, resume or start the conversation session.
 - **AC-COORDINATOR-COPILOT-002.3:** When a reader sends a message to a
   conversation task, the system shall refuse it and start nothing.
-- **AC-COORDINATOR-COPILOT-002.4:** After a reload, the transcript shall
-  reappear and the popover and launcher shall show the session's current state:
-  a turn still running shows as running, an idle session shows as idle. The
+- **AC-COORDINATOR-COPILOT-002.4:** After a reload, the launcher shall show
+  the session's current state, and when the panel is opened the transcript
+  shall reappear with that state: a turn still running shows as running, an
+  idle session shows as idle. The
   reload shall send no resume or restore request; an idle agent starts again
-  only when the manager sends a message.
+  only when the manager sends a message. While the panel is closed, the
+  launcher's state shall come from reads that create nothing, never from an
+  open: when the coordinator has no current conversation task, or its state
+  cannot be read, the launcher shows idle.
 
 ### REQ-COORDINATOR-COPILOT-003: Kandev tool surface
 
@@ -122,12 +143,17 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-COPILOT-003.1:** A coordinator session shall have exactly
-  these six Kandev tools: `list_tasks_kandev`, `get_task_conversation_kandev`,
+- **AC-COORDINATOR-COPILOT-003.1:** In phase 1, a coordinator session shall
+  have exactly these seven Kandev tools, the phase-1 tool profile:
+  `list_tasks_kandev`, `get_task_conversation_kandev`,
   `list_workflows_kandev`, `list_workflow_steps_kandev`,
-  `list_repositories_kandev` and `propose_task_kandev`. It shall have no other
+  `list_repositories_kandev`, `get_coordinator_item_kandev` and
+  `propose_task_kandev`. It shall have no other
   Kandev tool, including no `list_related_tasks_kandev`, no plan read, no
-  user-question tool, no task-title tool and no plugin tool.
+  user-question tool, no task-title tool and no plugin tool. The profile is
+  phase 1's hardcoded policy, not a permanent contract: a later phase may give
+  a coordinator more tools, only through the coordinator permission model
+  recorded as out of scope in [coordinators](coordinators.md#out-of-scope).
 - **AC-COORDINATOR-COPILOT-003.2:** When a coordinator session calls any other
   Kandev tool or action, the system shall refuse it with an error naming the
   tool and change nothing.
@@ -160,42 +186,106 @@ Mockup:
   own tools shall appear in the copilot with Approve and Deny, as in any Kandev
   chat.
 
-### REQ-COORDINATOR-COPILOT-004: Copilot popover
+### REQ-COORDINATOR-COPILOT-004: Copilot panel
 
-**Intent:** The manager asks from where the list is.
+**Intent:** The manager asks beside the list, the way a board card is
+previewed beside the board.
 
 Mockup:
 
-- [`docs/plans/workspace-coordinator/assets/p1-02-ask-about-this.png`](../../../plans/workspace-coordinator/assets/p1-02-ask-about-this.png): the popover over Needs you, item actions left uncovered.
+- [`docs/plans/workspace-coordinator/assets/p1-02-ask-about-this.png`](../../../plans/workspace-coordinator/assets/p1-02-ask-about-this.png): the copilot's header, transcript and composer over Needs you (drawn as a popover; the panel frame is set by the criteria below).
 
 #### Acceptance criteria
 
 - **AC-COORDINATOR-COPILOT-004.1:** On the Coordinator screens, managers shall
-  see a launcher at the bottom right that opens a 420 by 550 pixel popover
-  titled "Coordinator: <name>" with Close and no Expand; readers shall see no
-  launcher.
-- **AC-COORDINATOR-COPILOT-004.2:** The launcher shall show a busy state while the
-  conversation's agent is running, whether or not the popover is open.
-- **AC-COORDINATOR-COPILOT-004.3:** The popover shall show the transcript and a
+  see a launcher at the bottom right while the panel is closed. It opens a
+  panel on the right side of the content area, the full height of the content
+  area, titled "Coordinator: <name>" with Close and no Expand or maximize
+  action. While the panel is open the launcher is hidden. Readers shall see no
+  launcher and shall have no way to open the panel.
+- **AC-COORDINATOR-COPILOT-004.2:** While the conversation's agent is running,
+  the launcher shall show a busy state when the panel is closed, and the panel
+  header shall show a busy state when it is open.
+- **AC-COORDINATOR-COPILOT-004.3:** The panel shall show the transcript and a
   composer without a mode or model selector.
-- **AC-COORDINATOR-COPILOT-004.4:** When the conversation is empty, the popover
+- **AC-COORDINATOR-COPILOT-004.4:** When the conversation is empty, the panel
   shall show "Ask why something is on the list. I read the same facts the list
-  is derived from; the only change I can make is to propose a task, which you
-  approve." and one "Try asking" suggestion that fills the composer without
+  is derived from. Through Kandev I can only propose a task, and it waits for
+  your decision." and one "Try asking" suggestion that fills the composer without
   sending.
-- **AC-COORDINATOR-COPILOT-004.5:** When a turn is running and the popover
+- **AC-COORDINATOR-COPILOT-004.5:** When a turn is running and the panel
   closes, the turn shall continue and the launcher shall show it is busy; the
   composer's Stop shall end the turn.
-- **AC-COORDINATOR-COPILOT-004.6:** When the session cannot start or resume, the
-  popover shall show Kandev's session recovery feedback and the lists shall
-  keep working.
-- **AC-COORDINATOR-COPILOT-004.7:** Escape shall close the popover and return
-  focus to the launcher.
-- **AC-COORDINATOR-COPILOT-004.8:** At a 1200px-wide viewport the open popover
-  shall not cover the item actions; at 390px it shall fill the width without
+- **AC-COORDINATOR-COPILOT-004.6:** When the session cannot start, or has
+  ended, the panel shall show Kandev's session recovery feedback with an
+  action that opens the conversation again (which returns a fresh session under
+  `AC-COORDINATOR-COPILOT-001.10`), and the lists shall keep working. This
+  state is the copilot's own; the task page, mobile and Settings chat recovery
+  are unchanged.
+- **AC-COORDINATOR-COPILOT-004.7:** Escape pressed while focus is inside the
+  panel shall close the panel and return focus to the launcher. When the panel
+  floats (`AC-COORDINATOR-COPILOT-004.8`), a click on the backdrop shall also
+  close it and return focus to the launcher.
+- **AC-COORDINATOR-COPILOT-004.8:** The panel shall lay out as the board's
+  task preview panel does. When the list keeps at least half of the content
+  area's width beside the panel, the panel sits beside the list and the list
+  narrows to the remaining width, so the panel covers no part of the list;
+  otherwise the panel floats over the list from the right edge above a
+  backdrop, and the list keeps its width. At a 1440px-wide viewport with the
+  sidebar expanded and the default panel width, the panel sits beside the list
+  and covers no item action. At the mobile breakpoint (390px included) the
+  panel fills the screen width and height with no resize handle and no
   horizontal scroll.
 - **AC-COORDINATOR-COPILOT-004.9:** Configuration chat on `/settings` shall
   behave as before, Expand included.
+- **AC-COORDINATOR-COPILOT-004.10:** While a turn is running, the composer
+  shall not send a message; it offers Stop instead.
+- **AC-COORDINATOR-COPILOT-004.11:** Outside the mobile breakpoint, dragging
+  the panel's left edge shall resize it. The first opening in a browser uses
+  500px; the width shall never be narrower than 320px (380px at a coarse
+  pointer) nor wider than 95% of the viewport width. The chosen width shall
+  persist in that browser across reloads and coordinators, separately from the
+  board preview panel's width.
+- **AC-COORDINATOR-COPILOT-004.12:** The panel, its chip and its composer draft
+  shall stay as they are when the manager switches between the same
+  coordinator's Needs you and Queue. Leaving that coordinator's screens (to
+  another coordinator or any other page) shall close the panel and clear the
+  chip and the draft. Closing the panel (Close, Escape or the backdrop) and
+  opening it again on the same coordinator's screens shall keep the chip and
+  the draft. A reload shall leave the panel closed with no chip and no draft.
+- **AC-COORDINATOR-COPILOT-004.13:** The board's task preview panel shall
+  behave as before: the same layout rule, resize bounds, persisted width,
+  Escape and backdrop close, and maximize action.
+
+### REQ-COORDINATOR-COPILOT-006: Activity display
+
+**Intent:** The manager sees that the coordinator is working, not how Kandev
+runs it.
+
+This requirement changes mockup `p1-05`, which shows each Kandev tool call as
+its own row. It follows the pattern of assistant chats aimed at non-developers:
+calm by default, detail on demand.
+
+#### Acceptance criteria
+
+- **AC-COORDINATOR-COPILOT-006.1:** While a turn is running, the panel shall
+  show one status line above the composer that updates in place with a plain
+  verb for the current tool (for example "Reading tasks", "Checking
+  workflows", "Drafting a proposal") and the elapsed seconds. Tool calls shall
+  not render as one row each while the turn runs.
+- **AC-COORDINATOR-COPILOT-006.2:** When a turn ends, its tool calls shall
+  collapse into one chip naming how many were made and how long the turn took,
+  collapsed by default; expanding it shows one row per tool call with its
+  existing detail.
+- **AC-COORDINATOR-COPILOT-006.3:** A `propose_task_kandev` call shall never be
+  collapsed: its proposal card always renders in full.
+- **AC-COORDINATOR-COPILOT-006.4:** Once the agent has started successfully, the
+  session start-up rows (environment preparation and agent start) shall be
+  hidden; while the agent is still starting, or when it failed to start, they
+  shall stay visible.
+- **AC-COORDINATOR-COPILOT-006.5:** The activity display applies to the
+  coordinator panel only; Settings configuration chat, Quick Chat and the
+  task page shall render as before.
 
 ### REQ-COORDINATOR-COPILOT-005: Ask about this
 
@@ -208,15 +298,25 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-COPILOT-005.1:** When a manager chooses **Ask about this** on
-  an item, the popover shall open with a removable context chip naming the item
+  an item, the panel shall open with a removable context chip naming the item
   and "Why is <id> here?" in the composer, focused and not sent; `<id>` is the
   card identifier, or the proposal title for a proposal without a source task.
+  The chip shall also carry the item's stable reference: its kind (`task`,
+  `proposal` or `stall`) and its id.
 - **AC-COORDINATOR-COPILOT-005.2:** While the chip is set, each message sent
-  shall be stored with the prefix "About <id>: ", and the composer shall show
-  `your message is sent as "About <id>: ..."`.
+  shall be stored with the prefix "About <id> [<kind>:<ref>]: ", where
+  `<ref>` is the proposal id for a proposal and the task id otherwise, and the
+  composer shall show `your message is sent as "About <id>: ..."`.
 - **AC-COORDINATOR-COPILOT-005.3:** In the coordinator's transcript, a message
-  beginning "About <id>: " shall render as the text without the prefix plus an
-  "about <id>" tag; the stored message shall keep the prefix.
+  beginning "About <id> [<kind>:<ref>]: " (or the reference-less
+  "About <id>: " of earlier messages) shall render as the text without the
+  prefix plus an "about <id>" tag; the stored message shall keep the prefix.
+- **AC-COORDINATOR-COPILOT-005.6:** When a coordinator session calls
+  `get_coordinator_item_kandev` with a `proposal` reference, it shall receive
+  that proposal of its own coordinator (spec, status, error and timestamps);
+  with a `stall` reference, the stall record of that task in its workspace.
+  A reference to another coordinator's proposal or another workspace's task
+  shall be refused like any foreign id (`AC-COORDINATOR-COPILOT-003.3`).
 - **AC-COORDINATOR-COPILOT-005.4:** When the chip is removed, the next message
   shall be sent without a prefix.
 - **AC-COORDINATOR-COPILOT-005.5:** Choosing **Ask about this** on another item

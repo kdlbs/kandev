@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-28
 requirements:
   - REQ-COORDINATOR-PROPOSALS-001
   - REQ-COORDINATOR-PROPOSALS-002
@@ -142,7 +142,11 @@ There is no deduplication key.
    When the step is eligible, create the task through the task service with the frozen spec, external
    id `coordinator-proposal:<id>` (with `AllowReservedExternalID`), origin the
    regular board origin, and no `start_agent`, no `prepare_session` and no
-   `auto_start_on_create` metadata marker. Branch on the returned
+   `auto_start_on_create` metadata marker. The request sets no agent
+   profile: the coordinator's profile belongs to its conversation, and the
+   task resolves its agent at start through the orchestrator's
+   `resolveTaskAgentProfile` (step, workflow, workspace default) like any
+   board task (`AC-COORDINATOR-PROPOSALS-002.13`). Branch on the returned
    `CreateTaskResult.Outcome`:
    - `CreateTaskOutcomeCreated`: call `Service.SettleExternalID(ctx,
      task.ID, "coordinator-proposal:<id>")`, as the MCP and HTTP create
@@ -374,10 +378,9 @@ winner's row. A racing approve and reject cannot both succeed.
 
 ## Recovery
 
-Two callers run recovery on an `approving` row: the startup pass and an
-approve request. A proposal read, single or list, never writes; it always
-returns rows as stored. Nothing else recovers a row, and no timer runs
-recovery while the process is up.
+Three callers run recovery on an `approving` row: the startup pass, a sweep,
+and an approve request. A proposal read, single or list, never writes; it
+always returns rows as stored.
 
 - **Approve request.** A claim is stale after two minutes. An approve of an
   `approving` row whose claim is stale, with no edits, takes the
@@ -412,10 +415,18 @@ recovery while the process is up.
     logged at warn with the proposal id, and the pass continues with the
     next row. The row is left as the stale re-claim's error rule says.
   - The pass stops early when its context is cancelled (shutdown).
+- **Sweep.** The startup pass covers a claim left by a stopped process; a
+  claim that goes stale while the process keeps running (its approve request
+  died after the claim) has no other caller until a manager acts, and its card
+  showed no action. The proposal service therefore runs the same per-row
+  recovery once a minute while `features.coordinator` is on, with
+  `cutoff = now - 2 minutes`, so such a claim is recovered within a minute
+  with no manager action (`AC-COORDINATOR-PROPOSALS-002.14`). The card of a
+  row whose claim is stale shows **Retry**, which sends an approve without
+  edits and so takes the approve path (`AC-COORDINATOR-PROPOSALS-005.10`).
 
-Both callers use the same stale re-claim `UPDATE`, which refreshes
-`claimed_at` and sets a new `claim_token`. When a startup pass and an approve
-race on one row, exactly one wins, and a slow original claimer's completion
+All three callers use the same stale re-claim `UPDATE`, which refreshes
+`claimed_at` and sets a new `claim_token`. When two of them race on one row, exactly one wins, and a slow original claimer's completion
 no longer matches the token. The winner then follows the stale re-claim's
 order. First it looks the task up by the reserved external id; a found task
 completes the approval with it, whatever the step's eligibility is now. Only
@@ -457,8 +468,8 @@ The prefix is enforced in the task service, so every entry point inherits it:
 
 Routes live under `/api/v1/workspaces/:id/`. A proposal of another
 coordinator or workspace is 404. Both reads need only `workspace.read` and
-never write: stale-claim recovery runs only in the startup pass and on
-approve ([Recovery](#recovery)). The coordinator list response carries
+never write: stale-claim recovery runs only in the startup pass, the sweep
+and on approve ([Recovery](#recovery)). The coordinator list response carries
 `open_proposals` per coordinator for the sidebar badge.
 
 ## Events
@@ -516,11 +527,21 @@ ever having been listed.
 - The decision toast reads the item count from the classification of
   [needs-you](needs-you.md#classification) after the store update.
 - Readers get the card without actions.
+- An `approving` card compares `claimed_at` with the two-minute threshold: not
+  stale shows "Approval in progress. Edits are locked."; stale shows
+  "Approval did not finish." with **Retry** for managers.
 
 ## Security
 
 - Decisions authorise at the backend by workspace scope; the principal of the
   MCP action is resolved server-side.
+- Approve and reject are not on the coordinator's MCP surface, and the MCP
+  guard refuses both from a coordinator principal and from a principal it
+  cannot resolve (`AC-COORDINATOR-PROPOSALS-002.15`). The REST routes cannot
+  tell a person's browser from an agent's shell while `features.auth` is
+  off; that residual is recorded in the
+  [ADR](../../../decisions/2026-09-26-workspace-coordinator.md#residual-risk-the-agents-own-tools),
+  and no user-facing copy claims more than the guard enforces.
 - A proposal read never writes, so no request, from any site, can trigger
   recovery or otherwise mutate a proposal through a read route.
 - Spec strings are untrusted and rendered as text.
