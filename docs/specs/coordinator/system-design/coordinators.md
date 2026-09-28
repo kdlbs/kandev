@@ -283,7 +283,10 @@ validator (this document, [permissions](permissions.md#policy-value),
 `policy_revision = 1` and `watch_scope`, its watch rows, and the goal with
 its baseline in one transaction (`008.4`). Any validation error is 400
 naming the field with its step (`{"step": "watches", "field": ...}`), and
-nothing is stored. The phase-1 `POST .../coordinators` stays for phase 1.
+nothing is stored. The route has no idempotency key, like the phase-1
+create; the page disables **Finish** while the request is in flight, so a
+double click creates one coordinator. The phase-1 `POST .../coordinators`
+stays for phase 1.
 
 The web page `settings/workspace/[id]/coordinators/new` renders
 `CoordinatorSetup` while phase 2 is on:

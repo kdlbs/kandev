@@ -296,6 +296,10 @@ too when `starts_agent` is true) is `denied`, it returns 409
 `{"error":"policy_denied","action":...}` and writes nothing (`002.6`). Reject
 has no such check. The card shows "Its May do settings no longer allow
 this" with Reject only.
+Approve does not re-check Watches: Watches bounds what the coordinator reads
+and proposes, so a proposal made while its workflow was watched stays
+approvable after the workflow leaves scope, and the kind's executor still
+checks the target at approval.
 
 ## Auto-approval
 

@@ -161,7 +161,7 @@ flag is on, fed by `GET goal` and refreshed on `coordinator.updated`:
 | State | Note |
 | --- | --- |
 | no active goal, no met goal | "No goal is set, so this list is ordered by urgency alone." + **Set a goal** (managers) |
-| active | "<name>" + "Due <date>" (or "Overdue since <date>" when `due_on` is before today in the viewer's time zone) + "N of M criteria met" |
+| active | "<name>" + "Due <date>" (or "Overdue since <date>" when `due_on` is before today in the viewer's time zone) + "N of M criteria met" (omitted when the goal has no criteria) |
 | no active, last met | "<name> was met on <date>." + **Set the next goal** (managers) |
 
 **Set a goal** and **Set the next goal** open the coordinator page at the
