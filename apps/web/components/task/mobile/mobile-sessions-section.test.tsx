@@ -30,6 +30,7 @@ vi.mock("@/components/state-provider", () => ({
     getState: () => ({
       taskSessionsByTask: {
         itemsByTaskId: { [TASK_ID]: mocks.sessions },
+        loadingByTaskId: { [TASK_ID]: false },
         errorByTaskId: {},
       },
     }),
@@ -38,6 +39,11 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       features: { dynamicAgentRouting: false },
       tasks: { activeSessionId: mocks.activeSessionId },
+      taskSessionsByTask: {
+        itemsByTaskId: { [TASK_ID]: mocks.sessions },
+        loadingByTaskId: { [TASK_ID]: false },
+        errorByTaskId: {},
+      },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
       repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
