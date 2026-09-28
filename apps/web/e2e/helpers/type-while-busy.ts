@@ -35,6 +35,7 @@ export async function typeWhileBusy(page: Page, editor: Locator, text: string): 
   // the composer, so wait for the editable state before attempting interaction.
   await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
   for (let attempt = 0; attempt < 3; attempt++) {
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 5_000 });
     const box = await editor.boundingBox();
     if (!box) throw new Error("Editor bounding box not found");
     await page.mouse.click(box.x + 20, box.y + box.height / 2);
