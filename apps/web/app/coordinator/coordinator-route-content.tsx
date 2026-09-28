@@ -115,6 +115,7 @@ export function CoordinatorRouteContent({
               classification={attention.classification}
               workspaceId={workspaceId}
               coordinatorId={resolved.coordinator.id}
+              view={view}
             />
           </div>
           {children({
