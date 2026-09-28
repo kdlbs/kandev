@@ -516,7 +516,8 @@ func nextUnclassifiedFailureCount(
 	count := int64(1)
 	if previous.valid() && previous.LogicalProfileID == profile.ID &&
 		previous.ExecutionProfileID == candidateID && previous.ProfileVersion == profile.Version &&
-		previous.StepID == evidence.StepID && previous.Fingerprint == fingerprint &&
+		previous.StepID == evidence.StepID && previous.StepUpdatedAt.Equal(evidence.StepUpdatedAt) &&
+		previous.Fingerprint == fingerprint &&
 		previous.Origin == evidence.Origin && previous.Phase == evidence.Phase &&
 		previous.LastRouteGeneration <= generation {
 		count = previous.Count + 1
@@ -537,8 +538,9 @@ func newUnclassifiedStreak(
 ) *UnclassifiedStreak {
 	return &UnclassifiedStreak{
 		Version: 1, LogicalProfileID: profile.ID, ExecutionProfileID: candidateID,
-		ProfileVersion: profile.Version, StepID: evidence.StepID, Fingerprint: fingerprint,
-		Origin: evidence.Origin, Phase: evidence.Phase, Count: count,
+		ProfileVersion: profile.Version, StepID: evidence.StepID, StepUpdatedAt: evidence.StepUpdatedAt,
+		Fingerprint: fingerprint,
+		Origin:      evidence.Origin, Phase: evidence.Phase, Count: count,
 		LastAttemptID: evidence.AttemptID, LastRouteGeneration: generation,
 	}
 }

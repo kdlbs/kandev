@@ -35,6 +35,8 @@ type promptAttemptEvidence struct {
 	providerDiagnosticText string
 	effect                 bool
 	dynamic                bool
+	streakResetInProgress  bool
+	streakResetComplete    bool
 }
 
 // normalizeDiagnosticText applies streams.SanitizeProviderMessage so a raw
@@ -475,6 +477,17 @@ func (s *Service) clearDynamicUnclassifiedStreakForEvent(
 	if s.repo == nil || s.profileExecutionResolver == nil || !s.currentUnclassifiedStreakEvent(data, requireLocalEvidence) {
 		return
 	}
+	attempt, ok := s.claimUnclassifiedStreakReset(data, requireLocalEvidence)
+	if !ok {
+		return
+	}
+	resetComplete := false
+	defer func() {
+		attempt.mu.Lock()
+		attempt.streakResetInProgress = false
+		attempt.streakResetComplete = resetComplete
+		attempt.mu.Unlock()
+	}()
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil || !validUnclassifiedStreakEventSession(session, data) {
 		return
@@ -482,7 +495,26 @@ func (s *Service) clearDynamicUnclassifiedStreakForEvent(
 	if !s.taskAllowsUnclassifiedStreakClear(ctx, data.TaskID) {
 		return
 	}
-	s.clearUnclassifiedStreak(ctx, session, false, "current activity")
+	resetComplete = s.clearUnclassifiedStreak(ctx, session, false, "current activity")
+}
+
+func (s *Service) claimUnclassifiedStreakReset(
+	data watcher.AgentEventData,
+	requireLocalEvidence bool,
+) (*promptAttemptEvidence, bool) {
+	attempt, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		return nil, false
+	}
+	attempt.mu.Lock()
+	defer attempt.mu.Unlock()
+	if !attempt.promptIdentityMatchesForClearLocked(data.AgentExecutionID, data.PromptGeneration) ||
+		requireLocalEvidence && (!attempt.dynamic || !attempt.evidenceKnown) ||
+		attempt.streakResetInProgress || attempt.streakResetComplete {
+		return nil, false
+	}
+	attempt.streakResetInProgress = true
+	return attempt, true
 }
 
 func (s *Service) currentUnclassifiedStreakEvent(data watcher.AgentEventData, requireLocalEvidence bool) bool {
@@ -546,7 +578,7 @@ func (s *Service) clearUnclassifiedStreak(
 	session *models.TaskSession,
 	startup bool,
 	reason string,
-) {
+) bool {
 	var err error
 	if startup {
 		err = s.profileExecutionResolver.ClearUnclassifiedStartupStreak(
@@ -557,8 +589,13 @@ func (s *Service) clearUnclassifiedStreak(
 			ctx, session.ID, session.RouteGeneration, session.ExecutionProfileID,
 		)
 	}
-	if err != nil && !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
+	if errors.Is(err, dynamicruntime.ErrStaleGeneration) || errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+		return true
+	}
+	if err != nil {
 		s.logger.Debug("could not clear dynamic unclassified streak after "+reason,
 			zap.String("session_id", session.ID), zap.Error(err))
+		return false
 	}
+	return true
 }

@@ -287,10 +287,12 @@ the final **Skip candidate** or **Stop for manual recovery** outcome. Kandev
 uses a trusted future reset date at most once for a candidate and class when it
 fits the configured maximum. It then applies the retry schedule and outcome.
 Unclassified, task, repository, permission, tool, and ambiguous mid-turn
-failures stop for manual recovery so Kandev does not repeat work. The error
-catalogue is versioned and can grow as provider signals become known; an
-ambiguous new signal fails closed. A future classifier may improve catalogue
-coverage, but no model is called to classify errors today.
+failures stop for manual recovery by default. The optional repeated-failure
+policy below is a narrow exception for eligible, current, effect-safe
+unclassified failures. The error catalogue is versioned and can grow as
+provider signals become known; an ambiguous new signal fails closed. A future
+classifier may improve catalogue coverage, but no model is called to classify
+errors today.
 
 Dynamic profiles also have an API-only option for repeated, safe unclassified
 failures. It is off by default and is not exposed in the profile editor. In a

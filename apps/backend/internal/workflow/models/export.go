@@ -114,12 +114,13 @@ func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
 	type plainStepPortable StepPortable
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
-			if node.Content[i].Value != "complete_task_on_enter" {
+			field := node.Content[i].Value
+			if field != "complete_task_on_enter" && field != "disable_unclassified_fallback" {
 				continue
 			}
 			valueNode := node.Content[i+1]
 			if valueNode.Tag == "!!null" || valueNode.ShortTag() == "!!null" {
-				return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+				return fmt.Errorf("%s must be a boolean, not null", field)
 			}
 		}
 	}

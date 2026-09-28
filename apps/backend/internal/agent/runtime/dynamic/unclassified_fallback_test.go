@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
@@ -227,6 +228,32 @@ func TestUnclassifiedStreakResetMatrix(t *testing.T) {
 		changedStep.StepID = "step-2"
 		if _, err := engine.ApplyUnclassifiedFailureContext(context.Background(), decision.SessionID, profile, retry.Generation, "candidate-a", failure, changedStep); !errors.Is(err, ErrRecoveryPending) {
 			t.Fatalf("failure after step change: %v", err)
+		}
+		assertUnclassifiedCount(t, engine, decision.SessionID, 1)
+	})
+
+	t.Run("step revision change resets count", func(t *testing.T) {
+		engine, profile, decision := startUnclassifiedRoute(t, unclassifiedTestProfile(3))
+		failure := unclassifiedPromptFailure()
+		first := safePromptEvidence(decision.Generation, "prompt-1", "same diagnostic")
+		first.StepUpdatedAt = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+		if _, err := engine.ApplyUnclassifiedFailureContext(context.Background(), decision.SessionID, profile, decision.Generation, "candidate-a", failure, first); !errors.Is(err, ErrRecoveryPending) {
+			t.Fatalf("first failure: %v", err)
+		}
+		state, _ := engine.State(decision.SessionID)
+		retry, err := engine.SelectContextWithPreference(context.Background(), decision.SessionID, profile, state.Generation, "", "candidate-a")
+		if err != nil {
+			t.Fatalf("manual retry: %v", err)
+		}
+		if err := engine.MarkActive(context.Background(), decision.SessionID, retry.Generation); err != nil {
+			t.Fatalf("mark active: %v", err)
+		}
+		// The veto was enabled and then disabled between failures. The current
+		// step is eligible again, but its changed revision starts a fresh streak.
+		revisedStep := safePromptEvidence(retry.Generation, "prompt-2", "same diagnostic")
+		revisedStep.StepUpdatedAt = first.StepUpdatedAt.Add(time.Second)
+		if _, err := engine.ApplyUnclassifiedFailureContext(context.Background(), decision.SessionID, profile, retry.Generation, "candidate-a", failure, revisedStep); !errors.Is(err, ErrRecoveryPending) {
+			t.Fatalf("failure after step revision change: %v", err)
 		}
 		assertUnclassifiedCount(t, engine, decision.SessionID, 1)
 	})

@@ -36,10 +36,12 @@ func (e *ManagedRuntimeStartupError) Unwrap() error {
 // session-initialization boundary. Preparation, executor, and task errors must
 // not be wrapped with this type.
 type AgentStartupFailure struct {
-	Phase      Phase
-	ProviderID string
-	Diagnostic string
-	Cause      error
+	Phase                      Phase
+	ProviderID                 string
+	Diagnostic                 string
+	DiagnosticSource           string
+	DiagnosticIdentityComplete bool
+	Cause                      error
 }
 
 func (e *AgentStartupFailure) Error() string {

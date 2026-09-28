@@ -127,6 +127,7 @@ func TestUnclassifiedWorkflowContextFencedBeforeDetachedLaunch(t *testing.T) {
 	ctx := context.Background()
 	fixture := newUnclassifiedWorkflowFenceFixture(t, false, true)
 	defer fixture.svc.stopDynamicSuccessorWorkers()
+	fixture.svc.lastTurnPrompt.Store(fixture.sessionID, capturedPrompt{text: "retry the task"})
 
 	if handled := fixture.svc.routeDynamicAgentFailure(ctx, fixture.event("execution-one", 1), fixture.failure()); handled {
 		t.Fatal("first matching failure selected a successor below threshold")
@@ -192,6 +193,8 @@ type barrierUnclassifiedRoutePersistence struct {
 	releaseLaunch   chan struct{}
 	decisionOnce    sync.Once
 	launchOnce      sync.Once
+	snapshotCalls   int
+	snapshotError   error
 }
 
 func (p *barrierUnclassifiedRoutePersistence) RecordUnclassifiedRouteDecision(
@@ -217,6 +220,22 @@ func (p *barrierUnclassifiedRoutePersistence) ClaimUnclassifiedFallbackLaunch(
 		<-p.releaseLaunch
 	}
 	return p.Repository.ClaimUnclassifiedFallbackLaunch(ctx, decision, evidence)
+}
+
+func (p *barrierUnclassifiedRoutePersistence) ClaimRouteStateFromSnapshot(
+	ctx context.Context,
+	expectedGeneration int64,
+	expectedStatus string,
+	expectedPolicyState string,
+	state dynamicruntime.RouteState,
+) (bool, error) {
+	p.snapshotCalls++
+	if p.snapshotError != nil {
+		return false, p.snapshotError
+	}
+	return p.Repository.ClaimRouteStateFromSnapshot(
+		ctx, expectedGeneration, expectedStatus, expectedPolicyState, state,
+	)
 }
 
 func newUnclassifiedWorkflowFenceFixture(
@@ -348,6 +367,24 @@ func (f unclassifiedWorkflowFenceFixture) resume(t *testing.T, executionID strin
 	}
 }
 
+func (f unclassifiedWorkflowFenceFixture) persistRunningExecution(t *testing.T, executionID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := f.repo.DB().ExecContext(f.ctx, `
+		INSERT INTO executors_running (
+			id, session_id, task_id, execution_profile_id, executor_id, status, agent_execution_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			execution_profile_id = excluded.execution_profile_id,
+			agent_execution_id = excluded.agent_execution_id,
+			status = excluded.status,
+			updated_at = excluded.updated_at
+	`, "running-"+executionID, f.sessionID, f.taskID, "candidate-a",
+		"executor-test", "running", executionID, now, now); err != nil {
+		t.Fatalf("persist resumed execution: %v", err)
+	}
+}
+
 func (f unclassifiedWorkflowFenceFixture) setWorkflowVeto(t *testing.T, disabled bool) {
 	t.Helper()
 	step, err := f.workflow.GetStep(f.ctx, "step-1")
@@ -409,8 +446,9 @@ func TestUnclassifiedStartupAdmission(t *testing.T) {
 		DynamicRouteAttempt: true, EvidenceKnown: true,
 	}
 	evidence := svc.unclassifiedStartupEvidence(ctx, data, mustTaskSession(t, repo, ctx, sessionID), attempt, startup)
-	if !evidence.TaskScope || !evidence.StepKnown || !evidence.CurrentAttempt || !evidence.DiagnosticComplete || evidence.Phase != routingerr.PhaseSessionInit {
-		t.Fatalf("trusted startup evidence = %+v", evidence)
+	if !evidence.TaskScope || !evidence.StepKnown || !evidence.CurrentAttempt || evidence.DiagnosticComplete ||
+		evidence.Phase != routingerr.PhaseSessionInit {
+		t.Fatalf("generic startup evidence = %+v, want incomplete diagnostic identity", evidence)
 	}
 	failure := classifyTrustedAgentStartupFailure(startup)
 	if failure.Code != routingerr.CodeAgentRuntime || failure.Class != routingerr.ClassUnclassified {
@@ -420,7 +458,27 @@ func TestUnclassifiedStartupAdmission(t *testing.T) {
 		t.Fatalf("startup classification widened global routing flags: %+v", failure)
 	}
 	if _, err := engine.ApplyUnclassifiedFailureContext(ctx, sessionID, profile, decision.Generation, "candidate-a", failure, evidence); !errors.Is(err, dynamicruntime.ErrRecoveryPending) {
-		t.Fatalf("trusted startup failure error = %v, want manual recovery before threshold", err)
+		t.Fatalf("generic startup failure error = %v, want manual recovery", err)
+	}
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState after generic startup failure: %v", err)
+	}
+	var policyState dynamicruntime.PolicyState
+	if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
+		t.Fatalf("decode policy state: %v", err)
+	}
+	if policyState.Unclassified != nil {
+		t.Fatalf("generic startup error created a streak: %+v", policyState.Unclassified)
+	}
+
+	startup.DiagnosticSource = streams.ProviderErrorSourceOpenCodeACP
+	startup.DiagnosticIdentityComplete = true
+	trustedEvidence := svc.unclassifiedStartupEvidence(
+		ctx, data, mustTaskSession(t, repo, ctx, sessionID), attempt, startup,
+	)
+	if !trustedEvidence.DiagnosticComplete {
+		t.Fatalf("explicit provider diagnostic attestation was not accepted: %+v", trustedEvidence)
 	}
 
 	if _, ok := dynamicStartupAttemptFromContext(context.Background()); ok {

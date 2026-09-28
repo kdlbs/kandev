@@ -3024,6 +3024,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	s.logger.Debug("resuming task session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
+	// Route actions claim ownership before they enter the lifecycle lock. Keep
+	// the same order so recovery cannot pass a route claim while using a stale
+	// session projection.
+	releaseRouteOperationLock := s.acquireSessionRouteOperationLock(sessionID)
+	defer releaseRouteOperationLock()
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 
@@ -3033,6 +3038,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
+	}
+	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
+		return nil, &sessionOpenRecoveryBlockedError{reason: autoResumeBlockedDynamicRoute}
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
 		return nil, err
@@ -4350,6 +4358,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 const (
 	autoResumeBlockedLaunchQueued         = "launch_queued"
 	autoResumeBlockedOwnershipUnavailable = "ownership_unavailable"
+	autoResumeBlockedDynamicRoute         = "dynamic_route_pending"
 )
 
 func (s *Service) sessionOpenRecoveryBlockReason(
@@ -4382,6 +4391,9 @@ func (s *Service) autoResumeEligibility(
 ) (bool, string) {
 	if session == nil || task == nil {
 		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
+		return false, autoResumeBlockedDynamicRoute
 	}
 	raw, present := task.Metadata[models.MetaKeyDeferredLaunch]
 	if !present || raw == nil {

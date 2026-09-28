@@ -445,7 +445,10 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			failure.ErrorMessage = payload.Data.Text
 		}
 		failure = s.withPromptAttemptEvidence(failure)
-		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
+		result := s.routeDynamicAgentFailureWithEvidence(
+			ctx, failure, classifyKanbanFailure(failure), nil, true,
+		)
+		if result.handled && !result.manualRecovery {
 			return
 		}
 	}

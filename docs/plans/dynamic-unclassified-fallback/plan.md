@@ -13,7 +13,7 @@ legacy_specs: []
 
 [Issue #4015](https://github.com/kdlbs/kandev/issues/4015) requests an opt-in extension to intentional manual recovery.
 The user accepted the feature direction on 2026-09-28. The issue is assigned to `carlosflorencio`.
-This package defines implementation work. It does not claim an existing regression or completed implementation.
+This package records the implemented extension and its verification.
 
 The agent system owns this work because it owns candidate selection and persisted route state.
 [Requirements](../../specs/agents/requirements/dynamic-agent-routing.md) and the [design](../../specs/agents/system-design/dynamic-unclassified-fallback.md) define the contract.
@@ -131,7 +131,6 @@ Documentation checks passed:
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `.github/scripts/pr-docs.cjs` `validateCoverage`: all three work orders passed linked-reference preflight with a simulated runtime change.
 - `git diff --check -- docs/specs docs/decisions docs/plans/dynamic-unclassified-fallback`: passed.
-- `git status --short -- docs/plans/dynamic-unclassified-fallback`: new package present and untracked.
 
 The first specification lint found the edited provider design over its size limit.
 The classification summary was shortened without removing its contract, and the rerun passed.
@@ -148,7 +147,7 @@ Implementation checks passed:
 - Specification validation: 322 decisions and 1221 specifications validated; 36 linter tests passed; all specification files passed lint.
 - `gofmt` inspection and `git diff --check` passed.
 
-The package is implemented and its work orders are complete. Changes remain uncommitted for review.
+The implementation package and its work orders are complete. Review remediation and final verification are recorded below.
 
 ## Review remediation results
 
@@ -164,6 +163,8 @@ Passed after remediation:
 - `git diff --check`; changed Go files pass `gofmt` inspection.
 
 The first full tagged test pass hit a lifecycle cache-prune temporary-directory cleanup race. The isolated test passed, and the full tagged suite passed on rerun. The final build and race-filtered suite also passed after the last runtime changes. The step-revision barrier regression and its race-enabled run passed afterward.
+
+Session-open recovery also rejects a dynamic session while its route is pending or action-required, and generic session resume serializes against manual route actions. The tagged orchestrator suite passed with `TestResumeTaskSession_DynamicRouteActionOwnsRecovery` and the route-state eligibility cases. Final desktop and mobile browser reruns passed. One additional desktop run timed out waiting for the successor message; the unchanged immediate rerun passed in 36 seconds.
 
 ## Risks
 

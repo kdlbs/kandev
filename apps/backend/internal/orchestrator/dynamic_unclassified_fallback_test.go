@@ -413,6 +413,85 @@ func TestDynamicUnclassifiedStreakResetsAfterClassifiedNonFallbackFailure(t *tes
 	}
 }
 
+func TestUnclassifiedContinuationFailureSettlesClaimedSuccessorGeneration(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-unclassified-continuation-failure"
+		sessionID = "session-unclassified-continuation-failure"
+		profileID = "profile-unclassified-continuation-failure"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	profile := unclassifiedAdmissionProfile(2)
+	profile.ID = profileID
+	policyJSON, err := json.Marshal(profile.Candidates[0].Policies)
+	if err != nil {
+		t.Fatalf("marshal candidate policy: %v", err)
+	}
+	resolver := newWorkflowDynamicProfileResolverWithCandidates(t, profileID, []workflowDynamicCandidate{
+		{executionProfileID: "candidate-a", enabled: true, rulesJSON: string(policyJSON)},
+		{executionProfileID: "candidate-b", enabled: true},
+	}, dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo))
+	_, initial := seedUnclassifiedAdmissionRoute(t, repo, ctx, profile, taskID, sessionID, "execution-one")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	svc.SetProfileExecutionResolver(resolver)
+	defer svc.stopDynamicSuccessorWorkers()
+
+	unknownFailure := func(executionID string, generation uint64) watcher.AgentEventData {
+		svc.beginPromptAttempt(sessionID, executionID, generation, true)
+		return watcher.AgentEventData{
+			TaskID: taskID, SessionID: sessionID, OwnerKind: "task", AgentExecutionID: executionID,
+			PromptGeneration: generation, DynamicRouteAttempt: true, EvidenceKnown: true,
+			ProviderError: &streams.ProviderError{
+				Source: streams.ProviderErrorSourceACPPrompt, ProviderID: "provider-x",
+				Message: "provider returned an unsupported terminal response", DiagnosticIdentityComplete: true,
+				OccurredAt: time.Now().UTC(),
+			},
+		}
+	}
+	first := unknownFailure("execution-one", 1)
+	if handled := svc.routeDynamicAgentFailure(ctx, first, classifyKanbanFailure(first)); handled {
+		t.Fatal("first failure unexpectedly selected a successor below threshold")
+	}
+	resumed, err := resolver.ResolveRouteAction(ctx, sessionID, profileID, "candidate-a", initial.Generation, "retry")
+	if err != nil {
+		t.Fatalf("retry current candidate: %v", err)
+	}
+	session := mustTaskSession(t, repo, ctx, sessionID)
+	session.AgentExecutionID = "execution-two"
+	session.RouteGeneration = resumed.Generation
+	session.RouteState = resumed.Decision.Status
+	session.State = models.TaskSessionStateRunning
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession retry: %v", err)
+	}
+
+	// Fail only after RouteAfterUnclassifiedFailure has durably claimed the
+	// successor generation, while building its continuation context.
+	svc.repo = continuationFailureRepo{sessionExecutorStore: repo}
+	second := unknownFailure("execution-two", 2)
+	if handled := svc.routeDynamicAgentFailure(ctx, second, classifyKanbanFailure(second)); handled {
+		t.Fatal("continuation failure unexpectedly launched a successor")
+	}
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state.Generation != initial.Generation+1 || state.Status != dynamicRouteStatusActionRequired {
+		t.Fatalf("route after continuation failure = %+v, want claimed successor generation action_required", state)
+	}
+}
+
+type continuationFailureRepo struct {
+	sessionExecutorStore
+}
+
+func (continuationFailureRepo) ListMessages(context.Context, string) ([]*models.Message, error) {
+	return nil, errors.New("continuation transcript unavailable")
+}
+
 func unclassifiedAdmissionProfile(threshold int64) dynamicruntime.Profile {
 	document := routingpolicy.DefaultDocument()
 	document.Unclassified = &routingpolicy.UnclassifiedPolicy{Enabled: true, ConsecutiveFailureThreshold: threshold}

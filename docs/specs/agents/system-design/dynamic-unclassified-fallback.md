@@ -15,7 +15,7 @@ owners:
 The agent system owns candidate selection and durable route state.
 This design extends [dynamic routing](dynamic-agent-routing-01.md), with a narrow exception to the shared provider policy.
 The [decision](../../../decisions/2026-09-28-repeated-unclassified-fallback.md) records the accepted boundary.
-The [implementation package](../../../plans/dynamic-unclassified-fallback/plan.md) remains pending.
+The [implementation package](../../../plans/dynamic-unclassified-fallback/plan.md) and its three work orders are complete.
 
 ## Requirement mapping
 

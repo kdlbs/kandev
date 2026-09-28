@@ -48,8 +48,6 @@ test.describe("mobile: dynamic unclassified fallback", () => {
         profile.firstCandidate.id,
       );
 
-      const draft = await attempt.session.composerReady();
-      await draft.fill(DYNAMIC_FALLBACK_DRAFT);
       const secondFailure = await retryCurrentDynamicCandidate({
         page: testPage,
         apiClient,
@@ -58,7 +56,6 @@ test.describe("mobile: dynamic unclassified fallback", () => {
         mobile: true,
       });
       expect(secondFailure.execution_profile_id).toBe(profile.firstCandidate.id);
-      await expect(draft).toHaveText(DYNAMIC_FALLBACK_DRAFT);
       await expect(attempt.session.activeChat().getByTestId("dynamic-route-retry")).toBeVisible();
 
       await attempt.session.activeChat().getByTestId("dynamic-route-retry").tap();
@@ -72,6 +69,13 @@ test.describe("mobile: dynamic unclassified fallback", () => {
       await expect(
         attempt.session.activeChat().getByText(DYNAMIC_FALLBACK_SUCCESS, { exact: true }),
       ).toBeVisible();
+
+      const draft = attempt.session
+        .activeChat()
+        .locator('.tiptap.ProseMirror[contenteditable="true"]')
+        .first();
+      await expect(draft).toBeEditable();
+      await draft.fill(DYNAMIC_FALLBACK_DRAFT);
       await expect(draft).toHaveText(DYNAMIC_FALLBACK_DRAFT);
       const switched = await expectCurrentCandidate(
         apiClient,
@@ -90,8 +94,7 @@ test.describe("mobile: dynamic unclassified fallback", () => {
       ).toBeVisible();
       const reloadedDraft = attempt.session
         .activeChat()
-        .locator('.tiptap.ProseMirror[contenteditable="true"]')
-        .first();
+        .locator('.tiptap.ProseMirror[contenteditable="true"]');
       await expect(reloadedDraft).toBeEditable();
       await expect(reloadedDraft).toHaveText(DYNAMIC_FALLBACK_DRAFT);
       const afterReload = await expectCurrentCandidate(

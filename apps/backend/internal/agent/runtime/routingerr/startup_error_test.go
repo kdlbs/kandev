@@ -15,7 +15,9 @@ func TestAgentStartupFailureAttestsOnlyAgentStartupStages(t *testing.T) {
 			if !errors.As(wrapped, &startup) {
 				t.Fatalf("startup wrapper = %T, want AgentStartupFailure", wrapped)
 			}
-			if startup.Phase != phase || startup.ProviderID != "provider-x" || startup.Diagnostic != cause.Error() || startup.Cause != cause {
+			if startup.Phase != phase || startup.ProviderID != "provider-x" ||
+				startup.Diagnostic != cause.Error() || startup.Cause != cause ||
+				startup.DiagnosticIdentityComplete || startup.DiagnosticSource != "" {
 				t.Fatalf("startup evidence = %+v", startup)
 			}
 			classified := Classify(Input{Phase: startup.Phase, ProviderID: startup.ProviderID, StructuredErr: startup.Cause, Stderr: startup.Diagnostic})

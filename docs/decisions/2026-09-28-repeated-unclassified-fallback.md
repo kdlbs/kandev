@@ -8,7 +8,7 @@
 
 [Issue #4015](https://github.com/kdlbs/kandev/issues/4015) proposes recovery from repeated unknown failures in task dynamic routing.
 The user accepted this direction after reviewing the manual-recovery behavior and safety boundaries.
-Implementation remains pending the linked design package.
+The implementation is delivered in the linked plan and its three completed work orders.
 
 The [provider policy decision](2026-08-17-provider-error-classes-and-policies.md) requires manual recovery for all unclassified errors.
 That rule prevents automatic replay from ambiguous evidence, but also stops recovery from repeated, proven safe startup failures.

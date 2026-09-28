@@ -35,6 +35,23 @@ type dynamicStartupAttempt struct {
 	Generation         int64
 }
 
+type unclassifiedFallbackLaunchClaimContextKey struct{}
+
+func withUnclassifiedFallbackLaunchClaim(
+	ctx context.Context,
+	claim *unclassifiedFallbackLaunchClaim,
+) context.Context {
+	if claim == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, unclassifiedFallbackLaunchClaimContextKey{}, claim)
+}
+
+func unclassifiedFallbackLaunchClaimFromContext(ctx context.Context) *unclassifiedFallbackLaunchClaim {
+	claim, _ := ctx.Value(unclassifiedFallbackLaunchClaimContextKey{}).(*unclassifiedFallbackLaunchClaim)
+	return claim
+}
+
 func withDynamicStartupAttempt(ctx context.Context, launch dynamicruntime.DownstreamLaunch) context.Context {
 	if launch.AttemptID == "" {
 		return ctx
@@ -74,6 +91,18 @@ func (d *dynamicTaskDownstream) Launch(
 	launch dynamicruntime.DownstreamLaunch,
 ) (dynamicruntime.DownstreamExecution, error) {
 	ctx = withDynamicStartupAttempt(ctx, launch)
+	if claim := unclassifiedFallbackLaunchClaimFromContext(ctx); claim != nil {
+		if d.service.profileExecutionResolver == nil {
+			claim.launchError = dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable
+			return dynamicruntime.DownstreamExecution{}, claim.launchError
+		}
+		if err := d.service.profileExecutionResolver.ClaimUnclassifiedFallbackLaunch(
+			ctx, claim.decision, claim.evidence,
+		); err != nil {
+			claim.launchError = err
+			return dynamicruntime.DownstreamExecution{}, err
+		}
+	}
 	if err := d.service.persistDynamicLaunchDecision(ctx, d.sessionID, launch.Decision); err != nil {
 		return dynamicruntime.DownstreamExecution{}, err
 	}
@@ -595,6 +624,18 @@ func (s *Service) buildDynamicContinuation(
 	return input, nil
 }
 
+func limitDynamicRecoveryContext(input *dynamicruntime.ContinuationInput) {
+	if input == nil {
+		return
+	}
+	// A recovery handoff can cross providers. Keep user requests and durable
+	// task artifacts, but omit agent text and tool output from the failed
+	// attempt because they can contain untrusted provider diagnostics.
+	input.Conversation = ""
+	input.ToolSummary = ""
+	input.FailureReason = "The previous agent attempt failed."
+}
+
 func (s *Service) addDynamicTaskMetadata(ctx context.Context, task *v1.Task, input *dynamicruntime.ContinuationInput) error {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil {
@@ -754,9 +795,16 @@ type dynamicFailureRouteResult struct {
 	manualRecovery bool
 }
 
+func dynamicFailureRecoveryResult(handled bool, decision dynamicruntime.RouteDecision) dynamicFailureRouteResult {
+	return dynamicFailureRouteResult{
+		handled: handled, manualRecovery: handled && decision.Status == dynamicRouteStatusActionRequired,
+	}
+}
+
 type unclassifiedFallbackLaunchClaim struct {
-	decision dynamicruntime.RouteDecision
-	evidence dynamicruntime.UnclassifiedFailureEvidence
+	decision    dynamicruntime.RouteDecision
+	evidence    dynamicruntime.UnclassifiedFailureEvidence
+	launchError error
 }
 
 func (s *Service) routeDynamicAgentFailureWithEvidence(
@@ -785,7 +833,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	}
 	reason := "dynamic_recovery_declined"
 	if classified != nil {
-		reason = classified.Error()
+		reason = string(classified.Code)
 	}
 	// The route already holds a claimed generation the moment
 	// dynamicFailureSession succeeds. Every return below is a decline, so the
@@ -822,13 +870,13 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	decision, continuationInput, err := s.routeDynamicFailureDecision(
 		ctx, session, task, conductor, classified, evidence, unclassified,
 	)
+	if decision.Generation > 0 {
+		generation = decision.Generation
+	}
 	if err != nil {
 		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
-		return dynamicFailureRouteResult{
-			handled: handled, manualRecovery: handled && decision.Status == dynamicRouteStatusActionRequired,
-		}
+		return dynamicFailureRecoveryResult(handled, decision)
 	}
-	generation = decision.Generation
 	var launchClaim *unclassifiedFallbackLaunchClaim
 	if unclassified {
 		launchClaim = &unclassifiedFallbackLaunchClaim{decision: decision, evidence: evidence}
@@ -856,8 +904,9 @@ func (s *Service) routeDynamicFailureDecision(
 		)
 	} else {
 		continuationInput, err = s.buildDynamicContinuation(
-			ctx, task, session.ID, "", classified.Error(),
+			ctx, task, session.ID, "", "The previous agent attempt failed.",
 		)
+		limitDynamicRecoveryContext(&continuationInput)
 		if err == nil {
 			decision, err = conductor.RouteAfterFailure(
 				ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
@@ -868,7 +917,10 @@ func (s *Service) routeDynamicFailureDecision(
 	if err != nil || !unclassified {
 		return decision, continuationInput, err
 	}
-	continuationInput, err = s.buildDynamicContinuation(ctx, task, session.ID, "", classified.Error())
+	continuationInput, err = s.buildDynamicContinuation(
+		ctx, task, session.ID, "", "The previous agent attempt failed.",
+	)
+	limitDynamicRecoveryContext(&continuationInput)
 	return decision, continuationInput, err
 }
 
@@ -1128,24 +1180,7 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 			zap.Error(ctx.Err()))
 		return
 	}
-	if claim != nil {
-		if err := s.profileExecutionResolver.ClaimUnclassifiedFallbackLaunch(
-			ctx, claim.decision, claim.evidence,
-		); err != nil {
-			s.logger.Warn("dynamic successor launch rejected after workflow context changed",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID),
-				zap.String("execution_profile_id", executionProfileID),
-				zap.Error(err))
-			failureCtx := context.WithoutCancel(ctx)
-			s.markDynamicRouteActionRequired(
-				failureCtx, data.SessionID, claim.decision.Generation,
-				"unclassified_workflow_context_changed",
-			)
-			s.settleDetachedDynamicSuccessorFailure(failureCtx, data, executionProfileID)
-			return
-		}
-	}
+	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return
@@ -1164,12 +1199,72 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 			zap.Error(ctx.Err()))
 		return
 	}
+	if claim != nil && unclassifiedWorkflowContextRejection(claim.launchError) {
+		s.settleDetachedUnclassifiedWorkflowRejection(context.WithoutCancel(ctx), data, claim)
+		return
+	}
 	s.logger.Warn("dynamic successor launch failed; surfacing recoverable failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("execution_profile_id", executionProfileID))
 	s.settleDetachedDynamicSuccessorFailure(context.WithoutCancel(ctx), data, executionProfileID)
+}
+
+func unclassifiedWorkflowContextRejection(err error) bool {
+	return errors.Is(err, dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable) ||
+		errors.Is(err, dynamicruntime.ErrUnclassifiedWorkflowContextChanged)
+}
+
+func (s *Service) settleDetachedUnclassifiedWorkflowRejection(
+	failureCtx context.Context,
+	data watcher.AgentEventData,
+	claim *unclassifiedFallbackLaunchClaim,
+) {
+	if claim == nil {
+		return
+	}
+	state, err := s.repo.GetTaskSession(failureCtx, data.SessionID)
+	if err != nil || state == nil || state.RouteGeneration != claim.decision.Generation ||
+		state.RouteState != dynamicRouteStatusActionRequired {
+		return
+	}
+	if err := s.profileExecutionResolver.ClearUnclassifiedStreak(
+		failureCtx, data.SessionID, claim.decision.Generation, claim.decision.ExecutionProfileID,
+	); err != nil && !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
+		s.logger.Warn("failed to clear unclassified streak after workflow-context rejection",
+			zap.String("session_id", data.SessionID), zap.Error(err))
+	}
+	s.retireExecutionActivityAndPublish(failureCtx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	errMsg := data.ErrorMessage
+	if errMsg == "" {
+		errMsg = "workflow context was rejected before dynamic successor launch"
+	}
+	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
+	data.ErrorMessage = errMsg
+	// A workflow-context rejection is a user-owned recovery boundary, so do
+	// not run the returned workflow trigger after settling the failed turn.
+	_ = s.handleRecoverableFailureLockedState(failureCtx, data, agentruntime.StopReasonRecoverableAgentFailure)
+	state, err = s.repo.GetTaskSession(failureCtx, data.SessionID)
+	if err != nil || state == nil || state.RouteGeneration != claim.decision.Generation {
+		return
+	}
+	oldState := state.State
+	state.State = models.TaskSessionStateWaitingForInput
+	state.DownstreamACPSessionID = ""
+	state.RouteState = dynamicRouteStatusActionRequired
+	state.RouteReason = "unclassified_workflow_context_changed"
+	if errors.Is(claim.launchError, dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable) {
+		state.RouteReason = "unclassified_workflow_context_unavailable"
+	}
+	if err := s.repo.UpdateTaskSession(failureCtx, state); err != nil {
+		s.logger.Warn("failed to preserve manual recovery after workflow-context rejection",
+			zap.String("session_id", data.SessionID), zap.Error(err))
+		return
+	}
+	s.publishTaskSessionStateChanged(
+		failureCtx, state.TaskID, state.ID, oldState, state.State, state.ErrorMessage, &state.UpdatedAt, state,
+	)
 }
 
 func (s *Service) settleDetachedDynamicSuccessorFailure(
@@ -1266,6 +1361,7 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 	if err != nil {
 		return err
 	}
+	limitDynamicRecoveryContext(&input)
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	continuation, err := conductor.BuildContinuation(ctx, input)
 	if err != nil {
@@ -1348,7 +1444,9 @@ func (s *Service) unclassifiedStartupEvidence(
 	diagnosticComplete := false
 	if startup != nil {
 		phase, providerID, diagnostic = startup.Phase, startup.ProviderID, startup.Diagnostic
-		diagnosticComplete = streams.IsCompleteProviderDiagnostic(startup.Diagnostic)
+		diagnosticComplete = startup.DiagnosticIdentityComplete &&
+			completeProviderDiagnosticSource(startup.DiagnosticSource) &&
+			streams.IsCompleteProviderDiagnostic(startup.Diagnostic)
 	}
 	return s.unclassifiedFailureEvidence(
 		ctx, data, session, startup != nil && startup.Cause != nil && session != nil && attempt.ID != "" &&

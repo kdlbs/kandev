@@ -87,6 +87,7 @@ type UnclassifiedStreak struct {
 	ExecutionProfileID  string                    `json:"execution_profile_id"`
 	ProfileVersion      int64                     `json:"profile_version"`
 	StepID              string                    `json:"step_id,omitempty"`
+	StepUpdatedAt       time.Time                 `json:"step_updated_at,omitempty"`
 	Fingerprint         string                    `json:"fingerprint"`
 	Origin              UnclassifiedFailureOrigin `json:"origin"`
 	Phase               routingerr.Phase          `json:"phase"`

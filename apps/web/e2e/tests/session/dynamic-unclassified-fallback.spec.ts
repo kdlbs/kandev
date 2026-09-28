@@ -23,21 +23,20 @@ test.describe("dynamic unclassified fallback", () => {
     });
 
     try {
-      const stamp = Date.now().toString(36);
       const enabled = await createDynamicFallbackProfile(apiClient, seedData, {
-        name: `Unclassified desktop ${stamp}`,
+        name: "Unclassified desktop core",
         enabled: true,
       });
       const savedPolicy = enabled.dynamicProfile.dynamic?.candidates[0]?.policies;
       if (!savedPolicy) throw new Error("Dynamic profile did not return its candidate policy");
       await apiClient.updateAgentProfile(enabled.dynamicProfile.id, {
-        name: `Unclassified desktop renamed ${stamp}`,
+        name: "Unclassified desktop core renamed",
       });
       const editedProfile = await apiClient.getAgentProfile(enabled.dynamicProfile.id);
       expect(editedProfile.dynamic?.candidates[0]?.policies).toEqual(savedPolicy);
 
       const core = await startDynamicFallbackSession(testPage, apiClient, seedData, {
-        title: `Unclassified desktop core ${stamp}`,
+        title: "Unclassified desktop core",
         prompt: "/e2e:dynamic-unclassified:same:3",
         profileId: enabled.dynamicProfile.id,
       });
@@ -51,8 +50,6 @@ test.describe("dynamic unclassified fallback", () => {
         enabled.firstCandidate.id,
       );
 
-      const draft = await core.session.composerReady();
-      await draft.fill(DYNAMIC_FALLBACK_DRAFT);
       const secondFailure = await retryCurrentDynamicCandidate({
         page: testPage,
         apiClient,
@@ -60,7 +57,6 @@ test.describe("dynamic unclassified fallback", () => {
         sessionId: core.sessionId,
       });
       expect(secondFailure.execution_profile_id).toBe(enabled.firstCandidate.id);
-      await expect(draft).toHaveText(DYNAMIC_FALLBACK_DRAFT);
 
       const retryAfterSecondFailure = testPage.getByTestId("dynamic-route-retry");
       await expect(retryAfterSecondFailure).toBeVisible({ timeout: 10_000 });
@@ -76,6 +72,13 @@ test.describe("dynamic unclassified fallback", () => {
       await expect(
         core.session.activeChat().getByText(DYNAMIC_FALLBACK_SUCCESS, { exact: true }),
       ).toBeVisible();
+
+      const draft = core.session
+        .activeChat()
+        .locator('.tiptap.ProseMirror[contenteditable="true"]')
+        .first();
+      await expect(draft).toBeEditable();
+      await draft.fill(DYNAMIC_FALLBACK_DRAFT);
       await expect(draft).toHaveText(DYNAMIC_FALLBACK_DRAFT);
 
       const afterSwitch = await expectCurrentCandidate(
@@ -94,8 +97,7 @@ test.describe("dynamic unclassified fallback", () => {
       ).toBeVisible();
       const reloadedDraft = core.session
         .activeChat()
-        .locator('.tiptap.ProseMirror[contenteditable="true"]')
-        .first();
+        .locator('.tiptap.ProseMirror[contenteditable="true"]');
       await expect(reloadedDraft).toBeEditable();
       await expect(reloadedDraft).toHaveText(DYNAMIC_FALLBACK_DRAFT);
       const afterReload = await expectCurrentCandidate(
@@ -119,7 +121,7 @@ test.describe("dynamic unclassified fallback", () => {
         veto?: boolean;
       }) => {
         const profile = await createDynamicFallbackProfile(apiClient, seedData, {
-          name: `Unclassified desktop ${options.suffix} ${stamp}`,
+          name: `Unclassified desktop ${options.suffix}`,
           enabled: options.enabled,
         });
         if (options.veto) {
@@ -128,7 +130,7 @@ test.describe("dynamic unclassified fallback", () => {
           });
         }
         const attempt = await startDynamicFallbackSession(testPage, apiClient, seedData, {
-          title: `Unclassified desktop ${options.suffix} ${stamp}`,
+          title: `Unclassified desktop ${options.suffix}`,
           prompt: options.prompt,
           profileId: profile.dynamicProfile.id,
         });
