@@ -140,3 +140,14 @@ Verification after the fix:
 - `pnpm run typecheck` — passed.
 - `pnpm run i18n:check` — passed for all required locales.
 - `pnpm run i18n:ratchet` — passed.
+
+## QA remediation (2026-09-28)
+
+After Remove All, the auto-provisioning fence remained active when a user
+created a new session. The New Session success path now clears that fence only
+after receiving a session ID, restoring ordinary single-session behavior for
+later visits. A failed launch leaves the fence in place. The focused regression
+test failed before the fix and passed afterward.
+
+Verification: 62 focused Vitest tests, web typecheck, specification validators,
+phone bulk-removal E2E (1/1), and desktop session-tab E2E (14/14) passed.

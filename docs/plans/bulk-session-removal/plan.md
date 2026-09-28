@@ -140,6 +140,11 @@ The 2026-09-28 PR fixup adds coverage for partial Remove All failure cleanup and
 failed-refresh messaging. Its focused tests (18 passed), web typecheck,
 `i18n:check`, and `i18n:ratchet` passed.
 
+QA on 2026-09-28 found that creating a session after Remove All left the
+auto-provisioning fence active. The New Session success path now clears it;
+the regression test, 62 focused unit tests, typecheck, spec validators, and
+desktop/phone browser flows passed.
+
 ## Risks
 
 - `session.delete` is non-atomic across targets; a server refusal after an

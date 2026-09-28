@@ -4,6 +4,11 @@ import type { FormEvent } from "react";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { FileAttachment } from "./chat/file-attachment";
+import {
+  clearTaskSessionAutoProvisioningSuppression,
+  isTaskSessionAutoProvisioningSuppressed,
+  suppressTaskSessionAutoProvisioning,
+} from "@/lib/session/session-auto-provisioning-fence";
 
 const mockLaunchSession = vi.fn();
 const mockBuildStartRequest = vi.fn();
@@ -257,6 +262,7 @@ describe("useSessionContextChange", () => {
 describe("useSessionLaunchSubmit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearTaskSessionAutoProvisioningSuppression(TASK_ID);
     mockHasPendingAttachmentUploads.mockReturnValue(false);
     mockBuildStartRequest.mockReturnValue({
       request: {
@@ -330,6 +336,33 @@ describe("useSessionLaunchSubmit", () => {
     );
     expect(mockSetIsCreating).toHaveBeenNthCalledWith(1, true);
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
+  });
+
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.5 restores normal ensuring after a new session", async () => {
+    suppressTaskSessionAutoProvisioning(TASK_ID);
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef: createPromptRef("new conversation"),
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        onClose: vi.fn(),
+        toast: mockToast,
+        setActiveSession: vi.fn(),
+        activateSession: vi.fn(),
+        setIsCreating: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(isTaskSessionAutoProvisioningSuppressed(TASK_ID)).toBe(false);
   });
 
   it("marks the picker profile explicit and labels the tab from the effective response profile", async () => {
@@ -507,6 +540,7 @@ describe("useSessionLaunchSubmit", () => {
   });
 
   it("shows a toast when launching fails", async () => {
+    suppressTaskSessionAutoProvisioning(TASK_ID);
     mockLaunchSession.mockRejectedValueOnce(new Error("launch failed"));
     const promptRef = createPromptRef("hello", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
@@ -547,5 +581,6 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockRecordRecentUse).not.toHaveBeenCalled();
     expect(mockActivateSession).not.toHaveBeenCalled();
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
+    expect(isTaskSessionAutoProvisioningSuppressed(TASK_ID)).toBe(true);
   });
 });

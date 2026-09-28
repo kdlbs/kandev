@@ -60,6 +60,12 @@ prevents re-entry. The backend remains authoritative for authorization,
 runtime quiescence, refusal of active sessions, primary promotion, and task
 workspace retention.
 
+Remove All suppresses automatic session provisioning so the confirmed empty
+state survives navigation and reload. A failed bulk deletion clears that
+suppression. Creating a new session through the task's New Session action
+clears it after the server returns a session ID, restoring ordinary
+single-session deletion behavior for that task.
+
 ## Desktop presentation
 
 `SessionContextMenuItems` retains its Dockview-only Close Others callback and
