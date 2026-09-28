@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { fetchStorageDisk } from "@/lib/api/domains/system-api";
 import type { StorageDiskCapacityResponse, StorageTemporaryDiskCapacity } from "@/lib/types/system";
+import { createSystemInfoQueryKey, type SystemInfoQueryIdentity } from "./system-info-query";
 import type { StorageSection } from "./use-storage-sections";
 
 type LoadSection = <T>(
@@ -9,6 +10,10 @@ type LoadSection = <T>(
   commit: (value: T) => void,
 ) => Promise<void>;
 type SetStoredDisk = (disk: StorageDiskCapacityResponse | null, identity: string | null) => void;
+
+export function createStorageDiskCapacityIdentity(identity: SystemInfoQueryIdentity): string {
+  return JSON.stringify(createSystemInfoQueryKey(identity));
+}
 
 export function mergeStorageDiskCapacity(
   previous: StorageDiskCapacityResponse | null,
@@ -20,7 +25,14 @@ export function mergeStorageDiskCapacity(
       ? { ...incoming, stale: false }
       : { ...previous, warning: incoming.warning, stale: true };
   if (!Array.isArray(incoming.temporary_roots)) {
-    return { ...home, temporary_roots: undefined };
+    const previousRoots = previous.temporary_roots ?? [];
+    return {
+      ...home,
+      temporary_roots: previousRoots.length
+        ? previousRoots.map((root) => (root.available ? { ...root, stale: true } : root))
+        : undefined,
+      temporary_roots_warning: incoming.temporary_roots_warning ?? previous.temporary_roots_warning,
+    };
   }
   const previousRoots = previous.temporary_roots ?? [];
   if (incoming.temporary_roots.length === 0 && incoming.temporary_roots_warning) {
@@ -35,9 +47,7 @@ export function mergeStorageDiskCapacity(
   const temporaryRoots = incoming.temporary_roots.map((root): StorageTemporaryDiskCapacity => {
     if (root.available) return { ...root, stale: false };
     const lastGood = previousRoots.find(
-      (candidate) =>
-        candidate.available &&
-        (candidate.path === root.path || candidate.requested_path === root.requested_path),
+      (candidate) => candidate.available && candidate.path === root.path,
     );
     if (!lastGood) return root;
     return {
@@ -49,7 +59,11 @@ export function mergeStorageDiskCapacity(
       stale: true,
     };
   });
-  return { ...home, temporary_roots: temporaryRoots };
+  return {
+    ...home,
+    temporary_roots: temporaryRoots,
+    temporary_roots_warning: incoming.temporary_roots_warning,
+  };
 }
 
 function staleDiskCapacity(previous: StorageDiskCapacityResponse | null) {
@@ -66,11 +80,11 @@ function staleDiskCapacity(previous: StorageDiskCapacityResponse | null) {
 export function useStorageDiskCapacity(
   storedDisk: StorageDiskCapacityResponse | null,
   storedDiskIdentity: string | null,
-  authIdentity: string,
+  capacityIdentity: string,
   setDiskInStore: SetStoredDisk,
   loadSection: LoadSection,
 ) {
-  const diskIdentity = `${typeof window === "undefined" ? "" : window.location.origin}\u0000${authIdentity}`;
+  const diskIdentity = capacityIdentity;
   const currentDisk = storedDiskIdentity === diskIdentity ? storedDisk : null;
   const diskSnapshot = useRef<StorageDiskCapacityResponse | null>(currentDisk);
   diskSnapshot.current = currentDisk;

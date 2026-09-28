@@ -499,7 +499,7 @@
   "storageTemporaryEntryFile": "檔案",
   "storageTemporaryEntryDirectory": "資料夾",
   "storageTemporaryEntrySymlink": "符號連結",
-  "storageTemporaryEntryOther": "其他專案",
+  "storageTemporaryEntryOther": "其他項目",
   "storageTemporaryEntrySize": "{{size}} B",
   "storageTemporaryEntryPartial": "部分完成",
   "storageTemporaryEntryRegistered": "已向 Kandev 註冊",

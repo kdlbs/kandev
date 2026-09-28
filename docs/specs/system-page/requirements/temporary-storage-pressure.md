@@ -35,7 +35,7 @@ The proposal preserves tool defaults and inherited temporary-directory settings.
 
 - **AC-SYSTEM-PAGE-TEMP-PRESSURE-001.1:** Storage shall show capacity, available space, and pressure for the effective service temporary folder and distinct Unix `/tmp`.
   The Kandev home capacity shall remain visible. Paths sharing a known filesystem shall identify that relationship without adding their capacities together.
-- **AC-SYSTEM-PAGE-TEMP-PRESSURE-001.2:** A temporary filesystem shall show a warning at 80% unavailable space and a critical warning at 90%.
+- **AC-SYSTEM-PAGE-TEMP-PRESSURE-001.2:** A temporary filesystem shall show a warning at 80% used space and a critical warning at 90% used space.
   Zero available bytes shall be critical. Text shall explain that temporary-file operations can fail even when the task workspace has free space.
 - **AC-SYSTEM-PAGE-TEMP-PRESSURE-001.3:** Capacity shall load independently of recursive analysis and maintenance policy.
   While the Host storage tab is visible, capacity shall refresh every 30 seconds without starting directory scans.

@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useSystemInfoBootId } from "@/components/system-info-query-provider";
 import { useToast } from "@/components/toast-provider";
 import { ApiError } from "@/lib/api/client";
 // The module-level `t`, not `useTranslation`: every string below is produced
@@ -40,8 +41,12 @@ import type {
   StorageQuarantinePurgeScope,
   SystemJob,
 } from "@/lib/types/system";
-import { useStorageDiskCapacity } from "./use-storage-disk-capacity";
+import {
+  createStorageDiskCapacityIdentity,
+  useStorageDiskCapacity,
+} from "./use-storage-disk-capacity";
 import { useStorageSections } from "./use-storage-sections";
+import { useSystemInfoQueryIdentity } from "./system-info-query";
 import { useSystemJob } from "./use-system-jobs";
 import type { StorageSection } from "./use-storage-sections";
 
@@ -492,9 +497,8 @@ function useStorageMaintenanceEffects({
 
 export function useStorageMaintenance(active = true) {
   const storage = useAppStore((state) => state.system.storage);
-  const authIdentity = useAppStore(
-    (state) => `${state.auth.mode}\u0000${state.auth.user?.id ?? ""}`,
-  );
+  const systemInfoIdentity = useSystemInfoQueryIdentity(useSystemInfoBootId());
+  const capacityIdentity = createStorageDiskCapacityIdentity(systemInfoIdentity);
   const analysisRevision = useAppStore((state) => state.system.storage.analysisRevision);
   const setPolicy = useAppStore((state) => state.setSystemStoragePolicy);
   const setOverview = useAppStore((state) => state.setSystemStorageOverview);
@@ -506,7 +510,7 @@ export function useStorageMaintenance(active = true) {
   const { currentDisk, loadDisk } = useStorageDiskCapacity(
     storage.disk,
     storage.diskIdentity,
-    authIdentity,
+    capacityIdentity,
     setDiskInStore,
     loadSection,
   );

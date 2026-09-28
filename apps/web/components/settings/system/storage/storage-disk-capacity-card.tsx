@@ -414,7 +414,7 @@ function TemporaryDiskCapacityCard({
         <Button
           type="button"
           variant="outline"
-          className="h-7 min-h-7 w-full px-3 text-xs md:w-auto max-md:h-11 max-md:min-h-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11"
+          className="h-7 min-h-7 w-full cursor-pointer px-3 text-xs md:w-auto max-md:h-11 max-md:min-h-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={onViewTemporary}
           data-testid="storage-disk-view-temporary"
         >

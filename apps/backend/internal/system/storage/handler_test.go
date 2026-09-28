@@ -269,8 +269,91 @@ func TestGetStorageDiskCollapsesKnownSharedTemporaryFilesystems(t *testing.T) {
 	if len(root.Aliases) != 1 || root.Aliases[0] != "/var/tmp" {
 		t.Fatalf("aliases = %#v, want the second temporary path", root.Aliases)
 	}
-	if reads["/tmp"] != 1 || reads["/var/tmp"] != 0 || reads["/ignored"] != 0 {
-		t.Fatalf("capacity reads = %#v, want one read per known filesystem and at most two candidates", reads)
+	if reads["/tmp"] != 1 || reads["/var/tmp"] != 1 || reads["/ignored"] != 0 {
+		t.Fatalf("capacity reads = %#v, want each of the first two candidates measured", reads)
+	}
+}
+
+func TestGetStorageDiskUsesHealthyCandidateAfterSharedFilesystemReadFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reads := map[string]int{}
+	router := newTestRouter(NewHandler(HandlerConfig{
+		DiskPath: "/home",
+		DiskCapacity: func(_ context.Context, path string) (DiskCapacity, error) {
+			reads[path]++
+			switch path {
+			case "/tmp":
+				return DiskCapacity{}, errors.New("first alias unavailable")
+			case "/var/tmp":
+				return DiskCapacity{TotalBytes: 200, UsedBytes: 50, AvailableBytes: 150, UsedPercent: 25}, nil
+			default:
+				return measuredDiskCapacity(), nil
+			}
+		},
+		DiskRoots: func(context.Context) ([]DiskRootCandidate, error) {
+			return []DiskRootCandidate{
+				{RequestedPath: "/tmp", Path: "/tmp"},
+				{RequestedPath: "/var/tmp", Path: "/var/tmp"},
+			}, nil
+		},
+		DiskIdentity: func(_ context.Context, path string) (string, error) {
+			if path == "/home" {
+				return "home-filesystem", nil
+			}
+			return "shared-temp-filesystem", nil
+		},
+	}))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/disk", nil))
+
+	var body DiskCapacityResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.TemporaryRoots) != 1 {
+		t.Fatalf("temporary roots = %#v, want one deduplicated measurement", body.TemporaryRoots)
+	}
+	root := body.TemporaryRoots[0]
+	if !root.Available || root.Path != "/tmp" || root.UsedBytes != 50 || root.UsedPercent != 25 {
+		t.Fatalf("temporary root = %#v, want the healthy alias measurement", root)
+	}
+	if len(root.Aliases) != 1 || root.Aliases[0] != "/var/tmp" {
+		t.Fatalf("aliases = %#v, want /var/tmp", root.Aliases)
+	}
+	if reads["/tmp"] != 1 || reads["/var/tmp"] != 1 {
+		t.Fatalf("candidate capacity reads = %#v, want both same-filesystem candidates measured", reads)
+	}
+}
+
+func TestGetStorageDiskTimestampsCapacityAfterEachMeasurement(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	clock := time.Date(2026, time.September, 28, 10, 30, 0, 0, time.UTC)
+	measuredAt := map[string]time.Time{}
+	router := newTestRouter(NewHandler(HandlerConfig{
+		DiskPath: "/home",
+		DiskCapacity: func(_ context.Context, path string) (DiskCapacity, error) {
+			measuredAt[path] = clock
+			clock = clock.Add(time.Minute)
+			return measuredDiskCapacity(), nil
+		},
+		DiskRoots: func(context.Context) ([]DiskRootCandidate, error) {
+			return []DiskRootCandidate{{RequestedPath: "/tmp", Path: "/tmp"}}, nil
+		},
+		DiskIdentity: func(context.Context, string) (string, error) { return "filesystem", nil },
+		Now:          func() time.Time { return clock },
+	}))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/disk", nil))
+
+	var body DiskCapacityResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.ObservedAt.After(measuredAt["/home"]) {
+		t.Fatalf("home observed_at = %s, want after measurement at %s", body.ObservedAt, measuredAt["/home"])
+	}
+	if len(body.TemporaryRoots) != 1 || !body.TemporaryRoots[0].ObservedAt.After(measuredAt["/tmp"]) {
+		t.Fatalf("temporary roots = %#v, want timestamp after /tmp measurement at %s", body.TemporaryRoots, measuredAt["/tmp"])
 	}
 }
 

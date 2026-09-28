@@ -29,10 +29,10 @@ Paths alone do not identify the process or task that created historical data.
 
 ## Requirement mapping
 
-| Requirement | Sections |
-| --- | --- |
+| Requirement                         | Sections                                                      |
+| ----------------------------------- | ------------------------------------------------------------- |
 | `REQ-SYSTEM-PAGE-TEMP-PRESSURE-001` | Capacity contract, Refresh and failure behavior, Presentation |
-| `REQ-SYSTEM-PAGE-TEMP-PRESSURE-002` | Breakdown contract, Cleanup boundary, Presentation |
+| `REQ-SYSTEM-PAGE-TEMP-PRESSURE-002` | Breakdown contract, Cleanup boundary, Presentation            |
 
 ## Capacity contract
 
@@ -79,7 +79,7 @@ Invalid totals and non-finite frontend numbers also produce unavailable, never a
 
 ## Breakdown contract
 
-Extend `tempstore.RootMeasurement` with an optional `entries` breakdown.
+Extend `tempstore.RootMeasurement` with an optional `breakdown` object that contains `entries`.
 Each entry has a direct-child name, kind, observed `size_bytes`, completeness, and ownership classification.
 Return at most twenty entries, sorted by descending observed bytes and then name for stable ties.
 Also return `other_observed_bytes`, `other_observed_count`, and breakdown completeness.

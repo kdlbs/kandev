@@ -57,13 +57,13 @@ It reuses `metrics.DiskUsage`, the temporary root resolver, and the existing sto
 Task 02 extends scanner partition results and `tempstore.RootMeasurement`, then renders the breakdown in the existing accordion.
 Neither task adds a migration, feature flag, external tool invocation, or cleanup mutation.
 
-| Platform | Capacity and root selection | Evidence | Unsupported behavior |
-| --- | --- | --- | --- |
-| Linux | Home, effective temp, distinct `/tmp`; native filesystem identity | Injected capacity/mount tests and Linux integration | Unknown sharing identity stays unknown |
-| macOS | Same candidate rules; native identity | Platform reader tests and compile validation | Missing capacity is unavailable |
-| Windows | Home and effective temp; native volume identity | Platform reader tests and compile validation | No invented `/tmp` path |
-| E2E | Existing disposable temporary root override | Real fixture scan and controlled capacity response | Never inspect host `/tmp` |
-| Older backend/cache | Existing home fields and optional additions | API, hook, and component fixtures | Missing data is unavailable, never zero |
+| Platform            | Capacity and root selection                                       | Evidence                                            | Unsupported behavior                    |
+| ------------------- | ----------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------- |
+| Linux               | Home, effective temp, distinct `/tmp`; native filesystem identity | Injected capacity/mount tests and Linux integration | Unknown sharing identity stays unknown  |
+| macOS               | Same candidate rules; native identity                             | Platform reader tests and compile validation        | Missing capacity is unavailable         |
+| Windows             | Home and effective temp; native volume identity                   | Platform reader tests and compile validation        | No invented `/tmp` path                 |
+| E2E                 | Existing disposable temporary root override                       | Real fixture scan and controlled capacity response  | Never inspect host `/tmp`               |
+| Older backend/cache | Existing home fields and optional additions                       | API, hook, and component fixtures                   | Missing data is unavailable, never zero |
 
 ## ASCII UI preview
 
@@ -153,14 +153,14 @@ Here the abbreviated AC prefix is `AC-SYSTEM-PAGE`.
 
 ## Tests
 
-| Criteria | Planned evidence |
-| --- | --- |
-| 001.1, .2, .4, .5 | `storage/handler_test.go`: distinct/shared filesystems, reserved-space pressure, zero available, failures, legacy response, rejected client paths |
-| 001.3, .4 | `use-storage-maintenance-temporary-capacity.test.tsx`: fake timers, visibility/tab changes, coalescing, stale generations, scan independence |
-| 001.2, .4, .6 | `storage-disk-capacity-card.test.tsx`: threshold boundaries, invalid values, stale and unavailable labels |
-| 002.1, .2, .6 | `filescan/measure_test.go` and `tempstore/provider_test.go`: top twenty, ties, remainder, partial children, cancellation, excluded mounts and symlinks |
-| 002.3, .5, .6 | `backendapp/storage_maintenance_test.go`: exact registry ownership, mismatched marker, missing registry, fixture root, unchanged environment |
-| 002.1 through .4, .7 | `storage-overview-card.test.tsx` and `storage-overview-resources.test.ts`: breakdown, focus navigation, no mutation, limitations |
+| Criteria             | Planned evidence                                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 001.1, .2, .4, .5    | `storage/handler_test.go`: distinct/shared filesystems, reserved-space pressure, zero available, failures, legacy response, rejected client paths      |
+| 001.3, .4            | `use-storage-maintenance-temporary-capacity.test.tsx`: fake timers, visibility/tab changes, coalescing, stale generations, scan independence           |
+| 001.2, .4, .6        | `storage-disk-capacity-card.test.tsx`: threshold boundaries, invalid values, stale and unavailable labels                                              |
+| 002.1, .2, .6        | `filescan/measure_test.go` and `tempstore/provider_test.go`: top twenty, ties, remainder, partial children, cancellation, excluded mounts and symlinks |
+| 002.3, .5, .6        | `backendapp/storage_maintenance_test.go`: exact registry ownership, mismatched marker, missing registry, fixture root, unchanged environment           |
+| 002.1 through .4, .7 | `storage-overview-card.test.tsx` and `storage-overview-resources.test.ts`: breakdown, focus navigation, no mutation, limitations                       |
 
 All numeric AC references in this table use `AC-SYSTEM-PAGE-TEMP-PRESSURE`.
 New test function names are selected during TDD, beside these existing suites.
@@ -206,15 +206,16 @@ Implementation and rendered verification passed on 2026-09-28:
 - Desktop temporary-storage E2E passed all 5 tests. Mobile temporary-storage E2E passed all 4 tests. Both runs built the backend and the pseudo-locale Vite production bundle.
 - Public-doc tests passed all 62 tests; public-doc validation accepted 47 pages. Specification validation accepted 321 decisions and 1,222 specifications; all specification files passed lint.
 - `git diff --check` passed. No custom cache or temporary-directory overrides were added, and existing registered-artifact cleanup remains the only mutation path.
-Public operations documentation is assigned to both implementation slices. No unshipped behavior is published during design.
+  Public operations documentation is assigned to both implementation slices. No unshipped behavior is published during design.
 
 Review remediation passed on 2026-09-28:
 
-- Rejected capacity polls and explicit root-discovery failures keep last-success temporary readings and timestamps, mark them stale, and show a localized failure message. Successful replacement clears stale state; successful authoritative empty results remove old roots.
-- Root discovery, filesystem identity, and capacity probes now use per-probe deadlines and a process-wide limit of eight active or still-blocked operations. Unknown identity does not suppress capacity measurement.
-- Regression coverage passed for rejection and recovery, discovery failure and authoritative removal, bounded response deadlines, sibling capacity availability, unknown sharing, and the global probe limit.
-- `go test ./internal/system/metrics ./internal/system/storage/... ./internal/backendapp -count=1`, targeted Go race tests, the focused frontend tests (12 tests), TypeScript typecheck, ESLint, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
-- `make -C apps/backend build` and `pnpm run build:vite` passed. Re-run desktop temporary-storage E2E passed 5 tests; mobile E2E passed 4 tests.
+- Rejected polls, failed root discovery, and responses without the temporary-capacity extension retain last-success readings and timestamps, mark them stale, and show failure state. Recovery clears prior warnings; an authoritative empty root set removes old paths.
+- Cached capacity is scoped to normalized API base, backend boot ID, and auth identity. Stale root values match only the resolved path. Each bounded root candidate is measured before filesystem deduplication so a healthy alias can replace a failed first read.
+- Capacity timestamps are captured after each read attempt. Root discovery, filesystem identity, and capacity probes use per-probe deadlines and a process-wide limit of eight active or still-blocked operations. Unknown identity does not suppress capacity measurement.
+- Regression coverage passed for rejection and recovery, discovery failure and authoritative removal, omitted extension fields, redirected paths, warning recovery, same-filesystem alias fallback, post-measurement timestamps, bounded response deadlines, sibling availability, unknown sharing, and the global probe limit.
+- `go test ./internal/system/metrics ./internal/system/storage/... ./internal/backendapp -count=1` and `go test -race ./internal/system/storage -count=1` passed. The focused frontend suite passed 75 tests across six files; typecheck, changed-file ESLint, i18n checks and ratchet, and Prettier checks passed.
+- The backend build and pseudo-locale Vite production build passed. Focused desktop E2E passed 2 tests and mobile E2E passed 1 test, all with retries disabled. Specification validation and lint passed; `git diff --check` passed.
 
 ## Risks
 

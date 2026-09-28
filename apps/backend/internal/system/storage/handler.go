@@ -209,13 +209,8 @@ func RegisterRoutes(read, admin *gin.RouterGroup, handler *Handler) {
 }
 
 func (h *Handler) getStorageDisk(c *gin.Context) {
-	observedAt := time.Now().UTC()
-	if h.config.Now != nil {
-		observedAt = h.config.Now().UTC()
-	}
 	result := DiskCapacityResponse{
-		DiskCapacity: DiskCapacity{Path: h.config.DiskPath},
-		ObservedAt:   observedAt, TemporaryRoots: []TemporaryDiskCapacity{},
+		DiskCapacity: DiskCapacity{Path: h.config.DiskPath}, TemporaryRoots: []TemporaryDiskCapacity{},
 	}
 	if h.config.DiskCapacity == nil {
 		result.Warning = "disk usage unavailable"
@@ -230,6 +225,7 @@ func (h *Handler) getStorageDisk(c *gin.Context) {
 			result.Available = true
 		}
 	}
+	result.ObservedAt = h.observedAt()
 	homeIdentity, _ := h.diskIdentity(c.Request.Context(), h.config.DiskPath)
 	if h.config.DiskRoots != nil {
 		candidates, err := boundedDiskProbe(c.Request.Context(), h.probeTimeout(), h.config.DiskRoots)
@@ -237,10 +233,17 @@ func (h *Handler) getStorageDisk(c *gin.Context) {
 			h.logError("failed to resolve temporary storage roots", err)
 			result.TemporaryRootsWarning = "temporary storage paths unavailable"
 		} else {
-			result.TemporaryRoots = h.readTemporaryDiskRoots(c.Request.Context(), candidates, homeIdentity, observedAt)
+			result.TemporaryRoots = h.readTemporaryDiskRoots(c.Request.Context(), candidates, homeIdentity)
 		}
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) observedAt() time.Time {
+	if h.config.Now != nil {
+		return h.config.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 const (
@@ -274,7 +277,6 @@ func (h *Handler) readTemporaryDiskRoots(
 	ctx context.Context,
 	candidates []DiskRootCandidate,
 	homeIdentity string,
-	observedAt time.Time,
 ) []TemporaryDiskCapacity {
 	roots := make([]TemporaryDiskCapacity, 0, min(len(candidates), maxTemporaryDiskRoots))
 	identities := make([]string, 0, cap(roots))
@@ -287,19 +289,6 @@ func (h *Handler) readTemporaryDiskRoots(
 			RequestedPath: candidate.RequestedPath,
 			Path:          path,
 			Aliases:       append([]string(nil), candidate.Aliases...),
-			ObservedAt:    observedAt,
-		}
-		identity, identityErr := h.diskIdentity(ctx, path)
-		if identityErr == nil && identity != "" {
-			if homeIdentity != "" {
-				shared := identity == homeIdentity
-				root.SharedWithHome = &shared
-			}
-			if existing := rootWithIdentity(roots, identities, identity); existing >= 0 {
-				roots[existing].Aliases = append(roots[existing].Aliases, candidate.RequestedPath)
-				roots[existing].Aliases = append(roots[existing].Aliases, candidate.Aliases...)
-				continue
-			}
 		}
 		if h.config.DiskCapacity == nil {
 			root.Warning = "disk usage unavailable"
@@ -314,6 +303,28 @@ func (h *Handler) readTemporaryDiskRoots(
 				root.AvailableBytes = capacity.AvailableBytes
 				root.UsedPercent = capacity.UsedPercent
 				root.Available = true
+			}
+		}
+		root.ObservedAt = h.observedAt()
+		identity, identityErr := h.diskIdentity(ctx, path)
+		if identityErr == nil && identity != "" {
+			if homeIdentity != "" {
+				shared := identity == homeIdentity
+				root.SharedWithHome = &shared
+			}
+			if existing := rootWithIdentity(roots, identities, identity); existing >= 0 {
+				roots[existing].Aliases = append(roots[existing].Aliases, candidate.RequestedPath)
+				roots[existing].Aliases = append(roots[existing].Aliases, candidate.Aliases...)
+				if !roots[existing].Available && root.Available {
+					roots[existing].TotalBytes = root.TotalBytes
+					roots[existing].UsedBytes = root.UsedBytes
+					roots[existing].AvailableBytes = root.AvailableBytes
+					roots[existing].UsedPercent = root.UsedPercent
+					roots[existing].Available = true
+					roots[existing].Warning = ""
+					roots[existing].ObservedAt = root.ObservedAt
+				}
+				continue
 			}
 		}
 		roots = append(roots, root)

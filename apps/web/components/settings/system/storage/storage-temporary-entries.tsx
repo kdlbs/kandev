@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { formatNumber } from "@/lib/i18n/formats";
 import type {
   StorageTemporaryArtifactsSummary,
+  StorageTemporaryEntryBreakdown,
   StorageTemporaryEntry,
   StorageTemporaryRootMeasurement,
 } from "@/lib/types/system";
@@ -66,74 +67,105 @@ function cleanupStatusText(
   });
 }
 
+function TemporaryEntrySummary({
+  breakdown,
+  t,
+}: {
+  breakdown: StorageTemporaryEntryBreakdown;
+  t: Translate;
+}) {
+  return (
+    <>
+      {breakdown.other_observed_count > 0 && (
+        <p
+          className="break-words text-xs text-muted-foreground"
+          data-testid="storage-temporary-other-observed"
+        >
+          {t("system:storageTemporaryOtherObserved", {
+            count: breakdown.other_observed_count,
+            size: entrySize(t, breakdown.other_observed_bytes),
+          })}
+        </p>
+      )}
+      {breakdown.status === "partial" && (
+        <p className="break-words text-xs text-amber-700">
+          {t("system:storageTemporaryEntriesPartial")}
+        </p>
+      )}
+    </>
+  );
+}
+
+function TemporaryEntryList({
+  root,
+  breakdown,
+  t,
+}: {
+  root: StorageTemporaryRootMeasurement;
+  breakdown: StorageTemporaryEntryBreakdown;
+  t: Translate;
+}) {
+  const summary = <TemporaryEntrySummary breakdown={breakdown} t={t} />;
+  if (breakdown.entries.length === 0) {
+    return (
+      <>
+        <p className="text-xs text-muted-foreground">{t("system:storageTemporaryEntriesEmpty")}</p>
+        {summary}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ul className="min-w-0 divide-y rounded-md border">
+        {breakdown.entries.map((entry) => (
+          <li
+            key={`${root.path}/${entry.name}`}
+            className="grid min-w-0 gap-1 px-3 py-2 md:grid-cols-[minmax(0,1fr)_8rem_minmax(10rem,0.7fr)] md:items-center md:gap-3"
+            data-testid="storage-temporary-entry"
+          >
+            <span className="min-w-0 break-all text-sm" data-testid="storage-temporary-entry-name">
+              {entry.name}
+            </span>
+            <span
+              className="text-xs text-muted-foreground"
+              data-testid="storage-temporary-entry-size"
+            >
+              {entrySize(t, entry.size_bytes)}
+            </span>
+            <span className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              <span>{entryKindLabel(t, entry)}</span>
+              <span data-testid="storage-temporary-entry-ownership">
+                {entryOwnershipLabel(t, entry.ownership)}
+              </span>
+              {entry.completeness === "partial" && (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  {t("system:storageTemporaryEntryPartial")}
+                </Badge>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {summary}
+    </>
+  );
+}
+
 function TemporaryRootEntries({ root }: { root: StorageTemporaryRootMeasurement }) {
   const { t } = useTranslation();
   const breakdown = root.breakdown;
+  const unavailable =
+    !breakdown || breakdown.status === "unavailable" || breakdown.status === "not_applicable";
   return (
     <section className="min-w-0 space-y-2" data-testid="storage-temporary-root-entries">
       <h4 className="break-all text-sm font-medium">{root.path}</h4>
-      {!breakdown || breakdown.status === "unavailable" || breakdown.status === "not_applicable" ? (
+      {unavailable ? (
         <p className="text-xs text-muted-foreground">
           {t("system:storageTemporaryEntriesUnavailable")}
         </p>
       ) : (
-        <>
-          {breakdown.entries.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {t("system:storageTemporaryEntriesEmpty")}
-            </p>
-          ) : (
-            <ul className="min-w-0 divide-y rounded-md border">
-              {breakdown.entries.map((entry) => (
-                <li
-                  key={`${root.path}/${entry.name}`}
-                  className="grid min-w-0 gap-1 px-3 py-2 md:grid-cols-[minmax(0,1fr)_8rem_minmax(10rem,0.7fr)] md:items-center md:gap-3"
-                  data-testid="storage-temporary-entry"
-                >
-                  <span
-                    className="min-w-0 break-all text-sm"
-                    data-testid="storage-temporary-entry-name"
-                  >
-                    {entry.name}
-                  </span>
-                  <span
-                    className="text-xs text-muted-foreground"
-                    data-testid="storage-temporary-entry-size"
-                  >
-                    {entrySize(t, entry.size_bytes)}
-                  </span>
-                  <span className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                    <span>{entryKindLabel(t, entry)}</span>
-                    <span data-testid="storage-temporary-entry-ownership">
-                      {entryOwnershipLabel(t, entry.ownership)}
-                    </span>
-                    {entry.completeness === "partial" && (
-                      <Badge variant="outline" className="text-[10px] font-normal">
-                        {t("system:storageTemporaryEntryPartial")}
-                      </Badge>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {breakdown.other_observed_count > 0 && (
-            <p
-              className="break-words text-xs text-muted-foreground"
-              data-testid="storage-temporary-other-observed"
-            >
-              {t("system:storageTemporaryOtherObserved", {
-                count: breakdown.other_observed_count,
-                size: entrySize(t, breakdown.other_observed_bytes),
-              })}
-            </p>
-          )}
-          {breakdown.status === "partial" && (
-            <p className="break-words text-xs text-amber-700">
-              {t("system:storageTemporaryEntriesPartial")}
-            </p>
-          )}
-        </>
+        <TemporaryEntryList root={root} breakdown={breakdown} t={t} />
       )}
     </section>
   );

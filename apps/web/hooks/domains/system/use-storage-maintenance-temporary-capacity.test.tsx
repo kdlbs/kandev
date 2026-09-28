@@ -1,6 +1,11 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  createStorageDiskCapacityIdentity,
+  useStorageDiskCapacity,
+} from "./use-storage-disk-capacity";
+import type { StorageSection } from "./use-storage-sections";
+import {
   cleanupJob,
   cleanupJobId,
   disk,
@@ -51,6 +56,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
 import { mergeStorageDiskCapacity, useStorageMaintenance } from "./use-storage-maintenance";
 
 const successfulObservedAt = "2026-09-28T10:00:00.000Z";
+const refreshedObservedAt = "2026-09-28T10:01:00.000Z";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -153,7 +159,7 @@ it("keeps the last successful root capacity when a later read fails", () => {
   };
   const incoming = {
     ...disk,
-    observed_at: "2026-09-28T10:01:00.000Z",
+    observed_at: refreshedObservedAt,
     temporary_roots: [
       {
         requested_path: "/tmp",
@@ -164,7 +170,7 @@ it("keeps the last successful root capacity when a later read fails", () => {
         used_percent: 0,
         available: false,
         warning: "disk usage unavailable",
-        observed_at: "2026-09-28T10:01:00.000Z",
+        observed_at: refreshedObservedAt,
         shared_with_home: false,
       },
     ],
@@ -187,6 +193,121 @@ it("does not infer temporary capacity from an older response", () => {
   const incoming = { ...disk, temporary_roots: undefined };
   const merged = mergeStorageDiskCapacity(previous, incoming);
   expect(merged.temporary_roots).toBeUndefined();
+});
+
+it("retains last-good roots as stale when an older response omits temporary capacity", () => {
+  const previous = {
+    ...disk,
+    temporary_roots: [
+      {
+        requested_path: "/tmp",
+        path: "/tmp",
+        total_bytes: 100,
+        used_bytes: 40,
+        available_bytes: 60,
+        used_percent: 40,
+        available: true,
+        observed_at: successfulObservedAt,
+        shared_with_home: false,
+      },
+    ],
+  };
+  const merged = mergeStorageDiskCapacity(previous, { ...disk, temporary_roots: undefined });
+
+  expect(merged.temporary_roots?.[0]).toMatchObject({
+    path: "/tmp",
+    available: true,
+    used_percent: 40,
+    observed_at: successfulObservedAt,
+    stale: true,
+  });
+  expect(merged.temporary_roots_warning).toBeUndefined();
+});
+
+it("does not carry capacity across a changed resolved temporary path", () => {
+  const previous = {
+    ...disk,
+    temporary_roots: [
+      {
+        requested_path: "/tmp",
+        path: "/tmp",
+        total_bytes: 100,
+        used_bytes: 40,
+        available_bytes: 60,
+        used_percent: 40,
+        available: true,
+        observed_at: successfulObservedAt,
+        shared_with_home: false,
+      },
+    ],
+  };
+  const redirected = {
+    requested_path: "/tmp",
+    path: "/mnt/other-filesystem/tmp",
+    total_bytes: 0,
+    used_bytes: 0,
+    available_bytes: 0,
+    used_percent: 0,
+    available: false,
+    warning: "disk usage unavailable",
+    observed_at: refreshedObservedAt,
+    shared_with_home: null,
+  };
+
+  const merged = mergeStorageDiskCapacity(previous, { ...disk, temporary_roots: [redirected] });
+
+  expect(merged.temporary_roots).toEqual([redirected]);
+});
+
+it("clears a recovered discovery warning when fresh roots arrive", () => {
+  const previous = {
+    ...disk,
+    temporary_roots_warning: "temporary storage paths unavailable",
+    temporary_roots: [],
+  };
+  const freshRoot = {
+    requested_path: "/tmp",
+    path: "/tmp",
+    total_bytes: 100,
+    used_bytes: 40,
+    available_bytes: 60,
+    used_percent: 40,
+    available: true,
+    observed_at: refreshedObservedAt,
+    shared_with_home: false,
+  };
+
+  const merged = mergeStorageDiskCapacity(previous, {
+    ...disk,
+    available: false,
+    warning: "disk usage unavailable",
+    temporary_roots: [freshRoot],
+  });
+
+  expect(merged.temporary_roots).toEqual([{ ...freshRoot, stale: false }]);
+  expect(merged.temporary_roots_warning).toBeUndefined();
+});
+
+it("uses the full backend and auth identity as the stored capacity key", () => {
+  const queryIdentity = {
+    apiBaseUrl: "http://localhost:38429/system///",
+    bootId: "boot-1",
+    authMode: "enabled" as const,
+    authenticated: true,
+    userId: "user-1",
+  };
+  const identity = createStorageDiskCapacityIdentity(queryIdentity);
+  const loadSection = async <T,>(
+    _section: StorageSection,
+    _request: () => Promise<T>,
+    _commit: (value: T) => void,
+  ) => {};
+  const { result } = renderHook(() =>
+    useStorageDiskCapacity(disk, null, identity, vi.fn(), loadSection),
+  );
+
+  expect(result.current.diskIdentity).toBe(identity);
+  expect(result.current.currentDisk).toBeNull();
 });
 
 it("retains and marks the last successful capacity stale after a rejected refresh, then clears stale on recovery", async () => {
