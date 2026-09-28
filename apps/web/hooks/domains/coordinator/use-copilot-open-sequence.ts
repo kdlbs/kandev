@@ -70,14 +70,23 @@ export async function runOpenSequence(
 
 export type UseCopilotOpenSequenceResult = {
   state: OpenSequenceState;
+  /** The attempt id that produced the current `state`, or `null` before any
+   *  call has settled. A caller that remembers the id its own `open()` or
+   *  `retry()` call returned can compare it against this value once `state`
+   *  next changes, to tell whether that specific call is what produced the
+   *  new state — as opposed to a different call, or one that joined an
+   *  already in-flight attempt and never started its own. */
+  settledAttemptId: number | null;
   /** Runs the sequence. A call while one is already in flight for this
-   *  coordinator joins it rather than starting a second one. Safe to call
-   *  on every popover open, including one that is already `ready`: the
-   *  profile statuses must be current at each open. */
-  open: () => void;
+   *  coordinator joins it rather than starting a second one, and returns
+   *  `null` in that case since it started no attempt of its own; otherwise
+   *  returns the id of the newly-started attempt. Safe to call on every
+   *  popover open, including one that is already `ready`: the profile
+   *  statuses must be current at each open. */
+  open: () => number | null;
   /** Identical to `open`; kept as a separate name for the **Try again**
    *  button's intent. */
-  retry: () => void;
+  retry: () => number | null;
 };
 
 /**
@@ -91,26 +100,32 @@ export function useCopilotOpenSequence(
   coordinatorId: string | null,
 ): UseCopilotOpenSequenceResult {
   const [state, setState] = useState<OpenSequenceState>({ kind: "idle" });
-  const generationRef = useRef(0);
+  const [settledAttemptId, setSettledAttemptId] = useState<number | null>(null);
+  const coordinatorGenerationRef = useRef(0);
+  const attemptCounterRef = useRef(0);
   const inFlightRef = useRef(false);
 
   useEffect(() => {
-    generationRef.current += 1;
+    coordinatorGenerationRef.current += 1;
     inFlightRef.current = false;
     setState({ kind: "idle" });
+    setSettledAttemptId(null);
   }, [coordinatorId]);
 
-  const run = useCallback(() => {
-    if (!coordinatorId || inFlightRef.current) return;
+  const run = useCallback((): number | null => {
+    if (!coordinatorId || inFlightRef.current) return null;
     inFlightRef.current = true;
-    const generation = generationRef.current;
+    const coordinatorGeneration = coordinatorGenerationRef.current;
+    const attemptId = ++attemptCounterRef.current;
     setState({ kind: "loading" });
     void runOpenSequence(workspaceId, coordinatorId).then((result) => {
-      if (generationRef.current !== generation) return;
+      if (coordinatorGenerationRef.current !== coordinatorGeneration) return;
       inFlightRef.current = false;
       setState(result);
+      setSettledAttemptId(attemptId);
     });
+    return attemptId;
   }, [workspaceId, coordinatorId]);
 
-  return { state, open: run, retry: run };
+  return { state, settledAttemptId, open: run, retry: run };
 }

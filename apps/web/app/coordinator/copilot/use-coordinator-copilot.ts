@@ -46,9 +46,19 @@ export type UseCoordinatorCopilotResult = {
  * legitimately hand back a different `session_id` for a draft that was only
  * just seeded for this same open (a terminal session replaced by the very
  * "Ask about this" that reopened it) — that case must keep the draft.
+ *
+ * Ownership is tracked by attempt id, not an optimistic boolean: the caller
+ * marks `markSelfInitiatedOpen(attemptId)` only with the id `open()` itself
+ * returned for a call it actually started, and this hook attributes a ready
+ * state to "self-initiated" only when `settledAttemptId` is that exact id.
+ * A call that joined an in-flight sequence never receives an id to mark, and
+ * a marked id that later settles as an error is never reused by a
+ * subsequent, unrelated attempt — so no explicit reset on error or no-op is
+ * needed for correct attribution.
  */
 function useReadySessionForCoordinator(
   state: UseCopilotOpenSequenceResult["state"],
+  settledAttemptId: number | null,
   coordinatorId: string,
   onStaleReplacement: () => void,
 ) {
@@ -56,11 +66,11 @@ function useReadySessionForCoordinator(
     coordinatorId: string;
     session: ConversationResponse;
   } | null>(null);
-  const selfInitiatedOpenRef = useRef(false);
+  const selfInitiatedAttemptIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     setOwnedRouteSession(null);
-    selfInitiatedOpenRef.current = false;
+    selfInitiatedAttemptIdRef.current = null;
   }, [coordinatorId]);
 
   useEffect(() => {
@@ -70,8 +80,8 @@ function useReadySessionForCoordinator(
       ownedRouteSession && ownedRouteSession.coordinatorId === coordinatorId
         ? ownedRouteSession.session
         : null;
-    const resolvedFromSelfInitiatedOpen = selfInitiatedOpenRef.current;
-    selfInitiatedOpenRef.current = false;
+    const resolvedFromSelfInitiatedOpen =
+      settledAttemptId !== null && settledAttemptId === selfInitiatedAttemptIdRef.current;
     if (
       priorSession &&
       priorSession.session_id !== nextSession.session_id &&
@@ -81,7 +91,7 @@ function useReadySessionForCoordinator(
     }
     setOwnedRouteSession({ coordinatorId, session: nextSession });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedRouteSession is read for its current value only; adding it would re-run this effect on every ready-session update rather than just on an actual incoming state change.
-  }, [state, coordinatorId]);
+  }, [state, settledAttemptId, coordinatorId]);
 
   // Guards against a coordinator switch: this hook's own state (not just the
   // `[coordinatorId]` effect above) must never hand a previous coordinator's
@@ -93,8 +103,8 @@ function useReadySessionForCoordinator(
 
   return {
     routeSession,
-    markSelfInitiatedOpen: () => {
-      selfInitiatedOpenRef.current = true;
+    markSelfInitiatedOpen: (attemptId: number) => {
+      selfInitiatedAttemptIdRef.current = attemptId;
     },
   };
 }
@@ -126,6 +136,7 @@ export function useCoordinatorCopilot(
   const openSequence = useCopilotOpenSequence(workspaceId, effectiveId);
   const { routeSession, markSelfInitiatedOpen } = useReadySessionForCoordinator(
     openSequence.state,
+    openSequence.settledAttemptId,
     coordinatorId,
     () => setPendingDraft(undefined),
   );
@@ -149,8 +160,13 @@ export function useCoordinatorCopilot(
     // fresh; this effect's own initial-mount run is what opens the
     // newly-viewed coordinator, not a `coordinatorId` dependency here.
     if (entry.open) {
-      markSelfInitiatedOpen();
-      openSequence.open();
+      const attemptId = openSequence.open();
+      // Only a call that (a) started its own attempt, not one that joined an
+      // in-flight Retry, and (b) came from an actual chip-seeded ask, not a
+      // plain chip removal re-triggering this effect, counts as self-initiated.
+      if (entry.chip && attemptId !== null) {
+        markSelfInitiatedOpen(attemptId);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- openSequence.open reads workspaceId/effectiveId itself; including the whole object would re-open on every state transition.
   }, [entry.open, entry.chip]);

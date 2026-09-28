@@ -44,8 +44,20 @@ const conversation: ConversationResponse = {
 
 const WHY_KAN_1 = "Why is KAN-1 here?";
 
-function openSequenceMock(state: { kind: string; [key: string]: unknown } = { kind: "idle" }) {
-  return { state, open: vi.fn(), retry: vi.fn() };
+function openSequenceMock(
+  state: { kind: string; [key: string]: unknown } = { kind: "idle" },
+  overrides: {
+    settledAttemptId?: number | null;
+    open?: () => number | null;
+    retry?: () => number | null;
+  } = {},
+) {
+  return {
+    state,
+    settledAttemptId: overrides.settledAttemptId ?? null,
+    open: overrides.open ?? vi.fn(() => null),
+    retry: overrides.retry ?? vi.fn(() => null),
+  };
 }
 
 beforeEach(() => {
@@ -296,7 +308,7 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
 describe("useCoordinatorCopilot - pendingDraft clearing on session replacement", () => {
   it("clears pendingDraft when Retry replaces the session with a new one", () => {
     mocks.useCopilotOpenSequence.mockReturnValue(
-      openSequenceMock({ kind: "ready", session: conversation }),
+      openSequenceMock({ kind: "ready", session: conversation }, { open: vi.fn(() => 1) }),
     );
     const { result, rerender } = renderHook(() =>
       useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
@@ -307,24 +319,26 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
-    // The ask's own chip-driven reopen resolves back to the same still-live
-    // session (a new object, same id) before Retry ever enters the picture.
+    // The ask's own chip-driven reopen (attempt 1) resolves back to the
+    // same still-live session (a new object, same id) before Retry ever
+    // enters the picture.
     mocks.useCopilotOpenSequence.mockReturnValue(
-      openSequenceMock({ kind: "ready", session: { ...conversation } }),
+      openSequenceMock({ kind: "ready", session: { ...conversation } }, { settledAttemptId: 1 }),
     );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
     // `onRetry` is wired directly to `openSequence.retry` (never touching
-    // `entry.chip`/`entry.open`), so this replacement is independent of any
-    // chip-driven reopen and must still clear the now-stale draft.
+    // `entry.chip`/`entry.open`), so this replacement (its own attempt 2)
+    // is independent of any chip-driven reopen and must still clear the
+    // now-stale draft.
     const retried: ConversationResponse = {
       task_id: "task-2",
       session_id: "session-2",
       archive_state: false,
     };
     mocks.useCopilotOpenSequence.mockReturnValue(
-      openSequenceMock({ kind: "ready", session: retried }),
+      openSequenceMock({ kind: "ready", session: retried }, { settledAttemptId: 2 }),
     );
     rerender();
 
@@ -338,10 +352,10 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
   // which — because the held session is terminal — resolves to a brand new
   // session_id, not the old one. That resolution must not be treated the
   // same as an unrelated Retry: the draft was only ever seeded for this
-  // exact open, so it must survive.
+  // exact open (attempt 1), so it must survive.
   it("keeps a freshly chip-seeded draft when Ask about this itself triggers the session replacement", () => {
     mocks.useCopilotOpenSequence.mockReturnValue(
-      openSequenceMock({ kind: "ready", session: conversation }),
+      openSequenceMock({ kind: "ready", session: conversation }, { open: vi.fn(() => 1) }),
     );
     const { result, rerender } = renderHook(() =>
       useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
@@ -359,7 +373,7 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
       archive_state: false,
     };
     mocks.useCopilotOpenSequence.mockReturnValue(
-      openSequenceMock({ kind: "ready", session: replacement }),
+      openSequenceMock({ kind: "ready", session: replacement }, { settledAttemptId: 1 }),
     );
     rerender();
 
@@ -387,6 +401,126 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
     rerender();
 
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+  });
+});
+
+// Review round 4 Finding D: the self-initiated-open attribution used to rest
+// on an optimistic boolean ref, set before `open()`'s outcome (join vs. new
+// attempt) was known and never scoped to an actual chip-seeded ask. These
+// three tests each reproduce one variant against the fixed attempt-id-based
+// attribution in `useReadySessionForCoordinator`.
+describe("useCoordinatorCopilot - self-initiated attribution (Finding D)", () => {
+  // Review round 4 Finding D1: `entry.chip` also changes identity on a
+  // plain chip *removal* (store sets `chip: null` on a new entry object),
+  // not just on a genuine new ask. The chip/open effect still fires and
+  // still calls `open()` to refresh profile statuses, but with nothing to
+  // protect a draft for, that attempt must not be tracked as
+  // self-initiated — an unrelated session replacement that later resolves
+  // must still clear the (now stale, already-consumed) draft.
+  it("clears a stale draft when a plain chip removal is followed by an unrelated session replacement", () => {
+    let attemptCounter = 0;
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock(
+        { kind: "ready", session: conversation },
+        { open: vi.fn(() => ++attemptCounter) },
+      ),
+    );
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+    expect(result.current.routeSession).toEqual(conversation);
+
+    // Attempt 1: the genuine ask.
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    // Attempt 2: the chip is removed, not re-asked. The effect still fires
+    // and still calls open() (profile-status refresh), but must not claim
+    // this attempt as self-initiated.
+    act(() => result.current.removeChip());
+    rerender();
+
+    const unrelatedReplacement: ConversationResponse = {
+      task_id: "task-9",
+      session_id: "session-9",
+      archive_state: false,
+    };
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: unrelatedReplacement }, { settledAttemptId: 2 }),
+    );
+    rerender();
+
+    expect(result.current.pendingDraft).toBeUndefined();
+  });
+
+  // Review round 4 Finding D2 (codex): the chip-driven open() call can join
+  // an already in-flight sequence (e.g. an independent Retry) instead of
+  // starting one of its own — the real `useCopilotOpenSequence.open()`
+  // returns `null` in that case. That no-op must not be tracked as
+  // self-initiated: the Retry it joined settles under its own, different
+  // attempt id and must still clear the draft.
+  it("clears the draft when the chip-driven open no-ops into an in-flight Retry", () => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }, { open: vi.fn(() => null) }),
+    );
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+    expect(result.current.routeSession).toEqual(conversation);
+
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    const retried: ConversationResponse = {
+      task_id: "task-retry",
+      session_id: "session-retry",
+      archive_state: false,
+    };
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: retried }, { settledAttemptId: 5 }),
+    );
+    rerender();
+
+    expect(result.current.pendingDraft).toBeUndefined();
+  });
+
+  // Review round 4 Finding D3 (kandev-code-reviewer): a self-initiated
+  // attempt that resolves to an error must not leak forward and get
+  // mistaken for a later, functionally unrelated Retry's own resolution.
+  it("does not let a self-initiated open's error leak into suppressing a later unrelated Retry's clear", () => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }, { open: vi.fn(() => 1) }),
+    );
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+    expect(result.current.routeSession).toEqual(conversation);
+
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    // The self-initiated attempt (1) fails outright.
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "error", error: "open-failed" }, { settledAttemptId: 1 }),
+    );
+    rerender();
+
+    // A later, unrelated Retry succeeds under its own attempt id (2) into a
+    // genuinely different session.
+    const retried: ConversationResponse = {
+      task_id: "task-retry-2",
+      session_id: "session-retry-2",
+      archive_state: false,
+    };
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: retried }, { settledAttemptId: 2 }),
+    );
+    rerender();
+
+    expect(result.current.pendingDraft).toBeUndefined();
   });
 });
 
