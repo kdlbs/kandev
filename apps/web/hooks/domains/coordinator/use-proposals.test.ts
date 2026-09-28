@@ -356,7 +356,7 @@ const UPDATED_PAYLOAD = {
   payload: { workspace_id: WORKSPACE_ID, coordinator_id: COORDINATOR_ID, open_proposals: 1 },
 };
 
-describe("overlapping reads", () => {
+describe("overlapping reads - pending list", () => {
   it("merges an earlier-issued pending read that answers last, letting the merge rules decide", async () => {
     const first = deferred<{ proposals: Proposal[] }>();
     const second = deferred<{ proposals: Proposal[] }>();
@@ -396,7 +396,9 @@ describe("overlapping reads", () => {
     });
     expect(result.current.proposals.error).toBe(false);
   });
+});
 
+describe("overlapping reads - by id", () => {
   it("merges an earlier-issued by-id read that answers last", async () => {
     const first = deferred<Proposal>();
     const second = deferred<Proposal>();
@@ -418,7 +420,7 @@ describe("overlapping reads", () => {
     await waitFor(() => expect(result.current.proposal?.status).toBe("approved"));
   });
 
-  it("does not let an older 404 by-id read evict a row merged by a newer read", async () => {
+  it("success-then-404: does not let an older 404 by-id read evict a row merged by a newer read", async () => {
     const first = deferred<Proposal>();
     getProposalMock
       .mockReturnValueOnce(first.promise)
@@ -437,5 +439,54 @@ describe("overlapping reads", () => {
 
     expect(result.current.notFound).toBe(false);
     expect(result.current.proposal?.status).toBe("approved");
+  });
+
+  it("404-then-success: does not let a stale success clear notFound after a newer 404 already set it", async () => {
+    const first = deferred<Proposal>();
+    getProposalMock
+      .mockReturnValueOnce(first.promise)
+      .mockRejectedValueOnce(new ApiError("not found", 404, {}));
+    const wsClient = makeWsClient();
+    clients.active = wsClient;
+
+    const { result } = renderHook(() => useProposalById(WORKSPACE_ID, COORDINATOR_ID, "p-1"));
+    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
+    act(() => handler(UPDATED_PAYLOAD));
+    await waitFor(() => expect(result.current.notFound).toBe(true));
+
+    // The earlier-issued (now stale) request finally resolves after the
+    // later-issued request's 404 already decided notFound. Since it is
+    // older, it must not flip notFound back - only a fresher read can.
+    await act(async () => {
+      first.resolve(proposal({ id: "p-1", status: "approved" }));
+    });
+
+    expect(result.current.notFound).toBe(true);
+  });
+
+  it("CR-101: does not let a stale response for a previous id set notFound for the current id", async () => {
+    const firstForP1 = deferred<Proposal>();
+    getProposalMock.mockReturnValueOnce(firstForP1.promise);
+    const wsClient = makeWsClient();
+    clients.active = wsClient;
+
+    const { result, rerender } = renderHook(
+      ({ proposalId }: { proposalId: string }) =>
+        useProposalById(WORKSPACE_ID, COORDINATOR_ID, proposalId),
+      { initialProps: { proposalId: "p-1" } },
+    );
+
+    getProposalMock.mockResolvedValueOnce(proposal({ id: "p-2", status: "pending" }));
+    rerender({ proposalId: "p-2" });
+    await waitFor(() => expect(result.current.proposal?.id).toBe("p-2"));
+
+    // p-1's read, issued before the hook moved on to p-2, finally settles
+    // with a 404. It must not touch the notFound flag now driving p-2.
+    await act(async () => {
+      firstForP1.reject(new ApiError("not found", 404, {}));
+    });
+
+    expect(result.current.notFound).toBe(false);
+    expect(result.current.proposal?.id).toBe("p-2");
   });
 });

@@ -256,29 +256,39 @@ export function useProposalById(
   const proposal = useProposalRow(coordinatorId, proposalId);
   const [notFound, setNotFound] = useState(false);
   const seqRef = useRef(0);
-  const lastSucceededSeqRef = useRef(0);
+  const lastAppliedSeqRef = useRef(0);
+  const currentIdRef = useRef<string | null>(null);
 
-  // Every response is merged whatever order it arrives in; the merge rules
-  // decide which row wins (proposal-cards.md#client-store). A 404 older than
-  // an already-succeeded read must not evict the row that read just merged.
+  // Every response is merged into the store whatever order it arrives in;
+  // the merge rules decide which row wins (proposal-cards.md#client-store).
+  // `notFound` has no `updated_at` to arbitrate by, so every write to it -
+  // clearing it on a success, setting it on a 404 - is guarded by the same
+  // per-id request sequence: an older response can never override state a
+  // newer one already applied, in either direction, and a response for an
+  // id this hook has since moved past can never touch it at all.
   const read = useCallback((ws: string, coordinator: string, id: string) => {
     const seq = ++seqRef.current;
     getProposal(ws, coordinator, id)
       .then((row) => {
-        lastSucceededSeqRef.current = Math.max(lastSucceededSeqRef.current, seq);
         useProposalsStore.getState().mergeOne(coordinator, row);
+        if (id !== currentIdRef.current || seq < lastAppliedSeqRef.current) return;
+        lastAppliedSeqRef.current = seq;
+        setNotFound(false);
       })
       .catch((error: unknown) => {
-        if (lastSucceededSeqRef.current > seq) return;
-        if (error instanceof ApiError && error.status === 404) {
-          useProposalsStore.getState().evict(coordinator, id);
-          setNotFound(true);
-        }
+        if (!(error instanceof ApiError) || error.status !== 404) return;
+        if (id !== currentIdRef.current || seq < lastAppliedSeqRef.current) return;
+        lastAppliedSeqRef.current = seq;
+        useProposalsStore.getState().evict(coordinator, id);
+        setNotFound(true);
       });
   }, []);
 
   useEffect(() => {
+    currentIdRef.current = proposalId;
     setNotFound(false);
+    seqRef.current = 0;
+    lastAppliedSeqRef.current = 0;
     if (!workspaceId || !coordinatorId || !proposalId) return;
     read(workspaceId, coordinatorId, proposalId);
   }, [workspaceId, coordinatorId, proposalId, read]);
