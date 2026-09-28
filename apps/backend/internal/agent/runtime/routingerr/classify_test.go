@@ -312,11 +312,23 @@ func TestClassify_CodexUsageLimitPlainText(t *testing.T) {
 			if !e.FallbackAllowed {
 				t.Fatalf("quota failure must allow fallback: %+v", e)
 			}
-			want := time.Date(2026, time.September, 27, 3, 9, 0, 0, time.Local)
-			if e.ResetHint == nil || !e.ResetHint.Equal(want) {
-				t.Fatalf("ResetHint = %v, want %v", e.ResetHint, want)
+			if e.ResetHint != nil {
+				t.Fatalf("ResetHint = %v, want no hint for an unzoned provider time", e.ResetHint)
 			}
 		})
+	}
+}
+
+func TestClassify_CodexUsageLimitExplicitTimezone(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "codex-acp",
+		Stderr:     "You've hit your usage limit. try again at Sep 27th, 2026 3:09 AM UTC.",
+	})
+	want := time.Date(2026, time.September, 27, 3, 9, 0, 0, time.UTC)
+	if e.ResetHint == nil || !e.ResetHint.Equal(want) {
+		t.Fatalf("ResetHint = %v, want %v", e.ResetHint, want)
 	}
 }
 
