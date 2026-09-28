@@ -2541,5 +2541,8 @@
   "managedCloneRelocationTitle": "Workspace needs repair",
   "managedCloneRelocateResume": "Move files and resume",
   "managedCloneRelocationConfirmBody": "Kandev will create a worktree in the current repository clone and continue this session.",
-  "managedCloneRelocationConfirm": "Move and resume"
+  "managedCloneRelocationConfirm": "Move and resume",
+  "sessionRecoveryResumeDescription": "Resuming keeps your previous messages and context.",
+  "sessionRecoveryFreshDescription": "Starting fresh uses the same workspace without previous conversation context.",
+  "sessionRecoveryCorruptedDescription": "Resuming will likely fail again because this session’s saved state is corrupted. Start a fresh session instead."
 }

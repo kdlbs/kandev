@@ -2541,5 +2541,8 @@
   "managedCloneRelocationTitle": "Ŵōŕķśƥàćē ńēēďś ŕēƥàĩŕ",
   "managedCloneRelocateResume": "Ḿōvē ƒĩĺēś àńď ŕēśũḿē",
   "managedCloneRelocationConfirmBody": "Ķàńďēv ŵĩĺĺ ćŕēàţē à ŵōŕķţŕēē ĩń ţĥē ćũŕŕēńţ ŕēƥōśĩţōŕŷ ćĺōńē àńď ćōńţĩńũē ţĥĩś śēśśĩōń.",
-  "managedCloneRelocationConfirm": "Ḿōvē àńď ŕēśũḿē"
+  "managedCloneRelocationConfirm": "Ḿōvē àńď ŕēśũḿē",
+  "sessionRecoveryResumeDescription": "Ŕēśũḿĩńĝ ķēēƥś ŷōũŕ ƥŕēvĩōũś ḿēśśàĝēś àńď ćōńţēxţ.",
+  "sessionRecoveryFreshDescription": "Śţàŕţĩńĝ ƒŕēśĥ ũśēś ţĥē śàḿē ŵōŕķśƥàćē ŵĩţĥōũţ ƥŕēvĩōũś ćōńvēŕśàţĩōń ćōńţēxţ.",
+  "sessionRecoveryCorruptedDescription": "Ŕēśũḿĩńĝ ŵĩĺĺ ĺĩķēĺŷ ƒàĩĺ àĝàĩń ƀēćàũśē ţĥĩś śēśśĩōń’ś śàvēď śţàţē ĩś ćōŕŕũƥţēď. Śţàŕţ à ƒŕēśĥ śēśśĩōń ĩńśţēàď."
 }

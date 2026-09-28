@@ -13,6 +13,9 @@ import {
 import type { AppState } from "@/lib/state/store";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
+import { i18n } from "@/lib/i18n";
+import ptTask from "@/src/locales/pt-pt/task.json";
+
 const requestMock = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -406,3 +409,46 @@ it("redacts a workspace failure after a transcript recovery guard", async () => 
 });
 
 const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
+
+describe("recovery description localization", () => {
+  it.each([
+    ["sessionRecoveryResumeDescription", "Retomar mantém as mensagens e o contexto anteriores."],
+    [
+      "sessionRecoveryFreshDescription",
+      "Começar de novo utiliza o mesmo espaço de trabalho sem o contexto da conversa anterior.",
+    ],
+    [
+      "sessionRecoveryCorruptedDescription",
+      "É provável que retomar volte a falhar porque o estado guardado desta sessão está corrompido. Inicie uma nova sessão.",
+    ],
+  ])("localizes %s instead of displaying the backend fallback", async (key, expected) => {
+    i18n.addResourceBundle("pt-pt", "task", ptTask, true, true);
+    await i18n.changeLanguage("pt-pt");
+    try {
+      const message = recoveryMessage();
+      const actions = message.metadata!.actions as Record<string, unknown>[];
+      actions[0].tooltip_key = key;
+      actions[0].tooltip = "English fallback";
+      renderWithTranscript("WAITING_FOR_INPUT", [], undefined, message);
+      expect(screen.getByTestId(RESUME_TEST_ID).getAttribute("title")).toBe(expected);
+      expect(screen.getByText(expected)).toBeTruthy();
+      await act(() => i18n.changeLanguage("en"));
+      expect(screen.getByTestId(RESUME_TEST_ID).getAttribute("title")).toBe(i18n.t(`task:${key}`));
+    } finally {
+      cleanup();
+      await i18n.changeLanguage("en");
+    }
+  });
+});
+
+it.each([undefined, "futureDescription"])(
+  "keeps fallback copy for a missing or unknown key: %s",
+  (key) => {
+    const message = recoveryMessage();
+    const actions = message.metadata!.actions as Record<string, unknown>[];
+    actions[0].tooltip_key = key;
+    actions[0].tooltip = "Recovery fallback";
+    renderWithTranscript("WAITING_FOR_INPUT", [], undefined, message);
+    expect(screen.getByTestId(RESUME_TEST_ID).getAttribute("title")).toBe("Recovery fallback");
+  },
+);

@@ -912,6 +912,17 @@ func startAgentInfrastructure(
 	)
 	services.Task.SetExecutorSaveObserver(reachabilitypkg.NewSaveObserver(sshReachabilityPoller))
 
+	// Start the SSH orphaned-agentctl sweep: reconciles each SSH executor's
+	// remote agentctl process table against Kandev's task/session state,
+	// stopping any process left behind by a lost-transport stop or a
+	// reconciliation path that deleted its executors_running row without a
+	// remote kill. Triggered by the same reachability-changed event this
+	// poller publishes, plus its own slow interval backstop.
+	startSSHOrphanSweepScheduler(
+		ctx, repos.Task, eventBus, log, addRuntimeCleanup,
+		lifecycleMgr.AcquireSSHOrphanSweepFence,
+	)
+
 	// Launch-time session.launch.warning producer (task 05): repos.Task
 	// already implements the narrow read accessor (same method used by the
 	// reachability HTTP routes). probingEnabled mirrors the poller's own
