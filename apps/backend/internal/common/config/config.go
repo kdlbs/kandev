@@ -561,11 +561,6 @@ type FeaturesConfig struct {
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
 
-	// RemoteExecutorPlugins gates manifest-owned providers that allocate
-	// remote task environments. It remains off in every embedded profile
-	// until the complete lifecycle, recovery, and cleanup path is available.
-	RemoteExecutorPlugins bool `mapstructure:"remote_executor_plugins" json:"remoteExecutorPlugins"`
-
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`

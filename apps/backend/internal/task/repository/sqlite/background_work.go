@@ -26,11 +26,11 @@ const (
 		source_call_id TEXT NOT NULL DEFAULT '',
 		exit_code INTEGER,
 		output TEXT NOT NULL DEFAULT '',
-		output_truncated BOOLEAN NOT NULL DEFAULT FALSE,
 		output_offset BIGINT NOT NULL DEFAULT 0,
 		started_at TIMESTAMP,
 		finished_at TIMESTAMP,
 		revision BIGINT NOT NULL DEFAULT 0,
+		output_truncated BOOLEAN NOT NULL DEFAULT FALSE,
 		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (session_id, id),
@@ -158,33 +158,7 @@ func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *mod
 	}
 	workload.UpdatedAt = now
 
-	var query string
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query = `INSERT INTO task_session_background_work (
-			id, task_id, session_id, kind, title, state, parent_work_id,
-			origin_turn_id, source_message_id, source_call_id, exit_code,
-			output, output_truncated, output_offset, started_at, finished_at,
-			revision, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
-		) ON CONFLICT (session_id, id) DO UPDATE SET
-			title = EXCLUDED.title,
-			state = EXCLUDED.state,
-			parent_work_id = EXCLUDED.parent_work_id,
-			origin_turn_id = CASE WHEN task_session_background_work.origin_turn_id = '' THEN EXCLUDED.origin_turn_id ELSE task_session_background_work.origin_turn_id END,
-			source_message_id = EXCLUDED.source_message_id,
-			source_call_id = EXCLUDED.source_call_id,
-			exit_code = EXCLUDED.exit_code,
-			output = EXCLUDED.output,
-			output_truncated = EXCLUDED.output_truncated,
-			output_offset = EXCLUDED.output_offset,
-			started_at = COALESCE(task_session_background_work.started_at, EXCLUDED.started_at),
-			finished_at = EXCLUDED.finished_at,
-			revision = EXCLUDED.revision,
-			updated_at = EXCLUDED.updated_at
-		WHERE EXCLUDED.revision >= task_session_background_work.revision`
-	} else {
-		query = `INSERT INTO task_session_background_work (
+	query := `INSERT INTO task_session_background_work (
 			id, task_id, session_id, kind, title, state, parent_work_id,
 			origin_turn_id, source_message_id, source_call_id, exit_code,
 			output, output_truncated, output_offset, started_at, finished_at,
@@ -207,9 +181,8 @@ func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *mod
 			revision = excluded.revision,
 			updated_at = excluded.updated_at
 		WHERE excluded.revision >= task_session_background_work.revision`
-	}
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		workload.ID, workload.TaskID, workload.SessionID, workload.Kind, workload.Title, workload.State,
 		workload.ParentWorkID, workload.OriginTurnID, workload.SourceMessageID, workload.SourceCallID,
 		workload.ExitCode, workload.Output, workload.OutputTruncated, workload.OutputOffset,
@@ -268,19 +241,14 @@ func (r *Repository) ListBackgroundWorkloadsBySession(ctx context.Context, sessi
 }
 
 func (r *Repository) DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error {
-	var q1, q2, q3 string
-	if dialect.IsPostgres(r.db.DriverName()) {
-		q1 = `DELETE FROM task_session_background_action_receipts WHERE session_id = $1`
-		q2 = `DELETE FROM task_session_background_runs WHERE session_id = $1`
-		q3 = `DELETE FROM task_session_background_work WHERE session_id = $1`
-	} else {
+	const (
 		q1 = `DELETE FROM task_session_background_action_receipts WHERE session_id = ?`
 		q2 = `DELETE FROM task_session_background_runs WHERE session_id = ?`
 		q3 = `DELETE FROM task_session_background_work WHERE session_id = ?`
-	}
-	_, _ = r.db.ExecContext(ctx, q1, sessionID)
-	_, _ = r.db.ExecContext(ctx, q2, sessionID)
-	_, err := r.db.ExecContext(ctx, q3, sessionID)
+	)
+	_, _ = r.db.ExecContext(ctx, r.db.Rebind(q1), sessionID)
+	_, _ = r.db.ExecContext(ctx, r.db.Rebind(q2), sessionID)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(q3), sessionID)
 	return err
 }
 
@@ -297,21 +265,7 @@ func (r *Repository) UpsertBackgroundRun(ctx context.Context, run *models.Backgr
 	}
 	run.UpdatedAt = now
 
-	var query string
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query = `INSERT INTO task_session_background_runs (
-			id, workload_id, session_id, provider_run_key, state, exit_code,
-			started_at, finished_at, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-		) ON CONFLICT (session_id, id) DO UPDATE SET
-			state = EXCLUDED.state,
-			exit_code = EXCLUDED.exit_code,
-			started_at = COALESCE(task_session_background_runs.started_at, EXCLUDED.started_at),
-			finished_at = EXCLUDED.finished_at,
-			updated_at = EXCLUDED.updated_at`
-	} else {
-		query = `INSERT INTO task_session_background_runs (
+	query := `INSERT INTO task_session_background_runs (
 			id, workload_id, session_id, provider_run_key, state, exit_code,
 			started_at, finished_at, created_at, updated_at
 		) VALUES (
@@ -322,9 +276,8 @@ func (r *Repository) UpsertBackgroundRun(ctx context.Context, run *models.Backgr
 			started_at = COALESCE(task_session_background_runs.started_at, excluded.started_at),
 			finished_at = excluded.finished_at,
 			updated_at = excluded.updated_at`
-	}
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		run.ID, run.WorkloadID, run.SessionID, run.ProviderRunKey, run.State, run.ExitCode,
 		run.StartedAt, run.FinishedAt, run.CreatedAt, run.UpdatedAt,
 	)
@@ -385,38 +338,19 @@ func (r *Repository) executeActionReceiptWrite(ctx context.Context, receipt *mod
 	}
 	receipt.UpdatedAt = now
 
-	var query string
-	isPg := dialect.IsPostgres(r.db.DriverName())
-	switch {
-	case !upsert && isPg:
-		query = `INSERT INTO task_session_background_action_receipts (
-			id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-	case !upsert:
-		query = `INSERT INTO task_session_background_action_receipts (
-			id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	case isPg:
-		query = `INSERT INTO task_session_background_action_receipts (
-			id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (session_id, operation_id) DO UPDATE SET
-			status = EXCLUDED.status,
-			error = EXCLUDED.error,
-			uncertain = EXCLUDED.uncertain,
-			updated_at = EXCLUDED.updated_at`
-	default:
-		query = `INSERT INTO task_session_background_action_receipts (
+	query := `INSERT INTO task_session_background_action_receipts (
 			id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session_id, operation_id) DO UPDATE SET
+	`
+	if upsert {
+		query += ` ON CONFLICT (session_id, operation_id) DO UPDATE SET
 			status = excluded.status,
 			error = excluded.error,
 			uncertain = excluded.uncertain,
 			updated_at = excluded.updated_at`
 	}
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		receipt.ID, receipt.SessionID, receipt.WorkloadID, receipt.RunID, receipt.Action,
 		receipt.OperationID, receipt.Status, receipt.Error, receipt.Uncertain,
 		receipt.CreatedAt, receipt.UpdatedAt,
