@@ -196,6 +196,144 @@ func TestSSHOrphanStopCommandSessionDirSurvivesWhenPidfileNamesAnotherPID(t *tes
 
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.16
 //
+// A resume can nohup its new agentctl and disown it before writing that
+// process's own agentctl.pid (see startRemoteAgentctlOnPort): by the time
+// this stop command's cleanup runs, the resumed process is already live
+// even though its own pidfile has not landed yet, so the original pidfile
+// this stop was given can be absent for a reason other than "nothing has
+// claimed the directory since." This proves the session dir survives when a
+// live process still matches the task dir, even with no pidfile at all.
+func TestSSHOrphanStopCommandSessionDirSurvivesWhenLiveAgentctlMatchesTaskDir(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("spawn short-lived process: %v", err)
+	}
+	deadPID := cmd.Process.Pid
+
+	dir := t.TempDir()
+	taskDirPath := filepath.Join(dir, "task-1")
+	sessionDir := filepath.Join(taskDirPath, ".kandev", "sessions", "sess-1")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	// No agentctl.pid: the resumed launch has not written it yet.
+
+	// A live process whose full command line contains "agentctl --workdir
+	// <taskDirPath>", standing in for a resume's already-nohup'd, not-yet-
+	// pidfiled agentctl (same trailing-argv trick as the process-group test
+	// above: ps sees it as part of this process's own command line). The
+	// script must have more than one statement — a single simple `sleep 100`
+	// lets bash tail-call exec it away, replacing bash's argv (and the fake
+	// trailing "agentctl --workdir" tail with it) with the bare sleep.
+	impersonator := exec.Command("bash", "-c", "sleep 100 &\nwait\n", "agentctl", "--workdir", taskDirPath)
+	if err := impersonator.Start(); err != nil {
+		t.Fatalf("start impersonator process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = impersonator.Process.Kill()
+		_ = impersonator.Wait()
+	})
+
+	script := sshOrphanStopCommand(deadPID, taskDirPath, sessionDir)
+	output, err := exec.Command("sh", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("stop command failed: %v\n%s", err, output)
+	}
+	if _, statErr := os.Stat(sessionDir); statErr != nil {
+		t.Fatalf("session dir %s was removed even though a live agentctl still matches %s: %v", sessionDir, taskDirPath, statErr)
+	}
+	if !strings.Contains(string(output), "leaving session dir") {
+		t.Fatalf("stop command output = %q, want a message noting a live agentctl match", output)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.16
+//
+// This script's interpreter is the remote account's login shell (see
+// WrapLoginShell / sshShellForRemote), zsh by default on macOS — and zsh
+// does not word-split an unquoted expansion the way sh/bash/dash do. An
+// unquoted `for cpid in $CHILDREN` would collapse two newline-separated
+// child pids into one bogus argument and strand every child after the
+// first. This proves multiple direct children are all still signalled when
+// the script runs under zsh.
+func TestSSHOrphanStopCommandKillsMultipleChildProcessGroupsUnderZsh(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	dir := t.TempDir()
+	taskDirPath := filepath.Join(dir, "tasks", "task-1")
+	child1PIDFile := filepath.Join(dir, "child1.pid")
+	child2PIDFile := filepath.Join(dir, "child2.pid")
+
+	targetScript := fmt.Sprintf(`set -m
+trap '' TERM
+sleep 100 &
+echo $! > %s
+sleep 100 &
+echo $! > %s
+wait
+`, shellQuote(child1PIDFile), shellQuote(child2PIDFile))
+
+	target := exec.Command("bash", "-c", targetScript, "agentctl", "--workdir", taskDirPath)
+	if err := target.Start(); err != nil {
+		t.Fatalf("start target process: %v", err)
+	}
+	targetPID := target.Process.Pid
+	targetReaped := false
+	t.Cleanup(func() {
+		_ = target.Process.Kill()
+		if !targetReaped {
+			_ = target.Wait()
+		}
+	})
+
+	child1PID := waitForPIDFile(t, child1PIDFile)
+	child2PID := waitForPIDFile(t, child2PIDFile)
+	t.Cleanup(func() {
+		_ = syscall.Kill(child1PID, syscall.SIGKILL)
+		_ = syscall.Kill(child2PID, syscall.SIGKILL)
+	})
+
+	if !processAlive(targetPID) {
+		t.Fatalf("target pid %d is not alive before the stop", targetPID)
+	}
+	if !processAlive(child1PID) || !processAlive(child2PID) {
+		t.Fatalf("a child pid is not alive before the stop")
+	}
+
+	script := sshOrphanStopCommand(targetPID, taskDirPath, "")
+	output, err := exec.Command("zsh", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("stop command failed under zsh: %v\n%s", err, output)
+	}
+
+	_ = target.Wait()
+	targetReaped = true
+
+	if processAlive(targetPID) {
+		t.Fatalf("target pid %d is still alive after the stop command", targetPID)
+	}
+	if processAlive(child1PID) {
+		t.Fatalf("first child pid %d is still alive after SIGKILL escalation under zsh", child1PID)
+	}
+	if processAlive(child2PID) {
+		t.Fatalf("second child pid %d is still alive after SIGKILL escalation under zsh — likely the unquoted $CHILDREN word-split regression", child2PID)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.16
+//
 // Review Round 1 (R1-F2): the stop script must re-check the target pid's own
 // command line before signalling it, because the pid can have exited and
 // been reused by an unrelated process in the window between the inventory

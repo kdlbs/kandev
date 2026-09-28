@@ -25,6 +25,16 @@ const sshOrphanSweepDefaultIntervalSeconds = 30 * 60
 // sweep, mirroring ProbeSSHHost's own bound on the same connection.
 const sshOrphanSweepDialTimeout = 30 * time.Second
 
+// sshOrphanSweepRunTimeout bounds one sweepSSHExecutorOrphans call, separate
+// from the scheduler's own long-lived context. Without it, a stalled SSH
+// round trip keeps sweeping[executor.ID] set forever (see trySweep), so
+// every later trigger for that executor — including the next reachability
+// event — is silently coalesced away, and Stop blocks on the same hang.
+// Sized well above the worst realistic sweep: sshAgentctlStopPollAttempts
+// (50 * 100ms = 5s) grace per stopped process, times a generously large
+// orphan count, plus per-command round trips.
+const sshOrphanSweepRunTimeout = 10 * time.Minute
+
 // sshOrphanSweepExecutorStore is the narrow executor-read surface the
 // scheduler needs. GetExecutor resolves the single id an
 // events.ExecutorReachabilityChanged event names; the other two mirror
@@ -298,7 +308,9 @@ func (s *OrphanSweepScheduler) runSweep(ctx context.Context, executor *models.Ex
 	}
 	defer func() { _ = client.Close() }()
 
-	if _, err := sweepSSHExecutorOrphans(ctx, client, s.tasks, executor.ID, executor.Config, s.log); err != nil {
+	sweepCtx, sweepCancel := context.WithTimeout(ctx, sshOrphanSweepRunTimeout)
+	defer sweepCancel()
+	if _, err := sweepSSHExecutorOrphans(sweepCtx, client, s.tasks, executor.ID, executor.Config, s.log); err != nil {
 		s.warn(executor.ID, "sweep failed", err)
 	}
 }

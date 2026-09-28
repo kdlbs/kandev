@@ -30,7 +30,7 @@ type sshOrphanSweepStore interface {
 // inventory command, after Go-side parsing of its --workdir argument.
 type sshOrphanProcessRecord struct {
 	PID     int
-	PPID    int
+	PPID    int    // reserved for a future recycled-pid pidfile tie-breaker; not read yet.
 	TaskDir string // e.g. "task-<task-id>"
 	TaskID  string
 }
@@ -585,23 +585,35 @@ func stopSSHOrphanProcess(
 }
 
 // sshOrphanSessionDirCleanupCommand returns the shell snippet that removes
-// sessionDir only when doing so cannot delete a newer claim: either its
-// agentctl.pid is absent (nothing has claimed the directory since), or the
-// pidfile still names $TARGET_PID — the same process this script just
-// stopped. A pidfile naming a different pid means a fresh agentctl launch
-// has already claimed this session directory since the inventory snapshot
-// was taken (Review Round 2, R2-F2 part 2); removing it then would delete
-// state out from under that live, unrelated process, so the directory is
-// left alone instead. The identity check runs inside this same shell
-// snippet, atomically with the removal it gates, so there is no separate
-// round trip between checking and removing for a resume to race into.
+// sessionDir only when doing so cannot delete a newer claim: no live
+// agentctl currently matches $TASKDIR (a resume's remote launch backgrounds
+// its new agentctl, via nohup, before it writes that process's own
+// agentctl.pid — see startRemoteAgentctlOnPort — so an absent or momentarily
+// empty pidfile does not by itself prove nothing has claimed the directory
+// since the inventory snapshot; re-checking for a live match closes that
+// window), its agentctl.pid is absent (nothing has claimed the directory
+// since), or the pidfile still names $TARGET_PID — the same process this
+// script just stopped. A pidfile naming a different pid means a fresh
+// agentctl launch has already claimed this session directory since the
+// inventory snapshot was taken (Review Round 2, R2-F2 part 2); removing it
+// then would delete state out from under that live, unrelated process, so
+// the directory is left alone instead. Every check runs inside this same
+// shell snippet, atomically with the removal it gates, so there is no
+// separate round trip between checking and removing for a resume to race
+// into. NEEDLE and TASKDIR are the same values sshOrphanStopCommand's own
+// pre-signal identity recheck already validated, including NEEDLE's
+// deliberate trailing space guarding the word boundary when --workdir is
+// the last token on the command line (the common case: see the launch
+// command in startRemoteAgentctlOnPort).
 //
 //nolint:dupword // shell branches contain repeated `fi` tokens.
 func sshOrphanSessionDirCleanupCommand(sessionDir string) string {
 	pidFile := strings.TrimSuffix(sessionDir, "/") + "/agentctl.pid"
 	remove := removeRemoteDirCommand(sessionDir)
 	return fmt.Sprintf(`SESSION_PIDFILE=%[1]s
-if [ ! -f "$SESSION_PIDFILE" ]; then
+if ps -eo command= 2>/dev/null | sed 's/$/ /' | grep -F -- "agentctl" | grep -qF -- "$NEEDLE"; then
+  echo "orphan sweep: a live agentctl now matches $TASKDIR; leaving session dir" >&2
+elif [ ! -f "$SESSION_PIDFILE" ]; then
   %[2]s
 else
   SESSION_PID=$(cat "$SESSION_PIDFILE" 2>/dev/null | tr -d '[:space:]')
@@ -653,6 +665,12 @@ CURRENT_CMD=$(
 %[3]s
 )
 if [ $? -eq 0 ]; then
+  # NEEDLE's trailing space is the word-boundary guard (so "$TASKDIR" can't
+  # match a longer sibling path); the space appended to "$CURRENT_CMD" below
+  # is a second, independent guard so that still matches when --workdir is
+  # the last token on the line (the common case — see the launch command in
+  # startRemoteAgentctlOnPort). Simplifying either one away silently breaks
+  # the other's boundary check.
   case "$CURRENT_CMD " in
     *agentctl*"$NEEDLE"*) ;;
     *)
@@ -673,7 +691,14 @@ if kill "$TARGET_PID" 2>/dev/null; then
 fi
 if kill -0 "$TARGET_PID" 2>/dev/null; then
   kill -9 "$TARGET_PID" 2>/dev/null || true
-  for cpid in $CHILDREN; do
+  # Fed through printf+read rather than an unquoted "for cpid in $CHILDREN":
+  # this script's interpreter is the remote account's login shell (see
+  # WrapLoginShell / sshShellForRemote), zsh by default on macOS, and zsh
+  # does not word-split an unquoted expansion the way sh/bash/dash do — a
+  # multi-line $CHILDREN would collapse into a single bogus argument there,
+  # leaving every child but the first process group unsignalled.
+  printf '%%s\n' "$CHILDREN" | while read -r cpid; do
+    [ -n "$cpid" ] || continue
     kill -9 -- "-$cpid" 2>/dev/null || true
   done
 fi
