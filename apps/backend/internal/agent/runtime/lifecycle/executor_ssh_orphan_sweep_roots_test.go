@@ -124,12 +124,12 @@ func TestSweepSSHExecutorOrphansUsesProfileWorkdirRoot(t *testing.T) {
 	archivedAt := time.Now().Add(-time.Hour)
 	handler := newSSHScriptedHandler(t,
 		sshScriptRule{
-			match:  `ROOT='/Users/neo/kandev-workspaces/tasks'`,
+			match:  "/Users/neo/kandev-workspaces/tasks",
 			result: sshOut("PROC\t4242\t1\t/opt/kandev/agentctl --workdir /Users/neo/kandev-workspaces/tasks/task-1\n"),
 		},
 		sshScriptRule{match: "TARGET_PID=4242", result: sshOK},
 		sshScriptRule{match: `printf %s "$HOME"`, result: sshOut("/Users/neo")},
-		sshScriptRule{match: `ROOT='/Users/neo/.kandev/tasks'`, result: sshOK},
+		sshScriptRule{match: "/Users/neo/.kandev/tasks", result: sshOK},
 	)
 	server := newFakeSSHServer(t, handler.handle)
 	client := server.dial(t)
@@ -141,7 +141,7 @@ func TestSweepSSHExecutorOrphansUsesProfileWorkdirRoot(t *testing.T) {
 		task: &models.Task{ID: "1", ArchivedAt: &archivedAt},
 	}
 
-	report, err := sweepSSHExecutorOrphans(context.Background(), client, store, "executor-1", map[string]string{}, logger.Default())
+	report, err := sweepSSHExecutorOrphans(context.Background(), client, store, "executor-1", map[string]string{}, logger.Default(), nil)
 	if err != nil {
 		t.Fatalf("sweepSSHExecutorOrphans: %v", err)
 	}

@@ -2,9 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -57,7 +61,7 @@ func (s *sshOrphanRecheckStore) ListExecutorProfiles(context.Context, string) ([
 func TestSweepSSHExecutorOrphansUnderRootReChecksBeforeStop(t *testing.T) {
 	handler := newSSHScriptedHandler(t,
 		sshScriptRule{
-			match: `ROOT='/root/tasks'`,
+			match: "ps -eo pid=,ppid=,command=",
 			result: sshOut(
 				"PROC\t4242\t1\t/opt/kandev/agentctl --workdir /root/tasks/task-1\n" +
 					"PIDFILE\ttask-1\tsess-1\t4242\n",
@@ -75,7 +79,7 @@ func TestSweepSSHExecutorOrphansUnderRootReChecksBeforeStop(t *testing.T) {
 	report := &sshOrphanSweepReport{ExecutorID: "executor-1"}
 	err := sweepSSHExecutorOrphansUnderRoot(
 		context.Background(), client, store, "executor-1", "/root",
-		map[string]*sshOrphanTaskContext{}, report, logger.Default(),
+		map[string]*sshOrphanTaskContext{}, report, logger.Default(), nil,
 	)
 	if err != nil {
 		t.Fatalf("sweepSSHExecutorOrphansUnderRoot: %v", err)
@@ -89,5 +93,125 @@ func TestSweepSSHExecutorOrphansUnderRootReChecksBeforeStop(t *testing.T) {
 	}
 	if calls := atomic.LoadInt32(&store.sessionsCalls); calls < 2 {
 		t.Fatalf("ListTaskSessions was called %d times, want at least 2 (cached decision + fresh recheck)", calls)
+	}
+}
+
+type sshOrphanSweepFenceStore struct {
+	finalRead chan struct{}
+	reads     atomic.Int32
+}
+
+func (*sshOrphanSweepFenceStore) GetTask(context.Context, string) (*models.Task, error) {
+	return &models.Task{ID: "1"}, nil
+}
+
+func (*sshOrphanSweepFenceStore) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
+	return []*models.TaskSession{{ID: "sess-1", State: models.TaskSessionStateCompleted}}, nil
+}
+
+func (s *sshOrphanSweepFenceStore) ListExecutorsRunningByTaskID(context.Context, string) ([]*models.ExecutorRunning, error) {
+	if s.reads.Add(1) == 2 {
+		close(s.finalRead)
+	}
+	return nil, nil
+}
+
+func (*sshOrphanSweepFenceStore) ListExecutorProfiles(context.Context, string) ([]*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
+// TestSweepFencePreventsResumeBetweenFinalReadAndRemoteStop proves that a
+// runtime resume cannot reuse an inventoried PID after the fresh database
+// read and before the stop signal. The resume starts as soon as the final
+// executor-row query begins, then remains blocked until the remote stop ends.
+func TestSweepFencePreventsResumeBetweenFinalReadAndRemoteStop(t *testing.T) {
+	finalRead := make(chan struct{})
+	stopStarted := make(chan struct{})
+	allowStop := make(chan struct{})
+	var allowStopOnce sync.Once
+	releaseRemoteStop := func() { allowStopOnce.Do(func() { close(allowStop) }) }
+	defer releaseRemoteStop()
+	sweepDone := make(chan error, 1)
+	resumeStarted := make(chan struct{})
+	creationDone := make(chan error, 1)
+	log := newTestLogger()
+	backend := &resumeTrackingExecutor{
+		MockExecutor:  MockExecutor{name: executor.NameStandalone},
+		client:        newReadyAgentctlClient(t, log),
+		resumeStarted: resumeStarted,
+	}
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+
+	handler := func(command, _ string) sshExecResult {
+		switch {
+		case strings.Contains(command, "ps -eo pid=,ppid=,command="):
+			return sshOut("PROC\t4242\t1\t/opt/kandev/agentctl --workdir /root/tasks/task-1\nPIDFILE\ttask-1\tsess-1\t4242\n")
+		case strings.Contains(command, "TARGET_PID=4242"):
+			close(stopStarted)
+			<-allowStop
+			return sshOK
+		default:
+			t.Errorf("unexpected remote command %q", command)
+			return sshFail("unexpected command")
+		}
+	}
+	server := newFakeSSHServer(t, handler)
+	client := server.dial(t)
+	store := &sshOrphanSweepFenceStore{finalRead: finalRead}
+	go func() {
+		report := &sshOrphanSweepReport{ExecutorID: "executor-1"}
+		sweepDone <- sweepSSHExecutorOrphansUnderRoot(
+			context.Background(), client, store, "executor-1", "/root",
+			map[string]*sshOrphanTaskContext{}, report, logger.Default(), mgr.AcquireSSHOrphanSweepFence,
+		)
+	}()
+
+	select {
+	case <-finalRead:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sweep did not reach its final executor-row read")
+	}
+	go func() {
+		_, err := mgr.createExecution(context.Background(), "1", &WorkspaceInfo{
+			TaskID: "1", SessionID: "sess-1", AgentID: "auggie", WorkspacePath: "/workspace/task-1",
+		})
+		creationDone <- err
+	}()
+
+	select {
+	case <-resumeStarted:
+		t.Fatal("runtime resume entered between the final database read and remote stop")
+	case <-stopStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sweep did not send the remote stop command")
+	}
+	select {
+	case <-resumeStarted:
+		t.Fatal("runtime resume entered while the remote stop was in progress")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseRemoteStop()
+	select {
+	case err := <-sweepDone:
+		if err != nil {
+			t.Fatalf("sweepSSHExecutorOrphansUnderRoot returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sweep did not finish after the remote stop was released")
+	}
+	select {
+	case <-resumeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime resume did not continue after the sweep released the task fence")
+	}
+	if err := <-creationDone; err != nil {
+		t.Fatalf("createExecution returned error: %v", err)
 	}
 }

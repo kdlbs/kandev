@@ -136,6 +136,7 @@ func sweepSSHExecutorOrphans(
 	executorID string,
 	config map[string]string,
 	log *logger.Logger,
+	acquireTaskFence func(taskID string) func(),
 ) (sshOrphanSweepReport, error) {
 	report := sshOrphanSweepReport{ExecutorID: executorID}
 
@@ -159,7 +160,7 @@ func sweepSSHExecutorOrphans(
 		}
 		resolvedRoots[resolvedRoot] = true
 
-		if err := sweepSSHExecutorOrphansUnderRoot(ctx, client, store, executorID, resolvedRoot, taskContexts, &report, log); err != nil {
+		if err := sweepSSHExecutorOrphansUnderRoot(ctx, client, store, executorID, resolvedRoot, taskContexts, &report, log, acquireTaskFence); err != nil {
 			return report, err
 		}
 	}
@@ -185,6 +186,7 @@ func sweepSSHExecutorOrphansUnderRoot(
 	taskContexts map[string]*sshOrphanTaskContext,
 	report *sshOrphanSweepReport,
 	log *logger.Logger,
+	acquireTaskFence func(taskID string) func(),
 ) error {
 	stdout, _, err := runSSHCommand(ctx, client, sshOrphanInventoryCommand(resolvedRoot))
 	if err != nil {
@@ -211,35 +213,58 @@ func sweepSSHExecutorOrphansUnderRoot(
 			continue
 		}
 
-		// Re-decide against a fresh, uncached read immediately before
-		// signalling: taskCtx above can be stale by the time this process's
-		// turn in the sequential stop loop arrives, since a resume can race
-		// in against an earlier process's grace-period wait and flip this
-		// task's session out of the terminal state the cached decision relied
-		// on. Only a fresh Stop verdict may proceed; a fresh Preserve leaves
-		// the process alone even though the cached decision above said Stop.
-		freshTaskCtx, err := loadSSHOrphanTaskContextFresh(ctx, store, proc.TaskID)
+		// The shared task fence prevents a runtime resume from reclaiming this
+		// PID between the final database read and the remote identity check and
+		// stop. It also makes newly created controllers visible in the running
+		// rows before a later sweep can classify them.
+		freshDecision, err := recheckAndStopSSHOrphanProcess(
+			ctx, client, store, resolvedRoot, proc,
+			sessionID, claimed, tainted, acquireTaskFence,
+		)
 		if err != nil {
 			report.Failed++
-			log.Warn("ssh orphan sweep: pre-stop recheck failed",
+			log.Warn("ssh orphan sweep: final recheck or remote stop failed",
 				zap.String("executor_id", executorID), zap.Error(err))
 			continue
 		}
-		freshDecision := decideSSHOrphanProcess(proc.PID, sessionID, claimed, tainted, freshTaskCtx)
 		if freshDecision.Verdict == sshOrphanPreserve {
 			report.Preserved++
-			continue
-		}
-
-		if err := stopSSHOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {
-			report.Failed++
-			log.Warn("ssh orphan sweep: stop failed",
-				zap.String("executor_id", executorID), zap.Error(err))
 			continue
 		}
 		report.Stopped++
 	}
 	return nil
+}
+
+func recheckAndStopSSHOrphanProcess(
+	ctx context.Context,
+	client *ssh.Client,
+	store sshOrphanSweepStore,
+	resolvedRoot string,
+	proc sshOrphanProcessRecord,
+	sessionID string,
+	claimed bool,
+	tainted bool,
+	acquireTaskFence func(taskID string) func(),
+) (sshOrphanDecision, error) {
+	if acquireTaskFence != nil {
+		if release := acquireTaskFence(proc.TaskID); release != nil {
+			defer release()
+		}
+	}
+
+	freshTaskCtx, err := loadSSHOrphanTaskContextFresh(ctx, store, proc.TaskID)
+	if err != nil {
+		return sshOrphanDecision{}, fmt.Errorf("recheck task state: %w", err)
+	}
+	freshDecision := decideSSHOrphanProcess(proc.PID, sessionID, claimed, tainted, freshTaskCtx)
+	if freshDecision.Verdict == sshOrphanPreserve {
+		return freshDecision, nil
+	}
+	if err := stopSSHOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {
+		return freshDecision, fmt.Errorf("stop remote process: %w", err)
+	}
+	return freshDecision, nil
 }
 
 // loadSSHOrphanTaskContext reads a task, its sessions, and its
@@ -295,7 +320,7 @@ func loadSSHOrphanTaskContextFresh(
 
 // decideSSHOrphanProcess implements AC-EXECUTORS-SSH-EXECUTOR-001.14 and .15.
 // Every branch that cannot prove the process is safe to stop preserves it:
-// an unknown task, a live executors_running row for the pid, a pidfile claim
+// an unknown task, an executors_running row for the pid, a pidfile claim
 // naming a session the task does not have, a non-terminal attributed
 // session, or a non-terminal session among an unclaimed process's task.
 func decideSSHOrphanProcess(
@@ -317,10 +342,10 @@ func decideSSHOrphanProcess(
 			Reason:  "task is unknown to this Kandev database",
 		}
 	}
-	if sshOrphanRunningRowBlocksStop(pid, taskCtx.Sessions, taskCtx.Running) {
+	if sshOrphanRunningRowBlocksStop(pid, taskCtx.Running) {
 		return sshOrphanDecision{
 			Verdict: sshOrphanPreserve,
-			Reason:  "an executors_running row for a non-terminal session names this pid",
+			Reason:  "an executors_running row tracks this pid",
 		}
 	}
 	if claimed {
@@ -384,20 +409,15 @@ func findSSHOrphanSession(sessions []*models.TaskSession, id string) *models.Tas
 	return nil
 }
 
-// sshOrphanRunningRowBlocksStop implements the executors_running safety net
-// in AC-EXECUTORS-SSH-EXECUTOR-001.15: a live row naming this pid blocks the
-// stop regardless of the pidfile/task attribution above, unless the row's
-// own session is provably terminal. A row whose session cannot be found is
-// treated the same as a non-terminal one — ownership is unproven either way.
-func sshOrphanRunningRowBlocksStop(pid int, sessions []*models.TaskSession, rows []*models.ExecutorRunning) bool {
+// sshOrphanRunningRowBlocksStop implements the executors_running safety net:
+// any row claiming this pid blocks the stop. Its session can be terminal
+// while the tracked runtime still provides workspace services.
+func sshOrphanRunningRowBlocksStop(pid int, rows []*models.ExecutorRunning) bool {
 	for _, row := range rows {
 		if row == nil || row.PID != pid {
 			continue
 		}
-		session := findSSHOrphanSession(sessions, row.SessionID)
-		if session == nil || !isTerminalSSHOrphanSessionState(session.State) {
-			return true
-		}
+		return true
 	}
 	return false
 }
@@ -421,12 +441,13 @@ func sshOrphanAttributeSession(inv sshOrphanInventory, proc sshOrphanProcessReco
 // roughly the same instant. It deliberately runs without `set -e`: a single
 // unreadable pidfile must not abort the rest of the survey, and callers
 // treat unparsable pidfile content as a tainted task rather than a script
-// failure.
+// failure. An explicit POSIX shell keeps unmatched globs safe when the remote
+// account's login shell is zsh with NOMATCH enabled.
 //
 //nolint:dupword // shell branches contain repeated `done` tokens.
 func sshOrphanInventoryCommand(resolvedRoot string) string {
 	root := strings.TrimSuffix(resolvedRoot, "/") + "/tasks"
-	return "ROOT=" + shellQuote(root) + `
+	script := "ROOT=" + shellQuote(root) + `
 ps -eo pid=,ppid=,command= 2>/dev/null | while read -r pid ppid command; do
   case "$command" in
     *agentctl*"--workdir "*"$ROOT/task-"*)
@@ -446,6 +467,7 @@ for taskDir in "$ROOT"/task-*/; do
   done
 done
 `
+	return "sh -c " + shellQuote(script)
 }
 
 // parseSSHOrphanInventory parses sshOrphanInventoryCommand's output. Any line

@@ -83,10 +83,11 @@ func decodeSSHOrphanReachabilityEvent(data interface{}) (sshOrphanReachabilityEv
 // Start and Stop are idempotent. Stop cancels every in-flight sweep and
 // waits for all of them (plus the loop) to drain before returning.
 type OrphanSweepScheduler struct {
-	executors       sshOrphanSweepExecutorStore
-	tasks           sshOrphanSweepStore
-	log             *logger.Logger
-	intervalSeconds int
+	executors        sshOrphanSweepExecutorStore
+	tasks            sshOrphanSweepStore
+	acquireTaskFence func(taskID string) func()
+	log              *logger.Logger
+	intervalSeconds  int
 
 	mu           sync.Mutex
 	started      bool
@@ -105,16 +106,23 @@ type OrphanSweepScheduler struct {
 // reachability.Poller, there is no user-facing "disabled" sentinel here —
 // this sweep only ever stops orphaned processes, so there is no reason to
 // turn the backstop off.
-func NewOrphanSweepScheduler(executors sshOrphanSweepExecutorStore, tasks sshOrphanSweepStore, intervalSeconds int, log *logger.Logger) *OrphanSweepScheduler {
+func NewOrphanSweepScheduler(
+	executors sshOrphanSweepExecutorStore,
+	tasks sshOrphanSweepStore,
+	intervalSeconds int,
+	log *logger.Logger,
+	acquireTaskFence func(taskID string) func(),
+) *OrphanSweepScheduler {
 	if intervalSeconds <= 0 {
 		intervalSeconds = sshOrphanSweepDefaultIntervalSeconds
 	}
 	return &OrphanSweepScheduler{
-		executors:       executors,
-		tasks:           tasks,
-		log:             log,
-		intervalSeconds: intervalSeconds,
-		sweeping:        map[string]bool{},
+		executors:        executors,
+		tasks:            tasks,
+		acquireTaskFence: acquireTaskFence,
+		log:              log,
+		intervalSeconds:  intervalSeconds,
+		sweeping:         map[string]bool{},
 	}
 }
 
@@ -310,7 +318,7 @@ func (s *OrphanSweepScheduler) runSweep(ctx context.Context, executor *models.Ex
 
 	sweepCtx, sweepCancel := context.WithTimeout(ctx, sshOrphanSweepRunTimeout)
 	defer sweepCancel()
-	if _, err := sweepSSHExecutorOrphans(sweepCtx, client, s.tasks, executor.ID, executor.Config, s.log); err != nil {
+	if _, err := sweepSSHExecutorOrphans(sweepCtx, client, s.tasks, executor.ID, executor.Config, s.log, s.acquireTaskFence); err != nil {
 		s.warn(executor.ID, "sweep failed", err)
 	}
 }

@@ -816,6 +816,13 @@ func (m *Manager) createExecutionWithMode(
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(operationCtx)
 	defer launchCancel()
+	// The orphan sweep holds this task's exclusive fence from its final state
+	// read through the remote stop. Keep resume, controller creation, and row
+	// persistence inside the matching shared fence so an inventoried PID
+	// cannot be reused between that read and its stop signal.
+	releaseRuntimeFence := m.taskRuntimeFences.acquireCreation(taskID)
+	defer releaseRuntimeFence()
+
 	if err := resumeRemoteInstancePreflight(launchCtx, inputs.runtime, inputs.preparation.request); err != nil {
 		return nil, err
 	}

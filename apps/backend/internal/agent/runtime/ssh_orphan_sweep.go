@@ -51,8 +51,9 @@ func StartOrphanSweepScheduler(
 	intervalSeconds int,
 	log *logger.Logger,
 	eventBus bus.EventBus,
+	acquireTaskFence func(taskID string) func(),
 ) *OrphanSweepScheduler {
-	scheduler := lifecycle.NewOrphanSweepScheduler(executors, tasks, intervalSeconds, log)
+	scheduler := lifecycle.NewOrphanSweepScheduler(executors, tasks, intervalSeconds, log, acquireTaskFence)
 	scheduler.Start(ctx, eventBus)
 	return &OrphanSweepScheduler{inner: scheduler}
 }

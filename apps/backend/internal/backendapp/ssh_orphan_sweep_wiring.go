@@ -38,8 +38,9 @@ func startSSHOrphanSweepScheduler(
 	eventBus bus.EventBus,
 	log *logger.Logger,
 	addCleanup func(func() error) func() error,
+	acquireTaskFence func(taskID string) func(),
 ) *agentruntime.OrphanSweepScheduler {
-	scheduler := agentruntime.StartOrphanSweepScheduler(ctx, repo, repo, 0, log, eventBus)
+	scheduler := agentruntime.StartOrphanSweepScheduler(ctx, repo, repo, 0, log, eventBus, acquireTaskFence)
 	addCleanup(func() error { scheduler.Stop(); return nil })
 	return scheduler
 }

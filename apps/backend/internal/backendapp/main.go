@@ -918,7 +918,10 @@ func startAgentInfrastructure(
 	// reconciliation path that deleted its executors_running row without a
 	// remote kill. Triggered by the same reachability-changed event this
 	// poller publishes, plus its own slow interval backstop.
-	startSSHOrphanSweepScheduler(ctx, repos.Task, eventBus, log, addRuntimeCleanup)
+	startSSHOrphanSweepScheduler(
+		ctx, repos.Task, eventBus, log, addRuntimeCleanup,
+		lifecycleMgr.AcquireSSHOrphanSweepFence,
+	)
 
 	// Launch-time session.launch.warning producer (task 05): repos.Task
 	// already implements the narrow read accessor (same method used by the

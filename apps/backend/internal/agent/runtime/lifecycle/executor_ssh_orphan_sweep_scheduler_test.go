@@ -151,7 +151,7 @@ func TestOrphanSweepSchedulerCoalescesConcurrentTriggersForSameExecutor(t *testi
 	store := &schedulerTestStore{executor: executor}
 
 	eventBus := bus.NewMemoryEventBus(logger.Default())
-	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default())
+	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default(), nil)
 	scheduler.Start(context.Background(), eventBus)
 	defer scheduler.Stop()
 
@@ -203,7 +203,7 @@ func TestOrphanSweepSchedulerIgnoresNonReachableState(t *testing.T) {
 		getExecutorHit: make(chan string, 1),
 	}
 	eventBus := bus.NewMemoryEventBus(logger.Default())
-	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default())
+	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default(), nil)
 	scheduler.Start(context.Background(), eventBus)
 	defer scheduler.Stop()
 
@@ -238,7 +238,7 @@ func TestOrphanSweepSchedulerHandlesNATSDecodedEventPayload(t *testing.T) {
 		getExecutorHit: make(chan string, 1),
 	}
 	eventBus := bus.NewMemoryEventBus(logger.Default())
-	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default())
+	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default(), nil)
 	scheduler.Start(context.Background(), eventBus)
 	defer scheduler.Stop()
 

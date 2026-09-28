@@ -100,7 +100,7 @@ func TestStartSSHOrphanSweepScheduler_StartsSchedulerAndRegistersCleanup(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scheduler := startSSHOrphanSweepScheduler(ctx, repo, nil, logger.Default(), addCleanup)
+	scheduler := startSSHOrphanSweepScheduler(ctx, repo, nil, logger.Default(), addCleanup, nil)
 	if scheduler == nil {
 		t.Fatal("startSSHOrphanSweepScheduler returned a nil scheduler")
 	}

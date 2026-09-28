@@ -14,8 +14,8 @@ func TestDecideSSHOrphanProcess(t *testing.T) {
 	session := func(id string, state models.TaskSessionState) *models.TaskSession {
 		return &models.TaskSession{ID: id, State: state}
 	}
-	runningRow := func(pid int, sessionID string) *models.ExecutorRunning {
-		return &models.ExecutorRunning{PID: pid, SessionID: sessionID}
+	runningRow := func(pid int, sessionID, status string) *models.ExecutorRunning {
+		return &models.ExecutorRunning{PID: pid, SessionID: sessionID, Status: status}
 	}
 
 	cases := []struct {
@@ -47,27 +47,36 @@ func TestDecideSSHOrphanProcess(t *testing.T) {
 			taskCtx: &sshOrphanTaskContext{
 				Task:     &models.Task{ID: "t1", ArchivedAt: &archivedAt},
 				Sessions: []*models.TaskSession{session("s1", models.TaskSessionStateRunning)},
-				Running:  []*models.ExecutorRunning{runningRow(100, "s1")},
+				Running:  []*models.ExecutorRunning{runningRow(100, "s1", models.ExecutorRunningStatusRunning)},
 			},
 			wantVerdict: sshOrphanPreserve,
 		},
 		{
-			name:    "executors_running row for a terminal session does not block stop",
-			pid:     100,
-			claimed: false,
+			name: "active workspace execution blocks stop when its conversation session is terminal",
+			pid:  100,
 			taskCtx: &sshOrphanTaskContext{
 				Task:     &models.Task{ID: "t1", ArchivedAt: &archivedAt},
 				Sessions: []*models.TaskSession{session("s1", models.TaskSessionStateCompleted)},
-				Running:  []*models.ExecutorRunning{runningRow(100, "s1")},
+				Running:  []*models.ExecutorRunning{runningRow(100, "s1", models.ExecutorRunningStatusReady)},
 			},
-			wantVerdict: sshOrphanStop,
+			wantVerdict: sshOrphanPreserve,
+		},
+		{
+			name: "tracked terminal-session runtime still blocks stop",
+			pid:  100,
+			taskCtx: &sshOrphanTaskContext{
+				Task:     &models.Task{ID: "t1", ArchivedAt: &archivedAt},
+				Sessions: []*models.TaskSession{session("s1", models.TaskSessionStateCompleted)},
+				Running:  []*models.ExecutorRunning{runningRow(100, "s1", models.ExecutorRunningStatusComplete)},
+			},
+			wantVerdict: sshOrphanPreserve,
 		},
 		{
 			name: "executors_running row referencing an unknown session blocks stop",
 			pid:  100,
 			taskCtx: &sshOrphanTaskContext{
 				Task:    &models.Task{ID: "t1", ArchivedAt: &archivedAt},
-				Running: []*models.ExecutorRunning{runningRow(100, "missing-session")},
+				Running: []*models.ExecutorRunning{runningRow(100, "missing-session", models.ExecutorRunningStatusStarting)},
 			},
 			wantVerdict: sshOrphanPreserve,
 		},
