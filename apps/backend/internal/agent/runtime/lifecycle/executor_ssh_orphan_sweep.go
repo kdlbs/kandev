@@ -654,7 +654,7 @@ fi`, shellQuote(pidFile), remove)
 //
 //nolint:dupword // shell branches contain repeated `fi` tokens.
 func sshOrphanStopCommand(pid int, taskDirPath, sessionDir string) string {
-	cleanup := "true"
+	cleanup := boolStringTrue
 	if sessionDir != "" {
 		cleanup = sshOrphanSessionDirCleanupCommand(sessionDir)
 	}
