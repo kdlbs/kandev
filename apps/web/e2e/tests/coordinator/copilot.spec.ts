@@ -31,6 +31,25 @@ async function sendMessage(popover: Locator, text: string) {
   await editor.press(`${modifier}+Enter`);
 }
 
+// Like openCopilot, but also surfaces the opened conversation's ids so a test
+// can drive that session to a terminal state and later prove a Retry opened
+// a different one.
+async function openCopilotCapturingSession(
+  page: Page,
+): Promise<{ popover: Locator; sessionId: string; taskId: string }> {
+  const coordinatorRead = waitForHttp(page, "GET", COORDINATOR_READ);
+  const conversationOpened = waitForHttp(page, "POST", CONVERSATION_OPENED);
+  const launcher = page.getByTestId("coordinator-copilot-launcher");
+  await expect(launcher).toBeVisible({ timeout: 10_000 });
+  await launcher.click();
+  await coordinatorRead;
+  const response = await conversationOpened;
+  const body = (await response.json()) as { task_id: string; session_id: string };
+  const popover = page.getByTestId("coordinator-copilot-popover");
+  await expect(popover).toBeVisible();
+  return { popover, sessionId: body.session_id, taskId: body.task_id };
+}
+
 test.describe("Coordinator copilot", () => {
   test("opens on the launcher, shows the empty-conversation intro and suggestion, and answers a question (AC .002.4, .004.3, .004.4, .004.8)", async ({
     testPage,
@@ -309,25 +328,88 @@ test.describe("Coordinator copilot", () => {
     await expect(popover.getByTestId("session-recovery-error")).toHaveCount(0);
   });
 
-  // RESIDUAL, not a missing test: AC-COORDINATOR-COPILOT-004.6's "session
-  // exists but cannot start or resume" row is currently unreachable, not
-  // merely untested. `ReadyBody` passes `automaticRecovery={false}` to
-  // `QuickChatSessionView` (required by AC .002.2/.002.4/.004.5 — no
-  // automatic resume/restore on open or reload), which maps to
-  // `skipAutomaticRecovery: true` in `useSessionResumption`. The only two
-  // writers of the `error`/`notice` state `SessionRecoveryFeedback` renders
-  // from are the auto-resume effect itself — which returns immediately
-  // whenever `skipAutomaticRecovery` is true
-  // (apps/web/hooks/domains/session/use-session-resumption.ts:511-520) — and
-  // a manual retry reachable only from inside the banner those two writers
-  // would populate: a closed loop with no external trigger. Separately,
-  // `QuickChatSessionView`'s non-passthrough render branch never mounts
-  // `recoveryFeedback` at all (apps/web/components/quick-chat/quick-chat-session-view.tsx:129-152),
-  // a pre-existing gap that predates this stack. See the task plan's Build
-  // round 2 RESIDUAL entry for the full trace; the conductor is filing a
-  // follow-up for the coordinator-local failed-session display and a WP-2
-  // backend defect (the conversation route can return a FAILED session).
-  test.skip("a session that cannot start or resume shows SessionRecoveryFeedback while the lists stay live (AC .004.6, residual)", async () => {});
+  test("a session that has ended shows session-recovery-error while a Needs you item stays clickable, and Retry opens a new conversation (AC .004.6)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Ended Session Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+
+    // An unrelated task with a blocked clarification question, so the Needs
+    // you list has a real, clickable item independent of the coordinator
+    // conversation this test ends.
+    const needsYouTitle = "Needs You Stays Live";
+    const needsYouTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      needsYouTitle,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!needsYouTask.session_id) {
+      throw new Error("expected an active session for the clarification task");
+    }
+    await waitForSessionState(apiClient, {
+      taskId: needsYouTask.id,
+      sessionId: needsYouTask.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification session should block before the ended-session copilot check",
+      timeout: 60_000,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const needsYouCard = testPage.getByTestId(`needs-you-item-${needsYouTask.id}`);
+    await expect(needsYouCard).toBeVisible();
+    const needsYouAction = needsYouCard.getByRole("button", { name: "Ask about this" });
+    await expect(needsYouAction).toBeVisible();
+
+    const { popover, sessionId, taskId } = await openCopilotCapturingSession(testPage);
+    await sendMessage(popover, "/e2e:simple-message");
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // session.stop needs a live execution to cancel: let the turn settle off
+    // RUNNING first, as tests/terminal/terminal-ended-session.spec.ts does.
+    const state = async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      return sessions.find((session) => session.id === sessionId)?.state ?? "";
+    };
+    await expect
+      .poll(state, { timeout: 30_000, message: "Waiting for the coordinator turn to settle" })
+      .not.toBe("RUNNING");
+
+    await apiClient.stopSession({ session_id: sessionId, force: true });
+    await expect
+      .poll(state, { timeout: 30_000, message: "Waiting for the coordinator session to end" })
+      .toMatch(/FAILED|CANCELLED|COMPLETED/);
+
+    const banner = popover.getByTestId("session-recovery-error");
+    await expect(banner).toBeVisible();
+    // The Coordinator lists stay usable throughout: the banner does not
+    // block interaction elsewhere on the page.
+    await expect(needsYouAction).toBeEnabled();
+
+    const retryOpened = waitForHttp(testPage, "POST", CONVERSATION_OPENED);
+    await popover.getByTestId("ensure-session-error-retry").click();
+    const retryResponse = await retryOpened;
+    const retryBody = (await retryResponse.json()) as { task_id: string; session_id: string };
+    expect(retryBody.task_id).not.toBe(taskId);
+
+    await expect(banner).toHaveCount(0);
+    await expect(
+      popover.getByText("Ask the coordinator about anything on this screen."),
+    ).toBeVisible();
+  });
 });
 
 test.describe("Coordinator copilot: permission requests", () => {

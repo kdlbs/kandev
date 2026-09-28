@@ -271,6 +271,126 @@ func TestOpenConversationReplacesTaskWithTerminalSession(t *testing.T) {
 	}
 }
 
+// TestOpenConversationReusesNonTerminalSessionStates covers copilot.md
+// #conversation-task step 2's closing sentence: CREATED, STARTING, RUNNING,
+// IDLE and WAITING_FOR_INPUT are all reusable, not just the empty/zero-value
+// state the other reuse tests happen to exercise.
+func TestOpenConversationReusesNonTerminalSessionStates(t *testing.T) {
+	for _, state := range []taskmodels.TaskSessionState{
+		taskmodels.TaskSessionStateWaitingForInput,
+		taskmodels.TaskSessionStateCreated,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			deps := newConversationTestDeps(t)
+			ctx := context.Background()
+
+			first, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+			if err != nil {
+				t.Fatalf("first OpenConversation() unexpected error: %v", err)
+			}
+			deps.sessions.states[first.TaskID] = string(state)
+
+			second, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+			if err != nil {
+				t.Fatalf("second OpenConversation() unexpected error: %v", err)
+			}
+			if second.TaskID != first.TaskID {
+				t.Errorf("second open task = %q, want reuse of %q (session state %s)", second.TaskID, first.TaskID, state)
+			}
+			if len(deps.tasks.archivedIDs) != 0 {
+				t.Errorf("archivedIDs = %v for a reusable session state %s, want none", deps.tasks.archivedIDs, state)
+			}
+		})
+	}
+}
+
+// TestOpenConversationTerminalSessionArchiveFailureStillReplacesTask covers
+// copilot.md#conversation-task step 2: a failed archive (logged warn with the
+// coordinator id, task id and session state) does not block the open from
+// continuing at step 3 with a fresh task.
+func TestOpenConversationTerminalSessionArchiveFailureStillReplacesTask(t *testing.T) {
+	deps := newConversationTestDeps(t)
+	ctx := context.Background()
+
+	first, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("first OpenConversation() unexpected error: %v", err)
+	}
+	deps.sessions.states[first.TaskID] = string(taskmodels.TaskSessionStateFailed)
+	deps.tasks.archiveErr = errors.New("archive boom")
+
+	second, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("second OpenConversation() unexpected error: %v", err)
+	}
+	if second.TaskID == first.TaskID {
+		t.Fatalf("second open reused task %q despite a terminal session", first.TaskID)
+	}
+	if len(deps.tasks.archivedIDs) != 0 {
+		t.Errorf("archivedIDs = %v, want none: ArchiveTask always fails in this test", deps.tasks.archivedIDs)
+	}
+	reread, err := deps.svc.store.GetCoordinatorByID(ctx, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("GetCoordinatorByID: %v", err)
+	}
+	if reread.ConversationTaskID == nil || *reread.ConversationTaskID != second.TaskID {
+		t.Errorf("current conversation task = %v, want %q", reread.ConversationTaskID, second.TaskID)
+	}
+}
+
+// TestOpenConversationRacingOpensOverEndedTaskConverge covers copilot.md
+// #conversation-task step 2's race note: two opens racing over the same
+// ended task both reach step 4 with the same stale value (the ended task's
+// id), so exactly one new conversation task wins and the loser deletes its
+// own and converges on it.
+func TestOpenConversationRacingOpensOverEndedTaskConverge(t *testing.T) {
+	deps := newConversationTestDeps(t)
+	ctx := context.Background()
+
+	first, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("first OpenConversation() unexpected error: %v", err)
+	}
+	deps.sessions.states[first.TaskID] = string(taskmodels.TaskSessionStateFailed)
+
+	var winnerTaskID, loserTaskID string
+	raceInjected := false
+	deps.tasks.onCreate = func(task *taskmodels.Task) {
+		if raceInjected {
+			return // only race the second open's own create
+		}
+		raceInjected = true
+		loserTaskID = task.ID
+		winner, err := deps.tasks.CreateTask(ctx, &taskservice.CreateTaskRequest{
+			WorkspaceID: deps.coordinator.WorkspaceID, Title: "Coordinator: concurrent winner",
+		})
+		if err != nil {
+			t.Fatalf("seed winner task: %v", err)
+		}
+		winnerTaskID = winner.Task.ID
+		// The concurrent winner races over the same ended task: its stale
+		// value is also first.TaskID.
+		ok, err := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, winnerTaskID, first.TaskID)
+		if err != nil || !ok {
+			t.Fatalf("commit winner task: ok=%v err=%v", ok, err)
+		}
+	}
+
+	second, err := deps.svc.OpenConversation(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID)
+	if err != nil {
+		t.Fatalf("second OpenConversation() unexpected error: %v", err)
+	}
+	if second.TaskID != winnerTaskID {
+		t.Errorf("OpenConversation() task = %q, want the race winner %q", second.TaskID, winnerTaskID)
+	}
+	if _, stillExists := deps.tasks.tasks[loserTaskID]; stillExists {
+		t.Errorf("losing task %q was not deleted", loserTaskID)
+	}
+	if len(deps.tasks.archivedIDs) != 1 || deps.tasks.archivedIDs[0] != first.TaskID {
+		t.Errorf("archivedIDs = %v, want [%s] (the original ended task, archived exactly once)", deps.tasks.archivedIDs, first.TaskID)
+	}
+}
+
 func TestOpenConversationProfileUnavailableCreatesNoTask(t *testing.T) {
 	const workspaceID = "ws-1"
 	// No agent/executor profiles registered: ProfileStatus resolves to
