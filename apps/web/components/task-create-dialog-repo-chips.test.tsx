@@ -30,6 +30,10 @@ type CreationSurfaceProps = {
 };
 const creationSurface = vi.hoisted(() => ({ props: null as CreationSurfaceProps | null }));
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
 vi.mock("@/hooks/domains/workspace/use-repository-discovery", () => ({
   useRepositoryDiscovery: () => mockDiscovery,
 }));
@@ -87,6 +91,7 @@ afterEach(() => {
   creationSurface.props = null;
   mockBranches.value = { branches: [], isLoading: false, isLoaded: false };
   mockPolicies.value = [];
+  mockDiscovery.desktopRuntime = true;
 });
 
 const REPO_FRONT_ID = "repo-front";

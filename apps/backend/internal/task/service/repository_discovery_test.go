@@ -1396,6 +1396,18 @@ func TestDesktopDiscoveryAddTildeResolvesHome(t *testing.T) {
 	if selected.Path != home || selected.DisplayPath != "~" {
 		t.Fatalf("selected root = %+v, want path %q and display_path '~'", selected, home)
 	}
+
+	codeDir := filepath.Join(home, "Code")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		t.Fatalf("create code subpath: %v", err)
+	}
+	selectedSub, err := svc.AddDesktopDiscoveryRoot(context.Background(), "~/Code")
+	if err != nil {
+		t.Fatalf("add tilde-subpath desktop discovery root: %v", err)
+	}
+	if selectedSub.Path != codeDir || selectedSub.DisplayPath != "~/Code" {
+		t.Fatalf("selected subpath root = %+v, want path %q and display_path '~/Code'", selectedSub, codeDir)
+	}
 }
 
 func mustCreateRepo(t *testing.T, repo repository.RepositoryEntityRepository, r *models.Repository) {

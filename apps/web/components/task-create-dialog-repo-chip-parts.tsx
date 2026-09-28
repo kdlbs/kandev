@@ -256,26 +256,28 @@ export function RepoChipRepositoryPill({
   const discoveryAction = buildDiscoverySettingsAction(onOpenDiscoverySettings);
   const actions = [createAction, discoveryAction].filter(Boolean) as PillAction[];
 
-  const emptyMessage = onAddHomeAndOpenDiscovery ? (
-    <div className="flex flex-col items-center justify-center gap-2 py-4 px-3 text-center">
-      <p className="text-xs text-muted-foreground">{t("workspaces:noRepositoriesScanHomeHint")}</p>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-8 gap-1.5 text-xs cursor-pointer"
-        data-testid="scan-home-folder-hint-button"
-        onClick={() => {
-          onAddHomeAndOpenDiscovery();
-        }}
-      >
-        <IconHome className="h-3.5 w-3.5 text-muted-foreground" />
-        <span>{t("workspaces:scanHomeFolderAction")}</span>
-      </Button>
-    </div>
-  ) : (
-    t("task:noRepositories")
-  );
+  const emptyMessage =
+    repoOptions.length === 0 && onAddHomeAndOpenDiscovery ? (
+      <div className="flex flex-col items-center justify-center gap-2 py-4 px-3 text-center">
+        <p className="text-xs text-muted-foreground">
+          {t("workspaces:noRepositoriesScanHomeHint")}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 max-md:min-h-11 max-md:h-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:h-11 gap-1.5 text-xs cursor-pointer"
+          data-testid="scan-home-folder-hint-button"
+          onClick={() => {
+            onAddHomeAndOpenDiscovery();
+          }}
+        >
+          <IconHome className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>{t("workspaces:scanHomeFolderAction")}</span>
+        </Button>
+      </div>
+    ) : (
+      t("task:noRepositories")
+    );
 
   return (
     <Pill

@@ -652,23 +652,28 @@ func (s *Service) getRequiredDesktopDiscoveryRoot(
 	return root, nil
 }
 
-func expandDiscoveryRootPath(path string) string {
+func expandDiscoveryRootPath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
-	if trimmed == "~" || strings.HasPrefix(trimmed, "~"+string(os.PathSeparator)) || strings.HasPrefix(trimmed, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			if trimmed == "~" {
-				return home
-			}
-			return filepath.Join(home, trimmed[2:])
-		}
+	if trimmed == "" {
+		return "", fmt.Errorf("%w: path is required", ErrInvalidDiscoveryRoot)
 	}
-	return trimmed
+	if trimmed == "~" || strings.HasPrefix(trimmed, "~"+string(os.PathSeparator)) || strings.HasPrefix(trimmed, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("%w: could not resolve home directory: %v", ErrInvalidDiscoveryRoot, err)
+		}
+		if trimmed == "~" {
+			return home, nil
+		}
+		return filepath.Join(home, trimmed[2:]), nil
+	}
+	return trimmed, nil
 }
 
 func normalizeDiscoveryRootLookupPath(path string) (string, error) {
-	trimmed := expandDiscoveryRootPath(path)
-	if trimmed == "" {
-		return "", fmt.Errorf("%w: path is required", ErrInvalidDiscoveryRoot)
+	trimmed, err := expandDiscoveryRootPath(path)
+	if err != nil {
+		return "", err
 	}
 	abs, err := filepath.Abs(filepath.Clean(trimmed))
 	if err != nil {
@@ -747,9 +752,9 @@ func discoveryFailureCode(err error) string {
 }
 
 func canonicalDiscoveryRoot(path string) (string, error) {
-	trimmed := expandDiscoveryRootPath(path)
-	if trimmed == "" {
-		return "", fmt.Errorf("%w: path is required", ErrInvalidDiscoveryRoot)
+	trimmed, err := expandDiscoveryRootPath(path)
+	if err != nil {
+		return "", err
 	}
 	abs, err := filepath.Abs(filepath.Clean(trimmed))
 	if err != nil {

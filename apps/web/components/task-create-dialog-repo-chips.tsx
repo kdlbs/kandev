@@ -13,6 +13,7 @@ import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-re
 import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
 import { RepositoryDiscoveryDialog } from "@/components/repository-discovery-dialog";
 import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
+import { useToast } from "@/components/toast-provider";
 import { addDesktopDiscoveryRootAction } from "@/app/actions/workspaces";
 import { RepositorySetsControl } from "@/components/task-create-dialog-repository-sets-control";
 import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
@@ -189,18 +190,24 @@ function useDiscoverySettingsState(workspaceId: string | null) {
   const showDiscoveryControls = discovery.desktopRuntime;
   const [discoverySettingsOpen, setDiscoverySettingsOpen] = useState(false);
   const [addingHome, setAddingHome] = useState(false);
+  const { toast } = useToast();
+  const { t } = useTranslation();
   const handleAddHomeAndOpenDiscovery = useCallback(async () => {
     setDiscoverySettingsOpen(true);
     setAddingHome(true);
     try {
       await addDesktopDiscoveryRootAction("~");
       await discovery.load();
-    } catch {
-      // Ignored: any error will be reported in the dialog UI
+    } catch (error) {
+      toast({
+        title: t("workspaces:failedToDiscoverRepositories"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
+        variant: "error",
+      });
     } finally {
       setAddingHome(false);
     }
-  }, [discovery]);
+  }, [discovery, toast, t]);
   return {
     showDiscoveryControls,
     discoverySettingsOpen,

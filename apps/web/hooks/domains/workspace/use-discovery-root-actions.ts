@@ -41,15 +41,28 @@ async function runDiscoveryAction(
 
 export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toast, t: TFunction) {
   const confirmingHomeRef = useRef(false);
+  const mutationInFlightRef = useRef(false);
   const [isConfirmingHomeDiscovery, setIsConfirmingHomeDiscovery] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
 
-  const executeMutatingAction = async (runner: () => Promise<void>) => {
+  const startMutation = () => {
+    if (mutationInFlightRef.current) return false;
+    mutationInFlightRef.current = true;
     setIsMutating(true);
+    return true;
+  };
+
+  const finishMutation = () => {
+    mutationInFlightRef.current = false;
+    setIsMutating(false);
+  };
+
+  const executeMutatingAction = async (runner: () => Promise<void>) => {
+    if (!startMutation()) return;
     try {
       await runner();
     } finally {
-      setIsMutating(false);
+      finishMutation();
     }
   };
 
@@ -62,10 +75,9 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
       runDiscoveryAction(() => addDesktopDiscoveryRootAction(path), discovery.load, toast, t),
     );
   const handleConfirmHomeDiscovery = async () => {
-    if (confirmingHomeRef.current) return;
+    if (confirmingHomeRef.current || !startMutation()) return;
     confirmingHomeRef.current = true;
     setIsConfirmingHomeDiscovery(true);
-    setIsMutating(true);
     try {
       await confirmHomeDesktopDiscoveryAction();
       await discovery.load();
@@ -74,7 +86,7 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
     } finally {
       confirmingHomeRef.current = false;
       setIsConfirmingHomeDiscovery(false);
-      setIsMutating(false);
+      finishMutation();
     }
   };
   const handleReconnectDiscoveryRoot = (oldPath: string, newPath: string) =>

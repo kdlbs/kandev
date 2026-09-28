@@ -113,7 +113,7 @@ function SavedDiscoveryRootList({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs text-muted-foreground hover:text-destructive cursor-pointer"
+                className="h-7 max-md:min-h-11 max-md:h-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:h-11 text-xs text-muted-foreground hover:text-destructive cursor-pointer"
                 onClick={() => onRemoveDiscoveryRoot(root.path)}
               >
                 {t("workspaces:removeDiscoveryRoot")}
@@ -165,19 +165,25 @@ export function RepositoryDiscoveryRootControls({
         <Button
           type="button"
           variant="outline"
-          className="cursor-pointer"
+          className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={onRefreshDiscovery}
           disabled={isLoading}
         >
-          {isLoading ? (
-            <span className="inline-flex items-center gap-1.5">
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-              <span>{t("workspaces:scanningRepositories")}</span>
-            </span>
-          ) : (
-            t("workspaces:refreshRepositories")
-          )}
+          <span className="inline-flex items-center gap-1.5">
+            {isLoading && (
+              <IconLoader2
+                aria-hidden="true"
+                className="h-3.5 w-3.5 animate-spin text-muted-foreground"
+              />
+            )}
+            <span>{t("workspaces:refreshRepositories")}</span>
+          </span>
         </Button>
+        {isLoading && (
+          <span className="sr-only" role="status">
+            {t("workspaces:scanningRepositories")}
+          </span>
+        )}
       </div>
       {homeConfirmationRequired && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
@@ -187,6 +193,7 @@ export function RepositoryDiscoveryRootControls({
               type="button"
               variant="outline"
               size="sm"
+              className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
               disabled={isLoading || isConfirmingHomeDiscovery}
               aria-busy={isConfirmingHomeDiscovery}
               onClick={onConfirmHomeDiscovery}

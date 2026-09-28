@@ -82,7 +82,7 @@ describe("RepositoryDiscoveryRootControls", () => {
     expect(screen.getByTestId("discovery-roots-loading")).toBeTruthy();
     expect(screen.getByText("workspaces:addingScanFolder")).toBeTruthy();
     expect(
-      (screen.getByRole("button", { name: /workspaces:scanningRepositories/ }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "workspaces:refreshRepositories" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });
