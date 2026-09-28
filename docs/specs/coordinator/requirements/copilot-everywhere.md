@@ -26,7 +26,9 @@ view.
 - **Panel:** the right-hand copilot panel on a workspace page.
 - **Page context:** `{kind, id}` with kind `task` or `workflow`.
 - **Chip:** the removable label showing the page context in the composer.
-- **Workspace page:** the board, a task page and the Inbox of a workspace.
+- **Workspace page:** the board, a task page or the Inbox, shown while a
+  workspace is the active workspace (the one the sidebar shows). The
+  workspace is the active workspace, not read from the page's address.
 - Other terms are defined in [copilot](copilot.md#terminology).
 
 ## Mockup
@@ -66,8 +68,9 @@ Mockup:
   line and composer) and **Open the coordinator page**, and shall have no
   Expand.
 - **AC-COORDINATOR-COPILOT-EVERYWHERE-001.5:** The panel shall stay open when
-  the manager moves between pages of the same workspace, and shall close when
-  the workspace changes or the manager closes it.
+  the manager moves between workspace pages while the active workspace stays
+  the same, and shall close when the active workspace changes or the manager
+  closes it.
 - **AC-COORDINATOR-COPILOT-EVERYWHERE-001.6:** At most one right panel shall be
   open: opening the panel shall close the board's task preview, and opening
   the task preview shall close the panel.
@@ -87,7 +90,9 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-EVERYWHERE-002.1:** When the panel opens or the page
   changes on a task page, the composer shall show the chip "This task:
   <task identifier>"; on the board it shall show "This board: <workflow
-  name>"; on the Inbox it shall show no chip.
+  name>"; on the Inbox it shall show no chip. Until the task or workflow
+  has loaded, and on a task page for a task of another workspace, it shall
+  show no chip.
 - **AC-COORDINATOR-COPILOT-EVERYWHERE-002.2:** The chip shall have the tooltip
   "Sent as an id; it reads the rest itself." and a remove control. A removed
   chip shall stay removed until the page changes.

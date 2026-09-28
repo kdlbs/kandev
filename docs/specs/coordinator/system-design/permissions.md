@@ -114,6 +114,12 @@ phase-2 flag is on. The coordinator GET and list responses also carry
 PUT body: `{policy?: {actions: {...}}, watches?: {scope, workflow_ids}}`.
 An absent member is unchanged. `policy.actions` must name all six actions.
 `watches.workflow_ids` is ignored for `all` and required for `selected`.
+The client sends a member only when its section changed, so a May do save
+by a coordinator that watches nothing (an empty `selected` set left by a
+workflow deletion) carries no `watches`. The server also validates
+`watches` only when it differs from the stored value: a body whose
+`watches` equals the stored Watches, the stored empty set included, is
+treated as absent.
 
 The save runs in one transaction: take the per-coordinator lock of
 [proposals](proposals.md#propose), read the row and watch rows, validate
@@ -227,7 +233,15 @@ used (`AC-COORDINATOR-COORDINATORS-007.4`).
 `registerCoordinatorTools` (`internal/mcp/server/coordinator_tools.go`)
 takes the bound names from the session's MCP profile context, which the
 executor's `resolveTaskSessionMCPProfile` coordinator branch fills from
-`BoundToolNames`. It registers each read tool and each named propose tool.
+`BoundToolNames`. It registers each read tool and each named propose tool. A tool that is not
+registered is unknown to the session's MCP server: the agent's call fails
+there, before any backend action, so it has no refused row (`002.2`). The
+guard's `not_in_profile` covers the calls that do reach the backend: a
+direct request to the coordinator MCP endpoint with an action outside the
+bound names. The refusal a running session can meet is
+`policy_denied`: a propose tool registered at open whose action a manager
+has since set to `denied`, called before the save's conversation reset has
+archived that conversation.
 An invalid binding fails the start in that branch, as the other fail-closed
 checks do ([copilot](copilot.md#fail-closed)).
 
@@ -244,13 +258,27 @@ handler runs:
    row read per call) and require `Allows(action)`.
 4. For every id argument, the [watch filter](#watch-filter).
 
-A refusal returns the phase-1 unknown-action error text, "tool is not
-available on the coordinator MCP surface", whatever the reason, and records
-a refused activity row through `activity.RecordRefusal(ctx, coordinatorID,
-actionClass, reasonCode)` ([activity log](activity-log.md#refusals)). Reason
-codes: `not_in_profile`, `policy_denied`, `binding_invalid`, `not_watched`,
-`foreign_reference`. A refused-row write failure is logged at warn and does
-not change the refusal. The coordinator's surface has no settings, Watches,
+Each check has one result shape:
+
+| Check | Response | Activity row |
+| --- | --- | --- |
+| 1, binding unparsable | phase-1 unknown-action error | `refused`, reason `binding_invalid`, class of the called action |
+| 2, not in the bound names | phase-1 unknown-action error | `refused`, reason `not_in_profile`, class of the called action (`unknown` for a name that is no action) |
+| 3, stored policy `denied` | phase-1 unknown-action error | `refused`, reason `policy_denied`, class of the propose action |
+| 4, read of an unwatched id | the phase-1 not-found error, identical to an absent id | none |
+| 4, propose target unwatched | the propose tool's validation error naming the field | none |
+| phase-1 reference checks | unchanged phase-1 result | none |
+
+The phase-1 unknown-action error is "tool is not available on the
+coordinator MCP surface". Rows go through `activity.RecordRefusal(ctx,
+coordinatorID, actionClass, reasonCode)` ([activity log](activity-log.md#refusals)).
+Only the first three are refusals of an action (`002.2`); the Watches
+filter narrows what exists for the coordinator, as a missing id does, so
+it writes no row, which also keeps a chip's unwatched id
+([copilot everywhere](copilot-everywhere.md#server-side)) out of the log. A
+read tool is never a class: reads are refused only by checks 1 and 2, whose
+rows carry `unknown` because no action class names a read. A refused-row
+write failure is logged at warn and does not change the refusal. The coordinator's surface has no settings, Watches,
 standing-order or goal action, so the allowlist refuses any such attempt
 (`002.5`).
 
@@ -264,7 +292,7 @@ standing-order or goal action, so the allowlist refuses any such attempt
 | `list_workflows_kandev` | the handler's result is filtered to the set |
 | `list_tasks_kandev`, `list_workflow_steps_kandev` | `workflow_id` outside the set: phase-1 not-found error |
 | `get_task_conversation_kandev`, `get_coordinator_item_kandev` (task or stall) | task whose workflow is outside the set: not found |
-| propose tools | target task, workflow or step outside the set: refused naming the field |
+| propose tools | target task, workflow or step outside the set: the tool's validation error naming the field, no activity row ([Guard](#guard)) |
 
 A task with no workflow (a conversation task, a Quick Chat) is never
 watched. An empty `selected` set (after workflow deletion) watches nothing:

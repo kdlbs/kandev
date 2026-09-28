@@ -52,7 +52,8 @@ measures computed at read time.
 
 - Standing orders: `GET`, `POST`, `POST :oid/retire`, `POST :oid/restore`
   with trim and 1 to 500 characters, the limit of 20 active under the
-  per-coordinator lock, idempotent retire and restore, no edit route
+  per-coordinator lock, idempotent retire and restore (restoring an active
+  order returns 200 before the limit check, even at 20), no edit route
   (`001.1` to `001.3`, `001.7`).
 - `resetConversation` on add, retire and restore that change something
   (`002.2`).
@@ -60,10 +61,12 @@ measures computed at read time.
   order-number order with number, text and date, and the sentence that they
   never grant a permission (`002.1`). A test that an order text asking for a
   denied action is still refused by the guard (`002.3`).
-- `last_applied_at` per active order from the proposals that cite it
-  (`003.3`).
+- `last_applied_at` per active order from every proposal that cites it, with
+  no time bound (`003.3`).
 - Goal: `GET goal`, `PUT goal` (create or update in place, criteria keep
-  their done state by id), `POST goal/criteria/:cid` done toggle,
+  their done state by id; an unknown or repeated id is 400 naming
+  `criteria[i].id`; an omitted criterion is removed), `POST
+  goal/criteria/:cid` done toggle under the per-coordinator lock,
   `POST goal/met` idempotent, 403 for readers (`GOALS-001.1` to `001.5`,
   `001.8`).
 - Goal instruction section with done states, or "No goal is set"

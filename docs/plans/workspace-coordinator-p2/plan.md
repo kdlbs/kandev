@@ -68,11 +68,17 @@ stored settings (tasks 01 and 02), and the per-kind `Execute` seam (task
 Shared interface first; then the log, which other backends write through;
 then the enforcing backends and their screens in parallel.
 
+**Precondition from phase 1.** Task 10 starts only after phase-1
+[task 11, panel swap](../workspace-coordinator/task-11-panel-swap.md) has
+merged: it adds `RightSidePanel` and its `mobileFullScreen` opt-in, which
+task 10 renders and which do not exist in the code before it. The other
+work orders do not use them.
+
 ```text
 task-01 shared interface --+--> task-03 activity log backend --+--> task-02 policy, Watches enforcement --+--> task-04 proposal kinds backend --+
                            |                                   +--> task-05 orders and goals backend -----+                                      +--> task-09 proposal kinds UI
                            |                                   +--> task-08 What it did UI                +--> task-06 Configure sections --> task-07 guided setup
-                           +--> task-10 copilot everywhere                                                +--> task-11 goal note, Watches on Needs you (also after 02)
+                           +--> task-10 copilot everywhere (after phase-1 task 11)                                          +--> task-11 goal note, Watches on Needs you (also after 02)
 ```
 
 | Work order | Package | Size | Depends on | Result |
@@ -82,7 +88,7 @@ task-01 shared interface --+--> task-03 activity log backend --+--> task-02 poli
 | [task-02](task-02-policy-enforcement.md) | WP-7 | L | 01, 03 | Settings routes, derived and bound tool profile, guard, auto-approve, Watches filter |
 | [task-05](task-05-orders-goals-backend.md) | WP-7, WP-10 | M | 01, 03 | Standing orders and goal routes, instructions, baselines and measures |
 | [task-08](task-08-what-it-did-ui.md) | WP-6 | M | 03 | What it did in the Queue with Undo |
-| [task-10](task-10-copilot-everywhere.md) | WP-9 | M | 01 | Launcher and panel on board, task page and Inbox; page chip |
+| [task-10](task-10-copilot-everywhere.md) | WP-9 | M | 01; phase-1 task 11 | Launcher and panel on board, task page and Inbox; page chip |
 | [task-04](task-04-proposal-kinds-backend.md) | WP-8 | L | 02, 03 | Resume, message and move proposals with at-most-once execution |
 | [task-06](task-06-configure-sections.md) | WP-7 | L | 02, 03, 05 | Sections row, May do, Watches, Standing orders, Goal; list summary |
 | [task-11](task-11-needs-you-goal-watches.md) | WP-10 | S | 01, 02, 05 | Goal note and Watches filter on Needs you and Queue |

@@ -50,7 +50,8 @@ creates, and `standing_order_ids` on every propose tool.
 - `propose_resume_kandev`, `propose_message_kandev`, `propose_move_kandev`
   and their MCP actions, registered by task 02's `ToolNames` (`001.1`).
 - Target checks: watched, unarchived, same workspace, not a conversation
-  task (`001.2`); step checks for move (`001.3`); session checks
+  task (`001.2`); step checks for move, with `starts_agent` stored from the
+  destination's eligibility at propose (`001.3`); session checks
   (`001.4`); dedupe on `coordinator_proposals_open_target` returning the
   open proposal (`001.5`).
 - `start_agent` for creates: `EligibleStep` widened only while
@@ -59,7 +60,10 @@ creates, and `standing_order_ids` on every propose tool.
 - Approval: resume through `ResumeTaskSession`, message through the
   extracted `TaskMessenger` (queued delivery, refusing CREATED, FAILED,
   CANCELLED or no session), move with `outcome_json.from_step_id` recorded
-  before the move (`003.1` to `003.3`); `not_editable` for any edit except
+  before the move, `step_starts_agent` when the destination became
+  agent-starting after a `starts_agent` false propose, and a `noop: true`
+  outcome with no call when the task already sits on the destination
+  (`003.1` to `003.3`); `not_editable` for any edit except
   message text (`003.4`).
 - Stale claim of a non-create kind settles `failed` with
   `outcome_unknown` and never re-runs; Approve on a failed card creates a new
@@ -97,7 +101,10 @@ identical proposes leave one row; approve against an archived target settles
 RUNNING one queues, and to CREATED is refused; a claim stale past its window
 settles `failed` with `outcome_unknown` and the executor stub records zero
 second calls; `starts_agent` create approved after `start_agent` flips to
-`denied` is 409. The E2E spec drives the mock agent to propose a move and
+`denied` is 409; a move whose destination turned agent-starting after
+propose settles `failed` with `step_starts_agent` and does not move; a move
+onto the task's current step settles `approved` with `noop: true` and no
+`MoveTask` call. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.
 
 ## Likely files

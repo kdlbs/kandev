@@ -84,7 +84,11 @@ Tests: a fault-injected row insert leaves the proposal unchanged
 row with count 10 (`001.3`); a direct Resume writes nothing (`001.5`, a
 service-level test that calls the orchestrator stub and asserts zero rows);
 two concurrent undos of one create archive once and return one 409
-(`003.4`); a moved-again task returns `undo_conflict` (`003.3`); a reader's
+(`003.4`); a moved-again task returns `undo_conflict` (`003.3`); a failed
+marker transaction leaves the row undoable and a retry only marks it
+(reversal already done); a `noop` move row is `not_undoable` and lists
+`undoable` false; the summary's `approved` includes edited approvals and
+`undone` counts under the reversed row's class (`005.2`); a reader's
 undo is 403 (`003.5`); the read tool never returns another coordinator's
 rows or any user id (`004.1`, `004.2`); limit 0 and 51 are refused
 (`004.3`); retention deletes a 401-day-old row and keeps a 399-day-old one

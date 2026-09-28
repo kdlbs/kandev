@@ -115,12 +115,15 @@ run.
   `create_task`, `propose_message_kandev` when `message`,
   `propose_move_kandev` when `move`, and `propose_resume_kandev` when `resume`
   is not `denied`. `start_agent` and `stop` shall add no tool.
-- **AC-COORDINATOR-PERMISSIONS-002.2:** When a coordinator session calls a
-  Kandev action that is not in its bound tool profile, or a propose action
-  whose action the currently stored policy sets to `denied`, the system shall
+- **AC-COORDINATOR-PERMISSIONS-002.2:** When a coordinator session's call
+  reaches the backend guard for a Kandev action that is not in its bound
+  tool profile, or for a propose action whose action the currently stored
+  policy sets to `denied`, or while its binding is invalid, the system shall
   refuse it with the phase-1 unknown-action error, change nothing, and record
   a refused row in the activity log. A tightened setting shall take effect on
-  the next call, even within a running conversation.
+  the next call, even within a running conversation. A tool name that was
+  never registered for the session is rejected by the agent's MCP client
+  before any Kandev action runs; it reaches no guard and writes no row.
 - **AC-COORDINATOR-PERMISSIONS-002.3:** When a coordinator conversation opened
   before phase 2 has no bound tool profile, the system shall treat it as the
   phase-1 tool profile. When a bound tool profile cannot be parsed or fails
@@ -158,7 +161,9 @@ Mockup:
 - **AC-COORDINATOR-PERMISSIONS-003.2:** The system shall refuse a Watches save
   with 400 naming `watches`, storing nothing, when it is `selected` with no
   workflow, with more than 50, with a duplicate, or with a workflow that is
-  not in the coordinator's workspace.
+  not in the coordinator's workspace. A save that leaves Watches as stored,
+  including an empty list left by a deleted workflow, shall not be refused
+  for it.
 - **AC-COORDINATOR-PERMISSIONS-003.3:** While a coordinator watches `selected`,
   `list_workflows_kandev` shall return only its watched workflows;
   `list_tasks_kandev` and `list_workflow_steps_kandev` for an unwatched

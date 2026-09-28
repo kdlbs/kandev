@@ -230,8 +230,10 @@ install.
 - **AC-COORDINATOR-COORDINATORS-007.3:** While the phase-2 flag is off, stored
   phase-2 data (settings, Watches, standing orders, goals, activity rows and
   non-create proposals) shall be kept unchanged; open non-create proposals
-  shall not show and shall not count toward Needs you; turning the flag on
-  again after a restart shall show the same data.
+  shall not show and shall not count toward Needs you; reading, approving or
+  rejecting a non-create proposal by its id shall return 404 as for an
+  unknown proposal, change nothing and run nothing; turning the flag on again
+  after a restart shall show the same data.
 - **AC-COORDINATOR-COORDINATORS-007.4:** While the phase-2 flag is off, the
   guard shall enforce the phase-1 policy for every coordinator, whatever its
   stored settings.

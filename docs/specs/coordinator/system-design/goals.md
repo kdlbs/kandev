@@ -67,16 +67,25 @@ Under `/api/v1/workspaces/:id/coordinators/:cid/`, phase-2 flag only:
 `001.1` (400 naming `name`, `due_on`, `criteria` or `criteria[i].text`). With
 an active goal it updates name, due date and criteria: a criterion with a
 known `id` keeps its `done`, one without gets a new id and `done=false`
-(`001.2`). Without one it inserts a new active goal and computes the
+(`001.2`), and a stored criterion whose id the body omits is removed. A
+known id is one of the active goal's current criteria. An `id` that is not
+known, including any `id` when there is no active goal, and an `id` that
+appears a second time in the body, are 400 naming `criteria[i].id` for the
+first such index; nothing is stored. Without one it inserts a new active goal and computes the
 baseline in the same transaction (`001.5`, `003.1`). When anything differs
 from the stored goal, or a goal was created, it calls `resetConversation`
 ([permissions](permissions.md#conversation-reset)) (`001.7`).
 
-**Criteria** updates only that criterion's `done` in `criteria_json` and
-does not reset the conversation (`001.3`). An unknown criterion id is 404;
+**Criteria** runs in the same per-coordinator locked transaction as PUT
+and met: it reads the active goal's `criteria_json` inside the lock, sets
+only that criterion's `done` and writes it back, so a concurrent toggle,
+PUT or met cannot lose the other's write; they apply in commit order. It
+does not reset the conversation (`001.3`). Setting `done` to its current
+value returns 200 and writes nothing. An unknown criterion id is 404;
 no active goal is 404.
 
-**Met** sets `status='met'`, `met_at`, `met_by` with `WHERE status='active'`
+**Met**, in the per-coordinator locked transaction, sets `status='met'`,
+`met_at`, `met_by` with `WHERE status='active'`
 and resets the conversation. With no active goal it returns the most recent
 met goal with 200 and changes nothing (`001.4`).
 

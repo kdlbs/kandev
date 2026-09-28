@@ -60,7 +60,8 @@ a pull request or moves a task to Done.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.3:** `propose_move_kandev` shall refuse,
   naming `step_id`, a step that is not in the task's workflow, the step the
   task is in, a Done step, and an agent-starting step while `start_agent` is
-  `denied`.
+  `denied`. It shall store the proposal with `starts_agent` true when the
+  step is agent-starting at propose, and false otherwise.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.4:** `propose_resume_kandev` shall refuse
   a task without a resumable session, and `propose_message_kandev` a task
   without a session that accepts a message, naming `task_id`.
@@ -108,7 +109,11 @@ a pull request or moves a task to Done.
   proposal, the system shall record the step the task is in, move the task to
   the proposed step and settle `approved`. When the task is archived, has
   left its workflow, or the step is gone or has become a Done step, it shall
-  settle `failed` with the reason.
+  settle `failed` with the reason. When the step has become agent-starting
+  since a proposal stored with `starts_agent` false, it shall settle
+  `failed` with `step_starts_agent` and move nothing. When the task is
+  already in the proposed step, it shall move nothing and settle `approved`
+  with a row that is not undoable.
 - **AC-COORDINATOR-PROPOSAL-KINDS-003.4:** Approving a resume, message or move
   proposal shall accept an edit only of the message text; any other edit
   shall be refused with 400 `not_editable`.
@@ -131,9 +136,10 @@ a pull request or moves a task to Done.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.2:** Every card shall show "Policy:
   <action> requires approval" and, for each cited order, the Shaped by label
   of [standing orders](standing-orders.md#req-coordinator-standing-orders-003-shaped-by-and-last-applied).
-- **AC-COORDINATOR-PROPOSAL-KINDS-004.3:** A card with `starts_agent` true, and
-  a move card whose destination is an agent-starting step, shall say
-  "Approving this starts an agent" next to Approve.
+- **AC-COORDINATOR-PROPOSAL-KINDS-004.3:** A create or move card with
+  `starts_agent` true shall say "Approving this starts an agent" next to
+  Approve. The warning shall come from the stored proposal, not from the
+  step's current settings.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.4:** A message card shall offer Edit for
   the text; resume and move cards shall offer no Edit.
 

@@ -60,7 +60,9 @@ screen.
 - Proposals carry `kind` (existing rows `create_task`), `target_task_id`,
   `standing_order_ids`, `starts_agent`, `outcome_json`
   (`AC-COORDINATOR-PROPOSAL-KINDS-001.6`). The phase-1 list filter
-  `kind = 'create_task'` while `phase2` is off (`AC-COORDINATOR-COORDINATORS-007.3`).
+  `kind = 'create_task'` while `phase2` is off, applied also to `GET
+  proposals/:pid`, approve and reject, so a non-create id is 404 and nothing
+  is claimed or run (`AC-COORDINATOR-COORDINATORS-007.3`).
 - `resetConversation(tx, coordinatorID)` in the service: clear
   `conversation_task_id`, increment `config_revision`, archive after commit
   ([permissions design](../../specs/coordinator/system-design/permissions.md#conversation-reset)).
@@ -81,6 +83,9 @@ screen.
 
 - With `phase2` off, every phase-1 test passes unchanged, and stored phase-2
   data survives a flag off and on cycle.
+- With `phase2` off, `GET`, approve and reject of a stored resume, message
+  or move proposal return 404; its row, status and claim are unchanged and
+  no executor runs.
 - A phase-1 coordinator reads as the phase-1 policy and watching `all`.
 - A phase-1 proposal reads as `create_task`.
 

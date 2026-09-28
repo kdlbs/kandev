@@ -50,7 +50,7 @@ and the `standing_order_ids` check in
 | `kind` | text not null default 'create_task' | `create_task`, `resume`, `message`, `move` |
 | `target_task_id` | text null | set for resume, message, move |
 | `standing_order_ids` | text not null default '[]' | JSON array, at most 5 |
-| `starts_agent` | boolean not null default false | |
+| `starts_agent` | boolean not null default false | create and move: the target step was agent-starting at propose |
 | `outcome_json` | text null | kind-specific result, set with `approved` |
 
 Partial unique index `coordinator_proposals_open_target` on
@@ -108,7 +108,9 @@ coordinator from the principal, passes the guard of
      points (`001.1`, `001.4`);
    - move: `step_id` in the task's workflow, not the task's current step, the
      step's `CompleteTaskOnEnter` false, and, while `start_agent` is `denied`,
-     `EligibleStep` true (`001.3`);
+     `EligibleStep` true (`001.3`). The row stores `starts_agent =
+     !EligibleStep(step)`, so a move into an agent-starting step (allowed
+     only with `start_agent` `requires_approval`) is flagged like a create;
    - `rationale` per the phase-1 rule; `standing_order_ids` per
      [standing orders](standing-orders.md#citations).
 2. In the phase-1 locked transaction: look up an open proposal of the same
@@ -151,10 +153,14 @@ After the claim commits, `Execute` runs:
 | --- | --- |
 | `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not resumable: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)`; its error fails with the error text. Outcome `{session_id}`. |
 | `message` | Re-read the task and session (archived or not accepting: fail). Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
-| `move` | Re-read the task: archived (`task_archived`), workflow changed (`task_left_workflow`), destination step missing (`step_missing`), `CompleteTaskOnEnter` now true (`step_is_done`), or agent-starting while `start_agent` is `denied` (`step_starts_agent`) each fail. Record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
+| `move` | Re-read the task: archived (`task_archived`), workflow changed (`task_left_workflow`), destination step missing (`step_missing`), `CompleteTaskOnEnter` now true (`step_is_done`), or agent-starting (`EligibleStep` false) while the proposal's `starts_agent` is false (`step_starts_agent`) each fail. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`. Record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
 
-A move whose task already sits on the destination completes with that
-outcome and no call. The completion update is fenced by the claim token and
+A move whose task already sits on the destination makes no call and
+completes with outcome `{from_step_id: to_step_id, to_step_id, noop: true}`;
+its `approved` row has detail "It was already there" and is not undoable
+([activity log](activity-log.md#undo)). A destination that stopped being
+agent-starting since propose is not a failure: the move starts nothing more
+than the card warned about. The completion update is fenced by the claim token and
 writes `outcome_json` and the `approved` row; a failure writes `failed`, the
 `error` and the `failed` row ([activity log](activity-log.md#writes)).
 
@@ -240,9 +246,10 @@ Approving this starts an agent.
 - "Shaped by" labels come from the proposal's `standing_order_ids` and the
   store's orders, as [standing orders](standing-orders.md#shaped-by-ui)
   specifies (`004.2`).
-- "Approving this starts an agent" shows when `starts_agent` is true, or for
-  a move whose destination step is not eligible (`004.3`), computed from the
-  workflow steps store.
+- "Approving this starts an agent" shows when the proposal's stored
+  `starts_agent` is true, for a create or a move (`004.3`); it is never
+  computed from the live workflow steps store, so the card shows what was
+  proposed and a later step change fails the move rather than widening it.
 - Edit only on message cards, editing the text (`004.4`).
 - The chat transcript attaches the card to the tool call of any propose
   tool by the returned `proposal_id`, as phase 1 does for create.

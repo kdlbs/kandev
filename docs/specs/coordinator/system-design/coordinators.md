@@ -260,14 +260,21 @@ so a redelivered event is harmless.
   not registered; `ToolNames` returns the phase-1 seven tools and the guard
   ignores stored policy and Watches ([permissions](permissions.md#binding));
   the standing instructions carry no orders or goal; no activity row is
-  written; the retention ticker does not run; and the web renders none of
+  written; the retention ticker does not run, so rows are kept (`007.3`) and
+  the first run after the flag returns deletes any past 400 days; and the web renders none of
   the phase-2 sections, launcher, card kinds, goal note, What it did,
   stall Resume or Ready to merge actions.
 - Stored phase-2 columns and tables stay, untouched (`007.3`). The phase-1
   proposal list query gains `AND kind = 'create_task'` while `phase2` is
   false, so open non-create proposals neither show nor count toward
   `open_proposals`, and the startup pass and sweep skip them; they are
-  served again unchanged when the flag returns.
+  served again unchanged when the flag returns. The same predicate guards
+  the by-id reads and the decision routes: with `phase2` false, `GET
+  proposals/:pid`, `approve` and `reject` read the row with `kind =
+  'create_task'` in the WHERE clause, so a non-create id is the phase-1 404
+  of an absent proposal. Nothing is claimed, settled or logged, and no
+  executor runs; the row keeps its state and is decided normally once the
+  flag returns (`007.3`).
 - A conversation opened while `phase2` was on carries a binding; after a
   restart with it off, the binding is ignored and the phase-1 profile
   applies. A conversation opened while it was off has no binding and gets the

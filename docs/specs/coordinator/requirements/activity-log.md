@@ -29,8 +29,9 @@ reads when it offers the first automatic setting.
   `undone`.
 - **Authorization:** how the row was authorised: `requires_approval` for a
   proposal and its decisions, `denied` for a refusal.
-- **Undoable row:** an `approved` row of a created task, or of a move, that
-  has not been undone.
+- **Undoable row:** an `approved` row of a created task, or of a move that
+  changed the task's step, that has not been undone. A move approved while
+  the task was already in the proposed step is not undoable.
 - Other terms are defined in the [system README](../README.md#terms).
 
 ## Mockup
@@ -120,15 +121,19 @@ Mockup:
   to a manager. Rows of a message or resume shall show "No undo"; other rows
   shall show nothing in the Undo column.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.2:** When a manager undoes an approved
-  create, the system shall archive the created task, mark the row undone with
-  `undone_at` and `undone_by`, and write an `undone` row pointing to it, in
-  one transaction. A created task already archived shall count as undone.
+  create, the system shall first archive the created task, and then, in one
+  transaction, mark the row undone with `undone_at` and `undone_by` and write
+  an `undone` row pointing to it. A created task already archived shall
+  count as archived. When that transaction fails after the reversal, the
+  undo shall return the error and the row shall stay undoable; a retry shall
+  find the reversal already done and only mark the row.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.3:** When a manager undoes an approved
   move, the system shall move the task back to the step it left if the task
-  is still in the step it was moved to, and record the undo as in
-  `AC-COORDINATOR-ACTIVITY-LOG-003.2`. When the task has moved since or was
-  archived, the system shall refuse with 409 `undo_conflict` and the row
-  shall say "It has moved since".
+  is still in the step it was moved to, and then record the undo as in
+  `AC-COORDINATOR-ACTIVITY-LOG-003.2`. A task already back in the step it
+  left, unarchived, shall count as moved back. When the task is in any other
+  step or was archived, the system shall refuse with 409 `undo_conflict` and
+  the row shall say "It has moved since".
 - **AC-COORDINATOR-ACTIVITY-LOG-003.4:** Undoing a row that is already undone,
   or two undos at once, shall reverse the action at most once; the second
   shall return 409 `already_undone`. Undoing a row that is not undoable shall
@@ -161,15 +166,18 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-ACTIVITY-LOG-005.1:** At startup and once a day, the system
-  shall delete activity rows older than 400 days, in batches, without
-  blocking proposal writes. Rows of a deleted coordinator shall be deleted
-  with it.
+- **AC-COORDINATOR-ACTIVITY-LOG-005.1:** While the phase-2 flag is on, at
+  startup and once a day, the system shall delete activity rows older than
+  400 days, in batches, without
+  blocking proposal writes. While the flag is off no row is deleted by age
+  (`AC-COORDINATOR-COORDINATORS-007.3`). Rows of a deleted coordinator shall
+  be deleted with it, whatever the flag.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.2:** The system shall return, for a
   coordinator and a window of 1 to 90 days (default 30), per action class,
   the counts of rows created in the window by outcome, `proposed`,
-  `approved`, `approved` with edits, `rejected`, `failed`, `refused` (summing
-  refusal counts) and `undone`, and the earliest row time the coordinator
+  `approved` (every approval, edited or not), `approved` with edits (the
+  subset of `approved`), `rejected`, `failed`, `refused` (summing refusal
+  counts) and `undone` (counted under the action class of the row undone), and the earliest row time the coordinator
   has. A window outside 1 to 90 shall be refused with 400.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.3:** Any workspace member shall read the
   log and the summary; neither shall be available for another workspace's

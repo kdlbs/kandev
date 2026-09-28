@@ -66,9 +66,12 @@ Under `/api/v1/workspaces/:id/coordinators/:cid/`, phase-2 flag only:
 | `POST standing-orders/:oid/restore` | `workspace.manage` | the order |
 
 Add and restore run in the per-coordinator locked transaction of
-[proposals](proposals.md#propose): count active orders, refuse at 20 with
-400 `standing_order_limit`, insert or clear `retired_at`, and call
-`resetConversation`. Retire and restore use `UPDATE ... WHERE id=? AND
+[proposals](proposals.md#propose). Restore first reads the order: absent or
+of another coordinator is 404, and an order that is already active returns
+200 unchanged with no reset, before any count, so restoring an active order
+never gets `standing_order_limit` (`001.3`). Then both count active orders,
+refuse at 20 with 400 `standing_order_limit`, insert or clear `retired_at`,
+and call `resetConversation`. Retire and restore use `UPDATE ... WHERE id=? AND
 coordinator_id=? AND retired_at IS [NOT] NULL`; zero rows re-reads and
 returns the order unchanged with 200 and no reset (`001.3`, `002.2`). Text
 out of range is 400 naming `text`. `source_proposal_id` must name a
@@ -118,10 +121,13 @@ the proposal's `standing_order_ids` column
 
 `last_applied_at` for each active order is `MAX(created_at)` of the
 coordinator's proposals whose `standing_order_ids` contains the order id.
-The list route computes it with one query per request over the
-coordinator's proposals of the last 400 days, parsing the JSON column in Go
-(at most a few thousand rows per coordinator), so no JSON index is needed
-on either dialect. Null reads as "Never applied" (`003.3`).
+The list route computes it with one query per request over every one of
+the coordinator's proposals whose `standing_order_ids` is not `'[]'`, with
+no time bound, parsing the JSON column in Go, so no JSON index is needed on
+either dialect. Proposals are not pruned by age, so an order cited once,
+however long ago, shows that time. The scan is bounded by the
+coordinator's citing proposals, which grow by at most the proposals a
+manager decides. Null reads as "Never applied" (`003.3`).
 
 ## Shaped by UI
 

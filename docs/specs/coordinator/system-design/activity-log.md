@@ -128,7 +128,9 @@ next page is `WHERE (created_at, id) < (?, ?)` written as the expanded
 comparison for SQLite. `class` accepts one action class or `unknown`;
 other values are 400 naming `class` (`002.3`). A bad cursor is 400 naming
 `before`. A coordinator of another workspace is 404 (`005.3`). Rows carry
-`actor_name` resolved from the user service at read time; a missing user
+`undoable`, computed at read time (outcome `approved`, class `create_task`
+or `move`, `undone_at` null, and not a move whose proposal outcome has
+`noop: true`), and `actor_name` resolved from the user service at read time; a missing user
 reads as "A former member".
 
 ## Undo
@@ -136,7 +138,8 @@ reads as "A former member".
 `POST activity/:rid/undo`, managers only:
 
 1. Read the row (404 when absent or of another coordinator). Not
-   `approved`, or class not `create_task` or `move`: 409 `not_undoable`.
+   `approved`, class not `create_task` or `move`, or a move whose outcome
+   has `noop: true`: 409 `not_undoable`.
    `undone_at` set: 409 `already_undone`.
 2. **Create.** Call `ArchiveTask(target_task_id)`. `ErrTaskAlreadyArchived`
    and not found count as done. Any other error: 500, nothing written.
@@ -144,11 +147,23 @@ reads as "A former member".
    and `to_step_id` ([proposal kinds](proposal-kinds.md#approve)). The task
    archived, or its step not `to_step_id`: 409 `undo_conflict`. Otherwise
    `MoveTask(task, workflow, from_step_id, 0)`; an error is 500. When the
-   from step no longer exists: 409 `undo_conflict`.
+   from step no longer exists: 409 `undo_conflict`. A task already on
+   `from_step_id` (a retry after a failed step 4, or a person who moved it
+   back) counts as reversed and skips the call. An outcome with `noop: true`
+   was rejected as `not_undoable` in step 1.
 4. In one transaction: `UPDATE ... SET undone_at=now, undone_by=? WHERE id=?
    AND undone_at IS NULL`; zero rows is 409 `already_undone`; one row inserts
    the `undone` row with `undo_of_id`.
 5. Publish `coordinator.updated`.
+
+The reversal (steps 2 and 3) and the marker (step 4) are two commits, as
+`003.2` states: the task service owns its own transaction. When step 4's
+transaction fails, the route returns 500, the task stays reversed and the
+row stays undoable; the next Undo finds the reversal done (archive is
+idempotent, and a task on `from_step_id` counts as moved back) and only runs
+step 4. The `undone` row carries the original row's `action_class`,
+`target_task_id` and `proposal_id`, authorization `requires_approval`, and
+the manager as `actor_user_id`.
 
 Two concurrent undos of a create both reach step 2; archive is idempotent,
 and step 4's compare-and-set lets one win (`003.4`). Two concurrent undos of
@@ -158,7 +173,8 @@ before calling the task service. It is not a database lock, because steps 2
 and 3 write through the task service, which on SQLite would wait on a write
 lock held by this request. A second backend process is not a supported
 deployment; if one existed, step 4's compare-and-set still records one
-undo, and the second move would find the task no longer at `to_step_id`. Undo of a message or
+undo, and a second move undo would find the task on `from_step_id`, skip
+the call and lose that compare-and-set. Undo of a message or
 resume is `not_undoable`; the UI shows "No undo" (`003.1`).
 
 ## Read tool
@@ -189,7 +205,12 @@ naming `days`:
 ```
 
 One grouped query over `created_at >= now - N days`; `refused` sums
-`refusal_count`; every class appears with zeros. `earliest_row_at` is the
+`refusal_count`; every class appears with zeros. `approved` counts every
+`approved` row, edited or not; `approved_with_edits` is the subset with
+`edited` true, so it is never larger than `approved`. `undone` counts
+`undone` rows under the class they carry, the class of the row they
+reverse, so only `create_task` and `move` can be non-zero. `unknown` appears
+as a class only when it has a row. `earliest_row_at` is the
 oldest row of the coordinator at any age, `null` with none. May do reads
 it with N = 30; goal baselines read the approved and rejected counts for 7
 days through the same service function ([goals](goals.md#baselines)).
@@ -215,7 +236,7 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
   `AC-COORDINATOR-ACTIVITY-LOG-002.4`. How it was authorised shows
   "Requires approval" or "Denied", plus "Approved by <name>", "with edits",
   "x N".
-- Undo column: **Undo** for managers on undoable rows, "No undo" on
+- Undo column: **Undo** for managers on rows with `undoable` true, "No undo" on
   approved message and resume rows, "Undone by <name>, <time>" on undone
   rows, and the 409 `undo_conflict` message "It has moved since" inline.
 - Empty states from `002.5`. Readers see no Undo (`002.6`).
@@ -227,7 +248,9 @@ Phase 3 may rely on, and phase 2 will not change without a new ADR:
 
 - the `coordinator_activity` columns and outcome values above;
 - a row per proposal decision written in the same transaction as it;
-- `Service.ActivitySummary(ctx, coordinatorID, days)` and its route;
+- `Service.ActivitySummary(ctx, coordinatorID, days)` and its route, with
+  `approved` including `approved_with_edits` and `undone` counted under the
+  reversed row's class;
 - retention of at least 400 days.
 
 ## Security

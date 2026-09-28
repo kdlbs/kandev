@@ -35,9 +35,21 @@ phase-1 copilot in the shared right panel with a coordinator switcher, one
 right panel at a time with the board's task preview, a phone sheet, and the
 page chip for tasks and boards.
 
+## Precondition
+
+Phase-1 [task 11, panel swap](../workspace-coordinator/task-11-panel-swap.md)
+has merged. It adds `RightSidePanel` (extracted from
+`components/kanban-with-preview.tsx`) and its `mobileFullScreen` opt-in.
+Before starting, confirm `grep -rl RightSidePanel apps/web/components` finds
+the component; if it does not, this work order is blocked, not to be built
+around.
+
 ## In scope
 
-- Host at the workspace layout with the visibility rules (`001.1`).
+- Host in `src/app-shell.tsx` inside `WorkspaceScopeProvider`, for the
+  `kanban`, `taskDetail` and `needsYouInbox` route kinds, with the workspace
+  taken from the store's `workspaces.activeId`, never from the URL, and the
+  visibility rules (`001.1`).
 - Last-used coordinator per workspace in local storage, fallback to the
   first in list order (`001.2`); switcher (`001.3`).
 - Panel body is the phase-1 `CoordinatorCopilot` with Open the coordinator
@@ -45,8 +57,10 @@ page chip for tasks and boards.
 - Store keeps the panel open across pages of one workspace, closes on a
   workspace change (`001.5`); one-right-panel rule with the task preview
   (`001.6`); `mobileFullScreen` sheet (`001.7`).
-- Page chip from the route: "This task: <identifier>", "This board:
-  <workflow>", none on the Inbox; tooltip, remove until the page changes; the
+- Page chip from the resolved `SpaRoute` and the store: "This task:
+  <identifier>" once the task is loaded and of the host's workspace, "This
+  board: <workflow>" from `workflows.activeId`, none on the Inbox and none
+  while the label is loading; tooltip, remove until the page changes; the
   phase-1 `transformOutgoing` prefix (`002.1` to `002.3`).
 - "Not watched by this coordinator" from the Watches in the coordinator
   read (`002.4` client half; the server not-found half is task 02's guard);
@@ -113,11 +127,13 @@ sees no launcher; phone opens a sheet.
 - `apps/web/hooks/domains/coordinator/copilot-store.ts`,
   `use-coordinator-launcher.ts`, `use-page-context-chip.ts`
 - `apps/web/components/kanban-with-preview.tsx` (one right panel)
-- the workspace layout that mounts the host
+- `apps/web/src/app-shell.tsx`, which mounts the host
 
 ## Dependencies
 
 - Task 01 (flag, Watches in the coordinator read).
+- Phase-1 task 11, panel swap (`RightSidePanel`, `mobileFullScreen`); see
+  [Precondition](#precondition).
 
 ## Risks
 

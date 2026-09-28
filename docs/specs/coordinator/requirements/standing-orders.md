@@ -53,8 +53,10 @@ Mockup:
   user id, and return it. Other text shall be refused with 400 naming
   `text`.
 - **AC-COORDINATOR-STANDING-ORDERS-001.2:** When a coordinator already has 20
-  active orders, the system shall refuse an add or a restore with 400 and the
-  code `standing_order_limit`; concurrent adds shall never leave more than 20
+  active orders, the system shall refuse an add, or a restore of a retired
+  order, with 400 and the code `standing_order_limit`; restoring an order
+  that is already active shall return it as `AC-COORDINATOR-STANDING-ORDERS-001.3`
+  says, whatever the count. Concurrent adds shall never leave more than 20
   active.
 - **AC-COORDINATOR-STANDING-ORDERS-001.3:** When a manager retires an active
   order, the system shall set its `retired_at` and `retired_by` and keep the

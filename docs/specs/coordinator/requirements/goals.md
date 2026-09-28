@@ -57,10 +57,13 @@ criteria, so that the coordinator's advice points at it.
 - **AC-COORDINATOR-GOALS-001.2:** When the coordinator already has an active
   goal, setting a goal shall update that goal's name, due date and criteria,
   keep its baseline, and keep each criterion's done state when the criterion
-  keeps its id.
+  keeps its id. A criterion id that is not one of the active goal's
+  criteria, or that is repeated, shall be refused with 400 naming the field;
+  a criterion left out shall be removed.
 - **AC-COORDINATOR-GOALS-001.3:** When a manager checks or unchecks an exit
   criterion, the system shall store its done state and shall not mark the
-  goal met.
+  goal met. Concurrent changes to one goal shall apply in commit order and
+  none shall be lost.
 - **AC-COORDINATOR-GOALS-001.4:** When a manager marks the active goal met, the
   system shall set its status to `met` with `met_at` and `met_by`; the
   coordinator shall then have no active goal. Marking a goal that is already

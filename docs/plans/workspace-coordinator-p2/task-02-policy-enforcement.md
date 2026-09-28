@@ -101,9 +101,16 @@ cd apps/web && pnpm e2e:run tests/coordinator/policy-enforcement.spec.ts
 The guard table test is extended over every registered action times each
 setting times Watches `all`, `selected` and empty. Store tests on both
 dialects: two concurrent saves bump the revision twice and the last commit
-wins (`004.2`). A Playwright spec with the mock agent sets Message to
-Denied, opens a conversation and asserts the mock's `propose_message_kandev`
-call is refused and a refused row appears through the activity route.
+wins (`004.2`). Guard handler tests cover each refused-row case of the
+design's Guard table: an unparsable binding (`binding_invalid`), an action
+outside the bound names sent straight to the coordinator MCP endpoint
+(`not_in_profile`), and a bound propose action whose stored setting was
+changed to Denied after binding (`policy_denied`), each asserting one
+`refused` row with its class; unwatched reads and propose targets assert
+no row. A Playwright spec with the mock agent sets Message to Denied, opens
+a conversation and asserts `propose_message_kandev` is not registered for
+the session, the mock's call to it creates no proposal, and no refused row
+is written (the call never reaches the guard, `002.2`).
 
 ## Likely files
 
