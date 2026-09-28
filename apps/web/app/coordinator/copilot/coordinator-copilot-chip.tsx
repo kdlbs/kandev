@@ -20,9 +20,9 @@ export function CoordinatorCopilotChipRow({ chip, onRemove }: CoordinatorCopilot
       <Badge variant="secondary" className="w-fit gap-1 pr-1">
         {t("chat:coordinatorAboutTag", { id: chip.id })}
         <Button
-          size="icon"
+          size="icon-sm"
           variant="ghost"
-          className="h-4 w-4 cursor-pointer"
+          className="cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           onClick={onRemove}
           aria-label={t("coordinator:copilotRemoveChip")}
         >
@@ -52,7 +52,7 @@ export function CoordinatorCopilotEmptyIntro({ onSuggest }: CoordinatorCopilotEm
       <Button
         variant="outline"
         size="sm"
-        className="cursor-pointer"
+        className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
         onClick={() => onSuggest(suggestion)}
       >
         {suggestion}

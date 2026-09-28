@@ -1,12 +1,14 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
-import type { ConversationResponse } from "@/lib/api/domains/coordinator-api";
+import type { Coordinator, ConversationResponse } from "@/lib/api/domains/coordinator-api";
 
 const mocks = vi.hoisted(() => ({
   useFeature: vi.fn(),
   useCoordinatorLauncher: vi.fn(),
   useCopilotOpenSequence: vi.fn(),
+  getCoordinator: vi.fn(),
+  openConversation: vi.fn(),
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
@@ -18,6 +20,16 @@ vi.mock("@/hooks/domains/coordinator/use-coordinator-launcher", () => ({
 vi.mock("@/hooks/domains/coordinator/use-copilot-open-sequence", () => ({
   useCopilotOpenSequence: mocks.useCopilotOpenSequence,
 }));
+vi.mock("@/lib/api/domains/coordinator-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/domains/coordinator-api")>(
+    "@/lib/api/domains/coordinator-api",
+  );
+  return {
+    ...actual,
+    getCoordinator: mocks.getCoordinator,
+    openConversation: mocks.openConversation,
+  };
+});
 
 import { useCoordinatorCopilot } from "./use-coordinator-copilot";
 
@@ -271,5 +283,107 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
     for (const call of mocks.useCoordinatorLauncher.mock.calls) {
       expect(call).toEqual([WORKSPACE_ID, "coord-2", null]);
     }
+  });
+});
+
+/** The mount site keys the controller on `coordinatorId`
+ * (`coordinator-route-content.tsx`), so a coordinator switch always
+ * unmounts and remounts this hook rather than handing it a changed prop.
+ * This exercises that real remount, composed with the real
+ * `useCopilotOpenSequence`, instead of mocking the class of bug away. */
+describe("useCoordinatorCopilot - keyed remount across a coordinator switch", () => {
+  function coordinator(id: string): Coordinator {
+    return {
+      id,
+      workspace_id: WORKSPACE_ID,
+      name: `Coordinator ${id}`,
+      agent_profile_id: "agent-1",
+      executor_profile_id: "executor-1",
+      context: "",
+      conversation_task_id: null,
+      created_at: "2026-09-28T00:00:00Z",
+      updated_at: "2026-09-28T00:00:00Z",
+      agent_profile_status: "ok",
+      executor_profile_status: "ok",
+    };
+  }
+
+  function sessionFor(id: string): ConversationResponse {
+    return { task_id: `task-${id}`, session_id: `session-${id}`, archive_state: false };
+  }
+
+  function Harness({
+    coordinatorId,
+    onResult,
+  }: {
+    coordinatorId: string;
+    onResult: (result: ReturnType<typeof useCoordinatorCopilot>) => void;
+  }) {
+    onResult(useCoordinatorCopilot(WORKSPACE_ID, coordinatorId, true));
+    return null;
+  }
+
+  it("never leaks the previous coordinator's session or draft into the newly-viewed one", async () => {
+    const actual = await vi.importActual<
+      typeof import("@/hooks/domains/coordinator/use-copilot-open-sequence")
+    >("@/hooks/domains/coordinator/use-copilot-open-sequence");
+    mocks.useCopilotOpenSequence.mockImplementation(actual.useCopilotOpenSequence);
+    mocks.getCoordinator.mockImplementation(async (_workspaceId: string, id: string) =>
+      coordinator(id),
+    );
+    mocks.openConversation.mockImplementation(async (_workspaceId: string, id: string) =>
+      sessionFor(id),
+    );
+
+    let latest: ReturnType<typeof useCoordinatorCopilot> | undefined;
+    const onResult = (result: ReturnType<typeof useCoordinatorCopilot>) => {
+      latest = result;
+    };
+
+    // Ready A -> unopened B: A opens and reaches ready; B has never been
+    // opened, so the switch must show no session at all, never A's.
+    act(() => useCopilotStore.getState().setOpen("coord-a", true));
+    const { rerender } = render(
+      <Harness key="coord-a" coordinatorId="coord-a" onResult={onResult} />,
+    );
+    await waitFor(() => expect(latest?.routeSession).toEqual(sessionFor("coord-a")));
+
+    rerender(<Harness key="coord-b" coordinatorId="coord-b" onResult={onResult} />);
+    expect(latest?.routeSession).toBeNull();
+    expect(latest?.pendingDraft).toBeUndefined();
+
+    // Open A -> open B (no chip): B is also marked open in the store, so
+    // the remounted controller opens B's own conversation, not A's.
+    act(() => useCopilotStore.getState().setOpen("coord-b", true));
+    await waitFor(() => expect(latest?.routeSession).toEqual(sessionFor("coord-b")));
+    expect(latest?.routeSession).not.toEqual(sessionFor("coord-a"));
+
+    // A delayed A response lands after the switch: re-open A, hold its GET
+    // in flight, switch away to C before it resolves, then let A's response
+    // land late. C's own session must be unaffected.
+    let resolveAGet: ((value: Coordinator) => void) | undefined;
+    mocks.getCoordinator.mockImplementation((_workspaceId: string, id: string) => {
+      if (id === "coord-a") {
+        return new Promise<Coordinator>((resolve) => {
+          resolveAGet = resolve;
+        });
+      }
+      return Promise.resolve(coordinator(id));
+    });
+    act(() => useCopilotStore.getState().setOpen("coord-a", true));
+    rerender(<Harness key="coord-a" coordinatorId="coord-a" onResult={onResult} />);
+    await waitFor(() => expect(resolveAGet).toBeDefined());
+
+    act(() => useCopilotStore.getState().setOpen("coord-c", true));
+    rerender(<Harness key="coord-c" coordinatorId="coord-c" onResult={onResult} />);
+    await waitFor(() => expect(latest?.routeSession).toEqual(sessionFor("coord-c")));
+
+    resolveAGet?.(coordinator("coord-a"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latest?.routeSession).toEqual(sessionFor("coord-c"));
   });
 });

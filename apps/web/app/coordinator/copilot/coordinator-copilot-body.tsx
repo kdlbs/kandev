@@ -121,8 +121,11 @@ export type CoordinatorCopilotBodyProps = {
 
 /** Switches the popover body on the open sequence's outcome
  *  (docs/specs/coordinator/system-design/copilot-popover.md#opening-the-conversation).
- *  Every non-ready branch keeps the header and Close; no composer and no
- *  `SessionRecoveryFeedback` render outside `ready`. */
+ *  A freshly-resolved profile-unavailable, gone, or error outcome always
+ *  replaces the body. Otherwise `ReadyBody` renders whenever a route session
+ *  is held, including while a same-coordinator revalidation (Ask about
+ *  this, Try again) is in flight, so the transcript and composer stay
+ *  mounted across it. */
 export function CoordinatorCopilotBody({
   workspaceId,
   state,
@@ -143,7 +146,7 @@ export function CoordinatorCopilotBody({
   if (state.kind === "error") {
     return <RetryableError messageKey={RETRYABLE_ERRORS[state.error]} onRetry={onRetry} />;
   }
-  if (state.kind === "ready" && routeSession) {
+  if (routeSession) {
     return (
       <ReadyBody
         routeSession={routeSession}

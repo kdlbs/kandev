@@ -88,7 +88,10 @@ export function useCoordinatorCopilot(
     // `entry.chip`'s reference (not just `entry.open`) re-triggers this so a
     // second Ask about this while already open also refreshes the profile
     // statuses, per "again each time the popover opens (launcher, Ask about
-    // this, or Try again)".
+    // this, or Try again)". The mount site keys this whole controller on
+    // `coordinatorId`, so a coordinator switch always remounts this hook
+    // fresh; this effect's own initial-mount run is what opens the
+    // newly-viewed coordinator, not a `coordinatorId` dependency here.
     if (entry.open) openSequence.open();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- openSequence.open reads workspaceId/effectiveId itself; including the whole object would re-open on every state transition.
   }, [entry.open, entry.chip]);

@@ -244,6 +244,37 @@ describe("CoordinatorCopilot - ready conversation", () => {
   });
 });
 
+describe("CoordinatorCopilot - ready conversation: revalidation in flight", () => {
+  it("keeps the composer mounted while a held route session revalidates (loading)", async () => {
+    mockController({
+      open: true,
+      openSequence: { state: { kind: "loading" }, open: vi.fn(), retry: vi.fn() },
+      routeSession: conversation,
+    });
+    renderCopilot();
+    await waitFor(() => screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID));
+    expect(quickChatSessionViewCalls[0]).toMatchObject({
+      session: { kind: "chat", sessionId: "session-1" },
+    });
+  });
+
+  it("removing the chip does not blank the composer while the route session is held", async () => {
+    const removeChip = vi.fn();
+    mockController({
+      open: true,
+      openSequence: { state: { kind: "loading" }, open: vi.fn(), retry: vi.fn() },
+      routeSession: conversation,
+      chip,
+      removeChip,
+    });
+    renderCopilot();
+    await waitFor(() => screen.getByText("about KAN-418"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(removeChip).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID)).toBeTruthy();
+  });
+});
+
 describe("CoordinatorCopilot - ready conversation: transformOutgoing", () => {
   it("passes a transformOutgoing that prefixes the chip id while a chip is set", async () => {
     mockController({
