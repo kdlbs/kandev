@@ -2,9 +2,10 @@
 id: "07-guided-setup"
 title: "Guided setup"
 status: pending
-wave: 5
+wave: 6
 depends_on:
-  - "06-configure-sections"
+  - "06-may-do-watches"
+  - "11-orders-goal-sections"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COORDINATORS-008
@@ -23,7 +24,7 @@ system_design:
 ## Summary
 
 Replace the phase-1 new-coordinator form with a six-step setup that reuses
-task 06's section forms, ends on a "What it wrote" review, and creates the
+the section forms of tasks 06 and 11, ends on a "What it wrote" review, and creates the
 coordinator, settings, Watches and goal in one transaction through
 `POST .../coordinators/setup`.
 
@@ -44,7 +45,7 @@ coordinator, settings, Watches and goal in one transaction through
 
 ## Out of scope
 
-- Editing after creation (task 06's sections own it).
+- Editing after creation (the sections of tasks 06 and 11 own it).
 
 ## ASCII UI preview
 
@@ -98,7 +99,7 @@ list is unchanged.
 
 ## Dependencies
 
-- Task 06 (section forms reused as steps).
+- Tasks 06 and 11 (section forms reused as steps).
 
 ## Risks
 

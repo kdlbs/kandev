@@ -14,10 +14,7 @@ requirements:
 acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-001.1
   - AC-COORDINATOR-ACTIVITY-LOG-001.2
-  - AC-COORDINATOR-ACTIVITY-LOG-001.3
-  - AC-COORDINATOR-ACTIVITY-LOG-001.4
   - AC-COORDINATOR-ACTIVITY-LOG-001.5
-  - AC-COORDINATOR-ACTIVITY-LOG-001.6
   - AC-COORDINATOR-ACTIVITY-LOG-003.2
   - AC-COORDINATOR-ACTIVITY-LOG-003.3
   - AC-COORDINATOR-ACTIVITY-LOG-003.4
@@ -36,16 +33,13 @@ system_design:
 
 ## Summary
 
-Write a log row in the same transaction as every proposal change, coalesce
-refusals, and serve the list, summary and undo routes, the coordinator's
+Write a log row in the same transaction as every proposal change, through
+task 01's writer, and serve the list, summary and undo routes, the coordinator's
 read tool and daily retention. This is the phase-3 evidence source.
 
 ## In scope
 
-- `internal/coordinator/activity.go`: `Record(tx, row)` and
-  `RecordRefusal(...)` with 60-second coalescing under the per-coordinator
-  lock ([design](../../specs/coordinator/system-design/activity-log.md#refusals)).
-- Hooks in the phase-1 create path: propose insert, completion to
+- Hooks in the phase-1 create path, through task 01's `Record`: propose insert, completion to
   `approved` (with `edited`), reject, failure to `failed`. Task 04 adds the
   same calls for the other kinds through the shared writer.
 - Routes `GET activity`, `GET activity/summary`, `POST activity/:rid/undo`
@@ -61,15 +55,14 @@ read tool and daily retention. This is the phase-3 evidence source.
 ## Out of scope
 
 - The What it did screen (task 08).
-- The guard calling `RecordRefusal` (task 02 wires it; this task provides
-  and tests the function).
+- The writer and refusal coalescing (task 01); the guard's `RecordRefusal`
+  call (task 02).
 - Registering the read tool in the profile (task 02's `ToolNames`).
 
 ## Acceptance
 
 - Each proposal change leaves exactly one row in the same transaction; a
-  failed row insert rolls the change back.
-- Concurrent refusals within 60 seconds leave one row with the summed count.
+  failed row insert rolls the proposal change back.
 - Undo reverses a create or a move once; conflicts return their codes.
 
 ## Verification
@@ -80,8 +73,7 @@ make -C apps/backend test PKG=./internal/mcp/...
 ```
 
 Tests: a fault-injected row insert leaves the proposal unchanged
-(`001.6`); a losing claimer writes no row; 10 concurrent refusals give one
-row with count 10 (`001.3`); a direct Resume writes nothing (`001.5`, a
+(the hook half of task 01's `001.6`); a losing claimer writes no row; a direct Resume writes nothing (`001.5`, a
 service-level test that calls the orchestrator stub and asserts zero rows);
 two concurrent undos of one create archive once and return one 409
 (`003.4`); a moved-again task returns `undo_conflict` (`003.3`); a failed
@@ -102,14 +94,14 @@ workspace's coordinator is 404 (`005.3`).
 
 ## Likely files
 
-- `apps/backend/internal/coordinator/activity.go`, `activity_routes.go`,
+- `apps/backend/internal/coordinator/activity_routes.go`,
   `proposals.go`, `retention.go`
 - `apps/backend/internal/mcp/server/coordinator_tools.go`,
   `internal/mcp/handlers/` (the list action)
 
 ## Dependencies
 
-- Task 01 (table, types, client shapes).
+- Task 01 (table, writer, types, client shapes).
 
 ## Risks
 

@@ -2,10 +2,9 @@
 id: "02-policy-enforcement"
 title: "Policy and Watches enforcement"
 status: pending
-wave: 3
+wave: 2
 depends_on:
   - "01-shared-interface"
-  - "03-activity-log-backend"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COORDINATORS-007
@@ -64,7 +63,7 @@ refused log rows, workflow-deletion handling and the approve re-check.
   text, and no settings-shaped action on the surface (`002.2`, `002.5`,
   `003.3`).
 - Workflow-deleted subscriber (`003.5` backend half; the Configure notice
-  is task 06's and the Needs you notice task 11's).
+  and the Needs you notice are task 06's).
 - Approve re-check 409 `policy_denied` in the phase-1 approve route
   (`002.6`; the card copy is task 09's).
 - Flag-off behaviour: phase-1 tools, ignored bindings and stored policy,
@@ -87,6 +86,11 @@ refused log rows, workflow-deletion handling and the approve re-check.
 - A forged or unparsable binding refuses every action.
 
 ## Verification
+
+Write the interleaving table first, before code: a policy save racing an
+in-flight coordinator call, for a tightening and a loosening; an approve
+racing a save that denies its action; a save racing a conversation open.
+Each row names the order of the two operations and the expected result.
 
 ```bash
 make -C apps/backend test PKG=./internal/coordinator/...
@@ -127,8 +131,7 @@ is written (the call never reaches the guard, `002.2`).
 
 ## Dependencies
 
-- Task 01 (store, policy value, `resetConversation`); task 03
-  (`RecordRefusal`).
+- Task 01 (store, policy value, `resetConversation`, `RecordRefusal`).
 
 ## Risks
 

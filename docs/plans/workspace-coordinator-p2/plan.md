@@ -65,35 +65,46 @@ stored settings (tasks 01 and 02), and the per-kind `Execute` seam (task
 
 ## Order
 
-Shared interface first; then the log, which other backends write through;
-then the enforcing backends and their screens in parallel.
+Shared interface first, including the one log writer; then the backends in
+parallel, each depending on task 01 alone where it can; then their screens.
 
-**Precondition from phase 1.** Task 10 starts only after phase-1
-[task 11, panel swap](../workspace-coordinator/task-11-panel-swap.md) has
-merged: it adds `RightSidePanel` and its `mobileFullScreen` opt-in, which
-task 10 renders and which do not exist in the code before it. The other
-work orders do not use them.
+**Preconditions from phase 1.** Phase 2 is built ahead of phase 1's merge,
+from the phase-1 integration branch. Every work order waits for phase-1
+[task 12, review follow-ups](../workspace-coordinator/task-12-review-follow-ups.md)
+to pass review: task 01 follows its `config_revision` migration and
+increments that column in `resetConversation`, task 02 derives the tool
+list from a surface that task adds a tool to, and task 04 extends its
+stale-claim sweep. Task 09 also waits for phase-1
+[task 08](../workspace-coordinator/task-08-proposals-ui.md), whose proposal
+card it extends. Task 10 waits for phase-1
+[task 11, panel swap](../workspace-coordinator/task-11-panel-swap.md): it
+adds `RightSidePanel` and its `mobileFullScreen` opt-in, which task 10
+renders and which do not exist in the code before it.
 
 ```text
-task-01 shared interface --+--> task-03 activity log backend --+--> task-02 policy, Watches enforcement --+--> task-04 proposal kinds backend --+
-                           |                                   +--> task-05 orders and goals backend -----+                                      +--> task-09 proposal kinds UI
-                           |                                   +--> task-08 What it did UI                +--> task-06 Configure sections --> task-07 guided setup
-                           +--> task-10 copilot everywhere (after phase-1 task 11)                                          +--> task-11 goal note, Watches on Needs you (also after 02)
+phase-1 task 12 ──> task-01 shared interface, log writer
+                      ├──> task-02 policy, Watches enforcement ──┬──> task-04 proposal kinds backend ──> task-09 proposal kinds UI
+                      ├──> task-03 activity log backend ─────────┤                                        (also after 05)
+                      │      ├──> task-08 What it did UI         └──> task-06 May do, Watches ──┐
+                      │      └──> task-12 goals backend ──┐              (also after 11)        ├──> task-07 guided setup
+                      ├──> task-05 standing orders ───────┴──> task-11 sections row, orders, goal ┘
+                      └──> task-10 copilot everywhere (also after phase-1 task 11)
 ```
 
 | Work order | Package | Size | Depends on | Result |
 | --- | --- | --- | --- | --- |
-| [task-01](task-01-shared-interface.md) | WP-6/7 | M | none | Flag, tables, columns, types, route shapes, typed client |
+| [task-01](task-01-shared-interface.md) | WP-6/7 | M | phase-1 task 12 | Flag, tables, columns, types, route shapes, typed client, the log writer |
+| [task-02](task-02-policy-enforcement.md) | WP-7 | L | 01 | Settings routes, derived and bound tool profile, guard, auto-approve, Watches filter |
 | [task-03](task-03-activity-log-backend.md) | WP-6 | M | 01 | Rows written with every proposal change; list, summary, undo, read tool, retention |
-| [task-02](task-02-policy-enforcement.md) | WP-7 | L | 01, 03 | Settings routes, derived and bound tool profile, guard, auto-approve, Watches filter |
-| [task-05](task-05-orders-goals-backend.md) | WP-7, WP-10 | M | 01, 03 | Standing orders and goal routes, instructions, baselines and measures |
-| [task-08](task-08-what-it-did-ui.md) | WP-6 | M | 03 | What it did in the Queue with Undo |
+| [task-05](task-05-standing-orders-backend.md) | WP-7 | M | 01 | Standing order routes, instructions, last applied |
 | [task-10](task-10-copilot-everywhere.md) | WP-9 | M | 01; phase-1 task 11 | Launcher and panel on board, task page and Inbox; page chip |
 | [task-04](task-04-proposal-kinds-backend.md) | WP-8 | L | 02, 03 | Resume, message and move proposals with at-most-once execution |
-| [task-06](task-06-configure-sections.md) | WP-7 | L | 02, 03, 05 | Sections row, May do, Watches, Standing orders, Goal; list summary |
-| [task-11](task-11-needs-you-goal-watches.md) | WP-10 | S | 01, 02, 05 | Goal note and Watches filter on Needs you and Queue |
-| [task-09](task-09-proposal-kinds-ui.md) | WP-8 | M | 04, 05 | Cards per kind, Shaped by, stall Resume, Ready to merge actions, Make it a standing order |
-| [task-07](task-07-guided-setup.md) | WP-7 | M | 06 | Guided Add coordinator with atomic setup route |
+| [task-08](task-08-what-it-did-ui.md) | WP-6 | M | 03 | What it did in the Queue with Undo |
+| [task-12](task-12-goals-backend.md) | WP-10 | M | 01, 03 | Goal routes, instructions, baselines and measures |
+| [task-11](task-11-orders-goal-sections.md) | WP-7, WP-10 | M | 05, 12 | Sections row, Standing orders and Goal sections, goal note |
+| [task-09](task-09-proposal-kinds-ui.md) | WP-8 | M | 04, 05; phase-1 task 08 | Cards per kind, Shaped by, stall Resume, Ready to merge actions, Make it a standing order |
+| [task-06](task-06-may-do-watches.md) | WP-7 | M | 02, 03, 11 | May do and Watches sections, list summary, Watches filtering in Needs you |
+| [task-07](task-07-guided-setup.md) | WP-7 | M | 06, 11 | Guided Add coordinator with atomic setup route |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Every acceptance
 criterion of the seven phase-2 requirement documents, and the phase-2
@@ -101,6 +112,19 @@ criteria added to [coordinators](../../specs/coordinator/requirements/coordinato
 is owned by exactly one work order's frontmatter. Where a criterion spans
 surfaces, the owner's body names the work orders that build the others.
 Phase 3 can start against task 01's shapes and task 03's summary.
+
+**Sizing, from phase 1's record.** Every work order carries 5 to 17
+acceptance criteria in one layer. Phase 1 measured the cost of each end:
+its smallest card (2 criteria) still took 3 hours and 2 Build rounds, so a
+card below 5 criteria is merged into a neighbour; its two cards with 30 and
+41 criteria took 16 to 17 hours and up to 8 Build rounds, so no card here
+exceeds 17. Its cards of 8 to 19 criteria in one layer took 6.5 to 9 hours
+in 3 or 4 rounds. The rounds tracked ordering and concurrency rather than
+criterion count: a 2-criterion recovery card and a 10-criterion proposal UI
+each needed 5. Tasks 02 and 04 carry that class here (a policy tightened
+inside a running conversation; at-most-once execution after a crash), so
+each keeps a single such problem, and each states its interleaving test
+before code.
 
 ## Backend
 
@@ -111,8 +135,8 @@ Phase 3 can start against task 01's shapes and task 03's summary.
   `outcome_json` and the open-target partial index. Upgrade tests on both
   dialects from the phase-1 schema. `resetConversation`, shared by every
   change that must start the next conversation fresh.
-- Log (task 03): `activity.go` writer in the caller's transaction, refusal
-  coalescing, list, summary, undo routes, `list_coordinator_activity_kandev`,
+- Log: the `activity.go` writer in the caller's transaction and refusal
+  coalescing (task 01); hooks, list, summary, undo routes, `list_coordinator_activity_kandev`,
   daily retention.
 - Policy (task 02): `policy.go`, `toolprofile.go`, `CoordinatorToolPolicy`
   in `internal/mcp/profile` with launch-metadata transport, the guard's
@@ -121,17 +145,18 @@ Phase 3 can start against task 01's shapes and task 03's summary.
 - Kinds (task 04): `kinds.go` executor registry, three propose actions and
   tools, `TaskMessenger` extracted from `handleMessageTask`, the
   at-most-once recovery branch, `starts_agent` creates.
-- Orders and goals (task 05): routes, prompt sections, baselines, measures.
-- Setup route (task 07) and list summary (task 06).
+- Standing orders (task 05): routes, prompt section, last applied.
+- Goals (task 12): routes, prompt section, baselines, measures.
+- Setup route (task 07); list summary and the Watches projection (task 06).
 
 ## Frontend
 
 - Typed client and types (task 01).
-- Coordinator page sections and list summary (task 06); guided setup
-  (task 07).
+- Coordinator page Sections row, Standing orders and Goal sections and the
+  goal note (task 11); May do, Watches and list summary (task 06); guided
+  setup (task 07).
 - What it did (task 08); proposal cards per kind, stall Resume, Ready to
-  merge actions and the standing-order offer (task 09); goal note and
-  Watches filtering (task 11).
+  merge actions and the standing-order offer (task 09).
 - Workspace copilot host, switcher, one-right-panel store and page chip
   (task 10).
 
@@ -328,7 +353,7 @@ Quick Chat tab" (v21-05) is not built (D11).
 | Screenshot | Shows | Cited by | Work orders |
 | --- | --- | --- | --- |
 | [`assets/p2-01-queue-what-it-did.png`](assets/p2-01-queue-what-it-did.png) | Queue with What it did and Ready to merge | activity-log, proposal-kinds | 08, 09 |
-| [`assets/p2-02-settings-coordinator-sections.png`](assets/p2-02-settings-coordinator-sections.png) | coordinator page Sections row | permissions, standing-orders, coordinators | 06 |
+| [`assets/p2-02-settings-coordinator-sections.png`](assets/p2-02-settings-coordinator-sections.png) | coordinator page Sections row | permissions, standing-orders, coordinators | 06, 11 |
 | [`assets/p2-03-task-page-copilot-context.png`](assets/p2-03-task-page-copilot-context.png) | task page, panel, task chip | copilot-everywhere | 10 |
 | [`assets/p2-04-board-copilot-context.png`](assets/p2-04-board-copilot-context.png) | board, panel, board chip | copilot-everywhere | 10 |
 
@@ -340,7 +365,7 @@ are their reference.
 | Mockup spec (phase 2 view) | Repo test | Work order |
 | --- | --- | --- |
 | `18-v21-copilot-anywhere` (launcher on board and task page, chip) | `tests/coordinator/copilot-everywhere.spec.ts` | 10 |
-| `18-v21-copilot-anywhere` (settings sections) | `tests/coordinator/configure-sections.spec.ts` | 06 |
+| `18-v21-copilot-anywhere` (settings sections) | `tests/coordinator/configure-sections.spec.ts` | 06, 11 |
 | `14-first-run-setup` (coordinated part) | `tests/coordinator/guided-setup.spec.ts` | 07 |
 | `05-rule-on-a-proposal` (reject with a reason) | `tests/coordinator/proposal-kinds.spec.ts`, the standing-order offer | 09 |
 

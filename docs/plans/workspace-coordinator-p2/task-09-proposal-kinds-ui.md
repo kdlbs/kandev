@@ -2,10 +2,10 @@
 id: "09-proposal-kinds-ui"
 title: "Proposal cards, stall Resume and Ready to merge"
 status: pending
-wave: 5
+wave: 4
 depends_on:
   - "04-proposal-kinds-backend"
-  - "05-orders-goals-backend"
+  - "05-standing-orders-backend"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-PROPOSAL-KINDS-004
