@@ -25,6 +25,7 @@ export class SessionRead<T> {
   private revision = 0;
   private observedRevision: number | undefined;
   private initialized = false;
+  private live = true;
 
   constructor(
     private scope: SessionReadScope,
@@ -39,7 +40,7 @@ export class SessionRead<T> {
     const { resource, key, environmentId } = this.options;
     return JSON.stringify([resource, resource === "diff" ? key : environmentId]);
   }
-  private current = () => this.scope.current() && this.options.isCurrent();
+  private current = () => this.live && this.scope.current() && this.options.isCurrent();
   private writable = () => this.current() && this.scope.owns(this);
 
   subscribe = (listener: () => void) => {
@@ -66,9 +67,11 @@ export class SessionRead<T> {
   }
 
   retire() {
+    this.live = false;
     this.clearTimer();
     this.revision++;
     this.initialized = false;
+    this.update({ data: undefined, loading: false, error: null });
   }
 
   ensure = (revision?: number, reset = false) => {
@@ -188,6 +191,17 @@ export class SessionReadScope {
     }
   }
 
+  retireInvalidBindings() {
+    for (const reads of this.reads.values()) {
+      for (const [key, read] of reads) {
+        if (read.options.isCurrent()) continue;
+        reads.delete(key);
+        if (this.owns(read)) this.writers.delete(read.group);
+        read.retire();
+      }
+    }
+  }
+
   trim() {
     for (const reads of this.reads.values()) {
       let inactive = [...reads.values()].filter((read) => read.inactive).length;
@@ -237,11 +251,21 @@ export function getSessionReadScope(store: StoreApi<AppState>): SessionReadScope
   if (!owner) {
     owner = { scope: new SessionReadScope(store), identity: nextIdentity, listeners: new Set() };
     owners.set(store, owner);
-    store.subscribe(() => refreshScope(store));
+    store.subscribe((state, previous) => {
+      refreshScope(store);
+      if (
+        state.environmentIdBySessionId !== previous.environmentIdBySessionId ||
+        state.workspaceRestoration !== previous.workspaceRestoration
+      ) {
+        // Observe each store transition, including rebindings batched before React renders.
+        getSessionReadScope(store).retireInvalidBindings();
+      }
+    });
   } else if (owner.identity !== nextIdentity || owner.scope.client !== getWebSocketClient()) {
-    owner.scope.retire();
+    const previous = owner.scope;
     owner.scope = new SessionReadScope(store);
     owner.identity = nextIdentity;
+    previous.retire();
   }
   return owner.scope;
 }

@@ -121,6 +121,11 @@ not evicted into duplicate work. Remove settled promises, unused timers, and
 listeners. This bounds newly introduced retention; existing store retention
 is not silently redefined by this repair.
 
+Session/environment and restoration bindings retire synchronously on every store
+transition, including transitions batched before React renders. Retired entries
+cannot be revived when a session returns to a previous environment; the new
+binding starts a fresh read while obsolete completions remain unwritable.
+
 ## File-tree retention
 
 Retain immutable tree metadata, not file contents or DOM nodes. The cache owner
@@ -137,7 +142,9 @@ Do not persist this cache to localStorage, sessionStorage, or the backend.
 Existing sessionStorage expansion/scroll preferences keep their current owner.
 
 A cache hit publishes before refresh starts; it does not mark a refresh as
-complete. Cached content cannot override workspace-unavailable, failed-session,
+complete. Retain the remembered expanded branches, but discard loaded children
+of collapsed directories when restoring the snapshot. Those directories fetch
+current children when opened; a depth-one root refresh cannot validate them. Cached content cannot override workspace-unavailable, failed-session,
 or restoration-required states. Clear invalid context snapshots and release
 references on owner changes. Never retain an obsolete completion after eviction
 or context retirement.

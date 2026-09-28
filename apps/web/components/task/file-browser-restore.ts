@@ -33,6 +33,23 @@ export function removeFailedExpansions(paths: string[], failedPaths: string[]): 
   );
 }
 
+/** Keep visible retained branches; collapsed descendants must load again when opened. */
+export function retainExpandedChildren(
+  tree: FileTreeNode,
+  expanded: ReadonlySet<string>,
+): FileTreeNode {
+  if (!tree.children) return tree;
+  return {
+    ...tree,
+    children: tree.children.map((child) => {
+      if (!child.is_dir || !child.children) return child;
+      return expanded.has(child.path)
+        ? retainExpandedChildren(child, expanded)
+        : { ...child, children: undefined };
+    }),
+  };
+}
+
 export function mergeLoadedFolder(tree: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
   if (tree.path === incoming.path) return mergeTreeNodes(tree, incoming);
   if (!tree.children) return tree;

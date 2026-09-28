@@ -158,3 +158,14 @@ promise into duplicate requests.
   33-key detached-read case reproduced that path. Completion now settles its
   private snapshot and trims inactive entries even after the binding expires,
   while the ownership guard still prevents stale store publication.
+
+### Return-navigation review follow-up
+
+- Reproduced obsolete commit and diff publication after environment A-to-B-to-A
+  rebinding, both with separate renders and batched store updates (four RED
+  assertions). The store subscription now retires invalid bindings immediately,
+  and a retired read is permanently unwritable. Returning creates a new entry
+  and request even if the original response is still pending.
+- Verification: all 78 tests in the eight affected session/tree suites pass,
+  together with changed-file ESLint and frontend TypeScript. Commands and final
+  delivery results are tracked in Task 04.

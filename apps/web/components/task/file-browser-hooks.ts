@@ -10,7 +10,7 @@ import { getFilesPanelExpandedPaths, setFilesPanelExpandedPaths } from "@/lib/lo
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { mergeTreeNodes } from "./file-browser-parts";
 import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
-import { restoredExpandedPaths } from "./file-browser-restore";
+import { retainExpandedChildren, restoredExpandedPaths } from "./file-browser-restore";
 import { useTreeLoader } from "./file-browser-tree-loader";
 import { useFileTreeState } from "./file-browser-tree-state";
 import type { FileTreeCacheBinding } from "./file-browser-tree-cache";
@@ -356,18 +356,21 @@ function useTreeLoadEffects(ctx: TreeLoadEffectsContext) {
     clearRetryTimer();
     retryAttemptRef.current = 0;
     if (resetKeyChanged) {
-      setTree(cacheBinding?.isCurrent() ? cacheBinding.cache.get(cacheBinding.key) : null);
+      const savedPaths = restoredExpandedPaths(getFilesPanelExpandedPaths(effectiveResetKey));
+      const retained = cacheBinding?.isCurrent() ? cacheBinding.cache.get(cacheBinding.key) : null;
+      setTree(retained);
       setIsLoadingTree(true);
       setLoadState(agentctlIsReadyRef.current ? "loading" : "waiting");
       setLoadError(null);
       hasInitializedExpandedRef.current = null;
-      const savedPaths = restoredExpandedPaths(getFilesPanelExpandedPaths(effectiveResetKey));
       restoreExpandedPathsRef.current = savedPaths;
       setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
     }
     const savedPaths = resetKeyChanged
       ? restoreExpandedPathsRef.current
       : Array.from(expandedPathsRef.current);
+    const expanded = new Set(savedPaths);
+    setTree((current) => (current ? retainExpandedChildren(current, expanded) : current));
     restoreExpandedPathsRef.current = savedPaths;
     logLoad("init-effect", {
       sessionId,

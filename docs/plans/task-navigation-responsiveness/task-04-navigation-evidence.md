@@ -262,3 +262,23 @@ with 18 fictional tasks and two populated environments. Progressive loading,
 retry, A-to-B-to-A navigation, editor opening, phone geometry, and page-error
 checks all pass. The follow-up build, changed-file lint, and specification
 validation pass; the full suite is delegated to the PR CI run.
+
+### Second PR review follow-up
+
+- Eight new RED assertions reproduced obsolete commit/diff responses across
+  separate and batched environment round trips and deleted descendants in
+  collapsed root/nested folders. Retire invalid read bindings on each store
+  transition; restore only expanded descendants from retained trees.
+- `VITEST_MAX_WORKERS=2 pnpm exec vitest run` against session commits, cumulative
+  diff, user shells, coordinator, tree state/cache/restore-loader, and file-change
+  application: 8 files / 78 tests passed. Changed-file ESLint and frontend
+  TypeScript passed. Prior timings remain historical measurements.
+- The machine reboot interrupted the preceding synthetic-merge typecheck and
+  removed its temporary demo and logs. Its 102 passing tests alone are not a
+  completed merge verification. Recreate the isolated demo and validate the
+  final merge result before delivery.
+- Recreated the isolated Harbor Logistics preview under a dedicated persistent
+  demo directory, retaining 18 fictional tasks, two populated worktrees and
+  conversations, and a 633-file repository. A new production build passes the
+  desktop/phone progressive-loading, retry, task round-trip, file-opening,
+  touch-target, overflow and page-error checks. No production data was copied.

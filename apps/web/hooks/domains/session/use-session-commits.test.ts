@@ -217,3 +217,37 @@ describe("commit invalidation ownership", () => {
     expect(result.current.value.commits).toEqual([]);
   });
 });
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+describe("commits environment round trips", () => {
+  it.each([false, true])(
+    "retires the original binding across A to B to A (batched=%s)",
+    async (batched) => {
+      const old = deferred<unknown>();
+      const intermediate = deferred<unknown>();
+      const fresh = deferred<unknown>();
+      request.mockReturnValueOnce(old.promise);
+      if (!batched) request.mockReturnValueOnce(intermediate.promise);
+      request.mockReturnValue(fresh.promise);
+      const { result } = renderSessionRead(() => useSessionCommits("session"), undefined);
+      const move = (environment: string) =>
+        result.current.store.setState({ environmentIdBySessionId: { session: environment } });
+      if (batched) {
+        act(() => {
+          move("new-env");
+          move("environment");
+        });
+      } else {
+        act(() => move("new-env"));
+        act(() => move("environment"));
+      }
+      await act(async () => old.resolve({ commits: [commit("obsolete")] }));
+      expect(result.current.value.commits).toEqual([]);
+      expect(request).toHaveBeenCalledTimes(batched ? 2 : 3);
+      await act(async () => fresh.resolve({ commits: [commit("fresh")] }));
+      await act(async () => intermediate.resolve({ commits: [commit("obsolete")] }));
+      expect(result.current.value.commits).toEqual([commit("fresh")]);
+      expect(result.current.value.loading).toBe(false);
+    },
+  );
+});

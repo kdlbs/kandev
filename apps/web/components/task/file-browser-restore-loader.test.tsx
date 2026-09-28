@@ -461,3 +461,50 @@ it("does not request children for empty persisted paths", async () => {
   expect(requestFileTreeMock.mock.calls.map((call) => call[2])).toEqual([ROOT_PATH]);
   expect(result.current.expandedPaths).toEqual(new Set());
 });
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3
+it.each([
+  [CODEX_PATH, false],
+  [AGENTS_PATH, false],
+  [CODEX_PATH, true],
+  [AGENTS_PATH, true],
+] as const)(
+  "refreshes retained collapsed children when expanding %s after return (shared environment=%s)",
+  async (collapsed, sharedEnvironment) => {
+    const cache = new FileBrowserTreeCache();
+    const binding = { cache, key: ENVIRONMENT, isCurrent: () => true };
+    const { result, rerender } = renderHook(
+      ({ key, sessionId }) =>
+        useFileBrowserTree(sessionId, key, key === ENVIRONMENT ? binding : undefined),
+      { initialProps: { key: ENVIRONMENT, sessionId: SESSION } },
+    );
+    await waitFor(() =>
+      expect(result.current.visibleRows.map((row) => row.path)).toContain(CONFIG_PATH),
+    );
+    act(() =>
+      result.current.setExpandedPaths(new Set(collapsed === CODEX_PATH ? [] : [CODEX_PATH])),
+    );
+    rerender({
+      key: sharedEnvironment ? ENVIRONMENT : SUCCESSOR_ENVIRONMENT,
+      sessionId: SUCCESSOR_SESSION,
+    });
+    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+    const fresh = { ...CONFIG, name: "fresh.toml", path: ".codex/agents/fresh.toml" };
+    requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+      if (path === ROOT_PATH) return Promise.resolve({ root: { ...ROOT, children: [CODEX] } });
+      if (path === CODEX_PATH) return Promise.resolve({ root: { ...CODEX, children: [AGENTS] } });
+      return Promise.resolve({ root: { ...AGENTS, children: [fresh] } });
+    });
+    rerender({ key: ENVIRONMENT, sessionId: SESSION });
+    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+    for (const path of collapsed === CODEX_PATH ? EXPANDED_PATHS : [AGENTS_PATH]) {
+      const node = result.current.visibleRows.find((row) => row.path === path)!.node;
+      await act(async () => {
+        result.current.setExpandedPaths((previous) => new Set([...previous, path]));
+        await loadNodeChildren(node, SESSION, result.current);
+      });
+    }
+    expect(result.current.visibleRows.map((row) => row.path)).not.toContain(CONFIG_PATH);
+    expect(result.current.visibleRows.map((row) => row.path)).toContain(fresh.path);
+  },
+);

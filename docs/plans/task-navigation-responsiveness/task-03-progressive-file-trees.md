@@ -175,3 +175,15 @@ stop scheduling their descendants and reject publication.
 PR review added a direct real-provider tree-state regression for two batched
 folder completions. Both merges remain visible, reach the shared cache, and
 survive A-to-B-to-A rebinding. This test passed without production tree changes.
+
+### Retained collapsed-directory review follow-up
+
+- Reproduced deleted files remaining visible when reopening a previously loaded,
+  collapsed directory after return navigation, at root and nested folder levels
+  (four RED assertions including shared-environment sessions). Restoring a cached snapshot now retains expanded branches
+  and clears loaded children of collapsed folders. Their next expansion reads
+  current contents; manual completions during the subsequent root refresh remain
+  owned by the active tree. Desktop and phone share this loader behavior.
+- Verification: all 78 tests in the eight affected session/tree suites pass,
+  together with changed-file ESLint and frontend TypeScript. Commands and final
+  delivery results are tracked in Task 04.
