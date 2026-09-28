@@ -259,4 +259,11 @@ Raw measurements are retained under ignored
 `.kandev/diagnostics/`; Task 04 records their limits and exact fixture scope.
 
 Live deployment, restart, and live Firefox certification remain outside this
-package. All changes remain unstaged and uncommitted.
+package. The implementation is committed and published as PR #4041.
+
+
+PR review follow-up preserves shell-error settlement and gives each session's
+cumulative diff independent ownership within a shared environment. All 67
+affected tests and TypeScript pass; Task 02 and Task 04 record the regression
+evidence. The follow-up production build and desktop/phone smoke checks pass. CI and
+review disposition remain pending on the published PR.

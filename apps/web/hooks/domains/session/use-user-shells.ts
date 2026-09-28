@@ -86,13 +86,19 @@ export function useUserShells(
               include_parked: true,
             };
             if (taskId) payload.task_id = taskId;
-            const response = await getWebSocketClient()!.request<{ shells?: ListResponseItem[] }>(
-              "user_shell.list",
-              payload,
-              10000,
-            );
+            let mapped: UserShellInfo[];
+            try {
+              const response = await getWebSocketClient()!.request<{ shells?: ListResponseItem[] }>(
+                "user_shell.list",
+                payload,
+                10000,
+              );
+              mapped = (response.shells ?? []).map(mapListItemToShell);
+            } catch {
+              // Failed reads settle terminal initialization without discarding known shells.
+              mapped = store.getState().userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
+            }
             if (!isCurrent()) return {};
-            const mapped = (response.shells ?? []).map(mapListItemToShell);
             store.getState().setUserShells(environmentId, mapped);
             return { data: mapped };
           },

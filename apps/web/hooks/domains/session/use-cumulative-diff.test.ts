@@ -29,6 +29,45 @@ const advance = (ms = 0) =>
   });
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.2
+describe("cumulative diff response ownership", () => {
+  it("keeps session-specific diff reads independent inside a shared environment", async () => {
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    request.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result } = renderSessionRead(
+      () => [useCumulativeDiff("session"), useCumulativeDiff("other")],
+      undefined,
+      (store) =>
+        store.setState({
+          environmentIdBySessionId: { session: "environment", other: "environment" },
+        }),
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+    const other = { ...cached, session_id: "other", head_commit: "other-head" };
+    await act(async () => second.resolve({ cumulative_diff: other }));
+    await act(async () => first.resolve({ cumulative_diff: cached }));
+    expect(result.current.value.map((value) => value.diff)).toEqual([cached, other]);
+    expect(result.current.value.map((value) => value.loading)).toEqual([false, false]);
+  });
+
+  it("returns an idle snapshot while unbound and rejects a retired completion", async () => {
+    const stale = deferred<unknown>();
+    request.mockReturnValueOnce(stale.promise);
+    const { result, rerender } = renderSessionRead(
+      (session: string | null) => useCumulativeDiff(session),
+      "session" as string | null,
+    );
+    expect(result.current.value.loading).toBe(true);
+    rerender(null);
+    act(() => result.current.store.setState({ workspaceContextGeneration: 1 }));
+    await act(async () => stale.resolve({ cumulative_diff: { ...cached, head_commit: "stale" } }));
+    expect(result.current.value).toMatchObject({ loading: false, diff: null, error: null });
+    rerender("session");
+    await advance();
+    expect(result.current.value).toMatchObject({ loading: false, diff: cached, error: null });
+  });
+});
+
 describe("cumulative diff invalidation", () => {
   it("does not retain a response that settled after the session changed environments", async () => {
     const old = deferred<unknown>();

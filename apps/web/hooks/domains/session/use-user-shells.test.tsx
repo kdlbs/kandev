@@ -45,6 +45,47 @@ describe("shared session read initialization", () => {
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
 describe("shell response ownership", () => {
+  it.each([false, true])(
+    "settles a failed list while preserving cached shells: %s",
+    async (cached) => {
+      const response = deferred<unknown>();
+      const request = vi.fn(() => response.promise);
+      setWebSocketClient({ request } as unknown as WebSocketClient);
+      const shells = cached ? [{ terminalId: "cached", running: false, closable: true }] : [];
+      const { result } = renderSessionRead(
+        () => useUserShells("environment", "task"),
+        undefined,
+        (store) =>
+          store.setState({
+            userShells: {
+              ...store.getState().userShells,
+              byEnvironmentId: { environment: shells },
+            },
+          }),
+      );
+      expect(result.current.value.isLoading).toBe(true);
+      await act(async () => response.reject(new Error("temporary shell-list failure")));
+      expect(result.current.value.isLoaded).toBe(true);
+      expect(result.current.value.isLoading).toBe(false);
+      expect(result.current.value.shells).toEqual(shells);
+      expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not settle a replacement workspace when the old shell list fails", async () => {
+    const stale = deferred<unknown>();
+    const fresh = deferred<unknown>();
+    const request = vi.fn().mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+    setWebSocketClient({ request } as unknown as WebSocketClient);
+    const { result } = renderSessionRead(() => useUserShells("environment", "task"), undefined);
+    act(() => result.current.store.setState({ workspaceContextGeneration: 1 }));
+    await act(async () => stale.reject(new Error("old request failed")));
+    expect(result.current.value.isLoaded).toBe(false);
+    expect(result.current.value.isLoading).toBe(true);
+    await act(async () => fresh.resolve({ shells: [{ id: "current" }] }));
+    expect(result.current.value.shells.map((shell) => shell.terminalId)).toEqual(["current"]);
+  });
+
   it("does not let an older environment-only list overwrite task-scoped shells", async () => {
     const legacy = deferred<{ shells: { id: string }[] }>();
     const scoped = deferred<{ shells: { id: string }[] }>();

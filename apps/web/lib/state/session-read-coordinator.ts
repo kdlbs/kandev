@@ -36,7 +36,8 @@ export class SessionRead<T> {
     return this.listeners.size === 0 && !this.flight;
   }
   get group() {
-    return JSON.stringify([this.options.resource, this.options.environmentId]);
+    const { resource, key, environmentId } = this.options;
+    return JSON.stringify([resource, resource === "diff" ? key : environmentId]);
   }
   private current = () => this.scope.current() && this.options.isCurrent();
   private writable = () => this.current() && this.scope.owns(this);
@@ -132,7 +133,11 @@ export class SessionRead<T> {
       .finally(() => {
         if (this.flight !== flight) return;
         this.flight = null;
-        if (!this.current()) return;
+        if (!this.current()) {
+          this.update({ loading: false });
+          this.scope.trim();
+          return;
+        }
         if (this.revision !== revision && this.listeners.size > 0) {
           this.clearTimer();
           this.ensure();

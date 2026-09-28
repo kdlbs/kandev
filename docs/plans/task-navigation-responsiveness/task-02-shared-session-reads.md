@@ -139,3 +139,22 @@ promise into duplicate requests.
   retained after the session moved. Session reads now validate the current
   session-to-environment mapping before publication. All 51 affected coordinator,
   hook, Changes badge, and git-status handler tests pass with this guard.
+
+### PR review follow-up
+
+- Reproduced two shell-list error cases leaving `isLoaded` false and a shared-
+  environment diff case dropping one session's response. Failed shell reads
+  now settle with known shells (or empty); cumulative-diff ownership uses the
+  complete request key while shared shell/commit slices retain environment
+  ownership. Late error responses cannot settle a replacement workspace.
+- Added passing coverage for invalidation during the coalesced follow-up and
+  an unbound consumer ignoring a retired response. The suggested retired-
+  snapshot loading defect does not reproduce through the public hook.
+- `VITEST_MAX_WORKERS=2 pnpm exec vitest run` against the shell, commit, diff,
+  Changes-count, coordinator, tree-state, shell-reducer, and git-status-handler
+  suites: 8 files / 68 tests passed after the four behavioral RED assertions.
+  Frontend TypeScript also passes.
+- The private retired-binding snapshot did retain `loading: true`; a new
+  33-key detached-read case reproduced that path. Completion now settles its
+  private snapshot and trims inactive entries even after the binding expires,
+  while the ownership guard still prevents stale store publication.

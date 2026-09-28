@@ -36,6 +36,57 @@ afterEach(() => {
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.2
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+describe("read completion and invalidation", () => {
+  it("settles and trims detached reads after their environment binding expires", async () => {
+    const { scope } = setup();
+    let current = true;
+    const response = deferred<{ data: string }>();
+    const entries = Array.from({ length: 33 }, (_, i) => {
+      const entry = scope.get({
+        resource: "diff",
+        key: `key-${i}`,
+        environmentId: `environment-${i}`,
+        isCurrent: () => current,
+        fetch: () => response.promise,
+      });
+      const release = entry.subscribe(() => {});
+      entry.ensure();
+      release();
+      return entry;
+    });
+    current = false;
+    response.resolve({ data: "obsolete" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(entries[32].getSnapshot()).toEqual({ data: undefined, loading: false, error: null });
+    expect(scope.get(entries[0].options)).not.toBe(entries[0]);
+  });
+
+  it("schedules another read when invalidated during the coalesced follow-up", async () => {
+    const { read } = setup();
+    const first = deferred<{ data: string }>();
+    const second = deferred<{ data: string }>();
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+      .mockResolvedValue({ data: "latest" });
+    const entry = read("key", fetch);
+    const release = entry.subscribe(() => {});
+    entry.ensure();
+    entry.invalidate();
+    first.resolve({ data: "obsolete-first" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (let i = 0; i < 5; i++) entry.invalidate(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    second.resolve({ data: "obsolete-follow-up" });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(entry.getSnapshot()).toEqual({ data: "latest", loading: false, error: null });
+    release();
+  });
+});
+
 describe("read coordination lifetime", () => {
   it("retains active work while evicting the oldest inactive results", async () => {
     const { read } = setup();

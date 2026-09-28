@@ -171,3 +171,7 @@ stop scheduling their descendants and reject publication.
 - Targeted ESLint and frontend typecheck passed. Existing responsive component
   fixtures now mock the new cache-binding boundary alongside their mocked tree
   loader; real-store recovery is covered separately.
+
+PR review added a direct real-provider tree-state regression for two batched
+folder completions. Both merges remain visible, reach the shared cache, and
+survive A-to-B-to-A rebinding. This test passed without production tree changes.

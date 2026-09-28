@@ -94,8 +94,10 @@ or migrate unrelated queries.
 
 Starting an initial read is immediate. Another consumer joins it. Successful
 initialization belongs to the shared scope, not a hook ref; mounting alone is
-not invalidation. A failed read leaves the key eligible for the existing bounded
-retry behavior, without starting a retry timer for every consumer.
+not invalidation. A failed read preserves the resource's existing settlement or
+retry behavior, without starting a retry timer for every consumer. Shell-list
+failures settle `loaded` with the latest known shells (or an empty list), so
+terminal synchronization can proceed without discarding cached terminals.
 
 An invalidation during an outstanding read records one pending refresh. After
 that read settles, one owner drains it if the scope is still current and has
@@ -108,6 +110,10 @@ empty-result rules, and explicit shell mutation invalidation.
 Session-scope transitions must prevent an environment-only result arriving late
 from replacing task-scoped shells. Distinct backend inputs may require separate
 requests, but the current scope decides which may publish to a shared slice.
+Shell and commit publication ownership is environment-scoped because those
+slices own one result per environment. Cumulative diffs retain separate
+publication ownership for each complete request key: two sessions sharing an
+environment must both receive their own session-specific diff.
 
 Bound settled, unsubscribed coordinator entries to 32 keys per resource using
 least-recently-used eviction. Active subscribers and outstanding requests are

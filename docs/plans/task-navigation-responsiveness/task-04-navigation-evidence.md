@@ -239,10 +239,26 @@ instead of enforcing a misleading global request-count target.
   to the real store. Two subsequent ownership regressions also pass, along with
   all 51 affected coordinator/hook/handler tests. Browser and profile runs were
   refreshed for the final environment-mapping guard: all six desktop cases,
-  both affected phone cases, and both fixed profiling modes pass. No production
-  changes followed these runs. Typecheck, changed-file lint/format checks,
+  both affected phone cases, and both fixed profiling modes pass. These measurements describe the implementation before the PR-review
+  follow-up recorded below. Typecheck, changed-file lint/format checks,
   spec validation, and whitespace checks pass on the final changes.
 
 The complete package sweep was not repeated after the focused fixture and
 ownership corrections; the affected tests, static checks, and browser/profile
 runs above were rerun on the final implementation.
+
+### PR review follow-up
+
+Shell-error settlement and independent diff ownership for sessions sharing an
+environment were corrected after the original timing run. Four failing
+assertions reproduced the defects; all 68 affected tests and TypeScript pass
+after the fix. Additional tests cover invalidation during the follow-up,
+concurrent folder merges/cache retention, and the public unbound loading state.
+Detached reads also settle their private loading state and enforce inactive
+cache limits after their binding expires. The earlier performance numbers are historical measurements, not a new timing
+claim for this follow-up. The data changes preserve the existing desktop and
+phone composition; desktop and phone Chromium smoke checks pass on the new production build
+with 18 fictional tasks and two populated environments. Progressive loading,
+retry, A-to-B-to-A navigation, editor opening, phone geometry, and page-error
+checks all pass. The follow-up build, changed-file lint, and specification
+validation pass; the full suite is delegated to the PR CI run.
