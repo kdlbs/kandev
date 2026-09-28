@@ -298,6 +298,20 @@ The web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspa
 
 The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
 
+A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
+accepts up to 1,000 values, including an empty list. Each decoded string is
+limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
+Repository values are repository names, while workflow values are workflow IDs.
+
+Invalid queries return HTTP 400 with the existing `error` string and an additive
+`error_code: "sidebar_query_invalid"`. The `details` object includes a stable
+`reason` and, where relevant, a zero-based `filter_index` and numeric `limit`.
+Reasons include `list_count`, `scalar_length`, `clause_count`, `invalid_clause`,
+`malformed_query`, `page_bounds`, `sorting`, `grouping`, `collapsed_count`, and
+`locale`. Clients should render their own localized recovery message and treat
+unknown reasons as invalid input. Authorization failures remain separate from
+query validation.
+
 ### Send a user turn
 
 `message.add` requires `task_id`, `session_id`, and either non-whitespace `content` or at least one attachment. Optional fields are `author_id`, `model`, `plan_mode`, `has_review_comments`, `attachments`, `context_files`, and `entity_references`.

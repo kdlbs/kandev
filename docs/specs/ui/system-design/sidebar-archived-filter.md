@@ -19,6 +19,8 @@ The existing archive requirements remain authoritative for archive membership an
 loading and URL-only navigation described in the original implementation plan.
 [The proposed decision](../../../decisions/2026-09-26-bounded-archived-sidebar-queries.md)
 records the pagination tradeoff. The design remains draft until implementation review.
+The [bounded view reuse decision](../../../decisions/2026-09-28-sidebar-view-page-reuse.md)
+revises its single-page retention rule for responsive return switching.
 
 ## Requirement mapping
 
@@ -65,6 +67,23 @@ Normalize the request and return its `query_key`. The key includes effective pre
 and locale, but never grants authorization. Reject invalid dimensions, operators, types,
 or sizes with 400; do not silently broaden a query. Reuse existing sidebar validation
 limits and impose a 256 KiB request-body limit. No arbitrary SQL or regular expressions.
+
+Validate scalar strings by decoded UTF-8 byte length (at most 256), not by the
+encoded size of an entire membership array. For `in` and `not_in`, accept up to
+1,000 elements and validate every element using the dimension's scalar type and
+size rules. Preserve existing empty-array semantics. Keep the 20-clause cap and
+body limit; never truncate a clause or split it into ANDed fragments. Tests must
+exercise the maximum combined parameter count on SQLite and PostgreSQL.
+
+Represent validation failures with a typed model error and an additive HTTP
+envelope: `error` remains for existing clients; `error_code` is
+`sidebar_query_invalid`; `details` carries an allow-listed `reason`, optional
+zero-based `filter_index`, and numeric `limit` when applicable. Reasons cover
+malformed query, invalid clause/type/operator, scalar length, list count, clause
+count, page bounds, locale, grouping, sorting, and collapsed-entry count.
+Do not include submitted values or SQL. The frontend uses `ApiError.body` and
+`errorCode` to localize known reasons; unknown or older-server errors use a
+localized generic query error. Do not render backend English verbatim.
 
 The response contains `query_key`, `page`, `page_size`, `total_entries`, `total_tasks`,
 `has_previous`, `has_next`, `entries`, and optional `continuation`.
@@ -155,8 +174,46 @@ only when the measured plan needs them; no new persisted presentation aggregate 
 Replace the archive accumulator and active sidebar aggregation with one shared sidebar page cache per mounted query owner.
 The effective workspace/view hook owns the query key, current page, request generation,
 loading state, error state, and current response. Desktop and phone consumers share it.
-Retain only the active workspace's sidebar page and at most one in-flight replacement.
-An individual active-task detail record is separate and does not expand this cache.
+Retain one displayed page plus at most five distinct first-page snapshots for the
+active workspace, with one in-flight replacement per active query. The displayed
+first page shares its cached object rather than duplicating rows. Later pages
+replace the displayed page and are never inserted into the reusable cache.
+An individual active-task detail record remains separate.
+
+Use one store-scoped cache/controller shared by desktop, phone, and app-navigation
+consumers, not an unscoped module-level result map. It owns request deduplication,
+reference-counted request consumers and a least-recently-used map. Existing hook
+subscriptions trigger reads; the controller checks store generations, revisions,
+and summary references before every lookup and request settlement. Cap retained snapshots at
+five entries and 2 MiB of serialized response bytes; reject an oversized snapshot
+from reuse while still permitting its current-page display. Expire snapshots
+five minutes after successful fetch, not after last access. No persistence,
+prefetch of unvisited views, or eager page traversal is introduced.
+
+Key reuse by workspace context generation and the complete effective query:
+filters, sort, group, locale, collapse state, page size, pin order, manual root
+order, and child order. Do not key only by saved-view ID. Saved and draft queries
+with identical semantics can share a first page. A context change, logout,
+store disposal, or access-denied response cancels requests and clears results
+before rendering; returning to that workspace starts cold.
+
+On a view change, synchronously select an eligible cached first page, then
+revalidate once without hiding it. A miss has no page until its request succeeds.
+Do not temporarily label the old view's rows as the newly selected view. On
+refresh failure, retain the eligible page and show a nonblocking error. Authorization
+failures clear it instead. Enforce generation and request identity before both
+display commits and cache writes. Abort errors caused by supersession are silent.
+
+The existing sidebar query revision is the conservative invalidation boundary.
+When membership/order inputs change, invalidate reusable first pages for that
+workspace before they can be restored; keep only the currently displayed page
+under existing live-row reconciliation until refresh settles. Do not extend a
+snapshot's eligibility across a revision mismatch. Display-only updates must
+patch retained task fields or invalidate affected snapshots, never resurrect old
+status on return. This favors correctness during event churn; it does not claim
+cache hits while tasks are continuously changing. A completed response spanning
+an invalidation may serve the active read under existing reconciliation, but
+must not enter reusable storage until the queued refresh settles at one revision.
 
 Changing filters, sort, group, locale, or collapse preferences resets to page 1.
 Changing workspace clears the page immediately. Preserve saved preferences themselves.
@@ -254,7 +311,17 @@ Keep dynamic viewport containment, safe-area clearance, focus return, and keyboa
 Phone row taps navigate directly to the single conversation surface.
 
 Loading, errors, continuation, and page status use localized copy in all six languages.
-Use one status announcement and stable button names. Keep Retry separate from page actions.
+Use one shared task-query status presenter per visible task-list surface. Remove
+the duplicate archive banner for this query from desktop and phone paths; actual
+workspace-context failures remain separately typed and take presentation priority.
+Initial query failure replaces the list's loading state; refresh failure appears
+once alongside retained rows. Place status immediately below the view controls,
+with pagination below the rows. An invalid filter names its one-based position,
+translated dimension where available, and correction; the existing Filters control
+remains available. Retry is for reads that can succeed unchanged. A compact
+`Updating tasks...` status uses a polite announcement without removing rows or
+introducing a blocking overlay. Hide status after success; distinguish empty success.
+Keep stable button names and Retry separate from page actions.
 A standalone current-task marker outside the page must not affect page totals or sort order.
 
 ## Verification and observability
@@ -278,5 +345,7 @@ No new runtime feature flag or general monitoring subsystem is required.
 ## Delivery
 
 [Plan and work orders](../../../plans/archived-sidebar-loading/plan.md).
+The [view loading repair](../../../plans/sidebar-view-loading-repair/plan.md)
+owns filter validation, bounded return switching, and unified query status.
 The original implemented package remains historical; its eager-loader and navigation
 instructions are superseded by this package, not recorded as successful new validation.

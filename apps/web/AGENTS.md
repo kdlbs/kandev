@@ -291,7 +291,7 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 
 ## Sidebar task views
 
-`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
+`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields. `SidebarTaskPageCache` is scoped to the app store and shares requests across sidebar consumers. It retains at most five first pages, 2 MiB, for five minutes from fetch; later pages remain display-only. Complete query identity and workspace/account generations fence reuse. Query revisions clear reusable pages, and summary changes invalidate affected snapshots before lookup. Keep query status in `SidebarTaskQueryStatus`; do not also render query failures as archive errors.
 
 ## Testing notes
 

@@ -130,5 +130,12 @@
   "nextPage": "次へ",
   "pageLoadFailed": "このページを読み込めませんでした。",
   "pageStatus": "全 {{total}} ページ中 {{page}} ページ目",
-  "previousPage": "前へ"
+  "previousPage": "前へ",
+  "queryRefreshing": "タスクを更新中...",
+  "queryRefreshFailed": "タスクを更新できませんでした。",
+  "queryInvalid": "このタスクビューを読み込めませんでした。フィルターとビューの設定を確認してください。",
+  "filterListLimit": "フィルター {{filter}} の選択数が多すぎます。{{limit}} 件以内で選択してください。",
+  "filterValueLimit": "フィルター {{filter}} の値が長すぎます。{{limit}} バイト以内にしてください。",
+  "filterInvalid": "フィルター {{filter}} が無効です。値と演算子を確認してください。",
+  "filterCountLimit": "このビューのフィルター数が多すぎます。{{limit}} 個以内にしてください。"
 }
