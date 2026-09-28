@@ -49,6 +49,13 @@ transcript (task 06), on task 07's routes. Completes phase 1.
 - Replace `app/coordinator/use-coordinator-inputs.ts`'s own `listProposals`
   read with `use-proposals.ts`, so Needs you, Queue and the toast count read
   one proposal cache (needs-you.md#inputs).
+- Widen `classify()` in `lib/coordinator/attention.ts` from `pending` only to
+  every open status (`pending`, `approving`, `failed`), so approving and failed
+  cards stay on Needs you (`AC-COORDINATOR-NEEDS-YOU-001.1`); the Needs-you
+  `ProposalCard` reads its full row from `use-proposals.ts` by item id, and
+  `AttentionProposal` keeps its narrow shape, per
+  [Client store](../../specs/coordinator/system-design/proposal-cards.md#client-store)
+  and [Cards](../../specs/coordinator/system-design/proposal-cards.md#cards).
 - `lib/coordinator/eligible-step.ts`: a TypeScript copy of the eligible-step
   walk for the Edit form's step list; the approve route stays authoritative.
 - `ProposalCard` states (UI-03), Edit and Reject forms in place with focus
@@ -61,8 +68,9 @@ transcript (task 06), on task 07's routes. Completes phase 1.
   surface shows "Proposed by"), `<card>`/`<step>` derivation and fallbacks,
   Edit form options, the per-card in-flight lock, the decision-outcome table
   (200 approved/rejected/failed, 400, 403, 404, 409, network), the
-  `?proposal=<id>&form=edit|reject` navigation from the chat card, and focus
-  after a decision.
+  `?proposal=<id>&form=edit|reject` navigation from the chat card, focus
+  after a decision, the Edit form's option loading, read-failure and
+  missing-current-value rules, and remote changes while a form is open.
 - `docs/public/coordinator.md` through `/docs-maintainer`, including what the
   coordinator's agent can still do through its own tools; update
   `docs/public/feature-status.md` if the boundary changed.
@@ -77,16 +85,23 @@ transcript (task 06), on task 07's routes. Completes phase 1.
 
 ## ASCII UI preview
 
-From [plan UI-03](plan.md#ui-03-proposal-card-states-needs-you-and-chat):
+From [plan UI-03](plan.md#ui-03-proposal-card-states-needs-you-and-chat),
+aligned with the content-by-state table of
+[Cards](../../specs/coordinator/system-design/proposal-cards.md#cards), which
+governs where they differ. Needs-you-only lines (description, "Proposed by",
+policy) are left out.
 
 ```text
-pending, can manage       approving                 failed
-! create_task             ! create_task             ! Pending Approval
-  Pending Approval          Approval in progress      Could not create the task:
-  <title, workflow, step>   Edits are locked.         <error>. Nothing was created.
-  [Approve] [Edit] [Reject]                           [Approve] [Edit] [Reject]
-approved (chat)           rejected (chat)
-v Approved: KAN-432       x Rejected: <reason>
+pending, can manage          approving                    failed
+Pending Approval             Approval in progress.        Could not create the task:
+<title>                      Edits are locked.            <error>. Nothing was created.
+<workflow> · <step>          <title>                      <title>
+[Approve] [Edit] [Reject]    <workflow> · <step>          <workflow> · <step>
+                                                          [Approve] [Edit] [Reject]
+approved (chat)              rejected (chat)
+Approved: KAN-432            Rejected: <reason>
+<title>                      <title>
+<workflow> · <step>          <workflow> · <step>
 ```
 
 ## Mockup screenshots and scenarios
@@ -148,6 +163,9 @@ Unit tests also pin the rules the design adds:
   evicts it; backfill skips settled entries.
 - `use-coordinator-inputs.test.ts`: the proposals input comes from the store
   and the hook makes no `listProposals` call of its own.
+- `attention.test.ts`: a `pending`, an `approving` and a `failed` proposal
+  each classify as a proposal item; an `approved` and a `rejected` one do
+  not; ordering and counts are otherwise unchanged.
 - `eligible-step.test.ts`: the same cases as the Go `EligibleStep` table
   (start step, manual move off, `auto_start_agent` on enter, a feeder of an
   auto-start step directly and through a chain, unknown step).
@@ -160,7 +178,19 @@ Unit tests also pin the rules the design adds:
   Step) and a 400 from plain Approve opening the Edit form; empty title
   refused with no request; the chat card's tool-result parsing (error
   result or no `proposal_id` renders no card), loading placeholder and 404
-  copy.
+  copy; the Needs-you card rendering `final_spec` and `error` from the store
+  row, not the classified item.
+- Edit form tests: fields disabled with "Loading options" while reads are in
+  flight; a failed workflow or step read shows "Could not load options." with
+  Try again and disables Approve with edits, and never the "No step" line; a
+  failed repository read keeps Approve with edits enabled; a deleted current
+  workflow or an ineligible current step opens that field empty with its note
+  and Approve with edits disabled; a stale snapshot response for a
+  previously chosen workflow is discarded.
+- Remote change tests: with a form open, a merge that keeps `pending` keeps
+  the typed values; one that makes it `approving` closes the form and moves
+  focus to the card heading; one that removes the item moves focus per the
+  focus-after-decision rule and shows no toast.
 - Needs-you page test: `?proposal=<id>&form=reject` opens that form with
   focus on Reason and clears the query; an id that is not an item shows the
   "no longer waiting" toast; focus after a decision goes to the next item's
@@ -181,6 +211,7 @@ the correct "Next: ..." count line (AC-005.7), and the chat card's settled
 
 - `apps/web/hooks/domains/coordinator/use-proposals.ts` and test
 - `apps/web/app/coordinator/use-coordinator-inputs.ts` and its test
+- `apps/web/lib/coordinator/attention.ts` and its test (open-status filter)
 - `apps/web/lib/coordinator/eligible-step.ts` and test
 - `apps/web/lib/coordinator/links.ts` (the `proposal`/`form` query)
 - `apps/web/app/coordinator/proposal-card/`

@@ -44,6 +44,19 @@ status is open: `pending`, `approving` or `failed`), with the same
 it has today. The input's `error` is set while the latest `status=pending`
 read failed.
 
+**Open proposals are Needs-you items.** `classify()` in
+`apps/web/lib/coordinator/attention.ts` makes every proposal in its input
+whose status is `pending`, `approving` or `failed` a proposal item
+(`AC-COORDINATOR-NEEDS-YOU-001.1`); an `approved` or `rejected` row, or any
+other status, is not an item. Its current filter keeps `pending` only and is
+widened by this design, so a proposal that is being approved, or whose
+create failed, stays on Needs you and shows that state
+(`AC-COORDINATOR-PROPOSALS-005.2`, `AC-COORDINATOR-PROPOSALS-005.3`). Item
+ordering and counts are unchanged ([needs-you](needs-you.md#classification)).
+`AttentionProposal` keeps its narrow shape (`id`, `status`, `task_id`,
+`spec`, `created_at`), so `attention.ts` still has no dependency on the API
+client.
+
 **Merging one proposal.** Every source (the pending list, a by-id read, a
 decision's 200 response, a 409 `proposal_conflict` body) merges one row at a
 time by id, with these rules in order:
@@ -115,9 +128,17 @@ a 404 renders "This proposal no longer exists." with no actions.
   A tool call whose result is an error, or whose text has no string
   `proposal_id`, renders the ordinary tool-call message and no card.
 - Readers get the card without actions.
+- **Row source on Needs you.** A Needs-you proposal item carries only the
+  narrow `AttentionProposal`. Its `ProposalCard` reads the full `Proposal`
+  row (`final_spec`, `error`, `reject_reason`, `updated_at`, `task_id`) from
+  `use-proposals.ts` by the item's id. The classification's proposals input
+  is derived from the same store in the same render, so a classified item
+  always has its row; the card never reads a proposal by id itself on Needs
+  you. The chat card owns its own row (see [Client store](#client-store)).
 
-**Content by state.** Every state shows the title, then "`<workflow>` ·
-`<step>`" of the current spec (`final_spec` when set, else `spec`), with
+**Content by state.** Every state shows, top to bottom: the status line of
+the table below, the title, then "`<workflow>` · `<step>`" of the current
+spec (`final_spec` when set, else `spec`), with
 names from the workspace's workflow snapshots and the raw id as the fallback
 when a name is unknown, as `proposal-details.tsx` does today.
 
@@ -132,7 +153,10 @@ when a name is unknown, as `proposal-details.tsx` does today.
 On Needs you the card also keeps the description, the "Proposed by
 `<coordinator>`" line and the propose-only policy line that
 `proposal-details.tsx` renders today (AC-COORDINATOR-NEEDS-YOU-002.8), for
-managers and readers alike. The chat card omits those three lines, because
+managers and readers alike, in the order `proposal-details.tsx` uses today:
+the description between the title and "`<workflow>` · `<step>`", then
+"Proposed by", then the policy line, then the actions. The chat card omits
+those three lines, because
 the transcript around it already says who proposed it and why. Settled
 states only occur on the chat card; a settled proposal is not a Needs-you
 item.
@@ -165,6 +189,34 @@ already reads; no route is added.
 - The form opens with the current spec's values. Changing the workflow
   resets the step to that workflow's start step when it is eligible, else to
   empty; Approve with edits is disabled while the step is empty.
+- **Loading.** Opening the form issues `listWorkflows`, `listRepositories`
+  and `fetchWorkflowSnapshot` of the current workflow in parallel, once per
+  opening. Choosing another workflow issues that workflow's snapshot read; a
+  response for a workflow that is no longer selected is discarded. Title and
+  description are editable at once. While a read is in flight its field shows
+  "Loading options" and is disabled, and Approve with edits is disabled until
+  the workflow list and the chosen workflow's steps have loaded.
+- **Read failures.** A failed options read leaves its field disabled with an
+  inline line "Could not load options." and a **Try again** button that
+  re-issues only that read. While the workflow list or the step read has
+  failed, Approve with edits is disabled; a failed step read never shows the
+  "No step in this workflow can take a proposed task" line. A failed
+  repository read does not disable Approve with edits: the repository field
+  keeps the current value as its only option, and an untouched field is not
+  sent. Cancel and the other fields stay usable in every case.
+- **A current value missing from its options.** When the current workflow is
+  not in the loaded workflow list (it was deleted), the workflow field opens
+  empty with the note "The proposed workflow no longer exists. Choose a
+  workflow.", the step field is empty, and no snapshot read is made until a
+  workflow is chosen. When the current step is not among the chosen
+  workflow's eligible steps (deleted, or no longer eligible), the step field
+  opens empty with the note "The proposed step can no longer take this task.
+  Choose a step." Both keep Approve with edits disabled until a value is
+  chosen, which keeps the step list to eligible steps only
+  (`AC-COORDINATOR-PROPOSALS-005.4`). When the current repository is not in
+  the loaded repository list, the field keeps it selected, labelled "Unavailable
+  repository", and an untouched field is not sent; the route's 400 decides
+  whether it can still be used.
 - A title that is empty after trimming is refused in place without a
   request: an inline `role="alert"` under Title says "Enter a title" and
   focus moves to Title (`AC-COORDINATOR-PROPOSALS-005.4`). Every other
@@ -207,6 +259,26 @@ sends nothing. The lock is per card: other cards stay usable.
   inputs failed), no form opens and a toast says "This proposal is no longer
   waiting for a decision." A `form` value other than `edit` or `reject` is
   ignored. A reader never sees the chat card's actions, so never navigates.
+
+**Remote changes while a form is open.** A store merge from
+`coordinator.updated` (a decision in another browser or on the other surface)
+can change a card while its Edit or Reject form is open and no request of
+its own is in flight:
+
+- The status stays `pending` or `failed`: the form stays open with its typed
+  values; only the card's content above the form updates.
+- The status becomes `approving`: the form closes and its typed values are
+  discarded, because `approving` has no actions
+  (`AC-COORDINATOR-PROPOSALS-005.2`). When focus was inside the form, it
+  moves to the card's heading. The card's `role="status"` region announces
+  the new status line.
+- The item leaves the list (settled or evicted): when focus was inside that
+  item, it moves as in "Focus after a decision" below. No decision toast is
+  shown; the toasts of `AC-COORDINATOR-PROPOSALS-005.7` belong to the
+  manager whose request decided it.
+
+When the card's own request is in flight, the lock holds and the request's
+outcome row applies when it settles (typically the 409 row).
 
 **Focus after a decision.** When a decided item leaves the Needs-you list,
 focus moves to the heading of the next item in list order; with no next
