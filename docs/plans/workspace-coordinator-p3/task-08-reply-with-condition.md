@@ -33,7 +33,7 @@ control on both proposal card surfaces.
   and deliver route, the single conditional update shared in form with
   approve's claim and reject, [Reply delivery](../../specs/coordinator/system-design/relay.md#reply-delivery)
   through `OpenConversation` and the panel composer's message path as the
-  replying manager, with the in-flight marker on `reply_delivery_claimed_at`,
+  replying manager, with the diagnostic attempt time on `reply_delivery_claimed_at` (never a gate),
   the delivery key `coordinator-reply:<proposal_id>` as message and queue
   entry id, `metadata.coordinator_reply_proposal_id`, the new
   `CreateQueuedMessageOnce` in `internal/task/service` and its repository
@@ -85,10 +85,17 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
   Send again that stores and dispatches nothing new and sets
   `reply_delivered_at`; a crash injected inside step 3's transaction is
   followed by a Send again that stores and dispatches the reply once.
-- A full queue (`ErrQueueFull`) and a notify error: the first leaves the
-  proposal undelivered with **Send again** and nothing stored; the second
-  still records the delivery and the entry drains when the session is next
-  idle.
+- A full queue (`ErrQueueFull`) leaves the proposal undelivered with **Send
+  again** and nothing stored. A dispatch failure injected after the commit
+  (the coordinator's notifier interface is faked with a
+  `NotifyQueuedUserPrompt` that dispatches nothing, standing in for a failed
+  asynchronous launch or drain, since the real method returns nothing) still
+  records the delivery and keeps the one queue entry, and a later drain of
+  that session dispatches it once.
+- **Send again** after a crash injected between step 1 and step 4, with
+  `reply_delivery_claimed_at` still set, runs delivery and stores the reply
+  once; the card shows **Send again** throughout and "Sending reply" only
+  while its own request is pending.
 - With the conversation replaced after a crash that followed step 3's
   commit, Send again stores nothing in the new conversation and records the
   delivery.

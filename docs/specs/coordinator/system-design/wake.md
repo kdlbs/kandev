@@ -429,6 +429,9 @@ returns:
 ```
 
 It runs `Admit` read-only; `admission` is present only when autonomy is on.
+When `admission.reason` is `cooldown`, `admission` also carries `until`, the
+newest settled turn row's `finished_at` plus 5 minutes (RFC 3339 UTC); it is
+absent for every other reason.
 `last_turn.stop_state` is `null`, or `"stop_failing"` per
 [spend](spend.md#stopping).
 `coordinator.updated` gains optional `autonomy_changed: true`, published on
@@ -459,6 +462,14 @@ re-read.
   ceiling reached"; `no_conversation` "Open the copilot once to give it a
   conversation"; `conversation_unavailable` "The conversation stopped. Open
   the copilot to restart it". The item offers **Open settings** to managers.
+- The two transient reasons are not holds on the strip. For
+  `conversation_busy` the strip shows "Autonomy: Active (Waiting for the
+  conversation)", and for `cooldown` "Autonomy: Active (Between turns until
+  <time>)", where `<time>` is `admission.until` in the viewer's locale short
+  time format. Neither offers **Open settings**, and neither produces an item
+  (`AC-COORDINATOR-WAKE-006.2`). With `admission.ok` true the strip shows
+  "Autonomy: Active" alone. Every other reason shows "Autonomy: Held (<reason
+  text>)" from the catalog above.
 
 ## Failure and recovery
 

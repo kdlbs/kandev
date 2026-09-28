@@ -116,7 +116,7 @@ repository query directly, not the flag-gated Inbox handler.
 | --- | --- | --- |
 | `reply_text` | text null | trimmed, 1 to 2,000 characters, set with `returned` |
 | `reply_delivered_at` | timestamp null | set when the reply message is stored |
-| `reply_delivery_claimed_at` | timestamp null | the in-flight marker of a delivery; at-most-once rests on the message key, see [Reply delivery](#reply-delivery) |
+| `reply_delivery_claimed_at` | timestamp null | when the latest delivery attempt started, kept for diagnostics and the warn log; it gates nothing and is never rendered. At-most-once rests on the message key, see [Reply delivery](#reply-delivery) |
 | `in_reply_to` | text null | a `returned` proposal id of the same coordinator |
 
 `status` gains `returned`, a settled status. It is not open, so it does not
@@ -144,23 +144,31 @@ never-unsettle rule treats `returned` as settled.
 
 `POST .../proposals/:pid/reply/deliver` (`workspace.manage`) re-runs delivery
 for a `returned` proposal whose `reply_delivered_at` is null, returns 409 for
-any other proposal, and never changes `status`. When another delivery holds
-the claim it returns 200 with the current proposal and sends nothing.
+any other proposal, and never changes `status`. It runs delivery steps 1 to 4
+whatever `reply_delivery_claimed_at` holds, so after a crash between step 1
+and step 4 **Send again** delivers. When step 1 changes no row because a
+concurrent delivery has meanwhile set `reply_delivered_at`, it returns 200
+with the current proposal and sends nothing; when another delivery is still
+running, both reach step 3 and exactly one message is stored.
 
 ## Reply delivery
 
 Delivery is exactly one conditional insert keyed by the proposal. The reply's
-delivery key is `coordinator-reply:<proposal_id>` (under the 128-character
-`client_message_id` limit), used as both the message id and the queue entry
-id; the message table's primary key is the uniqueness constraint that decides, so no deadline,
+delivery key is `coordinator-reply:<proposal_id>` (about 55 characters; the
+message id column `task_session_messages.id` is a `TEXT` primary key with no
+length limit, and the 128-character check in
+`internal/task/handlers/message_handlers.go` applies to
+the client-supplied `client_message_id`, which this path does not use), used
+as both the message id and the queue entry id; the message table's primary key is the uniqueness constraint that decides, so no deadline,
 lookup or cancellation is needed for at-most-once.
 
-1. Mark the delivery in flight: `UPDATE coordinator_proposals SET
+1. Record the attempt: `UPDATE coordinator_proposals SET
    reply_delivery_claimed_at = ? WHERE id = ? AND status = 'returned' AND
    reply_delivered_at IS NULL`. Zero rows means the reply was delivered or the
    proposal is not `returned`: return the current proposal and send nothing.
-   The claim only drives the card's in-flight state; overlapping deliveries
-   are made safe by step 3, not by the claim.
+   The update has no condition on `reply_delivery_claimed_at`, so a value left
+   by a crashed or concurrent attempt never stops this one; overlapping
+   deliveries are made safe by step 3.
 2. Resolve the coordinator's conversation through the phase 1
    `OpenConversation` (which reuses a live current task or creates one, under
    the caller's identity).
@@ -197,13 +205,17 @@ lookup or cancellation is needed for at-most-once.
    (`ErrQueueFull`), a repository error), log at warn and `UPDATE ... SET
    reply_delivery_claimed_at = NULL WHERE id = ? AND reply_delivered_at IS
    NULL`, leaving `reply_delivered_at` null; the card shows "Reply saved, not
-   delivered" with **Send again**, which runs steps 1 to 4 again. An error
-   after the commit (the notify) does not undo the delivery: the entry stays
-   queued and drains at the session's next idle point, the queue's existing
-   restart drain, or the notify of the next delivery attempt.
+   delivered" with **Send again**, which runs steps 1 to 4 again.
+   `NotifyQueuedUserPrompt(ctx, taskID, sessionID)` returns nothing, so no
+   error from it reaches delivery. A dispatch that fails after the commit
+   (the asynchronous launch of a `CREATED` session or the fast-path drain,
+   each of which logs its own failure) does not undo the delivery:
+   `reply_delivered_at` stays set, and the entry stays queued and drains at
+   the session's next idle point, the queue's existing restart drain, or the
+   notify of a later message on that session.
 
-Two deliveries that overlap in any order, including a slow one that outlives
-another's claim, both reach step 3 at most; exactly one insert affects a row,
+Two deliveries that overlap in any order, including a slow one still running when
+a later **Send again** starts, both reach step 3 at most; exactly one insert affects a row,
 so one message is stored and one queue entry is dispatched, and the other
 returns the stored message and records the delivery. A crash after step 3
 commits and before step 4 leaves `reply_delivered_at` null, so the card shows
@@ -226,7 +238,12 @@ nothing, so Send again stores the reply once.
   quoted `reply_text` of the returned proposal, read through the proposal get
   route.
 - A `returned` card shows "Returned with your condition: <reply text>" with no
-  actions, plus **Send again** while `reply_delivered_at` is null.
+  actions, plus **Send again** while `reply_delivered_at` is null. While
+  this client's reply or deliver request is in flight, the card shows
+  "Sending reply" and disables **Send again**; that state is the client's
+  pending request only, never `reply_delivery_claimed_at`, so a claim left by
+  a crash never hides **Send again**. On the response, the card renders from
+  the returned proposal.
 
 ## Cards
 

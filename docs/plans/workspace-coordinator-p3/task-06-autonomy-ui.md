@@ -87,6 +87,11 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
   coordinator count and not the Inbox; the settings section shows ceiling,
   spend, 7-day mean, last turn cost and the four conditions re-read on open
   and Check again.
+- The strip shows "Autonomy: Active (Waiting for the conversation)" for
+  `conversation_busy` and "Autonomy: Active (Between turns until <time>)"
+  from `admission.until` for `cooldown`, with no **Open settings** and no
+  `autonomy` item; the read route returns `admission.until` only for
+  `cooldown`.
 - An open unattended turn whose ceiling stop was requested more than five
   minutes ago shows "Stop at ceiling not confirmed" with Stop on the strip;
   at four minutes it does not (`synctest` on the read). With autonomy
