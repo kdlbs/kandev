@@ -307,6 +307,17 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
+    // The ask's own chip-driven reopen resolves back to the same still-live
+    // session (a new object, same id) before Retry ever enters the picture.
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: { ...conversation } }),
+    );
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_1);
+
+    // `onRetry` is wired directly to `openSequence.retry` (never touching
+    // `entry.chip`/`entry.open`), so this replacement is independent of any
+    // chip-driven reopen and must still clear the now-stale draft.
     const retried: ConversationResponse = {
       task_id: "task-2",
       session_id: "session-2",
@@ -319,6 +330,41 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
 
     expect(result.current.routeSession).toEqual(retried);
     expect(result.current.pendingDraft).toBeUndefined();
+  });
+
+  // Review round 3 Finding C: clicking "Ask about this" while the held
+  // session is already terminal both seeds pendingDraft (the chip-seed
+  // effect) AND re-runs the open sequence (the chip/open-driven effect),
+  // which — because the held session is terminal — resolves to a brand new
+  // session_id, not the old one. That resolution must not be treated the
+  // same as an unrelated Retry: the draft was only ever seeded for this
+  // exact open, so it must survive.
+  it("keeps a freshly chip-seeded draft when Ask about this itself triggers the session replacement", () => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }),
+    );
+    const { result, rerender } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
+    );
+    expect(result.current.routeSession).toEqual(conversation);
+
+    const WHY_KAN_9 = "Why is KAN-9 here?";
+    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-9", WHY_KAN_9));
+    rerender();
+    expect(result.current.pendingDraft).toBe(WHY_KAN_9);
+
+    const replacement: ConversationResponse = {
+      task_id: "task-3",
+      session_id: "session-3",
+      archive_state: false,
+    };
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: replacement }),
+    );
+    rerender();
+
+    expect(result.current.routeSession).toEqual(replacement);
+    expect(result.current.pendingDraft).toBe(WHY_KAN_9);
   });
 
   it("keeps pendingDraft when the ready session's id is unchanged (same session, remounted via askKey)", () => {
