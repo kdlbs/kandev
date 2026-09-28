@@ -9,7 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
-	"github.com/kandev/kandev/internal/clarification"
+	clarificationprotocol "github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcp "github.com/kandev/kandev/internal/mcp/server"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -27,17 +27,17 @@ func newCodexUserInputRequestHandler(
 			return nil, err
 		}
 		payload := struct {
-			SessionID         string                   `json:"session_id"`
-			TaskID            string                   `json:"task_id"`
-			Questions         []clarification.Question `json:"questions"`
-			AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
+			SessionID         string                           `json:"session_id"`
+			TaskID            string                           `json:"task_id"`
+			Questions         []clarificationprotocol.Question `json:"questions"`
+			AllowFreeTextOnly bool                             `json:"allow_free_text_only,omitempty"`
 		}{
 			SessionID:         cfg.SessionID,
 			TaskID:            cfg.TaskID,
 			Questions:         questions,
 			AllowFreeTextOnly: true,
 		}
-		var result clarification.Response
+		var result clarificationprotocol.Response
 		if err := backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &result); err != nil {
 			if ctx.Err() != nil {
 				go notifyCodexQuestionCancellation(backend, cfg.SessionID, log)
@@ -48,25 +48,25 @@ func newCodexUserInputRequestHandler(
 	}
 }
 
-func clarificationQuestions(questions []adapter.UserInputQuestion) ([]clarification.Question, error) {
+func clarificationQuestions(questions []adapter.UserInputQuestion) ([]clarificationprotocol.Question, error) {
 	if len(questions) == 0 {
 		return nil, errors.New("codex user input request has no questions")
 	}
-	result := make([]clarification.Question, 0, len(questions))
+	result := make([]clarificationprotocol.Question, 0, len(questions))
 	for _, question := range questions {
 		if question.IsSecret {
 			return nil, fmt.Errorf("secret Codex user input question %q cannot be stored in Kandev chat", question.ID)
 		}
 		allowCustomText := question.IsOther
-		converted := clarification.Question{
+		converted := clarificationprotocol.Question{
 			ID:              question.ID,
 			Title:           question.Header,
 			Prompt:          question.Prompt,
 			AllowCustomText: &allowCustomText,
-			Options:         make([]clarification.Option, 0, len(question.Options)),
+			Options:         make([]clarificationprotocol.Option, 0, len(question.Options)),
 		}
 		for _, option := range question.Options {
-			converted.Options = append(converted.Options, clarification.Option{
+			converted.Options = append(converted.Options, clarificationprotocol.Option{
 				ID:          option.OptionID,
 				Label:       option.Label,
 				Description: option.Description,
@@ -79,7 +79,7 @@ func clarificationQuestions(questions []adapter.UserInputQuestion) ([]clarificat
 
 func normalizeClarificationResponse(
 	questions []adapter.UserInputQuestion,
-	response clarification.Response,
+	response clarificationprotocol.Response,
 ) (*adapter.UserInputResponse, error) {
 	if response.Rejected {
 		return &adapter.UserInputResponse{Rejected: true}, nil
@@ -114,7 +114,7 @@ func normalizeClarificationResponse(
 
 func normalizeClarificationAnswer(
 	question adapter.UserInputQuestion,
-	answer clarification.Answer,
+	answer clarificationprotocol.Answer,
 ) (adapter.UserInputAnswer, error) {
 	if len(answer.SelectedOptions) > 1 {
 		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response selected multiple options for Codex question %q", answer.QuestionID)

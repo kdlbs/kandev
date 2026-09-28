@@ -42,15 +42,16 @@ func TestPostgresBackgroundWorkRepositoryRoundTrip(t *testing.T) {
 	workID := uuid.New().String()
 	now := time.Now().UTC().Truncate(time.Second)
 	workload := &models.BackgroundWorkload{
-		ID:        workID,
-		TaskID:    taskID,
-		SessionID: sessionID,
-		Kind:      "shell",
-		Title:     "pg test",
-		State:     "running",
-		Output:    "Running pg test...\n",
-		StartedAt: &now,
-		Revision:  1,
+		ID:              workID,
+		TaskID:          taskID,
+		SessionID:       sessionID,
+		Kind:            "shell",
+		Title:           "pg test",
+		State:           "running",
+		Output:          "Running pg test...\n",
+		OutputTruncated: true,
+		StartedAt:       &now,
+		Revision:        1,
 	}
 
 	if err := repo.UpsertBackgroundWorkload(ctx, workload); err != nil {
@@ -61,7 +62,7 @@ func TestPostgresBackgroundWorkRepositoryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBackgroundWorkload: %v", err)
 	}
-	if got == nil || got.ID != workID || got.Title != "pg test" || got.State != "running" {
+	if got == nil || got.ID != workID || got.Title != "pg test" || got.State != "running" || !got.OutputTruncated {
 		t.Fatalf("GetBackgroundWorkload returned unexpected record: %#v", got)
 	}
 
@@ -91,6 +92,27 @@ func TestPostgresBackgroundWorkRepositoryRoundTrip(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ID != runID {
 		t.Fatalf("ListBackgroundRunsByWorkload count = %d, want 1", len(runs))
+	}
+
+	receipt := &models.BackgroundActionReceipt{
+		ID:          uuid.New().String(),
+		SessionID:   sessionID,
+		WorkloadID:  workID,
+		RunID:       runID,
+		Action:      "cancel",
+		OperationID: uuid.New().String(),
+		Status:      "uncertain",
+		Uncertain:   true,
+	}
+	if err := repo.ReserveBackgroundActionReceipt(ctx, receipt); err != nil {
+		t.Fatalf("ReserveBackgroundActionReceipt: %v", err)
+	}
+	gotReceipt, err := repo.GetBackgroundActionReceipt(ctx, sessionID, receipt.OperationID)
+	if err != nil {
+		t.Fatalf("GetBackgroundActionReceipt: %v", err)
+	}
+	if gotReceipt == nil || !gotReceipt.Uncertain {
+		t.Fatalf("GetBackgroundActionReceipt returned unexpected record: %#v", gotReceipt)
 	}
 
 	finished := now.Add(10 * time.Second)
