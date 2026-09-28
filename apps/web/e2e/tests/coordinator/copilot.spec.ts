@@ -137,7 +137,12 @@ test.describe("Coordinator copilot", () => {
     });
 
     await popover.getByRole("button", { name: "Remove" }).click();
-    await expect(popover.getByText(`about ${title}`, { exact: false })).not.toBeVisible();
+    // Scoped to the composer chip's own Remove button rather than a loose
+    // `about <title>` text match: the transcript's generic-fallback closing
+    // line echoes the sent prompt (including its "About <title>: " wire
+    // prefix) verbatim, so a text-based assertion here collides with content
+    // that legitimately stays on screen after the chip is gone.
+    await expect(popover.getByRole("button", { name: "Remove" })).not.toBeVisible();
 
     // Removing the chip must drop the wire prefix, not just the composer
     // hint: the next sent message gets no `About <id>: ` tag in the transcript.
