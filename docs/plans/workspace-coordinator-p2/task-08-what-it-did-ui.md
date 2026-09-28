@@ -34,7 +34,7 @@ managers, and the undone state.
 
 - Section and route wiring (`002.1`, `002.2` client half with cursor
   paging and Load more).
-- Class filter with `?activity=` (`002.3`); the May do link from task 06
+- Class filter with `?class=` (`002.3`); the May do link from task 06
   lands here.
 - Row: relative time, action, class, how it was authorised (policy,
   approver, "with edits", refused count) (`002.4`).

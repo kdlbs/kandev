@@ -92,7 +92,10 @@ marker transaction leaves the row undoable and a retry only marks it
 undo is 403 (`003.5`); the read tool never returns another coordinator's
 rows or any user id (`004.1`, `004.2`); limit 0 and 51 are refused
 (`004.3`); retention deletes a 401-day-old row and keeps a 399-day-old one
-(`005.1`); summary counts and `days=0`/`91` refusals (`005.2`); another
+(`005.1`); with `phase2` off the startup pass and ticker do not run and a
+401-day-old row survives (`005.1`); a move undo retried after a failed
+marker finds the task on `from_step_id`, skips `MoveTask` and marks the row
+(`003.3`); summary counts and `days=0`/`91` refusals (`005.2`); another
 workspace's coordinator is 404 (`005.3`).
 
 ## Likely files

@@ -129,8 +129,9 @@ navigation.
 The board's workflow is `workflows.activeId`, which `kanban-route.tsx` sets
 from the `workflowId` query parameter or the saved workflow filter, so a
 board opened without the parameter still gets its chip. A task page for a
-task of another workspace has no chip (the host still shows that
-workspace's coordinator).
+task of another workspace has no chip, and the host keeps showing the
+coordinator of the active workspace (`workspaces.activeId`), not of the
+task's workspace.
 
 **While loading there is no chip.** Until the label resolves the context is
 `null`, so nothing is sent with a message typed in the meantime and no short
@@ -146,11 +147,20 @@ label; it is a name the manager chose for the board, not task content.
 
 ## Chip
 
-- On open, on every route change, and when the page context turns from
+The **route key** is the page's identity for the chip: `"<route kind>:<context
+id>"`, where the route kind is the resolved `SpaRoute` kind and the context
+id is the task id on `taskDetail`, `workflows.activeId` on `kanban`, and
+empty on `needsYouInbox`. So moving to another task, or switching the
+board's workflow, is a page change; a query or hash change that keeps both
+parts (a filter, a search, an opened preview) is not. A workspace change
+resets the host instance, `chipDismissedFor` included ([Store](#store)).
+"The page changes" in `002.1` and `002.2` means the route key changes.
+
+- On open, on every route key change, and when the page context turns from
   `null` to a value (its label loaded), the host sets the chip to the page
   context unless `chipDismissedFor` equals the current route key; removing
   the chip sets `chipDismissedFor` to the route key, so it stays removed until
-  the route changes (`002.1`, `002.2`). An **Ask about this** chip set on the
+  the route key changes (`002.1`, `002.2`). An **Ask about this** chip set on the
   Coordinator screens never reaches this instance.
 - Chip text: "This task: <label>" or "This board: <label>", with a tooltip
   "Sent as an id; it reads the rest itself." and a remove button.

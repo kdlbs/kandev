@@ -53,14 +53,17 @@ creates, and `standing_order_ids` on every propose tool.
   task (`001.2`); step checks for move, with `starts_agent` stored from the
   destination's eligibility at propose (`001.3`); session checks
   (`001.4`); dedupe on `coordinator_proposals_open_target` returning the
-  open proposal (`001.5`).
+  open proposal, read first, before target validation, so a repeat call
+  returns it even after the target stopped validating, and repeated under
+  the lock (`001.5`).
 - `start_agent` for creates: `EligibleStep` widened only while
   `requires_approval`, `starts_agent` stored, `auto_start_on_create` marker
   on approval, and the approve-time 409 `policy_denied` (`002.1` to `002.3`).
 - Approval: resume through `ResumeTaskSession`, message through the
   extracted `TaskMessenger` (queued delivery, refusing CREATED, FAILED,
   CANCELLED or no session), move with `outcome_json.from_step_id` recorded
-  before the move, `step_starts_agent` when the destination became
+  before the move, the Execute checks in the design's stated order,
+  `step_starts_agent` when the destination became
   agent-starting after a `starts_agent` false propose, and a `noop: true`
   outcome with no call when the task already sits on the destination
   (`003.1` to `003.3`); `not_editable` for any edit except
@@ -68,8 +71,10 @@ creates, and `standing_order_ids` on every propose tool.
 - Stale claim of a non-create kind settles `failed` with
   `outcome_unknown` and never re-runs; Approve on a failed card creates a new
   claim as a new approval (`003.5`).
-- `standing_order_ids` on all four propose tools: at most 5, unique, active
-  orders of the caller; stored on the proposal (`STANDING-ORDERS-003.1`).
+- `standing_order_ids` on all four propose tools: at most 5 and unique
+  before the transaction; active orders of the caller checked inside the
+  locked propose transaction; stored on the proposal
+  (`STANDING-ORDERS-003.1`).
 - Activity rows for every change of these kinds through task 03's writer.
 
 ## Out of scope
@@ -104,7 +109,11 @@ second calls; `starts_agent` create approved after `start_agent` flips to
 `denied` is 409; a move whose destination turned agent-starting after
 propose settles `failed` with `step_starts_agent` and does not move; a move
 onto the task's current step settles `approved` with `noop: true` and no
-`MoveTask` call. The E2E spec drives the mock agent to propose a move and
+`MoveTask` call. A task moved by hand onto a destination that
+has since become a Done step settles `approved` with `noop: true`, not
+`step_is_done`. A second identical propose after the target was archived
+returns the open proposal. A retire committed before a citing propose makes
+the propose refuse naming `standing_order_ids`. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.
 
 ## Likely files

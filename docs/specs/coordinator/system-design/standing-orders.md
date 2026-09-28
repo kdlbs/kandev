@@ -65,8 +65,10 @@ Under `/api/v1/workspaces/:id/coordinators/:cid/`, phase-2 flag only:
 | `POST standing-orders/:oid/retire` | `workspace.manage` | the order |
 | `POST standing-orders/:oid/restore` | `workspace.manage` | the order |
 
-Add and restore run in the per-coordinator locked transaction of
-[proposals](proposals.md#propose). Restore first reads the order: absent or
+Add, retire and restore run in the per-coordinator locked transaction of
+[proposals](proposals.md#propose), the lock the propose transaction also
+holds, so a retire and a propose citing that order apply in commit order
+([Citations](#citations)). Restore first reads the order: absent or
 of another coordinator is 404, and an order that is already active returns
 200 unchanged with no reset, before any count, so restoring an active order
 never gets `standing_order_limit` (`001.3`). Then both count active orders,
@@ -111,9 +113,14 @@ text never becomes a tool argument or a policy input (`002.3`).
 ## Citations
 
 Every propose action accepts `standing_order_ids` (JSON array of strings,
-default empty). Validation, inside the propose transaction: at most 5, no
-duplicate, each an active order of the calling coordinator; otherwise the
-call is refused naming `standing_order_ids` (`003.1`). The ids are stored on
+default empty). Shape (at most 5, no duplicate) is checked before the
+transaction; that each id is an active order of the calling coordinator is
+checked inside the propose transaction, under the per-coordinator lock that
+retire also takes, so a proposal never commits citing an order retired
+before it ([proposal kinds](proposal-kinds.md#propose) step 2). Either
+failure refuses the call naming `standing_order_ids` (`003.1`). A retire
+that commits after the proposal leaves the citation in place; the card then
+shows "a retired standing order". The ids are stored on
 the proposal's `standing_order_ids` column
 ([proposal kinds](proposal-kinds.md#store)).
 

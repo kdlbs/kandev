@@ -96,6 +96,14 @@ and `coordinator.propose_move`, back the three tools. Each resolves the
 coordinator from the principal, passes the guard of
 [permissions](permissions.md#guard), then:
 
+0. Dedupe read, before any validation: parse `task_id` (absent or not a
+   string is 400 naming `task_id`) and read an open proposal of the same
+   `(coordinator_id, kind, target_task_id)`. When one exists, return it and
+   insert nothing, whatever the other arguments are and whether the target
+   still passes step 1 (an archived target, or a task already on the
+   proposed step, still returns the open proposal; its approval settles it
+   as [Approve](#approve) says). This is what `001.5` means by "return that
+   proposal"; step 2 repeats the lookup under the lock for concurrent calls.
 1. `ValidatePropose`, which reads through the task, session and workflow
    services:
    - target task: exists, not archived, `workspace_id` equals the
@@ -111,18 +119,24 @@ coordinator from the principal, passes the guard of
      `EligibleStep` true (`001.3`). The row stores `starts_agent =
      !EligibleStep(step)`, so a move into an agent-starting step (allowed
      only with `start_agent` `requires_approval`) is flagged like a create;
-   - `rationale` per the phase-1 rule; `standing_order_ids` per
-     [standing orders](standing-orders.md#citations).
+   - `rationale` per the phase-1 rule, and the shape of
+     `standing_order_ids` (a JSON array of strings, at most 5, no
+     duplicate). Whether each cited order is active is not checked here.
 2. In the phase-1 locked transaction: look up an open proposal of the same
    `(coordinator_id, kind, target_task_id)`; when found, return it and
-   insert nothing. Otherwise count open proposals (all kinds) against 25 and
+   insert nothing. Otherwise check that every `standing_order_ids` entry is
+   an active order of this coordinator, read inside this transaction
+   ([standing orders](standing-orders.md#citations)), refusing naming
+   `standing_order_ids`; then count open proposals (all kinds) against 25 and
    insert `pending` with the `proposed` activity row. A unique-index
    violation (possible only if the lock were bypassed) re-reads and returns
    the existing row (`001.5`).
 3. Publish `coordinator.updated`.
 
 `propose_task_kandev` gains the `start_agent` branch of
-[Create with a start](#create-with-a-start) and `standing_order_ids`.
+[Create with a start](#create-with-a-start) and `standing_order_ids`, whose
+active-order check likewise runs inside the phase-1 locked create
+transaction, after its external-id dedupe.
 
 ## Create with a start
 
@@ -153,10 +167,11 @@ After the claim commits, `Execute` runs:
 | --- | --- |
 | `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not resumable: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)`; its error fails with the error text. Outcome `{session_id}`. |
 | `message` | Re-read the task and session (archived or not accepting: fail). Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
-| `move` | Re-read the task: archived (`task_archived`), workflow changed (`task_left_workflow`), destination step missing (`step_missing`), `CompleteTaskOnEnter` now true (`step_is_done`), or agent-starting (`EligibleStep` false) while the proposal's `starts_agent` is false (`step_starts_agent`) each fail. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`. Record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
+| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. agent-starting (`EligibleStep` false) while the proposal's `starts_agent` is false: fail `step_starts_agent`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`. Otherwise record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
 
-A move whose task already sits on the destination makes no call and
-completes with outcome `{from_step_id: to_step_id, to_step_id, noop: true}`;
+A move whose task already sits on the destination (check 4) makes no call,
+because it moves nothing and starts nothing, even when the step has since
+become a Done or agent-starting step, and completes with outcome `{from_step_id: to_step_id, to_step_id, noop: true}`;
 its `approved` row has detail "It was already there" and is not undoable
 ([activity log](activity-log.md#undo)). A destination that stopped being
 agent-starting since propose is not a failure: the move starts nothing more

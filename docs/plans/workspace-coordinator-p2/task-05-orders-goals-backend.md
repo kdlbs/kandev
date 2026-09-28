@@ -52,7 +52,8 @@ measures computed at read time.
 
 - Standing orders: `GET`, `POST`, `POST :oid/retire`, `POST :oid/restore`
   with trim and 1 to 500 characters, the limit of 20 active under the
-  per-coordinator lock, idempotent retire and restore (restoring an active
+  per-coordinator lock (add, retire and restore all take it),
+  idempotent retire and restore (restoring an active
   order returns 200 before the limit check, even at 20), no edit route
   (`001.1` to `001.3`, `001.7`).
 - `resetConversation` on add, retire and restore that change something

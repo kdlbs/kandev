@@ -144,13 +144,18 @@ reads as "A former member".
 2. **Create.** Call `ArchiveTask(target_task_id)`. `ErrTaskAlreadyArchived`
    and not found count as done. Any other error: 500, nothing written.
 3. **Move.** Read the task and the proposal's `outcome_json.from_step_id`
-   and `to_step_id` ([proposal kinds](proposal-kinds.md#approve)). The task
-   archived, or its step not `to_step_id`: 409 `undo_conflict`. Otherwise
-   `MoveTask(task, workflow, from_step_id, 0)`; an error is 500. When the
-   from step no longer exists: 409 `undo_conflict`. A task already on
-   `from_step_id` (a retry after a failed step 4, or a person who moved it
-   back) counts as reversed and skips the call. An outcome with `noop: true`
-   was rejected as `not_undoable` in step 1.
+   and `to_step_id` ([proposal kinds](proposal-kinds.md#approve)), then
+   check in this order, stopping at the first that applies:
+   1. task archived, or not found: 409 `undo_conflict`;
+   2. task on `from_step_id` (a retry after a failed step 4, or a person
+      who moved it back): counts as reversed; skip the call and go to
+      step 4;
+   3. task on `to_step_id`: when `from_step_id` no longer exists, 409
+      `undo_conflict`; otherwise `MoveTask(task, workflow, from_step_id,
+      0)`, whose error is 500 with nothing written;
+   4. any other step: 409 `undo_conflict`.
+
+   An outcome with `noop: true` was rejected as `not_undoable` in step 1.
 4. In one transaction: `UPDATE ... SET undone_at=now, undone_by=? WHERE id=?
    AND undone_at IS NULL`; zero rows is 409 `already_undone`; one row inserts
    the `undone` row with `undo_of_id`.
@@ -217,11 +222,16 @@ days through the same service function ([goals](goals.md#baselines)).
 
 ## Retention
 
-A daily ticker started with the other coordinator background work (and one
-run in the startup pass) deletes `created_at < now - 400 days` in batches of
+While `features.coordinatorPhase2` is on, a daily ticker started with the
+other coordinator background work (and one run in the startup pass)
+deletes `created_at < now - 400 days` in batches of
 500 by primary key, each batch its own short transaction, stopping on
 context cancel. A batch error is logged at warn and the run ends; the next
-run retries (`005.1`).
+run retries (`005.1`). With the flag off neither the ticker nor the startup
+run starts, so no row is deleted by age while phase-2 data is kept
+([coordinators](coordinators.md#phase-2), `AC-COORDINATOR-COORDINATORS-007.3`);
+the first run after the flag returns deletes whatever is past 400 days by
+then. Deleting a coordinator deletes its rows whatever the flag.
 
 ## What it did UI
 
