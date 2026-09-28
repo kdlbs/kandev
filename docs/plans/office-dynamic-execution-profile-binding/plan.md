@@ -52,7 +52,7 @@ and resolves dynamic candidates through it.
 
 The Office identity and its execution profile share the unified
 `agent_profiles` table but are distinct logical objects. Store the optional
-binding in a new nullable-with-default column. The shared resolver consults the
+binding in a new `TEXT NOT NULL DEFAULT ''` column. The shared resolver consults the
 binding only for Office rows that set it and otherwise resolves the requested ID
 unchanged, so non-Office launches keep `execution_profile_id == agent_profile_id`.
 
