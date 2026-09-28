@@ -1,13 +1,17 @@
 ---
-spec: docs/specs/tasks/requirements/clarification-response-reliability.md
-related_specs:
-  - docs/specs/tasks/system-design/clarification-response-reliability.md
-  - docs/specs/tasks/requirements/clarification-active-lifecycle.md
+requirements:
+  - REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-001
+system_design:
+  - ../../specs/tasks/system-design/clarification-response-reliability.md
 created: 2026-09-05
 status: implemented
 ---
 
 # Implementation Plan: Clarification response reliability
+
+Authoritative contracts: [requirements](../../specs/tasks/requirements/clarification-response-reliability.md),
+[system design](../../specs/tasks/system-design/clarification-response-reliability.md), and
+[active lifecycle requirements](../../specs/tasks/requirements/clarification-active-lifecycle.md).
 
 ## Overview
 
@@ -90,6 +94,7 @@ to multiple backend replicas.
 ### Wave 3: Client recovery and viewport coverage
 
 - [x] [Task 03: Bound and recover clarification submission](task-03-bound-and-recover-clarification-submission.md) - depends on Task 02.
+- [x] [Task 04: Return delivery-pending retry outcomes](task-04-delivery-pending-retry.md) - depends on Task 03.
 
 Implementation remains sequential in the primary conversation unless the user
 explicitly authorizes implementation sessions.
