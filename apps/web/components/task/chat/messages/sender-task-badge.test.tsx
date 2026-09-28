@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import type { TaskSession } from "@/lib/types/http";
-import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
+import { SenderTaskBadge } from "./sender-task-badge";
 
 const TASK_ID = "task-1";
 const TASK_TITLE = "Review Contributor PR 3143";
@@ -15,6 +16,8 @@ afterEach(cleanup);
 type RenderBadgeOptions = {
   session?: { taskId?: string; name: string | null } | null;
   snapshotSessionName?: string;
+  senderSessionId?: string;
+  destinationTaskId?: string;
   modelName?: string;
   captureStore?: (store: ReturnType<typeof useAppStoreApi>) => void;
 };
@@ -22,6 +25,8 @@ type RenderBadgeOptions = {
 function renderBadge({
   session = { taskId: TASK_ID, name: "Luna" },
   snapshotSessionName = "Old session label",
+  senderSessionId = SESSION_ID,
+  destinationTaskId = TASK_ID,
   modelName,
   captureStore,
 }: RenderBadgeOptions = {}) {
@@ -58,14 +63,14 @@ function renderBadge({
   const sender: SenderTaskInfo = {
     id: TASK_ID,
     snapshotTitle: TASK_TITLE,
-    sessionId: SESSION_ID,
+    sessionId: senderSessionId,
     sessionName: snapshotSessionName,
   };
 
   render(
     <StateProvider initialState={initialState as never}>
       {captureStore && <StoreCapture capture={captureStore} />}
-      <SenderTaskBadge sender={sender} destinationTaskId={TASK_ID} />
+      <SenderTaskBadge sender={sender} destinationTaskId={destinationTaskId} />
     </StateProvider>,
   );
 }
@@ -123,6 +128,15 @@ describe("SenderTaskBadge", () => {
     expect(badge.getAttribute("aria-label")).toBe(
       `From session "Agent ${SESSION_ID}" in task "${TASK_TITLE}"`,
     );
+  });
+
+  it("keeps task attribution when the sender session ID is empty", () => {
+    renderBadge({ session: null, snapshotSessionName: "", senderSessionId: "" });
+
+    const badge = screen.getByTestId(BADGE_TEST_ID);
+    expect(badge.tagName).toBe("SPAN");
+    expect(badge.textContent?.trim()).toMatch(/^Review Contributor PR 3…$/);
+    expect(badge.closest("a")).not.toBeNull();
   });
 
   it("does not use a loaded session that belongs to another task", () => {

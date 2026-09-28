@@ -6,34 +6,17 @@ import { IconRobot } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
-import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import {
+  useSenderTaskBadgeModel,
+  type SenderTaskInfo,
+} from "@/hooks/domains/session/use-sender-task-badge-model";
 import { linkToTask } from "@/lib/links";
-import { Trans, useTranslation } from "react-i18next";
-import { selectSessionTabTitle } from "@/components/task/session-tab-title";
-
-export type SenderTaskInfo = {
-  id: string;
-  /** Title captured when the message was queued/sent. Survives the sender
-   * task being renamed, archived, or unloaded from the live kanban state. */
-  snapshotTitle: string;
-  /** Sender session id, when the message came from a specific session. */
-  sessionId?: string;
-  /** Sender session's user-supplied name captured at send time ("" when unnamed). */
-  sessionName?: string;
-};
+import { Trans } from "react-i18next";
 
 type SenderTaskTooltipProps = {
   sessionName: string;
   fullTitle: string;
 };
-
-const SENDER_TITLE_MAX = 24;
-
-function truncateTitle(title: string): string {
-  if (title.length <= SENDER_TITLE_MAX) return title;
-  return title.slice(0, SENDER_TITLE_MAX - 1).trimEnd() + "…";
-}
 
 type SenderTaskBadgeProps = {
   sender: SenderTaskInfo;
@@ -42,36 +25,6 @@ type SenderTaskBadgeProps = {
   /** Optional override for the badge size — defaults to "sm" (chat bubbles). */
   size?: "xs" | "sm";
 };
-
-function useSameTaskSessionTitle(
-  sender: SenderTaskInfo,
-  destinationTaskId: string,
-  isSameTaskMessage: boolean,
-) {
-  return useAppStore((state) => {
-    if (!isSameTaskMessage || !sender.sessionId) return null;
-    const session = state.taskSessions.items[sender.sessionId];
-    if (session?.task_id !== destinationTaskId) return null;
-    return selectSessionTabTitle(state, sender.sessionId);
-  });
-}
-
-function useLiveSenderSessionName(sender: SenderTaskInfo) {
-  return useAppStore((state) =>
-    sender.sessionId ? (state.taskSessions.items[sender.sessionId]?.name ?? null) : null,
-  );
-}
-
-function badgeLabel(
-  isSameTaskMessage: boolean,
-  fullTitle: string,
-  sessionName: string,
-  sameTaskSessionName: string,
-): string {
-  if (isSameTaskMessage) return truncateTitle(sameTaskSessionName);
-  if (!sessionName) return truncateTitle(fullTitle);
-  return `${truncateTitle(fullTitle)} · ${truncateTitle(sessionName)}`;
-}
 
 function wrapBadgeWithTaskLink(
   liveTask: { id: string } | null | undefined,
@@ -91,7 +44,8 @@ function SenderTaskTooltip({ sessionName, fullTitle }: SenderTaskTooltipProps) {
   if (sessionName) {
     return (
       <Trans i18nKey="task:fromSessionInTask" values={{ sessionName, fullTitle }}>
-        From session <span className="font-semibold">&ldquo;{sessionName}&rdquo;</span> in task{" "}
+        From session <span className="font-semibold">&ldquo;{sessionName}&rdquo;</span> in task
+        {" " /* Keep the task title span at Trans child index 4 for locale templates. */}
         <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
       </Trans>
     );
@@ -101,37 +55,6 @@ function SenderTaskTooltip({ sessionName, fullTitle }: SenderTaskTooltipProps) {
       From agent in task <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
     </Trans>
   );
-}
-
-function useSenderTaskBadgeModel(sender: SenderTaskInfo, destinationTaskId: string) {
-  const { t } = useTranslation();
-  const liveTask = useTaskById(sender.id);
-  const isSameTaskMessage = sender.id === destinationTaskId && sender.sessionId !== undefined;
-  const liveSessionTitle = useSameTaskSessionTitle(sender, destinationTaskId, isSameTaskMessage);
-  const liveSessionName = useLiveSenderSessionName(sender);
-  const fullTitle = liveTask?.title || sender.snapshotTitle || t("task:unknownTaskFallback");
-  const sessionName = liveSessionName ?? sender.sessionName ?? "";
-  const sameTaskSessionName = liveSessionTitle || sender.sessionName || "";
-  const senderSessionId = sender.sessionId ?? "";
-  const sameTaskVisibleLabel =
-    sameTaskSessionName ||
-    t("task:agentSessionFallback", { sessionId: senderSessionId.slice(0, 8) });
-  const sameTaskContextName =
-    sameTaskSessionName || t("task:agentSessionFallback", { sessionId: senderSessionId });
-  const sameTaskContext = t("task:sameTaskSessionContext", {
-    sessionName: sameTaskContextName,
-    fullTitle,
-  });
-
-  return {
-    liveTask,
-    isSameTaskMessage,
-    fullTitle,
-    sessionName,
-    sameTaskContext,
-    truncated: badgeLabel(isSameTaskMessage, fullTitle, sessionName, sameTaskVisibleLabel),
-    sourceTaskAriaLabel: t("task:openSourceTask", { fullTitle }),
-  };
 }
 
 /**
@@ -172,13 +95,14 @@ export function SenderTaskBadge({ sender, destinationTaskId, size = "sm" }: Send
             className={cn(
               badgeClassName,
               "cursor-pointer border-0 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-              "[@media(pointer:coarse)]:min-h-11",
+              "max-w-full min-w-0 [@media(pointer:coarse)]:min-h-11",
             )}
             data-testid="sender-task-badge"
             data-sender-task-id={sender.id}
             aria-label={sameTaskContext}
           >
-            <IconRobot size={iconSize} /> {truncated}
+            <IconRobot className="shrink-0" size={iconSize} aria-hidden="true" />
+            <span className="min-w-0 truncate">{truncated}</span>
           </button>
         </PopoverTrigger>
         <PopoverContent

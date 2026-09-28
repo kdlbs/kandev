@@ -539,6 +539,7 @@ test.describe("Same-task agent message attribution", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const scenario = await seedSameTaskAttributionScenario(
       apiClient,
@@ -620,5 +621,8 @@ test.describe("Same-task agent message attribution", () => {
     await expect(context).toBeVisible();
     await expect(context).toContainText(SAME_TASK_LONG_SENDER_NAME);
     await expect(context).toContainText(scenario.title);
+    await prCapture.screenshot("same-task-agent-message-desktop", {
+      caption: "Desktop queue row: the sender chip opens the full session and task context.",
+    });
   });
 });

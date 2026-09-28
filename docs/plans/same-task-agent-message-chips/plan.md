@@ -37,8 +37,9 @@ desktop and phone behavior.
   selector used by `SessionTab` and `SenderTaskBadge`. Only accept a resolved
   sender session whose `task_id` matches the destination message task.
 - Pass destination `task_id` from `ChatMessage` and `QueuedGhostMessage` into
-  the shared badge. Branch only when it equals `sender_task_id` and a sender
-  session ID exists. Keep the current cross-task branch and source-task link.
+  the shared badge. Branch only when it equals `sender_task_id` and a non-empty
+  sender session ID exists; treat an empty ID as absent. Keep the current
+  cross-task branch and source-task link.
 - When a live session is absent, use `sender_session_name` if present, else a
   localized agent label with a stable short session ID. Keep the task-title
   branch when the sender session ID is absent.
@@ -59,7 +60,7 @@ Before                                   After
 [robot Review Contributor PR #3143]     [robot Astra]
   Here is the finding.                    Here is the finding.
 
-After, full context on focus/hover:
+After, full context on keyboard activation or tap:
   From Luna in task "Review Contributor PR #3143"
 ```
 
@@ -74,10 +75,12 @@ Phone transcript                        Queue row
 |_____________________________________|___________________________|
 ```
 
-The chip may truncate, but full context remains available through its
-accessible label and desktop tooltip. Existing transcript and queue regions
-own scrolling. The sender task link remains the existing action. These are
-structural requirements; spacing and glyphs are illustrative.
+The chip may truncate, but its semantic button keeps the full context in its
+accessible name and opens that context on Enter, Space, click, or tap. Existing
+transcript and queue regions own scrolling. Cross-task badges retain the
+existing sender-task link. In narrow queue rows, the chip truncates before the
+message actions and never covers them. These are structural requirements;
+spacing and glyphs are illustrative.
 
 ## Tests
 
@@ -96,8 +99,8 @@ structural requirements; spacing and glyphs are illustrative.
 - `apps/web/e2e/tests/chat/mobile-agent-message-attribution.spec.ts`
   (`mobile-chrome`): send through the same real sibling-session message path,
   tap the long-label chip to read its full context, and check the 44px hitbox,
-  popover viewport containment, and zero document horizontal overflow (`.1`,
-  `.3`, `.4`).
+  popover viewport containment, no overlap with queue actions at 320px width,
+  and zero document horizontal overflow (`.1`, `.3`, `.4`).
 
 ## Work orders
 
@@ -105,9 +108,10 @@ structural requirements; spacing and glyphs are illustrative.
 
 ## Verification results
 
-Prior focused unit, typecheck, i18n, lint, and E2E results are recorded in the
-work order. Review follow-up verification results are recorded after the
-keyboard, touch, and real sibling-delivery regressions pass.
+The work order records the post-review unit, typecheck, i18n, lint, spec
+validation, and desktop/phone browser results. Both browser scenarios send
+through `message_task_kandev` to an explicit sibling session and verify its
+persisted queue metadata before rendering the chip.
 
 ## Risks
 

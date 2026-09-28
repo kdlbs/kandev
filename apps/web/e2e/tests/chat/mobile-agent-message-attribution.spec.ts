@@ -1,27 +1,31 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
-  SAME_TASK_LONG_SENDER_NAME,
   SAME_TASK_QUEUED_MESSAGE,
   selectSameTaskSession,
   seedSameTaskAttributionScenario,
   startSameTaskReceiverSession,
 } from "./agent-message-attribution-helpers";
 
+const WIDE_SENDER_SESSION_NAME = "W".repeat(48);
+
 function mcpScript(args: Record<string, string>): string {
   return `e2e:mcp:kandev:message_task_kandev(${JSON.stringify(args)})`;
 }
 
-test("phone users can tap a real sibling-message chip to read its full sender context", async ({
+test("phone users can tap a wide sibling-message chip without covering queue actions", async ({
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(120_000);
+  await testPage.setViewportSize({ width: 320, height: 720 });
   const scenario = await seedSameTaskAttributionScenario(
     apiClient,
     seedData,
     "Phone same-task sender attribution",
+    WIDE_SENDER_SESSION_NAME,
   );
   await testPage.goto(`/t/${scenario.taskId}`);
   const session = new SessionPage(testPage);
@@ -61,7 +65,7 @@ test("phone users can tap a real sibling-message chip to read its full sender co
       metadata: {
         sender_task_id: scenario.taskId,
         sender_session_id: scenario.senderSessionId,
-        sender_session_name: SAME_TASK_LONG_SENDER_NAME,
+        sender_session_name: WIDE_SENDER_SESSION_NAME,
       },
     });
 
@@ -73,16 +77,19 @@ test("phone users can tap a real sibling-message chip to read its full sender co
   const senderBadge = queuedRow.getByTestId("sender-task-badge");
   await expect(senderBadge).toHaveAttribute(
     "aria-label",
-    `From session "${SAME_TASK_LONG_SENDER_NAME}" in task "${scenario.title}"`,
+    `From session "${WIDE_SENDER_SESSION_NAME}" in task "${scenario.title}"`,
   );
   const badgeBounds = await senderBadge.boundingBox();
+  const actionBounds = await queuedRow.getByTestId("queue-entry-actions").boundingBox();
   expect(badgeBounds).not.toBeNull();
+  expect(actionBounds).not.toBeNull();
   expect(badgeBounds!.height).toBeGreaterThanOrEqual(44);
+  expect(badgeBounds!.x + badgeBounds!.width).toBeLessThanOrEqual(actionBounds!.x);
   await senderBadge.tap();
 
   const context = testPage.getByTestId("sender-task-context");
   await expect(context).toBeVisible();
-  await expect(context).toContainText(SAME_TASK_LONG_SENDER_NAME);
+  await expect(context).toContainText(WIDE_SENDER_SESSION_NAME);
   await expect(context).toContainText(scenario.title);
   const bounds = await context.boundingBox();
   const viewportWidth = testPage.viewportSize()?.width;
@@ -95,4 +102,7 @@ test("phone users can tap a real sibling-message chip to read its full sender co
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
   expect(documentWidth).toBe(0);
+  await prCapture.screenshot("same-task-agent-message-phone", {
+    caption: "Phone queue row: tapping the sender chip reveals its full session and task context.",
+  });
 });

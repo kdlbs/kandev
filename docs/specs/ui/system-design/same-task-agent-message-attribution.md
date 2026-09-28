@@ -32,17 +32,18 @@ sender's own session remains invalid. `ChatMessage` receives the destination `Me
 that destination task ID into `SenderTaskBadge`. Compare task IDs exactly;
 the currently active global task is not reliable in Threads or preview layouts.
 
-For a same-task message with a sender session ID, resolve that session from
-`taskSessions.items` only if its `task_id` matches the destination task. Use the
-same label precedence as `SessionTab` via `resolveSessionTabTitle`: custom
-`session.name`, current/active model display name, profile label, then the
-session profile's model snapshot. Extract the existing tab selector logic into
-a shared pure helper or selector so the badge and tab cannot drift. Keep the
-current send-time `sender_session_name` metadata as a fallback when the live
-session is unavailable. If both are absent, display a localized generic agent
-label plus a stable short form of `sender_session_id`; show the full ID in the
-chip's contextual tooltip or accessible label. A missing sender session ID
-uses the existing task title path.
+For a same-task message with a non-empty sender session ID, resolve that
+session from `taskSessions.items` only if its `task_id` matches the destination
+task. Use the same label precedence as `SessionTab` via
+`resolveSessionTabTitle`: custom `session.name`, current/active model display
+name, profile label, then the session profile's model snapshot. Extract the
+existing tab selector logic into a shared pure helper or selector so the badge
+and tab cannot drift. Keep the current send-time `sender_session_name`
+metadata as a fallback when the live session is unavailable. If both are
+absent, display a localized generic agent label plus a stable short form of
+`sender_session_id`; show the full ID in the chip's contextual tooltip or
+accessible label. A missing or empty sender session ID uses the existing task
+title path.
 
 No API field, database migration, or historical metadata rewrite is needed.
 The label is a presentation projection. Loaded-session model or name changes
@@ -69,9 +70,11 @@ and are not translated.
 
 The chip stays inline above the message bubble or queue row on desktop and
 phone. The existing phone transcript and queue are the nearest shipped mobile
-surfaces. Tapping a long sender chip opens an anchored popover with the full
-sender and task context; the popover stays within the viewport. The transcript
-or queue keeps its current scroll owner and safe-area behavior.
+surfaces. In narrow queue rows, the chip shrinks and truncates before the
+message action controls, with no overlap. Tapping a long sender chip opens an
+anchored popover with the full sender and task context; the popover stays
+within the viewport. The transcript or queue keeps its current scroll owner
+and safe-area behavior.
 
 ## Failure and compatibility
 

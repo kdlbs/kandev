@@ -20,10 +20,8 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import {
-  SenderTaskBadge,
-  type SenderTaskInfo,
-} from "@/components/task/chat/messages/sender-task-badge";
+import { SenderTaskBadge } from "@/components/task/chat/messages/sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,

@@ -129,11 +129,23 @@ None.
 
 ## Results
 
-Review follow-up: 102 focused unit tests passed across four files; typecheck,
-i18n check, i18n ratchet, ESLint, specification/catalog validation, and
-`git diff --check` passed. The backend sibling-queue test passed. Desktop
-attribution E2E passed 10/10, and mobile attribution E2E passed 1/1. Both
-browser scenarios send through `message_task_kandev` to a distinct sibling
-session and verify persisted sender metadata before checking the chip. The
-desktop scenario also verifies keyboard access to full context; the mobile
-scenario verifies tap access, a 44px touch target, and viewport containment.
+Review follow-up verification:
+
+- `pnpm exec vitest run components/task/chat/messages/sender-task-badge.test.tsx components/task/chat/messages/chat-message.test.tsx components/task/chat/queued-ghost-message.test.tsx components/task/session-tab-title.test.ts`: 103 tests passed across four files.
+- `pnpm run typecheck`: passed.
+- `pnpm run i18n:check && pnpm run i18n:ratchet`: passed.
+- `pnpm exec eslint components/task/chat/messages/chat-message.tsx components/task/chat/messages/sender-task-badge.test.tsx components/task/chat/messages/sender-task-badge.tsx components/task/chat/queued-ghost-message.tsx hooks/domains/session/use-sender-task-badge-model.ts e2e/tests/chat/agent-message-attribution.spec.ts e2e/tests/chat/mobile-agent-message-attribution.spec.ts`: passed.
+- `pnpm exec prettier --check components/task/chat/messages/chat-message.tsx components/task/chat/messages/sender-task-badge.test.tsx components/task/chat/messages/sender-task-badge.tsx components/task/chat/queued-ghost-message.tsx hooks/domains/session/use-sender-task-badge-model.ts e2e/tests/chat/agent-message-attribution.spec.ts e2e/tests/chat/mobile-agent-message-attribution.spec.ts`: passed.
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`: passed; 320 decisions and 1220 specifications validated.
+- `git diff --check`: passed.
+- `CAPTURE_PR_ASSETS=1 pnpm e2e:run tests/chat/agent-message-attribution.spec.ts`: 10 tests passed.
+- `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project=mobile-chrome tests/chat/mobile-agent-message-attribution.spec.ts`: 1 test passed.
+
+Both browser scenarios send through `message_task_kandev` with an explicit
+distinct sibling `session_id`, then verify persisted agent queue metadata
+before checking the chip. The desktop scenario verifies normal tab access and
+Enter/Space activation of the full context. The phone scenario verifies tap
+access, a 44px touch target, popover viewport containment, and no overlap with
+queue actions at 320px width. An empty sender session ID uses the existing task
+attribution path. Sender model selectors now live in the session domain hook,
+leaving the badge component below the 200-line limit.
