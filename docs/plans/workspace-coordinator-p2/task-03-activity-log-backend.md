@@ -87,7 +87,9 @@ two concurrent undos of one create archive once and return one 409
 (`003.4`); a moved-again task returns `undo_conflict` (`003.3`); a failed
 marker transaction leaves the row undoable and a retry only marks it
 (reversal already done); a `noop` move row is `not_undoable` and lists
-`undoable` false; the summary's `approved` includes edited approvals and
+`undoable` false; an undone row lists `undone_by_name` resolved from
+`undone_by` while its `actor_name` stays the approver, and a deleted
+undoer reads "A former member" (the field task 08 renders); the summary's `approved` includes edited approvals and
 `undone` counts under the reversed row's class (`005.2`); a reader's
 undo is 403 (`003.5`); the read tool never returns another coordinator's
 rows or any user id (`004.1`, `004.2`); limit 0 and 51 are refused

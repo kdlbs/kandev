@@ -130,8 +130,10 @@ other values are 400 naming `class` (`002.3`). A bad cursor is 400 naming
 `before`. A coordinator of another workspace is 404 (`005.3`). Rows carry
 `undoable`, computed at read time (outcome `approved`, class `create_task`
 or `move`, `undone_at` null, and not a move whose proposal outcome has
-`noop: true`), and `actor_name` resolved from the user service at read time; a missing user
-reads as "A former member".
+`noop: true`), `actor_name` resolved from `actor_user_id` through the user
+service at read time, and `undone_by_name` resolved from `undone_by` the
+same way (null while `undone_by` is null); a missing user reads as "A
+former member".
 
 ## Undo
 
@@ -189,7 +191,8 @@ phase-2 coordinator session ([permissions](permissions.md#tool-profile)).
 The MCP action `coordinator.list_activity` resolves the coordinator from the
 principal only; it takes no coordinator or workspace argument, so it cannot
 read another coordinator's rows (`004.1`). It returns the list route's rows
-without `actor_user_id`, `undone_by` or `actor_name` (`004.2`), default limit
+without `actor_user_id`, `undone_by`, `actor_name` or `undone_by_name`
+(`004.2`), default limit
 20, and refuses a limit outside 1 to 50 or a bad cursor naming the field
 (`004.3`).
 
@@ -249,9 +252,19 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
 - Undo column: **Undo** for managers on rows with `undoable` true; "No undo"
   on every row whose action class is `message` or `resume`, whatever its
   outcome (`proposed`, `approved`, `rejected`, `failed` or `refused`), and
-  for readers too; "Undone by <name>, <time>" on undone rows; nothing on any
-  other row (`003.1`). The 409 `undo_conflict` message "It has moved since"
-  shows inline.
+  for readers too; "Undone by <name>, <time>" on the original row that was
+  reversed (`undone_at` set), in place of Undo, with `<name>` from
+  `undone_by_name` and `<time>` from `undone_at` (`003.6`); nothing on any
+  other row, including the separate row whose outcome is `undone`, which
+  shows the undoer through `actor_name` in How it was authorised (`002.4`)
+  (`003.1`). The 409 `undo_conflict` message "It has moved since" shows
+  inline.
+  Undo first opens a confirmation dialog titled "Undo this?" whose text
+  names the effect: for a created task "The task <identifier> will be
+  archived.", for a move "The task <identifier> will move back to
+  <from step name>." It has two buttons, **Undo** and **Cancel**, with
+  Cancel focused on open. Cancel or Escape closes it and sends nothing;
+  Undo sends the request and closes it, and the outcomes below apply.
   The other two refusals: 409 `already_undone` (a double click, or another
   manager undid it first) shows no error; the list refetches, so the row
   shows "Undone by <name>, <time>" of whoever undid it. 409 `not_undoable`

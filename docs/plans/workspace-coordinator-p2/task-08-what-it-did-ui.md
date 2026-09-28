@@ -42,11 +42,15 @@ managers, and the undone state.
   (`002.6`).
 - "No undo" on every `message` or `resume` class row whatever its outcome,
   nothing on other non-undoable rows (`003.1`).
-- Undo button on undoable rows, confirmation, and the refusal handling of
+- Undo button on undoable rows; the "Undo this?" confirmation dialog of
+  the design's Undo column (effect text per class, Undo and Cancel, Cancel
+  focused, Cancel or Escape sends nothing); and the refusal handling of
   the design's Undo column: `already_undone` refetches with no error text,
   `not_undoable` shows "This can no longer be undone", `undo_conflict`
   shows "It has moved since", other errors show "Undo failed. Try again."
-  and keep the button; "Undone by <name>, <time>" (`003.1`, `003.6`).
+  and keep the button; "Undone by <name>, <time>" on the original
+  reversed row from `undone_by_name` and `undone_at`, and nothing in the
+  Undo cell of the `undone` outcome row (`003.1`, `003.6`).
 - Refresh on `coordinator.updated`. Six locales.
 
 ## Out of scope
@@ -85,6 +89,13 @@ Phone: each row is a card; Undo is a full-width button.
 - A component test renders a `proposed` message row and a `refused`
   message row and asserts "No undo" on both, and nothing in the Undo cell
   of a `rejected` create row.
+- A component test renders an undone create row (approver Ana,
+  `undone_by_name` Bo) and its `undone` outcome row, and asserts "Undone by
+  Bo" on the original row, no Undo on it, and an empty Undo cell on the
+  `undone` row.
+- A component test clicks Undo on a create row and asserts the dialog
+  "Undo this?" with "The task <identifier> will be archived." and focus on
+  Cancel; Cancel sends no request; confirming sends one undo request.
 
 ## Verification
 
