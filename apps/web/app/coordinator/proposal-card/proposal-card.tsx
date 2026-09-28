@@ -68,7 +68,19 @@ type OutcomeContext = {
   computeNeedsYouCount?: () => number;
   setServerError: (error: EditFormServerError | null) => void;
   setOpenForm: (form: ProposalCardForm | null) => void;
+  resolveCardLabel: (proposal: Proposal) => Promise<string>;
 };
+
+async function toastApproved(proposal: Proposal, ctx: OutcomeContext) {
+  const spec = effectiveProposalSpec(proposal);
+  const step = resolveStepName(spec, ctx.stepNameByWorkflowStep);
+  const card = await ctx.resolveCardLabel(proposal);
+  ctx.toast({
+    title: ctx.t("coordinator:toastApproved", { card, step }),
+    description: nextLine(ctx.t, ctx.computeNeedsYouCount),
+    variant: "success",
+  });
+}
 
 /**
  * Applies one decision outcome per the decision-outcomes table
@@ -81,28 +93,14 @@ function applyDecisionOutcome(
   plainApprove: boolean,
   ctx: OutcomeContext,
 ) {
-  const {
-    t,
-    toast,
-    variant,
-    stepNameByWorkflowStep,
-    computeNeedsYouCount,
-    setServerError,
-    setOpenForm,
-  } = ctx;
+  const { t, toast, variant, computeNeedsYouCount, setServerError, setOpenForm } = ctx;
   switch (outcome.kind) {
     case "decided": {
       setServerError(null);
       setOpenForm(null);
       if (outcome.proposal.status === "failed") return;
-      const spec = effectiveProposalSpec(outcome.proposal);
       if (outcome.proposal.status === "approved") {
-        const step = resolveStepName(spec, stepNameByWorkflowStep);
-        toast({
-          title: t("coordinator:toastApproved", { card: spec.title, step }),
-          description: nextLine(t, computeNeedsYouCount),
-          variant: "success",
-        });
+        void toastApproved(outcome.proposal, ctx);
       } else if (outcome.proposal.status === "rejected") {
         toast({
           title: t("coordinator:toastRejected"),
@@ -251,7 +249,7 @@ export function ProposalCard({
   const [openForm, setOpenForm] = useState<ProposalCardForm | null>(null);
   const [serverError, setServerError] = useState<EditFormServerError | null>(null);
   const [pendingFocusReturn, setPendingFocusReturn] = useState<ProposalCardForm | null>(null);
-  const cardLabel = useApprovedCardLabel(proposal);
+  const { label: cardLabel, resolveLabel: resolveCardLabel } = useApprovedCardLabel(proposal);
   const approveButtonRef = useRef<HTMLButtonElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const rejectButtonRef = useRef<HTMLButtonElement>(null);
@@ -306,6 +304,7 @@ export function ProposalCard({
     computeNeedsYouCount,
     setServerError,
     setOpenForm,
+    resolveCardLabel,
   };
 
   async function handleApprove(edits?: ApproveProposalEdits) {

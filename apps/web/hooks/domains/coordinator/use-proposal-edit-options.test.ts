@@ -76,6 +76,23 @@ describe("useProposalEditOptions", () => {
     expect(result.current.steps.value.map((s) => s.id)).toEqual(["start"]);
     expect(listWorkflowsMock).toHaveBeenCalledTimes(1);
     expect(listRepositoriesMock).toHaveBeenCalledTimes(1);
+    expect(result.current.snapshotWorkflowName).toBe("Build");
+  });
+
+  it("exposes the selected workflow's snapshot name even when the workflow list fails", async () => {
+    listWorkflowsMock.mockRejectedValue(new Error("boom"));
+    listRepositoriesMock.mockResolvedValue({ repositories: [] });
+    fetchWorkflowSnapshotMock.mockResolvedValue({
+      workflow: workflow("wf-1", "Build"),
+      steps: [step({ id: "start", is_start_step: true, allow_manual_move: true })],
+      tasks: [],
+    });
+
+    const { result } = renderHook(() => useProposalEditOptions(WORKSPACE_ID, "wf-1"));
+
+    await waitFor(() => expect(result.current.workflows.status).toBe("error"));
+    await waitFor(() => expect(result.current.steps.status).toBe("loaded"));
+    expect(result.current.snapshotWorkflowName).toBe("Build");
   });
 
   it("re-reads the step snapshot when workflowId changes, and discards a stale response", async () => {

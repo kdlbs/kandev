@@ -26,10 +26,17 @@ vi.mock("@/hooks/domains/coordinator/use-proposal-edit-options", () => ({
   useProposalEditOptions: () => editOptions.current,
 }));
 
+const fetchTaskMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/api/domains/kanban-api", () => ({
+  fetchTask: (...args: unknown[]) => fetchTaskMock(...args),
+}));
+
 import { ProposalCard, type ProposalCardProps } from "./proposal-card";
 
 afterEach(() => {
   cleanup();
+  fetchTaskMock.mockReset();
   decisionState.current = { busy: false, approve: vi.fn(), reject: vi.fn() };
   editOptions.current = undefined;
 });
@@ -85,6 +92,7 @@ function loadedEditOptions(
     retryWorkflows: vi.fn(),
     retryRepositories: vi.fn(),
     retrySteps: vi.fn(),
+    snapshotWorkflowName: "Build",
     ...overrides,
   };
 }
@@ -254,15 +262,43 @@ describe("ProposalCard - compact variant", () => {
   });
 });
 
-describe("ProposalCard - decision outcomes", () => {
-  function withOutcome(outcome: ProposalDecisionOutcome) {
-    decisionState.current = {
-      busy: false,
-      approve: vi.fn().mockResolvedValue(outcome),
-      reject: vi.fn().mockResolvedValue(outcome),
-    };
-  }
+function withOutcome(outcome: ProposalDecisionOutcome) {
+  decisionState.current = {
+    busy: false,
+    approve: vi.fn().mockResolvedValue(outcome),
+    reject: vi.fn().mockResolvedValue(outcome),
+  };
+}
 
+describe("ProposalCard - approve toast card label", () => {
+  it("names the created task by its identifier in the approve toast", async () => {
+    fetchTaskMock.mockResolvedValue({ id: "task-9", identifier: "KAN-432" });
+    withOutcome({
+      kind: "decided",
+      proposal: proposal({ status: "approved", task_id: "task-9", final_spec: spec() }),
+    });
+    renderCard({ computeNeedsYouCount: () => 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    const toast = await screen.findByTestId(TOAST_TEST_ID);
+    expect(toast.textContent).toContain("Approved. KAN-432 created in Review");
+    expect(fetchTaskMock).toHaveBeenCalledTimes(1);
+    expect(fetchTaskMock).toHaveBeenCalledWith("task-9");
+  });
+
+  it("falls back to the spec title in the approve toast when the task read fails", async () => {
+    fetchTaskMock.mockRejectedValue(new Error("gone"));
+    withOutcome({
+      kind: "decided",
+      proposal: proposal({ status: "approved", task_id: "task-9", final_spec: spec() }),
+    });
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    const toast = await screen.findByTestId(TOAST_TEST_ID);
+    expect(toast.textContent).toContain("Approved. Add tests created in Review");
+  });
+});
+
+describe("ProposalCard - decision outcomes", () => {
   it("toasts the approved copy with the Next-count line on a decided/approved outcome", async () => {
     withOutcome({ kind: "decided", proposal: proposal({ status: "approved" }) });
     renderCard({ computeNeedsYouCount: () => 2 });

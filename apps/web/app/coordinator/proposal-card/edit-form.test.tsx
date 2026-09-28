@@ -49,11 +49,35 @@ function loadedOptions(
     retryWorkflows: vi.fn(),
     retryRepositories: vi.fn(),
     retrySteps: vi.fn(),
+    snapshotWorkflowName: "Build",
     ...overrides,
   };
 }
 
 const APPROVE_BUTTON = "Approve with edits";
+
+function approveButton() {
+  return screen.getByRole("button", { name: APPROVE_BUTTON }) as HTMLButtonElement;
+}
+
+function renderForm(
+  overrides: Partial<{
+    spec: ProposalSpec;
+    busy: boolean;
+    serverError: { message: string; field: string | null } | null;
+  }> = {},
+) {
+  return render(
+    <EditForm
+      workspaceId="w-1"
+      spec={overrides.spec ?? spec()}
+      busy={overrides.busy ?? false}
+      serverError={overrides.serverError ?? null}
+      onApprove={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+}
 
 describe("EditForm - title", () => {
   it("focuses the title field on mount", () => {
@@ -174,11 +198,54 @@ describe("EditForm - workflow and step resolution", () => {
       />,
     );
     expect(screen.getByText("No step in this workflow can be entered manually.")).not.toBeNull();
-    // The step was not changed (the workflow wasn't switched), so the form
-    // still submits the proposal's original, unmodified step.
-    expect(
-      (screen.getByRole("button", { name: APPROVE_BUTTON }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+    expect(approveButton().disabled).toBe(true);
+  });
+
+  it("disables Approve with edits while the proposed workflow is deleted", () => {
+    editOptions.current = loadedOptions();
+    renderForm({ spec: spec({ workflow_id: "wf-deleted" }) });
+    expect(approveButton().disabled).toBe(true);
+  });
+
+  it("disables Approve with edits while the proposed step is not eligible", () => {
+    editOptions.current = loadedOptions();
+    renderForm({ spec: spec({ step_id: "step-gone" }) });
+    expect(screen.getByText("The proposed step is no longer eligible.")).not.toBeNull();
+    expect(approveButton().disabled).toBe(true);
+  });
+
+  it("keeps the current workflow selected and shows its steps when the workflow list fails", () => {
+    editOptions.current = loadedOptions({ workflows: { status: "error", value: [] } });
+    renderForm();
+    expect((screen.getByLabelText("Workflow") as HTMLInputElement).value).toBe("Build");
+    expect(screen.getByLabelText("Step").textContent).toContain("Review");
+    expect(approveButton().disabled).toBe(true);
+  });
+});
+
+describe("EditForm - in-flight lock", () => {
+  it("disables every option control and retry while a decision is in flight", () => {
+    editOptions.current = loadedOptions({
+      repositories: { status: "error", value: [] },
+    });
+    renderForm({ busy: true });
+    for (const label of ["Workflow", "Step", "Repository"]) {
+      expect((screen.getByLabelText(label) as HTMLButtonElement).disabled).toBe(true);
+    }
+    for (const retry of screen.getAllByRole("button", { name: "Try again" })) {
+      expect((retry as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
+  it("disables the workflow and step retry buttons while busy", () => {
+    editOptions.current = loadedOptions({
+      workflows: { status: "error", value: [] },
+      steps: { status: "error", value: [] },
+    });
+    renderForm({ busy: true });
+    const retries = screen.getAllByRole("button", { name: "Try again" });
+    expect(retries.length).toBe(2);
+    for (const retry of retries) expect((retry as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
@@ -240,6 +307,28 @@ describe("EditForm - repository", () => {
     expect(
       (screen.getByRole("button", { name: APPROVE_BUTTON }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+});
+
+describe("EditForm - server error focus", () => {
+  it.each([
+    ["workflow_id", "Workflow"],
+    ["step_id", "Step"],
+    ["repository_id", "Repository"],
+    ["description", "Description"],
+  ])("moves focus to the %s field and renders its error as an alert", (field, label) => {
+    editOptions.current = loadedOptions();
+    renderForm({ serverError: { message: "Not allowed here", field } });
+    expect(document.activeElement).toBe(screen.getByLabelText(label));
+    expect(screen.getByRole("alert").textContent).toBe("Not allowed here");
+  });
+
+  it("shows an error for a field not on the form above the buttons and focuses it", () => {
+    editOptions.current = loadedOptions();
+    renderForm({ serverError: { message: "Rationale is too long", field: "rationale" } });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toBe("Rationale is too long");
+    expect(document.activeElement).toBe(alert);
   });
 });
 

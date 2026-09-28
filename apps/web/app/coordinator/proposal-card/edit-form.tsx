@@ -28,43 +28,69 @@ export type EditFormProps = {
 
 const NO_REPOSITORY = "__none__";
 
+/** Element ids of the form's fields, keyed by the approve route's `field` names. */
+const fieldElementIds: Record<string, string> = {
+  title: "proposal-edit-title", // i18n-exempt: DOM id, not copy
+  description: "proposal-edit-description", // i18n-exempt: DOM id, not copy
+  workflow_id: "proposal-edit-workflow", // i18n-exempt: DOM id, not copy
+  step_id: "proposal-edit-step", // i18n-exempt: DOM id, not copy
+  repository_id: "proposal-edit-repository", // i18n-exempt: DOM id, not copy
+};
+
+/** The server error's field when it names a field on this form, else null. */
+function formErrorField(serverError: EditFormServerError | null): string | null {
+  const field = serverError?.field;
+  return field && field in fieldElementIds ? field : null;
+}
+
+function LoadFailed({ busy, retry }: { busy: boolean; retry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2">
+      <FieldError>{t("coordinator:editOptionsLoadFailed")}</FieldError>
+      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={retry}>
+        {t("coordinator:tryAgain")}
+      </Button>
+    </div>
+  );
+}
+
 type WorkflowFieldProps = {
   workflows: OptionsField<Workflow>;
-  currentWorkflowId: string;
   workflowId: string;
+  /** The selected workflow's name from its snapshot, shown while the list read has failed. */
+  fallbackName: string | null;
+  busy: boolean;
   onChange: (id: string) => void;
   retry: () => void;
 };
 
 function WorkflowField({
   workflows,
-  currentWorkflowId,
   workflowId,
+  fallbackName,
+  busy,
   onChange,
   retry,
 }: WorkflowFieldProps) {
   const { t } = useTranslation();
+  const id = fieldElementIds.workflow_id;
   if (workflows.status === "loading") {
-    return <Input disabled value={t("coordinator:editOptionsLoading")} />;
+    return <Input id={id} disabled value={t("coordinator:editOptionsLoading")} />;
   }
   if (workflows.status === "error") {
     return (
       <div className="space-y-1">
-        <Input disabled value="" />
-        <div className="flex items-center gap-2">
-          <FieldError>{t("coordinator:editOptionsLoadFailed")}</FieldError>
-          <Button type="button" variant="ghost" size="sm" onClick={retry}>
-            {t("coordinator:tryAgain")}
-          </Button>
-        </div>
+        <Input id={id} disabled value={fallbackName ?? ""} />
+        <LoadFailed busy={busy} retry={retry} />
       </div>
     );
   }
-  const currentKnown = workflows.value.some((w) => w.id === currentWorkflowId);
+  const currentKnown = workflows.value.some((w) => w.id === workflowId);
   return (
     <div className="space-y-1">
-      <Select value={workflowId || undefined} onValueChange={onChange}>
-        <SelectTrigger>
+      <Select value={workflowId || undefined} onValueChange={onChange} disabled={busy}>
+        <SelectTrigger id={id}>
           <SelectValue placeholder={t("coordinator:editSelectWorkflow")} />
         </SelectTrigger>
         <SelectContent>
@@ -81,55 +107,49 @@ function WorkflowField({
 }
 
 type StepFieldProps = {
-  workflowKnown: boolean;
+  /** False while the selected workflow is not (yet) known to exist: the field stays empty. */
+  workflowResolved: boolean;
   steps: OptionsField<WorkflowStepDTO>;
-  currentStepId: string;
   stepId: string;
+  busy: boolean;
   onChange: (id: string) => void;
   retry: () => void;
 };
 
-function StepField({
-  workflowKnown,
-  steps,
-  currentStepId,
-  stepId,
-  onChange,
-  retry,
-}: StepFieldProps) {
+function StepField({ workflowResolved, steps, stepId, busy, onChange, retry }: StepFieldProps) {
   const { t } = useTranslation();
-  if (!workflowKnown) {
-    return <Input disabled value="" />;
+  const id = fieldElementIds.step_id;
+  if (!workflowResolved) {
+    return <Input id={id} disabled value="" />;
   }
   if (steps.status === "loading") {
-    return <Input disabled value={t("coordinator:editOptionsLoading")} />;
+    return <Input id={id} disabled value={t("coordinator:editOptionsLoading")} />;
   }
   if (steps.status === "error") {
     return (
       <div className="space-y-1">
-        <Input disabled value="" />
-        <div className="flex items-center gap-2">
-          <FieldError>{t("coordinator:editOptionsLoadFailed")}</FieldError>
-          <Button type="button" variant="ghost" size="sm" onClick={retry}>
-            {t("coordinator:tryAgain")}
-          </Button>
-        </div>
+        <Input id={id} disabled value="" />
+        <LoadFailed busy={busy} retry={retry} />
       </div>
     );
   }
   if (steps.value.length === 0) {
     return (
       <div className="space-y-1">
-        <Input disabled value="" />
+        <Input id={id} disabled value="" />
         <FieldDescription>{t("coordinator:editNoEligibleStep")}</FieldDescription>
       </div>
     );
   }
-  const currentKnown = steps.value.some((s) => s.id === currentStepId);
+  const stepMissing = stepId !== "" && !steps.value.some((s) => s.id === stepId);
   return (
     <div className="space-y-1">
-      <Select value={stepId || undefined} onValueChange={onChange}>
-        <SelectTrigger>
+      <Select
+        value={stepMissing ? undefined : stepId || undefined}
+        onValueChange={onChange}
+        disabled={busy}
+      >
+        <SelectTrigger id={id}>
           <SelectValue placeholder={t("coordinator:editSelectStep")} />
         </SelectTrigger>
         <SelectContent>
@@ -140,36 +160,37 @@ function StepField({
           ))}
         </SelectContent>
       </Select>
-      {!currentKnown && <FieldDescription>{t("coordinator:editStepMissing")}</FieldDescription>}
+      {stepMissing && <FieldDescription>{t("coordinator:editStepMissing")}</FieldDescription>}
     </div>
   );
 }
 
 type RepositoryFieldProps = {
   repositories: OptionsField<Repository>;
-  currentRepositoryId: string;
   repositoryId: string;
+  busy: boolean;
   onChange: (id: string) => void;
   retry: () => void;
 };
 
 function RepositoryField({
   repositories,
-  currentRepositoryId,
   repositoryId,
+  busy,
   onChange,
   retry,
 }: RepositoryFieldProps) {
   const { t } = useTranslation();
+  const id = fieldElementIds.repository_id;
   if (repositories.status === "loading") {
-    return <Input disabled value={t("coordinator:editOptionsLoading")} />;
+    return <Input id={id} disabled value={t("coordinator:editOptionsLoading")} />;
   }
   const currentUnavailable =
-    currentRepositoryId !== "" && !repositories.value.some((r) => r.id === currentRepositoryId);
+    repositoryId !== "" && !repositories.value.some((r) => r.id === repositoryId);
   return (
     <div className="space-y-1">
-      <Select value={repositoryId || NO_REPOSITORY} onValueChange={onChange}>
-        <SelectTrigger>
+      <Select value={repositoryId || NO_REPOSITORY} onValueChange={onChange} disabled={busy}>
+        <SelectTrigger id={id}>
           <SelectValue placeholder={t("coordinator:editSelectRepository")} />
         </SelectTrigger>
         <SelectContent>
@@ -180,20 +201,13 @@ function RepositoryField({
             </SelectItem>
           ))}
           {currentUnavailable && (
-            <SelectItem value={currentRepositoryId}>
+            <SelectItem value={repositoryId}>
               {t("coordinator:editUnavailableRepository")}
             </SelectItem>
           )}
         </SelectContent>
       </Select>
-      {repositories.status === "error" && (
-        <div className="flex items-center gap-2">
-          <FieldError>{t("coordinator:editOptionsLoadFailed")}</FieldError>
-          <Button type="button" variant="ghost" size="sm" onClick={retry}>
-            {t("coordinator:tryAgain")}
-          </Button>
-        </div>
-      )}
+      {repositories.status === "error" && <LoadFailed busy={busy} retry={retry} />}
     </div>
   );
 }
@@ -217,7 +231,7 @@ function FieldServerError({
   serverError: EditFormServerError | null;
   field: string;
 }) {
-  if (serverError?.field !== field) return null;
+  if (!serverError || formErrorField(serverError) !== field) return null;
   return <FieldError>{serverError.message}</FieldError>;
 }
 
@@ -228,7 +242,7 @@ function GeneralServerError({
   serverError: EditFormServerError | null;
   alertRef: RefObject<HTMLDivElement | null>;
 }) {
-  if (!serverError || serverError.field) return null;
+  if (!serverError || formErrorField(serverError)) return null;
   return (
     <div
       ref={alertRef}
@@ -290,6 +304,9 @@ export function EditForm({
   const workflowKnown =
     options.workflows.status === "loaded" &&
     options.workflows.value.some((w) => w.id === workflowId);
+  // A failed workflow list keeps the current workflow selected and shows its
+  // snapshot outcome as usual (proposal-cards.md#cards "Edit form options").
+  const workflowResolved = workflowKnown || options.workflows.status === "error";
 
   // Changing the workflow resets the step to its start step when eligible,
   // else empty (proposal-cards.md#cards "Edit form options").
@@ -308,19 +325,21 @@ export function EditForm({
 
   useEffect(() => {
     if (!serverError) return;
-    if (serverError.field === "title") {
-      titleRef.current?.focus();
-    } else if (!serverError.field) {
+    const field = formErrorField(serverError);
+    if (field) {
+      document.getElementById(fieldElementIds[field])?.focus();
+    } else {
       alertRef.current?.focus();
     }
   }, [serverError]);
 
+  // Approve with edits needs a known workflow and a step among its eligible
+  // steps; a deleted workflow or an ineligible current step keeps it disabled
+  // until the user chooses one.
   const approveDisabled = useMemo(() => {
-    if (busy) return true;
-    if (options.workflows.status !== "loaded") return true;
-    if (workflowKnown && options.steps.status !== "loaded") return true;
-    return stepId === "";
-  }, [busy, options.workflows.status, options.steps.status, workflowKnown, stepId]);
+    if (busy || !workflowKnown || options.steps.status !== "loaded") return true;
+    return !options.steps.value.some((s) => s.id === stepId);
+  }, [busy, workflowKnown, options.steps, stepId]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -346,9 +365,9 @@ export function EditForm({
     <form className="space-y-3" onSubmit={handleSubmit}>
       <Field>
         <FieldContent>
-          <FieldLabel htmlFor="proposal-edit-title">{t("coordinator:editTitleLabel")}</FieldLabel>
+          <FieldLabel htmlFor={fieldElementIds.title}>{t("coordinator:editTitleLabel")}</FieldLabel>
           <Input
-            id="proposal-edit-title"
+            id={fieldElementIds.title}
             ref={titleRef}
             value={title}
             disabled={busy}
@@ -359,24 +378,28 @@ export function EditForm({
       </Field>
       <Field>
         <FieldContent>
-          <FieldLabel htmlFor="proposal-edit-description">
+          <FieldLabel htmlFor={fieldElementIds.description}>
             {t("coordinator:editDescriptionLabel")}
           </FieldLabel>
           <Textarea
-            id="proposal-edit-description"
+            id={fieldElementIds.description}
             value={description}
             disabled={busy}
             onChange={(e) => setDescription(e.target.value)}
           />
+          <FieldServerError serverError={serverError} field="description" />
         </FieldContent>
       </Field>
       <Field>
         <FieldContent>
-          <FieldLabel>{t("coordinator:editWorkflowLabel")}</FieldLabel>
+          <FieldLabel htmlFor={fieldElementIds.workflow_id}>
+            {t("coordinator:editWorkflowLabel")}
+          </FieldLabel>
           <WorkflowField
             workflows={options.workflows}
-            currentWorkflowId={workflowId}
             workflowId={workflowId}
+            fallbackName={options.snapshotWorkflowName}
+            busy={busy}
             onChange={setWorkflowId}
             retry={options.retryWorkflows}
           />
@@ -385,12 +408,14 @@ export function EditForm({
       </Field>
       <Field>
         <FieldContent>
-          <FieldLabel>{t("coordinator:editStepLabel")}</FieldLabel>
+          <FieldLabel htmlFor={fieldElementIds.step_id}>
+            {t("coordinator:editStepLabel")}
+          </FieldLabel>
           <StepField
-            workflowKnown={workflowKnown}
+            workflowResolved={workflowResolved}
             steps={options.steps}
-            currentStepId={stepId}
             stepId={stepId}
+            busy={busy}
             onChange={setStepId}
             retry={options.retrySteps}
           />
@@ -399,11 +424,13 @@ export function EditForm({
       </Field>
       <Field>
         <FieldContent>
-          <FieldLabel>{t("coordinator:editRepositoryLabel")}</FieldLabel>
+          <FieldLabel htmlFor={fieldElementIds.repository_id}>
+            {t("coordinator:editRepositoryLabel")}
+          </FieldLabel>
           <RepositoryField
             repositories={options.repositories}
-            currentRepositoryId={repositoryId}
             repositoryId={repositoryId}
+            busy={busy}
             onChange={(id) => setRepositoryId(id === NO_REPOSITORY ? "" : id)}
             retry={options.retryRepositories}
           />

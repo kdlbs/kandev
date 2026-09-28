@@ -166,17 +166,22 @@ export function useProposals(
     coordinatorId ? state.byCoordinator[coordinatorId] : undefined,
   );
   const seqRef = useRef(0);
+  const lastSucceededSeqRef = useRef(0);
 
+  // Overlapping reads are not cancelled: every response is merged and the
+  // merge rules decide which row wins (proposal-cards.md#client-store). The
+  // sequence only keeps a failure older than a later success from raising
+  // the input's error.
   const readPending = useCallback((ws: string, coordinator: string) => {
     const seq = ++seqRef.current;
     listProposals(ws, coordinator, "pending")
       .then((res) => {
-        if (seqRef.current !== seq) return;
+        lastSucceededSeqRef.current = Math.max(lastSucceededSeqRef.current, seq);
         useProposalsStore.getState().mergePendingList(coordinator, res.proposals);
         backfillDropped(ws, coordinator, new Set(res.proposals.map((p) => p.id)));
       })
       .catch(() => {
-        if (seqRef.current !== seq) return;
+        if (lastSucceededSeqRef.current > seq) return;
         useProposalsStore.getState().setPendingError(coordinator);
       });
   }, []);
@@ -250,17 +255,13 @@ export function useProposalById(
 ): UseProposalByIdResult {
   const proposal = useProposalRow(coordinatorId, proposalId);
   const [notFound, setNotFound] = useState(false);
-  const seqRef = useRef(0);
 
+  // Every response is merged whatever order it arrives in; the merge rules
+  // decide which row wins (proposal-cards.md#client-store).
   const read = useCallback((ws: string, coordinator: string, id: string) => {
-    const seq = ++seqRef.current;
     getProposal(ws, coordinator, id)
-      .then((row) => {
-        if (seqRef.current !== seq) return;
-        useProposalsStore.getState().mergeOne(coordinator, row);
-      })
+      .then((row) => useProposalsStore.getState().mergeOne(coordinator, row))
       .catch((error: unknown) => {
-        if (seqRef.current !== seq) return;
         if (error instanceof ApiError && error.status === 404) {
           useProposalsStore.getState().evict(coordinator, id);
           setNotFound(true);

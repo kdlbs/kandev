@@ -341,3 +341,80 @@ describe("useProposalById", () => {
     );
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const UPDATED_PAYLOAD = {
+  payload: { workspace_id: WORKSPACE_ID, coordinator_id: COORDINATOR_ID, open_proposals: 1 },
+};
+
+describe("overlapping reads", () => {
+  it("merges an earlier-issued pending read that answers last, letting the merge rules decide", async () => {
+    const first = deferred<{ proposals: Proposal[] }>();
+    const second = deferred<{ proposals: Proposal[] }>();
+    listProposalsMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const wsClient = makeWsClient();
+    clients.active = wsClient;
+
+    const { result } = renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID));
+    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
+    act(() => handler(UPDATED_PAYLOAD));
+
+    await act(async () => {
+      second.resolve({ proposals: [proposal({ id: "p-1", status: "pending", updated_at: T0 })] });
+    });
+    await act(async () => {
+      first.resolve({ proposals: [proposal({ id: "p-1", status: "approving", updated_at: T5 })] });
+    });
+
+    await waitFor(() => expect(result.current.proposals.value?.[0]?.status).toBe("approving"));
+  });
+
+  it("does not let an older failed pending read set the error after a newer read succeeded", async () => {
+    const first = deferred<{ proposals: Proposal[] }>();
+    listProposalsMock
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({ proposals: [proposal({ id: "p-1" })] });
+    const wsClient = makeWsClient();
+    clients.active = wsClient;
+
+    const { result } = renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID));
+    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
+    act(() => handler(UPDATED_PAYLOAD));
+    await waitFor(() => expect(result.current.proposals.value).toHaveLength(1));
+
+    await act(async () => {
+      first.reject(new Error("network"));
+    });
+    expect(result.current.proposals.error).toBe(false);
+  });
+
+  it("merges an earlier-issued by-id read that answers last", async () => {
+    const first = deferred<Proposal>();
+    const second = deferred<Proposal>();
+    getProposalMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const wsClient = makeWsClient();
+    clients.active = wsClient;
+
+    const { result } = renderHook(() => useProposalById(WORKSPACE_ID, COORDINATOR_ID, "p-1"));
+    const handler = wsClient.on.mock.calls[0]?.[1] as UpdatedHandler;
+    act(() => handler(UPDATED_PAYLOAD));
+
+    await act(async () => {
+      second.resolve(proposal({ id: "p-1", status: "pending", updated_at: T0 }));
+    });
+    await act(async () => {
+      first.resolve(proposal({ id: "p-1", status: "approved", updated_at: T5 }));
+    });
+
+    await waitFor(() => expect(result.current.proposal?.status).toBe("approved"));
+  });
+});

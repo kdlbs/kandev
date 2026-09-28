@@ -26,6 +26,8 @@ export type UseProposalEditOptionsResult = {
   retryWorkflows: () => void;
   retryRepositories: () => void;
   retrySteps: () => void;
+  /** The selected workflow's name from its snapshot; null until that snapshot loads. */
+  snapshotWorkflowName: string | null;
 };
 
 function toEligibleNode(step: WorkflowStepDTO): EligibleStepNode {
@@ -58,6 +60,7 @@ export function useProposalEditOptions(
   const [workflows, setWorkflows] = useState<OptionsField<Workflow>>(initialField);
   const [steps, setSteps] = useState<OptionsField<WorkflowStepDTO>>(initialField);
   const [repositories, setRepositories] = useState<OptionsField<Repository>>(initialField);
+  const [snapshotWorkflowName, setSnapshotWorkflowName] = useState<string | null>(null);
   const stepsSeqRef = useRef(0);
 
   const readWorkflows = useCallback(() => {
@@ -77,9 +80,11 @@ export function useProposalEditOptions(
   const readSteps = useCallback(() => {
     const seq = ++stepsSeqRef.current;
     setSteps(initialField());
+    setSnapshotWorkflowName(null);
     fetchWorkflowSnapshot(workflowId)
       .then((snapshot) => {
         if (stepsSeqRef.current !== seq) return;
+        setSnapshotWorkflowName(snapshot.workflow?.name ?? null);
         setSteps({ status: "loaded", value: eligibleSteps(snapshot.steps) });
       })
       .catch(() => {
@@ -107,5 +112,6 @@ export function useProposalEditOptions(
     retryWorkflows: readWorkflows,
     retryRepositories: readRepositories,
     retrySteps: readSteps,
+    snapshotWorkflowName,
   };
 }
