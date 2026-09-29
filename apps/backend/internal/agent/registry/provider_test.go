@@ -62,7 +62,7 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			wantOnlyMock:    false,
 		},
 		{
-			name:            "only: only mock-agent registered and enabled",
+			name:            "only: mock-agent enabled, optional native descriptor disabled",
 			envValue:        "only",
 			wantMockEnabled: true,
 			wantOnlyMock:    true,
@@ -102,9 +102,12 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			// Check agent count
 			all := reg.List()
 			if tt.wantOnlyMock {
-				if len(all) != 2 {
-					t.Errorf("only mode: expected mock agent plus virtual families, got %d", len(all))
+				if len(all) != 3 {
+					t.Errorf("only mode: expected mock agent, virtual family, and disabled native descriptor, got %d", len(all))
 				}
+			}
+			if native, exists := reg.Get("codex-app-server"); !exists || native.Enabled() {
+				t.Error("native Codex descriptor should remain registered but disabled by default")
 			}
 			if !reg.Exists(agents.DynamicAgentID) {
 				t.Error("dynamic virtual family should always be registered")
@@ -120,6 +123,24 @@ func TestProvide_MockAgentModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProvide_MockOnlyKeepsNativeCodexDisabled(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+
+	reg, cleanup, err := Provide(newTestLogger(), true)
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	native, exists := reg.Get("codex-app-server")
+	if !exists {
+		t.Fatal("native Codex descriptor should remain registered")
+	}
+	if native.Enabled() {
+		t.Fatal("native Codex must stay disabled while mock-only mode isolates inference")
 	}
 }
 

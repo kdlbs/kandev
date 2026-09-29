@@ -91,6 +91,16 @@ test.describe("mobile task launch failure recovery", () => {
 
       const sharedError = testPage.getByTestId("task-shared-error");
       await expect(sharedError).toBeVisible({ timeout: 30_000 });
+      const mobileLayout = testPage.getByTestId("mobile-task-layout");
+      const fixedHeader = mobileLayout.locator(":scope > div.fixed.top-0");
+      const [headerBox, errorBox] = await Promise.all([
+        fixedHeader.boundingBox(),
+        sharedError.boundingBox(),
+      ]);
+      expect(headerBox).not.toBeNull();
+      expect(errorBox).not.toBeNull();
+      if (!headerBox || !errorBox) throw new Error("mobile shared-error geometry is unavailable");
+      expect(errorBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
       await testPage.getByTestId("task-shared-error-details").tap();
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1);

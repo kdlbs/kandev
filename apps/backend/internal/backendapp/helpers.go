@@ -1334,6 +1334,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
 	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	taskH.SetBackgroundWorkEnabled(p.features.AgentBackgroundWork)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
 		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
@@ -2076,6 +2077,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	if p.agentSettingsController != nil {
+		mcpHandlers.SetAgentProfileVerifier(p.agentSettingsController)
+	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
 	}

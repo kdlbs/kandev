@@ -9,7 +9,15 @@ describe("dockview desktop layout registry", () => {
   });
 
   it("accepts every component the desktop renderer knows", () => {
-    for (const component of ["chat", "plan", "todos", "files", "changes", "prompt-history"]) {
+    for (const component of [
+      "chat",
+      "plan",
+      "todos",
+      "files",
+      "changes",
+      "prompt-history",
+      "background-work",
+    ]) {
       expect(DESKTOP_VALID_COMPONENTS.has(component)).toBe(true);
     }
   });

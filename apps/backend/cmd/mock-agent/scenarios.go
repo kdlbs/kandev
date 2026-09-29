@@ -38,6 +38,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":    scenarioUntrackedFileSetup,
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
+	"clarification-no-other":  scenarioClarificationNoOther,
 	"clarification-markdown":  scenarioClarificationMarkdown,
 	"clarification-multi":     scenarioClarificationMulti,
 	"clarification-timeout":   scenarioClarificationTimeout,
@@ -59,6 +60,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"goal-complete":           scenarioGoalComplete,
 	"goal-clear":              scenarioGoalClear,
 	"goal-long":               scenarioGoalLong,
+	"git-commit-permission":   scenarioGitCommitPermission,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -727,6 +729,7 @@ const (
 	clarificationPromptKey  = "prompt"
 	clarificationIDKey      = "id"
 	clarificationTitleKey   = "title"
+	clarificationCustomText = "allow_custom_text"
 )
 
 func mockOption(label, description string) map[string]any {
@@ -746,6 +749,22 @@ func clarificationQuestionArgs() map[string]any {
 					mockOption("PostgreSQL", "Relational database with strong consistency"),
 					mockOption("MongoDB", "Document database for flexible schemas"),
 					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+		},
+	}
+}
+
+func clarificationNoOtherQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:      "mode",
+				clarificationPromptKey:  "Choose a mode",
+				clarificationCustomText: false,
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Fast", "Prioritize quick completion"),
+					mockOption("Safe", "Prioritize additional checks"),
 				},
 			},
 		},
@@ -823,6 +842,18 @@ func scenarioClarification(e *emitter) {
 		return
 	}
 
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+func scenarioClarificationNoOther(e *emitter) {
+	fixedDelay(100)
+	e.text("Please choose one of the offered modes.")
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationNoOtherQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
 	fixedDelay(50)
 	e.text(fmt.Sprintf("You answered: %s", result))
 }

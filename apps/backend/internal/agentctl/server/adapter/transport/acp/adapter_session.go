@@ -20,6 +20,8 @@ const kandevMCPServerName = "kandev"
 
 const sessionTransitionPollInterval = 10 * time.Millisecond
 
+const configChangePollInterval = 10 * time.Millisecond
+
 // PublishesMCPAttachmentResults reports that this adapter emits attachment
 // results for the servers that survive its own capability filtering.
 func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
@@ -72,6 +74,33 @@ func (a *Adapter) lockSessionTransition(ctx context.Context) error {
 	}
 }
 
+// lockConfigChange serializes full config snapshots without making a canceled
+// request wait for another provider RPC to finish.
+func (a *Adapter) lockConfigChange(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ticker := time.NewTicker(configChangePollInterval)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if a.configChangeMu.TryLock() {
+			if err := ctx.Err(); err != nil {
+				a.configChangeMu.Unlock()
+				return err
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *Adapter) waitForSessionCleanup() {
 	a.sessionTransitionMu.Lock()
 	cleanupInFlight := a.sessionCleanupDone != nil
@@ -93,12 +122,25 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 
 //nolint:funlen // pre-existing session creation flow retained for transition ordering
 func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	// Session replacement and live config changes share one ordering boundary:
+	// each ACP response carries a complete config snapshot for its session.
+	if err := a.lockConfigChange(ctx); err != nil {
+		return "", err
+	}
+	defer a.configChangeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	a.mu.Lock()
 	conn := a.acpConn
 	a.mu.Unlock()
 
 	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -127,6 +169,9 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 			kind = streams.MCPAttachmentEvidenceFiltered
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
@@ -166,6 +211,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("failed to synchronize new session notifications: %w", barrierErr)
 	}
 
+	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.configGeneration++
@@ -174,10 +220,13 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	// state so a session without a model surface can't reuse the previous
 	// session's models / configOptions for validation in SetModel.
 	a.availableModels = nil
-	a.availableConfigOptions = nil
-	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
+	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
+	a.resetSessionModeLocked()
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
+	}
+	if resp.Modes == nil {
+		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
@@ -188,12 +237,16 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
-		a.emitInitialModeState(resp.Modes)
+		a.emitInitialModeState(sessionID, resp.Modes)
+	} else {
+		a.emitInitialModeConfigState(sessionID, initialConfigOptions)
 	}
 
 	// Emit session models when the session exposes a model-shaped config option.
 	if initialModels != nil {
 		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
+	} else if len(initialConfigOptions) > 0 {
+		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions)
 	}
 
 	// Emit session status event to normalize with other adapters.
@@ -239,6 +292,21 @@ func initialSessionModelState(
 		return &sessionModelState{}
 	}
 	return nil
+}
+
+func (a *Adapter) initialSessionConfigState(
+	meta map[string]any,
+	configOptions []acp.SessionConfigOption,
+	legacy *acp.LegacyModels,
+) (*sessionModelState, []streams.ConfigOption) {
+	models := initialSessionModelState(meta, configOptions, legacy)
+	var available []modelInfo
+	var currentModelID string
+	if models != nil {
+		available = models.AvailableModels
+		currentModelID = models.CurrentModelId
+	}
+	return models, a.dialect.sessionConfigOptions(meta, configOptions, available, currentModelID)
 }
 
 func hasModelConfigOption(options []streams.ConfigOption) bool {
@@ -450,6 +518,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		return err
 	}
 	defer a.sessionTransitionMu.Unlock()
+	if err := a.lockConfigChange(ctx); err != nil {
+		return err
+	}
+	defer a.configChangeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	a.mu.Lock()
 	conn := a.acpConn
@@ -458,6 +533,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
@@ -492,6 +570,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			kind = streams.MCPAttachmentEvidenceFiltered
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Suppress history replay notifications during load.
@@ -536,6 +617,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
 
+	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
+
 	// The SDK may finish the load RPC while replay notifications are still
 	// queued in the adapter worker. Keep suppression active until a FIFO barrier
 	// proves every replay frame has been processed, then mark replayed cumulative
@@ -553,10 +636,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Reset session-scoped model caches so a load that lands on a session
 	// without a model surface can't reuse the previous session's data.
 	a.availableModels = nil
-	a.availableConfigOptions = nil
-	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
+	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
+	a.resetSessionModeLocked()
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
+	}
+	if resp.Modes == nil {
+		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
@@ -567,13 +653,17 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
-		a.emitInitialModeState(resp.Modes)
+		a.emitInitialModeState(sessionID, resp.Modes)
+	} else {
+		a.emitInitialModeConfigState(sessionID, initialConfigOptions)
 	}
 
 	// Emit session models if the agent returned model state, or if it exposes
 	// model selection only through configOptions.
 	if initialModels != nil {
 		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
+	} else if len(initialConfigOptions) > 0 {
+		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions)
 	}
 
 	// Any Monitor still tracked at this point was running in pre-restart history
@@ -721,7 +811,7 @@ func (a *Adapter) emitReplayPlan(sessionID string, replayPlan *acp.SessionUpdate
 
 // emitInitialModeState emits a session_mode event from the session response's Modes field.
 // Called after session/new and session/load to provide the initial mode state.
-func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
+func (a *Adapter) emitInitialModeState(sessionID string, modes *acp.SessionModeState) {
 	availModes := make([]streams.SessionModeInfo, 0, len(modes.AvailableModes))
 	for _, m := range modes.AvailableModes {
 		availModes = append(availModes, streams.SessionModeInfo{
@@ -734,13 +824,58 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 	a.mu.Lock()
 	a.availableModes = availModes
 	a.mu.Unlock()
+	a.noteCurrentMode(sessionID, string(modes.CurrentModeId))
 
 	a.sendUpdate(AgentEvent{
 		Type:           streams.EventTypeSessionMode,
-		SessionID:      a.sessionID,
+		SessionID:      sessionID,
 		CurrentModeID:  string(modes.CurrentModeId),
 		AvailableModes: availModes,
 	})
+}
+
+func (a *Adapter) emitInitialModeConfigState(sessionID string, configOptions []streams.ConfigOption) {
+	modeOption, ok := modeConfigOption(configOptions)
+	if !ok {
+		return
+	}
+	availableModes := sessionModesFromConfigOption(modeOption)
+	a.mu.Lock()
+	if a.sessionID != sessionID || a.closed {
+		a.mu.Unlock()
+		return
+	}
+	a.availableModes = availableModes
+	a.mu.Unlock()
+	if modeOption.CurrentValue != "" {
+		a.noteCurrentMode(sessionID, modeOption.CurrentValue)
+	}
+	a.sendUpdate(AgentEvent{
+		Type:           streams.EventTypeSessionMode,
+		SessionID:      sessionID,
+		CurrentModeID:  modeOption.CurrentValue,
+		AvailableModes: availableModes,
+	})
+}
+
+func sessionModesFromConfig(options []streams.ConfigOption) ([]streams.SessionModeInfo, bool) {
+	modeOption, ok := modeConfigOption(options)
+	if !ok {
+		return nil, false
+	}
+	return sessionModesFromConfigOption(modeOption), true
+}
+
+func sessionModesFromConfigOption(option streams.ConfigOption) []streams.SessionModeInfo {
+	modes := make([]streams.SessionModeInfo, 0, len(option.Options))
+	for _, value := range option.Options {
+		modes = append(modes, streams.SessionModeInfo{
+			ID:          value.Value,
+			Name:        value.Name,
+			Description: value.Description,
+		})
+	}
+	return modes
 }
 
 // emitSessionModels emits a session_models event from the session response.
@@ -778,6 +913,14 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 		CurrentModelID: currentModelID,
 		SessionModels:  convertSessionModels(models.AvailableModels),
 		ConfigOptions:  configOptions,
+	})
+}
+
+func (a *Adapter) emitSessionConfigOptionsState(sessionID string, configOptions []streams.ConfigOption) {
+	a.sendUpdate(AgentEvent{
+		Type:          streams.EventTypeSessionModels,
+		SessionID:     sessionID,
+		ConfigOptions: cloneConfigOptions(configOptions),
 	})
 }
 
@@ -863,36 +1006,189 @@ func currentModelFromConfig(options []streams.ConfigOption) string {
 	return ""
 }
 
-// SetMode changes the agent's session mode via ACP session/set_mode.
-func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
+func currentModeFromConfig(options []streams.ConfigOption) string {
+	for _, option := range options {
+		if isModeConfigOption(option) {
+			return option.CurrentValue
+		}
+	}
+	return ""
+}
+
+// SetMode changes the agent's session mode via ACP session/set_mode and
+// reports what the agent actually ended up in.
+//
+// The emitted event carries the agent's reported mode, not the requested one.
+// Echoing the request made a clamped or ignored mode look identical to an
+// applied one.
+func (a *Adapter) SetMode(ctx context.Context, modeID string) (streams.ModeResult, error) {
+	return a.setSessionMode(ctx, modeID, "")
+}
+
+// setSessionMode applies a permission mode through the advertised mode config
+// option when available, then falls back to advertised legacy modes only when
+// the option method itself is not implemented.
+func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID string) (streams.ModeResult, error) {
+	if err := a.lockModeChange(ctx); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+	defer a.modeChangeMu.Unlock()
+	if err := a.lockConfigChange(ctx); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+	defer a.configChangeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
+	availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
+	cachedModels := append([]modelInfo(nil), a.availableModels...)
+	cachedConfig := cloneConfigOptions(a.availableConfigOptions)
 	a.mu.RUnlock()
 
 	if conn == nil {
-		return fmt.Errorf("adapter not initialized")
+		return streams.ModeResult{Requested: modeID}, fmt.Errorf("adapter not initialized")
+	}
+	if sessionID == "" {
+		return streams.ModeResult{Requested: modeID}, fmt.Errorf("no active session: call NewSession before SetMode")
+	}
+	generation := a.beginConfigChange()
+	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID)
+	if err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+	baseline, uncertain := a.beginModeChange()
+	unconfirmed := true
+	defer func() { a.endModeChange(unconfirmed) }()
+
+	request := sessionModeRequest{
+		conn: conn, sessionID: sessionID, modeID: modeID, option: modeOption,
+		legacyModes: availableModes, models: cachedModels, generation: generation,
+		baseline: baseline, uncertain: uncertain,
+	}
+	var result streams.ModeResult
+	if hasModeOption {
+		result, err = a.setConfigSessionMode(ctx, request)
+	} else {
+		result, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
+	}
+	if err != nil {
+		return result, err
+	}
+	if result.Confirmed {
+		unconfirmed = false
 	}
 
+	a.mu.RLock()
+	if a.sessionID != sessionID {
+		a.mu.RUnlock()
+		return result, nil
+	}
+	cachedModes := a.availableModes
+	a.mu.RUnlock()
+
+	reported, requested := sessionModeEventFields(modeID, result)
+	event := AgentEvent{
+		Type:           streams.EventTypeSessionMode,
+		SessionID:      sessionID,
+		CurrentModeID:  reported,
+		AvailableModes: cachedModes,
+	}
+	event.RequestedModeID = requested
+	a.sendUpdate(event)
+	return result, nil
+}
+
+func (a *Adapter) isActiveSession(sessionID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.sessionID == sessionID && !a.closed
+}
+
+func (a *Adapter) setLegacySessionMode(
+	ctx context.Context,
+	conn *acp.ClientSideConnection,
+	sessionID, modeID string,
+	afterGeneration uint64,
+	uncertain bool,
+) (streams.ModeResult, error) {
+	if err := ctx.Err(); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
 	_, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: acp.SessionId(sessionID),
 		ModeId:    acp.SessionModeId(modeID),
 	})
 	if err != nil {
-		return fmt.Errorf("set session mode failed: %w", err)
+		return streams.ModeResult{Requested: modeID}, fmt.Errorf("set session mode failed: %w", err)
 	}
+	result := a.awaitModeSettle(ctx, sessionID, modeID, afterGeneration)
+	if uncertain {
+		return streams.ModeResult{Requested: modeID}, nil
+	}
+	return result, nil
+}
 
-	a.mu.RLock()
-	cachedModes := a.availableModes
-	a.mu.RUnlock()
+func isModeConfigOption(option streams.ConfigOption) bool {
+	return option.Type == "select" && option.Category == string(acp.SessionConfigOptionCategoryMode)
+}
 
-	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionMode,
-		SessionID:      sessionID,
-		CurrentModeID:  modeID,
-		AvailableModes: cachedModes,
-	})
-	return nil
+func modeConfigOption(options []streams.ConfigOption) (streams.ConfigOption, bool) {
+	for _, option := range options {
+		if isModeConfigOption(option) {
+			return option, true
+		}
+	}
+	return streams.ConfigOption{}, false
+}
+
+func isModeConfigOptionID(options []streams.ConfigOption, configID string) bool {
+	for _, option := range options {
+		if option.ID == configID && isModeConfigOption(option) {
+			return true
+		}
+	}
+	return false
+}
+
+func configOptionAdvertisesValue(option streams.ConfigOption, value string) bool {
+	for _, candidate := range option.Options {
+		if candidate.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func legacyModesAdvertise(modes []streams.SessionModeInfo, modeID string) bool {
+	for _, mode := range modes {
+		if mode.ID == modeID {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionModeEventFields decides what a session-mode event reports after the
+// agent answered session/set_mode.
+//
+// Under ACP a successful answer means the mode changed, so only an observed
+// report can contradict it. Silence within the settle window leaves the
+// requested mode standing; the uncertainty belongs in ModeResult.Confirmed,
+// not in a current mode that would overwrite the caller's choice on persist.
+// An observed report that differs is a clamp, and carries the request
+// alongside it so the mismatch stays visible.
+func sessionModeEventFields(requested string, result streams.ModeResult) (currentModeID, requestedModeID string) {
+	if !result.Confirmed || result.Effective == "" {
+		return "", requested
+	}
+	if result.Effective == requested {
+		return requested, ""
+	}
+	return result.Effective, requested
 }
 
 // SetModel changes the agent's model via the ACP mechanism advertised by session/new.
@@ -900,20 +1196,17 @@ func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
 // fails before sending an RPC so callers do not wait for convergence that can
 // never arrive.
 func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
-	// Snapshot sessionID + cached state under a single RLock so the
-	// convergence event emitted on success is bound to the same session
-	// (and the same cached models/options) used to issue the RPC.
+	// Bind the request to this session. Read its config after acquiring the
+	// shared config gate so earlier changes have finished.
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
-	available := a.availableModels
-	cachedConfig := a.availableConfigOptions
 	a.mu.RUnlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
-	return a.setModelWithConn(ctx, conn, sessionID, modelID, available, cachedConfig)
+	return a.setModelWithConn(ctx, conn, sessionID, modelID)
 }
 
 func (a *Adapter) setModelWithConn(
@@ -921,12 +1214,23 @@ func (a *Adapter) setModelWithConn(
 	conn sessionmodel.SDKConn,
 	sessionID string,
 	modelID string,
-	available []modelInfo,
-	cachedConfig []streams.ConfigOption,
 ) error {
-	generation := a.beginConfigChange()
-	a.configChangeMu.Lock()
+	if err := a.lockConfigChange(ctx); err != nil {
+		return err
+	}
 	defer a.configChangeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.mu.RLock()
+	if a.sessionID != sessionID {
+		a.mu.RUnlock()
+		return nil
+	}
+	available := append([]modelInfo(nil), a.availableModels...)
+	cachedConfig := cloneConfigOptions(a.availableConfigOptions)
+	a.mu.RUnlock()
+	generation := a.beginConfigChange()
 	if !a.isCurrentConfigChange(sessionID, generation) {
 		return nil
 	}
@@ -941,6 +1245,9 @@ func (a *Adapter) setModelWithConn(
 		return err
 	}
 	if rpc != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		_, err = conn.UnstableSetSessionModel(ctx, rpc.request)
 		if !a.isCurrentConfigChange(sessionID, generation) {
 			return nil
@@ -968,6 +1275,9 @@ func (a *Adapter) setModelWithConn(
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	method, responseConfig, configID, err := applySessionModelWithConfigOptions(ctx, conn, sessionID, modelID, cachedConfig)
 	if !a.isCurrentConfigChange(sessionID, generation) {
 		return nil
@@ -1006,7 +1316,7 @@ func (a *Adapter) finalizeSetModel(
 		return
 	}
 	if len(responseConfig) > 0 {
-		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, expectedGeneration...)
+		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, false, expectedGeneration...)
 		return
 	}
 	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig, expectedGeneration...)
@@ -1125,10 +1435,33 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 	if sessionID == "" {
 		return fmt.Errorf("no active session: call NewSession before SetConfigOption")
 	}
+	if isModeConfigOptionID(cachedConfig, configID) {
+		result, err := a.setSessionMode(ctx, value, configID)
+		if err != nil {
+			return err
+		}
+		if !result.Confirmed {
+			return fmt.Errorf("requested mode %q was not confirmed by the agent", value)
+		}
+		return nil
+	}
 
-	generation := a.beginConfigChange()
-	a.configChangeMu.Lock()
+	if err := a.lockConfigChange(ctx); err != nil {
+		return err
+	}
 	defer a.configChangeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.mu.RLock()
+	if a.sessionID != sessionID {
+		a.mu.RUnlock()
+		return nil
+	}
+	cachedModels = append([]modelInfo(nil), a.availableModels...)
+	cachedConfig = cloneConfigOptions(a.availableConfigOptions)
+	a.mu.RUnlock()
+	generation := a.beginConfigChange()
 	if !a.isCurrentConfigChange(sessionID, generation) {
 		return nil
 	}
@@ -1144,6 +1477,9 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 		return err
 	}
 	if rpc != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		_, err = conn.UnstableSetSessionModel(ctx, rpc.request)
 		if !a.isCurrentConfigChange(sessionID, generation) {
 			return nil
@@ -1168,6 +1504,9 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 		return nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: acp.SessionId(sessionID),
@@ -1188,7 +1527,7 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 		return nil
 	}
 	if len(resp.ConfigOptions) > 0 {
-		a.emitAuthoritativeConfigOptions(sessionID, configID, resp.ConfigOptions, cachedModels, generation)
+		a.emitAuthoritativeConfigOptions(sessionID, configID, resp.ConfigOptions, cachedModels, false, generation)
 		return nil
 	}
 	if isModelConfigID(configID, cachedConfig) {
@@ -1204,6 +1543,7 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 	configID string,
 	options []acp.SessionConfigOption,
 	cachedModels []modelInfo,
+	correlatedModeResponse bool,
 	expectedGeneration ...uint64,
 ) {
 	configOptions := convertACPConfigOptions(options)
@@ -1228,6 +1568,23 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 		return
 	}
 	a.availableConfigOptions = configOptions
+	if modes, found := sessionModesFromConfig(configOptions); found {
+		a.availableModes = modes
+	}
+	modeEvent := (*AgentEvent)(nil)
+	if _, hasModeOption := modeConfigOption(configOptions); hasModeOption {
+		if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
+			a.noteConfigModeSnapshotLocked(sessionID, currentMode, correlatedModeResponse)
+		}
+		if !correlatedModeResponse {
+			modeEvent = &AgentEvent{
+				Type:           streams.EventTypeSessionMode,
+				SessionID:      sessionID,
+				CurrentModeID:  currentModeFromConfig(configOptions),
+				AvailableModes: append([]streams.SessionModeInfo(nil), a.availableModes...),
+			}
+		}
+	}
 	if isModelConfigID(configID, configOptions) {
 		if tracker := a.usageBySession[sessionID]; tracker != nil {
 			tracker.maxSize = 0
@@ -1235,6 +1592,9 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 		delete(a.contextSamples, sessionID)
 	}
 	a.mu.Unlock()
+	if modeEvent != nil {
+		a.sendUpdate(*modeEvent)
+	}
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see
 	// emitDialectContextWindow's doc comment for the deadlock this avoids.

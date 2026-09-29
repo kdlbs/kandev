@@ -279,12 +279,14 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   apiClient,
   seedData,
 }) => {
-  const { session } = await seedFullQueueTask(
+  const queueEvents = watchWs(testPage);
+  const { session, taskId, sessionId } = await seedFullQueueTask(
     testPage,
     apiClient,
     seedData,
     "Mobile queue management",
   );
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
 
   await expectFullQueueScrolls(session);
 
@@ -313,8 +315,13 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   );
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 
+  const clearResponse = queueEvents.waitForResponse("message.queue.cancel");
   await clear.tap();
-  await expect(panel).not.toBeVisible({ timeout: 10_000 });
+  expect((await clearResponse).payload.removed).toBe(9);
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(0);
+  await expect(panel).not.toBeVisible();
   await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 });

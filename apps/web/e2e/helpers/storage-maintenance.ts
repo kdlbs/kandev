@@ -29,6 +29,46 @@ export function seedSystemTemporaryFile(
   return { root, file };
 }
 
+export async function mockStorageDiskCapacity(
+  page: Page,
+  options: { temporaryUsedPercent?: number; temporaryAvailableBytes?: number } = {},
+): Promise<void> {
+  const temporaryUsedPercent = options.temporaryUsedPercent ?? 95;
+  const temporaryTotalBytes = 100 * 1024 ** 3;
+  const temporaryAvailableBytes =
+    options.temporaryAvailableBytes ??
+    Math.round((temporaryTotalBytes * (100 - temporaryUsedPercent)) / 100);
+  await page.route("**/api/v1/system/storage/disk", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        path: "/isolated/home",
+        total_bytes: temporaryTotalBytes,
+        used_bytes: temporaryTotalBytes * 0.6,
+        available_bytes: temporaryTotalBytes * 0.4,
+        used_percent: 60,
+        available: true,
+        observed_at: "2026-09-28T10:00:00.000Z",
+        temporary_roots: [
+          {
+            requested_path: "/isolated/tmp",
+            path: "/isolated/tmp",
+            aliases: [],
+            total_bytes: temporaryTotalBytes,
+            used_bytes: temporaryTotalBytes - temporaryAvailableBytes,
+            available_bytes: temporaryAvailableBytes,
+            used_percent: temporaryUsedPercent,
+            available: true,
+            observed_at: "2026-09-28T10:00:00.000Z",
+            shared_with_home: false,
+          },
+        ],
+      }),
+    });
+  });
+}
+
 export async function mockPartialSystemTemporaryOverview(page: Page, root: string): Promise<void> {
   await page.route("**/api/v1/system/storage", async (route) => {
     if (route.request().method() !== "GET") {
@@ -274,6 +314,78 @@ export async function mockTemporaryArtifactOverview(page: Page): Promise<void> {
       protected_bytes: 16 * 1024 * 1024,
       stale_count: 1,
       stale_bytes: 16 * 1024 * 1024,
+      skipped_count: 0,
+    };
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
+
+export async function mockTemporaryEntryBreakdown(page: Page): Promise<void> {
+  await page.route("**/api/v1/system/storage", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const requestHeaders = route.request().headers();
+    const response = await fetch(route.request().url(), {
+      headers: {
+        ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+        ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+      },
+    });
+    const body = JSON.parse(await response.text()) as {
+      capabilities: Record<string, unknown>;
+      summary: Record<string, unknown> | null;
+    };
+    body.capabilities.temporary_artifacts_available = true;
+    body.summary ??= {};
+    body.summary.system_temporary = {
+      status: "partial",
+      size_bytes: 1_200_000_000,
+      included_in_total: false,
+      roots: [
+        {
+          requested_path: "/isolated/tmp",
+          path: "/isolated/tmp",
+          status: "partial",
+          size_bytes: 1_200_000_000,
+          breakdown: {
+            status: "partial",
+            entries: [
+              {
+                name: "build-output",
+                kind: "directory",
+                size_bytes: 900_000_000,
+                completeness: "measured",
+                ownership: "untracked",
+              },
+              {
+                name: "active-profile",
+                kind: "directory",
+                completeness: "partial",
+                ownership: "unknown",
+              },
+            ],
+            other_observed_bytes: 100_000,
+            other_observed_count: 5,
+          },
+        },
+      ],
+    };
+    body.summary.temporary_artifacts = {
+      available: true,
+      total_count: 3,
+      total_bytes: 128 * 1024 ** 2,
+      active_count: 1,
+      active_bytes: 32 * 1024 ** 2,
+      protected_count: 1,
+      protected_bytes: 32 * 1024 ** 2,
+      stale_count: 1,
+      stale_bytes: 64 * 1024 ** 2,
       skipped_count: 0,
     };
     await route.fulfill({

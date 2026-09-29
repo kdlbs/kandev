@@ -454,6 +454,7 @@ type Repos struct {
 	TaskActivity                  repository.TaskActivityRepository
 	SubagentContexts              repository.SubagentContextRepository
 	Usage                         repository.UsageRepository
+	BackgroundWork                repository.BackgroundWorkRepository
 	AgentProfiles                 AgentProfileReader
 	AgentProfileExecutorValidator AgentProfileExecutorValidator
 }
@@ -490,6 +491,7 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	backgroundWork                  repository.BackgroundWorkRepository
 	agentProfiles                   AgentProfileReader
 	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
@@ -563,18 +565,19 @@ type Service struct {
 	// set (terminal, healed, or a live execution reappeared), which clears
 	// its entry so a later stall on the same session reports again. Accessed
 	// only from the reconciliation sweep's single goroutine.
-	stallNotifiedSessions       map[string]map[string]struct{}
-	remoteBranchLister          RemoteBranchLister
-	repositorySelectionResolver RepositorySelectionResolver
-	repoCloneLocation           RepoCloneLocation
-	blockers                    BlockerRepository
-	comments                    CommentRepository
-	taskStateActivity           TaskStateActivityLogger
-	secretStore                 secrets.SecretStore
-	workspaceSecretDeleter      WorkspaceSecretDeleter
-	baseBranchPusher            AgentBaseBranchPusher
-	comparisonTargetPusher      AgentComparisonTargetPusher
-	runtimeOverridesMu          sync.Mutex
+	stallNotifiedSessions          map[string]map[string]struct{}
+	remoteBranchLister             RemoteBranchLister
+	repositorySelectionResolver    RepositorySelectionResolver
+	repoCloneLocation              RepoCloneLocation
+	blockers                       BlockerRepository
+	comments                       CommentRepository
+	taskStateActivity              TaskStateActivityLogger
+	secretStore                    secrets.SecretStore
+	workspaceSecretDeleter         WorkspaceSecretDeleter
+	baseBranchPusher               AgentBaseBranchPusher
+	comparisonTargetPusher         AgentComparisonTargetPusher
+	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
+	runtimeOverridesMu             sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -803,6 +806,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		taskActivity:                  repos.TaskActivity,
 		subagentContexts:              repos.SubagentContexts,
 		usage:                         repos.Usage,
+		backgroundWork:                repos.BackgroundWork,
 		agentProfiles:                 repos.AgentProfiles,
 		agentProfileExecutorValidator: repos.AgentProfileExecutorValidator,
 		eventBus:                      eventBus,

@@ -55,7 +55,7 @@ func TestObserveProviderDiagnosticAfterTerminalFailureClearedIsNoOp(t *testing.T
 	service.clearPromptAttemptEvidence("session-1", "execution-1", 5)
 
 	// Late-arriving diagnostic notification for the already-cleared attempt.
-	service.observeProviderDiagnostic("session-1", "execution-1", 5, diagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 5, "", diagnostic)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",

@@ -911,8 +911,8 @@ subscription vocabulary and wildcard rules are in the
 | Exact task update          | `HostV2(host)` and `ExactHost.UpdateTaskExact`                                                                                   | Declared `api_write: tasks` plus active workspace grant for `host.v2.write:tasks`                                                                 | Optional Host v2 extension; requires task `resource_version`, approval revision, manifest digest, and idempotency key. Writes title, description, state, or priority                                                                                                                      |
 | Exact task commands        | `HostTaskCommands(host)`, `CreateTask`, `SetLabels`, `Assign`, `Move`, `Archive`, `AddRelation`, `RemoveRelation`, `SendMessage` | Task writes require `api_write: tasks` plus `host.v2.write:tasks`; messages require `api_write: messages` plus `host.v2.write:messages`           | Version-checked commands return durable receipts; when a management claim is active, task mutations and message admission also require the current manager instance key and claim generation                                                                                           |
 | Workspace administration  | `HostWorkspaceAdministration(host)`, `Apply`                                                                                   | Defaults: `api_write: workspaces` plus `host.v2.write:workspaces`; workflows and steps: `api_write: workflows` plus `host.v2.write:workflows`; repositories: `api_write: repositories` plus `host.v2.write:repositories` | One typed operation per call. Commands use observed versions, approval revision, manifest digest, and an idempotency key. Only supported non-destructive settings are available.                                                                                                      |
-| Task management claims    | `HostTaskManagementClaims(host)`, `Acquire`, `Transfer`, `Release`                                                               | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Optional task owner, independent of worker assignment; claim changes compare task and claim versions and create an audit entry; claims never time out into another owner                                                                                                                  |
-| Completion gates          | `HostTaskCompletionGates(host)`, `SetCriteria`, `Verify`                                                                         | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Task-version, criteria-revision, claim-generation, and idempotency fenced; returns typed criteria, evidence, and blockers; weakening unmet requirements and one-move overrides remain native human actions                                                                                 |
+| Task management claims    | `HostTaskManagementClaims(host)`, `Acquire`, `Transfer`, `Release`                                                               | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Optional task owner, separate from worker assignment; version-checked changes create audit entries; claims never time out. Human transfer and release use existing authorized APIs outside the plugin Host API. Task detail has no claim inspection or recovery dialog.                    |
+| Completion gates          | `HostTaskCompletionGates(host)`, `SetCriteria`, `Verify`                                                                         | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Task-version, criteria-revision, claim-generation, and idempotency fenced; returns typed criteria, evidence, and blockers. Plugins cannot weaken unmet criteria or issue human overrides. Human recovery APIs remain outside the plugin Host API. Task detail has no gate inspection or recovery dialog. |
 | Task directives            | `IssueDirective`, `ResolveDirective`                                                                                             | `api_write: task_directives` plus `host.v2.write:task_directives`; delegated capability must also be approved for the target                      | Short-lived, version-fenced request records; instruction and resolution bodies are represented by digests                                                                                                                                                                                 |
 | Native task deletion       | `PluginOwnedTaskTrees().Preview`; legacy `Delete` remains in the v1 SDK                                                          | Preview is source-scoped; native deletion is a Human-only task UI action                                                                          | The current Host denies plugin `Delete` with `PermissionDenied` and `native_human_confirmation_required`; see [deletion consent](#native-task-deletion-consent)                                                                                                                           |
 | Exact execution controls   | `HostExecutionCommands(host)`: `EnsureTaskRun`, `StopTaskRun`, `RecoverSession`, `CancelPendingTaskTransition`, `GetSessionModeContext`, `SetSessionMode` | Writes require `api_write: execution` plus `host.v2.write:execution`; mode reads require `api_read: sessions` plus `host.v2.read:sessions` | Exact task/session versions, execution IDs, and the observed management claim generation fence controls; the Host derives the caller installation and serializes effects with ownership changes. Recovery uses normal launch admission; unsafe provider modes are filtered |
@@ -1143,11 +1143,12 @@ instance key and expected claim generation while a claim is active. Do not
 silently reacquire a claim after a conflict; reload the owner and request an
 explicit transfer.
 
-Claims do not change the worker agent assignment. Native task detail shows the
-manager and its audit history and allows a human to transfer the claim to
-themselves or release it, including when the plugin is disabled or removed.
-Human actions require a reason and compare the same task and claim versions.
-No timeout silently replaces the manager.
+Claims do not change the worker agent assignment. Existing authorized human APIs
+support claim inspection, transfer, and release, including when the plugin is
+disabled or removed. These APIs are outside the plugin Host API. Transfer and
+release require a reason and compare task and claim versions. Native task detail
+does not show claim history or provide recovery dialogs. No timeout silently
+replaces the manager.
 
 Use `pluginsdk.HostTaskCompletionGates(host)` to set task-owned completion
 criteria or record typed evidence. Both commands require the task resource
@@ -1155,11 +1156,13 @@ version, completion-set revision, a stable idempotency key, the workspace grant,
 and the current management instance key and generation. The Host derives the
 plugin actor from its authenticated installation and returns the canonical gate
 snapshot. Supported evidence subjects are task revisions, completed execution
-IDs, immutable artifact revisions, and GitHub pull-request heads. A plugin
-cannot remove or weaken a currently unmet requirement without the human
-confirmation available in native task detail, and it cannot issue the
-one-move completion override. Completion rechecks evidence in the final task
-transition, so stale evidence remains blocked even after a previous verification.
+IDs, immutable artifact revisions, and GitHub pull-request heads. Plugins cannot
+remove or weaken unmet requirements as a human action, and they cannot issue the
+one-move completion override. Existing authorized human APIs retain these
+recovery actions outside the plugin Host API. Native task detail has no gate
+inspection or recovery dialog.
+Completion rechecks evidence in the final task transition, so stale evidence
+remains blocked after a previous verification.
 
 ```go
 gates, supported := pluginsdk.HostTaskCompletionGates(host)
