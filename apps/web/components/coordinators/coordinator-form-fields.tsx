@@ -20,6 +20,7 @@ import type { CoordinatorFieldError } from "@/lib/coordinators/field-error";
 import type { ProfileStatus } from "@/lib/api/domains/coordinator-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Executor } from "@/lib/types/http";
+import { LONG_TEXT_FIELD_CLASS } from "./long-text-field";
 
 export type CoordinatorFormFieldsProps = {
   form: CoordinatorFormState;
@@ -154,6 +155,7 @@ export function CoordinatorFormFields({
         <Label htmlFor="coordinator-context">{t("coordinator:contextLabel")}</Label>
         <Textarea
           id="coordinator-context"
+          className={LONG_TEXT_FIELD_CLASS}
           value={form.context}
           disabled={disabled}
           onChange={(event) => onChange("context", event.target.value)}
