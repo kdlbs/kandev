@@ -9,6 +9,8 @@ import {
 } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useVisibleItems } from "./startup-rows";
+import { useCopilotActivity } from "@/app/coordinator/copilot/use-copilot-activity";
+import { ActivityStatusSlot } from "@/app/coordinator/copilot/activity-status-line";
 import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
 import {
   ChatInputArea,
@@ -40,6 +42,9 @@ type QuickChatContentProps = {
   transformOutgoing?: (message: string) => string;
   /** See {@link useVisibleItems}. */
   hideStartupRows?: boolean;
+  /** Coordinator copilot: one status line while a turn runs, one chip of tool
+   *  calls after it. See {@link useCopilotActivity}. */
+  activityDisplay?: boolean;
 };
 
 /** Bundles the composer-priming hooks: a rejected launch prompt is restored
@@ -118,6 +123,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   initialDraft,
   transformOutgoing,
   hideStartupRows,
+  activityDisplay = false,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
@@ -125,7 +131,8 @@ export const QuickChatContent = memo(function QuickChatContent({
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
-  const items = useVisibleItems(panelState.groupedItems, hideStartupRows);
+  const activity = useCopilotActivity(activityDisplay, panelState);
+  const items = useVisibleItems(activity.items, hideStartupRows);
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
@@ -189,6 +196,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         shortcutScopeRef={shortcutScopeRef}
         maxHeightVh={35}
       />
+      <ActivityStatusSlot line={activity.statusLine} />
       <ChatInputArea
         chatInputRef={chatInputRef}
         clarificationKey={clarificationKey}
