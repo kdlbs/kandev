@@ -304,15 +304,10 @@ func (s *Store) DeleteCoordinator(ctx context.Context, workspaceID, id string) e
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if dialect.IsPostgres(s.db.DriverName()) {
-		var locked string
-		err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT id FROM coordinators WHERE id = ? AND workspace_id = ? FOR UPDATE`), id, workspaceID).Scan(&locked)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("lock coordinator for delete: %w", err)
-		}
+	if _, err := lockedCoordinatorRow(
+		ctx, tx, tx.Rebind, workspaceID, id, dialect.IsPostgres(s.db.DriverName()),
+	); err != nil {
+		return err
 	}
 	if err := deleteCoordinatorPhase3Rows(ctx, tx, "= ?", id); err != nil {
 		return err
@@ -570,7 +565,7 @@ func nullableInt64(v *int64) sql.NullInt64 {
 func lockedCoordinatorRow(ctx context.Context, exec coordinatorExec, rebind func(string) string, workspaceID, id string, forUpdate bool) (*coordinatorRow, error) {
 	query := `SELECT ` + coordinatorColumns + ` FROM coordinators WHERE id = ? AND workspace_id = ?`
 	if forUpdate {
-		query += " FOR UPDATE"
+		query += forUpdateClause
 	}
 	var row coordinatorRow
 	err := exec.QueryRowContext(ctx, rebind(query), id, workspaceID).Scan(

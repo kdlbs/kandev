@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -20,11 +18,15 @@ func (s *Store) DeleteWorkspaceState(ctx context.Context, workspaceID string) er
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	coordinatorQuery := `SELECT id FROM coordinators WHERE workspace_id = ? ORDER BY id`
 	if dialect.IsPostgres(s.db.DriverName()) {
-		if err := lockWorkspaceCoordinators(ctx, tx, workspaceID); err != nil {
-			return err
-		}
+		coordinatorQuery += forUpdateClause
 	}
+	var coordinatorIDs []string
+	if err := tx.SelectContext(ctx, &coordinatorIDs, tx.Rebind(coordinatorQuery), workspaceID); err != nil {
+		return fmt.Errorf("lock workspace coordinators: %w", err)
+	}
+
 	if err := deleteCoordinatorPhase3Rows(ctx, tx, "IN (SELECT id FROM coordinators WHERE workspace_id = ?)", workspaceID); err != nil {
 		return err
 	}
@@ -49,18 +51,4 @@ func (s *Store) DeleteWorkspaceState(ctx context.Context, workspaceID string) er
 		return fmt.Errorf("commit delete workspace coordinator state: %w", err)
 	}
 	return nil
-}
-
-// lockWorkspaceCoordinators takes the row locks of every coordinator in the
-// workspace, in id order, so a concurrent locked write finishes before the
-// deletion and none starts after it.
-func lockWorkspaceCoordinators(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`SELECT id FROM coordinators WHERE workspace_id = ? ORDER BY id FOR UPDATE`), workspaceID)
-	if err != nil {
-		return fmt.Errorf("lock workspace coordinators: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-	}
-	return rows.Err()
 }

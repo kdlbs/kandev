@@ -78,12 +78,16 @@ func (s *Store) withCoordinatorLockPostgres(ctx context.Context, coordinatorID s
 	return nil
 }
 
+// forUpdateClause is the PostgreSQL row-lock suffix; SQLite takes its write
+// lock by transaction instead.
+const forUpdateClause = " FOR UPDATE"
+
 // lockCoordinatorRow confirms the coordinator row exists on the locked handle;
 // on PostgreSQL the FOR UPDATE read is what takes the row lock.
 func lockCoordinatorRow(ctx context.Context, exec coordinatorExec, rebind func(string) string, coordinatorID string, forUpdate bool) error {
 	query := `SELECT id FROM coordinators WHERE id = ?`
 	if forUpdate {
-		query += " FOR UPDATE"
+		query += forUpdateClause
 	}
 	var id string
 	if err := exec.QueryRowContext(ctx, rebind(query), coordinatorID).Scan(&id); err != nil {
