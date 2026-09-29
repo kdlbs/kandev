@@ -20,6 +20,8 @@ import {
   DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useWorkflowOptionPreviews } from "@/hooks/use-workflow-option-previews";
+import type { WorkflowOptionPreview } from "@/hooks/use-workflow-option-previews";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { AgentLogo } from "@/components/agent-logo";
@@ -45,7 +47,7 @@ function InlineSteps({
   const { t } = useTranslation();
   if (steps.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
       {steps.map((s, i) => {
         const stepProfile = s.agent_profile_id
           ? agentProfiles.find((p) => p.id === s.agent_profile_id)
@@ -53,12 +55,12 @@ function InlineSteps({
         return (
           <Fragment key={s.id}>
             {i > 0 && <span className="text-muted-foreground/40">{"\u2192"}</span>}
-            <span className="flex items-center gap-1">
+            <span className="flex min-w-0 items-center gap-1">
               <span
                 className="h-1.5 w-1.5 rounded-full shrink-0"
                 style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
               />
-              {s.title}
+              <span className="min-w-0 wrap-anywhere">{s.title}</span>
               {s.is_start_step && (
                 <TooltipProvider>
                   <Tooltip>
@@ -105,6 +107,7 @@ type WorkflowSelectorRowProps = {
   onWorkflowChange: (workflowId: string) => void;
   agentProfiles: AgentProfileOption[];
   launchPreview?: TaskCreateLaunchPreview | null;
+  previewWorkspaceId?: string | null;
   clearLabel?: string;
   placeholder?: string;
 };
@@ -195,6 +198,110 @@ function LaunchDestinationLabel({ stepName }: { stepName: string }) {
   );
 }
 
+type WorkflowItem = WorkflowSelectorRowProps["workflows"][number];
+
+function getOptionSteps(
+  taskCreatePreviewMode: boolean,
+  preview: WorkflowOptionPreview | undefined,
+  snapshot: WorkflowSnapshotData | undefined,
+): StepItem[] {
+  if (taskCreatePreviewMode) {
+    return preview?.status === "success" ? preview.steps : [];
+  }
+  return snapshot ? [...snapshot.steps].sort((a, b) => a.position - b.position) : [];
+}
+
+function WorkflowOption({
+  workflow,
+  snapshot,
+  preview,
+  isSelected,
+  taskCreatePreviewMode,
+  agentProfiles,
+  onWorkflowChange,
+  onClose,
+  onRetry,
+}: {
+  workflow: WorkflowItem;
+  snapshot: WorkflowSnapshotData | undefined;
+  preview: WorkflowOptionPreview | undefined;
+  isSelected: boolean;
+  taskCreatePreviewMode: boolean;
+  agentProfiles: AgentProfileOption[];
+  onWorkflowChange: (workflowId: string) => void;
+  onClose: () => void;
+  onRetry: (workflowId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const steps = getOptionSteps(taskCreatePreviewMode, preview, snapshot);
+  const workflowProfile = workflow.agent_profile_id
+    ? agentProfiles.find((profile) => profile.id === workflow.agent_profile_id)
+    : null;
+
+  return (
+    <div
+      className="flex min-w-0 items-start gap-1 rounded-sm pr-1"
+      data-testid={`workflow-option-${workflow.id}`}
+    >
+      <button
+        type="button"
+        aria-pressed={isSelected}
+        data-testid={`workflow-option-select-${workflow.id}`}
+        onClick={() => {
+          onWorkflowChange(workflow.id);
+          onClose();
+        }}
+        className="relative flex min-h-[48px] min-w-0 flex-1 cursor-pointer flex-col gap-1 rounded-sm px-2 py-1.5 pr-8 text-left transition-colors hover:bg-muted"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 break-words text-sm">{workflow.name}</span>
+          {workflowProfile && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span data-testid="workflow-agent-logo">
+                    <AgentLogo
+                      agentName={workflowProfile.agent_name}
+                      size={14}
+                      className="shrink-0"
+                    />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{workflowProfile.label}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
+        {steps.length > 0 && (
+          <div
+            className="min-w-0 pl-[calc(0.875rem+0.5rem)]"
+            data-testid={`workflow-option-steps-${workflow.id}`}
+          >
+            <InlineSteps steps={steps} agentProfiles={agentProfiles} />
+          </div>
+        )}
+        <WorkflowPreviewStatus preview={taskCreatePreviewMode ? preview : undefined} />
+        {isSelected && <IconCheck className="absolute right-2 top-3 h-4 w-4" aria-hidden="true" />}
+      </button>
+      {preview?.status === "error" && (
+        <Button
+          type="button"
+          variant="ghost"
+          className={controlSizingClassName(
+            "standard",
+            "[@media(pointer:coarse)]:min-h-[48px] shrink-0 px-2 text-xs",
+          )}
+          data-testid={`workflow-preview-retry-${workflow.id}`}
+          onClick={() => onRetry(workflow.id)}
+        >
+          {t("common:retryPreview")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   workflows,
   snapshots,
@@ -202,11 +309,18 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   onWorkflowChange,
   agentProfiles,
   launchPreview,
+  previewWorkspaceId,
   clearLabel,
   placeholder,
 }: WorkflowSelectorRowProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const taskCreatePreviewMode = previewWorkspaceId !== undefined;
+  const { previews, retry } = useWorkflowOptionPreviews(
+    taskCreatePreviewMode ? previewWorkspaceId : null,
+    open && taskCreatePreviewMode,
+    taskCreatePreviewMode ? workflows.map((workflow) => workflow.id) : [],
+  );
 
   const selectedWorkflow = useMemo(
     () => workflows.find((w) => w.id === selectedWorkflowId),
@@ -224,72 +338,66 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
           </>
         )}
       </div>
-      <PopoverContent className="w-auto min-w-[300px] max-w-none p-1" align="start">
-        <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
+      <PopoverContent
+        className="max-h-[var(--radix-popover-content-available-height)] w-[min(30rem,calc(100vw-1rem))] min-w-0 max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-1"
+        align="start"
+        collisionPadding={8}
+        data-testid="workflow-selector-popover"
+      >
+        <div className="shrink-0 border-b px-2 py-1.5 text-xs text-muted-foreground">
           {t("workflows:workflow")}
         </div>
-        {clearLabel ? (
-          <button
-            type="button"
-            onClick={() => {
-              onWorkflowChange("");
-              setOpen(false);
-            }}
-            className="min-h-11 w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
-          >
-            {clearLabel}
-          </button>
-        ) : null}
-        {workflows.map((wf) => {
-          const isSelected = wf.id === selectedWorkflowId;
-          const snapshot = snapshots[wf.id];
-          const steps = snapshot ? [...snapshot.steps].sort((a, b) => a.position - b.position) : [];
-          return (
+        <div
+          className="min-h-0 max-h-[min(32rem,calc(var(--radix-popover-content-available-height)-3rem))] overflow-y-auto overflow-x-hidden overscroll-contain"
+          data-testid="workflow-selector-option-list"
+        >
+          {clearLabel ? (
             <button
-              key={wf.id}
               type="button"
               onClick={() => {
-                onWorkflowChange(wf.id);
+                onWorkflowChange("");
                 setOpen(false);
               }}
-              className="relative flex min-h-11 w-full cursor-pointer flex-col gap-1 rounded-sm px-2 py-1.5 pr-8 text-left transition-colors hover:bg-muted"
+              className="min-h-11 w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
             >
-              <div className="flex items-center gap-2">
-                <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="text-sm">{wf.name}</span>
-                {wf.agent_profile_id &&
-                  (() => {
-                    const wfProfile = agentProfiles.find((p) => p.id === wf.agent_profile_id);
-                    return wfProfile ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span data-testid="workflow-agent-logo">
-                              <AgentLogo
-                                agentName={wfProfile.agent_name}
-                                size={14}
-                                className="shrink-0"
-                              />
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{wfProfile.label}</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : null;
-                  })()}
-              </div>
-              {steps.length > 0 && (
-                <div className="pl-[calc(0.875rem+0.5rem)]">
-                  <InlineSteps steps={steps} agentProfiles={agentProfiles} />
-                </div>
-              )}
-              {isSelected && (
-                <IconCheck className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4" />
-              )}
+              {clearLabel}
             </button>
-          );
-        })}
+          ) : null}
+          {workflows.map((workflow) => (
+            <WorkflowOption
+              key={workflow.id}
+              workflow={workflow}
+              snapshot={snapshots[workflow.id]}
+              preview={previews[workflow.id]}
+              isSelected={workflow.id === selectedWorkflowId}
+              taskCreatePreviewMode={taskCreatePreviewMode}
+              agentProfiles={agentProfiles}
+              onWorkflowChange={onWorkflowChange}
+              onClose={() => setOpen(false)}
+              onRetry={retry}
+            />
+          ))}
+        </div>
       </PopoverContent>
     </Popover>
   );
 });
+
+function WorkflowPreviewStatus({ preview }: { preview?: WorkflowOptionPreview }) {
+  const { t } = useTranslation();
+  if (!preview || (preview.status === "success" && preview.steps.length > 0)) return null;
+  let message: string;
+  if (preview.status === "loading") {
+    message = t("workflows:loadingSteps");
+  } else if (preview.status === "error") {
+    message = t("workflows:failedToLoadWorkflowSteps");
+  } else {
+    message = t("workflows:noStepsInThisWorkflow");
+  }
+
+  return (
+    <span className="pl-[calc(0.875rem+0.5rem)] text-xs text-muted-foreground" role="status">
+      {message}
+    </span>
+  );
+}
