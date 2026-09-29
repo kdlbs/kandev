@@ -18,6 +18,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-EVERYWHERE-001.6
   - AC-COORDINATOR-COPILOT-EVERYWHERE-001.7
   - AC-COORDINATOR-COPILOT-EVERYWHERE-001.8
+  - AC-COORDINATOR-COPILOT-EVERYWHERE-001.9
   - AC-COORDINATOR-COPILOT-EVERYWHERE-002.1
   - AC-COORDINATOR-COPILOT-EVERYWHERE-002.2
   - AC-COORDINATOR-COPILOT-EVERYWHERE-002.3
@@ -80,6 +81,13 @@ around.
   or an unknown task or workflow id.
 - The router hook that returns the resolved route kind with the same feature
   options `SpaRoutes` passes, shared by the host and `SpaRoutes`.
+- Put `identifier` into `snapshotToState` (`apps/web/lib/ssr/mapper.ts`) and
+  `identifier` and `workspaceId` into the boot whitelist in
+  `apps/backend/internal/backendapp/boot_state_routes.go`, with a test in each
+  (the task chip's label source, `002.1`); a launcher of its own with the
+  string "Ask your coordinator" placed above `WalkthroughOverlay`'s launcher
+  and the phone bottom navigation (`001.1`, `001.7`); request identity and
+  stale-response dropping (`001.9`).
 - The coordinator list read, its re-read triggers and the coordinator GET
   re-fetch rules of the design's Host and Chip sections; `001.8`.
 
@@ -123,7 +131,8 @@ Phone: full-screen sheet with Close; the chip sits above the composer.
 ## Verification
 
 ```bash
-cd apps/web && pnpm test -- hooks/domains/coordinator
+cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot components/task/chat/messages lib/ssr lib/coordinator
+make -C apps/backend test PKG=./internal/backendapp/...
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 make -C apps/backend test PKG=./internal/coordinator/...
 cd apps/web && pnpm e2e:run tests/coordinator/copilot-everywhere.spec.ts
@@ -139,7 +148,11 @@ sees no launcher; phone opens a sheet.
 ## Likely files
 
 - `apps/web/app/coordinator/copilot/workspace-copilot-host.tsx`,
-  `coordinator-switcher.tsx`, `coordinator-copilot-chip.tsx`
+  `coordinator-switcher.tsx`, `workspace-copilot-launcher.tsx`,
+  `workspace-page-chip.tsx` (new; the existing
+  `coordinator-copilot-chip.tsx` is the phase-1 **Ask about this** chip and is
+  left unchanged), `apps/web/lib/ssr/mapper.ts`,
+  `apps/backend/internal/backendapp/boot_state_routes.go`
 - `apps/web/hooks/domains/coordinator/copilot-store.ts` (factory),
   `apps/web/app/coordinator/copilot/coordinator-copilot.tsx`,
   `use-coordinator-copilot.ts`, `apps/web/components/coordinator-copilot-reset-bridge.tsx`,

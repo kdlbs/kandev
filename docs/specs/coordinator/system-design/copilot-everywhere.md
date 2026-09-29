@@ -95,9 +95,19 @@ nothing is requested before then. The list is read when the host becomes
 eligible by checks 1 to 4 (entering a workspace page from any other page), when
 `workspaces.activeId` changes and when the panel opens; a coordinator created
 or deleted elsewhere therefore appears or disappears at the next of those, and
-not by push. While the list is undefined (loading) or its latest read failed
+not by push. While the list is undefined (loading) or its first read failed
 with no earlier value, check 5 fails: no launcher, and the host does nothing
-else. A failed re-read keeps the previous list. A list read that returns empty
+else. A re-read made when the panel opens keeps the previous list while it is in
+flight and when it fails, so check 5 keeps holding and the panel stays open;
+only the first read after eligibility or a workspace change gates the launcher
+(`001.1`). Every list read, open sequence and coordinator GET carries the
+`(workspaceId, coordinatorId, route key)` it was made for and a per-kind
+sequence number; a response whose triple no longer matches the host's, or that
+is not the latest request of its kind, is dropped without effect (`001.9`).
+Opening the panel chooses the coordinator from the list as it is and starts the
+open sequence at once, without waiting for the re-read; if the re-read then no
+longer holds that coordinator, `001.8` switches and the first open sequence's
+result is dropped by the rule above. A list read that returns empty
 while the panel is open closes the panel and the launcher goes ([Choosing the
 coordinator](#choosing-the-coordinator), `001.8`).
 
@@ -115,6 +125,22 @@ coordinator's Needs you), and has no Expand (`001.4`). Following that link
 leaves the workspace pages, so the panel is closed (above); the coordinator
 page's own copilot opens by its own rules. The mockups' Expand icon is not
 built, and where a mockup and an AC disagree the AC governs.
+
+**The launcher.** The closed launcher is the host's own control, not the
+phase-1 one: its accessible name and tooltip are the new string "Ask your
+coordinator", it names no coordinator and shows no working state, and no
+coordinator GET is made while the panel is closed. The coordinator is chosen
+when the panel opens (see [Choosing the coordinator](#choosing-the-coordinator)).
+It is fixed at the bottom right; on a task page that shows `WalkthroughOverlay`'s
+launcher (same corner) it sits directly above that launcher, and on a phone its
+offset clears the bottom navigation's height plus the safe-area inset, with a
+stacking order above it (`001.7`). The launcher's strings go through `t()` in
+all six locales.
+
+**Task page load failure.** The host follows `workspaces.activeId` only. If a
+task page fails to load, `activeId` is unchanged: the panel stays open for the
+previous workspace, its coordinators are that workspace's, and the page context
+is `null` (no chip) because the task never reaches the store (`001.5`).
 
 **Reuse boundary.** `CoordinatorCopilot` today owns both its launcher and its
 `RightSidePanel`, and reads a module singleton store. The host cannot render
@@ -137,8 +163,10 @@ export as the instance the factory made for the Coordinator screens, and `useCoo
 store handle as a parameter (default: the singleton). The Coordinator screens
 keep that instance, its reset rules and the bridge, which acts only on it; the
 bridge's `keepOnlyFor(null)` on every non-coordinator path must never touch the
-host's instance. The host gets a second instance
-`{workspaceId, coordinatorId, open, pageChip, chipDismissedFor, draft}`.
+host's instance. The host gets a second instance of the same slot
+(`{coordinatorId, open, chip, draft, draftsSwept}`) plus
+`{workspaceId, pageChip, chipDismissedFor}`. On the host instance `chip` and
+`draft` (phase 1's one-shot **Ask about this** seed) are never set.
 
 `pageChip` is a field of its own. The phase-1 `chip` (**Ask about this**) is
 never set on the host instance, and the phase-1 controller's `chip` effects
@@ -155,15 +183,24 @@ sidebar's workspace switch, a board link carrying another `workspaceId`, or a
 task page of another workspace); `workspaceId` is set when the manager opens the
 panel. Moving between the board, task pages and the Inbox in one workspace
 changes none of these, so the panel stays open. Both instances share the width
-key `kandev.coordinatorCopilot.width`. The composer draft stays a per-session
-phase-1 draft; the host's reset clears only the host instance's own draft field.
+key `kandev.coordinatorCopilot.width`. **Typed text.** "Draft" in `001.3` and `001.5` means the text the manager typed
+in the composer, which phase 1 keeps per conversation session in browser
+storage and wipes through `draftsSwept`, once per slot lifetime, before the
+composer mounts. A host reset (eligibility lost, workspace change) returns the
+host instance to the initial slot with `draftsSwept` false, so the next open
+sweeps the typed text for that session. A plain manager close leaves the slot
+and its typed text as they are, and reopening shows it. A coordinator switch
+gives the new coordinator a fresh slot (`coordinatorId` differs), so its
+composer starts empty; the previous coordinator's stored text is not carried
+over.
 
 ## Choosing the coordinator
 
 Last used is stored in local storage under
 `kandev.coordinatorCopilot.lastUsed.<workspaceId>` as a coordinator id. On
 open, the host uses it when the list still contains it, else the first
-coordinator in the list order (`created_at`, then `id`) (`001.2`). An
+coordinator in the list order (`created_at`, then `id`) and removes the stale
+stored value (`001.2`). An
 unreadable, malformed or unwritable storage value is treated as absent, and a
 failed write is ignored (the choice then lasts for the open panel only). The
 switcher is a select in the header, shown only with two or more coordinators;
@@ -174,9 +211,14 @@ Coordinator screens and sending a message do not.
 
 When the panel's coordinator is gone (the open sequence or the coordinator GET
 reports it unknown, or a list re-read no longer holds it), the host clears that
-stale last-used value, switches to the first remaining coordinator in list order
-and runs the open sequence for it; with none remaining it closes and check 5 of
-[Host](#host) fails, so the launcher disappears (`001.8`).
+stale last-used value and, unless the signal already came from a list re-read,
+re-reads the coordinator list once (the list held in the host is otherwise
+stale, since it is not pushed). "Remaining" is measured against that re-read;
+if the re-read fails it is the previous list minus the gone id. The host
+switches to the first remaining coordinator in list order and runs the open
+sequence for it; with none remaining it replaces the list with the empty result,
+closes, and check 5 of [Host](#host) fails, so the launcher disappears
+(`001.8`).
 
 ## One right panel
 
@@ -187,7 +229,16 @@ writer. Opening the copilot sets `copilot`, and the board closes its preview
 through its existing close path when it sees `preview` lost; opening a preview
 sets `preview`, which sets the host's `open` to false (`001.6`). Closing either
 one, by its control or Escape, sets `null`; it never reopens the other. Pages
-without the preview only ever set `copilot`.
+without the preview only ever set `copilot`. The host instance's `open` and
+`rightPanel === "copilot"` are written only together, by the one shell setter,
+and are never independent; an ineligible host is closed on both. Every path that writes `null` is a copilot close and none is a forced
+one: the close control and Escape, the host reset (eligibility lost, workspace
+change, leaving the workspace pages), no coordinator remaining (`001.8`) and
+following Open the coordinator page; each sets `null` only while `rightPanel` is
+`copilot`, so it never overwrites `preview`. A preview closed to make room for
+the panel goes through the board's close path with the shell store told to
+ignore that one close, so it writes nothing and `rightPanel` stays `copilot`
+(`001.6`).
 
 The board's preview also restores itself on mount from the browser's saved
 state (`useKanbanPreview`), and opens from a `?taskId=` address. The rule:
@@ -226,6 +277,17 @@ every screen size. On a phone the All Workflows board shows one focused workflow
 `workflows.activeId`; naming the focused workflow is out of scope. A stale
 `workflows.activeId` left over from another workspace is not in that workspace's
 items, so it yields `null`.
+
+**Where the task label comes from.** The task's `identifier` and `workspaceId`
+in `kanban.tasks`, as the task page's own load puts them there. Today neither
+hydration path fills them: `snapshotToState` (`apps/web/lib/ssr/mapper.ts`)
+sets `workspaceId` but not `identifier`, and the boot mapper in
+`apps/backend/internal/backendapp/boot_state_routes.go` (a camelCase
+whitelist) lists neither. Build adds `identifier` to `snapshotToState` and
+`identifier` and `workspaceId` to the boot whitelist, from the task DTO fields
+of the same names, each with a test that a task page reached by in-app
+navigation and one reached by a page load both yield the chip
+(`002.1`); the task page reads no other source for the label.
 
 A task without an `identifier` gives `null`: the phase-1 cards fall back to the
 title, but ADR D12 forbids sending a title, so the task chip does not use that
@@ -279,12 +341,16 @@ resets the host instance, `chipDismissedFor` included ([Store](#store)).
   shows only when the read has loaded, `watches.scope` is `selected`, and the
   context's workflow (the workflow id, or the task's `workflowId` from
   `kanban.tasks`) is not in `watches.workflow_ids`. It does not show when the
-  scope is all workflows, when `watches` is absent, while the read is loading or
-  after it failed, or for a task with no known workflow (`002.4`). It is text
+  scope is all workflows, when `watches` is absent, when no read of this
+  coordinator has loaded yet, or for a task with no known workflow (`002.4`).
+  While a re-fetch is in flight or has failed, the last loaded `watches` of the
+  same coordinator keeps deciding the hint; a response for an earlier route key,
+  coordinator or workspace is dropped (`001.9`). It is text
   beside the chip, not a change to the chip's label or to what is sent.
 - `transformOutgoing` is the phase-1 function with the reference taken from
   `pageChip`: it prefixes `About <label> [<kind>:<id>]: ` (`002.3`), where the
-  label is the chip's label, not its id as on the Coordinator screens.
+  label is the chip's `label` field alone (the identifier or workflow name, not
+  the rendered "This task:" text), not its id as on the Coordinator screens.
   Build passes the label to it through `normalizeCopilotItemId`, so a workflow
   name containing ": " or a line break cannot break the parser. `kind` is
   `task` or `workflow`; nothing else from the page is added. The prefix is
