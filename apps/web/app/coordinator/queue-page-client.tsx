@@ -51,6 +51,8 @@ export function QueuePageClient({ workspaceId, coordinatorId }: QueuePageClientP
               stepNameByTaskId={attention.stepNameByTaskId}
               prsByTaskId={attention.prsByTaskId}
               defaultOpen={linkedGroup === group ? true : undefined}
+              phase2={phase2}
+              canManage={canManage}
             />
           ))}
           {phase2 && (

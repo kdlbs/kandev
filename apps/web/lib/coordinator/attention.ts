@@ -38,18 +38,22 @@ export type AttentionStall = {
 };
 
 export type AttentionProposalSpec = {
-  title: string;
-  description: string;
   rationale: string;
-  workflow_id: string;
-  step_id: string;
-  repository_id: string;
-  source_task_id: string;
+  title?: string;
+  description?: string;
+  workflow_id?: string;
+  step_id?: string;
+  repository_id?: string;
+  source_task_id?: string;
+  /** The target task of a resume, message or move proposal. */
+  task_id?: string;
 };
 
 export type AttentionProposal = {
   id: string;
   status: string;
+  /** Absent on a phase-1 row, which is a create_task proposal. */
+  kind?: string;
   task_id: string | null;
   spec: AttentionProposalSpec;
   created_at: string;

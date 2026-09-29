@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const report = vi.hoisted(() => vi.fn());
@@ -61,6 +61,19 @@ describe("ToastProvider error reporting", () => {
       title: "Failed again",
       description: "More detail",
     });
+  });
+});
+
+describe("ToastProvider action", () => {
+  it("runs the action once and dismisses the toast", () => {
+    const api = renderProvider();
+    const onClick = vi.fn();
+    act(() => {
+      api.toast({ title: "Rejected", action: { label: "Keep it", onClick } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Rejected")).toBeNull();
   });
 });
 

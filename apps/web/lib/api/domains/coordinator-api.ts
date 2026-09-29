@@ -137,6 +137,40 @@ export type WireProposal = CreateTaskProposal | OtherKindProposal;
 
 export type Proposal = CreateTaskProposal;
 
+// Mirrors the stored spec of each phase-2 kind (internal/coordinator/kind_*.go).
+export type ResumeSpec = { task_id: string; rationale: string };
+export type MessageSpec = { task_id: string; text: string; rationale: string };
+export type MoveSpec = {
+  task_id: string;
+  workflow_id: string;
+  from_step_id: string;
+  to_step_id: string;
+  rationale: string;
+};
+
+type KindProposalOf<K extends OtherProposalKind, S> = ProposalBase & {
+  kind: K;
+  spec: S;
+  final_spec: S | null;
+};
+
+export type ResumeProposal = KindProposalOf<"resume", ResumeSpec>;
+export type MessageProposal = KindProposalOf<"message", MessageSpec>;
+export type MoveProposal = KindProposalOf<"move", MoveSpec>;
+export type KindProposal = ResumeProposal | MessageProposal | MoveProposal;
+
+// Every proposal the client caches and renders: create_task, or a phase-2 kind
+// it knows. A row of any other kind is never stored.
+export type StoredProposal = CreateTaskProposal | KindProposal;
+
+export function isKindProposal(p: WireProposal): p is KindProposal {
+  return p.kind === "resume" || p.kind === "message" || p.kind === "move";
+}
+
+export function isStoredProposal(p: WireProposal): p is StoredProposal {
+  return isCreateTaskProposal(p) || isKindProposal(p);
+}
+
 // isCreateTaskProposal narrows to the create_task kind; phase-1 rows carry
 // no kind and count as create_task.
 export function isCreateTaskProposal(p: WireProposal): p is CreateTaskProposal {
@@ -174,6 +208,8 @@ export type ApproveProposalEdits = {
   workflow_id?: string;
   step_id?: string;
   repository_id?: string;
+  // A message proposal's text; the only edit a non-create kind accepts.
+  text?: string;
 };
 
 // Mirrors internal/coordinator/dto.go's ProposalConflictResponse (Build

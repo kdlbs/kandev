@@ -6,11 +6,54 @@ import { NeedsYouItemsPanel } from "./components/needs-you-items-panel";
 import { WatchesNoneNotice } from "./components/watches-none-notice";
 import { GoalNote } from "./components/goal-note";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import type { NeedsYouItem } from "@/lib/coordinator/attention";
+import { Phase2PageProvider } from "./phase2-page-provider";
 
 export type NeedsYouPageClientProps = {
   workspaceId: string;
   coordinatorId: string | null;
 };
+
+function proposalsKey(items: NeedsYouItem[]): string {
+  return items
+    .flatMap((item) =>
+      item.kind === "proposal" ? [`${item.proposal.id}:${item.proposal.status}`] : [],
+    )
+    .join(",");
+}
+
+function stallTaskIds(items: NeedsYouItem[]): string[] {
+  return items.flatMap((item) => (item.kind === "stall" ? [item.task.id] : []));
+}
+
+function MaybePhase2({
+  enabled,
+  workspaceId,
+  coordinatorId,
+  items,
+  inputsLoaded,
+  children,
+}: {
+  enabled: boolean;
+  workspaceId: string;
+  coordinatorId: string;
+  items: NeedsYouItem[];
+  inputsLoaded: boolean;
+  children: React.ReactNode;
+}) {
+  if (!enabled) return <>{children}</>;
+  return (
+    <Phase2PageProvider
+      workspaceId={workspaceId}
+      coordinatorId={coordinatorId}
+      proposalsKey={proposalsKey(items)}
+      liveStallTaskIds={stallTaskIds(items)}
+      inputsLoaded={inputsLoaded}
+    >
+      {children}
+    </Phase2PageProvider>
+  );
+}
 
 /** Loaded or errored for every input: `proposal-cards.md#cards "Forms and navigation"` waits for this before acting on a deep link. */
 function allInputsLoaded(inputs: CoordinatorInputStatus[]): boolean {
@@ -31,7 +74,13 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
       view="needs-you"
     >
       {({ coordinator, attention, canManage }) => (
-        <>
+        <MaybePhase2
+          enabled={phase2}
+          workspaceId={workspaceId}
+          coordinatorId={coordinator.id}
+          items={attention.classification.needsYou}
+          inputsLoaded={allInputsLoaded(attention.inputs)}
+        >
           {phase2 && (
             <GoalNote
               workspaceId={workspaceId}
@@ -63,7 +112,7 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
             }}
             computeNeedsYouCount={attention.computeNeedsYouCount}
           />
-        </>
+        </MaybePhase2>
       )}
     </CoordinatorRouteContent>
   );

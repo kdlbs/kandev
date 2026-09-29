@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- one file holds the store's cross-path interleaving matrix for every proposal kind */
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proposal } from "@/lib/api/domains/coordinator-api";
@@ -693,4 +694,113 @@ describe("cross-path interleaving", () => {
     expect(byIdResult.current.notFound).toBe(true);
     expect(byIdResult.current.proposal).toBeUndefined();
   });
+});
+
+describe("resume, message and move rows", () => {
+  const KIND_ID = "k-1";
+
+  function kindRow(kind: "resume" | "message" | "move", overrides: Record<string, unknown> = {}) {
+    const specs = {
+      resume: { task_id: "t-1", rationale: "r" },
+      message: { task_id: "t-1", text: "hello", rationale: "r" },
+      move: {
+        task_id: "t-1",
+        workflow_id: "wf",
+        from_step_id: "a",
+        to_step_id: "b",
+        rationale: "r",
+      },
+    };
+    return {
+      ...proposal({ id: KIND_ID }),
+      kind,
+      spec: specs[kind],
+      ...overrides,
+    } as unknown as Proposal;
+  }
+
+  it.each(["resume", "message", "move"] as const)(
+    "stores and lists a %s row with the flag on",
+    async (kind) => {
+      listProposalsMock.mockResolvedValueOnce({ proposals: [kindRow(kind)] });
+      const { result } = renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID, true));
+      await waitFor(() => expect(result.current.proposals.value).toHaveLength(1));
+      expect(result.current.proposals.value?.[0].id).toBe(KIND_ID);
+    },
+  );
+
+  it("hides and does not count a kind row with the flag off", async () => {
+    listProposalsMock.mockResolvedValueOnce({
+      proposals: [kindRow("resume"), proposal({ id: "c-1" })],
+    });
+    const { result } = renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID, false));
+    await waitFor(() =>
+      expect((result.current.proposals.value ?? []).map((p) => p.id)).toEqual(["c-1"]),
+    );
+  });
+
+  it("never stores a row of a kind this client does not know", async () => {
+    listProposalsMock.mockResolvedValueOnce({
+      proposals: [kindRow("resume", { kind: "teleport" })],
+    });
+    const { result } = renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID, true));
+    await waitFor(() => expect(listProposalsMock).toHaveBeenCalled());
+    expect(result.current.proposals.value ?? []).toHaveLength(0);
+    expect(
+      useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId[KIND_ID],
+    ).toBeUndefined();
+  });
+
+  it.each(["resume", "message", "move"] as const)(
+    "interleaving: a stale %s re-read cannot undo a fresher decision",
+    async (kind) => {
+      seedProposal(COORDINATOR_ID, kindRow(kind, { status: "pending" }) as Proposal);
+      const stale = deferred<Proposal>();
+      const fresh = deferred<Proposal>();
+      getProposalMock.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+      listProposalsMock.mockResolvedValue({ proposals: [] });
+
+      renderHook(() => useProposalById(WORKSPACE_ID, COORDINATOR_ID, KIND_ID));
+      renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID, true));
+      await waitFor(() => expect(getProposalMock).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        fresh.resolve(kindRow(kind, { status: "approved", updated_at: T10 }));
+      });
+      await act(async () => {
+        stale.resolve(kindRow(kind, { status: "pending", updated_at: T0 }));
+      });
+      expect(
+        useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId[KIND_ID]?.status,
+      ).toBe("approved");
+    },
+  );
+
+  it.each(["resume", "message", "move"] as const)(
+    "interleaving: a stale %s by-id 404 issued before a fresher backfill success cannot evict its row",
+    async (kind) => {
+      seedProposal(COORDINATOR_ID, kindRow(kind, { status: "pending" }) as Proposal);
+      const byIdRead = deferred<Proposal>();
+      const backfillRead = deferred<Proposal>();
+      getProposalMock
+        .mockReturnValueOnce(byIdRead.promise)
+        .mockReturnValueOnce(backfillRead.promise);
+      listProposalsMock.mockResolvedValue({ proposals: [] });
+
+      const { result } = renderHook(() => useProposalById(WORKSPACE_ID, COORDINATOR_ID, KIND_ID));
+      renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID, true));
+      await waitFor(() => expect(getProposalMock).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        backfillRead.resolve(kindRow(kind, { status: "approved", updated_at: T10 }));
+      });
+      await act(async () => {
+        byIdRead.reject(new ApiError("gone", 404, {}));
+      });
+      expect(
+        useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId[KIND_ID]?.status,
+      ).toBe("approved");
+      expect(result.current.notFound).toBe(false);
+    },
+  );
 });
