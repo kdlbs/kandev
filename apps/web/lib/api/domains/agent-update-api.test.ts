@@ -7,8 +7,10 @@ vi.mock("@/lib/config", () => ({
 import {
   listAgentUpdateStatuses,
   previewAgentUpdate,
+  previewAgentUpdateToFamily,
   previewAgentUpdateUseDefault,
   updateAgent,
+  updateAgentToFamily,
   updateAgentUseDefault,
 } from "./agent-update-api";
 
@@ -55,6 +57,28 @@ describe("managed runtime update API", () => {
     const [, init] = fetchSpy.mock.calls[0] ?? [];
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ target_version: TARGET_VERSION }));
+  });
+
+  it("previews an explicit OpenCode family target", async () => {
+    await previewAgentUpdateToFamily(AGENT_NAME, "v2", "2.0.18", { cache: "no-store" });
+
+    const [input] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(input)).toBe(
+      `${API_BASE_URL}/api/v1/agent-update/${AGENT_NAME}/preview?target_family=v2&target_version=2.0.18`,
+    );
+  });
+
+  it("sends the preview revision with an explicit family migration", async () => {
+    await updateAgentToFamily(AGENT_NAME, "2.0.18", "v2", 7);
+
+    const [, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(init?.body).toBe(
+      JSON.stringify({
+        target_version: "2.0.18",
+        target_family: "v2",
+        expected_runtime_revision: 7,
+      }),
+    );
   });
 
   it("previews returning to the Kandev default with a structural query", async () => {

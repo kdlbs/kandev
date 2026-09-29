@@ -86,6 +86,14 @@ func (s ManagedNPMRuntimeSpec) ACPCommand(version string) Command {
 	return s.RuntimeCommand(version)
 }
 
+// InteractiveCommand starts the selected package's CLI without ACP mode.
+func (s ManagedNPMRuntimeSpec) InteractiveCommand(version string) Command {
+	args := []string{"npx", "--yes", "--prefer-offline"}
+	args = append(args, managedruntime.NPMProjectPrefixArgs()...)
+	args = append(args, s.PackageSpec(version))
+	return NewCommand(args...)
+}
+
 // ACPCommandWithNpmPreference builds a managed runtime launch command. The
 // package spec and ACP arguments remain trusted agent metadata; recovery only
 // changes npm's metadata freshness preference.

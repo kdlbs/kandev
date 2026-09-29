@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-26
-updated: 2026-09-07
+updated: 2026-09-27
 owners:
   - Kandev
 ---
@@ -25,7 +25,7 @@ Operators need newly released agent models without waiting for a Kandev release.
 - **AC-AGENTS-RUNTIME-UPDATES-001.3:** The backend classifies the selected action as `update`, `rollback`, `repair`, or `up_to_date`. The UI uses this structural state for copy and approval; it never compares translated labels or version strings itself.
 - **AC-AGENTS-RUNTIME-UPDATES-001.4:** Kandev stages the exact trusted `package@version`, ACP-probes that candidate, and activates it only after a successful probe. Candidate failure preserves the prior active version and capability catalogue.
 - **AC-AGENTS-RUNTIME-UPDATES-001.5:** Every managed npm runtime has an exact Kandev default version. A successful activation persists an exact operator selection for the current default generation. The effective version is that selection when present and the Kandev default otherwise.
-- **AC-AGENTS-RUNTIME-UPDATES-001.6:** Kandev does not persist the default as an operator selection. A change to the shipped package or default starts a new default generation.
+- **AC-AGENTS-RUNTIME-UPDATES-001.6:** Kandev does not persist the default as an operator selection. A change to the shipped package or default starts a new default generation. OpenCode adoption follows the family boundary in [OpenCode v2 adoption](opencode-v2-adoption.md); a default change cannot migrate an existing v1 user.
 - **AC-AGENTS-RUNTIME-UPDATES-001.7:** Every Kandev-built ACP command for the managed package uses the effective exact version, including probes, utility calls, standalone sessions, containers, and SSH executors. Active sessions continue unchanged.
 - **AC-AGENTS-RUNTIME-UPDATES-001.8:** Settings lets the operator clear the selected version and return to the Kandev default after that default passes the normal candidate validation.
 - **AC-AGENTS-RUNTIME-UPDATES-001.9:** When the weekly or manually started pin-maintenance run finds a changed stable default, it validates the catalogue and opens or refreshes one grouped review pull request without activating a runtime or merging the pull request. When no default changes, it creates no branch or pull request.
@@ -39,13 +39,13 @@ Operators need newly released agent models without waiting for a Kandev release.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-RUNTIME-UPDATES-002.1:** When startup detects a changed managed package or Kandev default, Kandev shall remove the prior selection for that agent before it becomes ready.
-- **AC-AGENTS-RUNTIME-UPDATES-002.2:** When the shipped package and default remain unchanged, Kandev shall preserve a current-generation operator selection across restarts and unrelated Kandev upgrades. An unmarked legacy selection is reset during the first reconciliation.
+- **AC-AGENTS-RUNTIME-UPDATES-002.1:** When startup detects a changed managed package or Kandev default, Kandev shall remove the prior selection for that agent before it becomes ready. For OpenCode, this reset applies only within the adopted family and shall not change its runtime source or perform a v1-to-v2 migration.
+- **AC-AGENTS-RUNTIME-UPDATES-002.2:** When the shipped package and default remain unchanged, Kandev shall preserve a current-generation operator selection across restarts and unrelated Kandev upgrades. An unmarked legacy selection is reset during the first reconciliation, except for OpenCode legacy import defined in [OpenCode v2 adoption](opencode-v2-adoption.md).
 - **AC-AGENTS-RUNTIME-UPDATES-002.3:** After Kandev activates a new default, Settings shall let the operator select any validated stable version, including an older version.
 - **AC-AGENTS-RUNTIME-UPDATES-002.4:** A selection made after default activation shall remain effective until the operator changes it or a later shipped default changes.
 - **AC-AGENTS-RUNTIME-UPDATES-002.5:** Default activation shall affect future probes and launches only. Kandev shall not replace an agent process that remains active during backend recovery.
 - **AC-AGENTS-RUNTIME-UPDATES-002.6:** If Kandev cannot complete default activation, startup shall stop before readiness and retry the activation during the next start.
-- **AC-AGENTS-RUNTIME-UPDATES-002.7:** On the first release with this behavior, Kandev shall treat an unmarked legacy selection as part of an earlier default generation.
+- **AC-AGENTS-RUNTIME-UPDATES-002.7:** On the first release with this behavior, Kandev shall treat an unmarked legacy selection as part of an earlier default generation. The later OpenCode adoption migration imports its legacy choice before reconciliation instead of discarding it.
 
 ## System design
 

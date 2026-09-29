@@ -76,6 +76,8 @@ export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undef
       return "agents:upToDateRuntime";
     case "use_default":
       return "agents:useKandevDefault";
+    case "migrate":
+      return "agents:upgradeOpenCodeV2";
     case "update":
     default:
       return "agents:updateRuntime";

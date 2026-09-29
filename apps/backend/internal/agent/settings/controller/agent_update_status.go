@@ -32,12 +32,16 @@ type runtimeUpdateStatusCacheEntry struct {
 }
 
 type runtimeUpdateStatusTarget struct {
-	agentName        string
-	packageName      string
-	defaultVersion   string
-	activeVersion    string
-	effectiveVersion string
-	selectionErr     error
+	agentName          string
+	packageName        string
+	defaultVersion     string
+	activeVersion      string
+	effectiveVersion   string
+	selectionErr       error
+	family             string
+	source             string
+	runtimeRevision    uint64
+	migrationAvailable bool
 }
 
 // SetRuntimeUpdateStatusClock injects the clock used for status cache TTLs.
@@ -111,12 +115,16 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 	for _, target := range targets {
 		entry := entries[target.packageName]
 		status := dto.AgentUpdateStatusDTO{
-			AgentName:        target.agentName,
-			Package:          target.packageName,
-			DefaultVersion:   target.defaultVersion,
-			ActiveVersion:    target.activeVersion,
-			EffectiveVersion: target.effectiveVersion,
-			CheckState:       dto.AgentUpdateCheckStateUnknown,
+			AgentName:          target.agentName,
+			Package:            target.packageName,
+			DefaultVersion:     target.defaultVersion,
+			ActiveVersion:      target.activeVersion,
+			EffectiveVersion:   target.effectiveVersion,
+			CheckState:         dto.AgentUpdateCheckStateUnknown,
+			Family:             target.family,
+			Source:             target.source,
+			RuntimeRevision:    target.runtimeRevision,
+			MigrationAvailable: target.migrationAvailable,
 		}
 		if !entry.checkedAt.IsZero() {
 			checkedAt := entry.checkedAt
@@ -157,7 +165,10 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 		if !ok {
 			continue
 		}
-		spec := managed.ManagedNPMRuntime()
+		spec, family, source, revision, selectedVersion, migrationAvailable, stateErr := c.managedRuntimeState(ctx, ag.ID(), managed)
+		if stateErr != nil {
+			continue
+		}
 		packageName := strings.TrimSpace(spec.Package)
 		if packageName == "" {
 			continue
@@ -168,17 +179,31 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 			// catalogue and must not create an unverifiable status item.
 			continue
 		}
-		activeVersion, effectiveVersion, _, selectionErr := c.runtimeVersions(ctx, ag.ID(), spec)
+		activeVersion, effectiveVersion, selectionErr := "", "", error(nil)
+		if family != "" {
+			activeVersion = selectedVersion
+			if activeVersion != "" {
+				effectiveVersion = activeVersion
+			} else {
+				effectiveVersion = spec.DefaultVersionOrPinned()
+			}
+		} else {
+			activeVersion, effectiveVersion, _, selectionErr = c.runtimeVersions(ctx, ag.ID(), spec)
+		}
 		if selectionErr != nil {
 			effectiveVersion = defaultVersion
 		}
 		targets = append(targets, runtimeUpdateStatusTarget{
-			agentName:        ag.ID(),
-			packageName:      packageName,
-			defaultVersion:   defaultVersion,
-			activeVersion:    activeVersion,
-			effectiveVersion: effectiveVersion,
-			selectionErr:     selectionErr,
+			agentName:          ag.ID(),
+			packageName:        packageName,
+			defaultVersion:     defaultVersion,
+			activeVersion:      activeVersion,
+			effectiveVersion:   effectiveVersion,
+			selectionErr:       selectionErr,
+			family:             string(family),
+			source:             string(source),
+			runtimeRevision:    revision,
+			migrationAvailable: migrationAvailable,
 		})
 	}
 	return targets, nil
@@ -239,19 +264,57 @@ func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName
 	resolver := c.runtimeUpdateStatusResolver
 	c.runtimeUpdateStatusMu.Unlock()
 	if resolver != nil {
-		return validateRuntimeUpdateLatest(resolver(ctx, packageName))
+		latest, err := validateRuntimeUpdateLatest(resolver(ctx, packageName))
+		if err != nil {
+			return "", err
+		}
+		if expectedMajor, restricted := managedruntime.ExpectedMajorForPackage(packageName); restricted {
+			parsed, parseErr := managedruntime.ParseStableVersion(latest)
+			if parseErr == nil && parsed.Major() != expectedMajor {
+				return c.resolveOpenCodeLatestFromCatalogue(ctx, packageName)
+			}
+		}
+		return latest, nil
 	}
 	if c.runtimeUpdater == nil {
 		return "", errors.New("runtime updater unavailable")
 	}
-	if metadataResolver, ok := c.runtimeUpdater.(RuntimeVersionResolver); ok {
-		metadata, err := metadataResolver.ResolveVersions(ctx, packageName)
-		if err != nil {
-			return "", err
-		}
-		return validateRuntimeUpdateLatest(metadata.Latest, nil)
+	if _, ok := c.runtimeUpdater.(RuntimeVersionResolver); ok {
+		return c.resolveOpenCodeLatestFromCatalogue(ctx, packageName)
 	}
-	return validateRuntimeUpdateLatest(c.runtimeUpdater.ResolveTarget(ctx, packageName))
+	latest, err := validateRuntimeUpdateLatest(c.runtimeUpdater.ResolveTarget(ctx, packageName))
+	if err != nil {
+		return "", err
+	}
+	if expectedMajor, restricted := managedruntime.ExpectedMajorForPackage(packageName); restricted {
+		parsed, parseErr := managedruntime.ParseStableVersion(latest)
+		if parseErr == nil && parsed.Major() != expectedMajor {
+			return "", fmt.Errorf("OpenCode package %s has no version in its selected family", packageName)
+		}
+	}
+	return latest, nil
+}
+
+func (c *Controller) resolveOpenCodeLatestFromCatalogue(
+	ctx context.Context,
+	packageName string,
+) (string, error) {
+	if c.runtimeUpdater == nil {
+		return "", fmt.Errorf("version catalogue unavailable for OpenCode package %s", packageName)
+	}
+	versionResolver, ok := c.runtimeUpdater.(RuntimeVersionResolver)
+	if !ok {
+		return "", fmt.Errorf("version catalogue unavailable for OpenCode package %s", packageName)
+	}
+	metadata, err := versionResolver.ResolveVersions(ctx, packageName)
+	if err != nil {
+		return "", err
+	}
+	catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, metadata.Versions, metadata.Latest)
+	if err != nil {
+		return "", err
+	}
+	return catalogue.Latest, nil
 }
 
 func validateRuntimeUpdateLatest(latest string, err error) (string, error) {

@@ -22,6 +22,14 @@ The design covers built-in managed ACP runtimes only. Native agents, passthrough
 | --- | --- |
 | `REQ-AGENTS-RUNTIME-UPDATES-002` | [Startup reconciliation](#startup-reconciliation), [Persistence](#persistence), [Failure behavior](#failure-behavior) |
 
+## OpenCode adoption exception
+
+The [OpenCode adoption design](opencode-v2-adoption.md) extends this contract with an authoritative family/source record.
+Its implementation imports legacy OpenCode state before this generic reconciler can remove it.
+OpenCode then uses family-specific reconciliation: a new reviewed default may clear a version override within the adopted family,
+but cannot change that family or its runtime source. Other agents continue to use the flow below.
+The new design and its plan track delivery; this exception does not claim that the current code already implements it.
+
 ## Default generation
 
 A default generation contains these trusted values for one built-in agent:

@@ -137,12 +137,41 @@ the control has no dot but remains usable.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
 5. Wait for the exact version to prepare and pass its ACP capability probe.
 
-OpenCode has one additional host-runtime rule. When the `opencode` executable
-is on the Kandev host `PATH`, the update installs the selected `opencode-ai`
-package version globally and the follow-up capability probe runs that same
-executable. Containers, SSH executors, and hosts without that executable keep
-using the managed `npx` runtime. This keeps the update result aligned with the
-runtime that Kandev will use for host utility calls.
+OpenCode has two runtime families. Fresh Kandev installations use the managed
+v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
+`opencode-ai` until you choose the v2 migration action.
+
+#### Move OpenCode from v1 to v2
+
+Use this action only after you review the shared-data boundary. OpenCode v1 and
+v2 use the same configuration and session data paths.
+
+1. Stop standalone OpenCode v1 processes that use the same session data.
+2. Open the OpenCode update control in **Settings > Agents**.
+3. Select **Upgrade to managed OpenCode v2** and review the package, version, and scope.
+4. Select **Upgrade to managed OpenCode v2** again to start the upgrade.
+5. Keep Kandev open while it installs the package and checks ACP startup.
+
+The selection applies to future OpenCode launches across every OpenCode
+profile in this Kandev installation. This includes local, container, and SSH
+executors. The action installs the managed v2 package; it leaves a standalone
+`opencode` installation unchanged.
+
+Kandev saves v2 as the active runtime only after the exact package passes an
+isolated ACP probe. Kandev-owned active OpenCode work blocks activation. The
+upgrade does not stop that work. If the probe or database write fails, v1
+remains selected. If capability discovery fails after activation, v2 remains
+selected and Kandev reports the discovery error.
+
+Kandev keeps saved OpenCode session IDs when it restores a conversation. If
+OpenCode cannot restore a saved conversation, Kandev reports the error in that
+session. It does not create a replacement conversation. Kandev cannot reverse
+changes that OpenCode v2 makes to shared session data, so selecting v1 later
+does not guarantee a rollback.
+
+When an existing native OpenCode v1 installation remains selected, same-family
+updates can still update that native executable. A v2 migration always uses
+the managed `@opencode/cli` package and does not run a global npm install.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm

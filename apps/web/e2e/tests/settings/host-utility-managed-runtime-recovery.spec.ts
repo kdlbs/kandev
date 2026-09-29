@@ -1,7 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
+import { DatabaseSync } from "../../helpers/node-sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import { managedRuntimeExecutionCacheKey } from "../../helpers/managed-runtime-recovery";
 import { KanbanPage } from "../../pages/kanban-page";
 
 const AGENT_NAME = "opencode-acp";
@@ -26,8 +26,11 @@ test.describe("host utility native runtime", () => {
       `#!/bin/sh\nprintf 'unexpected npx invocation\\n' >> '${npxInvocationPath}'\nexit 1\n`,
       { mode: 0o755 },
     );
-    fs.copyFileSync(mockAgentPath, discoveryPath);
-    fs.chmodSync(discoveryPath, 0o755);
+    fs.writeFileSync(
+      discoveryPath,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then printf 'opencode 1.18.5\\n'; exit 0; fi\nexec "${mockAgentPath}" "$@"\n`,
+      { mode: 0o755 },
+    );
 
     const runtimeEnv = {
       KANDEV_MOCK_AGENT: "true",
@@ -37,6 +40,28 @@ test.describe("host utility native runtime", () => {
     let releaseEnv: (() => Promise<void>) | undefined;
     let profileId = "";
     try {
+      await backend.restart(runtimeEnv);
+      const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+      try {
+        database.exec("PRAGMA busy_timeout = 10000");
+        database
+          .prepare(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+          )
+          .run(
+            "managed_runtime.opencode.selection",
+            JSON.stringify({
+              schema_version: 1,
+              family: "v1",
+              source: "native",
+              package: "opencode-ai",
+              applied_default_version: "1.18.32",
+              revision: 1,
+            }),
+          );
+      } finally {
+        database.close();
+      }
       await backend.restart(runtimeEnv);
       const { agents: persistedAgents } = await apiClient.listAgents();
       const persistedAgent = persistedAgents.find((candidate) => candidate.name === AGENT_NAME);
@@ -48,33 +73,32 @@ test.describe("host utility native runtime", () => {
 
       releaseEnv = await backend.useEnv(runtimeEnv);
 
-      let packageSpec = "";
       await expect
         .poll(
           async () => {
             const { agents } = await apiClient.listAvailableAgents();
             const agent = agents.find((candidate) => candidate.name === AGENT_NAME);
-            const runtime = agent?.runtime_update;
-            packageSpec =
-              runtime?.package && runtime.effective_version
-                ? `${runtime.package}@${runtime.effective_version}`
-                : "";
             const hasMockModel = agent?.model_config.available_models.some(
               (model) => model.id === "mock-fast",
             );
             const probeError = agent?.model_config.error ?? "";
-            return `${agent?.model_config.status ?? "missing"}:${hasMockModel}:${packageSpec !== ""}:${probeError}`;
+            return {
+              status: agent?.model_config.status ?? "missing",
+              hasMockModel: hasMockModel ?? false,
+              probeError,
+            };
           },
           {
             timeout: 60_000,
             message: "OpenCode host capabilities should load before task creation",
           },
         )
-        .toBe("ok:true:true:");
+        .toMatchObject({
+          status: "ok",
+          hasMockModel: true,
+          probeError: "",
+        });
 
-      const target = path.join(cacheRoot, "_npx", managedRuntimeExecutionCacheKey(packageSpec));
-      expect(fs.existsSync(path.join(target, "stale-marker"))).toBe(false);
-      expect(fs.existsSync(path.join(target, "fresh-marker"))).toBe(false);
       expect(fs.existsSync(npxInvocationPath)).toBe(false);
 
       const kanban = new KanbanPage(testPage);

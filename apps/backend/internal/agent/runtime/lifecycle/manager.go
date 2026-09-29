@@ -301,6 +301,7 @@ type Manager struct {
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
+	openCodeAdmission   sync.RWMutex
 	activityLeases      map[string]*activity.TaskLease
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim

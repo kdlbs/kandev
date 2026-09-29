@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -140,8 +141,13 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		return
 	}
 	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
-	if request.UseDefault && request.TargetVersion != "" {
+	request.TargetFamily = strings.TrimSpace(request.TargetFamily)
+	if request.UseDefault && (request.TargetVersion != "" || request.TargetFamily != "" || request.ExpectedRuntimeRevision != 0) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	if request.TargetFamily != "" && request.TargetFamily != "v2" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target family is invalid"})
 		return
 	}
 	if !request.UseDefault && request.TargetVersion == "" {
@@ -151,6 +157,17 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
 		if request.UseDefault {
 			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
+		}
+		if request.TargetFamily == "v2" {
+			if request.ExpectedRuntimeRevision == 0 {
+				return nil, controller.ErrRuntimeMigrationUnsupported
+			}
+			return h.controller.EnqueueOpenCodeMigration(
+				c.Request.Context(), name, request.TargetVersion, request.ExpectedRuntimeRevision,
+			)
+		}
+		if request.ExpectedRuntimeRevision != 0 {
+			return nil, controller.ErrRuntimeMigrationUnsupported
 		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
@@ -162,6 +179,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		return
 	}
 	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	targetFamily := strings.TrimSpace(c.Query("target_family"))
 	useDefault := false
 	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -171,15 +189,22 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		}
 		useDefault = parsed
 	}
-	if useDefault && targetVersion != "" {
+	if useDefault && (targetVersion != "" || targetFamily != "") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
 	var preview *dto.AgentUpdatePreviewDTO
 	var err error
-	if useDefault {
+	switch {
+	case targetFamily != "":
+		if useDefault {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target family cannot be combined with use_default"})
+			return
+		}
+		preview, err = h.controller.PreviewAgentUpdateFamily(c.Request.Context(), name, targetVersion, targetFamily)
+	case useDefault:
 		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
-	} else {
+	default:
 		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
 	}
 	if err == nil {
@@ -303,6 +328,12 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "target version is invalid", true
 	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
 		return http.StatusBadRequest, "target version is not published", true
+	case errors.Is(err, controller.ErrRuntimeMigrationUnsupported):
+		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
+	case errors.Is(err, controller.ErrRuntimeMigrationBlocked):
+		return http.StatusConflict, "OpenCode runtime migration is blocked by active work", true
+	case errors.Is(err, managedruntime.ErrOpenCodeSelectionRevisionConflict):
+		return http.StatusConflict, "OpenCode runtime changed; refresh the preview", true
 	default:
 		return 0, "", false
 	}
@@ -320,6 +351,9 @@ func classifyUpdatePreviewError(err error) (int, string, bool) {
 	}
 	if errors.Is(err, controller.ErrRuntimeUpdateTargetMissing) {
 		return http.StatusBadRequest, "target version is not published", true
+	}
+	if errors.Is(err, controller.ErrRuntimeMigrationUnsupported) {
+		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
 	}
 	return 0, "", false
 }

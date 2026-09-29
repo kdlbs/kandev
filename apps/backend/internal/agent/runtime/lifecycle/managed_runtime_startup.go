@@ -128,11 +128,11 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	if execution == nil {
 		return nil, false
 	}
-	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
+	spec, ok := managedRuntimeSpecForArgs(agentConfig, execution.AgentArgs)
 	if !ok {
 		return nil, false
 	}
-	preferOnlineArgs, packageSpec, ok := onlineManagedRuntimeArgs(execution.AgentArgs, managed.ManagedNPMRuntime())
+	preferOnlineArgs, packageSpec, ok := onlineManagedRuntimeArgs(execution.AgentArgs, spec)
 	if !ok {
 		return nil, false
 	}

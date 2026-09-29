@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"slices"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
@@ -51,6 +53,64 @@ func TestOpenCodeACPBuildCommandPrefersNativeBinary(t *testing.T) {
 	// Default (probe absent / containers / remotes) keeps the managed npx runtime.
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, a.ManagedNPMRuntime().CachedACPCommand().Args()) {
 		t.Fatalf("BuildCommand(default) = %#v, want npx fallback", got)
+	}
+}
+
+func TestOpenCodeRuntimeFamiliesUseTrustedPackagesAndArguments(t *testing.T) {
+	tests := []struct {
+		name        string
+		family      managedruntime.OpenCodeFamily
+		packageName string
+		version     string
+		logLevel    string
+	}{
+		{name: "v1", family: managedruntime.OpenCodeFamilyV1, packageName: "opencode-ai", version: "1.18.32", logLevel: "ERROR"},
+		{name: "v2", family: managedruntime.OpenCodeFamilyV2, packageName: "@opencode/cli", version: "2.0.18", logLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := NewOpenCodeACP().ManagedNPMRuntimeForFamily(tt.family)
+			if err != nil {
+				t.Fatalf("ManagedNPMRuntimeForFamily: %v", err)
+			}
+			if spec.Package != tt.packageName || spec.DefaultVersion != tt.version {
+				t.Fatalf("runtime spec = %+v", spec)
+			}
+			want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", tt.packageName + "@" + tt.version, "acp", "--print-logs", "--log-level", tt.logLevel}
+			got := NewOpenCodeACP().BuildCommand(CommandOptions{
+				ManagedRuntimeFamily:  tt.family,
+				ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+				ManagedRuntimeVersion: tt.version,
+				PreferNativeBinary:    true,
+			}).Args()
+			if !slices.Equal(got, want) {
+				t.Fatalf("managed family command = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeNativeCommandUsesObservedMajorArguments(t *testing.T) {
+	got := NewOpenCodeACP().BuildCommand(CommandOptions{
+		PreferNativeBinary:    true,
+		ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV1,
+		ManagedRuntimeSource:  managedruntime.OpenCodeSourceNative,
+		NativeRuntimeVersion:  "2.0.18",
+		ManagedRuntimeVersion: "1.18.32",
+	}).Args()
+	want := []string{"opencode", "acp", "--print-logs", "--log-level", "error"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("native v2 command = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenCodePassthroughUsesSelectedManagedCommand(t *testing.T) {
+	got := NewOpenCodeACP().BuildPassthroughCommand(PassthroughOptions{
+		BaseCommand: NewCommand("npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix, "@opencode/cli@2.0.18"),
+	}).Args()
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix, "@opencode/cli@2.0.18"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("passthrough command = %#v, want %#v", got, want)
 	}
 }
 
@@ -108,6 +168,48 @@ func TestOpenCodeACPDiscoveryDoesNotRunVersionCommand(t *testing.T) {
 	}
 	if !result.Available {
 		t.Fatal("IsInstalled() Available = false, want true")
+	}
+}
+
+func TestDetectOpenCodeNativeRuntimeSelectsSupportedFamily(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		wantFamily  managedruntime.OpenCodeFamily
+		wantVersion string
+	}{
+		{name: "v1", output: "opencode 1.18.5", wantFamily: managedruntime.OpenCodeFamilyV1, wantVersion: "1.18.5"},
+		{name: "v2", output: "opencode 2.0.18", wantFamily: managedruntime.OpenCodeFamilyV2, wantVersion: "2.0.18"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeOpenCodeTestBinary(t, "printf '%s\\n' '"+tt.output+"'")
+			got, found, err := DetectOpenCodeNativeRuntime(context.Background())
+			if err != nil {
+				t.Fatalf("DetectOpenCodeNativeRuntime: %v", err)
+			}
+			if !found || got.Family != tt.wantFamily || got.Version != tt.wantVersion {
+				t.Fatalf("native runtime = %+v, found %v; want %s %s", got, found, tt.wantFamily, tt.wantVersion)
+			}
+		})
+	}
+}
+
+func TestDetectOpenCodeNativeRuntimeRejectsUnknownAndFailedVersions(t *testing.T) {
+	for _, body := range []string{"printf 'opencode 3.0.0\\n'", "exit 1"} {
+		t.Run(body, func(t *testing.T) {
+			writeOpenCodeTestBinary(t, body)
+			if _, found, err := DetectOpenCodeNativeRuntime(context.Background()); !found || err == nil {
+				t.Fatalf("DetectOpenCodeNativeRuntime = found %v, err %v; want a found binary and compatibility error", found, err)
+			}
+		})
+	}
+}
+
+func TestDetectOpenCodeNativeRuntimeAllowsNoBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if got, found, err := DetectOpenCodeNativeRuntime(context.Background()); err != nil || found || got != (OpenCodeNativeRuntime{}) {
+		t.Fatalf("DetectOpenCodeNativeRuntime = %+v, found %v, err %v; want absent without error", got, found, err)
 	}
 }
 

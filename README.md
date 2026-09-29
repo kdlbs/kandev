@@ -94,7 +94,7 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 | **Gemini CLI** | `@google/gemini-cli` |
 | **Amp** | `amp-acp` |
 | **Auggie** | `@augmentcode/auggie` |
-| **OpenCode** | `opencode-ai` |
+| **OpenCode** | v2: `@opencode/cli`; existing v1: `opencode-ai` |
 | **Cursor** | `cursor-agent` *(requires Cursor Pro)* |
 | **Devin** | `devin` *(install Devin CLI from Devin Desktop or standalone installer)* |
 | **Qwen** | `@qwen-code/qwen-code` |
@@ -117,6 +117,10 @@ Managed npm runtimes have reviewed defaults. To fetch a selected upstream
 release, use **Update agent** in **Settings > Agents**. Kandev refreshes its
 advertised models and modes for future sessions without restarting active
 sessions. See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
+
+Fresh OpenCode installs use managed v2 (`@opencode/cli`). Existing v1
+selections remain on `opencode-ai` until you choose the explicit migration
+action. Kandev leaves a separately installed `opencode` CLI unchanged.
 
 ### Bring your own TUI agents
 

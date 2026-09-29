@@ -147,6 +147,25 @@ func TestHostRuntimeUpdaterResolvesTargetWithDirectNPMArgv(t *testing.T) {
 	}
 }
 
+func TestIsolatedProbeCleanupDoesNotTurnSuccessIntoFailure(t *testing.T) {
+	cleanupErr := errors.New("remove probe root failed")
+	warned := false
+	if err := isolatedProbeCleanupResult(nil, cleanupErr, func(got error) {
+		warned = errors.Is(got, cleanupErr)
+	}); err != nil {
+		t.Fatalf("successful probe cleanup result = %v, want success", err)
+	}
+	if !warned {
+		t.Fatal("cleanup failure after successful probe was not reported")
+	}
+
+	probeErr := errors.New("candidate probe failed")
+	combined := isolatedProbeCleanupResult(probeErr, cleanupErr, nil)
+	if !errors.Is(combined, probeErr) || !errors.Is(combined, cleanupErr) {
+		t.Fatalf("probe and cleanup errors = %v, want both errors", combined)
+	}
+}
+
 func TestHostRuntimeUpdaterResolvesStableVersionCatalogue(t *testing.T) {
 	executor := &recordingCommandExecutor{
 		output: `{"versions":["1.0.1","1.0.2-beta.1","1.0.2"],"dist-tags":{"latest":"1.0.2"}}`,

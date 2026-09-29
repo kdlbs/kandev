@@ -46,7 +46,9 @@ export function AgentRuntimeUpdateSurface({
         >
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
             <DrawerTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DrawerTitle>
-            <DrawerDescription>{t("agents:reviewUpdateBeforeApplying")}</DrawerDescription>
+            <DrawerDescription className="sr-only">
+              {t("agents:reviewUpdateBeforeApplying")}
+            </DrawerDescription>
           </DrawerHeader>
           {body}
           {footer(true)}
@@ -62,7 +64,9 @@ export function AgentRuntimeUpdateSurface({
       >
         <DialogHeader className="px-4 pb-1 pt-3">
           <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
-          <DialogDescription>{t("agents:reviewUpdateBeforeApplying")}</DialogDescription>
+          <DialogDescription className="sr-only">
+            {t("agents:reviewUpdateBeforeApplying")}
+          </DialogDescription>
         </DialogHeader>
         {body}
         {footer()}

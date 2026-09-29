@@ -352,16 +352,33 @@ export type AgentUpdateJobStatus =
   | "queued"
   | "resolving"
   | "updating"
+  | "probing"
+  | "saving"
   | "refreshing"
   | "succeeded"
   | "failed";
+
+export type AgentUpdateOperation =
+  | "update"
+  | "rollback"
+  | "repair"
+  | "up_to_date"
+  | "use_default"
+  | "migrate";
 
 export type AgentUpdateJob = {
   job_id: string;
   agent_name: string;
   status: AgentUpdateJobStatus;
+  operation?: AgentUpdateOperation;
   current_version?: string;
+  default_version?: string;
+  active_version?: string;
+  effective_version?: string;
   target_version?: string;
+  target_family?: "v1" | "v2";
+  runtime_revision?: number;
+  migration?: boolean;
   output?: string;
   error?: string;
   refresh_error?: string;

@@ -9,12 +9,24 @@ export const DEFAULT_CATALOGUE_PATH = path.resolve(
   "../apps/backend/internal/agent/agents/managed_npm_runtime_versions.json",
 );
 const STABLE_SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
+const EXPECTED_PACKAGE_MAJORS = Object.freeze({
+  "opencode-ai": 1,
+  "@opencode/cli": 2,
+});
 
 export function parseStableVersion(value) {
   if (typeof value !== "string" || !STABLE_SEMVER.test(value)) {
     throw new Error(`value is not a stable SemVer: ${String(value)}`);
   }
   return value;
+}
+
+function assertPackageVersion(packageName, version) {
+  parseStableVersion(version);
+  const expectedMajor = EXPECTED_PACKAGE_MAJORS[packageName];
+  if (expectedMajor !== undefined && Number(version.split(".")[0]) !== expectedMajor) {
+    throw new Error(`${packageName} must stay on major ${expectedMajor}; received ${version}`);
+  }
 }
 
 function assertCatalogue(catalogue) {
@@ -29,7 +41,7 @@ function assertCatalogue(catalogue) {
     if (!packageName.trim()) {
       throw new Error("runtime pin catalogue contains an empty package name");
     }
-    parseStableVersion(catalogue[packageName]);
+    assertPackageVersion(packageName, catalogue[packageName]);
   }
 }
 
@@ -46,7 +58,7 @@ export function updatePins(catalogue, latestByPackage) {
     if (latest === undefined || latest === null || latest === "") {
       throw new Error(`latest version is missing for ${packageName}`);
     }
-    parseStableVersion(latest);
+    assertPackageVersion(packageName, latest);
     next[packageName] = latest;
     changed ||= latest !== catalogue[packageName];
   }

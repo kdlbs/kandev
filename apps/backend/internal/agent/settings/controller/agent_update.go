@@ -7,15 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 )
 
 var (
@@ -25,6 +29,8 @@ var (
 	ErrRuntimeUpdateTargetRequired = errors.New("managed runtime target version is required")
 	ErrRuntimeUpdateTargetInvalid  = errors.New("managed runtime target version is invalid")
 	ErrRuntimeUpdateTargetMissing  = errors.New("managed runtime target version is not published")
+	ErrRuntimeMigrationUnsupported = errors.New("OpenCode runtime migration is unavailable")
+	ErrRuntimeMigrationBlocked     = errors.New("OpenCode runtime migration is blocked")
 )
 
 // PreviewAgentUpdate resolves the trusted built-in update recipe without
@@ -67,7 +73,10 @@ func (c *Controller) previewAgentUpdate(
 	if !ok {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
-	spec := managed.ManagedNPMRuntime()
+	spec, family, source, revision, activeSelection, migrationAvailable, err := c.managedRuntimeState(ctx, name, managed)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
 	if strings.TrimSpace(spec.Package) == "" {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
@@ -76,9 +85,17 @@ func (c *Controller) previewAgentUpdate(
 	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
 		current = caps.AgentVersion
 	}
-	active, effective, defaultVersion, err := c.runtimeVersions(ctx, name, spec)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	active, effective, defaultVersion := activeSelection, "", spec.DefaultVersionOrPinned()
+	if active != "" {
+		effective = active
+	} else {
+		effective = defaultVersion
+	}
+	if family == "" {
+		active, effective, defaultVersion, err = c.runtimeVersions(ctx, name, spec)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+		}
 	}
 	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(
 		ctx, spec.Package, active, current, effective, defaultVersion,
@@ -103,6 +120,9 @@ func (c *Controller) previewAgentUpdate(
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
 	}
 	command := spec.UpdateCommand(target).Args()
+	if family != "" && source == managedruntime.OpenCodeSourceManaged {
+		command = spec.CacheUpdateCommand(target).Args()
+	}
 	if !exactCatalogue && targetVersion == "" && !useDefault {
 		// Keep the compatibility preview for embedders that provide only the
 		// legacy latest-version seam. Production uses the catalogue resolver and
@@ -110,18 +130,136 @@ func (c *Controller) previewAgentUpdate(
 		command = spec.UpdateCommand().Args()
 	}
 	return &dto.AgentUpdatePreviewDTO{
-		AgentName:         name,
-		Package:           spec.Package,
-		CurrentVersion:    current,
-		DefaultVersion:    defaultVersion,
-		ActiveVersion:     active,
-		EffectiveVersion:  effective,
-		TargetVersion:     target,
-		Operation:         string(operation),
-		AvailableVersions: runtimeVersionDTOs(catalogue),
-		Command:           command,
-		CommandString:     buildCommandString(command),
+		AgentName:          name,
+		Package:            spec.Package,
+		CurrentVersion:     current,
+		DefaultVersion:     defaultVersion,
+		ActiveVersion:      active,
+		EffectiveVersion:   effective,
+		TargetVersion:      target,
+		Family:             string(family),
+		Source:             string(source),
+		TargetFamily:       string(family),
+		RuntimeRevision:    revision,
+		MigrationAvailable: migrationAvailable,
+		Operation:          string(operation),
+		AvailableVersions:  runtimeVersionDTOs(catalogue),
+		Command:            command,
+		CommandString:      buildCommandString(command),
 	}, nil
+}
+
+func (c *Controller) PreviewAgentUpdateFamily(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	targetFamily string,
+) (*dto.AgentUpdatePreviewDTO, error) {
+	if targetFamily == "" {
+		return c.PreviewAgentUpdate(ctx, name, targetVersion)
+	}
+	if targetFamily != string(managedruntime.OpenCodeFamilyV2) || name != agents.OpenCodeACPAgentID {
+		return nil, ErrRuntimeMigrationUnsupported
+	}
+	return c.previewOpenCodeV2Migration(ctx, name, targetVersion)
+}
+
+func (c *Controller) previewOpenCodeV2Migration(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+) (*dto.AgentUpdatePreviewDTO, error) {
+	if c.runtimeUpdater == nil {
+		return nil, ErrRuntimeUpdaterUnavailable
+	}
+	openCode, ok := c.agentRegistry.Get(name)
+	if !ok {
+		return nil, ErrAgentNotFound
+	}
+	provider, ok := openCode.(*agents.OpenCodeACP)
+	if !ok {
+		return nil, ErrRuntimeMigrationUnsupported
+	}
+	reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return nil, ErrRuntimeMigrationUnsupported
+	}
+	selection, found, err := reader.GetOpenCodeSelection(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read OpenCode selection: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
+	if !found || selection.Family != managedruntime.OpenCodeFamilyV1 {
+		return nil, ErrRuntimeMigrationUnsupported
+	}
+	spec, err := provider.ManagedNPMRuntimeForFamily(managedruntime.OpenCodeFamilyV2)
+	if err != nil {
+		return nil, err
+	}
+	current := selection.SelectedVersion
+	if selection.Source == managedruntime.OpenCodeSourceNative {
+		if caps, ok := c.runtimeUpdater.CurrentCapabilities(name); ok {
+			current = caps.AgentVersion
+		}
+	}
+	if current == "" {
+		current = selection.AppliedDefaultVersion
+	}
+	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(ctx, spec.Package, current, spec.DefaultVersionOrPinned())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
+	target := strings.TrimSpace(targetVersion)
+	if target == "" {
+		target = spec.DefaultVersionOrPinned()
+	}
+	target, err = resolvePreviewTarget(catalogue, exactCatalogue, target, spec.DefaultVersionOrPinned(), false)
+	if err != nil {
+		return nil, err
+	}
+	command := spec.CacheUpdateCommand(target).Args()
+	return &dto.AgentUpdatePreviewDTO{
+		AgentName: name, Package: spec.Package, CurrentVersion: current,
+		DefaultVersion: spec.DefaultVersionOrPinned(), ActiveVersion: current,
+		EffectiveVersion: current, TargetVersion: target,
+		Family: string(selection.Family), Source: string(selection.Source),
+		TargetFamily: string(managedruntime.OpenCodeFamilyV2), RuntimeRevision: selection.Revision,
+		MigrationAvailable: true, Operation: string(managedruntime.OperationMigrate),
+		AvailableVersions: runtimeVersionDTOs(catalogue), Command: command,
+		CommandString: buildCommandString(command),
+	}, nil
+}
+
+func (c *Controller) managedRuntimeState(
+	ctx context.Context,
+	name string,
+	managed agents.ManagedNPMRuntimeAgent,
+) (agents.ManagedNPMRuntimeSpec, managedruntime.OpenCodeFamily, managedruntime.OpenCodeSource, uint64, string, bool, error) {
+	spec := managed.ManagedNPMRuntime()
+	provider, ok := c.agentRegistry.Get(name)
+	openCode, isOpenCode := provider.(*agents.OpenCodeACP)
+	if !ok || !isOpenCode {
+		return spec, "", "", 0, "", false, nil
+	}
+	reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return spec, "", "", 0, "", false, nil
+	}
+	selection, found, err := reader.GetOpenCodeSelection(ctx)
+	if err != nil || !found {
+		return spec, "", "", 0, "", false, err
+	}
+	spec, err = openCode.ManagedNPMRuntimeForFamily(selection.Family)
+	if err != nil {
+		return agents.ManagedNPMRuntimeSpec{}, "", "", 0, "", false, err
+	}
+	active := selection.SelectedVersion
+	if selection.Source == managedruntime.OpenCodeSourceNative && c.runtimeUpdater != nil {
+		if caps, ok := c.runtimeUpdater.CurrentCapabilities(name); ok {
+			active = caps.AgentVersion
+		}
+	}
+	return spec, selection.Family, selection.Source, selection.Revision, active,
+		selection.Family == managedruntime.OpenCodeFamilyV1, nil
 }
 
 func resolvePreviewTarget(
@@ -159,14 +297,14 @@ func (c *Controller) resolveRuntimeCatalogue(
 		if err != nil {
 			return managedruntime.Catalogue{}, true, err
 		}
-		catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest, extras...)
+		catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, metadata.Versions, metadata.Latest, extras...)
 		return catalogue, true, err
 	}
 	target, err := c.runtimeUpdater.ResolveTarget(ctx, packageName)
 	if err != nil {
 		return managedruntime.Catalogue{}, false, err
 	}
-	catalogue, err := managedruntime.BuildCatalogue([]string{target}, target)
+	catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, []string{target}, target)
 	return catalogue, false, err
 }
 
@@ -254,6 +392,14 @@ type RuntimeCandidateUpdater interface {
 	PublishCapabilities(string, hostutility.AgentCapabilities)
 }
 
+type IsolatedRuntimeCandidateUpdater interface {
+	ProbeIsolated(context.Context, string, agents.Command) (hostutility.AgentCapabilities, error)
+}
+
+type RuntimeCapabilityInvalidator interface {
+	InvalidateCapabilities(string)
+}
+
 // ExactRuntimeCacheInvalidator removes only the version-specific npm tree.
 type ExactRuntimeCacheInvalidator interface {
 	InvalidateExecutionCacheVersion(context.Context, string, string) error
@@ -285,6 +431,20 @@ func (c *Controller) InvalidateExecutionCacheVersion(ctx context.Context, packag
 type hostRuntimeUpdater struct {
 	host     *hostutility.Manager
 	executor directCommandExecutor
+	logger   *commonlogger.Logger
+}
+
+func isolatedProbeCleanupResult(probeErr, cleanupErr error, warn func(error)) error {
+	if cleanupErr == nil {
+		return probeErr
+	}
+	if probeErr == nil {
+		if warn != nil {
+			warn(cleanupErr)
+		}
+		return nil
+	}
+	return errors.Join(probeErr, fmt.Errorf("remove isolated OpenCode probe: %w", cleanupErr))
 }
 
 type directCommandExecutor interface {
@@ -464,11 +624,34 @@ func (u *hostRuntimeUpdater) Probe(
 	return u.host.ProbeWithCommand(ctx, agentName, command)
 }
 
+func (u *hostRuntimeUpdater) ProbeIsolated(
+	ctx context.Context,
+	agentName string,
+	command agents.Command,
+) (caps hostutility.AgentCapabilities, err error) {
+	root, err := os.MkdirTemp("", "kandev-opencode-probe-")
+	if err != nil {
+		return hostutility.AgentCapabilities{}, fmt.Errorf("create isolated OpenCode probe: %w", err)
+	}
+	defer func() {
+		err = isolatedProbeCleanupResult(err, os.RemoveAll(root), func(cleanupErr error) {
+			if u.logger != nil {
+				u.logger.Warn("could not remove isolated OpenCode probe directory", zap.Error(cleanupErr))
+			}
+		})
+	}()
+	return u.host.ProbeIsolatedWithCommand(ctx, agentName, command, root)
+}
+
 func (u *hostRuntimeUpdater) PublishCapabilities(
 	agentName string,
 	caps hostutility.AgentCapabilities,
 ) {
 	u.host.PublishCapabilities(agentName, caps)
+}
+
+func (u *hostRuntimeUpdater) InvalidateCapabilities(agentName string) {
+	u.host.InvalidateCapabilities(agentName)
 }
 
 func runDirectCommand(ctx context.Context, command agents.Command, onChunk func(string)) error {
@@ -538,6 +721,92 @@ func (c *Controller) EnqueueAgentUpdate(
 	return c.enqueueAgentUpdate(ctx, name, strings.TrimSpace(targetVersion), false)
 }
 
+func (c *Controller) EnqueueOpenCodeMigration(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	expectedRevision uint64,
+) (*dto.AgentUpdateJobDTO, error) {
+	if name != agents.OpenCodeACPAgentID || expectedRevision == 0 {
+		return nil, ErrRuntimeMigrationUnsupported
+	}
+	return c.enqueueOpenCodeMigration(ctx, name, targetVersion, expectedRevision)
+}
+
+func (c *Controller) enqueueOpenCodeMigration(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	expectedRevision uint64,
+) (*dto.AgentUpdateJobDTO, error) {
+	if c.updateJobStore == nil || c.runtimeUpdater == nil {
+		return nil, ErrRuntimeMigrationUnsupported
+	}
+	if c.openCodeMigrationGuard == nil {
+		return nil, ErrRuntimeUpdaterUnavailable
+	}
+	openCode, selection, err := c.openCodeMigrationSelection(ctx, name, expectedRevision)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := openCode.ManagedNPMRuntimeForFamily(managedruntime.OpenCodeFamilyV2)
+	if err != nil {
+		return nil, err
+	}
+	targetVersion = strings.TrimSpace(targetVersion)
+	if targetVersion == "" {
+		targetVersion = spec.DefaultVersionOrPinned()
+	}
+	if err := c.validateAgentUpdateTarget(ctx, spec, targetVersion); err != nil {
+		return nil, err
+	}
+	return c.enqueueValidatedOpenCodeMigration(name, spec, targetVersion, selection.Revision)
+}
+
+func (c *Controller) openCodeMigrationSelection(
+	ctx context.Context,
+	name string,
+	expectedRevision uint64,
+) (*agents.OpenCodeACP, managedruntime.OpenCodeSelection, error) {
+	provider, ok := c.agentRegistry.Get(name)
+	if !ok {
+		return nil, managedruntime.OpenCodeSelection{}, ErrAgentNotFound
+	}
+	openCode, ok := provider.(*agents.OpenCodeACP)
+	if !ok {
+		return nil, managedruntime.OpenCodeSelection{}, ErrRuntimeMigrationUnsupported
+	}
+	reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return nil, managedruntime.OpenCodeSelection{}, ErrRuntimeMigrationUnsupported
+	}
+	selection, found, err := reader.GetOpenCodeSelection(ctx)
+	if err != nil {
+		return nil, managedruntime.OpenCodeSelection{}, fmt.Errorf("read OpenCode runtime selection: %w", err)
+	}
+	if !found || selection.Revision != expectedRevision || selection.Family != managedruntime.OpenCodeFamilyV1 {
+		return nil, managedruntime.OpenCodeSelection{}, managedruntime.ErrOpenCodeSelectionRevisionConflict
+	}
+	return openCode, selection, nil
+}
+
+func (c *Controller) enqueueValidatedOpenCodeMigration(
+	name string,
+	spec agents.ManagedNPMRuntimeSpec,
+	targetVersion string,
+	expectedRevision uint64,
+) (*dto.AgentUpdateJobDTO, error) {
+	job, err := c.updateJobStore.EnqueueOpenCodeMigration(name, spec, targetVersion, expectedRevision)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot, found := c.updateJobStore.Get(job.ID); found {
+		return snapshot, nil
+	}
+	snapshot := job.snapshot()
+	return &snapshot, nil
+}
+
 // EnqueueAgentUpdateUseDefault validates and activates the reviewed Kandev
 // default, deleting an operator selection only after the candidate probe
 // succeeds.
@@ -568,7 +837,10 @@ func (c *Controller) enqueueAgentUpdate(
 	if !ok {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
-	spec := managed.ManagedNPMRuntime()
+	spec, _, _, _, _, _, stateErr := c.managedRuntimeState(ctx, name, managed)
+	if stateErr != nil {
+		return nil, stateErr
+	}
 	if strings.TrimSpace(spec.Package) == "" {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
@@ -620,7 +892,7 @@ func (c *Controller) validateAgentUpdateTarget(
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
-	catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
+	catalogue, err := managedruntime.BuildCatalogueForPackage(spec.Package, metadata.Versions, metadata.Latest)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}

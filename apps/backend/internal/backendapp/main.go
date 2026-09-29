@@ -1123,6 +1123,21 @@ func startGatewayAndServe(
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
+	agentSettingsController.SetOpenCodeMigrationGuard(func(ctx context.Context) (context.Context, func(), error) {
+		activationCtx, releaseLifecycle, err := lifecycleMgr.AcquireOpenCodeMigration(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, "opencode-acp")
+		if err != nil {
+			releaseLifecycle()
+			return nil, nil, err
+		}
+		return activationCtx, func() {
+			releaseUtility()
+			releaseLifecycle()
+		}, nil
+	})
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 
 	// Wire Host.InvokeUtilityAgent at the first point where the sessionless

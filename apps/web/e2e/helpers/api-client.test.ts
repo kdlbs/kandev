@@ -94,42 +94,39 @@ describe("ApiClient.deleteTask", () => {
   });
 
   it("refreshes the preview when the task changes before deletion", async () => {
-    let preflightCount = 0;
+    let previewCount = 0;
     let deleteCount = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
-          return Response.json({ interimSettingsInterlockToken: "test-token" });
+    const confirmationHeaders: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+        return Response.json({ interimSettingsInterlockToken: "test-token" });
+      }
+      if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+        previewCount += 1;
+        return Response.json({ confirmation_id: `preview-${previewCount}` });
+      }
+      if (url.endsWith("/api/v1/tasks/task-1")) {
+        deleteCount += 1;
+        const headers = init?.headers as Record<string, string>;
+        confirmationHeaders.push(headers["X-Kandev-Task-Delete-Confirmation"]);
+        if (deleteCount === 1) {
+          return Response.json(
+            { error: "task deletion preview is no longer current" },
+            { status: 409 },
+          );
         }
-        if (url.endsWith("/api/v1/tasks/delete-preflight")) {
-          preflightCount += 1;
-          return Response.json({ confirmation_id: `confirmation-${preflightCount}` });
-        }
-        if (url.endsWith("/api/v1/tasks/task-1")) {
-          deleteCount += 1;
-          if (deleteCount === 1) {
-            return Response.json(
-              { error: "task deletion preview is no longer current" },
-              { status: 409 },
-            );
-          }
-          expect(init?.headers).toMatchObject({
-            "X-Kandev-Task-Delete-Confirmation": "confirmation-2",
-          });
-          return Response.json({ success: true });
-        }
-        throw new Error(`unexpected request: ${url}`);
-      }),
-    );
+        return Response.json({ success: true });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      new ApiClient("http://backend.test").deleteTask("task-1"),
-    ).resolves.toBeUndefined();
+    await new ApiClient("http://backend.test").deleteTask("task-1");
 
-    expect(preflightCount).toBe(2);
+    expect(previewCount).toBe(2);
     expect(deleteCount).toBe(2);
+    expect(confirmationHeaders).toEqual(["preview-1", "preview-2"]);
   });
 
   it("does not retry deletion for an unrelated conflict", async () => {

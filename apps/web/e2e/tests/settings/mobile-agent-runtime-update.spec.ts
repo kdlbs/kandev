@@ -198,4 +198,119 @@ test.describe("managed agent runtime updates on mobile", () => {
     await retryUpdate.tap();
     expect(runtime.postCount()).toBe(2);
   });
+
+  test("presents OpenCode migration choices as touch-safe controls in the drawer", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 600 });
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      agentName: "opencode-acp",
+      displayName: "OpenCode",
+      packageName: "opencode-ai",
+      currentVersion: "1.18.32",
+      defaultVersion: "1.18.32",
+      latestVersion: "1.18.32",
+      previewResponse: {
+        agent_name: "opencode-acp",
+        package: "opencode-ai",
+        current_version: "1.18.32",
+        default_version: "1.18.32",
+        active_version: "1.18.32",
+        effective_version: "1.18.32",
+        target_version: "1.18.32",
+        family: "v1",
+        source: "managed",
+        target_family: "v1",
+        runtime_revision: 7,
+        migration_available: true,
+        operation: "up_to_date",
+        command: ["npm", "exec"],
+        command_string: "npm exec --package=opencode-ai@1.18.32 -- opencode acp",
+      },
+      migrationPreviewResponse: {
+        agent_name: "opencode-acp",
+        package: "@opencode/cli",
+        current_version: "1.18.32",
+        default_version: "2.0.18",
+        active_version: "1.18.32",
+        effective_version: "1.18.32",
+        target_version: "2.0.18",
+        family: "v1",
+        source: "managed",
+        target_family: "v2",
+        runtime_revision: 7,
+        migration_available: true,
+        operation: "migrate",
+        command: ["npm", "exec", "--package=@opencode/cli@2.0.18"],
+        command_string:
+          "npm exec --yes --prefer-online --package=@opencode/cli@2.0.18 -- opencode acp --print-logs --log-level ERROR",
+      },
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
+    const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
+    await expect(drawer).toBeVisible();
+    const migrationChoice = drawer.getByTestId(`agent-update-migrate-family-${runtime.agentName}`);
+    const choiceBox = await migrationChoice.boundingBox();
+    expect(choiceBox).not.toBeNull();
+    expect(choiceBox!.height).toBeGreaterThanOrEqual(44);
+    expect(choiceBox!.width).toBeGreaterThanOrEqual(44);
+    expect(runtime.postCount()).toBe(0);
+    await migrationChoice.tap();
+    await expect(drawer).toContainText("1.18.32 → 2.0.18");
+    const info = drawer.getByTestId(`agent-update-info-${runtime.agentName}`);
+    const infoBox = await info.boundingBox();
+    expect(infoBox!.height).toBeGreaterThanOrEqual(44);
+    expect(infoBox!.width).toBeGreaterThanOrEqual(44);
+    await info.tap();
+    const information = testPage.getByRole("dialog", { name: "Upgrade to managed OpenCode v2" });
+    await expect(information).toBeVisible();
+    await expect(information).toContainText("The standalone CLI remains unchanged.");
+    await information.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(information).toBeHidden();
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText("Stop standalone OpenCode v1 processes");
+    const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
+    await expect(body).toHaveCSS("overflow-y", "auto");
+    const commandDetails = drawer.getByTestId(`agent-update-command-${runtime.agentName}`);
+    await expect(commandDetails).not.toHaveAttribute("open");
+    if (prCapture.capturing) {
+      await drawer.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+            .map((animation) => animation.finished),
+        ),
+      );
+      await prCapture.screenshot("mobile-opencode-migration-preview", {
+        caption: "Mobile OpenCode v1-to-v2 migration preview with details available on demand",
+      });
+    }
+    await commandDetails.locator("summary").tap();
+    await expect(commandDetails).toHaveAttribute("open", "");
+    const command = body.locator("pre");
+    await command.scrollIntoViewIfNeeded();
+    await expect(command).toBeInViewport();
+    const confirm = testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`);
+    await expect(confirm).toBeVisible();
+    const confirmBox = await confirm.boundingBox();
+    expect(confirmBox).not.toBeNull();
+    expect(confirmBox!.height).toBeGreaterThanOrEqual(44);
+    expect(runtime.previewFamilies()).toEqual(["", "v2"]);
+    await confirm.tap();
+    expect(runtime.postBodies()).toEqual([
+      {
+        target_version: "2.0.18",
+        target_family: "v2",
+        expected_runtime_revision: 7,
+      },
+    ]);
+    await expect(testPage.locator("html")).toHaveJSProperty(
+      "scrollWidth",
+      await testPage.locator("html").evaluate((element) => element.clientWidth),
+    );
+  });
 });

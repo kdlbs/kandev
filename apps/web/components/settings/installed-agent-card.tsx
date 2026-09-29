@@ -41,11 +41,14 @@ type Props = {
     agentName: string,
     targetVersion?: string,
     useDefault?: boolean,
+    targetFamily?: "v2",
   ) => Promise<AgentUpdatePreview>;
   onUpdate?: (
     agentName: string,
     targetVersion: string,
     useDefault?: boolean,
+    targetFamily?: "v2",
+    expectedRuntimeRevision?: number,
   ) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh

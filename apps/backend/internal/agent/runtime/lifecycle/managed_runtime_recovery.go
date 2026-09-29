@@ -7,6 +7,31 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
+func managedRuntimeSpecForArgs(agent agents.Agent, args []string) (agents.ManagedNPMRuntimeSpec, bool) {
+	managed, ok := agent.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return agents.ManagedNPMRuntimeSpec{}, false
+	}
+	if openCode, ok := agent.(*agents.OpenCodeACP); ok {
+		for _, family := range []managedruntime.OpenCodeFamily{
+			managedruntime.OpenCodeFamilyV1,
+			managedruntime.OpenCodeFamilyV2,
+		} {
+			spec, err := openCode.ManagedNPMRuntimeForFamily(family)
+			if err != nil {
+				continue
+			}
+			if _, _, found := onlineManagedRuntimeArgs(args, spec); found {
+				return spec, true
+			}
+		}
+		return agents.ManagedNPMRuntimeSpec{}, false
+	}
+	spec := managed.ManagedNPMRuntime()
+	_, _, found := onlineManagedRuntimeArgs(args, spec)
+	return spec, found
+}
+
 // onlineManagedRuntimeArgs returns a copy of a trusted managed-npm launch
 // command with only npm's metadata preference changed. The package spec is
 // returned separately so cache invalidation can target the exact execution
