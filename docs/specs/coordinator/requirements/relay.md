@@ -69,14 +69,33 @@ Mockup:
   the same resolver the Inbox uses and resume the task, with the outcomes that
   component reports: recorded (the item leaves Needs you when the task's
   pending action clears); lost to another caller (the item closes with a
-  notice naming the winning outcome, no error); no longer active (the item
-  closes with a notice); failed (the item stays expanded with the entered
-  answer kept and Try again).
+  notice naming the winning outcome, or a generic answered notice when the
+  winning outcome is unknown, no error); no longer active (the item closes with
+  a notice); failed (the item stays expanded with the entered answer kept and
+  the component's own Retry, which replays the last action, answer or skip).
+  The notices reuse the Inbox row's existing copy. The card offers no
+  late-answer recovery, so the late-message-admitted outcome cannot occur on it.
+  When answering reveals another pending action on the task, the item follows
+  the next status event or list refresh. An item the manager has expanded stays
+  in place, with its card and any entered answer, until one of these outcomes
+  or the manager collapses it, even when the task's pending action clears or
+  changes kind meanwhile; a submit then reaches the resolver's own outcome.
 - **AC-COORDINATOR-RELAY-001.4:** When the task has no answerable bundle, or
   the bundle cannot be read, the item shall show the phase 1 text and
   **Open task** only.
 - **AC-COORDINATOR-RELAY-001.5:** A reader shall see the question item without
   **Answer here**.
+- **AC-COORDINATOR-RELAY-001.6:** The relay read for a task in the
+  coordinator's workspace shall return 200 with the clarification bundle and
+  the pending permission of the task's primary session, each `null` when there
+  is none (including when the task has no primary session or the session is
+  completed, failed or cancelled); at most one bundle, the oldest by creation time then pending id;
+  at most one permission, the newest of the session's current turn, and `null`
+  when that permission has no `request_id`, no `pending_id` or no options; a bundle is
+  returned only for the session's current turn. A task
+  outside the workspace, or a coordinator outside the workspace, shall get 404;
+  a read error shall get 500 and the card shall treat any non-200 as no answer
+  available. While phase 3 is not effective the route shall be 404.
 
 ### REQ-COORDINATOR-RELAY-002: Answering a permission in place
 
@@ -95,14 +114,32 @@ Mockup:
   `AC-COORDINATOR-NEEDS-YOU-002.5` for permissions while phase 3 is
   effective.
 - **AC-COORDINATOR-RELAY-002.2:** **Answer here** shall show the request's
-  title, action details and one button per option, and choosing one shall
-  resolve the request through the same permission response path the task chat
-  uses, recorded with source `web` and the manager as actor.
+  title, the action summary the task chat shows for it and the same decision buttons the task chat shows for
+  that request (Deny, Approve and, when offered, Always allow; or, for a
+  request whose options carry Codex decisions, one button per such option), so
+  a request offering two reject options shows one Deny button. Choosing one
+  shall resolve the request through the same permission response path the task
+  chat uses, recorded with source `web` and the manager as actor.
 - **AC-COORDINATOR-RELAY-002.3:** When the request was already resolved or is
   no longer pending, the item shall close with a notice; any other failure
-  shall keep the item expanded with Try again.
-- **AC-COORDINATOR-RELAY-002.4:** Answering in place shall change neither the
-  Inbox's rows nor its count; the Inbox keeps its own row set (D14).
+  shall keep the item expanded with Try again, which sends the same option
+  again. While a response is in flight every option button shall be disabled,
+  so one choice sends one request. As for a question, an expanded permission
+  item stays in place until it reaches one of these outcomes or the manager
+  collapses it, even when the task's pending action clears or changes kind
+  meanwhile.
+- **AC-COORDINATOR-RELAY-002.4:** Answering in place shall write no Inbox
+  dismiss or snooze state and shall not itself add or remove Inbox rows; the
+  Inbox keeps its own row set (D14). A permission answer leaves the Inbox rows
+  and count unchanged; an answered question leaves the Inbox exactly as
+  answering the same bundle in the chat does.
+- **AC-COORDINATOR-RELAY-002.5:** The permission card shall send the same
+  response fields the task chat sends for the chosen option: `rejected` for a
+  reject option, `cancelled` with no option id for the cancel decision, and
+  the option id otherwise. A permission with no options offered shall show the phase 1
+  text and **Open task** only, without **Answer here**. When a non-Codex
+  request offers no allow option, the Approve button shall be shown disabled
+  and send nothing.
 
 ### REQ-COORDINATOR-RELAY-003: Replying with a condition
 

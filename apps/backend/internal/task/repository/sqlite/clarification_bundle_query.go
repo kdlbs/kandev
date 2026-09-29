@@ -59,6 +59,10 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 		conditions = append(conditions, "t.workspace_id = ?")
 		args = append(args, opts.WorkspaceID)
 	}
+	if opts.SessionID != "" {
+		conditions = append(conditions, "b.session_id = ?")
+		args = append(args, opts.SessionID)
+	}
 	if opts.CreatedSince != nil {
 		conditions = append(conditions, "b.created_at >= ?")
 		args = append(args, *opts.CreatedSince)

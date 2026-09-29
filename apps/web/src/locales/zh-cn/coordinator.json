@@ -450,5 +450,6 @@
   "sendBackQueueFull": "此任务的消息队列已满。",
   "sendBackFailed": "无法发送。请重试。",
   "sendBackSent": "已发送至 {{card}}",
-  "mergeAlwaysHuman": "合并拉取请求始终由人来决定。"
+  "mergeAlwaysHuman": "合并拉取请求始终由人来决定。",
+  "answerHere": "在此回答"
 }

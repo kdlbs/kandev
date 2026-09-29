@@ -450,5 +450,6 @@
   "sendBackQueueFull": "A fila de mensagens desta tarefa está cheia.",
   "sendBackFailed": "Não foi possível enviar. Tente novamente.",
   "sendBackSent": "Enviado para {{card}}",
-  "mergeAlwaysHuman": "Integrar um pull request é sempre uma decisão humana."
+  "mergeAlwaysHuman": "Integrar um pull request é sempre uma decisão humana.",
+  "answerHere": "Responder aqui"
 }

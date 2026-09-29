@@ -450,5 +450,6 @@
   "sendBackQueueFull": "Ţĥĩś ţàśķ'ś ḿēśśàĝē qũēũē ĩś ƒũĺĺ.",
   "sendBackFailed": "Ćōũĺď ńōţ śēńď. Ţŕŷ àĝàĩń.",
   "sendBackSent": "Śēńţ ţō {{card}}",
-  "mergeAlwaysHuman": "Ḿēŕĝĩńĝ à ƥũĺĺ ŕēqũēśţ ĩś àĺŵàŷś ĥũḿàń."
+  "mergeAlwaysHuman": "Ḿēŕĝĩńĝ à ƥũĺĺ ŕēqũēśţ ĩś àĺŵàŷś ĥũḿàń.",
+  "answerHere": "Àńśŵēŕ ĥēŕē"
 }

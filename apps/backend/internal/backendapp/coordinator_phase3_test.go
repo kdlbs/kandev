@@ -133,3 +133,26 @@ func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 		t.Fatalf("warn entries = %v, want one prune failure warning", logs.All())
 	}
 }
+
+func TestRegisterCoordinatorRelayRoutes_MountsReadRouteOnlyWhenPhase3Effective(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, p3 := range []bool{false, true} {
+		svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, p3, newTestLogger())
+		if err != nil {
+			t.Fatalf("initCoordinatorWiring: %v", err)
+		}
+		router := gin.New()
+		if p3 {
+			registerCoordinatorRelayRoutes(router, nil, svc, newTestLogger())
+		}
+		mounted := false
+		for _, route := range router.Routes() {
+			if route.Method == "GET" && route.Path == "/api/v1/workspaces/:id/coordinators/:cid/relay/:taskId" {
+				mounted = true
+			}
+		}
+		if mounted != p3 {
+			t.Fatalf("phase3=%v: relay route mounted = %v", p3, mounted)
+		}
+	}
+}

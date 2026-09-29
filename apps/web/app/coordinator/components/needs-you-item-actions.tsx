@@ -14,6 +14,8 @@ import { resumeStalledTask, useStallResume, type StallResumeEntry } from "../use
 import { StallEvidenceContent } from "./stall-evidence-content";
 
 const NOT_RESUMABLE_STATES = new Set(["COMPLETED", "CREATED"]);
+// i18n-exempt: Tailwind class names
+const TOUCH_TARGET = "min-h-11 min-w-11";
 
 /** The stalled task's primary session id when a resume can pick it up, else undefined. */
 export function resumableSessionId(task: AttentionTask): string | undefined {
@@ -51,7 +53,7 @@ function ResumeAction({ task, sessionId }: { task: AttentionTask; sessionId: str
         variant="outline"
         size="sm"
         disabled={locked}
-        className={cn("cursor-pointer", !isFinePointer && "min-h-11 min-w-11")}
+        className={cn("cursor-pointer", !isFinePointer && TOUCH_TARGET)}
         onClick={() => resumeStalledTask(task.id, sessionId)}
       >
         {entry?.phase === "sending" && <Spinner aria-hidden="true" className="mr-1.5" />}
@@ -73,12 +75,7 @@ function OpenTaskAction({ task }: { task: AttentionTask }) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
   return (
-    <Button
-      asChild
-      variant="outline"
-      size="sm"
-      className={cn(!isFinePointer && "min-h-11 min-w-11")}
-    >
+    <Button asChild variant="outline" size="sm" className={cn(!isFinePointer && TOUCH_TARGET)}>
       <TaskLink taskId={task.id}>{t("coordinator:openTask")}</TaskLink>
     </Button>
   );
@@ -90,7 +87,7 @@ function ShowEvidenceAction({ task, stall }: { task: AttentionTask; stall: Atten
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn(!isFinePointer && "min-h-11 min-w-11")}>
+        <Button variant="outline" size="sm" className={cn(!isFinePointer && TOUCH_TARGET)}>
           {t("coordinator:showEvidence")}
         </Button>
       </PopoverTrigger>
@@ -99,19 +96,45 @@ function ShowEvidenceAction({ task, stall }: { task: AttentionTask; stall: Atten
   );
 }
 
+export type AnswerHereControl = {
+  expanded: boolean;
+  onToggle: () => void;
+};
+
 export type NeedsYouItemPrimaryActionsProps = {
   item: NeedsYouItem;
   canManage?: boolean;
+  /** Present when the item can be answered in place (relay.md "Question card"). */
+  answerHere?: AnswerHereControl;
 };
 
+function AnswerHereAction({ control }: { control: AnswerHereControl }) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  return (
+    <Button
+      variant="default"
+      size="sm"
+      className={cn("cursor-pointer", !isFinePointer && TOUCH_TARGET)}
+      aria-expanded={control.expanded}
+      onClick={control.onToggle}
+      data-testid="needs-you-answer-here"
+    >
+      {t("coordinator:answerHere")}
+    </Button>
+  );
+}
+
 /**
- * The item's primary actions, by kind: question/error offer Open task only;
+ * The item's primary actions, by kind: question/error offer Open task (a
+ * question also offers Answer here while it can be answered in place); error offers Open task only;
  * stall offers Open task and Show the evidence; a proposal offers neither
  * (AC-COORDINATOR-NEEDS-YOU-002.5/.6/.7/.8).
  */
 export function NeedsYouItemPrimaryActions({
   item,
   canManage = false,
+  answerHere,
 }: NeedsYouItemPrimaryActionsProps) {
   const { enabled } = usePhase2CardContext();
   if (item.kind === "proposal") return null;
@@ -119,6 +142,7 @@ export function NeedsYouItemPrimaryActions({
     item.kind === "stall" && enabled && canManage ? resumableSessionId(item.task) : undefined;
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {item.kind === "question" && answerHere && <AnswerHereAction control={answerHere} />}
       {sessionId && <ResumeAction task={item.task} sessionId={sessionId} />}
       <OpenTaskAction task={item.task} />
       {item.kind === "stall" && <ShowEvidenceAction task={item.task} stall={item.stall} />}

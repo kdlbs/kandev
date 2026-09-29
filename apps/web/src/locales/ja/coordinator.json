@@ -450,5 +450,6 @@
   "sendBackQueueFull": "このタスクのメッセージキューはいっぱいです。",
   "sendBackFailed": "送信できませんでした。もう一度お試しください。",
   "sendBackSent": "{{card}} に送信しました",
-  "mergeAlwaysHuman": "プルリクエストのマージは常に人が行います。"
+  "mergeAlwaysHuman": "プルリクエストのマージは常に人が行います。",
+  "answerHere": "ここで回答"
 }

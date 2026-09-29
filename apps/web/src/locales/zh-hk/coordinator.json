@@ -450,5 +450,6 @@
   "sendBackQueueFull": "此任務的訊息佇列已滿。",
   "sendBackFailed": "無法傳送。請重試。",
   "sendBackSent": "已傳送至 {{card}}",
-  "mergeAlwaysHuman": "合併拉取要求始終由人來決定。"
+  "mergeAlwaysHuman": "合併拉取要求始終由人來決定。",
+  "answerHere": "在此回答"
 }

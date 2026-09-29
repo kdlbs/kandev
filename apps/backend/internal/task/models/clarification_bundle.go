@@ -28,6 +28,9 @@ type ListClarificationBundlesOptions struct {
 	// exactly this workspace_id (spec L7/L7a). Empty means unfiltered — it
 	// is never read as "workspace_id is empty" (L7a.4).
 	WorkspaceID string
+	// SessionID optionally narrows to bundles of exactly this task session.
+	// Empty means unfiltered; the query is unchanged when it is empty.
+	SessionID string
 	// CreatedSince optionally excludes bundles created before this instant
 	// (spec L8). Nil means unfiltered.
 	CreatedSince *time.Time

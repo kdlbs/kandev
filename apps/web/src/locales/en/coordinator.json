@@ -450,5 +450,6 @@
   "sendBackQueueFull": "This task's message queue is full.",
   "sendBackFailed": "Could not send. Try again.",
   "sendBackSent": "Sent to {{card}}",
-  "mergeAlwaysHuman": "Merging a pull request is always human."
+  "mergeAlwaysHuman": "Merging a pull request is always human.",
+  "answerHere": "Answer here"
 }

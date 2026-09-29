@@ -125,6 +125,9 @@ func registerCoordinatorRoutes(p routeParams) {
 		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.taskSvc, p.services.Workflow, p.log),
 	}
 	if svc.Phase3Enabled() {
+		if p.taskRepo != nil && p.taskSvc != nil {
+			svc.SetRelayDeps(p.taskRepo, p.taskSvc)
+		}
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}
@@ -264,7 +267,7 @@ var (
 	registerCoordinatorSpend        coordinatorRegistration = noopCoordinatorHook
 	registerCoordinatorWake         coordinatorRegistration = registerCoordinatorWakeState
 	registerCoordinatorDelivery     coordinatorRegistration = noopCoordinatorHook
-	registerCoordinatorRelay        coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorRelay        coordinatorRegistration = registerCoordinatorRelayRoutes
 	registerCoordinatorReply        coordinatorRegistration = noopCoordinatorHook
 	registerCoordinatorAutomatic    coordinatorRegistration = noopCoordinatorHook
 	registerCoordinatorImprovements coordinatorRegistration = noopCoordinatorHook
@@ -281,6 +284,13 @@ func phase3Registrations() []coordinatorRegistration {
 		registerCoordinatorAutomatic,
 		registerCoordinatorImprovements,
 	}
+}
+
+// registerCoordinatorRelayRoutes mounts the answer-in-place read route. The
+// readers it serves from are set on svc by registerCoordinatorRoutes.
+func registerCoordinatorRelayRoutes(router *gin.Engine, _ bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	coordinator.RegisterRelayRoutes(router, svc, log)
+	return func(context.Context, time.Time) {}
 }
 
 // registerCoordinatorWakeState returns the startup hook that prunes wake
