@@ -62,7 +62,13 @@ function openSequenceMock(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useCopilotStore.setState({ entries: {} });
+  useCopilotStore.setState({
+    coordinatorId: null,
+    open: false,
+    chip: null,
+    draft: "",
+    draftsSwept: false,
+  });
   mocks.useFeature.mockReturnValue(true);
   mocks.useCoordinatorLauncher.mockReturnValue({
     coordinator: null,
