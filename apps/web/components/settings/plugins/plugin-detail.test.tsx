@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 
 const state = vi.hoisted(() => ({
   isAdmin: false,
@@ -78,7 +79,11 @@ afterEach(() => {
 
 describe("PluginDetail personal settings visibility", () => {
   it("renders the owner-scoped settings slot for a non-admin without operator controls", () => {
-    render(<PluginDetail pluginId={state.plugin.id} />);
+    render(
+      <StateProvider>
+        <PluginDetail pluginId={state.plugin.id} />
+      </StateProvider>,
+    );
 
     expect(screen.getByTestId("owner-scoped-plugin-settings")).not.toBeNull();
     expect(screen.queryByTestId("plugin-settings-card")).toBeNull();
