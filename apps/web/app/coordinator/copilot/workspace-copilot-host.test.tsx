@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   route: { kind: "kanban" } as { kind: string; taskId?: string },
   listCoordinators: vi.fn(),
   panelRenders: [] as string[],
+  taskHasWalkthrough: false,
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
@@ -53,6 +54,9 @@ vi.mock("@/components/right-side-panel", () => ({
   ),
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("./use-task-has-walkthrough", () => ({
+  useTaskHasWalkthrough: () => mocks.taskHasWalkthrough,
+}));
 vi.mock("./use-page-context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./use-page-context")>()),
   useActiveWorkflowId: () => null,
@@ -104,6 +108,7 @@ function mount() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  mocks.taskHasWalkthrough = false;
   mocks.flags.coordinator = true;
   mocks.flags.coordinatorPhase2 = true;
   mocks.scope.workspace = { scopes: ["workspace.manage"] };
@@ -128,6 +133,23 @@ describe("WorkspaceCopilotHost eligibility", () => {
     mocks.route = route;
     mount();
     await waitFor(() => expect(launcher()).not.toBeNull());
+  });
+
+  it("keeps the launcher in the corner on a task page without a walkthrough", async () => {
+    mocks.route = { kind: "taskDetail", taskId: "t-1" };
+    mocks.taskHasWalkthrough = false;
+    mount();
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    expect(launcher()?.className).toContain("bottom-[calc(1.5rem");
+    expect(launcher()?.className).not.toContain("bottom-[calc(5.5rem");
+  });
+
+  it("lifts the launcher above the walkthrough launcher when the task has a walkthrough", async () => {
+    mocks.route = { kind: "taskDetail", taskId: "t-1" };
+    mocks.taskHasWalkthrough = true;
+    mount();
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    expect(launcher()?.className).toContain("bottom-[calc(5.5rem");
   });
 
   it.each([

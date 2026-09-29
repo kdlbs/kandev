@@ -27,6 +27,7 @@ import {
   type WorkspacePageRoute,
 } from "./use-page-context";
 import { useCopilotPanelWidth } from "./use-copilot-panel-width";
+import { useTaskHasWalkthrough } from "./use-task-has-walkthrough";
 import { WorkspaceCopilotLauncher } from "./workspace-copilot-launcher";
 import { WorkspaceCopilotPanel } from "./workspace-copilot-panel";
 
@@ -133,6 +134,9 @@ function EnabledHost({ children }: HostProps) {
   const { t } = useTranslation();
   const elig = useHostEligibility();
   const { workspaceId, route, pageRoute, coordinators, eligible } = elig;
+  const taskHasWalkthrough = useTaskHasWalkthrough(
+    route.kind === "taskDetail" ? route.taskId : null,
+  );
 
   const [store] = useState(createWorkspaceCopilotStore);
   const open = useStore(store, (s) => s.open);
@@ -196,7 +200,7 @@ function EnabledHost({ children }: HostProps) {
         <WorkspaceCopilotLauncher
           ref={launcherRef}
           onOpen={openPanel}
-          aboveWalkthrough={route.kind === "taskDetail"}
+          aboveWalkthrough={taskHasWalkthrough}
         />
       )}
     </WorkspaceCopilotStoreProvider>
