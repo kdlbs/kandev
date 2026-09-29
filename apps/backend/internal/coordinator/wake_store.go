@@ -87,53 +87,70 @@ const ownTaskJoins = `FROM coordinator_proposals p
 	JOIN tasks t ON t.id = p.task_id
 	JOIN coordinators c ON c.id = p.coordinator_id`
 
-// ListOwnTasks returns the coordinator's own tasks ordered by task id.
-func (s *Store) ListOwnTasks(ctx context.Context, coordinatorID string) ([]OwnTask, error) {
-	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
-		SELECT DISTINCT t.id, t.workspace_id, COALESCE(t.workflow_id, '') `+ownTaskJoins+`
-		WHERE p.coordinator_id = ? AND `+ownTaskPredicates+`
-		ORDER BY t.id`), coordinatorID)
+// queryOwnRows runs an own-task query and scans each row with scan.
+func queryOwnRows[T any](ctx context.Context, s *Store, what, query string, arg any, scan func(*sql.Rows) (T, error)) ([]T, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(query), arg)
 	if err != nil {
-		return nil, fmt.Errorf("list own tasks: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer func() { _ = rows.Close() }()
-	out := []OwnTask{}
+	out := []T{}
 	for rows.Next() {
-		var o OwnTask
-		if err := rows.Scan(&o.TaskID, &o.WorkspaceID, &o.WorkflowID); err != nil {
-			return nil, fmt.Errorf("scan own task: %w", err)
+		v, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: scan: %w", what, err)
 		}
-		out = append(out, o)
+		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list own tasks: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	return out, nil
+}
+
+// ListOwnTasks returns the coordinator's own tasks ordered by task id.
+func (s *Store) ListOwnTasks(ctx context.Context, coordinatorID string) ([]OwnTask, error) {
+	return queryOwnRows(ctx, s, "list own tasks", `
+		SELECT DISTINCT t.id, t.workspace_id, COALESCE(t.workflow_id, '') `+ownTaskJoins+`
+		WHERE p.coordinator_id = ? AND `+ownTaskPredicates+`
+		ORDER BY t.id`, coordinatorID, func(r *sql.Rows) (o OwnTask, err error) {
+		err = r.Scan(&o.TaskID, &o.WorkspaceID, &o.WorkflowID)
+		return o, err
+	})
+}
+
+// OwningCoordinator is an autonomous coordinator that owns a task, with the
+// task's workspace and workflow as stored.
+type OwningCoordinator struct {
+	CoordinatorID string
+	WorkspaceID   string
+	WorkflowID    string
+}
+
+// OwnersOfTask returns the autonomous coordinators that own taskID, ordered by
+// coordinator id.
+func (s *Store) OwnersOfTask(ctx context.Context, taskID string) ([]OwningCoordinator, error) {
+	return queryOwnRows(ctx, s, "list coordinators owning task", `
+		SELECT DISTINCT c.id, t.workspace_id, COALESCE(t.workflow_id, '') `+ownTaskJoins+`
+		WHERE p.task_id = ? AND c.autonomy_enabled = 1 AND `+ownTaskPredicates+`
+		ORDER BY c.id`, taskID, func(r *sql.Rows) (o OwningCoordinator, err error) {
+		err = r.Scan(&o.CoordinatorID, &o.WorkspaceID, &o.WorkflowID)
+		return o, err
+	})
 }
 
 // CoordinatorsOwningTask returns the ids of the autonomous coordinators that
 // own taskID, ordered by coordinator id.
 func (s *Store) CoordinatorsOwningTask(ctx context.Context, taskID string) ([]string, error) {
-	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
-		SELECT DISTINCT c.id `+ownTaskJoins+`
-		WHERE p.task_id = ? AND c.autonomy_enabled = 1 AND `+ownTaskPredicates+`
-		ORDER BY c.id`), taskID)
+	owners, err := s.OwnersOfTask(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("list coordinators owning task: %w", err)
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan owning coordinator: %w", err)
-		}
-		out = append(out, id)
+	ids := make([]string, 0, len(owners))
+	for _, o := range owners {
+		ids = append(ids, o.CoordinatorID)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list coordinators owning task: %w", err)
-	}
-	return out, nil
+	return ids, nil
 }
 
 // ExistingWakeKeys returns the (task, kind, episode key) of every stored wake

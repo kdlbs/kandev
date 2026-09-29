@@ -133,3 +133,31 @@ func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 		t.Fatalf("warn entries = %v, want one prune failure warning", logs.All())
 	}
 }
+
+func TestRegisterCoordinatorWakeState_FailedPruneStillStartsBackstopAndRecorder(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, newTestLogger())
+	if err != nil {
+		t.Fatalf("initCoordinatorWiring: %v", err)
+	}
+	t.Cleanup(func() {
+		svc.StopWakeRecorder()
+		svc.StopWakeBackstop()
+	})
+	memBus := bus.NewMemoryEventBus(newTestLogger())
+	t.Cleanup(memBus.Close)
+	saved := coordinatorWakeSources
+	coordinatorWakeSources = &coordinatorWakeReader{tasks: nil}
+	t.Cleanup(func() { coordinatorWakeSources = saved })
+
+	hook := registerCoordinatorWakeState(nil, memBus, svc, newTestLogger())
+	if svc.WakeBackstopRunning() {
+		t.Fatal("the backstop must wait for the startup pass")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	hook(cancelled, time.Now().UTC())
+	if !svc.WakeBackstopRunning() {
+		t.Fatal("a failing prune must not stop the backstop from starting")
+	}
+}

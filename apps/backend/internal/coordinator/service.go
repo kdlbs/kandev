@@ -127,8 +127,20 @@ type Service struct {
 	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
 	// and phase 3 all on). It gates the autonomy settings.
 	phase3 bool
+	// wakeMu guards kick, the stall hook, the wake sources and the recorder
+	// state; nothing waits while holding it.
+	wakeMu sync.Mutex
 	// kick asks the wake ticker to re-evaluate one coordinator; nil means no call.
 	kick func(ctx context.Context, coordinatorID string) error
+	// stallWakeHook records stall wakes; nil is a no-op.
+	stallWakeHook StallWakeHook
+	wakeSources   WakeSources
+	recorderSubs  []bus.Subscription
+	// recorderStopped latches once StopWakeRecorder ran: later hook and event
+	// entries are refused. wakeInFlight counts handlers and hooks in flight.
+	recorderStopped bool
+	wakeInFlight    sync.WaitGroup
+	backstop        *WakeBackstop
 
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
@@ -154,7 +166,29 @@ func (s *Service) Phase3Enabled() bool { return s.phase3 }
 
 // SetKick registers the post-commit Kick the autonomy PATCH calls; nil clears it.
 func (s *Service) SetKick(kick func(ctx context.Context, coordinatorID string) error) {
+	s.wakeMu.Lock()
 	s.kick = kick
+	s.wakeMu.Unlock()
+}
+
+// callKick asks the wake ticker to re-evaluate one coordinator. It is a no-op
+// while no Kick is set; a panic is recovered and an error is logged and
+// ignored.
+func (s *Service) callKick(ctx context.Context, coordinatorID string) {
+	s.wakeMu.Lock()
+	kick := s.kick
+	s.wakeMu.Unlock()
+	if kick == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("coordinator kick panicked", zap.String("coordinator_id", coordinatorID), zap.Any("panic", r))
+		}
+	}()
+	if err := kick(ctx, coordinatorID); err != nil {
+		s.logger.Warn("coordinator kick failed", zap.String("coordinator_id", coordinatorID), zap.Error(err))
+	}
 }
 
 // Phase2Enabled reports whether the phase-2 control surface is on.
@@ -171,6 +205,7 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 	}
 	s.registerKinds()
 	s.executeTimeout = executeDeadline
+	s.backstop = newWakeBackstop(s)
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -351,17 +386,7 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 // PATCH result.
 func (s *Service) afterAutonomyChange(ctx context.Context, workspaceID, id string) {
 	s.publishCoordinatorUpdatedWith(ctx, workspaceID, id, true)
-	if s.kick == nil {
-		return
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Warn("coordinator kick panicked", zap.String("coordinator_id", id), zap.Any("panic", r))
-		}
-	}()
-	if err := s.kick(ctx, id); err != nil {
-		s.logger.Warn("coordinator kick failed", zap.String("coordinator_id", id), zap.Error(err))
-	}
+	s.callKick(ctx, id)
 }
 
 // buildCoordinatorPatch parses req's four known fields into a
