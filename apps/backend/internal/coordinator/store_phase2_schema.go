@@ -35,6 +35,7 @@ var phase2ColumnMigrations = []struct{ name, stmt string }{
 // until then.
 var phase2LateColumnMigrations = []struct{ name, stmt string }{
 	{"coordinator_activity.unattended_turn_id", `ALTER TABLE coordinator_activity ADD COLUMN unattended_turn_id TEXT`},
+	{"coordinator_unattended_turns.reserved_turn_id", `ALTER TABLE coordinator_unattended_turns ADD COLUMN reserved_turn_id TEXT`},
 }
 
 // phase2TablesSQL creates the phase-2 tables. Indexes over columns added by
