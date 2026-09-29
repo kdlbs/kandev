@@ -108,6 +108,7 @@ func TestHandleListCoordinatorActivity_BadArguments(t *testing.T) {
 		"limit fraction": {"limit": 1.5},
 		"limit string":   {"limit": "ten"},
 		"bad cursor":     {"before": "not-a-cursor!"},
+		"cursor number":  {"before": 123},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assertWSError(t, callListActivity(t, h, ctx, payload), ws.ErrorCodeBadRequest)

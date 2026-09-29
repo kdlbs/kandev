@@ -163,6 +163,11 @@ func TestUndoActivity_Refusals(t *testing.T) {
 	seedMoveRow(t, store, c, "noop", "t1", `{"from_step_id":"s2","to_step_id":"s2","noop":true}`)
 	_, err = svc.UndoActivity(ctx, "ws-1", c.ID, "noop")
 	assertUndoRefusal(t, err, UndoNotUndoable, "")
+	pid := "p-notarget"
+	seedMoveProposal(t, store, c, pid, moveOutcomeS1toS2)
+	seedApproved(t, store, c, "notarget", ActionMove, time.Now().UTC(), func(r *ActivityRow) { r.ProposalID = &pid })
+	_, err = svc.UndoActivity(ctx, "ws-1", c.ID, "notarget")
+	assertUndoRefusal(t, err, UndoNotUndoable, "")
 	seedMoveRow(t, store, c, "badout", "t1", `{"to_step_id":"s2"}`)
 	_, err = svc.UndoActivity(ctx, "ws-1", c.ID, "badout")
 	assertUndoRefusal(t, err, UndoNotUndoable, "")

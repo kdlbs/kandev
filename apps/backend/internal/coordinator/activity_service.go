@@ -116,7 +116,7 @@ func undoReadable(row *ActivityRow, outcomes map[string]*string) bool {
 	if row.ActionClass == ActionCreateTask {
 		return row.TargetTaskID != nil && *row.TargetTaskID != ""
 	}
-	if row.ProposalID == nil {
+	if row.ProposalID == nil || row.TargetTaskID == nil || *row.TargetTaskID == "" {
 		return false
 	}
 	raw, present := outcomes[*row.ProposalID]
