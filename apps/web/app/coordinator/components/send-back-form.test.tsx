@@ -144,6 +144,75 @@ describe("SendBackForm", () => {
     );
   });
 
+  it("resets the queue id on success within the same instance", async () => {
+    await renderForm();
+    type("again");
+    await send();
+    await send();
+    expect(queueMock).toHaveBeenCalledTimes(2);
+    expect(queueMock.mock.calls[1][0].client_queue_id).not.toBe(
+      queueMock.mock.calls[0][0].client_queue_id,
+    );
+  });
+
+  it("toasts a late success without touching the closed form", async () => {
+    let resolveSend: (value: unknown) => void = () => {};
+    queueMock.mockReturnValueOnce(new Promise((resolve) => (resolveSend = resolve)));
+    const onClose = vi.fn();
+    const view = render(
+      <SendBackForm taskId="t-1" sessionId="s-1" label="KAN-1" onClose={onClose} />,
+    );
+    await act(async () => {});
+    type("late");
+    await send();
+    view.unmount();
+    await act(async () => resolveSend({}));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays silent when a send fails after the form closed", async () => {
+    let rejectSend: (reason: unknown) => void = () => {};
+    queueMock.mockReturnValueOnce(new Promise((_, reject) => (rejectSend = reject)));
+    const view = render(
+      <SendBackForm taskId="t-1" sessionId="s-1" label="KAN-1" onClose={vi.fn()} />,
+    );
+    await act(async () => {});
+    type("late");
+    await send();
+    view.unmount();
+    await act(async () => rejectSend(new Error("x")));
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale session read that lands after the session changed", async () => {
+    let resolveStale: (value: unknown) => void = () => {};
+    fetchSessionMock.mockReturnValueOnce(new Promise((resolve) => (resolveStale = resolve)));
+    fetchSessionMock.mockResolvedValueOnce(session());
+    const view = render(
+      <SendBackForm taskId="t-1" sessionId="s-1" label="KAN-1" onClose={vi.fn()} />,
+    );
+    view.rerender(<SendBackForm taskId="t-1" sessionId="s-2" label="KAN-1" onClose={vi.fn()} />);
+    await act(async () => {});
+    await act(async () => resolveStale(session("FAILED")));
+    expect(screen.queryByRole("alert")).toBeNull();
+    type("ok");
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it("disables the note and Send while a send is in flight", async () => {
+    let resolveSend: (value: unknown) => void = () => {};
+    queueMock.mockReturnValueOnce(new Promise((resolve) => (resolveSend = resolve)));
+    await renderForm();
+    type("busy");
+    await send();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => resolveSend({}));
+  });
+
   it("maps queue-full and admission errors to translated copy", async () => {
     queueMock.mockRejectedValueOnce(new QueueFullError(10, 10));
     await renderForm();

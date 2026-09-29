@@ -157,9 +157,15 @@ a unit test in `send-back-form.test.tsx`, `use-stall-resume.test.ts` or
   draft and a generic error. The form closes only with the row on success.
 - **R4-03 Late responses.** Resume and Send it back fence late responses with a
   per-id sequence and tombstones (the pattern WP-5b's proposal store uses). A
-  response for a superseded or pruned Resume or Send is ignored.
+  response for a superseded or pruned Resume is ignored. Send it back fences the
+  session read by sequence and guards form state with the mounted flag; a send
+  that succeeds after the form closed still toasts (the message was queued),
+  and one that fails after it closed is silent.
 - **R4-04 No raw transport text.** Errors show generic translated copy. A
-  timeout states that the outcome is unknown and does not silently re-enable.
+  Resume timeout states that the outcome is unknown and does not silently
+  re-enable. Send it back needs no such state: queueMessage reconciles an
+  uncertain transport error by client_queue_id, and a retry of the same note
+  reuses that id, so a retry cannot double-queue.
 - **R4-05 Announce and focus.** AC 005.2 is conditioned on the phase-2 flag.
   The session read retries after a failure. Closing the form returns focus to
   the Send it back trigger, matching WP-5b's card and task 08's rows.
