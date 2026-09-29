@@ -17,6 +17,8 @@ import (
 type sessionRequestCaptureAgent struct {
 	newRequest   acpsdk.NewSessionRequest
 	loadRequest  acpsdk.LoadSessionRequest
+	newResponse  *acpsdk.NewSessionResponse
+	loadResponse *acpsdk.LoadSessionResponse
 	newStarted   chan struct{}
 	releaseNew   chan struct{}
 	newCalls     chan struct{}
@@ -106,6 +108,13 @@ func (a *sessionRequestCaptureAgent) NewSession(_ context.Context, request acpsd
 	a.sessionCounter = attempt
 	sessionID := fmt.Sprintf("session-%d", attempt)
 	a.mu.Unlock()
+	if a.newResponse != nil {
+		response := *a.newResponse
+		if response.SessionId == "" {
+			response.SessionId = acpsdk.SessionId(sessionID)
+		}
+		return response, nil
+	}
 	return acpsdk.NewSessionResponse{SessionId: acpsdk.SessionId(sessionID)}, nil
 }
 
@@ -129,6 +138,9 @@ func (a *sessionRequestCaptureAgent) LoadSession(_ context.Context, request acps
 	a.loadRequest = request
 	if a.loadStarted != nil {
 		close(a.loadStarted)
+	}
+	if a.loadResponse != nil {
+		return *a.loadResponse, nil
 	}
 	return acpsdk.LoadSessionResponse{}, nil
 }

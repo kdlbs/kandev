@@ -22,7 +22,7 @@ func TestGlobalSchedulingStartsOutsideOfficeFeatureGate(t *testing.T) {
 			continue
 		}
 		count := countNamedCalls(fn, "startSchedulingRuntime")
-		if fn.Name.Name == "initOfficeServices" {
+		if fn.Name.Name == "constructOfficeServices" || fn.Name.Name == "activateOfficeServices" {
 			foundOfficeInit = true
 			callsInOfficeInit += count
 			continue
@@ -31,7 +31,7 @@ func TestGlobalSchedulingStartsOutsideOfficeFeatureGate(t *testing.T) {
 	}
 
 	if !foundOfficeInit {
-		t.Fatal("initOfficeServices not found in main.go; re-point this guard at the Office-gated function")
+		t.Fatal("constructOfficeServices not found in main.go; re-point this guard at the Office-gated function")
 	}
 	if callsInOfficeInit > 0 {
 		t.Errorf("startSchedulingRuntime is called inside the Office-gated initializer %d time(s)", callsInOfficeInit)

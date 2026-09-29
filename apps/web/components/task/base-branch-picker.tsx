@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
@@ -73,6 +73,7 @@ function usePickerLogic(taskId: string | null, repositoryName: string, fallbackB
   const envKey = useAppStore((s) =>
     sessionId ? (s.environmentIdBySessionId[sessionId] ?? sessionId) : null,
   );
+  const store = useAppStoreApi();
   const bumpSessionCommitsRefetch = useAppStore((s) => s.bumpSessionCommitsRefetch);
 
   const { branches, isLoading: isLoadingBranches } = useBranches(
@@ -101,7 +102,7 @@ function usePickerLogic(taskId: string | null, repositoryName: string, fallbackB
       // panel + cumulative diff refetch against the new base instead of
       // serving the stale snapshot until next page load.
       if (sessionId) bumpSessionCommitsRefetch(sessionId);
-      if (envKey) invalidateCumulativeDiffCache(envKey);
+      if (envKey) invalidateCumulativeDiffCache(store, envKey);
     } catch (err) {
       toast({
         title: t("task:failedToChangeCompareBranch"),

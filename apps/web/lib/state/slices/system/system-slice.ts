@@ -15,6 +15,7 @@ export const defaultSystemState: SystemSliceState = {
       overview: null,
       analysisRevision: 0,
       disk: null,
+      diskIdentity: null,
       runs: [],
       quarantine: [],
     },
@@ -76,9 +77,10 @@ export const createSystemSlice: StateCreator<
     set((draft) => {
       draft.system.storage.analysisRevision += 1;
     }),
-  setSystemStorageDisk: (disk) =>
+  setSystemStorageDisk: (disk, identity) =>
     set((draft) => {
       draft.system.storage.disk = disk;
+      draft.system.storage.diskIdentity = identity;
     }),
   setSystemStorageRuns: (runs) =>
     set((draft) => {

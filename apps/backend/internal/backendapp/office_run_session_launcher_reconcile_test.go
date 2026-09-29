@@ -13,6 +13,7 @@ import (
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
@@ -82,6 +83,10 @@ func (f *fakeReconcileBackend) GetExecution(executionID string) (*lifecycle.Agen
 }
 
 func (f *fakeReconcileBackend) SetMcpMode(_ context.Context, _ string, _ string) error { return nil }
+
+func (f *fakeReconcileBackend) ExecuteBackgroundWorkAction(_ context.Context, _ string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	return streams.BackgroundWorkActionResponse{Success: true, WorkID: req.WorkID, Action: req.Action}, nil
+}
 
 // evict removes an execution, simulating a backend restart that lost the
 // runtime's record of it.

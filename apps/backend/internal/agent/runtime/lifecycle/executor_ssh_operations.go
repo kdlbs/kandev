@@ -718,12 +718,13 @@ func buildSSHCreateInstanceRequest(
 	agentctlBin string,
 ) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
+		ID:                    req.InstanceID,
+		WorkspacePath:         workspacePath,
+		SessionID:             req.SessionID,
+		TaskID:                req.TaskID,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             sshAgentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -1050,6 +1051,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}
+	}
+	// Keep an explicit profile configuration path intact. Mode application no
+	// longer creates or redirects this directory.
+	if configDir := req.Env["CLAUDE_CONFIG_DIR"]; configDir != "" {
+		env["CLAUDE_CONFIG_DIR"] = configDir
 	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value

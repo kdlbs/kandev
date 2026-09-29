@@ -162,6 +162,19 @@ describe("ClarificationInputOverlay — Escape key", () => {
   });
 });
 
+describe("ClarificationInputOverlay — native question controls", () => {
+  it("hides custom text when the provider does not allow another answer", () => {
+    const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
+    const metadata = message.metadata as ClarificationRequestMetadata;
+    metadata.question.allow_custom_text = false;
+
+    renderOverlay([message]);
+
+    expect(screen.getByTestId(TESTID_OPTION)).toBeTruthy();
+    expect(screen.queryByTestId("clarification-custom-input")).toBeNull();
+  });
+});
+
 function fakeEscape(target: EventTarget): KeyboardEvent {
   return {
     key: "Escape",

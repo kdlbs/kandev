@@ -302,6 +302,11 @@ export type CommandPreviewResponse = {
   supported: boolean;
   command: string[];
   command_string: string;
+  /**
+   * Which process the profile's CLI flags are appended to. Over ACP that is the
+   * bridge, not the agent CLI it wraps.
+   */
+  flag_destination?: "agent_cli" | "acp_bridge";
 };
 
 export async function previewAgentCommandAction(

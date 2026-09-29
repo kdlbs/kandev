@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import {
@@ -15,6 +15,11 @@ const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
 const { copyToClipboard } = vi.hoisted(() => ({
   copyToClipboard: vi.fn().mockResolvedValue(true),
 }));
+const FORK = vi.hoisted(() => ({ request: vi.fn() }));
+
+vi.mock("@/lib/services/session-launch-service", () => ({
+  forkConversation: FORK.request,
+}));
 
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => TOUCH_DRAWER.enabled,
@@ -24,6 +29,7 @@ vi.mock("@/lib/utils/copy-to-clipboard", () => ({ copyToClipboard }));
 
 const MESSAGE_TIMESTAMP = "2026-07-20T10:15:00Z";
 const MESSAGE_TURN_DURATION_TEST_ID = "message-turn-duration";
+const TURN_COMPLETED_AT = "2026-07-20T10:15:05Z";
 
 function assistantMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -66,7 +72,7 @@ function StoreCapture() {
   return null;
 }
 
-function renderMessageActions(message: Message, messageTurn?: Turn) {
+function renderMessageActions(message: Message, messageTurn?: Turn, nativeCodexEnabled = false) {
   render(
     <StateProvider>
       <StoreCapture />
@@ -78,6 +84,13 @@ function renderMessageActions(message: Message, messageTurn?: Turn) {
 
   const capturedStore = storeApi;
   if (!capturedStore) throw new Error("App store was not captured");
+  if (nativeCodexEnabled) {
+    act(() => {
+      capturedStore
+        .getState()
+        .setFeatures({ ...capturedStore.getState().features, codexAppServer: true });
+    });
+  }
   act(() => {
     capturedStore.getState().addTurn(messageTurn);
   });
@@ -88,6 +101,7 @@ afterEach(() => {
   cleanup();
   storeApi = null;
   copyToClipboard.mockClear();
+  FORK.request.mockReset();
 });
 
 describe("MessageActions copy", () => {
@@ -170,7 +184,7 @@ describe("MessageActions action row disclosure", () => {
   it("keeps the action row visible for coarse pointers at tablet widths", () => {
     TOUCH_DRAWER.enabled = true;
 
-    renderMessageActions(userMessage(), turn({ completed_at: "2026-07-20T10:15:05Z" }));
+    renderMessageActions(userMessage(), turn({ completed_at: TURN_COMPLETED_AT }));
 
     const actions = screen.getByTestId(MESSAGE_TURN_DURATION_TEST_ID).parentElement;
     expect(actions).not.toBeNull();
@@ -239,7 +253,7 @@ describe("MessageActions favorite toggle", () => {
 
 describe("MessageActions turn duration", () => {
   it("renders the completed user prompt duration with an hourglass", () => {
-    renderMessageActions(userMessage(), turn({ completed_at: "2026-07-20T10:15:05Z" }));
+    renderMessageActions(userMessage(), turn({ completed_at: TURN_COMPLETED_AT }));
 
     const duration = screen.getByTestId(MESSAGE_TURN_DURATION_TEST_ID);
     expect(duration.textContent).toBe("5s");
@@ -264,7 +278,7 @@ describe("MessageActions turn duration", () => {
   it("omits duration for completed agent messages", () => {
     renderMessageActions(
       assistantMessage({ turn_id: "turn-1" }),
-      turn({ completed_at: "2026-07-20T10:15:05Z" }),
+      turn({ completed_at: TURN_COMPLETED_AT }),
     );
 
     expect(screen.queryByTestId(MESSAGE_TURN_DURATION_TEST_ID)).toBeNull();
@@ -280,5 +294,50 @@ describe("MessageActions turn duration", () => {
     expect(duration.textContent).toBe("5m 23s");
     expect(duration.className).toContain("whitespace-nowrap");
     expect(duration.className).toContain("shrink-0");
+  });
+});
+
+describe("MessageActions native conversation fork", () => {
+  it.each([false, true])("confirms and selects the forked session on touch=%s", async (touch) => {
+    TOUCH_DRAWER.enabled = touch;
+    FORK.request.mockResolvedValueOnce({
+      task_id: "task-1",
+      session_id: "forked-session",
+      state: "STARTING",
+    });
+    const message = assistantMessage({ turn_id: "turn-1" });
+    renderMessageActions(
+      message,
+      turn({ completed_at: TURN_COMPLETED_AT, metadata: { agent_type: "codex-app-server" } }),
+      true,
+    );
+
+    fireEvent.click(screen.getByTestId("fork-conversation-trigger"));
+    expect(screen.getByText(/files remain shared/i)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("fork-conversation-confirm"));
+
+    await waitFor(() =>
+      expect(FORK.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task_id: "task-1",
+          session_id: "sess-1",
+          turn_id: "turn-1",
+          request_id: expect.any(String),
+        }),
+      ),
+    );
+    await waitFor(() => {
+      expect(storeApi?.getState().tasks.activeSessionId).toBe("forked-session");
+    });
+  });
+
+  it("does not offer a fork while the Kandev turn is active", () => {
+    renderMessageActions(
+      assistantMessage({ turn_id: "turn-1" }),
+      turn({ metadata: { agent_type: "codex-app-server" } }),
+      true,
+    );
+
+    expect(screen.queryByTestId("fork-conversation-trigger")).toBeNull();
   });
 });

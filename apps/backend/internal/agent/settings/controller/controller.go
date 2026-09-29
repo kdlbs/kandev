@@ -40,6 +40,7 @@ func buildCommandString(cmd []string) string {
 
 var (
 	ErrAgentNotFound                        = errors.New("agent not found")
+	ErrAgentFeatureDisabled                 = errors.New("agent feature is disabled")
 	ErrAgentAlreadyExists                   = errors.New("agent already exists")
 	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
 	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
