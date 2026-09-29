@@ -189,6 +189,15 @@ func TestHandleGetCoordinatorItem_Stall(t *testing.T) {
 		assertWSError(t, resp, ws.ErrorCodeNotFound)
 	})
 
+	t.Run("task read failure is an internal error, not not-found", func(t *testing.T) {
+		msg := makeWSMessage(t, coordinator.ActionGetItem, getItemPayload("stall", foreignTask.ID))
+		cctx, cancel := context.WithCancel(getItemPrincipalContext(c.WorkspaceID, c.ID))
+		cancel()
+		resp, err := h.handleGetCoordinatorItem(cctx, msg)
+		require.NoError(t, err)
+		assertWSError(t, resp, ws.ErrorCodeInternalError)
+	})
+
 	t.Run("missing task is not found", func(t *testing.T) {
 		msg := makeWSMessage(t, coordinator.ActionGetItem, getItemPayload("stall", "does-not-exist"))
 		resp, err := h.handleGetCoordinatorItem(getItemPrincipalContext(c.WorkspaceID, c.ID), msg)

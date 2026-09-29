@@ -8,6 +8,8 @@ import (
 
 	"github.com/kandev/kandev/internal/coordinator"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -100,7 +102,15 @@ func (h *Handlers) getCoordinatorStallItem(
 	ctx context.Context, msg *ws.Message, principal mcpscope.Principal, id string,
 ) (*ws.Message, error) {
 	task, err := h.taskSvc.GetTask(ctx, id)
-	if err != nil || task == nil || task.WorkspaceID != principal.WorkspaceID {
+	switch {
+	case errors.Is(err, repoerrors.ErrTaskNotFound), service.IsForbidden(err):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target not found", nil)
+	case err != nil:
+		h.logger.Warn("get_item failed to read task",
+			zap.String(coordinatorItemFieldKind, coordinatorItemKindStall), zap.String("id", id),
+			zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to read item", nil)
+	case task == nil || task.WorkspaceID != principal.WorkspaceID:
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target not found", nil)
 	}
 	stall, err := h.coordinatorSvc.GetStall(ctx, principal.WorkspaceID, id)
