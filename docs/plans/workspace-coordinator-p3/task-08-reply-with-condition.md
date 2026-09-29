@@ -60,13 +60,18 @@ control on both proposal card surfaces.
   `requires_approval`, actor the replying manager, detail the reply text)
   written in the reply's locked transaction, and its copy in six locales
   ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
-  The unattended mark copy (`activityUnattended`) is added here with the
-  what-it-did text table. A `failed` card keeps its phase 2 controls (Approve,
+  The unattended mark (`AC-COORDINATOR-INTEGRATION-004.1`, rendering only;
+  task 05 stamps `unattended_turn_id` and the activity DTO carries it) is
+  rendered and its copy (`activityUnattended`) added here with the what-it-did
+  text table: a row with a turn id shows "During an unattended turn" as a second
+  muted line on the Action cell and the phone card. A `failed` card keeps its phase 2 controls (Approve,
   Edit and Reject; an improvement card Approve and Reject) and shows no
   **Reply with a condition**; there is no **Try again** on a proposal card
   (`AC-COORDINATOR-INTEGRATION-006.1`).
-- Web: the control, returned and revised card states and **Send again** in
-  the phase 1 `ProposalCard` ([Cards](../../specs/coordinator/system-design/relay.md#cards)).
+- Web: the control (shown only for kinds with registered delivery text:
+  `create_task`, `message`, `move`, `resume`), returned and revised card states
+  and **Send again** in the phase 1 `ProposalCard`, on the Needs you item and
+  the copilot chat card (no `status=all` list is added) ([Cards](../../specs/coordinator/system-design/relay.md#cards)).
 - Copy in six locales.
 
 ## Out of scope
@@ -143,6 +148,16 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
   proposal, or any value while phase 3 is off) is refused naming
   `in_reply_to`; a coordinator principal is refused both routes on every
   transport.
+- A row with `unattended_turn_id` renders the "During an unattended turn"
+  mark on the Action cell and the phone card, and a row without one renders no
+  mark (component test).
+- A reply to a proposal whose kind has no registered delivery text is 400
+  naming `kind` and writes nothing; delivery text titles are `spec_json.title`
+  for `create_task` and `Resume|Message|Move task <task_id>` for the others;
+  the queue entry, not the message, carries `user_message_recorded`; delivery
+  runs under a 30-second deadline detached from the client; a reply sent from a
+  Needs you item stays rendered from the response with **Send again** on a
+  failed delivery.
 - A failed delivery answers the reply and deliver routes with 200 and the
   proposal with `reply_delivered_at` null, never a 5xx; with phase 3 off both
   routes are 404 and the DTO omits `reply_text`, `reply_delivered_at` and
