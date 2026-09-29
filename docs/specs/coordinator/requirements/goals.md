@@ -66,8 +66,10 @@ criteria, so that the coordinator's advice points at it.
   none shall be lost.
 - **AC-COORDINATOR-GOALS-001.4:** When a manager marks the active goal met, the
   system shall set its status to `met` with `met_at` and `met_by`; the
-  coordinator shall then have no active goal. Marking a goal that is already
-  met shall return it unchanged with 200.
+  coordinator shall then have no active goal. Marking met acts only on the
+  active goal: when there is none, the request shall return the most recent
+  met goal unchanged with 200 and change nothing, and when the coordinator
+  has never had a met goal it shall return 404 and change nothing.
 - **AC-COORDINATOR-GOALS-001.5:** When a manager sets a goal while the
   coordinator has no active goal, the system shall create a new goal with a
   new baseline (`AC-COORDINATOR-GOALS-003.1`); earlier met goals stay stored.
@@ -79,13 +81,20 @@ criteria, so that the coordinator's advice points at it.
   name, due date or criteria, or marks it met, or sets a new goal, the system
   shall archive the current conversation task and clear its reference.
   Checking or unchecking a criterion shall keep the conversation.
-- **AC-COORDINATOR-GOALS-001.8:** A reader's goal request shall be refused with
-  403 and change nothing; the Goal section shall show a reader the goal
+- **AC-COORDINATOR-GOALS-001.8:** A reader's goal write request (set, check or
+  uncheck, mark met) shall be refused with 403 and change nothing; a reader's
+  goal read shall succeed, and the Goal section shall show a reader the goal
   without controls.
 - **AC-COORDINATOR-GOALS-001.9:** The Goal section shall show the milestone
   name, the due date, the exit criteria with checkboxes, **Mark milestone
   met** and the baseline measures; with no active goal it shall show an empty
   form with **Set goal**.
+
+- **AC-COORDINATOR-GOALS-001.10:** Where a set-goal request names the goal it
+  was edited from, and that goal is not the coordinator's active goal, the
+  system shall refuse it with 409 and change nothing. A request that names no
+  goal is applied as in `AC-COORDINATOR-GOALS-001.2` and
+  `AC-COORDINATOR-GOALS-001.5`.
 
 ### REQ-COORDINATOR-GOALS-002: Goal note on Needs you
 
@@ -114,15 +123,16 @@ without a false trend.
 
 - **AC-COORDINATOR-GOALS-003.1:** When a goal becomes active, the system shall
   record its baseline in the same transaction: Open tasks (watched tasks that
-  are not archived and not completed, excluding coordinator conversation
-  tasks), and the coordinator's Approved and Rejected proposals of the 7 days
+  are not archived, not completed, not ephemeral and not created by a
+  coordinator, which excludes coordinator conversation tasks), and the coordinator's Approved and Rejected proposals of the 7 days
   before, from the activity log.
 - **AC-COORDINATOR-GOALS-003.2:** When the coordinator was created less than 7
   days before the goal became active, the baseline of the two proposal
   measures shall be recorded as none, and they shall show "No baseline".
-- **AC-COORDINATOR-GOALS-003.3:** When the goal is read, the system shall
-  return each measure's current value, computed at read time over the same
-  definition, next to its baseline.
+- **AC-COORDINATOR-GOALS-003.3:** When the active goal is read, the system
+  shall return each measure's current value, computed at read time over the
+  same definition, next to its baseline; with no active goal it shall return
+  no measures.
 - **AC-COORDINATOR-GOALS-003.4:** Each measure shall show a direction (up or
   down) only when its current value differs from its baseline by 2 or more;
   otherwise it shall show "No direction yet". A measure without a baseline

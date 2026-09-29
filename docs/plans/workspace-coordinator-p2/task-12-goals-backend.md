@@ -19,6 +19,7 @@ acceptance_criteria:
   - AC-COORDINATOR-GOALS-001.6
   - AC-COORDINATOR-GOALS-001.7
   - AC-COORDINATOR-GOALS-001.8
+  - AC-COORDINATOR-GOALS-001.10
   - AC-COORDINATOR-GOALS-003.1
   - AC-COORDINATOR-GOALS-003.2
   - AC-COORDINATOR-GOALS-003.3
@@ -40,9 +41,9 @@ computed at read time.
 - Goal: `GET goal`, `PUT goal` (create or update in place, criteria keep
   their done state by id; an unknown or repeated id is 400 naming
   `criteria[i].id`; an omitted criterion is removed), `POST
-  goal/criteria/:cid` done toggle under the per-coordinator lock,
+  goal/criteria/:crid` done toggle under the per-coordinator lock,
   `POST goal/met` idempotent, 403 for readers (`001.1` to `001.5`,
-  `001.8`).
+  `001.8`, `001.10`: an optional `goal_id` that is not the active goal is 409).
 - Goal instruction section with done states, or "No goal is set"
   (`001.6`); `resetConversation` on name, due, criteria, met and new goal,
   not on a done toggle (`001.7`).
@@ -69,8 +70,9 @@ make -C apps/backend test PKG=./internal/coordinator/...
 
 Tests: the instruction builder output with a met, active or absent goal
 (golden text); baseline with a coordinator 6 and 8 days old; direction at
-deltas 1, 2 and -2; the active-goal unique index refuses a second
-concurrent create and the loser returns the winner.
+deltas 1, 2 and -2; two concurrent creates serialize on the
+lock and the second applies as an update of the first (the unique index is a
+backstop); a stale `goal_id` is 409.
 
 ## Likely files
 
@@ -84,7 +86,9 @@ concurrent create and the loser returns the winner.
 
 ## Risks
 
-- Measures read many tasks; they use the Watches-filtered count query of
-  phase 1, not a per-task loop.
+- Measures read many tasks; they use one new `Store.CountOpenWatchedTasks`
+  count query in `measures.go` (phase 1 has no such query), not a per-task
+  loop. The baseline log counts use the new exec-taking
+  `Store.ActivityCountsIn` on the locked handle, not `Service.ActivitySummary`.
 - Task 05 adds its section to the same instruction builder; each work order
   adds only its own section.
