@@ -218,7 +218,7 @@ func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView,
 			Actions: PhaseOnePolicy().Actions, WatchScope: watchScopeAll, WorkflowIDs: []string{},
 		}, nil
 	}
-	set, err := s.store.LoadWatchSet(ctx, s.store.ro, c.ID)
+	set, err := s.store.EffectiveWatchSet(ctx, s.store.ro, c.ID, c.WorkspaceID)
 	if err != nil {
 		return PolicyView{}, err
 	}

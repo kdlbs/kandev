@@ -79,6 +79,9 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	case ProposalStatusFailed:
 		return s.approveFailed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, proposal, edits, carriesEdits)
 	case ProposalStatusPending:
+		if err := s.recheckPolicy(ctx, coordinatorID, proposal); err != nil {
+			return nil, err
+		}
 		return s.approvePending(ctx, workspaceID, coordinatorID, proposalID, decidedBy, proposal, edits)
 	default:
 		return nil, fmt.Errorf("coordinator: proposal %s has unknown status %q", proposalID, proposal.Status)
@@ -144,6 +147,9 @@ func (s *Service) approveFailed(ctx context.Context, workspaceID, coordinatorID,
 		}
 		return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, base, foundTask)
 	case errors.Is(err, repoerrors.ErrTaskNotFound):
+		if err := s.recheckPolicy(ctx, coordinatorID, proposal); err != nil {
+			return nil, err
+		}
 		base := proposal.Spec
 		if proposal.FinalSpec != nil {
 			base = *proposal.FinalSpec
@@ -491,4 +497,43 @@ func (s *Service) settleWriteRace(ctx context.Context, workspaceID, coordinatorI
 		s.logger.Info("approval completion raced with another decision", zap.String("proposal_id", proposalID))
 	}
 	return current, nil
+}
+
+// kindAction maps a stored proposal kind to its policy action.
+func kindAction(kind string) Action {
+	switch kind {
+	case ProposalKindMessage:
+		return ActionMessage
+	case ProposalKindMove:
+		return ActionMove
+	case ProposalKindResume:
+		return ActionResume
+	default:
+		return ActionCreateTask
+	}
+}
+
+// recheckPolicy refuses a new approval whose action the coordinator's stored
+// policy now denies. It reads only the proposal and the policy, so it runs
+// before any kind's own checks, and only with phase 2 on.
+func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, proposal *Proposal) error {
+	if !s.phase2 {
+		return nil
+	}
+	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return err
+	}
+	policy := s.policyFor(c)
+	if s.afterApproveRecheck != nil {
+		defer s.afterApproveRecheck()
+	}
+	kind := kindAction(proposal.Kind)
+	if !policy.Allows(kind) {
+		return &PolicyDeniedError{Action: kind}
+	}
+	if proposal.StartsAgent && !policy.Allows(ActionStartAgent) {
+		return &PolicyDeniedError{Action: ActionStartAgent}
+	}
+	return nil
 }
