@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => {
   };
   return {
     state,
-    store: { getState: () => state },
+    store: { current: { getState: () => state } },
     fetchTaskSessionConditional: vi.fn(),
     subscribeSession: vi.fn(() => vi.fn()),
   };
@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mocks.state) => unknown) => selector(mocks.state),
-  useAppStoreApi: () => mocks.store,
+  useAppStoreApi: () => mocks.store.current,
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -66,6 +66,9 @@ async function flushPromises(): Promise<void> {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  // Reconciler ownership is scoped to a store instance. Keep hook consumers
+  // joined within a test while isolating any in-flight request from other tests.
+  mocks.store.current = { getState: () => mocks.state };
   mocks.state.setTaskSession.mockImplementation((next: TaskSession) => {
     mocks.state.taskSessions.items[next.id] = next;
   });

@@ -187,7 +187,7 @@ export function TaskLoadErrorState() {
 export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const store = useAppStoreApi();
   const routeDataReady = useTaskRouteSessionHydrated();
-  const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
+  const [taskDetails, setTaskDetails] = useState<Task | null>(null);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const activeTaskIdRef = useRef(activeTaskId);
   const connectionStatus = useAppStore((state) => state.connection.status);

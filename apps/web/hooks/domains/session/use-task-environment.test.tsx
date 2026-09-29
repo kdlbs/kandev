@@ -193,6 +193,29 @@ describe("useTaskEnvironment Kubernetes status", () => {
 });
 
 describe("useTaskEnvironment explicit refresh", () => {
+  it("joins an in-flight Kubernetes status read without fetching the environment again", async () => {
+    const kubernetesResponse = deferred<KubernetesSession | null>();
+    mocks.fetchTaskEnvironmentLive.mockResolvedValue({ environment: ENVIRONMENT });
+    mocks.getKubernetesTaskSession.mockImplementation(() => kubernetesResponse.promise);
+    const { result } = renderHook(() => useEnvironmentWithSession(TASK_ONE, SESSION_ONE, true));
+    await waitFor(() => expect(mocks.getKubernetesTaskSession).toHaveBeenCalledTimes(1));
+
+    let refreshPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      refreshPromise = result.current.refresh();
+    });
+    expect(result.current.refreshing).toBe(true);
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      kubernetesResponse.resolve(KUBERNETES_SESSION);
+      await refreshPromise;
+    });
+    expect(result.current.refreshing).toBe(false);
+    expect(result.current.kubernetes).toEqual(KUBERNETES_SESSION);
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a distinct busy state while an explicit refresh keeps the last Pod visible", async () => {
     mocks.fetchTaskEnvironmentLive.mockResolvedValueOnce({ environment: ENVIRONMENT });
     mocks.getKubernetesTaskSession.mockResolvedValue(KUBERNETES_SESSION);

@@ -36,6 +36,16 @@ type LiveEnvironmentState = {
   kubernetes: KubernetesEnvironmentStatus;
 };
 
+type ScopedEnvironmentState = { scope: string; value: LiveEnvironmentState };
+
+type PendingEnvironmentEnrichment = {
+  response: TaskEnvironmentLiveResponse;
+  owner: ReturnType<typeof useOptionalAppStoreApi>;
+  generation: number;
+  isCurrent: () => boolean;
+  promise: Promise<void>;
+};
+
 const EMPTY_ENVIRONMENT_STATE: LiveEnvironmentState = {
   env: null,
   container: null,
@@ -106,38 +116,40 @@ function useLiveEnvironment(
   const storeOwner = useOptionalAppStoreApi();
   const consumerId = useRef(Symbol("task-environment-consumer"));
   const requestScope = `${taskId ?? ""}\u0000${sessionId ?? ""}`;
-  const [scopedState, setScopedState] = useState({
+  const [scopedState, setScopedState] = useState<ScopedEnvironmentState>({
     scope: requestScope,
     value: EMPTY_ENVIRONMENT_STATE,
   });
   const [refreshing, setRefreshing] = useState(false);
   const currentScopeRef = useRef(requestScope);
   const manualRefreshGenerationRef = useRef(0);
+  const enrichmentGenerationRef = useRef(0);
+  const pendingEnrichmentRef = useRef<PendingEnvironmentEnrichment | null>(null);
   const lastStatusRef = useRef<EnvironmentStatusSnapshot | null>(null);
   const hasLoadedRef = useRef(false);
   const snapshot = useEnvironmentLiveSnapshot(storeOwner, taskId, consumerId, active);
   const state = scopedState.scope === requestScope ? scopedState.value : EMPTY_ENVIRONMENT_STATE;
   currentScopeRef.current = requestScope;
 
-  const publish = useCallback(
-    (next: LiveEnvironmentState) => {
-      const kubernetes = next.env?.executor_type === "k8s" ? next.kubernetes : undefined;
-      const nextStatus = getEnvironmentStatusSnapshot(
-        next.env,
-        next.container,
-        kubernetes,
-        next.pluginExecutor,
-      );
-      maybeNotifyEnvironmentStatus(lastStatusRef.current, nextStatus);
-      lastStatusRef.current = nextStatus;
-      setScopedState({ scope: requestScope, value: next });
-    },
-    [requestScope],
-  );
+  const publish = useEnvironmentPublisher(lastStatusRef, requestScope, setScopedState);
+
+  const loadEnrichedSnapshot = useEnrichedEnvironmentSnapshot({
+    currentScopeRef,
+    enrichmentGenerationRef,
+    hasLoadedRef,
+    pendingEnrichmentRef,
+    publish,
+    requestScope,
+    sessionId,
+    storeOwner,
+    taskId,
+  });
 
   useEffect(() => {
     hasLoadedRef.current = false;
     lastStatusRef.current = null;
+    enrichmentGenerationRef.current += 1;
+    pendingEnrichmentRef.current = null;
     setScopedState({ scope: requestScope, value: EMPTY_ENVIRONMENT_STATE });
     setRefreshing(false);
     manualRefreshGenerationRef.current += 1;
@@ -153,23 +165,25 @@ function useLiveEnvironment(
     if (!snapshot.response) return;
 
     let cancelled = false;
-    const response = snapshot.response;
-    void fetchLiveEnvironment(response, taskId, sessionId).then((next) => {
-      if (cancelled || currentScopeRef.current !== requestScope) return;
-      hasLoadedRef.current = true;
-      publish(next);
-    });
+    void loadEnrichedSnapshot(snapshot.response, () => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, [publish, requestScope, sessionId, snapshot.notFound, snapshot.response, taskId]);
+  }, [loadEnrichedSnapshot, publish, requestScope, snapshot.notFound, snapshot.response, taskId]);
 
   const refresh = useCallback(async () => {
     if (!taskId) return;
     const generation = ++manualRefreshGenerationRef.current;
     setRefreshing(true);
     try {
+      const currentEnrichment = pendingEnrichmentRef.current;
+      if (currentEnrichment?.response === snapshot.response) {
+        await currentEnrichment.promise;
+        return;
+      }
       await environmentLiveResource.refresh(storeOwner, taskId);
+      const response = environmentLiveResource.getSnapshot(storeOwner, taskId).response;
+      if (response) await loadEnrichedSnapshot(response, () => true);
     } finally {
       if (
         generation === manualRefreshGenerationRef.current &&
@@ -178,7 +192,7 @@ function useLiveEnvironment(
         setRefreshing(false);
       }
     }
-  }, [requestScope, storeOwner, taskId]);
+  }, [loadEnrichedSnapshot, requestScope, snapshot.response, storeOwner, taskId]);
 
   const clear = useCallback(() => {
     lastStatusRef.current = getEnvironmentStatusSnapshot(null, null);
@@ -193,6 +207,101 @@ function useLiveEnvironment(
     refresh,
     clear,
   };
+}
+
+function useEnvironmentPublisher(
+  lastStatusRef: MutableRefObject<EnvironmentStatusSnapshot | null>,
+  requestScope: string,
+  setScopedState: (value: ScopedEnvironmentState) => void,
+) {
+  return useCallback(
+    (next: LiveEnvironmentState) => {
+      const kubernetes = next.env?.executor_type === "k8s" ? next.kubernetes : undefined;
+      const nextStatus = getEnvironmentStatusSnapshot(
+        next.env,
+        next.container,
+        kubernetes,
+        next.pluginExecutor,
+      );
+      maybeNotifyEnvironmentStatus(lastStatusRef.current, nextStatus);
+      lastStatusRef.current = nextStatus;
+      setScopedState({ scope: requestScope, value: next });
+    },
+    [lastStatusRef, requestScope, setScopedState],
+  );
+}
+
+function useEnrichedEnvironmentSnapshot({
+  currentScopeRef,
+  enrichmentGenerationRef,
+  hasLoadedRef,
+  pendingEnrichmentRef,
+  publish,
+  requestScope,
+  sessionId,
+  storeOwner,
+  taskId,
+}: {
+  currentScopeRef: MutableRefObject<string>;
+  enrichmentGenerationRef: MutableRefObject<number>;
+  hasLoadedRef: MutableRefObject<boolean>;
+  pendingEnrichmentRef: MutableRefObject<PendingEnvironmentEnrichment | null>;
+  publish: (next: LiveEnvironmentState) => void;
+  requestScope: string;
+  sessionId: string | null | undefined;
+  storeOwner: ReturnType<typeof useOptionalAppStoreApi>;
+  taskId: string | null | undefined;
+}) {
+  return useCallback(
+    (response: TaskEnvironmentLiveResponse, isCurrent: () => boolean): Promise<void> => {
+      if (!taskId) return Promise.resolve();
+      const existing = pendingEnrichmentRef.current;
+      if (existing?.response === response && existing.owner === storeOwner) {
+        existing.isCurrent = isCurrent;
+        return existing.promise;
+      }
+
+      const generation = ++enrichmentGenerationRef.current;
+      const promise = fetchLiveEnvironment(response, taskId, sessionId)
+        .then((next) => {
+          const current = pendingEnrichmentRef.current;
+          if (
+            current?.generation !== generation ||
+            !current.isCurrent() ||
+            currentScopeRef.current !== requestScope ||
+            environmentLiveResource.getSnapshot(storeOwner, taskId).response !== response
+          ) {
+            return;
+          }
+          hasLoadedRef.current = true;
+          publish(next);
+        })
+        .finally(() => {
+          if (pendingEnrichmentRef.current?.generation === generation) {
+            pendingEnrichmentRef.current = null;
+          }
+        });
+      pendingEnrichmentRef.current = {
+        response,
+        owner: storeOwner,
+        generation,
+        isCurrent,
+        promise,
+      };
+      return promise;
+    },
+    [
+      currentScopeRef,
+      enrichmentGenerationRef,
+      hasLoadedRef,
+      pendingEnrichmentRef,
+      publish,
+      requestScope,
+      sessionId,
+      storeOwner,
+      taskId,
+    ],
+  );
 }
 
 function useEnvironmentLiveSnapshot(
