@@ -1,3 +1,4 @@
+import { ActivityDisplayContext } from "@/components/task/chat/messages/agent-status-mode";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -127,16 +128,19 @@ function ReadyBody({
         <CoordinatorProposalProvider
           value={{ workspaceId, coordinatorId, closePopover: onClosePopover }}
         >
-          <QuickChatSessionView
-            key={`${routeSession.session_id}-${askKey}`}
-            session={session}
-            automaticRecovery={false}
-            hideSessionSelectors
-            hideStartupRows
-            taskArchiveState={routeSession.archive_state}
-            initialDraft={pendingDraft}
-            transformOutgoing={transformOutgoing}
-          />
+          <ActivityDisplayContext.Provider value>
+            <QuickChatSessionView
+              key={`${routeSession.session_id}-${askKey}`}
+              session={session}
+              automaticRecovery={false}
+              hideSessionSelectors
+              hideStartupRows
+              activityDisplay
+              taskArchiveState={routeSession.archive_state}
+              initialDraft={pendingDraft}
+              transformOutgoing={transformOutgoing}
+            />
+          </ActivityDisplayContext.Provider>
         </CoordinatorProposalProvider>
       </MessageTaskOriginProvider>
     </div>

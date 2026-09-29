@@ -11,6 +11,7 @@ import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { GridSpinner } from "@/components/grid-spinner";
 import { resolveAgentErrorLabelKey } from "./agent-error-label";
 import { useTranslation } from "react-i18next";
+import { useActivityDisplay } from "./agent-status-mode";
 
 type AgentStatusProps = {
   sessionState?: TaskSessionState;
@@ -27,10 +28,12 @@ type StatusConfig = {
   icon: "spinner" | "error" | "warning" | null;
 };
 
+const RUNNING_LABEL_KEY = "task:agentIsRunning";
+
 const STATE_CONFIG: Record<TaskSessionState, StatusConfig> = {
   CREATED: { labelKey: "", icon: null },
   STARTING: { labelKey: "task:agentIsStarting", dynamicLabel: true, icon: "spinner" },
-  RUNNING: { labelKey: "task:agentIsRunning", icon: "spinner" },
+  RUNNING: { labelKey: RUNNING_LABEL_KEY, icon: "spinner" },
   IDLE: { labelKey: "", icon: null },
   WAITING_FOR_INPUT: { labelKey: "", icon: null },
   COMPLETED: { labelKey: "", icon: null },
@@ -216,7 +219,12 @@ function AgentRunningStatus({
   );
 }
 
-function useAgentStatusData(sessionId: string | null, messages: Message[], isRunning: boolean) {
+function useAgentStatusData(
+  sessionId: string | null,
+  messages: Message[],
+  isRunning: boolean,
+  activityDisplay: boolean,
+) {
   const { lastTurnDuration, isActive: isTurnActive } = useSessionTurn(sessionId);
   const activeTurn = useActiveTurn(sessionId);
   const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(
@@ -227,7 +235,9 @@ function useAgentStatusData(sessionId: string | null, messages: Message[], isRun
     if (lastTurnDuration) return null;
     return calculateTurnDurationFromMessages(messages);
   }, [messages, lastTurnDuration]);
-  const displayDuration = lastTurnDuration?.formatted ?? fallbackDuration;
+  const displayDuration = activityDisplay
+    ? null
+    : (lastTurnDuration?.formatted ?? fallbackDuration);
   return { isTurnActive, runningDuration, elapsedSeconds, displayDuration };
 }
 
@@ -264,6 +274,10 @@ function useAgentLabel(sessionId: string | null, dynamicLabel?: boolean): string
   return profile ? profile.label.split(" \u2022 ")[0] : null;
 }
 
+function isCoarseRunning(state: TaskSessionState | undefined, config: StatusConfig | null) {
+  return state === "RUNNING" && config?.labelKey === RUNNING_LABEL_KEY;
+}
+
 export function AgentStatus({
   sessionState,
   sessionId,
@@ -283,13 +297,16 @@ export function AgentStatus({
       error?.stamp,
     );
   });
+  const activityDisplay = useActivityDisplay();
   const config = resolveAgentStatusConfig(sessionState, isWorking, hasBackgroundWork);
   const isRunning = config?.icon === "spinner";
   const agentLabel = useAgentLabel(sessionId, config?.dynamicLabel);
 
-  const runningData = useAgentStatusData(sessionId, messages, isRunning);
+  const runningData = useAgentStatusData(sessionId, messages, isRunning, activityDisplay);
 
   if (config?.icon === "error" && recoveryOwned) return null;
+  // The activity status line owns the running state; the coarse RUNNING label is redundant.
+  if (activityDisplay && isCoarseRunning(sessionState, config)) return null;
   if (config?.icon) {
     const label = agentLabel ? t("task:startingAgent", { agentLabel }) : t(config.labelKey);
     return renderActiveStatus(

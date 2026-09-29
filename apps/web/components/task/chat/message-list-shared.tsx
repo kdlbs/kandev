@@ -7,6 +7,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { ActivityChip } from "@/app/coordinator/copilot/activity-chip";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -644,6 +645,22 @@ export const MessageItem = memo(function MessageItem({
   }
   if (item.type === "agent_error_notice") {
     return <LastAgentErrorNotice sessionId={item.sessionId} error={item.error} />;
+  }
+  if (item.type === "turn_group" && item.activityChip) {
+    return (
+      <ActivityChip
+        group={item}
+        chip={item.activityChip}
+        sessionId={sessionId}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        streamingMessageId={streamingMessageId}
+        onScrollToMessage={onScrollToMessage}
+      />
+    );
   }
   if (item.type === "turn_group") {
     const isContainingTurnActive = Boolean(activeTurnId && item.turnId === activeTurnId);
