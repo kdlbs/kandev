@@ -163,5 +163,12 @@
   "activityVerbCoordinatorItem": "項目を確認中",
   "activityVerbProposeTask": "提案を作成中",
   "activityVerbWaiting": "あなたの判断を待っています",
-  "activityVerbWorking": "作業中"
+  "activityVerbWorking": "作業中",
+  "copilotWorkspaceLauncher": "コーディネーターに質問",
+  "copilotPageChipTask": "このタスク: {{label}}",
+  "copilotPageChipBoard": "このボード: {{label}}",
+  "copilotPageChipTooltip": "ID のみ送信されます。残りはコーディネーター自身が読み取ります。",
+  "copilotNotWatched": "このコーディネーターは監視していません",
+  "copilotSwitcherLabel": "コーディネーター",
+  "copilotOpenCoordinatorPage": "コーディネーターのページを開く"
 }

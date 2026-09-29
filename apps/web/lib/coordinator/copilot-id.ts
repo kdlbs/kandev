@@ -43,7 +43,7 @@ export function deriveCopilotItemId(
   return normalizeCopilotItemId(rawCopilotItemId(item, openTasksById));
 }
 
-export type CopilotItemRefKind = "task" | "proposal" | "stall";
+export type CopilotItemRefKind = "task" | "proposal" | "stall" | "workflow";
 
 export type CopilotItemRef = { kind: CopilotItemRefKind; id: string };
 

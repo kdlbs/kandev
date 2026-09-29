@@ -834,6 +834,8 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 	return map[string]any{
 		"id":                          task.ID,
 		"workflowStepId":              task.WorkflowStepID,
+		"workspaceId":                 task.WorkspaceID,
+		"identifier":                  nullString(task.Identifier),
 		"title":                       task.Title,
 		"description":                 task.Description,
 		"position":                    task.Position,

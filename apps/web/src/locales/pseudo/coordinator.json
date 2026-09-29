@@ -163,5 +163,12 @@
   "activityVerbCoordinatorItem": "Ĺōōķĩńĝ ũƥ àń ĩţēḿ",
   "activityVerbProposeTask": "Ďŕàƒţĩńĝ à ƥŕōƥōśàĺ",
   "activityVerbWaiting": "Ŵàĩţĩńĝ ƒōŕ ŷōũŕ ďēćĩśĩōń",
-  "activityVerbWorking": "Ŵōŕķĩńĝ"
+  "activityVerbWorking": "Ŵōŕķĩńĝ",
+  "copilotWorkspaceLauncher": "Àśķ ŷōũŕ ćōōŕďĩńàţōŕ",
+  "copilotPageChipTask": "Ţĥĩś ţàśķ: {{label}}",
+  "copilotPageChipBoard": "Ţĥĩś ƀōàŕď: {{label}}",
+  "copilotPageChipTooltip": "Śēńţ àś àń ĩď; ĩţ ŕēàďś ţĥē ŕēśţ ĩţśēĺƒ.",
+  "copilotNotWatched": "Ńōţ ŵàţćĥēď ƀŷ ţĥĩś ćōōŕďĩńàţōŕ",
+  "copilotSwitcherLabel": "Ćōōŕďĩńàţōŕ",
+  "copilotOpenCoordinatorPage": "Ōƥēń ţĥē ćōōŕďĩńàţōŕ ƥàĝē"
 }

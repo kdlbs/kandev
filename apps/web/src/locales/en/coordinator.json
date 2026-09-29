@@ -163,5 +163,12 @@
   "activityVerbCoordinatorItem": "Looking up an item",
   "activityVerbProposeTask": "Drafting a proposal",
   "activityVerbWaiting": "Waiting for your decision",
-  "activityVerbWorking": "Working"
+  "activityVerbWorking": "Working",
+  "copilotWorkspaceLauncher": "Ask your coordinator",
+  "copilotPageChipTask": "This task: {{label}}",
+  "copilotPageChipBoard": "This board: {{label}}",
+  "copilotPageChipTooltip": "Sent as an id; it reads the rest itself.",
+  "copilotNotWatched": "Not watched by this coordinator",
+  "copilotSwitcherLabel": "Coordinator",
+  "copilotOpenCoordinatorPage": "Open the coordinator page"
 }

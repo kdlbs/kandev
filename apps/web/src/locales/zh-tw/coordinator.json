@@ -163,5 +163,12 @@
   "activityVerbCoordinatorItem": "正在查詢條目",
   "activityVerbProposeTask": "正在起草提案",
   "activityVerbWaiting": "正在等待你的決定",
-  "activityVerbWorking": "處理中"
+  "activityVerbWorking": "處理中",
+  "copilotWorkspaceLauncher": "詢問您的協調器",
+  "copilotPageChipTask": "此任務：{{label}}",
+  "copilotPageChipBoard": "此看板：{{label}}",
+  "copilotPageChipTooltip": "僅以 ID 傳送，其餘內容由協調器自行讀取。",
+  "copilotNotWatched": "此協調器未關注",
+  "copilotSwitcherLabel": "協調器",
+  "copilotOpenCoordinatorPage": "開啟協調器頁面"
 }

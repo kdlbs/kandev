@@ -19,6 +19,8 @@ func TestStandingInstructions(t *testing.T) {
 			"propose_task_kandev",
 			"decided by a person",
 			"get_coordinator_item_kandev",
+			"[workflow:<id>]",
+			"list_workflow_steps_kandev",
 			"watch the release queue",
 		} {
 			if !strings.Contains(got, want) {
