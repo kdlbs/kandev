@@ -88,6 +88,11 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 	if err != nil {
 		return nil, 0, err
 	}
+	if s.phase2 {
+		if err := s.checkProposalWatched(ctx, coordinatorID, spec); err != nil {
+			return nil, 0, err
+		}
+	}
 
 	proposal := &Proposal{
 		CoordinatorID: coordinatorID,
@@ -177,6 +182,30 @@ func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req
 		RepositoryID: req.RepositoryID,
 		SourceTaskID: req.SourceTaskID,
 	}, nil
+}
+
+// checkProposalWatched refuses a proposal whose workflow, or whose source
+// task's workflow, is outside the coordinator's effective watch set. A source
+// task without a workflow is never watched.
+func (s *Service) checkProposalWatched(ctx context.Context, coordinatorID string, spec ProposalSpec) error {
+	set, err := s.EffectiveWatchSet(ctx, coordinatorID)
+	if err != nil {
+		return fmt.Errorf("read watch set: %w", err)
+	}
+	if !set.Contains(spec.WorkflowID) {
+		return &FieldError{Field: "workflow_id", Message: "workflow is outside this coordinator's watches"}
+	}
+	if spec.SourceTaskID == "" {
+		return nil
+	}
+	task, err := s.proposalTasks.GetTask(ctx, spec.SourceTaskID)
+	if err != nil {
+		return fmt.Errorf("get source task: %w", err)
+	}
+	if task == nil || !set.Contains(task.WorkflowID) {
+		return &FieldError{Field: fieldSourceTaskID, Message: "source task is outside this coordinator's watches"}
+	}
+	return nil
 }
 
 func (s *Service) validateProposalSourceTask(ctx context.Context, workspaceID, sourceTaskID string) error {
