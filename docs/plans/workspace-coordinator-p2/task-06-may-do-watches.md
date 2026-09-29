@@ -21,6 +21,7 @@ acceptance_criteria:
   - AC-COORDINATOR-PERMISSIONS-001.9
   - AC-COORDINATOR-PERMISSIONS-001.10
   - AC-COORDINATOR-PERMISSIONS-003.4
+  - AC-COORDINATOR-PERMISSIONS-003.5
   - AC-COORDINATOR-PERMISSIONS-003.6
   - AC-COORDINATOR-PERMISSIONS-003.7
   - AC-COORDINATOR-PERMISSIONS-004.3
@@ -110,8 +111,9 @@ make -C apps/backend test PKG=./internal/coordinator/...
 cd apps/web && pnpm test -- components/coordinators app/coordinator lib/coordinator
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/configure-sections.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/configure-sections.spec.ts
+cd apps/web && pnpm e2e:run tests/coordinator/mobile-configure-sections.spec.ts
 cd apps/web && pnpm e2e:run tests/coordinator/needs-you-watches.spec.ts
+cd apps/web && pnpm e2e:run tests/auth/coordinator-settings-reader.spec.ts
 ```
 
 Backend: list `summary` tests with `all`, `selected` and an empty
@@ -121,7 +123,7 @@ set Message to Requires approval and save (Message is Denied under the
 phase-1 policy, so Denied would not dirty the form); take a board out of
 scope and save; reload and assert each value; the Review link lands on
 What it did filtered by class; seed two boards, watch one, assert Needs you counts;
-a reader account (auth project) sees no controls; flag-off shows the
+a reader account sees no controls (`pnpm e2e:run tests/auth/coordinator-settings-reader.spec.ts`, the auth project matches only `auth/`; the mobile project matches only `mobile-*` files); flag-off shows the
 phase-1 page.
 
 ## Likely files

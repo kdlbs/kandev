@@ -189,7 +189,10 @@ Mockup:
   the section shall list every workflow of the workspace in the workspace's
   workflow order, each marked In scope or Out with **Put this board in
   scope** or **Take this board out of scope**; taking the last board out of
-  scope shall be refused in the form with a message.
+  scope shall be refused in the form with a message. The switch shall not be
+  turned off while the board list has not loaded or the workspace has no
+  board, at most 50 boards shall be put in scope, and a draft left with no
+  board in scope shall disable Save and say why.
 - **AC-COORDINATOR-PERMISSIONS-003.7:** While the phase-2 flag is on and the
   coordinator's watch set has not loaded, or its read failed with nothing
   loaded, Needs you, Queue and the count strip shall show no task, stall or
@@ -218,9 +221,10 @@ one applies at once.
 - **AC-COORDINATOR-PERMISSIONS-004.3:** The May do and Watches sections shall
   save through the settings save bar with the coordinator's other fields, and
   shall say that saving a change starts the next conversation fresh. One save
-  shall send one request, carrying only the member (May do, Watches or both)
-  that differs from the stored value, whichever section the manager last
-  visited.
+  shall send one request for these two sections, carrying only the member
+  (May do, Watches or both) that differs from the stored value, whichever
+  section the manager last visited; the Identity fields, when also changed,
+  are saved by their own request.
 
 ## Out of scope
 
