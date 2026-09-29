@@ -80,6 +80,15 @@ row.
 - A tool call awaiting permission stays visible with Approve and Deny while
   the turn runs, including while the session waits for that decision; a
   stopped or failed turn still collapses into a chip.
+- A proposal card is visible while its turn is still running; an unreturned
+  or failed proposal call stays hidden until the turn ends
+  (`AC-COORDINATOR-COPILOT-006.6`).
+- After Approve or Deny of a permission the status line keeps its verb and
+  count, and the turn's other calls stay hidden until it ends; a stale
+  pending request of an older turn does not keep the line running (unit tests
+  on the derived running-turn id).
+- A message with a malformed `created_at` leaves the chip label without a
+  duration instead of showing a wrong one.
 - The chip label states count, duration (`Ns`, `Nm Ss`, `Nh Mm`) and a
   "N failed" text; unit tests pin the formats, the one-call and no-call cases
   and the proposal exclusion (`AC-COORDINATOR-COPILOT-006.7`).

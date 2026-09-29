@@ -43,9 +43,9 @@ calm by default, detail on demand.
   collapsed: its proposal card always renders in full.
 - **AC-COORDINATOR-COPILOT-006.4:** Once the agent has started successfully, the
   session start-up rows (environment preparation and agent start) shall be
-  hidden; while the agent is still starting, or when it failed to start, they
-  shall stay visible (a failed restart after an earlier success keeps its own
-  failed start row).
+  hidden; while the first start is still in progress, or when it failed, they
+  shall stay visible (after an earlier success, a later restart's preparation
+  row is hidden and a failed restart keeps its own failed start row).
 - **AC-COORDINATOR-COPILOT-006.5:** The activity display applies to the
   coordinator panel only; Settings configuration chat, Quick Chat and the
   task page shall render as before.
@@ -53,7 +53,8 @@ calm by default, detail on demand.
   render as rows, except a tool call awaiting a permission decision (with
   Approve and Deny) and a `propose_task_kandev` card once its call returns.
 - **AC-COORDINATOR-COPILOT-006.7:** There shall be one chip per turn, holding its
-  tool calls even with agent text between them; its label shall state the call
+  tool calls even with agent text between them (a user message inside the
+  turn starts a further chip for the later calls); its label shall state the call
   count, the duration (`Ns`, `Nm Ss`, `Nh Mm`) and, as text, any failed calls. A
   turn with no chippable call shall have no chip.
 - **AC-COORDINATOR-COPILOT-006.8:** A stopped turn or a turn of a failed session

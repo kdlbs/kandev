@@ -156,17 +156,26 @@ Each rule cites the acceptance criterion it serves.
 
 - **Turn and running.** A turn is the messages sharing one `turn_id`; a
   message with no `turn_id` is never hidden, never chipped and renders as
-  today. The running turn is the id in `turns.activeBySession[sessionId]`
-  (`lib/state/slices/session/turn-actions.ts`), and it is running while the
-  session state is `RUNNING`, or `WAITING_FOR_INPUT` with at least one pending
-  permission request (below). It has ended when neither holds, whatever the
-  reason (completed, stopped `AC-COORDINATOR-COPILOT-004.5`, failed
+  today. The running turn id is derived on every render: the id in
+  `turns.activeBySession[sessionId]`
+  (`lib/state/slices/session/turn-actions.ts`) when set; otherwise the
+  `turn_id` of the latest loaded message that has one (latest `created_at`,
+  ties by transcript order). The fallback is needed because the store clears
+  the active id when the session settles, which includes
+  `WAITING_FOR_INPUT`, and does not restore it when the session returns to
+  `RUNNING` after the decision; the derived id therefore carries over from
+  the wait to the resumed run without a stored marker. The turn is running
+  while the session state is `RUNNING`, or `WAITING_FOR_INPUT` with at least
+  one pending permission request (below) whose `turn_id` equals the running
+  turn id or is absent; a pending request of an older turn does not keep a
+  newer state running. It has ended when neither holds, whatever the reason
+  (completed, stopped `AC-COORDINATOR-COPILOT-004.5`, failed
   `AC-COORDINATOR-COPILOT-004.6`); its activity then joins the chip. If the
-  state is `RUNNING` but the store names no active turn yet, no message is
-  hidden or chipped as running, and the status line shows the generic verb
-  counting from the client's first sight of that state. Once an id arrives it
-  takes over. The status line is not shown while the state is `STARTING`
-  (`AC-COORDINATOR-COPILOT-006.4`).
+  state is `RUNNING` and no loaded message has a `turn_id` either, no message
+  is hidden or chipped as running, and the status line shows the generic verb
+  counting from the client's first sight of that state; the first message
+  with a `turn_id` takes over. The status line is not shown while the state
+  is `STARTING` (`AC-COORDINATOR-COPILOT-006.9`).
 - **Pending permission.** A `permission_request` message is pending when its
   `metadata.status` is absent or `pending`; `approved`, `rejected`, `denied`,
   `expired` and `cancelled` are not. A tool call is awaiting permission when
@@ -186,13 +195,25 @@ Each rule cites the acceptance criterion it serves.
   `tool_search`, plus `thinking`) except the exceptions above and below, even
   with agent text between them, and sits at the position of the turn's first
   such message. A user message inside the turn closes the chip, and later
-  activity of that turn forms a second chip. Agent text, proposal cards and
-  permission rows render in transcript order around it. The chip step runs
-  on that list; `hideSuccessfulStartupRows` runs afterwards on the result.
+  activity of that turn forms a second chip (a segment); each chip counts and
+  measures its own segment. A chip is keyed by turn id plus segment ordinal,
+  so a permission-pending call joining it later does not reset its expanded
+  state. Agent text, proposal cards and
+  permission rows render in transcript order around it. The chip step replaces only the `groupActivityMessages` call inside
+  `buildGroupedRenderItems`; the prepare-progress item, the last-agent-error
+  item and the footer-action split are built as today, so a failed start and
+  a failed session keep their rows (`AC-COORDINATOR-COPILOT-006.4`,
+  `006.8`). `hideSuccessfulStartupRows` runs afterwards on the result.
 - **Proposals.** A call is a proposal when `kandevToolStemOf(message)` is
   `propose_task`, whatever its status; it is never in the chip
-  (`AC-COORDINATOR-COPILOT-006.3`) and renders as today (the card, or the
-  plain row on error). A card appears as soon as its call returns.
+  (`AC-COORDINATOR-COPILOT-006.3`). A proposal shows its card when its call
+  has returned without error and its result carries a `proposal_id` (the
+  condition `ProposeTaskRenderer` already uses), and it does so as soon as the
+  call returns, even while the turn runs (`AC-COORDINATOR-COPILOT-006.6`).
+  While the turn runs, a proposal call that has not returned, ended in
+  `error` or has no `proposal_id` is hidden (the status line says "Drafting a
+  proposal" for a running one); once the turn has ended it renders as today
+  (the plain row), still outside the chip.
 - **While the turn runs** (`AC-COORDINATOR-COPILOT-006.1`, `006.6`): every
   activity message of the running turn is hidden, completed ones included,
   except the exceptions above.
@@ -213,15 +234,20 @@ Each rule cites the acceptance criterion it serves.
   the turn's activity messages in transcript order with the existing row
   components. When a call in the chip ended in `error`, the label adds the
   failed count as text ("2 failed") (`AC-COORDINATOR-COPILOT-006.7`).
-- **Duration.** From `created_at` of the turn's first message to that of its
-  last message (any type in the list above with that `turn_id`). Rounded down
-  to whole seconds, minimum `1s`; `Ns` under a minute, `Nm Ss` under an hour,
-  `Nh Mm` beyond. A stopped or failed turn is measured to its last message. A
-  call left non-terminal after the turn ended is shown with its status as
-  stored, and counted.
+- **Duration.** For a chip: from `created_at` of the first to that of the
+  last message of its segment (any type in the list above with that
+  `turn_id`). Only timestamps `parseTurnTimestamp`
+  (`lib/state/slices/session/turn-actions.ts`) accepts count; a message with
+  an absent or malformed one is skipped for the measure and ordered by
+  transcript position, and a segment with no accepted timestamp shows no
+  duration (the label omits it). Rounded down to whole seconds, minimum `1s`;
+  `Ns` under a minute, `Nm Ss` under an hour, `Nh Mm` beyond. A stopped or
+  failed turn is measured to its last message. A call left non-terminal after
+  the turn ended is shown with its status as stored, and counted.
 - **Chip label.** `Checked {{count}} sources · {{duration}}` with
   `_one`/`_other` plurals (`Checked 1 source`); with failures
-  `... · {{failed}} failed` follows the duration. The chip is a button with
+  `... · {{failed}} failed` follows the duration; with no duration the
+  label is `Checked {{count}} sources` plus the failed part. The chip is a button with
   `aria-expanded`, collapsed by default. Its expanded state is component
   state: it survives new messages and closing and reopening the panel (whose
   content stays mounted); it resets on a page reload and on Ask about this,
@@ -250,7 +276,7 @@ Each rule cites the acceptance criterion it serves.
   | (anything else) | Working |
 
   Elapsed seconds are `max(0, now - created_at)` of the running turn's first
-  message, floored, formatted like the chip duration including its `1s`
+  message (client's first sight when its `created_at` is not accepted), floored, formatted like the chip duration including its `1s`
   minimum, refreshed once a second, so a reload mid-turn continues the count
   (`AC-COORDINATOR-COPILOT-002.4`); with no message yet it counts from the
   client's first sight. The element is `role="status"` with
