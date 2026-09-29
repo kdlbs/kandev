@@ -58,7 +58,7 @@ export function ReadyToMergeActions({
   const actions = (
     <span className="flex flex-wrap items-center gap-2">
       {prUrl && (
-        <Button asChild variant="outline" size="sm" className="cursor-pointer">
+        <Button asChild variant="outline" size="sm" className="min-h-11 cursor-pointer sm:min-h-0">
           <a href={prUrl} target="_blank" rel="noopener noreferrer">
             {t("coordinator:openPr")}
           </a>
@@ -71,7 +71,7 @@ export function ReadyToMergeActions({
             ref={openButtonRef}
             variant="outline"
             size="sm"
-            className="cursor-pointer"
+            className="min-h-11 cursor-pointer sm:min-h-0"
             aria-expanded={formOpen}
             onClick={() => setFormOpen((open) => !open)}
           >
