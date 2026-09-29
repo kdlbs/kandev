@@ -61,6 +61,7 @@ during an unattended turn and counts them on the turn row.
 
 - Calling `Check` from admission (task 05) and the settings display (task 06).
 - Any sandboxing or change to executors, auth or secrets.
+- Wiring `ReresolveRecordedDenials` into the backstop tick (task 04). Admission holding wakes `pending` with hold reason `containment` (task 05). For `AC-COORDINATOR-CONTAINMENT-002.1` this card pins only that `Check` returns the four conditions in order and that the first unmet one is identifiable; `002.2` is pinned by the phase 1 tests passing with every condition failing.
 
 ## Acceptance
 
@@ -68,7 +69,7 @@ during an unattended turn and counts them on the turn row.
   the design lists (`mock_remote` met only under the e2e profile); auth modes
   `disabled` and `setup` fail; a key `KANDEV_API_KEY` or `KANDEV_RUN_TOKEN`, or
   a value starting `kandev_pat_` from a plain value or a secret, fails; any MCP
-  server fails; each unreadable input fails with detail `unreadable`; no
+  server fails; each unreadable input fails with detail `unreadable`; a profile with no MCP row is met; a `kandev`-named MCP entry fails; a profile updated after the session's `started_at` fails conditions 3 and 4 with `changed_since_launch`; no
   result is cached (two calls around a profile edit differ).
 - A permission request during an open unattended turn that the exact-name
   rule does not approve is resolved at once with the audit above and the
@@ -76,7 +77,7 @@ during an unattended turn and counts them on the turn row.
   no open turn, or from a later session turn than the unattended one (a
   drained queued manager message), waits for a person; the same `pending_id`
   delivered twice is counted and resolved once; a failed resolution is
-  resolved again by the next backstop tick without a second count; a coordinator session started by delivery
+  resolved again by a direct call of `ReresolveRecordedDenials` without a second count; with a reject option the session is not left `WAITING_FOR_INPUT`, with none the cancel path restores it; a failed message write records and counts nothing; a coordinator session started by delivery
   has profile and environment auto-approve forced off.
 - Attended paths never call `Check`: the phase 1 conversation and message
   tests pass unchanged with every condition failing.

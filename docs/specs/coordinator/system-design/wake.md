@@ -264,6 +264,9 @@ Each tick:
    3. the ceiling check `CheckCeiling` of [spend](spend.md#stopping) for its
       open turn, if any, including a row with `stop_requested_at` set;
    4. the lower-on-undo retry of [automatic](automatic.md#lowering).
+   5. the re-resolution of recorded unattended denials,
+      `ReresolveRecordedDenials` of
+      [containment](containment.md#unattended-permissions).
 
    A read or write error in one duty logs at warn, increments
    `coordinator_backstop_skipped_total`, and does not skip the later duties
