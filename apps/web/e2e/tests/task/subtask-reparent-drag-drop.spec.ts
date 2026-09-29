@@ -183,8 +183,9 @@ test.describe("Subtask re-parenting by drag and drop", () => {
     // Drag childA toward childB: childB (a subtask) is not a valid target, so
     // its row offers no nest zone (parentB's row does — it is a valid root
     // candidate), and a drop on childB's row is cross-level: no-op.
-    const fromBox = await taskBlock(childA.id).getByTestId("sortable-task-handle").boundingBox();
-    if (!fromBox) throw new Error("drag source handle has no bounding box");
+    const fromBox = await settledBoundingBox(
+      taskBlock(childA.id).getByTestId("sortable-task-handle"),
+    );
     await testPage.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
     await testPage.mouse.down();
     await testPage.mouse.move(fromBox.x + fromBox.width / 2 + 24, fromBox.y + fromBox.height / 2, {

@@ -184,3 +184,10 @@ stable task-ID order, retaining the no-drop-zone and no-drag-opacity assertions.
 All six subtask drag/drop scenarios pass with one worker and retries disabled;
 actual nesting and sibling reorder remain covered. This is a test-contract fix;
 no product behavior or public documentation changes are needed.
+
+A post-format verification exposed another stale-coordinate read in the same
+spec's invalid-subtask-target scenario: the intended drag never activated, so
+the positive-control root drop zone stayed absent. That source handle now uses
+the existing `settledBoundingBox` helper before pointer input, as the spec's
+shared drag helper already does. This preserves the positive control and the
+persisted parent assertion without adding sleeps or raising timeouts.
