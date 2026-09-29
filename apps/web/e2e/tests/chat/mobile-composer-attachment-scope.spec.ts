@@ -100,7 +100,8 @@ test.describe("mobile task chat attachment workspace scope", () => {
     await testPage.reload();
     const reloadedChat = testPage.getByTestId("session-chat");
     await expect(reloadedChat).toBeVisible({ timeout: 30_000 });
-    const image = reloadedChat.locator(
+    const sentMessage = reloadedChat.getByTestId("user-message-bubble").filter({ hasText: marker });
+    const image = sentMessage.locator(
       `img[src*="/api/v1/attachments/${String(attachment?.attachment_id)}/content"]`,
     );
     await expect(image).toBeVisible();

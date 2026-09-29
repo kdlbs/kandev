@@ -14,6 +14,8 @@ import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useAppStore } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -29,6 +31,34 @@ export function selectWorkspaceRepositories(
   workspaceId: string | null | undefined,
 ): Repository[] {
   return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
+}
+
+export function shouldReservePageLevelMobileFeedbackOffset(params: {
+  isMobile: boolean;
+  hasTaskMoveError: boolean;
+  hasEnsureSessionError: boolean;
+  hasBootstrapRecoveryError: boolean;
+  effectiveSessionId: string | null;
+  isSessionPassthrough: boolean;
+  hasResumptionError: boolean;
+  hasResumptionNotice: boolean;
+  hasStatusUnavailable: boolean;
+}): boolean {
+  const hasPageRecoveryFeedback = params.hasBootstrapRecoveryError
+    ? Boolean(params.effectiveSessionId && params.isSessionPassthrough)
+    : params.hasResumptionError || params.hasResumptionNotice || params.hasStatusUnavailable;
+  return (
+    params.isMobile &&
+    (params.hasTaskMoveError || params.hasEnsureSessionError || hasPageRecoveryFeedback)
+  );
+}
+
+export function resolveTaskPageBootstrapRecoveryError(
+  statusSummary: TaskStatusSummary | null | undefined,
+  sessionId: string | null,
+  sessionMetadata: Record<string, unknown> | null | undefined,
+) {
+  return selectSessionRecoveryError(statusSummary?.active_error, sessionId, sessionMetadata);
 }
 
 type ACPDebugInfo = {

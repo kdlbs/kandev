@@ -113,6 +113,10 @@ func inspectWorktreeRegistrationOwnershipWithOptions(
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
+		outStr := strings.TrimSpace(string(output))
+		if outStr != "" {
+			return worktreeRegistrationAbsent, fmt.Errorf("git worktree list failed: %s: %w", outStr, err)
+		}
 		return worktreeRegistrationAbsent, err
 	}
 	wantPath, err := normalizedWorktreeTargetPath(worktreePath)

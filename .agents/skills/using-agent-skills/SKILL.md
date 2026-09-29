@@ -19,6 +19,7 @@ Task arrives
 |-- New feature or behavior-changing fix? --> /spec-driven-development
 |-- Bug regression? ------------------------> /fix -> requirement/design check -> fix plan/work orders -> /tdd
 |-- Running/debugging Kandev locally? ------> /debug
+|-- Inspecting native Codex app-server protocol? -> /codex-app-server-debug
 |-- Need focused context setup? ------------> /context-engineering
 |-- Code change with test coverage? --------> /tdd
 |-- Browser/E2E coverage? ------------------> /e2e

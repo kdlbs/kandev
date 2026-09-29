@@ -227,6 +227,9 @@ func isManualRecoveryPromptError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
+	// Codex renders the notice with a typographic apostrophe; normalize it so
+	// both forms are recognized.
+	message = strings.ReplaceAll(message, "\u2019", "'")
 	return strings.Contains(message, "usagelimitexceeded") ||
 		strings.Contains(message, "you've hit your usage limit")
 }

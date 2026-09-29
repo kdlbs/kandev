@@ -237,4 +237,22 @@ describe("InstalledAgentCard setup links", () => {
       "/settings/agents/mock-agent?mode=create",
     );
   });
+
+  it("shows a disabled setup action when native Codex is feature-gated off", () => {
+    render(
+      <InstalledAgentCard
+        agent={makeDiscovery("codex-app-server")}
+        savedAgent={makeSavedAgent("codex-app-server", 0)}
+        displayName="Codex app server"
+        profileCreationDisabled
+      >
+        <div data-testid="profiles-body">profiles</div>
+      </InstalledAgentCard>,
+    );
+
+    expect(
+      (screen.getByTestId("profile-unavailable-codex-app-server") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.queryByTestId("setup-profile-codex-app-server")).toBeNull();
+  });
 });

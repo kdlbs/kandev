@@ -29,6 +29,7 @@ import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
 import { AgentGoalChip } from "./agent-goal-chip";
+import { BackgroundWorkChip } from "./background-work/background-work-chip";
 import { shouldShowProceed } from "./types";
 import { getAgentGoal } from "@/lib/agent-goal";
 import { useComposerDisclosureContext } from "./composer-disclosure";
@@ -271,6 +272,7 @@ export function ChatStatusBar({
       <TaskDependencyChip taskId={taskId} />
       {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
       {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
+      <BackgroundWorkChip sessionId={sessionId} />
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes

@@ -27,6 +27,7 @@ import {
   shouldShowFileTreeTouchActions,
 } from "./file-browser-parts";
 import { FileBrowserContentArea } from "./file-browser-content-area";
+import { FileTreeRefreshStatus } from "./file-browser-load-state";
 import {
   useFileBrowserTree,
   useScrollPersistence,
@@ -531,6 +532,7 @@ export function FileBrowser({
   const { folderAction, copied, copyPath, search, treeState, fullPath, displayPath } = data;
   const workspaceBlocked =
     data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
+  const canUseTree = !workspaceBlocked && !data.isSessionFailed;
   const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
   const handleToolbarUpload = useCallback(
     (mode: "files" | "folder") => openPicker(mode, handlers.activeFolderPath ?? ""),
@@ -546,7 +548,7 @@ export function FileBrowser({
         onMouseDown={handleClickOutside}
       >
         <FileBrowserHeader
-          treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
+          treeLoaded={Boolean(treeState.tree && canUseTree)}
           search={search}
           displayPath={displayPath}
           fullPath={fullPath}
@@ -579,6 +581,15 @@ export function FileBrowser({
           onUploadFilesHere={sessionId ? handleUploadHere : undefined}
           showTouchActions={showTouchActions}
         />
+        {canUseTree && (
+          <FileTreeRefreshStatus
+            tree={treeState.tree}
+            loadState={treeState.loadState}
+            isLoadingTree={treeState.isLoadingTree}
+            loadError={treeState.loadError}
+            onRetry={() => treeState.loadTree({ resetRetry: true })}
+          />
+        )}
         <span role="status" className="sr-only">
           {folderAction.isLoading ? t("editors:openingFolder") : ""}
         </span>

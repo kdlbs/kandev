@@ -139,6 +139,10 @@ test.describe("Desktop repository discovery consent", () => {
     await expect(dialog.getByTestId("discovery-root-controls")).toHaveCount(0);
 
     await dialog.getByTestId("repo-chip-trigger").first().click();
+    const settingsButton = testPage.getByTestId("repository-discovery-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+
     const controls = testPage.getByTestId("discovery-root-controls");
     const chooseFolders = controls.getByTestId("folder-picker-trigger");
     const refreshRepositories = controls.getByRole("button", {
@@ -271,9 +275,7 @@ test.describe("Desktop repository discovery consent", () => {
           response.request().method() === "POST" &&
           response.ok(),
       );
-      await controls
-        .getByRole("button", { name: "Choose folders to discover repositories" })
-        .click();
+      await controls.getByTestId("folder-picker-trigger").click();
       expect((await addResponse).status()).toBe(201);
       rootSaved = true;
 

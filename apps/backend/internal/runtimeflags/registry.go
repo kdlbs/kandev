@@ -37,6 +37,8 @@ type runtimeFlagIdentity struct {
 }
 
 const (
+	keyCodexAppServer                  = "features.codexAppServer"
+	envCodexAppServer                  = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey             = "features.appStatusBar"
 	retiredAppStatusBarEnvVar          = "KANDEV_FEATURES_APP_STATUS_BAR"
 	retiredOfficeSessionIdentityKey    = "features.officeSessionIdentity"
@@ -178,6 +180,38 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyCodexAppServer,
+			EnvVar:          envCodexAppServer,
+			Kind:            KindFeature,
+			Label:           "Codex app server",
+			Description:     "Enables native Codex app-server profiles and conversations, separate from Codex ACP.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Native Codex conversation and background lifecycle support is experimental. Keep Codex ACP for existing sessions and disable this flag if native sessions behave unexpectedly.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.agentBackgroundWork",
+			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
+			Kind:            KindFeature,
+			Label:           "Agent background work",
+			Description:     "Enables normalized background work tracking, interactive controls, and subagent observation.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Background work lifecycle management and UI inspection are experimental.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

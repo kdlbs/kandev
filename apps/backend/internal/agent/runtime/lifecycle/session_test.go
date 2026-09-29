@@ -265,7 +265,18 @@ func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 			"success": true,
 		})
 		return resp
-	case "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option":
+	case "agent.session.set_mode":
+		var request struct {
+			ModeID string `json:"mode_id"`
+		}
+		_ = msg.ParsePayload(&request)
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, agentctl.ModeResult{
+			Requested: request.ModeID,
+			Effective: request.ModeID,
+			Confirmed: request.ModeID != "",
+		})
+		return resp
+	case "agent.session.set_model", "agent.session.set_config_option":
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
 		})
@@ -386,6 +397,222 @@ func TestInitializeAndPromptWithLayers_UnadvertisedModelFailsBeforeInference(t *
 				}
 			}
 		})
+	}
+}
+
+func TestInitializeAndPromptWithLayers_HoldsPromptWhenModeIsUnconfirmed(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.session.set_mode" {
+			response, _ := ws.NewResponse(msg.ID, msg.Action, agentctl.ModeResult{
+				Requested: "plan",
+			})
+			return response
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), nil, nil, nil)
+	client := createTestClient(t, mock.server.URL)
+	disconnected := connectAgentStream(t, mock, client)
+	t.Cleanup(func() {
+		closeStopChOnce(stopCh)
+		client.Close()
+		select {
+		case <-disconnected:
+		case <-time.After(5 * time.Second):
+			t.Error("agent stream did not finish draining during cleanup")
+		}
+	})
+	execution := &AgentExecution{
+		ID: "exec-mode-unconfirmed", TaskID: "task-mode-unconfirmed", SessionID: "session-mode-unconfirmed",
+		WorkspacePath: "/workspace", agentctl: client, promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	agentConfig := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{
+		Cmd: agents.NewCommand("test-agent"), Protocol: agent.ProtocolACP,
+		SessionConfig: agents.SessionConfig{}, ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+	}}
+
+	err := sm.InitializeAndPromptWithLayers(
+		context.Background(), execution, agentConfig, "do work", nil, nil,
+		func(string) error { return nil }, "", "plan", nil, "", "", nil, StartModelPolicy{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "plan") || !strings.Contains(err.Error(), "confirmed") {
+		t.Fatalf("unconfirmed mode error = %v, want mode-specific confirmation error", err)
+	}
+	for _, action := range mock.getActionLog() {
+		if action == "agent.prompt" {
+			t.Fatal("initial prompt was dispatched with an unconfirmed explicit mode")
+		}
+	}
+}
+
+func TestInitializeAndPromptWithLayers_AppliesOnlyWinningModeBeforePrompt(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	modeRequests := make(chan string, 2)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.session.set_mode" {
+			var request struct {
+				ModeID string `json:"mode_id"`
+			}
+			_ = msg.ParsePayload(&request)
+			modeRequests <- request.ModeID
+			response, _ := ws.NewResponse(msg.ID, msg.Action, agentctl.ModeResult{
+				Requested: request.ModeID, Effective: request.ModeID, Confirmed: true,
+			})
+			return response
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), nil, nil, nil)
+	client := createTestClient(t, mock.server.URL)
+	disconnected := connectAgentStream(t, mock, client)
+	t.Cleanup(func() {
+		closeStopChOnce(stopCh)
+		client.Close()
+		select {
+		case <-disconnected:
+		case <-time.After(5 * time.Second):
+			t.Error("agent stream did not finish draining during cleanup")
+		}
+	})
+	execution := &AgentExecution{
+		ID: "exec-mode-override", TaskID: "task-mode-override", SessionID: "session-mode-override",
+		WorkspacePath: "/workspace", agentctl: client, promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	promptDispatched := make(chan struct{}, 1)
+	execution.setInitialPromptDispatchCallbacks(func() {
+		promptDispatched <- struct{}{}
+		execution.promptDoneCh <- PromptCompletionSignal{StopReason: "test-complete"}
+	}, nil)
+	agentConfig := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{
+		Cmd: agents.NewCommand("test-agent"), Protocol: agent.ProtocolACP,
+		SessionConfig: agents.SessionConfig{}, ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+	}}
+
+	err := sm.InitializeAndPromptWithLayers(
+		context.Background(), execution, agentConfig, "do work", nil, nil,
+		func(string) error { return nil }, "", "plan", nil, "", "bypassPermissions", nil, StartModelPolicy{},
+	)
+	if err != nil {
+		t.Fatalf("InitializeAndPromptWithLayers: %v", err)
+	}
+	select {
+	case <-promptDispatched:
+	case <-time.After(3 * time.Second):
+		t.Fatal("initial prompt was not dispatched")
+	}
+	select {
+	case mode := <-modeRequests:
+		if mode != "bypassPermissions" {
+			t.Fatalf("applied mode = %q, want winning runtime override", mode)
+		}
+	default:
+		t.Fatal("winning mode was not applied")
+	}
+	select {
+	case mode := <-modeRequests:
+		t.Fatalf("applied a second mode %q; profile mode must not be applied before its override", mode)
+	default:
+	}
+	actions := mock.getActionLog()
+	modeIndex, promptIndex := -1, -1
+	for i, action := range actions {
+		if action == "agent.session.set_mode" && modeIndex == -1 {
+			modeIndex = i
+		}
+		if action == "agent.prompt" {
+			promptIndex = i
+		}
+	}
+	if modeIndex < 0 || promptIndex < 0 || modeIndex >= promptIndex {
+		t.Fatalf("actions = %v, want winning mode before prompt", actions)
+	}
+}
+
+func TestInitializeAndPromptWithLayers_ReappliesModeAfterResumeBeforePrompt(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.session.set_mode" {
+			var request struct {
+				ModeID string `json:"mode_id"`
+			}
+			_ = msg.ParsePayload(&request)
+			response, _ := ws.NewResponse(msg.ID, msg.Action, agentctl.ModeResult{
+				Requested: request.ModeID, Effective: request.ModeID, Confirmed: true,
+			})
+			return response
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), nil, nil, nil)
+	client := createTestClient(t, mock.server.URL)
+	disconnected := connectAgentStream(t, mock, client)
+	t.Cleanup(func() {
+		closeStopChOnce(stopCh)
+		client.Close()
+		select {
+		case <-disconnected:
+		case <-time.After(5 * time.Second):
+			t.Error("agent stream did not finish draining during cleanup")
+		}
+	})
+	execution := &AgentExecution{
+		ID: "exec-mode-resume", TaskID: "task-mode-resume", SessionID: "session-mode-resume",
+		ACPSessionID: "existing-session", WorkspacePath: "/workspace", agentctl: client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	promptDispatched := make(chan struct{}, 1)
+	execution.setInitialPromptDispatchCallbacks(func() {
+		promptDispatched <- struct{}{}
+		execution.promptDoneCh <- PromptCompletionSignal{StopReason: "test-complete"}
+	}, nil)
+	agentConfig := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{
+		Cmd: agents.NewCommand("test-agent"), Protocol: agent.ProtocolACP,
+		SessionConfig:  agents.SessionConfig{NativeSessionResume: true},
+		ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+	}}
+
+	err := sm.InitializeAndPromptWithLayers(
+		context.Background(), execution, agentConfig, "continue work", nil, nil,
+		func(string) error { return nil }, "", "plan", nil, "", "", nil, StartModelPolicy{},
+	)
+	if err != nil {
+		t.Fatalf("InitializeAndPromptWithLayers: %v", err)
+	}
+	select {
+	case <-promptDispatched:
+	case <-time.After(3 * time.Second):
+		t.Fatal("resumed prompt was not dispatched")
+	}
+	actions := mock.getActionLog()
+	loadIndex, modeIndex, promptIndex := -1, -1, -1
+	for i, action := range actions {
+		switch action {
+		case "agent.session.load":
+			loadIndex = i
+		case "agent.session.set_mode":
+			modeIndex = i
+		case "agent.prompt":
+			promptIndex = i
+		}
+	}
+	if loadIndex < 0 || modeIndex < 0 || promptIndex < 0 || loadIndex >= modeIndex || modeIndex >= promptIndex {
+		t.Fatalf("actions = %v, want session.load before confirmed mode before resumed prompt", actions)
 	}
 }
 

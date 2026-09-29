@@ -18,6 +18,8 @@ export const defaultFeatureFlags = {
   needsYouInbox: false,
   agentSurvival: false,
   coordinator: false,
+  codexAppServer: false,
+  agentBackgroundWork: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

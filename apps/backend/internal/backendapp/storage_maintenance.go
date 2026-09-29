@@ -57,6 +57,7 @@ type storageDependencies struct {
 	cachedOverview   *storagepkg.OverviewCache
 	quarantine       *workspaceQuarantineController
 	providers        []storagepkg.CleanupProvider
+	systemTemporary  *tempstore.Provider
 }
 
 // provideStorageStore constructs the storage system's persistence store and
@@ -134,6 +135,22 @@ func provideStorageCompositionWithDependencies(
 				AvailableBytes: capacity.AvailableBytes, UsedPercent: capacity.UsedPercent,
 			}, nil
 		},
+		DiskRoots: func(ctx context.Context) ([]storagepkg.DiskRootCandidate, error) {
+			roots, err := dependencies.systemTemporary.CapacityRoots(ctx)
+			if err != nil {
+				return nil, err
+			}
+			candidates := make([]storagepkg.DiskRootCandidate, 0, len(roots))
+			for _, root := range roots {
+				candidates = append(candidates, storagepkg.DiskRootCandidate{
+					RequestedPath: root.RequestedPath, Path: root.Path, Aliases: root.Aliases,
+				})
+			}
+			return candidates, nil
+		},
+		DiskIdentity: func(_ context.Context, path string) (string, error) {
+			return systemmetrics.FilesystemIdentity(path)
+		},
 		DiskPath:  cfg.ResolvedHomeDir(),
 		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
 	})
@@ -174,7 +191,7 @@ func prepareStorageDependencies(
 		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
 		Scanner:  scanner, Settings: settings,
 	})
-	systemTemporary := tempstore.New(systemTemporaryConfig(scanner))
+	systemTemporary := tempstore.New(systemTemporaryConfig(scanner, tempArtifacts))
 	if err := tempProvider.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact quarantine", err)
 	}
@@ -213,14 +230,21 @@ func prepareStorageDependencies(
 	return &storageDependencies{
 		settings: settings, store: store, tempArtifacts: tempArtifacts,
 		coordinator: coordinator, goCache: goCache, workspaceFactory: workspaceFactory,
-		cachedOverview: cachedOverview,
-		quarantine:     quarantine,
-		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
+		cachedOverview:  cachedOverview,
+		quarantine:      quarantine,
+		systemTemporary: systemTemporary,
+		providers:       storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
 	}, nil
 }
 
-func systemTemporaryConfig(scanner *filescan.Limiter) tempstore.Config {
+func systemTemporaryConfig(
+	scanner *filescan.Limiter,
+	registry *tempartifacts.Registry,
+) tempstore.Config {
 	config := tempstore.Config{Scanner: scanner}
+	config.ClassifyOwnership = func(ctx context.Context, paths []string) map[string]tempstore.EntryOwnership {
+		return classifyTemporaryArtifactOwnership(ctx, registry, paths)
+	}
 	if root := os.Getenv("KANDEV_E2E_SYSTEM_TEMP_ROOT"); root != "" {
 		// The browser fixture supplies a disposable root so E2E analysis never
 		// reads the host's shared temporary directory.
@@ -228,6 +252,82 @@ func systemTemporaryConfig(scanner *filescan.Limiter) tempstore.Config {
 		config.UnixRoot = root
 	}
 	return config
+}
+
+func classifyTemporaryArtifactOwnership(
+	ctx context.Context,
+	registry *tempartifacts.Registry,
+	paths []string,
+) map[string]tempstore.EntryOwnership {
+	ownership := make(map[string]tempstore.EntryOwnership, len(paths))
+	for _, path := range paths {
+		ownership[path] = tempstore.EntryOwnershipUnknown
+	}
+	if registry == nil || len(paths) == 0 {
+		return ownership
+	}
+	artifacts, err := registry.List(ctx)
+	if err != nil {
+		return ownership
+	}
+	byPath, duplicates := indexTemporaryArtifactPaths(artifacts)
+	for _, requested := range paths {
+		ownership[requested] = classifyTemporaryArtifactPath(registry, requested, byPath, duplicates)
+	}
+	return ownership
+}
+
+func indexTemporaryArtifactPaths(
+	artifacts []storagepkg.TemporaryArtifact,
+) (map[string]storagepkg.TemporaryArtifact, map[string]struct{}) {
+	byPath := make(map[string]storagepkg.TemporaryArtifact, len(artifacts))
+	duplicates := make(map[string]struct{})
+	for _, artifact := range artifacts {
+		if !filepath.IsAbs(artifact.Path) {
+			continue
+		}
+		addTemporaryArtifactPath(byPath, duplicates, artifact.Path, artifact)
+		if canonical, err := filepath.EvalSymlinks(artifact.Path); err == nil && filepath.IsAbs(canonical) {
+			addTemporaryArtifactPath(byPath, duplicates, canonical, artifact)
+		}
+	}
+	return byPath, duplicates
+}
+
+func addTemporaryArtifactPath(
+	byPath map[string]storagepkg.TemporaryArtifact,
+	duplicates map[string]struct{},
+	path string,
+	artifact storagepkg.TemporaryArtifact,
+) {
+	path = filepath.Clean(path)
+	if existing, exists := byPath[path]; exists {
+		if existing.ID != artifact.ID {
+			duplicates[path] = struct{}{}
+		}
+		return
+	}
+	byPath[path] = artifact
+}
+
+func classifyTemporaryArtifactPath(
+	registry *tempartifacts.Registry,
+	requested string,
+	byPath map[string]storagepkg.TemporaryArtifact,
+	duplicates map[string]struct{},
+) tempstore.EntryOwnership {
+	if !filepath.IsAbs(requested) {
+		return tempstore.EntryOwnershipUnknown
+	}
+	path := filepath.Clean(requested)
+	artifact, registered := byPath[path]
+	if !registered {
+		return tempstore.EntryOwnershipUntracked
+	}
+	if _, ambiguous := duplicates[path]; ambiguous || registry.ValidateMarker(path, artifact) != nil {
+		return tempstore.EntryOwnershipUnknown
+	}
+	return tempstore.EntryOwnershipRegisteredKandev
 }
 
 func newStorageOverviewCache(
