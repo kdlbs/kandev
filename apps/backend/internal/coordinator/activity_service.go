@@ -253,7 +253,8 @@ func (s *Service) GetActivitySummary(ctx context.Context, workspaceID, coordinat
 }
 
 // ActivitySummary counts the coordinator's rows created in the last days,
-// per class. Phase 3 and the goal baselines read it; days is not validated
+// per class. Phase 3 and the goal measures read it; the goal baselines read
+// Store.ActivityCountsIn on the locked handle instead. days is not validated
 // here beyond being positive.
 func (s *Service) ActivitySummary(ctx context.Context, coordinatorID string, days int) (*ActivitySummary, error) {
 	if days < 1 {

@@ -74,6 +74,13 @@ func coordinatorStandingInstructionsReader(
 		} else {
 			sections = append(sections, orders)
 		}
+		goal, goalErr := svc.GoalInstructionSection(ctx, coordinatorID)
+		if goalErr != nil {
+			log.Warn("goal unreadable; instructions built without it",
+				zap.String("coordinator_id", coordinatorID), zap.Error(goalErr))
+		} else {
+			sections = append(sections, goal)
+		}
 		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext, sections...), nil
 	}
 }

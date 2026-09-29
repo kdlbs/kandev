@@ -50,6 +50,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 	if svc.phase2 {
 		registerStandingOrderRoutes(workspace, h)
+		registerGoalRoutes(workspace, h)
 		workspace.GET("/coordinators/:cid/activity", h.httpListActivity)
 		workspace.GET("/coordinators/:cid/activity/summary", h.httpActivitySummary)
 		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
@@ -288,6 +289,8 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
+	case errors.Is(err, ErrGoalConflict):
+		c.JSON(http.StatusConflict, NewErrorResponse(err.Error()))
 	case errors.Is(err, ErrStandingOrderLimit):
 		c.JSON(http.StatusBadRequest, NewStandingOrderLimitResponse())
 	case errors.As(err, &conflictErr):

@@ -77,6 +77,31 @@ func (s *Store) ActivityCounts(ctx context.Context, coordinatorID string, since 
 	return out, nil
 }
 
+// ActivityCountsIn groups the coordinator's rows created in [since, until)
+// through exec, so a caller holding the coordinator lock reads on its own
+// handle.
+func (s *Store) ActivityCountsIn(ctx context.Context, exec coordinatorExec, coordinatorID string, since, until time.Time) ([]ActivityCount, error) {
+	rows, err := exec.QueryContext(ctx, s.db.Rebind(`SELECT action_class, outcome, edited, COUNT(*) AS rows, COALESCE(SUM(refusal_count), 0) AS refusals
+		FROM coordinator_activity WHERE coordinator_id = ? AND created_at >= ? AND created_at < ?
+		GROUP BY action_class, outcome, edited`), coordinatorID, since.UTC(), until.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("count coordinator activity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ActivityCount
+	for rows.Next() {
+		var c ActivityCount
+		if err := rows.Scan(&c.Class, &c.Outcome, &c.Edited, &c.Rows, &c.Refusal); err != nil {
+			return nil, fmt.Errorf("scan coordinator activity count: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("count coordinator activity: %w", err)
+	}
+	return out, nil
+}
+
 // EarliestActivityAt is the oldest row time of the coordinator, nil with none.
 func (s *Store) EarliestActivityAt(ctx context.Context, coordinatorID string) (*time.Time, error) {
 	var at time.Time
