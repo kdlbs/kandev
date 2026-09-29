@@ -156,6 +156,15 @@ tests distinguish an exact surviving origin ref, authentication failure, and
 confirmed branch loss; the explicit new-branch preflight is authorized without
 automatic materialization or base-branch substitution.
 
+PR #4061 review follow-up adds regressions for a remote-only branch advancing
+between probe and fetch, refreshing its exact head on replay, and removing an
+operation ref only when it still matches the recorded head. An interrupted
+cleanup retry now removes a leftover ref before completing its record. Coverage
+also checks that unrelated environment claims do not block healthy admission,
+confirmed branch loss during claimed inspection creates no empty operation
+record, early failures remove only an empty reserved target, and Git can add
+through an inherited pinned working directory on descriptor-path platforms.
+
 Validation passed:
 
 - `(cd apps/backend && go test -race ./internal/worktree -count=1)`
@@ -168,3 +177,16 @@ Validation passed:
 
 The PostgreSQL claim test was not run because `KANDEV_TEST_POSTGRES_DSN` is not
 configured. It remains an outstanding cross-process database verification.
+
+PR #4061 review-fix verification on 2026-09-29:
+
+- Focused replay, temporary-ref cleanup, unrelated-claim, no-empty-plan,
+  empty-target, and pinned-working-directory regressions: passed.
+- `go test -race ./internal/worktree -count=1`: passed.
+- `go test -race ./internal/orchestrator/executor ./internal/orchestrator ./internal/agent/runtime/lifecycle -run 'TestMissingCheckoutRecovery|Test.*Recovery|TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity' -count=1`: passed.
+- `go test -race ./internal/task/repository/sqlite -run 'TestTaskEnvironmentRecoveryClaim' -count=1`: passed.
+- `make -C apps/backend lint` and `make -C apps/backend build`: passed.
+- Windows/amd64 and Darwin/arm64 worktree test cross-compiles: passed.
+- Catalog, specification lint, public-doc validators (62 tests and 47 pages), PR-documentation reference coverage, and `git diff --check`: passed.
+- PostgreSQL remains unverified because no disposable
+  `KANDEV_TEST_POSTGRES_DSN` was supplied.

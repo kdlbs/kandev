@@ -204,6 +204,12 @@ advertised commit and verifies the head before it creates the checkout. A failed
 origin check blocks automatic recovery. Confirmed branch loss still requires
 the explicit **Resume on a new branch** recovery action.
 
+If recovery stops before the checkout is complete and only the origin branch
+remains, Kandev checks that exact branch again on retry. It records the newly
+advertised head before fetching it. If the branch advances between that check
+and the fetch, the current attempt stops and a later retry checks the branch
+again. A surviving local branch stays at its recorded commit.
+
 Before restoring a missing checkout, Kandev verifies every selected repository
 slot, confirms the Worktree environment still has exclusive ownership, and
 checks that no session or runtime is using it. A live requester, sibling session,

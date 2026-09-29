@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// missingCheckoutChildFD is the descriptor slot used by ExtraFiles to pass the pinned target to Git.
 const missingCheckoutChildFD = 3
 
 func (m *Manager) fetchMissingCheckoutRemoteCommit(
@@ -56,11 +59,64 @@ func (m *Manager) deleteMissingCheckoutRemoteRef(ctx context.Context, repository
 	if _, err := uuid.Parse(operationID); err != nil {
 		return fmt.Errorf("missing-checkout operation identity is invalid")
 	}
-	cmd := m.newNonInteractiveGitCmd(ctx, repositoryPath, "update-ref", "-d", "refs/kandev/missing-checkout/"+operationID, head)
+	ref := "refs/kandev/missing-checkout/" + operationID
+	current, exists, err := m.readMissingCheckoutOperationRef(ctx, repositoryPath, ref)
+	if err != nil {
+		return fmt.Errorf("inspect temporary origin reference %q: %w", operationID, err)
+	}
+	if !exists {
+		return nil
+	}
+	if !strings.EqualFold(current, head) {
+		return fmt.Errorf("temporary origin reference %q no longer matches the recorded head", operationID)
+	}
+	cmd := m.newNonInteractiveGitCmd(ctx, repositoryPath, "update-ref", "-d", ref, head)
 	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
+		latest, stillExists, inspectErr := m.readMissingCheckoutOperationRef(ctx, repositoryPath, ref)
+		if inspectErr == nil && !stillExists {
+			return nil
+		}
+		if inspectErr == nil && !strings.EqualFold(latest, head) {
+			return fmt.Errorf("temporary origin reference %q changed during cleanup", operationID)
+		}
 		return fmt.Errorf("delete temporary origin reference %q: %s: %w", operationID, strings.TrimSpace(string(output)), err)
 	}
 	return nil
+}
+
+func (m *Manager) readMissingCheckoutOperationRef(
+	ctx context.Context,
+	repositoryPath, ref string,
+) (string, bool, error) {
+	present, err := m.missingCheckoutOperationRefExists(ctx, repositoryPath, ref)
+	if err != nil || !present {
+		return "", false, err
+	}
+	output, err := m.runBoundedGitInspect(ctx, repositoryPath, "rev-parse", "--verify", ref)
+	if err != nil {
+		present, checkErr := m.missingCheckoutOperationRefExists(ctx, repositoryPath, ref)
+		if checkErr == nil && !present {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	head := strings.TrimSpace(output)
+	if !commitSHA.MatchString(head) {
+		return "", false, fmt.Errorf("temporary origin reference has an invalid object ID")
+	}
+	return strings.ToLower(head), true, nil
+}
+
+func (m *Manager) missingCheckoutOperationRefExists(ctx context.Context, repositoryPath, ref string) (bool, error) {
+	_, err := m.runBoundedGitInspect(ctx, repositoryPath, "show-ref", "--verify", "--quiet", ref)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 func (m *Manager) restoreMissingCheckout(
@@ -98,16 +154,31 @@ func (m *Manager) restoreMissingCheckoutWithHooks(
 	if pathErr != nil && !errors.Is(pathErr, os.ErrNotExist) {
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, "cannot inspect checkout path during recovery")
 	}
+	if hooks.beforeClaimedInspection != nil {
+		if err := hooks.beforeClaimedInspection(); err != nil {
+			return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("claimed-inspection barrier: %v", err))
+		}
+	}
 	inspection, err := m.inspectMissingCheckout(
 		ctx, req.OwnerTaskID, req.OwnershipGeneration, slot, pathPresent, req.AllowBranchReplacement,
 	)
 	if err != nil {
 		return err
 	}
+	if !inspection.needsRecovery || inspection.needsBranchReplacement {
+		return missingCheckoutError(req.OwnerTaskID, wt.Path, "checkout no longer has an authorized missing-checkout recovery plan")
+	}
 	if inspection.pathPresent {
-		return m.completeInterruptedMissingCheckout(ctx, req, wt, claim, inspection)
+		return m.completeInterruptedMissingCheckout(ctx, req, wt, repositoryPath, claim, inspection)
+	}
+	if !validMissingCheckoutBranchPlan(inspection.plan) {
+		return missingCheckoutError(req.OwnerTaskID, wt.Path, "recorded branch plan is incomplete or invalid")
 	}
 	return m.restoreMissingCheckoutOperation(ctx, req, slot, claim, inspection, repositoryPath, hooks)
+}
+
+func validMissingCheckoutBranchPlan(plan missingCheckoutBranchPlan) bool {
+	return plan.branch != "" && plan.source != "" && commitSHA.MatchString(plan.head)
 }
 
 func (m *Manager) restoreMissingCheckoutOperation(
@@ -146,7 +217,7 @@ func (m *Manager) restoreMissingCheckoutOperation(
 	if err := parent.VerifyPath(location.taskRoot); err != nil {
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, "managed task root changed before materialization")
 	}
-	if err := m.fetchAndRecordMissingCheckoutRemoteCommit(ctx, req, repositoryPath, parent, location.name, &plan, &record); err != nil {
+	if err := m.fetchAndRecordMissingCheckoutRemoteCommit(ctx, req, repositoryPath, parent, location.name, &plan, &record, hooks); err != nil {
 		return err
 	}
 	if hooks.beforeTargetReservation != nil {
@@ -157,12 +228,32 @@ func (m *Manager) restoreMissingCheckoutOperation(
 	if err := m.materializeMissingCheckoutTarget(ctx, req, wt, repositoryPath, parent, location, plan, record, hooks); err != nil {
 		return err
 	}
-	if plan.fetchRemote {
-		if err := m.deleteMissingCheckoutRemoteRef(ctx, repositoryPath, record.OperationID, record.Head); err != nil {
-			return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("cannot remove temporary origin reference: %v", err))
-		}
+	if err := m.cleanupMissingCheckoutRemoteReference(ctx, req, wt, repositoryPath, record, hooks); err != nil {
+		return err
 	}
 	return markMissingCheckoutOperationComplete(parent, location.name, record)
+}
+
+func (m *Manager) cleanupMissingCheckoutRemoteReference(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	wt *Worktree,
+	repositoryPath string,
+	record missingCheckoutRecoveryRecord,
+	hooks missingCheckoutRestoreHooks,
+) error {
+	if record.Source != missingCheckoutSourceRemote {
+		return nil
+	}
+	if hooks.beforeRemoteRefCleanup != nil {
+		if err := hooks.beforeRemoteRefCleanup(); err != nil {
+			return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("temporary-ref cleanup barrier: %v", err))
+		}
+	}
+	if err := m.deleteMissingCheckoutRemoteRef(ctx, repositoryPath, record.OperationID, record.Head); err != nil {
+		return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("cannot remove temporary origin reference: %v", err))
+	}
+	return nil
 }
 
 func (m *Manager) cleanupMissingCheckoutRegistration(
@@ -196,12 +287,18 @@ func (m *Manager) fetchAndRecordMissingCheckoutRemoteCommit(
 	targetName string,
 	plan *missingCheckoutBranchPlan,
 	record *missingCheckoutRecoveryRecord,
+	hooks missingCheckoutRestoreHooks,
 ) error {
 	if !plan.fetchRemote {
 		return nil
 	}
+	if hooks.beforeRemoteFetch != nil {
+		if err := hooks.beforeRemoteFetch(); err != nil {
+			return missingCheckoutError(req.OwnerTaskID, record.Path, fmt.Sprintf("remote-fetch barrier: %v", err))
+		}
+	}
 	if err := m.fetchMissingCheckoutRemoteCommit(ctx, repositoryPath, plan, record.OperationID); err != nil {
-		return missingCheckoutError(req.OwnerTaskID, record.Path, fmt.Sprintf("cannot fetch the recorded origin branch: %v", err))
+		return missingCheckoutCauseError(req.OwnerTaskID, record.Path, "cannot fetch the recorded origin branch", err)
 	}
 	record.Head = plan.head
 	record.UpdatedAt = time.Now().UTC()
@@ -215,6 +312,7 @@ func (m *Manager) completeInterruptedMissingCheckout(
 	ctx context.Context,
 	req *RecoveryAdmissionRequest,
 	wt *Worktree,
+	repositoryPath string,
 	claim *models.TaskEnvironmentRecoveryClaim,
 	inspection missingCheckoutInspection,
 ) error {
@@ -236,6 +334,11 @@ func (m *Manager) completeInterruptedMissingCheckout(
 	}
 	if err := m.verifyMissingCheckoutResult(ctx, wt, *record); err != nil {
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("interrupted checkout failed identity validation: %v", err))
+	}
+	if record.Source == missingCheckoutSourceRemote {
+		if err := m.deleteMissingCheckoutRemoteRef(ctx, repositoryPath, record.OperationID, record.Head); err != nil {
+			return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("cannot remove temporary origin reference: %v", err))
+		}
 	}
 	return markMissingCheckoutOperationComplete(parent, location.name, *record)
 }
@@ -294,9 +397,17 @@ func (m *Manager) prepareMissingCheckoutOperation(
 		var err error
 		plan, err = m.missingCheckoutPlanFromRecord(ctx, recoveryRepositoryPath(*slot), slot.Worktree, *inspection.record)
 		if err != nil {
-			return plan, missingCheckoutRecoveryRecord{}, missingCheckoutError(req.OwnerTaskID, slot.Worktree.Path, err.Error())
+			return plan, missingCheckoutRecoveryRecord{}, missingCheckoutCauseError(req.OwnerTaskID, slot.Worktree.Path, err.Error(), err)
 		}
-		return plan, *inspection.record, nil
+		record := *inspection.record
+		if record.Source == missingCheckoutSourceRemote && !strings.EqualFold(record.Head, plan.head) {
+			record.Head = plan.head
+			record.UpdatedAt = time.Now().UTC()
+			if err := writeMissingCheckoutRecord(parent, targetName+missingCheckoutRecordSuffix, record); err != nil {
+				return plan, missingCheckoutRecoveryRecord{}, missingCheckoutError(req.OwnerTaskID, slot.Worktree.Path, "cannot persist refreshed origin branch head")
+			}
+		}
+		return plan, record, nil
 	}
 	plan = inspection.plan
 	record := missingCheckoutRecoveryRecord{
@@ -329,6 +440,16 @@ func (m *Manager) materializeMissingCheckoutTarget(
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, "checkout path appeared before materialization")
 	}
 	defer func() { _ = target.Close() }()
+	materialized := false
+	defer func() {
+		if materialized {
+			return
+		}
+		entries, readErr := target.ReadDir()
+		if readErr == nil && len(entries) == 0 {
+			_ = target.RemoveDirectory(context.WithoutCancel(ctx))
+		}
+	}()
 	if err := target.VerifyPath(wt.Path); err != nil {
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, "reserved checkout path changed before materialization")
 	}
@@ -347,6 +468,7 @@ func (m *Manager) materializeMissingCheckoutTarget(
 	if err := m.addMissingCheckoutGitWorktree(ctx, repositoryPath, processPath, targetFile, plan); err != nil {
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, fmt.Sprintf("cannot restore recorded checkout: %v", err))
 	}
+	materialized = true
 	if err := target.VerifyPath(wt.Path); err != nil {
 		return missingCheckoutError(req.OwnerTaskID, wt.Path, "reserved checkout path changed during materialization")
 	}
@@ -378,11 +500,31 @@ func (m *Manager) addMissingCheckoutGitWorktree(
 	targetFile *os.File,
 	plan missingCheckoutBranchPlan,
 ) error {
+	usePinnedWorkingDirectory := runtime.GOOS != "linux" && targetFile != nil
+	return m.addMissingCheckoutGitWorktreeWithStrategy(ctx, repositoryPath, processPath, targetFile, plan, usePinnedWorkingDirectory)
+}
+
+func (m *Manager) addMissingCheckoutGitWorktreeWithStrategy(
+	ctx context.Context,
+	repositoryPath, processPath string,
+	targetFile *os.File,
+	plan missingCheckoutBranchPlan,
+	usePinnedWorkingDirectory bool,
+) error {
 	args := []string{"worktree", "add"}
 	if plan.createLocal {
 		args = append(args, "-b", plan.branch)
 	}
-	args = append(args, "--", processPath)
+	worktreeTarget := processPath
+	if usePinnedWorkingDirectory {
+		commonDir, err := gitCommonDir(ctx, m, repositoryPath)
+		if err != nil {
+			return fmt.Errorf("resolve repository common directory for pinned worktree add: %w", err)
+		}
+		args = append([]string{"--git-dir=" + commonDir}, args...)
+		worktreeTarget = "."
+	}
+	args = append(args, "--", worktreeTarget)
 	if plan.createLocal {
 		args = append(args, plan.head)
 	} else {
@@ -390,6 +532,15 @@ func (m *Manager) addMissingCheckoutGitWorktree(
 	}
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repositoryPath
+	if usePinnedWorkingDirectory {
+		gitArgs := append([]string(nil), cmd.Args[1:]...)
+		shell := exec.CommandContext(ctx, "/bin/sh", "-c", `cd "$1" && shift && exec "$@"`, "kandev", processPath, cmd.Path)
+		shell.Args = append(shell.Args, gitArgs...)
+		shell.Dir = repositoryPath
+		shell.Env = cmd.Env
+		cmd = shell
+	}
+	// Windows ProcessPath yields a lexical path; Unix descriptor targets pass this file to Git.
 	if targetFile != nil {
 		cmd.ExtraFiles = []*os.File{targetFile}
 	}
@@ -489,4 +640,8 @@ func writeMissingCheckoutRecord(
 
 func missingCheckoutError(taskID, checkout, reason string) error {
 	return &WorktreeRecoveryError{TaskID: taskID, Checkout: checkout, State: "missing_checkout", Reason: reason}
+}
+
+func missingCheckoutCauseError(taskID, checkout, reason string, cause error) error {
+	return fmt.Errorf("%w: %w", missingCheckoutError(taskID, checkout, reason), cause)
 }

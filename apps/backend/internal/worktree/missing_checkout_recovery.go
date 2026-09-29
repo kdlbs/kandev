@@ -77,9 +77,12 @@ type missingCheckoutLocation struct {
 }
 
 type missingCheckoutRestoreHooks struct {
+	beforeClaimedInspection   func() error
 	beforeRegistrationCleanup func() error
 	beforeTargetReservation   func() error
 	beforeWorktreeAdd         func() error
+	beforeRemoteFetch         func() error
+	beforeRemoteRefCleanup    func() error
 }
 
 func (m *Manager) inspectMissingCheckout(
@@ -198,7 +201,7 @@ func (m *Manager) inspectMissingCheckoutRecord(
 	}
 	plan, err := m.missingCheckoutPlanFromRecord(ctx, slot.RepositoryPath, wt, *record)
 	if err != nil {
-		return missingCheckoutInspection{}, true, missingCheckoutError(taskID, wt.Path, err.Error())
+		return missingCheckoutInspection{}, true, missingCheckoutCauseError(taskID, wt.Path, err.Error(), err)
 	}
 	prune, err := m.inspectMissingCheckoutRegistration(ctx, slot.RepositoryPath, wt.Path, plan)
 	if err != nil {
@@ -233,18 +236,47 @@ func (m *Manager) validateInterruptedMissingCheckoutCommit(
 	slot *RecoverySlot,
 	record missingCheckoutRecoveryRecord,
 ) error {
+	if record.Source == missingCheckoutSourceRemote {
+		return m.validateInterruptedRemoteMissingCheckout(ctx, taskID, slot, record)
+	}
 	if _, err := m.resolveCommit(ctx, slot.RepositoryPath, record.Head); err == nil {
 		return nil
 	}
-	if record.Source != missingCheckoutSourceRemote {
-		return missingCheckoutError(taskID, slot.Worktree.Path, "interrupted recovery commit is unavailable")
+	return missingCheckoutError(taskID, slot.Worktree.Path, "interrupted recovery commit is unavailable")
+}
+
+func (m *Manager) validateInterruptedRemoteMissingCheckout(
+	ctx context.Context,
+	taskID string,
+	slot *RecoverySlot,
+	record missingCheckoutRecoveryRecord,
+) error {
+	localExists, err := m.branchExists(ctx, slot.RepositoryPath, "refs/heads/"+record.Branch)
+	if err != nil {
+		return missingCheckoutError(taskID, slot.Worktree.Path, "cannot inspect interrupted recovery branch")
+	}
+	if !localExists {
+		_, exists, err := m.missingCheckoutRemoteHead(ctx, slot.RepositoryPath, record.Branch)
+		if err != nil {
+			return missingCheckoutProbeError(taskID, slot.Worktree.Path, err)
+		}
+		if !exists {
+			return missingCheckoutBranchLoss(record.Branch)
+		}
+		return nil
+	}
+	if _, err := m.resolveCommit(ctx, slot.RepositoryPath, record.Head); err == nil {
+		return nil
 	}
 	remoteHead, exists, err := m.missingCheckoutRemoteHead(ctx, slot.RepositoryPath, record.Branch)
 	if err != nil {
 		return missingCheckoutProbeError(taskID, slot.Worktree.Path, err)
 	}
-	if !exists || !strings.EqualFold(remoteHead, record.Head) {
-		return missingCheckoutError(taskID, slot.Worktree.Path, "interrupted recovery branch head is no longer available on origin")
+	if !exists {
+		return missingCheckoutBranchLoss(record.Branch)
+	}
+	if !strings.EqualFold(remoteHead, record.Head) {
+		return missingCheckoutError(taskID, slot.Worktree.Path, "interrupted recovery branch head changed while its local branch remains available")
 	}
 	return nil
 }
@@ -622,11 +654,16 @@ func (m *Manager) missingCheckoutRemoteHead(ctx context.Context, repositoryPath,
 		}
 		return strings.ToLower(fields[0]), true, nil
 	}
+	// A successful probe can still contain non-matching rows, so require the exact advertised ref.
 	return "", false, fmt.Errorf("%w: origin probe returned no exact ref for %q", ErrGitCommandFailed, wantRef)
 }
 
 func missingCheckoutProbeError(taskID, checkout string, cause error) error {
 	return fmt.Errorf("%w: %w", missingCheckoutError(taskID, checkout, "cannot determine whether the recorded origin branch survives"), cause)
+}
+
+func missingCheckoutBranchLoss(branch string) error {
+	return fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, &BranchUnrecoverableError{Branch: branch})
 }
 
 func (m *Manager) missingCheckoutPlanFromRecord(
@@ -649,6 +686,19 @@ func (m *Manager) missingCheckoutPlanFromRecord(
 	}
 	if record.Source == missingCheckoutSourceLocal {
 		return missingCheckoutBranchPlan{}, fmt.Errorf("interrupted recovery local branch is no longer available")
+	}
+	if record.Source == missingCheckoutSourceRemote {
+		head, exists, err := m.missingCheckoutRemoteHead(ctx, repositoryPath, record.Branch)
+		if err != nil {
+			return missingCheckoutBranchPlan{}, err
+		}
+		if !exists {
+			return missingCheckoutBranchPlan{}, fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, &BranchUnrecoverableError{Branch: record.Branch})
+		}
+		return missingCheckoutBranchPlan{
+			branch: record.Branch, head: head, source: missingCheckoutSourceRemote,
+			createLocal: true, fetchRemote: true,
+		}, nil
 	}
 	_, commitErr := m.resolveCommit(ctx, repositoryPath, record.Head)
 	return missingCheckoutBranchPlan{

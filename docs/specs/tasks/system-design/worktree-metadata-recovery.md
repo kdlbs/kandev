@@ -239,9 +239,13 @@ The operation uses the repository lock and pinned no-follow directory handles.
 Resolve the recorded local branch to an exact commit first. When only the
 recorded origin branch survives but its tracking ref is absent, use a bounded
 exact-ref probe and fetch only the advertised commit to a private operation ref.
-Verify that fetched head before restoring the same local branch. Prefer persisted
-compaction recovery identity when applicable. Never replace a surviving local
-head with a newer remote head. Probe failure is not confirmed branch loss.
+Verify that fetched head before restoring the same local branch. For an
+interrupted remote-only operation, each retry must probe the exact origin branch
+again and persist its newly advertised head before fetching. If origin advances
+between the probe and fetch, refuse that attempt; the next retry can record and
+fetch the latest advertised head. If the local branch exists, keep its recorded
+head and do not replace it with a newer remote head. Prefer persisted compaction
+recovery identity when applicable. Probe failure is not confirmed branch loss.
 
 Atomically reserve only the recorded absent path through its pinned parent
 directory. Pass Git the pinned target identity throughout `worktree add`; do not
@@ -264,6 +268,16 @@ records. Record the claim operation ID, environment generation, exact slot ident
 branch head, and expected path before materialization. Give this operation its own
 record format, separate from the surviving-file snapshot protocol. The OS lock
 serializes active work and adoption across backend processes.
+
+Git must mutate the target through its pinned directory identity. On platforms
+where the descriptor path cannot be a worktree destination, enter the inherited
+pinned directory descriptor as the Git process working directory and add `.`
+using the repository's exact common directory. Before Git succeeds, failure
+cleanup may remove the pinned target only while it is empty. After Git succeeds,
+retain it even when later validation fails. Remote operation refs use exact
+compare-and-swap deletion; absence is already-clean, and an interrupted replay
+retries cleanup after validating the completed checkout and before marking the
+record complete.
 
 The admission path must detect an unfinished missing-checkout record before its
 healthy-path fast return. On restart, adopt only a matching operation under the

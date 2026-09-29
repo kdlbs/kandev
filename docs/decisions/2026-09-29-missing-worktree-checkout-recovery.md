@@ -33,7 +33,17 @@ operating-system operation lock with the durable environment claim, including
 through the external-start boundary. A completed record may settle its retained
 claim only after the lock holder revalidates the exact record and checkout.
 When local and tracking refs are absent, probe the exact origin branch; probe
-errors are not proof of loss, and fetch must match the advertised head.
+errors are not proof of loss, and fetch must match the advertised head. If an
+interrupted remote-only operation is retried, probe and persist the current
+advertised head before fetching. If origin advances between probe and fetch,
+stop the attempt and let a later retry refresh that head. Preserve a local
+branch at its recorded head.
+
+Use the inherited pinned directory as Git's working directory on platforms
+where its descriptor path cannot be used as a worktree destination. Remove an
+operation's temporary origin ref only if it still points at that record's head;
+an absent ref is already clean. Interrupted cleanup must run again after the
+restored checkout is validated and before its record is marked complete.
 
 Use a narrow restoration operation. Do not inherit general recreation's path
 removal, branch-refresh, or repository setup behavior. Interruption must retain

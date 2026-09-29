@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -158,6 +159,36 @@ func TestMissingCheckoutRecoveryContinuesMultiSlotClaimFromCompletedRecord(t *te
 	}
 }
 
+func TestMissingCheckoutRecoveryIgnoresUnrelatedClaimForHealthyCheckout(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	operationID := "c3af05d8-3017-47c9-8944-69c7799ce10f"
+	claim, err := fixture.store.AcquireTaskEnvironmentRecoveryClaim(context.Background(), models.TaskEnvironmentRecoveryClaimRequest{
+		TaskEnvironmentID: fixture.environmentID, OwnerTaskID: fixture.taskID,
+		OwnershipGeneration: fixture.request.OwnershipGeneration, SessionID: fixture.sessionID,
+		OperationID: operationID, ExecutorType: fixture.request.ExecutorType,
+	})
+	if err != nil {
+		t.Fatalf("seed unrelated environment claim: %v", err)
+	}
+	defer func() {
+		if err := fixture.store.ReleaseTaskEnvironmentRecoveryClaim(context.Background(), claim); err != nil {
+			t.Errorf("release unrelated environment claim: %v", err)
+		}
+	}()
+
+	admission, err := fixture.manager.AdmitRecovery(context.Background(), fixture.request)
+	if err != nil || admission != nil {
+		if admission != nil {
+			_ = admission.Release(context.Background())
+		}
+		t.Fatalf("healthy checkout admission = %v, %v; want no recovery and no error", admission, err)
+	}
+	current, err := fixture.store.GetTaskEnvironmentRecoveryClaim(context.Background(), fixture.environmentID)
+	if err != nil || current == nil || current.OperationID != operationID {
+		t.Fatalf("unrelated claim after ordinary admission = %+v, err=%v", current, err)
+	}
+}
+
 // @covers AC-TASKS-WORKTREE-METADATA-RECOVERY-004.8
 func TestMissingCheckoutRecoverySameOperationReplayIsExcludedAcrossManagers(t *testing.T) {
 	fixture := newMissingCheckoutFixture(t)
@@ -192,6 +223,249 @@ func TestMissingCheckoutRecoverySameOperationReplayIsExcludedAcrossManagers(t *t
 	claim, claimErr := fixture.store.GetTaskEnvironmentRecoveryClaim(context.Background(), fixture.environmentID)
 	if claimErr != nil || claim == nil || claim.OperationID != operationID {
 		t.Fatalf("active operation claim after replay refusal = %+v, err=%v", claim, claimErr)
+	}
+}
+
+func TestMissingCheckoutRecoveryRefreshesRemoteOnlyBranchHeadOnReplay(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	fixture.removeCheckout(t, false)
+	newHead := advanceOriginBranch(t, fixture.repositoryPath, fixture.branch)
+	runGit(t, fixture.repositoryPath, "branch", "-D", fixture.branch)
+	operationID := "8b51ed95-6078-402d-9391-813c72ca2bf0"
+	fixture.writeRemoteOperationRecord(t, fixture.request.Slots[0].Worktree, operationID, missingCheckoutRecordInProgress, fixture.branchHead)
+
+	admission, err := fixture.manager.AdmitRecovery(context.Background(), fixture.request)
+	if err != nil || admission == nil {
+		t.Fatalf("replay remote-only operation after origin advanced: admission=%+v err=%v", admission, err)
+	}
+	defer func() {
+		if err := admission.Release(context.Background()); err != nil {
+			t.Errorf("release refreshed remote operation admission: %v", err)
+		}
+	}()
+	if head := strings.TrimSpace(runGit(t, fixture.worktreePath, "rev-parse", "HEAD")); head != newHead {
+		t.Fatalf("replayed checkout HEAD = %q, want refreshed origin head %q", head, newHead)
+	}
+	if record := fixture.readOperationRecord(t); record.Head != newHead || record.State != missingCheckoutRecordComplete {
+		t.Fatalf("replayed operation record = %+v, want completed refreshed head %q", record, newHead)
+	}
+}
+
+func TestMissingCheckoutRecoveryRetriesWhenOriginAdvancesBetweenProbeAndFetch(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	fixture.removeCheckout(t, false)
+	runGit(t, fixture.repositoryPath, "branch", "-D", fixture.branch)
+	runGit(t, fixture.repositoryPath, "update-ref", "-d", "refs/remotes/origin/"+fixture.branch)
+	var advancedHead string
+	err := runMissingCheckoutRestoreWithHooks(t, fixture, missingCheckoutRestoreHooks{
+		beforeRemoteFetch: func() error {
+			advancedHead = advanceOriginBranch(t, fixture.repositoryPath, fixture.branch)
+			return nil
+		},
+	})
+	if err == nil || advancedHead == "" {
+		t.Fatalf("restore between remote probe and fetch = %v, advanced head=%q; want safe interruption", err, advancedHead)
+	}
+	if record := fixture.readOperationRecord(t); record.State != missingCheckoutRecordInProgress || record.Head != fixture.branchHead {
+		t.Fatalf("interrupted operation record = %+v, want old advertised head %q before retry", record, fixture.branchHead)
+	}
+	if _, err := os.Lstat(fixture.worktreePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout path changed after fetch detected an origin advance: %v", err)
+	}
+
+	admission, err := fixture.manager.AdmitRecovery(context.Background(), fixture.request)
+	if err != nil || admission == nil {
+		t.Fatalf("retry after origin advancement: admission=%+v err=%v", admission, err)
+	}
+	defer func() {
+		if err := admission.Release(context.Background()); err != nil {
+			t.Errorf("release retried origin advancement admission: %v", err)
+		}
+	}()
+	if head := strings.TrimSpace(runGit(t, fixture.worktreePath, "rev-parse", "HEAD")); head != advancedHead {
+		t.Fatalf("retried checkout HEAD = %q, want latest origin head %q", head, advancedHead)
+	}
+	if record := fixture.readOperationRecord(t); record.State != missingCheckoutRecordComplete || record.Head != advancedHead {
+		t.Fatalf("retried operation record = %+v, want completed head %q", record, advancedHead)
+	}
+}
+
+func TestMissingCheckoutRemoteRefCleanupRequiresRecordedHeadAndAcceptsAbsence(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	otherHead := advanceOriginBranch(t, fixture.repositoryPath, fixture.branch)
+	runGit(t, fixture.repositoryPath, "fetch", "origin", fixture.branch)
+	const operationID = "aefc046a-c7c9-4bbb-9799-3779f1b55b0a"
+	ref := "refs/kandev/missing-checkout/" + operationID
+	runGit(t, fixture.repositoryPath, "update-ref", ref, otherHead)
+	if err := fixture.manager.deleteMissingCheckoutRemoteRef(context.Background(), fixture.repositoryPath, operationID, fixture.branchHead); err == nil {
+		t.Fatal("cleanup deleted an operation ref that did not match the recorded head")
+	}
+	if got := strings.TrimSpace(runGit(t, fixture.repositoryPath, "rev-parse", ref)); got != otherHead {
+		t.Fatalf("mismatched operation ref after refused cleanup = %q, want preserved %q", got, otherHead)
+	}
+	if err := fixture.manager.deleteMissingCheckoutRemoteRef(context.Background(), fixture.repositoryPath, operationID, otherHead); err != nil {
+		t.Fatalf("delete exact operation ref: %v", err)
+	}
+	if err := fixture.manager.deleteMissingCheckoutRemoteRef(context.Background(), fixture.repositoryPath, operationID, otherHead); err != nil {
+		t.Fatalf("treat already-absent operation ref as successful cleanup: %v", err)
+	}
+}
+
+func TestMissingCheckoutRecoveryCleansRemoteOperationRefAfterInterruptedCleanup(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	fixture.removeCheckout(t, false)
+	runGit(t, fixture.repositoryPath, "branch", "-D", fixture.branch)
+	runGit(t, fixture.repositoryPath, "update-ref", "-d", "refs/remotes/origin/"+fixture.branch)
+	var injected bool
+	err := runMissingCheckoutRestoreWithHooks(t, fixture, missingCheckoutRestoreHooks{
+		beforeRemoteRefCleanup: func() error {
+			injected = true
+			return errors.New("injected temporary-ref cleanup failure")
+		},
+	})
+	if err == nil || !injected {
+		t.Fatalf("first restoration = %v, cleanup hook ran=%v; want injected cleanup failure", err, injected)
+	}
+	operationRef := "refs/kandev/missing-checkout/" + "f94931a8-f793-49b3-8a08-f42b9228ea4c"
+	if got := strings.TrimSpace(runGit(t, fixture.repositoryPath, "rev-parse", operationRef)); got != fixture.branchHead {
+		t.Fatalf("orphaned operation ref = %q, want %q", got, fixture.branchHead)
+	}
+
+	admission, err := fixture.manager.AdmitRecovery(context.Background(), fixture.request)
+	if err != nil || admission == nil {
+		t.Fatalf("replay interrupted checkout cleanup: admission=%+v err=%v", admission, err)
+	}
+	defer func() {
+		if err := admission.Release(context.Background()); err != nil {
+			t.Errorf("release cleanup replay admission: %v", err)
+		}
+	}()
+	output, err := exec.Command("git", "-C", fixture.repositoryPath, "show-ref", "--verify", "--quiet", operationRef).CombinedOutput()
+	if err == nil {
+		t.Fatalf("operation temporary ref %q survived successful replay cleanup", operationRef)
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("temporary ref lookup failed unexpectedly: %v: %s", err, strings.TrimSpace(string(output)))
+	}
+	if record := fixture.readOperationRecord(t); record.State != missingCheckoutRecordComplete {
+		t.Fatalf("operation record after cleanup replay = %+v, want complete", record)
+	}
+}
+
+func advanceOriginBranch(t *testing.T, repositoryPath, branch string) string {
+	t.Helper()
+	origin := strings.TrimSpace(runGit(t, repositoryPath, "remote", "get-url", "origin"))
+	clonePath := filepath.Join(t.TempDir(), "origin-clone")
+	output, err := exec.Command("git", "clone", origin, clonePath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("clone origin to advance branch: %v: %s", err, output)
+	}
+	runGit(t, clonePath, "config", "user.email", "missing-checkout-test@example.invalid")
+	runGit(t, clonePath, "config", "user.name", "Missing Checkout Test")
+	runGit(t, clonePath, "checkout", branch)
+	if err := os.WriteFile(filepath.Join(clonePath, "origin-advance.txt"), []byte("advanced "+branch+"\n"), 0o600); err != nil {
+		t.Fatalf("write origin advancement: %v", err)
+	}
+	runGit(t, clonePath, "add", "origin-advance.txt")
+	runGit(t, clonePath, "commit", "-m", "Advance origin branch for replay test")
+	runGit(t, clonePath, "push", "origin", branch)
+	return strings.TrimSpace(runGit(t, clonePath, "rev-parse", "HEAD"))
+}
+
+func TestMissingCheckoutRecoveryDoesNotRecordEmptyPlanWhenBranchDisappearsAtClaimedInspection(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	fixture.removeCheckout(t, false)
+	err := runMissingCheckoutRestoreWithHooks(t, fixture, missingCheckoutRestoreHooks{
+		beforeClaimedInspection: func() error {
+			runGit(t, fixture.repositoryPath, "push", "origin", "--delete", fixture.branch)
+			runGit(t, fixture.repositoryPath, "branch", "-D", fixture.branch)
+			runGit(t, fixture.repositoryPath, "fetch", "--prune", "origin")
+			return nil
+		},
+	})
+	if !errors.Is(err, ErrBranchUnrecoverable) {
+		t.Fatalf("claimed inspection error = %v, want confirmed branch loss", err)
+	}
+	location, managed, err := fixture.manager.missingCheckoutLocation(fixture.request.Slots[0].Worktree)
+	if err != nil || !managed {
+		t.Fatalf("resolve operation record location: managed=%v err=%v", managed, err)
+	}
+	parent, err := storageworkspaces.OpenDirectoryNoFollow(location.tasksBase, location.taskRoot)
+	if err != nil {
+		t.Fatalf("open managed task root: %v", err)
+	}
+	defer func() { _ = parent.Close() }()
+	if record, err := readMissingCheckoutRecord(parent, location.name+missingCheckoutRecordSuffix); err != nil || record != nil {
+		t.Fatalf("operation record after branch-loss refusal = %+v, err=%v; want no record", record, err)
+	}
+	if _, err := os.Lstat(fixture.worktreePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("branch-loss refusal changed checkout path: %v", err)
+	}
+}
+
+func TestMissingCheckoutRecoveryCleansOnlyEmptyReservedTargetOnEarlyFailure(t *testing.T) {
+	t.Run("empty target removed", func(t *testing.T) {
+		fixture := newMissingCheckoutFixture(t)
+		fixture.removeCheckout(t, false)
+		err := runMissingCheckoutRestoreWithHooks(t, fixture, missingCheckoutRestoreHooks{
+			beforeWorktreeAdd: func() error { return errors.New("stop before git add") },
+		})
+		if err == nil {
+			t.Fatal("restore succeeded after the pre-add barrier failed")
+		}
+		if _, err := os.Lstat(fixture.worktreePath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("empty reserved target remained after early failure: %v", err)
+		}
+	})
+
+	t.Run("non-empty target preserved", func(t *testing.T) {
+		fixture := newMissingCheckoutFixture(t)
+		fixture.removeCheckout(t, false)
+		err := runMissingCheckoutRestoreWithHooks(t, fixture, missingCheckoutRestoreHooks{
+			beforeWorktreeAdd: func() error {
+				return os.WriteFile(filepath.Join(fixture.worktreePath, "external-content"), []byte("preserve"), 0o600)
+			},
+		})
+		if err == nil {
+			t.Fatal("restore succeeded after external content appeared in the reserved target")
+		}
+		content, readErr := os.ReadFile(filepath.Join(fixture.worktreePath, "external-content"))
+		if readErr != nil || string(content) != "preserve" {
+			t.Fatalf("non-empty appeared target content = %q, err=%v", content, readErr)
+		}
+	})
+}
+
+func TestMissingCheckoutGitAddCanUsePinnedWorkingDirectoryStrategy(t *testing.T) {
+	fixture := newMissingCheckoutFixture(t)
+	fixture.removeCheckout(t, false)
+	location, managed, err := fixture.manager.missingCheckoutLocation(fixture.request.Slots[0].Worktree)
+	if err != nil || !managed {
+		t.Fatalf("resolve managed checkout location: managed=%v err=%v", managed, err)
+	}
+	parent, err := storageworkspaces.OpenDirectoryNoFollow(location.tasksBase, location.taskRoot)
+	if err != nil {
+		t.Fatalf("open managed task root: %v", err)
+	}
+	defer func() { _ = parent.Close() }()
+	target, err := parent.CreateSubdirectory(location.name, 0o700)
+	if err != nil {
+		t.Fatalf("reserve pinned target: %v", err)
+	}
+	defer func() { _ = target.Close() }()
+	processPath, targetFile, err := target.ProcessPath(missingCheckoutChildFD)
+	if err != nil {
+		t.Fatalf("create pinned process path: %v", err)
+	}
+	defer func() { _ = targetFile.Close() }()
+	plan := missingCheckoutBranchPlan{branch: fixture.branch, head: fixture.branchHead}
+	if err := fixture.manager.addMissingCheckoutGitWorktreeWithStrategy(
+		context.Background(), fixture.repositoryPath, processPath, targetFile, plan, true,
+	); err != nil {
+		t.Fatalf("git worktree add through pinned working directory: %v", err)
+	}
+	if head := strings.TrimSpace(runGit(t, fixture.worktreePath, "rev-parse", "HEAD")); head != fixture.branchHead {
+		t.Fatalf("pinned working-directory checkout HEAD = %q, want %q", head, fixture.branchHead)
 	}
 }
 

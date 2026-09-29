@@ -587,6 +587,27 @@ func (f *missingCheckoutFixture) writeOperationRecord(
 	operationID string,
 	state missingCheckoutRecordState,
 ) {
+	f.writeOperationRecordWithSource(t, worktree, operationID, state, missingCheckoutSourceLocal, "")
+}
+
+func (f *missingCheckoutFixture) writeRemoteOperationRecord(
+	t *testing.T,
+	worktree *Worktree,
+	operationID string,
+	state missingCheckoutRecordState,
+	head string,
+) {
+	f.writeOperationRecordWithSource(t, worktree, operationID, state, missingCheckoutSourceRemote, head)
+}
+
+func (f *missingCheckoutFixture) writeOperationRecordWithSource(
+	t *testing.T,
+	worktree *Worktree,
+	operationID string,
+	state missingCheckoutRecordState,
+	source missingCheckoutSource,
+	requestedHead string,
+) {
 	t.Helper()
 	location, managed, err := f.manager.missingCheckoutLocation(worktree)
 	if err != nil || !managed {
@@ -597,8 +618,10 @@ func (f *missingCheckoutFixture) writeOperationRecord(
 		t.Fatalf("open task root for operation record: %v", err)
 	}
 	defer func() { _ = parent.Close() }()
-	head := f.branchHead
-	if worktree.Branch != f.branch {
+	head := requestedHead
+	if head == "" && worktree.Branch == f.branch {
+		head = f.branchHead
+	} else if head == "" {
 		head = strings.TrimSpace(runGit(t, f.repositoryPath, "rev-parse", "refs/heads/"+worktree.Branch))
 	}
 	record := missingCheckoutRecoveryRecord{
@@ -606,7 +629,7 @@ func (f *missingCheckoutFixture) writeOperationRecord(
 		TaskID: worktree.TaskID, TaskEnvironmentID: worktree.TaskEnvironmentID, OwnershipGeneration: 1,
 		TaskDirName: worktree.TaskDirName, WorktreeID: worktree.ID, RepositoryID: worktree.RepositoryID,
 		RepositoryPath: worktree.RepositoryPath, BranchSlug: worktree.BranchSlug, Path: worktree.Path,
-		Branch: worktree.Branch, Head: head, Source: missingCheckoutSourceLocal, UpdatedAt: time.Now().UTC(),
+		Branch: worktree.Branch, Head: head, Source: source, UpdatedAt: time.Now().UTC(),
 	}
 	if err := writeMissingCheckoutRecord(parent, location.name+missingCheckoutRecordSuffix, record); err != nil {
 		t.Fatalf("write pending missing-checkout record: %v", err)

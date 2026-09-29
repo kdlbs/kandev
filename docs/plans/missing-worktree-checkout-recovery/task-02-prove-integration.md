@@ -163,3 +163,15 @@ Completed on 2026-09-29.
 - Backend-wide lint and Windows worktree test cross-compilation passed.
 - PostgreSQL recovery-claim tests were not run because
   `KANDEV_TEST_POSTGRES_DSN` is not configured.
+
+PR #4061 review follow-up narrows the Office image assertion to the user-message
+bubble containing the submitted marker and verifies that its attachment button
+and image each occur once. It waits for the composer editor and draft attachment
+chip to clear before reloading, so API persistence cannot race the client-side
+draft cleanup. The focused Chromium test passed three consecutive runs:
+`pnpm e2e:run --project chromium e2e/tests/chat/composer-attachment-scope.spec.ts
+-- --grep "uploads a pasted image to an Office task workspace from a cold
+advanced route" --retries=0 --workers=1 --repeat-each=3`.
+
+The PR-fixup Chromium E2E completed with 3 passed and 0 failed. The current
+head's public-doc test suite and validator also passed (62 tests and 47 pages).

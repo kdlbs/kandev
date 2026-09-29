@@ -90,6 +90,9 @@ func (m *Manager) reconcileCompletedMissingCheckoutClaim(
 	if claim == nil {
 		return false, nil
 	}
+	if !selectedSlotsHaveCompletedMissingCheckoutOperation(req, indices, claim.OperationID) {
+		return false, nil
+	}
 	completedSlots, err := matchingCompletedMissingCheckoutSlots(req, indices, claim)
 	if err != nil {
 		return false, err
@@ -110,6 +113,20 @@ func (m *Manager) reconcileCompletedMissingCheckoutClaim(
 		return false, err
 	}
 	return true, nil
+}
+
+func selectedSlotsHaveCompletedMissingCheckoutOperation(
+	req *RecoveryAdmissionRequest,
+	indices []int,
+	operationID string,
+) bool {
+	for _, index := range indices {
+		missing := req.Slots[index].missingCheckout
+		if matchingCompletedMissingCheckoutRecord(missing, operationID) {
+			return true
+		}
+	}
+	return false
 }
 
 func selectedSlotsHaveCompletedMissingCheckoutRecord(req *RecoveryAdmissionRequest, indices []int) bool {

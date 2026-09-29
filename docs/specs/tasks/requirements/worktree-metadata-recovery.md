@@ -147,6 +147,10 @@ Worktree environment when its recorded branch survives.
   absent, recovery shall probe the configured origin for the exact recorded
   branch. Probe failure shall remain an inspection error, not branch loss. A
   surviving origin branch may be fetched only at the verified advertised head.
+  An interrupted remote-only operation shall re-probe and durably record the
+  advertised head on each retry before fetching. If the branch advances between
+  probe and fetch, that attempt shall stop safely and the next retry shall probe
+  again. An available local branch shall retain its recorded head.
   Confirmed loss shall retain the existing explicit `resume_new_branch`
   authorization; automatic recovery shall never replace it with a base branch.
 
