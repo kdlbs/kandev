@@ -27,6 +27,7 @@ type fakeConversationTasks struct {
 	archiveErr error
 	deleteErr  error
 	listErr    error
+	updateErr  error
 
 	onCreate func(task *taskmodels.Task)
 
@@ -58,6 +59,20 @@ func (f *fakeConversationTasks) CreateTask(_ context.Context, req *taskservice.C
 		f.onCreate(task)
 	}
 	return taskservice.CreateTaskResult{Task: task}, nil
+}
+
+func (f *fakeConversationTasks) UpdateTask(_ context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error) {
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	task, ok := f.tasks[id]
+	if !ok {
+		return nil, taskrepo.ErrTaskNotFound
+	}
+	if req.Metadata != nil {
+		task.Metadata = req.Metadata
+	}
+	return task, nil
 }
 
 func (f *fakeConversationTasks) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
