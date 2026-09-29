@@ -59,19 +59,25 @@ unattended row, a watch filter and an improvement could not exist.
 
 **Registration seam (task 01).** Each phase 3 work order attaches to the
 backend through one named function in `internal/backendapp/coordinator.go`,
-declared by task 01 with an empty body and the signature of the phase 2
-function it sits beside: `registerCoordinatorContainment`, `...Spend`,
-`...Wake`, `...Delivery`, `...Relay`, `...Reply`, `...Automatic`,
-`...Improvements`. Those that register routes take `routeParams` like
-`registerCoordinatorRoutes`; the others take the router, the event bus, the
-service and the logger and return `func(ctx context.Context, t0 time.Time)`
-startup steps like `registerCoordinatorSubscribers`. The startup steps run in
-the order listed, after phase 2's, from the same call site that already
-invokes phase 2's. The wiring calls them only when the value computed once as
-`phase3Effective` is true; it is false whenever any of the three flags is off,
-and the eight functions are then never called, which is what makes every phase
-3 subscriber, ticker and route absent. `registerCoordinatorWake` also runs
-`Store.PruneWakeState` ([wake](wake.md#store)).
+declared by task 01 with an empty body. All eight have the one signature of
+phase 2's `registerCoordinatorSubscribers`:
+`func(router *gin.Engine, eventBus bus.EventBus, svc *coordinator.Service, log
+*logger.Logger) func(context.Context, time.Time)`, named
+`registerCoordinatorContainment`, `...Spend`, `...Wake`, `...Delivery`,
+`...Relay`, `...Reply`, `...Automatic`, `...Improvements`. A function whose
+work order adds a route registers it on `router` inside its body, the way
+`registerCoordinatorConversation` does; a function with nothing to subscribe
+or start returns a no-op hook. A work order that needs a further dependency
+adds a `Service` setter called from its body, never a parameter. The wiring
+appends the eight returned hooks, in the order listed, after phase 2's hooks
+in the `hooks` slice of `registerCoordinatorRoutes`, only when the value
+computed once as `phase3Effective` is true; it is false whenever any of the
+three flags is off, and the eight functions are then never called, which is
+what makes every phase 3 subscriber, ticker and route absent.
+`registerCoordinatorWake` returns a hook whose first step is
+`Store.PruneWakeState(ctx, t0)` ([wake](wake.md#store)); task 01 declares the
+function with that hook body, so the prune is wired in task 01 and task 04
+adds its route and subscribers to the same function without moving it.
 
 **What task 01 observes.** The acceptance clauses of
 `AC-COORDINATOR-WAKE-004.4` and `AC-COORDINATOR-INTEGRATION-001.1` are
@@ -92,22 +98,25 @@ Task 01's contract for the settings fields of [wake](wake.md#flag-and-settings) 
 
 **PATCH field rules (task 01).**
 
-- Order of checks, unchanged from phase 2: the scope check runs first, so a
-  reader gets 403 whether or not phase 3 is effective; a coordinator
-  principal is refused by the guard before the body is read, with the same
-  refusal the guard gives every non-allowlisted action (no activity row, no
-  new refusal shape). Then the body is bound. Then, only while phase 3 is
-  effective, the two fields are validated; while it is not, both keys are
-  dropped unread, so an invalid `cost_ceiling_usd` on an ineffective install
-  returns 200 and stores nothing.
+- Order of checks, as phase 2 does it: `httpPatchCoordinator` binds the JSON
+  body first (malformed JSON is 400 for any caller, unchanged), then the
+  service's scope check runs (a reader gets 403), then the two fields are
+  validated. The two keys are bound as raw JSON values (`json.RawMessage`),
+  never as typed fields, so a wrongly typed `autonomy_enabled` or
+  `cost_ceiling_usd` cannot fail binding; while phase 3 is not effective both
+  keys are dropped unread, so an invalid `cost_ceiling_usd` on an ineffective
+  install returns 200 and stores nothing. A coordinator principal is refused
+  by the MCP guard before any of this, with the refusal the guard gives every
+  non-allowlisted action (no activity row, no new refusal shape).
 - Presence: a key absent from the body leaves its column unchanged.
   `cost_ceiling_usd: null` clears the ceiling. `autonomy_enabled` accepts
   JSON `true` or `false` only; `null`, a string, a number or any other value
   is 400 naming `autonomy_enabled`, and nothing in the body is applied
   (the whole PATCH is one transaction, so every field fails together).
-- A PATCH that sets a field to the value it already holds is a success and
-  writes the same row; it does not touch `updated_at` beyond what phase 2's
-  PATCH already does, and publishes the same `coordinator.updated`.
+- A PATCH that sets a field to the value it already holds is a success, writes
+  the same row and publishes nothing (phase 2's PATCH publishes no event, and
+  task 01 adds none for an unchanged value); only the change-only publish
+  below exists.
 - An autonomy-off PATCH runs the supersede statement even when the row already
   reads off, because a wake can return to `pending` after autonomy went off
   (delivery `send_failed` or `interrupted`, see [Delivery](wake.md#delivery)) and no
@@ -120,13 +129,15 @@ Task 01's contract for the settings fields of [wake](wake.md#flag-and-settings) 
   `cost_ceiling_subcents` differs from the row it read, the service publishes
   `coordinator.updated` with `autonomy_changed: true` and calls
   `Kick(coordinatorID)`. Both are post-commit and best effort: a failure is
-  logged at warn and never changes the PATCH result. `Kick` is the interface
-  task 04 declares as a no-op and task 05 implements; task 01 declares no
-  interface of its own and calls `Kick` through a nil-safe field on `Service`
-  that task 04 sets (nil means no call), so task 01 compiles and tests
-  without either. The `coordinator.updated` `autonomy_changed` field is added
-  to the payload type in task 01 and published by this PATCH only; the other
-  publish sites of [Autonomy read](wake.md#autonomy-read) belong to tasks 04 and 05.
+  logged at warn and never changes the PATCH result. `Service` holds
+  `kick func(ctx context.Context, coordinatorID string) error` (nil means no
+  call), set by task 04 through `SetKick`; task 01 declares the field and
+  setter and no interface. A returned error and a panic (recovered in the
+  PATCH path) both count as a failure. The `coordinator.updated`
+  `autonomy_changed` field is added to the payload type in task 01 and
+  published by this PATCH only (change-only); the other publish sites of
+  [Autonomy read](wake.md#autonomy-read) (wake insert, delivery, turn settle)
+  belong to tasks 04 and 05.
 
 **Deletion of every phase 3 table.** Only `coordinator_wakes`
 carries `workspace_id`; the other phase 3 tables carry `coordinator_id` or
@@ -148,11 +159,16 @@ orphan):
 before that loop. `DeleteWorkspaceState` runs them once per workspace with
 `coordinator_id IN (SELECT id FROM coordinators WHERE workspace_id = ?)`
 (denials through the turn subquery of that set) before it deletes the
-coordinators. The 90-day turn retention deletes the denial rows of the turns
-it removes first, in the same transaction. The retention pass is
-`Store.PruneWakeState(ctx, now)` (task 01), called once at startup from the
-body of `registerCoordinatorWake`, and only while phase 3 is effective; a
-prune error is logged at warn and never blocks startup.
+coordinators. `Store.PruneWakeState(ctx, now)` (task 01) is the retention pass. In one
+transaction it deletes, in this order: the denial rows of turns with
+`finished_at` older than 90 days, those turn rows, then wake rows with status
+`delivered` or `superseded` and `updated_at` older than 30 days. A wake with
+status `pending`, and a turn with `finished_at` null (open), are
+never deleted. It is idempotent (a second run at the same `now` deletes
+nothing) and returns the two deleted counts. Its caller is the first step of
+the hook `registerCoordinatorWake` returns, run once at startup and only
+while phase 3 is effective; an error is logged at warn and never blocks
+startup.
 
 ## Watch set
 
@@ -426,7 +442,7 @@ denied count is the autonomy read (`AC-COORDINATOR-INTEGRATION-008.1`).
 | File (phase 2) | Additive change | Owner |
 | --- | --- | --- |
 | `store_phase2_schema.go` | column `coordinator_activity.unattended_turn_id`; table `coordinator_class_changes` ([automatic](automatic.md#phase-2-interfaces-consumed)) | task 01 |
-| `activity.go` | `returned` outcome, `automatic` authorization, `improvement` class, `unattended_turn_id` in row, columns, insert and scan; refusal coalescing key | task 01 (values, columns), 05 (stamping) |
+| `activity.go` | `returned` outcome, `automatic` authorization, `improvement` class, `unattended_turn_id` in row, columns, insert and scan, and the activity DTO field omitted while phase 3 is not effective; refusal coalescing key | task 01 (values, columns, DTO), 05 (stamping) |
 | `activity_service.go`, `activity-text.ts`, `en/coordinator.json` and five locales | class list, copy table above | task 08 (returned, unattended), 09 (automatic), 10 (improvement) |
 | `policy.go`, `settings.go` | `Validate(p, phase3)`; change hook call and `LowerClass` in the locked transaction | task 09 |
 | `approve.go`, `approve_kinds.go`, `undo.go` | `returned` cases; `AuthAutomatic` rows; `recheckPolicy` skip; post-commit `OnUndo` | tasks 08, 09, 10 |

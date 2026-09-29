@@ -85,14 +85,14 @@ Starts only after G3 is met.
   refuses the fields from a coordinator principal.
 - Contract details that would otherwise be invented, all specified in the
   designs: the PATCH field rules, post-commit `Kick` and `autonomy_changed`
-  (a nil-safe `Service` field, no interface of its own)
+  (a nil-safe `Service` field `kick func(ctx, coordinatorID string) error` with `SetKick`, no interface of its own)
   ([integration](../../specs/coordinator/system-design/integration.md#autonomy-patch-and-deletion));
   the `WithWakeLock` contract, including the shared `takeWakeLock` step the
   autonomy-off PATCH uses, its lock order and missing-row result
   ([wake](../../specs/coordinator/system-design/wake.md#wake-lock)); deletion
   of every phase 3 table by coordinator, with denials through their turn, in
   `DeleteCoordinator` and `DeleteWorkspaceState`, and
-  `Store.PruneWakeState`
+  `Store.PruneWakeState`, wired as the first step of the hook `registerCoordinatorWake` returns; the eight functions all take the signature of `registerCoordinatorSubscribers`; the activity DTO's `unattended_turn_id` (omitted while phase 3 is not effective)
   ([integration](../../specs/coordinator/system-design/integration.md#autonomy-patch-and-deletion)); the columns
   of `coordinator_unattended_denials`
   ([containment](../../specs/coordinator/system-design/containment.md#unattended-permissions));
@@ -139,8 +139,15 @@ Starts only after G3 is met.
 - `autonomy_enabled` other than `true` or `false` (including `null`) is 400
   naming `autonomy_enabled`; an absent key leaves the column unchanged;
   a changed autonomy or ceiling publishes `autonomy_changed` and calls `Kick`
-  once after commit, an unchanged value neither, and a failing `Kick` does not
-  change the 200. While phase 3 is not effective GET and list carry neither
+  once after commit, an unchanged value publishes nothing and calls nothing,
+  and a `Kick` that returns an error or panics does not change the 200. Malformed
+  JSON is 400 before the scope check (as in phase 2); a wrongly typed
+  `cost_ceiling_usd` never fails binding. The activity DTO carries
+  `unattended_turn_id` only while phase 3 is effective.
+- `PruneWakeState` deletes delivered/superseded wakes older than 30 days and
+  turns finished more than 90 days ago (denials first) and keeps pending wakes
+  and open turns; a second run at the same `now` deletes nothing; a prune
+  error is logged at warn and startup continues. While phase 3 is not effective GET and list carry neither
   key and an invalid `cost_ceiling_usd` returns 200 and stores nothing.
 - Deleting a coordinator, and deleting its workspace, removes its rows from
   every phase 3 table, denials first, with the flag on or off.

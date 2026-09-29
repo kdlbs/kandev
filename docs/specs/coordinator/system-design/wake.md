@@ -81,7 +81,8 @@ exactly one conversation, and the rules below never create another.
   phase 3 is effective, and carries neither key otherwise, the way phase 2's
   fields are omitted while its flag is off. The activity row's
   `unattended_turn_id` follows the same rule: present (string or `null`) only
-  while phase 3 is effective. The web computes "effective" as the AND of the
+  while phase 3 is effective; task 01 owns that DTO field and its omission,
+  task 05 the stamping. The web computes "effective" as the AND of the
   three `useFeature` reads (`coordinator`, `coordinatorPhase2`,
   `coordinatorPhase3`) in one hook, and the typed client marks the new fields
   optional.
@@ -493,8 +494,8 @@ absent for every other reason.
 `last_turn.stop_state` is `null`, or `"stop_failing"` per
 [spend](spend.md#stopping).
 `coordinator.updated` gains optional `autonomy_changed: true`, published on
-every wake insert, delivery, turn settle and autonomy PATCH, so clients
-re-read.
+every wake insert, delivery, turn settle and autonomy PATCH that changes
+`autonomy_enabled` or the ceiling, so clients re-read.
 
 ## Screens
 
