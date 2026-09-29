@@ -209,11 +209,19 @@ once, however long ago, still shows that time (`003.3`). Null reads as
 
 ## Shaped by UI
 
-The proposal card reads the coordinator's orders with `include=retired` from
-`use-standing-orders.ts` and renders, for each cited id, "Shaped by:
-Standing order N" when active or "Shaped by: a retired standing order"
-otherwise, with the order text in a tooltip (`003.2`). An id not found at
-all (deleted with a coordinator) is skipped.
+`use-standing-orders.ts` takes an optional `{ includeRetired }` and passes it
+to `listStandingOrders`, which already supports `include=retired`. The
+Needs-you page holds one such read (with retired orders) and gives it to
+every card, so cards do not each fetch; it reloads when the page's proposal
+list refreshes on `coordinator.updated`. For each id of the proposal's
+`standing_order_ids`, in that order, the card renders "Shaped by: Standing
+order N" when the order is active (N is its `number`) or "Shaped by: a
+retired standing order" otherwise (`003.2`). An id no returned order matches
+(deleted with a coordinator) shows nothing. While the read is loading, or if it
+failed, no label shows and no error is raised: the card's decision never
+depends on it, and a label is never guessed as retired. Each label is a
+button that opens a popover with the order text on click, Enter or Space and
+on hover, so touch and keyboard reach it (`003.4`).
 
 ## Standing orders UI
 
@@ -259,13 +267,38 @@ coordinator page:
 
 ## Make it a standing order
 
-The reject flow of the proposal card, after a successful reject whose reason
-is non-empty and while the phase-2 flag is on, shows the toast "Rejected.
-Keep the reason as a standing order?" with **Make it a standing order** for
-10 seconds instead of phase 1's plain toast (`004.1`). The action opens
-`AddStandingOrderDialog` with the reason prefilled (trimmed, cut to 500) and
-posts with `source_proposal_id`; Cancel posts nothing (`004.2`). Readers
-never reject, so never see it.
+The reject flow of the proposal card, after a successful reject whose reason is
+non-empty after trimming and while the phase-2 flag is on, shows the toast
+"Rejected. Keep the reason as a standing order?" with **Make it a standing
+order** for 10 seconds instead of phase 1's plain toast, still followed by
+phase 1's "Next" line (`004.1`); a reason that is only white space, or none,
+shows the plain toast. The card unmounts once the row settles, so the dialog is
+not inside it: the Needs-you page mounts one `RejectOfferHost` that owns the
+offer. The toast action calls `offer({proposalId, reason})` on it; the host
+mounts `AddStandingOrderDialog`, keyed by the proposal id so the prefill is
+fresh, with `initialText` the reason trimmed and cut to 500 code points and
+`sourceProposalId`, plus the page's `workspaceId`, `coordinatorId`, `open`
+and `onOpenChange` (`004.2`, `004.3`). The dialog's state does not depend on
+the toast: it stays open after the toast expires, and it is modal, so a second
+offer's action cannot be pressed while it is open. Each reject shows its own
+toast. Cancel posts nothing; Save posts with `source_proposal_id`, then the
+dialog closes and a toast says "Standing order added."; the Configure list
+loads its own data when opened. Readers never reject, so never see it. The
+chat card's Reject navigates to Needs you and so reaches the same host.
+
+The host holds one offer. `offer()` while the dialog is closed opens it for
+the proposal it names, each call replacing any earlier one (two calls in one
+tick: the later wins). While the dialog is open a toast action cannot be
+pressed (the dialog is modal), so a second offer is never replaced under the
+user; a toast action pressed after the dialog closed opens its own
+proposal's reason. Save is the existing `AddStandingOrderDialog` save: it is
+disabled while the request is in flight, so a double activation posts once,
+and a failed save keeps the dialog open with the reason text and shows the
+dialog's inline error (`coordinator:standingOrderLimit` for the limit code,
+else `coordinator:standingOrderAddFailed`). The dialog cannot be dismissed
+while saving. A lost response after the server created the order is not
+reconciled: a retry creates a second order with the same text, which the
+Configure list shows and the manager can retire.
 
 ## Security
 

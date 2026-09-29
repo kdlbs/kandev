@@ -176,7 +176,8 @@ Mockup:
   not available the row shall show the pull request state and "PR detail
   unavailable".
 - **AC-COORDINATOR-NEEDS-YOU-004.5:** Queue rows shall have no action other than
-  opening the task.
+  opening the task, except Ready to merge rows with the phase-2 flag on (see
+  `AC-COORDINATOR-PROPOSAL-KINDS-005.7`).
 
 ### REQ-COORDINATOR-NEEDS-YOU-005: Stall records
 

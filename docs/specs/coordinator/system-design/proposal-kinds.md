@@ -38,7 +38,7 @@ and the `standing_order_ids` check in
 | `REQ-COORDINATOR-PROPOSAL-KINDS-001` | [Store](#store), [Propose](#propose) |
 | `REQ-COORDINATOR-PROPOSAL-KINDS-002` | [Propose](#propose), [Create with a start](#create-with-a-start) |
 | `REQ-COORDINATOR-PROPOSAL-KINDS-003` | [Approve](#approve), [At most once](#at-most-once) |
-| `REQ-COORDINATOR-PROPOSAL-KINDS-004` | [Cards](#cards) |
+| `REQ-COORDINATOR-PROPOSAL-KINDS-004` | [Cards](#cards), [Card outcome copy](#card-outcome-copy) |
 | `REQ-COORDINATOR-PROPOSAL-KINDS-005` | [Direct manager actions](#direct-manager-actions) |
 
 ## Store
@@ -83,12 +83,11 @@ type KindExecutor interface {
 
 `Claim` carries the proposal id, claim token, frozen spec and coordinator;
 `Outcome` carries `task_id` and `outcome_json`. A registry maps kind to
-executor; an unknown stored kind is treated as a failed read (500, no
-write) by approve and is skipped, with an error log, by the startup pass and
-the sweep ([At most once](#at-most-once)). The phase-1 approve steps 3 to 6 call `Execute` in place of the
-direct create call; everything before the claim and the fenced completion
-after it stay as [proposals](proposals.md#approve) specifies. This
-per-kind `Execute` is the seam phase 3 reuses.
+executor; an unknown stored kind is a failed read (500, no write) for
+approve and is skipped, with an error log, by the startup pass and the sweep
+([At most once](#at-most-once)). Phase-1 approve steps 3 to 6 call `Execute`
+in place of the direct create call; the rest stays as
+[proposals](proposals.md#approve) specifies. Phase 3 reuses this seam.
 
 ## Propose
 
@@ -101,16 +100,13 @@ coordinator from the principal, passes the guard of
    string is 400 naming `task_id`) and read an open proposal of the same
    `(coordinator_id, kind, target_task_id)`. When one exists, return it and
    insert nothing, whatever the other arguments are and whether the target
-   still passes step 1 (an archived target, or a task already on the
-   proposed step, still returns the open proposal; its approval settles it
-   as [Approve](#approve) says). This is what `001.5` means by "return that
+   still passes step 1 (an archived target or a task already on the proposed
+   step still returns it; approval settles it as [Approve](#approve) says). This is what `001.5` means by "return that
    proposal"; step 2 repeats the lookup under the lock for concurrent calls.
-   A returned existing proposal is the same result shape as a new one plus
-   `deduplicated: true`, so the coordinator can tell it did not create a
-   proposal; its `status` shows whether it is `pending`, `approving` or
-   `failed`. A `failed` proposal is open, so it blocks a new proposal for the
-   same target until a manager rejects it or approves it again; this is
-   intended, because two cards for one target would let two approvals run.
+   A returned existing proposal has the shape of a new one plus
+   `deduplicated: true`; its `status` shows `pending`, `approving` or
+   `failed`. A `failed` proposal is open and blocks a new one for the same
+   target until rejected or approved again, so two approvals never run.
 1. `ValidatePropose`, which reads through the task, session and workflow
    services:
    - target task: exists, not archived, `workspace_id` equals the
@@ -135,12 +131,10 @@ coordinator from the principal, passes the guard of
      only with `start_agent` `requires_approval`) is flagged like a create.
      `StartsAgentOnEnter(steps, stepID)` is new in `eligibility.go`: true when
      the step has `AutoStartOnEnter` or feeds, through `pull_from_step_id`
-     links, a step with `AutoStartOnEnter` (the two
-     agent-starting clauses `EligibleStep` already holds, moved into it so
-     `EligibleStep` calls it and cannot drift). A move does not apply the
-     `IsStart`/`AllowManualMove` placement clause of `EligibleStep`: a manager
-     approves the destination by name, and Review-style steps that refuse
-     drops are exactly what a move targets;
+     links, a step with `AutoStartOnEnter` (the clauses `EligibleStep` already
+     holds, moved into it so `EligibleStep` calls it and cannot drift). A move
+     skips the `IsStart`/`AllowManualMove` placement clause: a manager
+     approves the destination by name;
    - `rationale` per the phase-1 rule, and the shape of
      `standing_order_ids` (a JSON array of strings, at most 5, no
      duplicate). Whether each cited order is active is not checked here.
@@ -319,24 +313,72 @@ offers no undo.
 
 ## Direct manager actions
 
-These are not proposals and write no activity row.
+These are not proposals and write no activity row. Each is shown only to a
+manager (`canManage`), except **Open the PR** (readers see it too), and only
+while the phase-2 flag is on.
 
-- **Stall Resume** (`005.1`). The stall card on Needs you, while the
-  phase-2 flag is on and the viewer is a manager, shows **Resume** as the
-  primary button when the stall's task has a resumable session, computed by
-  the classification input from the session state and executor record. It
-  calls the task page's existing manual resume
+- **Stall Resume** (`005.1`, `005.5`). The stall card on Needs you shows
+  **Resume** as the primary button by a client rule (the client holds no
+  executor record or live-execution flag; `statusSummary.primary_session` is
+  `{id, state}`): the primary session exists and its state is neither
+  `COMPLETED` nor `CREATED`. A stall already means no live execution
+  ([needs-you](needs-you.md#inputs)). The server's resume is the authority: a
+  session it refuses shows the server's error inline, and no backend field is
+  added. The click sends the request the task page's manual resume sends
   (`useManualResumeSession` in
-  `apps/web/hooks/domains/session/use-session-resumption.ts`), which goes
-  through the orchestrator's resume with the user's own authority. The stall
-  clears through the phase-1 stall rules when the session changes state.
-- **Open the PR** (`005.2`). A link to the pull request URL the Queue row
-  already has, `target="_blank"`, `rel="noopener noreferrer"`.
-- **Send it back** (`005.3`). An inline note form (1 to 4,000 characters,
-  counted in code points) that sends the user's queued message to the task's
-  primary session through the existing task-page message action, as the
-  manager. Offered only when the row's session accepts a message; a send
-  failure shows the error inline and keeps the text.
+  `apps/web/hooks/domains/session/use-session-resumption.ts` is private, so
+  `buildResumeRequest(taskId, sessionId)` and `launchSession` are the shared
+  seam), with the user's own authority. A lock keyed by task id, held above
+  the card so a refetch does not reset it (a ref set before the request), makes
+  a second click send nothing. In flight the button is disabled with a spinner.
+  A resolved `launchSession` is read by its body: `success` true with no
+  `activation_disposition` leaves the button disabled labelled "Resuming";
+  `queued` gives "Resume queued"; `success` false or `suppressed` is a refusal.
+  The success state lasts until the stall leaves the list (the phase-1 rules
+  clear it when the session changes state and new activity passes
+  `detected_at`), through any refetch. A refusal, a rejected request and the
+  30-second launch timeout clear the lock, re-enable the button and show the
+  error inline (`role="alert"`: the response's `error`, else the thrown
+  error's message, else "Could not resume. Try again."); a session that
+  stopped being resumable before the click is such a refusal. If the stall
+  leaves the list mid-request the card unmounts with its state and shows
+  nothing; the lock entry is dropped when the stall leaves. **Open task** and
+  **Show the evidence** (`NEEDS-YOU-002.6`) stay beside **Resume**.
+- With the flag on, `NEEDS-YOU-004.5` (no Queue row action but opening the
+  task) no longer holds for Ready to merge rows, and only them. Every other
+  group keeps the phase-1 row.
+- **Open the PR** (`005.2`, `005.7`). A link to `pr_url` of
+  `getPrimaryTaskPR(prsByTaskId.get(taskId))` (the row status's list),
+  `target="_blank"`, `rel="noopener noreferrer"`. No PR, or a
+  scheme other than `http`/`https`: not rendered, nothing else changes. Row
+  actions sit in a cell after the `TaskLink`, never inside it, so pressing
+  one never navigates to the task.
+- **Send it back** (`005.3`, `005.6`). Shown only when the row's
+  `statusSummary.primary_session.state` is one that accepts a message
+  ([requirements](../requirements/proposal-kinds.md#terminology)); otherwise
+  the line and button are absent. It opens an inline note form under the row
+  (focus moves to the textarea; Escape or Cancel closes and discards it). On open it reads the primary session with `fetchTaskSession` for
+  `state` and `queue_incarnation_id`; Send is disabled while that is pending,
+  and inline with Send disabled a session that no longer accepts a message or
+  has no incarnation id shows "This task is not accepting messages." and a
+  failed read shows "Could not check the task. Try again." Send trims the note, counts code points, and is disabled when the
+  trimmed note is empty or over 4000, with a counter. It calls `queueMessage`
+  (`lib/api/domains/queue-api.ts`, `message.queue.add` with `session_id`,
+  `session_incarnation_id`, `task_id`, the trimmed note as `content` and a
+  `client_queue_id`), a queued message as the task page's composer sends it,
+  never a direct prompt. The queue id is made on the first send and reused
+  only while the trimmed note equals the note of the last attempt (a retry
+  after an uncertain transport error then queues it once); any edit makes a
+  new id, as the composer's admission key does. In flight, the note and Send
+  are disabled and a second activation sends nothing. Success closes and
+  clears the form and shows the toast "Sent to `<identifier>`" (task id if
+  unknown), even if the form has since closed. Failure keeps the form open
+  with the text and shows the error inline: "This task's message queue is
+  full." for `QueueFullError`; for a `QueueAdmissionError` the composer's
+  `task:queueAdmissionValidation`, `IdentityConflict`, `SessionUnavailable` or
+  `Unavailable` copy by its `code`; else "Could not send. Try again."; never
+  a raw code. If the row leaves Ready to merge or its session stops accepting
+  messages while the form is open, the form closes with the row.
 - The Ready to merge group header shows "Merging a pull request is always
   human." (`005.4`). No merge control exists anywhere in the coordinator UI.
 
@@ -366,15 +408,65 @@ Approving this starts an agent.
 - "Shaped by" labels come from the proposal's `standing_order_ids` and the
   store's orders, as [standing orders](standing-orders.md#shaped-by-ui)
   specifies (`004.2`).
-- "Approving this starts an agent" shows when the proposal's stored
-  `starts_agent` is true, for a create or a move (`004.3`); it is never
-  computed from the live workflow steps store, so the card shows what was
-  proposed and a later step change fails the move rather than widening it.
+- "Approving this starts an agent" shows when the stored `starts_agent` is
+  true, for a create or a move (`004.3`); it is never computed from live
+  steps, so a later step change fails the move rather than widening it.
 - Edit only on message cards, editing the text (`004.4`).
-- The chat transcript attaches the card to the tool call of any propose
-  tool by the returned `proposal_id`, as phase 1 does for create.
-- With the phase-2 flag off, the client hides non-create proposals and the
-  count excludes them ([coordinators](coordinators.md#phase-2)).
+- The chat transcript attaches the card to any propose tool call by the
+  returned `proposal_id`.
+- With the phase-2 flag off, non-create proposals are hidden and uncounted
+  ([coordinators](coordinators.md#phase-2)).
+- The `<task identifier>` and step names come from the loaded workspace tasks
+  and workflow snapshots (`004.6`). A target task not among them shows its id
+  and no link; an unresolved step shows its raw id; Approve and Reject stay.
+  A kind other than `create_task`, `resume`, `message` or `move` renders no
+  card and is not counted, as with the flag off.
+- The "Policy: `<action>` requires approval" line names the kind's action
+  (Create a task, Resume a task, Message a task, Move a task) whatever
+  `starts_agent` says: fixed text from the stored kind, not a live policy read.
+- After a 409 `policy_denied` the card shows "Its May do settings no longer
+  allow this", hides Approve and Edit and keeps Reject. That state is card
+  memory only: after a reload Approve returns and a second attempt gets the
+  same 409. The client recognises it by
+  status 409 with `body.error` `"policy_denied"` (no `error_code`, so
+  `ApiError.errorCode` is not used). The decision hook accepts a
+  `proposal_conflict` 409 for every known kind, not only create, so a
+  conflict on a resume, message or move card updates the card from the
+  returned row instead of the "network" outcome.
+- The compact chat card keeps the starts-agent line, the outcome copy below
+  and the `policy_denied` state, and omits the Policy line and Shaped by
+  labels (they need the Needs-you orders read). An unknown kind renders no
+  chat card.
+
+## Card outcome copy
+
+The status line of a `failed` card and the approve toast of an `approved` one.
+`<card>` is the target task's identifier (the id when unknown), `<step>` the
+destination step name (the raw id when unresolved). Failure text is chosen by
+the row's `error` code; a `failed` card keeps Approve and Reject. The flags
+below are read from the row's `outcome` object.
+
+| Kind | Row | Copy |
+| --- | --- | --- |
+| any | `failed`, `outcome_unknown` | "It may or may not have run; check the task" |
+| any | `failed`, `task_archived` | "This task is archived or no longer available. Nothing was changed." (also used for a deleted task, another workspace's task or a spec mismatch) |
+| resume | `failed`, `not_resumable` | "This task's session can no longer be resumed. Nothing was changed." |
+| message | `failed`, `not_accepting` | "This task's session is not accepting messages. Nothing was sent." |
+| message | `failed`, `queue_full` | "This task's message queue is full. Nothing was sent." |
+| move | `failed`, `task_left_workflow` | "This task is no longer in its workflow. It was not moved." |
+| move | `failed`, `moved` | "This task moved to another workflow. It was not moved." |
+| move | `failed`, `step_missing` | "The destination step no longer exists. The task was not moved." |
+| move | `failed`, `step_is_done` | "The destination step now completes the task. The task was not moved." |
+| move | `failed`, `step_starts_agent` | "The destination step now starts an agent, which this proposal did not say. The task was not moved." |
+| move | `failed`, `agent_running` | "An agent is running on this task. The task was not moved." |
+| move | `failed`, `step_full` | "The destination step is at its work-in-progress limit. The task was not moved." |
+| any | `failed`, any other or empty code | "Could not do this: `<error>`. Check the task." (with no error text: "Could not do this. Check the task.") |
+| resume | `approved` | toast "Approved. Resuming `<card>`."; with `deferred` true "Approved. `<card>` will resume when there is room." |
+| message | `approved` | toast "Approved. Message queued for `<card>`." |
+| move | `approved` | toast "Approved. `<card>` moved to `<step>`."; with `queued` true "Approved. `<card>` is queued behind the limit of `<step>`."; with `noop` true "Approved. `<card>` was already in `<step>`." |
+
+Each toast is followed by the phase-1 "Next" line. Create keeps the phase-1
+copy. Error text is untrusted, rendered as text.
 
 ## Security
 

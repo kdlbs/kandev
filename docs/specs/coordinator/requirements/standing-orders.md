@@ -117,6 +117,12 @@ Mockup:
 - **AC-COORDINATOR-STANDING-ORDERS-003.3:** Each active order shall show "Last
   applied <relative time>", from the most recent `created_at` of the
   coordinator's proposals that cite it, or "Never applied" when none does.
+- **AC-COORDINATOR-STANDING-ORDERS-003.4:** Shaped by labels shall follow the
+  order of the proposal's `standing_order_ids`; while the orders are loading
+  or when their read failed, the card shall show no Shaped by label and shall
+  still allow every action; an id no order matches shall show no label; and
+  each label's order text shall be reachable by hover, keyboard focus and
+  tap.
 
 ### REQ-COORDINATOR-STANDING-ORDERS-004: Make it a standing order
 
@@ -133,6 +139,13 @@ Mockup:
   text; saving shall add the order as in
   `AC-COORDINATOR-STANDING-ORDERS-001.1` with `source_proposal_id` set to the
   rejected proposal, and cancelling shall add nothing.
+- **AC-COORDINATOR-STANDING-ORDERS-004.3:** A reason that is empty after
+  trimming shall show no offer. The dialog shall prefill the trimmed reason
+  cut to 500 code points, shall stay open when its toast expires, and on a
+  successful save shall close and show "Standing order added." and leave the
+  Configure list to refetch on its next load. While the save is in flight Save
+  shall be disabled so a second activation posts nothing, and a failed save
+  shall keep the dialog open with the reason text and show an inline error.
 
 ## Out of scope
 
