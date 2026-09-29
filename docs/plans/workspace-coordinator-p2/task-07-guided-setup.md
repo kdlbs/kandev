@@ -43,6 +43,13 @@ coordinator, settings, Watches and goal in one transaction through
 - Finish enabled only when valid; success opens the new Configure page
   (`008.4`). Leaving creates nothing; readers never reach it (`008.5`).
 - State held in the page only; no draft is stored.
+- First task inside this work order: make the Watches, Goal and May do
+  sections controlled components (values and handlers passed in; the stored
+  reads, activity counts, Review link and goal actions stay in the Configure
+  wrappers) with regression tests on the Configure page before the setup
+  steps use them.
+- Finish banners: nothing created when the server answered, could not
+  confirm when no answer arrived (`008.6`).
 
 ## Out of scope
 

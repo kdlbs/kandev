@@ -256,9 +256,11 @@ chose.
 #### Acceptance criteria
 
 - **AC-COORDINATOR-COORDINATORS-008.1:** While the phase-2 flag is on, **+ Add
-  coordinator** shall open a setup with the steps Who runs it, What it
-  watches, What it is for, What it knows, What it may do and Review, with the
-  step list visible and the current step marked by more than colour. Steps 1
+  coordinator** shall open a setup, in place of the add form of `004.3`, with
+  the steps Who runs it, What it watches, What it is for, What it knows, What
+  it may do and Review. On a wide screen the step list shall be visible with
+  the current step marked by more than colour; on a phone the page shall show
+  "Step N of 6" and the step name instead. Steps 1
   to 5 shall have **Next** and, from step 2, **Back**; Review shall have
   **Back** and **Finish** and no **Next**.
 - **AC-COORDINATOR-COORDINATORS-008.2:** Who runs it shall ask for the name,
@@ -271,8 +273,10 @@ chose.
   it may do shall show the May do rows with `create_task`, `message`, `move`
   and `resume` set to Requires approval and `start_agent` and `stop` Denied.
 - **AC-COORDINATOR-COORDINATORS-008.3:** Review shall show a "What it wrote"
-  table with the columns Setting, Value and Owned from now on by, one row per
-  chosen value, each naming the Configure section that owns it; **Change**
+  table with the columns Setting, Value and Owned from now on by, twelve rows
+  (Name, Agent profile, Executor, Watches, Goal, Context and one per May do
+  action), each naming the Configure section that owns it and showing "Not
+  set" for a skipped Goal or Context; **Change**
   on a row shall return to its step with the values kept.
 - **AC-COORDINATOR-COORDINATORS-008.4:** **Finish** shall be enabled only while
   the name is valid, both profiles are chosen and Watches is `all` or has at
@@ -285,9 +289,12 @@ chose.
 - **AC-COORDINATOR-COORDINATORS-008.6:** If the setup request is refused
   because a chosen value is invalid, the system shall create nothing and
   the page shall return to the step that holds the value, with the value
-  kept and the error shown beside it; if the request fails for any other
-  reason, the page shall stay on Review with every value kept and show that
-  nothing was created.
+  kept and the error shown beside it; if the server answers with any other
+  failure, the page shall stay on Review with every value kept and show that
+  nothing was created; if no answer arrives, the page shall stay on Review
+  with every value kept and show that it could not confirm whether the
+  coordinator was created and that the list should be checked before trying
+  again.
 
 ### REQ-COORDINATOR-COORDINATORS-009: Configure sections and list summary
 

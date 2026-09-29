@@ -313,27 +313,34 @@ one transaction (`008.4`). The phase-1 `POST .../coordinators` stays for phase
 1. The route has no idempotency key, like the phase-1 create.
 
 **Order of checks.** Phase-2 flag off is 404; authorization (403) and the
-workspace lookup (404) come before any body decode, as for the goal routes; an
-undecodable body, one that is not a JSON object, is then 400 with no `step`
-and no `field`. Then, all before the transaction: the body is validated
-(below), the two profiles are read through the same helpers as
-[validation](#validation) and the workflow ids through the task service's
-`GetWorkflow`. A failed read is 500 with nothing stored. The transaction only
-inserts, in this order: the coordinator row with `policy_json` and
-`policy_revision = 1`, its `watch_scope` and watch rows, then the goal with
-its baseline (the baseline counts the watch rows just inserted through the
-same transaction handle, [goals](goals.md#baselines)). Any insert failure
-rolls everything back and is 500. A workflow deleted after its read and
-before the commit is not re-checked: the watch row is stored and a deleted
-workflow's row is not counted and is dropped by the next Watches save, as in
-[permissions](permissions.md#settings-routes).
+workspace lookup (404) come before any body decode, as for the goal routes.
+Then the body is decoded and its top-level shape checked: an undecodable
+body, one that is not a JSON object, or a member of the wrong JSON type is
+400 with code `invalid_body`, `field` naming that member (none for a
+non-object body) and no `step`. Then, before the transaction, the parts are
+validated in the fixed order below and the first failure wins. The reads a
+part needs are made when that part is reached, never earlier: the profile
+reads (same helpers as [validation](#validation)) belong to step `identity`
+and the workflow reads (the task service's `GetWorkflow`) to step `watches`,
+so an invalid name is a 400 whatever the profile read would have done. A
+failed read is 500 with nothing stored. The transaction only inserts, in
+this order: the coordinator row with `policy_json` and `policy_revision = 1`,
+its `watch_scope` and watch rows, then the goal with its baseline (the
+baseline counts the watch rows just inserted through the same transaction
+handle, [goals](goals.md#baselines)). Any insert failure rolls everything
+back and is 500. A workflow deleted after its read and before the commit is
+not re-checked: the watch row is stored and a deleted workflow's row is not
+counted and is dropped by the next Watches save, as in
+[permissions](permissions.md#settings-routes). A workspace deleted after its
+lookup and before the commit is likewise not re-checked, as in the phase-1
+create.
 
 **Body.** `{name, agent_profile_id, executor_profile_id, context?, watches,
 policy, goal?}`. `name`, `agent_profile_id` and `executor_profile_id` are
 required strings; `context` absent or `null` means `""`; `watches` and
 `policy` are required objects; `goal` absent or `null` means no goal. Unknown
-top-level members are ignored. A member of the wrong JSON type is 400 naming
-that member.
+top-level members are ignored. A member of the wrong JSON type is `invalid_body`
+(see Order of checks).
 
 **Validation, first failure wins.** Each part uses its owner's validator with
 the setup-mode rules below, in this fixed order; the first failure is the
@@ -342,10 +349,10 @@ response and nothing is stored:
 | # | Step id | Field paths, in check order | Rules |
 | --- | --- | --- | --- |
 | 1 | `identity` | `name`, `agent_profile_id`, `executor_profile_id` | [validation](#validation): name trimmed 1 to 60 code points; profiles exist, agent profile not CLI-passthrough. Names may repeat in a workspace (`002`) |
-| 2 | `watches` | `watches.scope`, `watches.workflow_ids` | [permissions](permissions.md#policy-value) codes, with the setup-mode rules below |
+| 2 | `watches` | `watches.scope`, `watches.workflow_ids` | [permissions](permissions.md#settings-routes) codes, with the setup-mode rules below |
 | 3 | `goal` | `goal.name`, `goal.due_on`, `goal.criteria`, `goal.criteria[i].text`, `goal.criteria[i].id` | [goals](goals.md#routes) steps 1 to 4, with the setup-mode rules below |
 | 4 | `context` | `context` | at most 4,000 code points |
-| 5 | `may-do` | `policy`, `policy.actions.<action>` | [permissions](permissions.md#policy-value) codes; all six actions named, `stop` denied, none `automatic` |
+| 5 | `may-do` | `policy`, `policy.actions.<action>` | [permissions](permissions.md#settings-routes) codes; all six actions named, `stop` denied, none `automatic` |
 
 The 400 body is the phase-1 error envelope plus `step` (the step id), `field`
 (the path) and, when the owner has one, `code` (the owner's closed code such
@@ -361,9 +368,10 @@ compare with a stored state do not apply:
 - *Watches.* The stored set is empty: there is no "equal to stored means
   absent" rule and no dropping of ids. `scope: "all"` stores no workflow rows
   and ignores `workflow_ids`. `scope: "selected"` needs 1 to 50 unique ids,
-  each an existing workflow of this workspace; a repeated id is
-  `watches_duplicate`, and any id that does not exist or belongs to another
-  workspace is `watches_foreign_workflow`.
+  each an existing workflow of this workspace; the checks run in this order and the first failing one is the code:
+  `watches_empty`, `watches_too_many`, `watches_duplicate`, then
+  `watches_foreign_workflow` for any id that does not exist or belongs to
+  another workspace.
 - *Goal.* `goal.goal_id` is ignored (nothing to be stale against, so never
   409). `goal.criteria[i].id` must be absent, `null` or `""`; any other
   value is 400 `goal.criteria[i].id`, since no criterion is known. `done`
@@ -400,7 +408,7 @@ Add coordinator
   `aria-current="step"`, bold text and a marker that is not colour alone, and
   finished steps a check mark. The items are not links; movement is by
   **Back**, **Next**, **Skip this step** and **Change**. On a phone the list
-  collapses to the text "Step N of 6" and the step name.
+  is replaced by the text "Step N of 6" and the step name (`008.1`).
 - **Buttons.** Step 1 has **Next** only. Steps 2 to 5 have **Back** and
   **Next**. Review has **Back** and **Finish**. **Back** keeps the values.
   **Next** on a step whose entered values are invalid is disabled and shows
@@ -418,13 +426,28 @@ Add coordinator
   section forms in a "draft" mode that edits local state (`008.2`): the same
   form components with the values and change handlers passed in instead of
   loaded for a stored coordinator, so a section change reaches both places.
+  Draft mode keeps the editable controls and the field errors, and removes
+  everything that needs a stored coordinator or its history:
+  - *May do* keeps the six rows and their settings, the "Always human" rows
+    and the stop-is-denied note; it removes the per-row activity counts, the
+    **Review the last 30 days** link, the load and error states of the
+    stored read and the page note about the next conversation starting fresh.
+  - *Watches* keeps the `all` or `selected` choice and the board picker with
+    its at-most-50 rule; it removes the load and error states and the
+    "watches no board" notice of a stored coordinator.
+  - *Goal* keeps the milestone, due date and exit-criteria fields and their
+    errors; it removes the criterion checkboxes, **Set goal**, **Mark
+    milestone met**, the measures and the stale-goal state.
+  - *Identity* and What it knows use the phase-1 fields unchanged.
+  The refactor of the three shipped sections into controlled components is
+  its own task in the work order, with regression tests on the Configure page.
   May do starts from `create_task`, `message`, `move`, `resume`
   `requires_approval` and `start_agent`, `stop` `denied`; Watches starts as
   `all`.
 - **Review.** "What it wrote" has the columns Setting, Value and Owned from
   now on by, and 12 rows in this order (`008.3`):
 
-  | Setting | Value | Owned by | Change goes to |
+  | Setting | Value | Owned from now on by | Change goes to |
   | --- | --- | --- | --- |
   | Name | the trimmed name | Identity | step 1 |
   | Agent profile | its name | Identity | step 1 |
@@ -434,21 +457,26 @@ Add coordinator
   | Context | the text, first line clipped, or "Not set" | Identity | step 4 |
   | six May do rows, one per action in the order of the May do section | its setting label | May do | step 5 |
 
-  **Change** goes to that step with every value kept; there **Next** returns
-  to Review, and **Back** goes to the previous step and ends that shortcut, so
-  **Next** then walks forward as usual. The owner labels are the Configure
+  **Change** goes to that step with every value kept; there **Next** and
+  **Skip this step** (on steps 3 and 4) return to Review, and **Back** goes
+  to the previous step and ends that shortcut, so **Next** then walks forward
+  as usual. The owner labels are the Configure
   section labels of `009.1`.
 - **Finish.** Enabled per `008.4` and only while the goal and context are valid
   or empty and no request is in flight; the page disables it from click to
   response, so a double click sends one request. Results:
   - 201: navigate to the new coordinator's Configure page.
   - 400 with `step`: go to that step, keep every value, show the error beside
-    the field named by `field` (`008.6`). A 400 without `step` shows the
-    generic failure banner.
-  - 403, 404, 500 or a network failure: stay on Review, keep every value,
-    re-enable **Finish** and show a banner that nothing was created. For a
-    network failure or a timeout the banner also asks the manager to check the
-    list before trying again, since the request may have completed.
+    the field named by `field` (`008.6`).
+  - Any other answer (a 400 without `step`, 403, 404, 500): stay on Review,
+    keep every value, re-enable **Finish** and show a banner that nothing was
+    created.
+  - No answer (network failure, or the request rejected in the browser): stay
+    on Review, keep every value, re-enable **Finish** and show a banner that
+    the page could not confirm whether the coordinator was created and that
+    the list should be checked before trying again, since the request may
+    have completed. The page sets no timeout of its own; the browser's
+    request failure is the only "no answer".
 - Readers never reach the page: the list has no Add for them, and a direct
   URL renders the reader state of phase 1.
 
