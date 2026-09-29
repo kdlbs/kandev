@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 import type { Coordinator, ConversationResponse } from "@/lib/api/domains/coordinator-api";
+import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
 
 const mocks = vi.hoisted(() => ({
   useFeature: vi.fn(),
@@ -64,7 +65,13 @@ function openSequenceMock(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useCopilotStore.setState({ entries: {} });
+  useCopilotStore.setState({
+    coordinatorId: null,
+    open: false,
+    chip: null,
+    draft: "",
+    draftsSwept: false,
+  });
   mocks.useFeature.mockReturnValue(true);
   mocks.useCoordinatorLauncher.mockReturnValue({
     coordinator: null,
@@ -666,5 +673,51 @@ describe("useCoordinatorCopilot - keyed remount across a coordinator switch", ()
     });
 
     expect(latest?.routeSession).toEqual(sessionFor("coord-c"));
+  });
+});
+
+describe("useCoordinatorCopilot - stored composer draft sweep", () => {
+  beforeEach(() => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }),
+    );
+    setChatDraftText(conversation.session_id, "left over from a reset slot");
+  });
+
+  afterEach(() => setChatDraftText(conversation.session_id, ""));
+
+  it("clears the stored draft once when the ready session first appears for a slot", () => {
+    act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
+    renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
+
+    expect(getChatDraftText(conversation.session_id)).toBe("");
+    expect(useCopilotStore.getState().draftsSwept).toBe(true);
+  });
+
+  it("hands the composer a loading state until the sweep has run, then the ready session", () => {
+    const observed: string[] = [];
+    act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
+    const { result } = renderHook(() => {
+      const value = useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true);
+      observed.push(
+        `${value.openSequence.state.kind}:${getChatDraftText(conversation.session_id)}`,
+      );
+      return value;
+    });
+
+    expect(observed[0]).toBe("loading:left over from a reset slot");
+    expect(result.current.openSequence.state.kind).toBe("ready");
+    expect(getChatDraftText(conversation.session_id)).toBe("");
+  });
+
+  it("keeps text typed after the sweep across a close and reopen of the same slot", () => {
+    act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
+    const { result } = renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
+    setChatDraftText(conversation.session_id, "typed after");
+
+    act(() => result.current.handleOpenChange(false));
+    act(() => result.current.handleOpenChange(true));
+
+    expect(getChatDraftText(conversation.session_id)).toBe("typed after");
   });
 });

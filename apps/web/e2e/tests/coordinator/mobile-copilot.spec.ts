@@ -1,11 +1,11 @@
-// AC-COORDINATOR-COPILOT-004.3, -004.4: full width below 640px
+// AC-COORDINATOR-COPILOT-004.3, -004.4: full screen below the mobile breakpoint
 // (docs/plans/workspace-coordinator/task-06-copilot-wired.md).
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
 test.describe("Mobile coordinator copilot", () => {
-  test("opens full width below 640px and answers a question", async ({
+  test("opens full screen below the mobile breakpoint and answers a question", async ({
     testPage,
     apiClient,
     seedData,
@@ -38,13 +38,15 @@ test.describe("Mobile coordinator copilot", () => {
 
     const box = await popover.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
-    // Full width below 640px: the shell's `min(420px, 100vw - 2rem)` cap
-    // resolves to the viewport-minus-margin branch here, not the 420px
-    // desktop cap.
-    expect(box!.width).toBeGreaterThan(390 - 40);
-    expect(box!.width).toBeLessThan(420);
+    expect(box!.x).toBe(0);
+    expect(box!.width).toBe(390);
+    expect(box!.y).toBe(0);
+    // Covers the viewport down to the status bar, with no backdrop and no
+    // resize handle at this size.
+    expect(box!.y + box!.height).toBeLessThanOrEqual(667);
+    expect(box!.height).toBeGreaterThan(667 - 60);
+    await expect(testPage.getByTestId("coordinator-copilot-popover-backdrop")).toHaveCount(0);
+    await expect(testPage.getByTestId("coordinator-copilot-popover-resize-handle")).toHaveCount(0);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false);
@@ -61,6 +63,8 @@ test.describe("Mobile coordinator copilot", () => {
       popover.getByText("simple mock response for e2e testing", { exact: false }),
     ).toBeVisible({ timeout: 30_000 });
 
+    // Escape closes the panel only while focus is inside it.
+    await popover.getByRole("button", { name: "Close" }).focus();
     await testPage.keyboard.press("Escape");
     await expect(popover).not.toBeVisible();
   });

@@ -207,6 +207,8 @@ test.describe("Coordinator proposals", () => {
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const popover = await openCopilot(testPage);
     const proposalId = await proposeTask(popover, seedData, "Edit me in place");
+    // Escape closes the panel only while focus is inside it.
+    await popover.getByRole("button", { name: "Close" }).focus();
     await testPage.keyboard.press("Escape");
     await expect(popover).toBeHidden();
 
@@ -266,6 +268,9 @@ test.describe("Coordinator proposals", () => {
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const popover = await openCopilot(testPage);
     const proposalId = await proposeTask(popover, seedData, "Reject me in place");
+    // Below the inline breakpoint the open panel's backdrop covers the list.
+    await popover.getByRole("button", { name: "Close" }).click();
+    await expect(popover).not.toBeVisible();
 
     const needsYouCard = testPage.getByTestId(`needs-you-item-${proposalId}`);
     await expect(needsYouCard).toBeVisible();

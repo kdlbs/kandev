@@ -61,7 +61,7 @@ vi.mock("@/components/page-shell", () => ({
 vi.mock("./copilot/coordinator-copilot", () => ({
   CoordinatorCopilot: (props: Record<string, unknown>) => {
     coordinatorCopilotCalls.push(props);
-    return <div data-testid="coordinator-copilot-marker" />;
+    return <div data-testid="coordinator-copilot-marker">{props.children as React.ReactNode}</div>;
   },
 }));
 
