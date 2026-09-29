@@ -55,7 +55,7 @@ managers, and the undone state.
   the design's Undo column: `already_undone` refetches with no error text,
   `not_undoable` shows "This can no longer be undone", `undo_conflict` shows the text of its `reason` (`moved`, `archived` or an unknown or absent reason "It has moved since"; `agent_running`, `step_deleted`, `step_done`, `step_full` each their own text, `003.7`), other errors show "Undo failed. Try again."
   and keep the button; "Undone by <name>, <time>" on the original
-  reversed row from `undone_by_name` and `undone_at`, and nothing in the
+  reversed row from `undone_by` (resolved through the member list) and `undone_at`, and nothing in the
   Undo cell of the `undone` outcome row (`003.1`, `003.6`).
 - Refresh on `coordinator.updated`. Six locales.
 
@@ -65,7 +65,7 @@ managers, and the undone state.
 - The full copy table of the system design in six locales, with whole-sentence
   undo dialog fallbacks and the conflict text for an unknown reason.
 - Undo failure lifecycle (`003.11`): inline below the still-clickable Undo,
-  cleared on first-page refetch, filter change or a new confirmed Undo.
+  cleared on the next successful re-read, filter change or a new confirmed Undo.
 
 ## Out of scope
 
@@ -116,7 +116,7 @@ Phone: each row is a card; Undo is a full-width button.
   message row and asserts "No undo" on both, and nothing in the Undo cell
   of a `rejected` create row.
 - A component test renders an undone create row (approver Ana,
-  `undone_by_name` Bo) and its `undone` outcome row, and asserts "Undone by
+  `undone_by` Bo's id, member list holding Bo) and its `undone` outcome row, and asserts "Undone by
   Bo" on the original row, no Undo on it, and an empty Undo cell on the
   `undone` row.
 - A component test clicks Undo on a create row and asserts the dialog
