@@ -48,6 +48,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.POST("/coordinators/:cid/proposals/:pid/approve", h.httpApproveProposal)
 	workspace.POST("/coordinators/:cid/proposals/:pid/reject", h.httpRejectProposal)
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
+	if svc.phase2 {
+		registerStandingOrderRoutes(workspace, h)
+	}
 }
 
 // coordinatorDTO builds the coordinator wire shape, adding the phase-2 policy
@@ -279,6 +282,8 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	switch {
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
+	case errors.Is(err, ErrStandingOrderLimit):
+		c.JSON(http.StatusBadRequest, NewStandingOrderLimitResponse())
 	case errors.As(err, &conflictErr):
 		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal, h.service.phase2))
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):

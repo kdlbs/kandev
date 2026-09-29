@@ -763,7 +763,7 @@ func startAgentInfrastructure(
 	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})
 	if services.Coordinator != nil {
 		orchestratorSvc.SetCoordinatorLookup(services.Coordinator)
-		orchestratorSvc.SetCoordinatorStandingInstructionsReader(coordinatorStandingInstructionsReader(services.Coordinator))
+		orchestratorSvc.SetCoordinatorStandingInstructionsReader(coordinatorStandingInstructionsReader(services.Coordinator, log))
 	}
 
 	// Wire the watcher-dependency enumerator into the agent settings

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
@@ -117,7 +118,7 @@ func TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator(t
 		t.Fatalf("CreateCoordinator: %v", err)
 	}
 
-	content, err := coordinatorStandingInstructionsReader(svc)(ctx, seed.ID, "Acme Workspace", "ws-1")
+	content, err := coordinatorStandingInstructionsReader(svc, newTestLogger())(ctx, seed.ID, "Acme Workspace", "ws-1")
 	if err != nil {
 		t.Fatalf("reader unexpected error: %v", err)
 	}
@@ -125,6 +126,54 @@ func TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator(t
 		if !strings.Contains(content, want) {
 			t.Errorf("reader content missing %q, got:\n%s", want, content)
 		}
+	}
+}
+
+type allowAllAuthorizer struct{}
+
+func (allowAllAuthorizer) AuthorizeWorkspaceScope(context.Context, string, authz.Scope) error {
+	return nil
+}
+
+// TestCoordinatorStandingInstructionsReader_AppendsStandingOrders verifies the
+// orders section follows the base block after one blank line only while phase
+// 2 is on, and that an unreadable orders table drops that section alone.
+func TestCoordinatorStandingInstructionsReader_AppendsStandingOrders(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	ctx := context.Background()
+	seed := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", Context: "ctx"}
+	if err := store.CreateCoordinator(ctx, seed); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	on := coordinator.NewService(store, coordinator.NewValidator(nil, nil), allowAllAuthorizer{}, newTestLogger(), coordinator.WithPhase2(true))
+	off := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
+	if _, err := on.AddStandingOrder(ctx, "ws-1", seed.ID, coordinator.AddStandingOrderInput{Text: "Prefer small cards."}); err != nil {
+		t.Fatalf("AddStandingOrder: %v", err)
+	}
+	build := func(svc *coordinator.Service) string {
+		content, err := coordinatorStandingInstructionsReader(svc, newTestLogger())(ctx, seed.ID, "Acme", "ws-1")
+		if err != nil {
+			t.Fatalf("reader: %v", err)
+		}
+		return content
+	}
+	base := build(off)
+	if strings.Contains(base, "<standing-orders>") {
+		t.Fatalf("flag off added the orders section:\n%s", base)
+	}
+	withOrders := build(on)
+	if !strings.HasPrefix(withOrders, base+"\n\nStanding orders from this workspace's managers.") || !strings.Contains(withOrders, "Prefer small cards.") {
+		t.Fatalf("orders section not appended after a blank line:\n%s", withOrders)
+	}
+	if _, err := pool.Writer().Exec(`DROP TABLE coordinator_standing_orders`); err != nil {
+		t.Fatal(err)
+	}
+	if got := build(on); got != base {
+		t.Fatalf("failed orders read changed the base block:\n%s", got)
 	}
 }
 
@@ -139,7 +188,7 @@ func TestCoordinatorStandingInstructionsReader_PropagatesLookupFailure(t *testin
 	}
 	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
 
-	_, err = coordinatorStandingInstructionsReader(svc)(context.Background(), "missing", "Acme Workspace", "ws-1")
+	_, err = coordinatorStandingInstructionsReader(svc, newTestLogger())(context.Background(), "missing", "Acme Workspace", "ws-1")
 	if err == nil {
 		t.Fatal("expected an error for an unknown coordinator id")
 	}

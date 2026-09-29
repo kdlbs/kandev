@@ -14,6 +14,7 @@ const (
 	ErrorCodeProposalConflict              = "proposal_conflict"
 	ErrorCodeConversationConflict          = "conversation_conflict"
 	ErrorCodeCoordinatorProfileUnavailable = "coordinator_profile_unavailable"
+	ErrorCodeStandingOrderLimit            = "standing_order_limit"
 )
 
 // ErrorResponse is the body of a plain coordinator-route error response
@@ -432,4 +433,21 @@ func (r ApproveProposalRequest) StringField(field string) (*string, bool, error)
 // this lands in task 07.
 type RejectProposalRequest struct {
 	Reason *string `json:"reason"`
+}
+
+// StandingOrderLimitResponse is the 400 body for an add or restore refused at
+// the active-order limit. Both keys are always present.
+type StandingOrderLimitResponse struct {
+	Error     string `json:"error"`
+	ErrorCode string `json:"error_code"`
+}
+
+// NewStandingOrderLimitResponse builds the limit refusal body.
+func NewStandingOrderLimitResponse() *StandingOrderLimitResponse {
+	return &StandingOrderLimitResponse{Error: ErrorCodeStandingOrderLimit, ErrorCode: ErrorCodeStandingOrderLimit}
+}
+
+// StandingOrderListResponse is the body of the standing orders list route.
+type StandingOrderListResponse struct {
+	Orders []Order `json:"orders"`
 }

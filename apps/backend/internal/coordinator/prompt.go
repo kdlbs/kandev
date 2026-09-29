@@ -24,7 +24,11 @@ import (
 // sysprompt.Wrap and attaches it through the existing system-prompt path
 // (orchestrator.wrapCreatedSessionPrompt), never by editing the stored user
 // message.
-func StandingInstructions(workspaceName, workspaceID, name, coordinatorContext string) string {
+//
+// sections are pre-rendered instruction sections (standing orders, goal)
+// appended in the given order, each after one blank line; empty ones are
+// skipped, so with none the output is the base block alone.
+func StandingInstructions(workspaceName, workspaceID, name, coordinatorContext string, sections ...string) string {
 	safeWorkspaceName := sysprompt.StripTags(strings.TrimSpace(workspaceName))
 	safeName := sysprompt.StripTags(strings.TrimSpace(name))
 	safeContext := sysprompt.StripTags(strings.TrimSpace(coordinatorContext))
@@ -39,5 +43,11 @@ func StandingInstructions(workspaceName, workspaceID, name, coordinatorContext s
 		safeContext,
 		"--- END OPERATOR-PROVIDED CONTEXT ---",
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	for _, section := range sections {
+		if section != "" {
+			out += "\n\n" + section
+		}
+	}
+	return out
 }
