@@ -186,10 +186,11 @@ func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *c
 // service, the workflow step reader used for step-eligibility checks, and
 // the event bus coordinator.updated publishes on) via SetDecisionDeps before
 // the HTTP routes registered by registerCoordinatorHTTPRoutes above can serve
-// a request, then returns StartupRecoveryPass as the background-pass hook
-// (docs/specs/coordinator/system-design/proposals.md#recovery). *taskservice.
-// Service satisfies coordinator.DecisionTaskService and *workflowservice.
-// Service satisfies coordinator.WorkflowStepReader.
+// a request, then returns a background-pass hook that runs StartupRecoveryPass
+// and, once it returns, starts the once-a-minute approval sweep
+// (docs/specs/coordinator/system-design/proposal-recovery.md#recovery).
+// *taskservice.Service satisfies coordinator.DecisionTaskService and
+// *workflowservice.Service satisfies coordinator.WorkflowStepReader.
 func registerCoordinatorDecisions(
 	_ *gin.Engine,
 	eventBus bus.EventBus,
@@ -199,5 +200,8 @@ func registerCoordinatorDecisions(
 	_ *logger.Logger,
 ) func(context.Context, time.Time) {
 	svc.SetDecisionDeps(taskSvc, steps, eventBus)
-	return svc.StartupRecoveryPass
+	return func(ctx context.Context, t0 time.Time) {
+		svc.StartupRecoveryPass(ctx, t0)
+		svc.StartApprovalSweep(ctx)
+	}
 }

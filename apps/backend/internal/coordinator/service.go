@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -86,6 +87,19 @@ type Service struct {
 	decisionTasks DecisionTaskService
 	decisionSteps WorkflowStepReader
 	eventBus      bus.EventBus
+
+	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
+	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
+	// docs/specs/coordinator/system-design/proposal-recovery.md#recovery.
+	sweepMu      sync.Mutex
+	sweepStarted bool
+	sweepWG      sync.WaitGroup
+
+	// afterSweepPass is a test-only hook invoked once at the end of every
+	// approval-sweep pass (including a pass with nothing to recover). nil in
+	// production; only tests in this package set it, to join on a pass
+	// completing instead of sleeping.
+	afterSweepPass func()
 }
 
 // NewService builds a Service over store, validator, the workspace
