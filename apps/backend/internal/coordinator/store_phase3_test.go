@@ -268,3 +268,17 @@ func TestWithWakeLock_SerialisesCallersForOneCoordinator(t *testing.T) {
 	c := newTestCoordinator(t, store, "ws-1")
 	assertSerialised(t, store, c.ID)
 }
+
+func TestDeleteWorkspaceState_RemovesOrphanedWakes(t *testing.T) {
+	store := newTestStore(t)
+	gone := &Coordinator{ID: "gone-coordinator", WorkspaceID: "ws-1"}
+	other := newTestCoordinator(t, store, "ws-2")
+	insertWake(t, store, gone, "orphan", "pending")
+	insertWake(t, store, other, "kept", "pending")
+	if err := store.DeleteWorkspaceState(context.Background(), "ws-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(t, store, "coordinator_wakes"); got != 1 {
+		t.Fatalf("wakes = %d, want only the other workspace's", got)
+	}
+}

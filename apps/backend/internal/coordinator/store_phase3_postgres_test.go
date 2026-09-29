@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"sync"
@@ -137,7 +138,7 @@ func TestWithWakeLock_Postgres_MissingRowAndRollback(t *testing.T) {
 	store := newTestStorePostgres(t)
 	c := newTestCoordinator(t, store, "ws-1")
 	ran := false
-	if err := store.WithWakeLock(context.Background(), "nope", func(coordinatorExec) error { ran = true; return nil }); err == nil || ran {
+	if err := store.WithWakeLock(context.Background(), "nope", func(coordinatorExec) error { ran = true; return nil }); !errors.Is(err, ErrNotFound) || ran {
 		t.Fatalf("missing row: err = %v ran = %v", err, ran)
 	}
 	boom := context.Canceled

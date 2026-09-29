@@ -2,6 +2,9 @@ package backendapp
 
 import (
 	"context"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"testing"
 	"time"
 
@@ -66,6 +69,11 @@ func TestRegisterCoordinatorRoutes_Phase3RegistrationsOnlyWhenEffective(t *testi
 			registerCoordinatorRelay, registerCoordinatorReply = mk(names[4]), mk(names[5])
 			registerCoordinatorAutomatic, registerCoordinatorImprovements = mk(names[6]), mk(names[7])
 			origPass := runCoordinatorBackgroundPass
+			t.Cleanup(func() {
+				runCoordinatorBackgroundPass = origPass
+				registerCoordinatorContainment, registerCoordinatorSpend, registerCoordinatorWake, registerCoordinatorDelivery = saved[0], saved[1], saved[2], saved[3]
+				registerCoordinatorRelay, registerCoordinatorReply, registerCoordinatorAutomatic, registerCoordinatorImprovements = saved[4], saved[5], saved[6], saved[7]
+			})
 			runCoordinatorBackgroundPass = func(context.Context, time.Time, []func(context.Context, time.Time)) {}
 
 			registerCoordinatorRoutes(routeParams{ctx: context.Background(), router: gin.New(), services: &Services{Coordinator: svc}, log: newTestLogger()})
@@ -115,5 +123,13 @@ func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	registerCoordinatorWakeState(nil, nil, svc, newTestLogger())(cancelled, time.Now().UTC())
+	core, logs := observer.New(zapcore.WarnLevel)
+	observed, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	registerCoordinatorWakeState(nil, nil, svc, observed)(cancelled, time.Now().UTC())
+	if logs.FilterMessage("coordinator wake state pruning failed").Len() != 1 {
+		t.Fatalf("warn entries = %v, want one prune failure warning", logs.All())
+	}
 }

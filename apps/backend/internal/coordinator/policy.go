@@ -33,6 +33,8 @@ const (
 	ActionResume     Action = "resume"
 	ActionStop       Action = "stop"
 	ActionUnknown    Action = "unknown"
+	// ActionImprovement is an activity-only class; it is not a policy action.
+	ActionImprovement Action = "improvement"
 )
 
 // AllActions is the fixed action order; ActionUnknown is not a policy action.

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -132,6 +133,7 @@ func TestPhase2Schema_UpgradeFromPhase1_SQLite(t *testing.T) {
 		conn := openSQLitePool(t)
 		upgradeFromPhase1(t, conn, withRevision)
 		assertUpgradedDefaults(t, conn)
+		assertOpenTurnIndexOnUpgrade(t, conn)
 		schemas = append(schemas, endSchema(t, conn))
 	}
 	fresh := newTestStore(t)
@@ -182,5 +184,26 @@ func TestPhase2Schema_UpgradeFromPhase1_Postgres(t *testing.T) {
 	}
 	if !strings.Contains(schemas[0], "policy_revision") {
 		t.Fatal("phase-2 columns missing")
+	}
+}
+
+func assertOpenTurnIndexOnUpgrade(t *testing.T, conn *sqlx.DB) {
+	t.Helper()
+	ins := func(id string, finished any) error {
+		outcome := any(nil)
+		if finished != nil {
+			outcome = "completed"
+		}
+		_, err := conn.Exec(conn.Rebind(`INSERT INTO coordinator_unattended_turns (id, coordinator_id, conversation_task_id, session_id, wake_count, start_ceiling_subcents, outcome, started_at, finished_at) VALUES (?, 'upgrade-coordinator', 'c', 's', 1, 1, ?, CURRENT_TIMESTAMP, ?)`), id, outcome, finished)
+		return err
+	}
+	if err := ins("open-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins("open-2", nil); err == nil {
+		t.Fatal("second open turn on an upgraded database must be refused")
+	}
+	if err := ins("done-1", time.Now().UTC()); err != nil {
+		t.Fatalf("a finished turn must not collide: %v", err)
 	}
 }

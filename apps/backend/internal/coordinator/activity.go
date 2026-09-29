@@ -27,6 +27,7 @@ const (
 	ActivityFailed   ActivityOutcome = "failed"
 	ActivityRefused  ActivityOutcome = "refused"
 	ActivityUndone   ActivityOutcome = "undone"
+	ActivityReturned ActivityOutcome = "returned"
 )
 
 // ActivityAuthorization records why a row was or was not allowed to proceed.
@@ -36,6 +37,7 @@ type ActivityAuthorization string
 const (
 	AuthRequiresApproval ActivityAuthorization = "requires_approval"
 	AuthDenied           ActivityAuthorization = "denied"
+	AuthAutomatic        ActivityAuthorization = "automatic"
 )
 
 const (
@@ -87,7 +89,7 @@ type RefusalRecorder interface {
 }
 
 func validActivityClass(a Action) bool {
-	return a == ActionUnknown || isPolicyAction(a)
+	return a == ActionUnknown || a == ActionImprovement || isPolicyAction(a)
 }
 
 func (r ActivityRow) validate() error {
@@ -98,12 +100,12 @@ func (r ActivityRow) validate() error {
 		return fmt.Errorf("%w: action class %q", ErrInvalidActivity, r.ActionClass)
 	}
 	switch r.Outcome {
-	case ActivityProposed, ActivityApproved, ActivityRejected, ActivityFailed, ActivityRefused, ActivityUndone:
+	case ActivityProposed, ActivityApproved, ActivityRejected, ActivityFailed, ActivityRefused, ActivityUndone, ActivityReturned:
 	default:
 		return fmt.Errorf("%w: outcome %q", ErrInvalidActivity, r.Outcome)
 	}
 	switch r.Authorization {
-	case AuthRequiresApproval, AuthDenied:
+	case AuthRequiresApproval, AuthDenied, AuthAutomatic:
 	default:
 		return fmt.Errorf("%w: authorization %q", ErrInvalidActivity, r.Authorization)
 	}
