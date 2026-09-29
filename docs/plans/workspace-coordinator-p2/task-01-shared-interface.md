@@ -71,7 +71,7 @@ screen.
   proposals/:pid`, approve and reject, so a non-create id is 404 and nothing
   is claimed or run (`AC-COORDINATOR-COORDINATORS-007.3`).
 - `resetConversation(tx, coordinatorID)` in the service: clear
-  `conversation_task_id`, increment `config_revision`, archive after commit
+  `conversation_task_id`, increment `config_revision` (always), archive after commit
   ([permissions design](../../specs/coordinator/system-design/permissions.md#conversation-reset)).
 - `internal/coordinator/activity.go`, the one log writer every later work
   order calls: `Record(tx, row)` in the caller's transaction, a failed
@@ -89,16 +89,22 @@ screen.
   section; implement them as written.
 - The `phase2` kind predicate on every store read a flag-off phase-1 path
   makes (list, by-id, decision-route read, startup pass, stale-claim sweep,
-  `get_coordinator_item_kandev` by-id read), and `CountOpenProposals` with
-  `phase2` (also passed to `InsertProposal`) so the cap and
+  `get_coordinator_item_kandev` by-id read), and `CountOpenProposals` (reader pool) and
+  `CountOpenProposalsTx` with `phase2` (`InsertProposal` passes it to the Tx form) so the cap and
   `open_proposals` agree. Task 04 extends the sweep
   for the other kinds and keeps the parameter.
 - Deletion order: children before the coordinator, with the per-coordinator
-  lock first on PostgreSQL, and `coordinator_activity(workspace_id)`. Stall
-  rows are deleted only by `workspace_id` in workspace deletion.
+  lock first on PostgreSQL, and `coordinator_activity(workspace_id)`.
+  Workspace deletion removes every phase-2 table by its own `workspace_id`
+  (after locking the workspace's coordinators in id order on PostgreSQL); stall
+  rows are deleted only by `workspace_id`.
 - `Store.withCoordinatorLock` (created here) and `QueryContext` on
-  `coordinatorExec`; the claim-fenced completion and failure writes take the
-  coordinator lock before `Record`.
+  `coordinatorExec`; the `CompleteProposalTx`, `FailProposalTx`,
+  `RejectProposalTx` and `InsertProposalWith` variants (the phase-1 methods
+  wrap them unchanged); with `phase2` on the service runs those writes and
+  `Record` inside `withCoordinatorLock`, and a deleted coordinator goes
+  through `settleWriteRace`
+  ([design](../../specs/coordinator/system-design/shared-interface.md#transaction-bound-proposal-writes)).
 - `ActivityRow`, validation (`ErrInvalidActivity`), id and timestamp
   assignment, 1,000-rune truncation and the `coordinator_activity_rows_total`
   counter, all in `InsertActivity`.
@@ -116,7 +122,10 @@ screen.
 ## Acceptance
 
 - With `phase2` off, every phase-1 test passes with no change other than the
-  added trailing `phase2=false` argument at its direct store call sites, and
+  added trailing `phase2=false` argument at its direct `CountOpenProposals`,
+  `InsertProposal`, `ListProposals`, `GetProposal`, `ListApprovingClaimedBefore`
+  and `ReclaimStale` call sites (`CompleteProposal`, `FailProposal` and
+  `RejectProposal` are unchanged), and
   stored phase-2 data survives a flag off and on cycle.
 - With `phase2` off, `GET`, approve and reject of a stored resume, message
   or move proposal return 404; its row, status and claim are unchanged and
@@ -149,7 +158,8 @@ view, nil error); `LoadWatchSet` order, empty `selected`, missing coordinator an
 a failed query; `resetConversation` clears, increments and returns the old
 task id, the after-commit archive runs once and never with an empty id, a
 rolled-back transaction changes nothing, and it matches the phase-1 PATCH
-end state; coordinator GET and list carry `policy`, `policy_revision` and
+end state except `config_revision` (reset always increments, PATCH only for a
+config-field change); coordinator GET and list carry `policy`, `policy_revision` and
 `watches` with `phase2` on and none with it off, and read an unreadable stored
 policy as all `denied`; the flag-off cap and `open_proposals` cases and the
 flag-off sweep, startup-pass and by-id cases of the design; the four-case
@@ -162,7 +172,14 @@ as `selected`; `ActiveGoal` and `LastMetGoal` for a missing coordinator return
 `nil, nil`; refusal
 cutoff at 59 and 61 seconds; a 1,001-rune detail stored as 1,000; delete
 ordering and concurrent `Record` against `DeleteCoordinator` on both
-dialects; a phase-1 statement set run against the phase-2 schema; the upgrade
+dialects; an unknown stored kind (phase2 on) lists raw, approve is 500 with nothing
+claimed, reject frees the slot; a PUT carrying the all-`denied` view over an
+unreadable stored policy still writes and increments the revision; a
+`withCoordinatorLock` `fn` statement commits and no source passes `s.db.` inside
+it; complete, fail, reject and propose write their activity row atomically with
+the status write and a `Record` fault rolls the status back; a deleted
+coordinator under complete yields the `settleWriteRace` 404; workspace deletion
+removes orphans a phase-1 binary left in every phase-2 table; a phase-1 statement set run against the phase-2 schema; the upgrade
 test from both starting schemas of the design; `ActiveStandingOrders` and goal
 reads with none, several and a failed query; the client test covers only the
 routes whose bodies the designs define.

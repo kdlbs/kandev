@@ -41,10 +41,56 @@ migrated. Statements run on the handle are rendered with `s.db.Rebind`
 exists. When the coordinator row is missing under the lock the helper
 returns `ErrNotFound` and `fn` does not run.
 
+Rule for `fn`: it uses only the handle it is given (and pure computation).
+It never calls `s.db`, `s.ro`, another store method, or any service method
+that opens its own statement or transaction, because the SQLite writer pool
+holds one connection and such a call blocks until the context ends. Reads
+`fn` needs (for example a goal baseline) are performed before the lock or
+through the handle. A test calls `withCoordinatorLock` with an `fn` that
+runs a statement on the handle and asserts it commits, and the source scan
+in the task 01 tests forbids `s.db.` inside functions passed to it.
+
+### Transaction-bound proposal writes
+
+The phase-1 store methods keep their exact signatures and behaviour and
+become thin wrappers over transaction-bound variants, so no phase-1 test
+call site changes for them (`*sqlx.DB` satisfies `coordinatorExec`):
+
+```go
+func (s *Store) CompleteProposalTx(ctx context.Context, exec coordinatorExec, id, token, taskID string, now time.Time) (bool, error)
+func (s *Store) FailProposalTx(ctx context.Context, exec coordinatorExec, id, token, errMsg string, now time.Time) (bool, error)
+func (s *Store) RejectProposalTx(ctx context.Context, exec coordinatorExec, id, reason, decidedBy string, now time.Time) (bool, error)
+func (s *Store) InsertProposalWith(ctx context.Context, p *Proposal, phase2 bool, inTx func(tx coordinatorExec) error) error
+```
+
+`CompleteProposal`, `FailProposal` and `RejectProposal` call their `Tx`
+variant with `s.db`. `InsertProposal(ctx, p, phase2)` calls
+`InsertProposalWith(ctx, p, phase2, nil)`; `InsertProposalWith` runs `inTx`
+inside the insert's own locked transaction after the cap check and the row
+insert, and an `inTx` error rolls the whole insert back.
+
+Only the service switches. With `phase2` false the service calls the
+phase-1 methods exactly as today, takes no extra lock and writes no
+activity. With `phase2` true, the service runs each of the claim-fenced
+completion, the failure write and reject inside
+`withCoordinatorLock(ctx, coordinatorID, fn)`, where `fn` calls the `Tx`
+variant and, only when it reports a matched row, `Record` on the same
+handle; a `Record` error fails `fn` and rolls the status write back
+(`AC-COORDINATOR-ACTIVITY-LOG-001.6`). Propose passes `inTx` that calls
+`Record` for the `proposed` row. When `withCoordinatorLock` returns
+`ErrNotFound` (the coordinator was deleted), the service treats it as a zero
+matched row and goes through the existing `settleWriteRace` path (404 with
+the existing info log, no activity written). A zero matched row inside `fn`
+commits nothing and writes no activity.
+
 ### Open-proposal counting and the flag-off kind predicate
 
-`Store.CountOpenProposals(ctx, exec, coordinatorID, phase2 bool)` is the one
-count behind both the propose-time cap of 25 and the `open_proposals` field.
+`Store.CountOpenProposals(ctx, coordinatorID string, phase2 bool)` (reader
+pool, the phase-1 signature plus the trailing argument) and
+`Store.CountOpenProposalsTx(ctx, exec coordinatorExec, coordinatorID string, phase2 bool)`
+(the propose transaction) share one query and are the one count behind both
+the propose-time cap of 25 and the `open_proposals` field. Non-transactional
+callers (`service.go`, `stalls.go`) use the reader-pool form.
 With `phase2` false it adds `AND kind = 'create_task'`, so stored resume,
 message and move proposals neither count toward the cap nor appear in
 `open_proposals`; with `phase2` true it counts every kind. The cap and the
@@ -57,7 +103,7 @@ sweep) and the by-id read of `get_coordinator_item_kandev`. Each store
 method takes `phase2 bool` as a trailing argument; the only change to a
 phase-1 test is that added `false` argument at its direct store call sites.
 `InsertProposal`, which runs the cap, takes the same trailing `phase2 bool`
-and passes it to `CountOpenProposals`; the service supplies its own value.
+and passes it to `CountOpenProposalsTx`; the service supplies its own value.
 With it false, a non-create id is the phase-1 not-found result, nothing is
 claimed, and no row changes. Task 04 extends the sweep for the other kinds
 and keeps the parameter. Tests: 25 stored open
@@ -71,7 +117,8 @@ pass; the by-id tool read of a resume id is not found.
 
 ```go
 type Store struct{ /* existing */ }
-func (s *Store) CountOpenProposals(ctx context.Context, exec coordinatorExec, coordinatorID string, phase2 bool) (int, error)
+func (s *Store) CountOpenProposals(ctx context.Context, coordinatorID string, phase2 bool) (int, error)
+func (s *Store) CountOpenProposalsTx(ctx context.Context, exec coordinatorExec, coordinatorID string, phase2 bool) (int, error)
 func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordinatorID string) (WatchSet, error)
 func (s *Store) ActiveStandingOrders(ctx context.Context, coordinatorID string) ([]StandingOrder, error)
 func (s *Store) ActiveGoal(ctx context.Context, coordinatorID string) (*Goal, error)
@@ -116,20 +163,21 @@ func WithPhase2(on bool) ServiceOption
   four-argument form in the permissions design is retired.
 - `resetConversation` runs inside the caller's locked transaction: sets
   `conversation_task_id` NULL, sets `config_revision = config_revision + 1`
-  (added once phase-1 WP-4f's column exists on the branch; until then only
-  the clear and `updated_at` are written),
-  also sets `updated_at` to now, and returns the previous
-  `conversation_task_id` (empty when none). The caller
+  and `updated_at` to now, and returns the previous `conversation_task_id`
+  (empty when none). It always increments. The caller
   invokes `archiveConversation(ctx, coordinatorID, taskID)` after commit;
   that function is a thin wrapper over the existing
   `archiveClearedConversationTask` (`conversation.go`), which is not changed,
   so the warn-and-startup-pass handling of an archive failure is inherited.
   It is never called with an empty id. The phase-1 PATCH keeps its inline
   clear at `store.go` and is deliberately not moved, so phase-1 tests are
-  untouched; a parity test asserts both paths leave the same
-  `conversation_task_id` and `updated_at` behaviour (the timestamp advances)
-  and no other column changed, except `config_revision`, which only
-  `resetConversation` increments once WP-4f's column is present.
+  untouched. That PATCH increments `config_revision` only when it changed
+  `context`, `agent_profile_id` or `executor_profile_id`
+  ([coordinators](coordinators.md#routes)). A parity test asserts both paths
+  leave the same `conversation_task_id` and advance `updated_at`, and change
+  no other column; the only allowed difference is `config_revision`, which
+  `resetConversation` increments unconditionally and PATCH increments only
+  for a config-field change (both cases tested).
 - `MarkUndone` runs `UPDATE coordinator_activity SET undone_at = ?, undone_by
   = ?, updated_at = ? WHERE id = ? AND undone_at IS NULL` and reports whether
   a row changed. Task 01 owns it; the undo route's work order calls it.
@@ -181,7 +229,11 @@ a full view (all six `denied`, the stored revision, the stored scope and
 watches) and a nil error, after the once-per-revision error log of
 `policyFor`; the caller enforces `denied`, and only a failed query returns an
 error with the zero view. A coordinator GET or list of an unreadable stored
-policy reports the same view; the next PUT replaces it.
+policy reports the same view. For a PUT that carries `policy`, an unreadable
+stored policy always counts as differing from the request, so the write
+happens even when the request equals the all-`denied` view the GET showed
+(the policy is replaced and the revision increments); a PUT without `policy`
+leaves it as it is.
 
 ### Watches
 
@@ -257,7 +309,13 @@ only its stored rows, none when there are none. A stored proposal `kind`
 outside the four is listed only with `phase2` true, as a card whose `kind`
 is the stored string and whose `spec` is the raw stored JSON; the TypeScript
 union has no branch for it, so the web renders it as an unsupported card
-with no action. An unknown activity `action_class`, `outcome` or
+with no action. With `phase2` true, `GET proposals/:pid` returns the same
+raw card; approve returns 500 and writes nothing, and claims nothing (the
+registry has no executor, per [proposal kinds](proposal-kinds.md#executors));
+reject is allowed on a pending or failed row and marks it `rejected`, which
+frees its cap slot. `CountOpenProposalsTx` counts it like any other open row
+with `phase2` true. With `phase2` false it is invisible, like every
+non-create kind. An unknown activity `action_class`, `outcome` or
 `authorization` is returned to the list as stored. No code path writes
 either.
 
@@ -265,13 +323,25 @@ either.
 
 `DeleteCoordinator` deletes children before the parent, in one transaction:
 watches, activity, standing orders, goals, proposals, then the coordinator.
-The workspace-deletion transaction deletes the same tables, and the phase-1
-`coordinator_stalls` rows, in the same child-first order. `coordinator_stalls`
-has no `coordinator_id` (it is keyed by `task_id`), so it is deleted only by
-`workspace_id` in workspace deletion, exactly as in phase 1, and never by
-`DeleteCoordinator`. On PostgreSQL `DeleteCoordinator` first takes the
-per-coordinator lock (`SELECT ... FOR UPDATE` on the coordinator row). On
-SQLite `BEGIN IMMEDIATE` serialises the same way.
+On PostgreSQL it first takes the per-coordinator lock (`SELECT ... FOR
+UPDATE` on the coordinator row). On SQLite the one-connection writer pool
+serialises the same way.
+
+The workspace-deletion transaction deletes every phase-2 table by its own
+`workspace_id` (all of them carry the column: watches, activity, standing
+orders, goals), then the phase-1 `coordinator_stalls` rows and
+`coordinator_proposals` by `workspace_id` as in phase 1, then the
+coordinators, child-first. It never uses a subquery on `coordinators`, so
+rows orphaned by a phase-1 binary deleting a coordinator are removed too.
+On PostgreSQL it first runs `SELECT id FROM coordinators WHERE workspace_id
+= ? ORDER BY id FOR UPDATE`, taking every coordinator lock of the workspace
+in id order before any delete, so a concurrent `withCoordinatorLock` writer
+either commits before the delete and is removed with it, or blocks and then
+finds no coordinator. `coordinator_stalls` has no `coordinator_id` (it is
+keyed by `task_id`), so it is deleted only by `workspace_id`, never by
+`DeleteCoordinator`. A test runs `Record` inside `withCoordinatorLock`
+against workspace deletion on both dialects and asserts no row of any
+phase-2 table survives for the workspace.
 
 `Service.Record` only inserts inside the transaction it is handed; it does
 not lock. Precondition: every caller of `Record` holds the per-coordinator
@@ -282,12 +352,11 @@ precondition a `Record` either commits before the delete and is removed with
 it, or blocks and then finds the coordinator missing (`ErrNotFound`, nothing
 written). `InsertActivity` itself does not check the coordinator row. The
 concurrent test runs `Record` inside `withCoordinatorLock` against
-`DeleteCoordinator` and asserts no activity row survives. Workspace deletion
-removes activity by `workspace_id` (index `coordinator_activity(workspace_id)`)
-and the other tables by `coordinator_id IN (SELECT id FROM coordinators WHERE
-workspace_id = ?)`. Orphan rows left by
-a phase-1 binary deleting a coordinator are unreachable (every read is scoped
-by coordinator) and are removed by activity retention or workspace deletion.
+`DeleteCoordinator` and asserts no activity row survives. Activity rows are found by
+`workspace_id` through the index `coordinator_activity(workspace_id)`. Orphan
+rows left by a phase-1 binary deleting a coordinator are unreachable (every
+read is scoped by coordinator) and are removed by workspace deletion, and
+activity orphans also by retention.
 
 ### Downgrade and upgrade
 
