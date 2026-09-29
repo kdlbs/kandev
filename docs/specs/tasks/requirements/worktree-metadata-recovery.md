@@ -76,6 +76,14 @@ Runtime verification status is recorded in the linked implementation plan.
   request before replacement starts. A later failure must preserve completed slot
   repairs and all original checkouts. No agent can start with an incomplete inventory.
 
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-002.8:** A healthy main-repository
+  checkout in the selected inventory shall remain usable for launch, additional
+  sessions, resume, and workspace restoration. Admission shall preserve its path,
+  branch, index, tracked edits, untracked files, and ignored files without repair.
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-002.9:** A directory named `.git` alone
+  shall not establish checkout health. Invalid, redirected, or unreadable metadata
+  shall stop admission without changing the checkout or granting replacement authority.
+
 ### REQ-TASKS-WORKTREE-METADATA-RECOVERY-003: Exclusive recovery authority
 
 **Intent:** Recovery must not redirect a workspace that another consumer can use.
@@ -112,3 +120,5 @@ Runtime verification status is recorded in the linked implementation plan.
 - [Agent resume recovery](../../agents/requirements/agent-resume-runtime-recovery.md)
 - [System design](../system-design/worktree-metadata-recovery.md)
 - [Implementation plan](../../../plans/worktree-metadata-recovery/plan.md)
+
+- [Main-checkout compatibility fix](../../../plans/main-checkout-recovery-admission/plan.md) tracks criteria 002.8 and 002.9.

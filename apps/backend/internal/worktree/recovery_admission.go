@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
@@ -654,39 +655,33 @@ func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *
 	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
 	}
-	inspection := inspectLinkedWorktree(wt.Path)
-	if inspection.class == linkedWorktreeHealthy {
+	inspection := m.inspectCheckout(ctx, wt.Path, handle)
+	if inspection.operationalErr != nil {
+		return recoverySlotInspection{}, fmt.Errorf("inspect persisted checkout: %w", inspection.operationalErr)
+	}
+	if inspection.class == checkoutMainHealthy {
 		if err := handle.VerifyPath(filepath.Clean(wt.Path)); err != nil {
 			return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
 		}
-		if slot.CloneRelocation != nil {
-			relocation, relocationErr := m.inspectManagedCloneRelocation(ctx, taskID, wt, slot.CloneRelocation)
-			if relocationErr != nil {
-				return recoverySlotInspection{}, relocationErr
-			}
-			if relocation.mismatch {
-				return recoverySlotInspection{
-					needsRecovery: true, needsRelocation: true, dirty: relocation.dirty,
-					relocation: relocation,
-				}, nil
-			}
-		}
 		return recoverySlotInspection{}, nil
 	}
-	if inspection.class != linkedWorktreeMissingAdmin {
+	if inspection.class == checkoutLinkedHealthy {
+		return m.inspectHealthyLinkedRecoverySlot(ctx, taskID, wt, slot, handle)
+	}
+	if inspection.class != checkoutLinkedMissingAdmin {
 		return recoverySlotInspection{}, &WorktreeRecoveryError{
-			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
-			ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
-			State: string(inspection.class), Reason: inspection.reason,
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.linked.adminPath,
+			ExpectedBacklink: inspection.linked.expectedBacklink, ActualBacklink: inspection.linked.actualBacklink,
+			State: string(linkedWorktreeAmbiguous), Reason: inspection.reason,
 		}
 	}
 	repositoryPath := recoveryRepositoryPath(*slot)
 	if repositoryPath == "" {
 		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, "repository path is missing")
 	}
-	if err := validateMissingLinkedWorktreeAdmin(repositoryPath, inspection.adminPath); err != nil {
+	if err := validateMissingLinkedWorktreeAdmin(repositoryPath, inspection.linked.adminPath); err != nil {
 		return recoverySlotInspection{}, &WorktreeRecoveryError{
-			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.linked.adminPath,
 			State: string(linkedWorktreeAmbiguous), Reason: err.Error(),
 		}
 	}
@@ -697,6 +692,31 @@ func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *
 		return recoverySlotInspection{}, err
 	}
 	return recoverySlotInspection{needsRecovery: true}, nil
+}
+
+func (m *Manager) inspectHealthyLinkedRecoverySlot(
+	ctx context.Context,
+	taskID string,
+	wt *Worktree,
+	slot *RecoverySlot,
+	handle storageworkspaces.DirectoryHandle,
+) (recoverySlotInspection, error) {
+	if err := handle.VerifyPath(filepath.Clean(wt.Path)); err != nil {
+		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
+	}
+	if slot.CloneRelocation != nil {
+		relocation, err := m.inspectManagedCloneRelocation(ctx, taskID, wt, slot.CloneRelocation)
+		if err != nil {
+			return recoverySlotInspection{}, err
+		}
+		if relocation.mismatch {
+			return recoverySlotInspection{
+				needsRecovery: true, needsRelocation: true, dirty: relocation.dirty,
+				relocation: relocation,
+			}, nil
+		}
+	}
+	return recoverySlotInspection{}, nil
 }
 
 func (m *Manager) recoveryOperationID(req *RecoveryAdmissionRequest, indices []int) (string, error) {
