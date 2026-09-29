@@ -48,6 +48,11 @@ coordinator, settings, Watches and goal in one transaction through
   reads, activity counts, Review link and goal actions stay in the Configure
   wrappers) with regression tests on the Configure page before the setup
   steps use them.
+- Draft-mode details of the design: Review Value formats (Goal template with
+  plural keys, Context cut at 80 code points, board-list order), per-field
+  error slots and the path-to-control mapping with code-keyed copy, the kept
+  boards-read and Automatic notes, no activity-summary request, check marks
+  and the post-400 Next behavior.
 - Finish banners: nothing created when the server answered, could not
   confirm when no answer arrived (`008.6`).
 
