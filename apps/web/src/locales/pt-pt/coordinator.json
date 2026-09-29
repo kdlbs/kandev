@@ -109,6 +109,7 @@
   "copilotReaderTooltip": "Só os gestores do espaço de trabalho podem perguntar ao coordenador.",
   "proposalStatusPending": "Aprovação pendente",
   "proposalStatusApproving": "Aprovação em curso. As edições estão bloqueadas.",
+  "proposalStatusApprovingStale": "A aprovação não foi concluída.",
   "proposalStatusFailedWithError": "Não foi possível criar a tarefa: {{error}}. Nada foi criado.",
   "proposalStatusFailed": "Não foi possível criar a tarefa. Nada foi criado.",
   "proposalStatusRejectedWithReason": "Rejeitado: {{reason}}",

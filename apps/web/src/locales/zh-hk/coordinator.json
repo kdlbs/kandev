@@ -109,6 +109,7 @@
   "copilotReaderTooltip": "只有工作區管理員才能向協調員提問。",
   "proposalStatusPending": "待批准",
   "proposalStatusApproving": "批准中。編輯已鎖定。",
+  "proposalStatusApprovingStale": "批准未完成。",
   "proposalStatusFailedWithError": "無法建立任務：{{error}}。未建立任何內容。",
   "proposalStatusFailed": "無法建立任務。未建立任何內容。",
   "proposalStatusRejectedWithReason": "已拒絕：{{reason}}",

@@ -109,6 +109,7 @@
   "copilotReaderTooltip": "Ōńĺŷ ŵōŕķśƥàćē ḿàńàĝēŕś ćàń àśķ ţĥē ćōōŕďĩńàţōŕ.",
   "proposalStatusPending": "Ƥēńďĩńĝ àƥƥŕōvàĺ",
   "proposalStatusApproving": "Àƥƥŕōvàĺ ĩń ƥŕōĝŕēśś. Ēďĩţś àŕē ĺōćķēď.",
+  "proposalStatusApprovingStale": "Àƥƥŕōvàĺ ďĩď ńōţ ƒĩńĩśĥ.",
   "proposalStatusFailedWithError": "Ćōũĺď ńōţ ćŕēàţē ţĥē ţàśķ: {{error}}. Ńōţĥĩńĝ ŵàś ćŕēàţēď.",
   "proposalStatusFailed": "Ćōũĺď ńōţ ćŕēàţē ţĥē ţàśķ. Ńōţĥĩńĝ ŵàś ćŕēàţēď.",
   "proposalStatusRejectedWithReason": "Ŕēĵēćţēď: {{reason}}",

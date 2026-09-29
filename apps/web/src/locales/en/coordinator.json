@@ -109,6 +109,7 @@
   "copilotReaderTooltip": "Only workspace managers can ask the coordinator.",
   "proposalStatusPending": "Pending approval",
   "proposalStatusApproving": "Approval in progress. Edits are locked.",
+  "proposalStatusApprovingStale": "Approval did not finish.",
   "proposalStatusFailedWithError": "Could not create the task: {{error}}. Nothing was created.",
   "proposalStatusFailed": "Could not create the task. Nothing was created.",
   "proposalStatusRejectedWithReason": "Rejected: {{reason}}",

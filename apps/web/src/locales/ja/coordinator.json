@@ -109,6 +109,7 @@
   "copilotReaderTooltip": "コーディネーターへの質問はワークスペース管理者のみ行えます。",
   "proposalStatusPending": "承認待ち",
   "proposalStatusApproving": "承認処理中です。編集はロックされています。",
+  "proposalStatusApprovingStale": "承認が完了しませんでした。",
   "proposalStatusFailedWithError": "タスクを作成できませんでした: {{error}}。何も作成されていません。",
   "proposalStatusFailed": "タスクを作成できませんでした。何も作成されていません。",
   "proposalStatusRejectedWithReason": "却下: {{reason}}",
