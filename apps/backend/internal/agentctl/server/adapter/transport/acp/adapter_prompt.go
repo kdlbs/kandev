@@ -217,7 +217,15 @@ func (a *Adapter) sendPrompt(
 		// asynchronously. Drain it before returning the error so a diagnostic
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		a.syncNotifQueue()
-		return normalizePromptErrorAfterCancel(traceCtx, err)
+		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
+		if a.agentID == codexAgentID &&
+			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
+			isGenericCodexPromptError(err) {
+			if providerError, ok := turn.codexUsageLimitFailure(); ok {
+				return &providerPromptError{ProviderError: *providerError, cause: normalizedErr}
+			}
+		}
+		return normalizedErr
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -373,6 +381,12 @@ func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error
 		return errPromptAbandonedAfterCancel
 	}
 	return err
+}
+
+func isGenericCodexPromptError(err error) bool {
+	var requestErr *acp.RequestError
+	return errors.As(err, &requestErr) && requestErr != nil &&
+		requestErr.Code == -32603 && requestErr.Message == "Internal error"
 }
 
 func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {

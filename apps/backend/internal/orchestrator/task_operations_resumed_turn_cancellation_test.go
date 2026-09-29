@@ -58,6 +58,24 @@ func (m *acceptedTurnPromptManager) PromptAgentWithDispatchCallback(
 	return &executor.PromptResult{StopReason: "cancelled"}, m.firstPromptErr
 }
 
+func (m *acceptedTurnPromptManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.7
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.8
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.9
@@ -337,8 +355,12 @@ func TestPromptTask_QueuedAcceptedTurnIdentityReadFailurePreservesExecution(t *t
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	if reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued); reservation == nil {
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
+	}
+	if claimed, err := svc.claimQueuedDispatchForExecution(sessionID, queued.ID, reservation); err != nil || !claimed {
+		t.Fatalf("claim queued dispatch for execution: claimed=%v err=%v", claimed, err)
 	}
 
 	var afterDispatchSawAccepted atomic.Bool
@@ -361,7 +383,12 @@ func TestPromptTask_QueuedAcceptedTurnIdentityReadFailurePreservesExecution(t *t
 	select {
 	case <-manager.accepted:
 	case <-time.After(resumeCancellationTestTimeout(t)):
-		t.Fatal("queued resumed prompt did not reach provider acceptance")
+		select {
+		case promptErr := <-promptDone:
+			t.Fatalf("queued resumed prompt returned before provider acceptance: %v", promptErr)
+		default:
+			t.Fatal("queued resumed prompt did not reach provider acceptance")
+		}
 	}
 	if identityReadFailures.Load() == 0 {
 		t.Fatal("acceptance callback did not exercise the injected identity read failure")
@@ -773,9 +800,12 @@ func TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance(t *testing.T) {
 	attempt.setExecutionID(oldExecution)
 	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
 
-	result, handled, err := svc.trySwitchModelForPrompt(
+	beforeAdmission, acceptAdmission, releaseAdmission, releaseSwitchGuard := svc.newModelSwitchAdmissionGate(
+		context.WithoutCancel(ctx), taskID, sessionID, session, promptTaskOptions{}, attempt, nil,
+	)
+	result, handled, err := svc.trySwitchModelForPromptWithAdmission(
 		ctx, taskID, sessionID, "new-model", "model-switch prompt", session,
-		&foregroundDispatch{}, attempt,
+		&foregroundDispatch{}, beforeAdmission, acceptAdmission, releaseAdmission, attempt, releaseSwitchGuard,
 	)
 	if err != nil {
 		t.Fatalf("model-switch fallback: %v", err)
@@ -788,9 +818,13 @@ func TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance(t *testing.T) {
 	}
 	manager.mu.Lock()
 	onDispatched := manager.initialPromptDispatchCallback
+	beforeInitialAdmission := manager.initialPromptAdmissionCallback
 	manager.mu.Unlock()
 	if onDispatched == nil {
 		t.Fatal("model-switch fallback did not register its initial-prompt acceptance callback")
+	}
+	if beforeInitialAdmission == nil {
+		t.Fatal("model-switch fallback did not register its final admission callback")
 	}
 	registry := svc.resumeAttemptStore()
 	registry.mu.Lock()
@@ -799,7 +833,16 @@ func TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance(t *testing.T) {
 	if acceptedBeforeDispatch {
 		t.Fatal("model-switch fallback transferred startup ownership before provider acceptance")
 	}
+	if err := beforeInitialAdmission(); err != nil {
+		t.Fatalf("model-switch initial prompt admission: %v", err)
+	}
+	if !cancelInFlightGuardIsHeld(svc, sessionID) {
+		t.Fatal("model-switch admission guard was not held through provider acceptance")
+	}
 	onDispatched()
+	if cancelInFlightGuardIsHeld(svc, sessionID) {
+		t.Fatal("model-switch admission guard remained held after provider acceptance")
+	}
 	if got := attempt.execution(); got != newExecution {
 		t.Fatalf("resume attempt execution = %q, want %q", got, newExecution)
 	}

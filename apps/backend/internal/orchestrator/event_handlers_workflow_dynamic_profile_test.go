@@ -69,6 +69,9 @@ func TestCreateNewSessionForStep_ResolvesDynamicProfileBeforeWorkspaceAttach(t *
 			persisted.AgentProfileID, persisted.ExecutionProfileID, resolvedProfileID,
 			initialGeneration, persisted.RouteGeneration)
 	}
+	if got := persisted.AgentProfileSnapshot["agent_name"]; got != "concrete-agent" {
+		t.Fatalf("persisted dynamic snapshot agent_name = %v, want concrete-agent", got)
+	}
 }
 
 // TestCreateNewSessionForStep_MarksRouteActionRequiredWhenWorkspaceAttachFails

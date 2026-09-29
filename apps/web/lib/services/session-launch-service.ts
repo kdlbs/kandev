@@ -9,7 +9,7 @@ export type SessionIntent =
   | "workflow_step"
   | "restore_workspace";
 
-export type LaunchActivationSource = "user_action" | "session_open";
+export type LaunchActivationSource = "user_action" | "session_open" | "session_focus";
 
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
@@ -62,6 +62,23 @@ export async function launchSession(
   if (!client) throw new Error("WebSocket client not available");
   const effectiveTimeout = timeout ?? (request.intent === "resume" ? 30_000 : 15_000);
   return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
+}
+
+export type ForkConversationResponse = {
+  task_id: string;
+  session_id: string;
+  state: string;
+};
+
+export async function forkConversation(request: {
+  task_id: string;
+  session_id: string;
+  turn_id: string;
+  request_id: string;
+}): Promise<ForkConversationResponse> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket client not available");
+  return client.request<ForkConversationResponse>("session.fork", request, 60_000);
 }
 
 export type EnsureSessionResponse = {

@@ -40,7 +40,11 @@ vi.mock("@/lib/api/domains/user-shell-api", () => ({
   fetchTerminals: vi.fn(),
 }));
 
-import { fetchSessionDataForTask, OPTIONAL_HYDRATION_TIMEOUT_MS } from "./session-page-state";
+import {
+  fetchTaskNavigationData,
+  fetchSessionDataForTask,
+  OPTIONAL_HYDRATION_TIMEOUT_MS,
+} from "./session-page-state";
 
 const NOW = "2026-07-16T12:00:00Z";
 const TASK_ID = "task-1";
@@ -427,5 +431,40 @@ describe("fetchSessionDataForTask timeout behavior", () => {
       String(message).includes("optional workspaces"),
     );
     expect(workspaceWarnings).toHaveLength(1);
+  });
+});
+
+describe("fetchTaskNavigationData", () => {
+  it("hydrates only essential task/session state without optional boot requests", async () => {
+    const session = makeSession();
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session] });
+    const result = await fetchTaskNavigationData(TASK_ID);
+    expect(result.sessionId).toBe(SESSION_ID);
+    expect(result.initialState.taskSessions?.items[SESSION_ID]).toEqual(session);
+    expect(result.initialState.taskSessionsByTask?.loadedByTaskId[TASK_ID]).toBe(true);
+    expect(result.initialState.messages).toBeUndefined();
+    expect(result.initialState.turns).toBeUndefined();
+    for (const [name, mock] of Object.entries(mocks)) {
+      if (name === "fetchTask" || name === "listTaskSessions") continue;
+      expect(mock, name).not.toHaveBeenCalled();
+    }
+  });
+
+  it("ignores a requested session owned by another task", async () => {
+    const session = makeSession();
+    mocks.listTaskSessions.mockResolvedValue({
+      sessions: [{ ...session, id: "foreign-session", task_id: "foreign-task" }, session],
+    });
+    const result = await fetchTaskNavigationData(TASK_ID, "foreign-session");
+    expect(result.sessionId).toBe(SESSION_ID);
+    expect(Object.keys(result.initialState.taskSessions!.items)).toEqual([SESSION_ID]);
+  });
+
+  it("keeps a sessionless task sessionless without waiting for enrichment", async () => {
+    const result = await fetchTaskNavigationData(TASK_ID);
+    expect(result.sessionId).toBeNull();
+    expect(result.initialState.taskSessionsByTask?.itemsByTaskId[TASK_ID]).toEqual([]);
+    expect(result.initialState.messages).toBeUndefined();
+    expect(mocks.listAgents).not.toHaveBeenCalled();
   });
 });

@@ -64,7 +64,7 @@ func TestAuthenticatedMCPAgentPermissionListResolveAndReplay(t *testing.T) {
 	ts.AgentManager.SetPendingPermissions(sessionID, []streams.PendingAgentPermission{permission})
 	messageAdapter := &testMessageCreatorAdapter{svc: ts.TaskSvc}
 	_, err := messageAdapter.CreatePermissionRequestMessage(ownerCtx, taskID, sessionID, permission.RequestID, permission.PendingID,
-		permission.ToolCallID, permission.Title, "", []map[string]interface{}{{"option_id": "allow-once"}}, "command", map[string]interface{}{"command": actionDetailsSentinel})
+		permission.ToolCallID, permission.Title, "", []map[string]interface{}{{"option_id": "allow-once"}}, "command", map[string]interface{}{"command": actionDetailsSentinel}, nil)
 	require.NoError(t, err)
 
 	foreign := dispatchPermissionMCP(t, ts, otherCtx, ws.ActionMCPListPendingAgentPermissions, map[string]any{"task_id": taskID, "session_id": sessionID})
@@ -107,11 +107,65 @@ func TestAuthenticatedMCPAgentPermissionListResolveAndReplay(t *testing.T) {
 	require.NotNil(t, audit)
 	assert.Equal(t, models.PermissionActorPersonalAccessToken, audit.ActorKind)
 	assert.Equal(t, models.PermissionSourceExternalMCP, audit.Source)
+	messages, err := ts.TaskSvc.ListMessages(ownerCtx, sessionID)
+	require.NoError(t, err)
+	var humanPermission *models.Message
+	for _, message := range messages {
+		if message.Metadata["request_id"] == "request-1" {
+			humanPermission = message
+			break
+		}
+	}
+	require.NotNil(t, humanPermission)
+	assert.Equal(t, string(models.PermissionStatusApproved), humanPermission.Metadata["status"])
+	assert.Nil(t, humanPermission.Metadata["permission_decision"], "human decisions remain attributed through the resolution audit")
+
 	encoded, err := json.Marshal(audit)
 	require.NoError(t, err)
 	for _, sentinel := range []string{"SECRET_TOKEN_RECORD_ID", actionCommandSentinel, actionCWDSentinel, actionDetailsSentinel} {
 		assert.NotContains(t, string(encoded), sentinel)
 	}
+}
+
+func TestAutoApprovedPermissionDecisionPersistsInSessionReplay(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	t.Cleanup(func() { ts.Close() })
+	ownerCtx := authn.WithIdentity(context.Background(), authn.Identity{
+		UserID: "owner-user", TokenID: "owner-token", Role: authn.RoleMember,
+	})
+	taskID, sessionID := createOwnedPermissionSession(t, ts, ownerCtx)
+	messageAdapter := &testMessageCreatorAdapter{svc: ts.TaskSvc}
+	want := models.PermissionDecision{
+		OptionID:   "allow-once",
+		OptionKind: "allow_once",
+		Source:     streams.PermissionDecisionSourceAutoApprove,
+	}
+	_, err := messageAdapter.CreatePermissionRequestMessage(
+		ownerCtx,
+		taskID,
+		sessionID,
+		"auto-request-1",
+		"auto-pending-1",
+		"tool-call-1",
+		"Run git status",
+		"",
+		[]map[string]interface{}{{"option_id": want.OptionID, "kind": want.OptionKind}},
+		"command",
+		map[string]interface{}{"command": "git status"},
+		&want,
+	)
+	require.NoError(t, err)
+
+	messages, err := ts.TaskSvc.ListMessages(ownerCtx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	message := messages[0]
+	assert.Equal(t, string(models.PermissionStatusApproved), message.Metadata["status"])
+	encoded, err := json.Marshal(message.Metadata["permission_decision"])
+	require.NoError(t, err)
+	var got models.PermissionDecision
+	require.NoError(t, json.Unmarshal(encoded, &got))
+	assert.Equal(t, want, got)
 }
 
 func createOwnedPermissionSession(t *testing.T, ts *OrchestratorTestServer, ctx context.Context) (string, string) {

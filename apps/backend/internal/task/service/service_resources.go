@@ -158,7 +158,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		// The tenant comes from the creating identity and from nowhere else.
 		// There is no org field on the request on purpose: a caller must not
 		// be able to place a workspace in another tenant.
-		OrgID: callerOrgID(ctx),
+		OrgID:                    callerOrgID(ctx),
+		ACPIdleSuspensionEnabled: false,
+		ACPIdleTimeoutMinutes:    120,
 	}
 	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
 	if placementErr != nil {
@@ -217,6 +219,9 @@ func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspac
 
 // UpdateWorkspace updates an existing workspace
 func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
+	if req.ACPIdleTimeoutMinutes != nil && *req.ACPIdleTimeoutMinutes <= 0 {
+		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceIdleTimeoutInvalid)
+	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, err
@@ -250,6 +255,12 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	}
 	if req.DefaultConfigAgentProfileID != nil {
 		workspace.DefaultConfigAgentProfileID = normalizeOptionalID(req.DefaultConfigAgentProfileID)
+	}
+	if req.ACPIdleSuspensionEnabled != nil {
+		workspace.ACPIdleSuspensionEnabled = *req.ACPIdleSuspensionEnabled
+	}
+	if req.ACPIdleTimeoutMinutes != nil {
+		workspace.ACPIdleTimeoutMinutes = *req.ACPIdleTimeoutMinutes
 	}
 	workspace.UpdatedAt = time.Now().UTC()
 

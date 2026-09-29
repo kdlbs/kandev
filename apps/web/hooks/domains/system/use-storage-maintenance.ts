@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useSystemInfoBootId } from "@/components/system-info-query-provider";
 import { useToast } from "@/components/toast-provider";
 import { ApiError } from "@/lib/api/client";
 // The module-level `t`, not `useTranslation`: every string below is produced
@@ -23,7 +24,6 @@ import {
   analyzeStorage,
   deleteStorageQuarantine,
   fetchStorageOverview,
-  fetchStorageDisk,
   fetchStoragePolicy,
   fetchStorageQuarantine,
   fetchStorageRuns,
@@ -41,7 +41,21 @@ import type {
   StorageQuarantinePurgeScope,
   SystemJob,
 } from "@/lib/types/system";
+import {
+  createStorageDiskCapacityIdentity,
+  useStorageDiskCapacity,
+} from "./use-storage-disk-capacity";
+import { useStorageSections } from "./use-storage-sections";
+import { useSystemInfoQueryIdentity } from "./system-info-query";
 import { useSystemJob } from "./use-system-jobs";
+import type { StorageSection } from "./use-storage-sections";
+
+export { mergeStorageDiskCapacity } from "./use-storage-disk-capacity";
+export type {
+  StorageSection,
+  StorageSectionErrors,
+  StorageSectionLoading,
+} from "./use-storage-sections";
 
 export type StoragePendingAction =
   | "save"
@@ -98,15 +112,13 @@ export function settingsWithDockerAcknowledgement(
   };
 }
 
-export type StorageSection = "policy" | "overview" | "disk" | "runs" | "quarantine";
-export type StorageSectionLoading = Record<StorageSection, boolean>;
-export type StorageSectionErrors = Record<StorageSection, string | null>;
 type Reload = (sections?: StorageSection[]) => Promise<void>;
 type SetStorageError = Dispatch<SetStateAction<string | null>>;
 const TERMINAL_REFRESH_RETRY_MS = 1000;
 const TERMINAL_REFRESH_MAX_RETRY_MS = 8000;
 const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
 const STORAGE_ANALYSIS_POLL_MS = 1500;
+const STORAGE_DISK_POLL_MS = 30_000;
 const MAX_BROWSER_TIMEOUT_MS = 2_147_483_647;
 
 function useStorageActionRunner() {
@@ -247,9 +259,10 @@ function useStorageActions(reload: Reload, setPolicy: (policy: StoragePolicyResp
     return perform("analyze", async () => {
       const accepted = await analyzeStorage();
       setAnalysisJobId(accepted.job_id);
+      void reload(["disk"]).catch(() => undefined);
       toast({ title: t("system:storageToastAnalysisStarted"), variant: "success" });
     });
-  }, [clearBusy, perform, toast]);
+  }, [clearBusy, perform, reload, toast]);
 
   const runNow = useCallback(
     async (resources?: string[]) => {
@@ -417,19 +430,59 @@ function useStorageAnalysisRefreshSchedule(
   }, [analysisState, refreshDueAt, reload]);
 }
 
-function useStorageMaintenanceEffects(
-  reload: Reload,
-  setError: SetStorageError,
-  actions: ReturnType<typeof useStorageActions>,
-  analysisRevision: number,
-  overview: StorageOverviewResponse | null,
-) {
+function useStorageDiskPolling(reload: Reload, active: boolean) {
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  useEffect(() => {
+    if (typeof document === "undefined" || !active) return;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let requestPending = false;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || requestPending) return;
+      requestPending = true;
+      void reloadRef
+        .current(["disk"])
+        .catch(() => undefined)
+        .finally(() => {
+          requestPending = false;
+        });
+    };
+    const syncVisibility = () => {
+      if (timer) clearInterval(timer);
+      timer = undefined;
+      if (document.visibilityState !== "visible") return;
+      refresh();
+      timer = setInterval(refresh, STORAGE_DISK_POLL_MS);
+    };
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, [active]);
+}
+
+function useStorageMaintenanceEffects({
+  reload,
+  actions,
+  analysisRevision,
+  overview,
+  active,
+}: {
+  reload: Reload;
+  actions: ReturnType<typeof useStorageActions>;
+  analysisRevision: number;
+  overview: StorageOverviewResponse | null;
+  active: boolean;
+}) {
   useEffect(() => {
     void reload().catch(() => undefined);
   }, [reload]);
   const analysisState = overview?.analysis.state;
   const analysisGeneration = overview?.analysis.generation;
   const refreshDueAt = overview?.analysis.refresh_due_at;
+  useStorageDiskPolling(reload, active);
   useStorageAnalysisUpdates(analysisRevision, reload);
   useStorageAnalysisPolling(analysisState, analysisGeneration, reload);
   useStorageAnalysisRefreshSchedule(analysisState, refreshDueAt, reload);
@@ -442,58 +495,24 @@ function useStorageMaintenanceEffects(
   );
 }
 
-export function useStorageMaintenance() {
+export function useStorageMaintenance(active = true) {
   const storage = useAppStore((state) => state.system.storage);
+  const systemInfoIdentity = useSystemInfoQueryIdentity(useSystemInfoBootId());
+  const capacityIdentity = createStorageDiskCapacityIdentity(systemInfoIdentity);
   const analysisRevision = useAppStore((state) => state.system.storage.analysisRevision);
   const setPolicy = useAppStore((state) => state.setSystemStoragePolicy);
   const setOverview = useAppStore((state) => state.setSystemStorageOverview);
-  const setDisk = useAppStore((state) => state.setSystemStorageDisk);
+  const setDiskInStore = useAppStore((state) => state.setSystemStorageDisk);
   const setRuns = useAppStore((state) => state.setSystemStorageRuns);
   const setQuarantine = useAppStore((state) => state.setSystemStorageQuarantine);
-  const [loading, setLoading] = useState<StorageSectionLoading>({
-    policy: true,
-    overview: true,
-    disk: true,
-    runs: true,
-    quarantine: true,
-  });
-  const [sectionErrors, setSectionErrors] = useState<StorageSectionErrors>({
-    policy: null,
-    overview: null,
-    disk: null,
-    runs: null,
-    quarantine: null,
-  });
-  const sectionGenerations = useRef<Record<StorageSection, number>>({
-    policy: 0,
-    overview: 0,
-    disk: 0,
-    runs: 0,
-    quarantine: 0,
-  });
-  const loadSection = useCallback(
-    async <T>(section: StorageSection, request: () => Promise<T>, commit: (value: T) => void) => {
-      const generation = ++sectionGenerations.current[section];
-      setLoading((current) => ({ ...current, [section]: true }));
-      setSectionErrors((current) => ({ ...current, [section]: null }));
-      try {
-        const value = await request();
-        if (generation === sectionGenerations.current[section]) commit(value);
-      } catch (requestError) {
-        if (generation === sectionGenerations.current[section]) {
-          setSectionErrors((current) => ({
-            ...current,
-            [section]: messageFromError(requestError),
-          }));
-          throw requestError;
-        }
-      } finally {
-        if (generation === sectionGenerations.current[section]) {
-          setLoading((current) => ({ ...current, [section]: false }));
-        }
-      }
-    },
-    [],
+  const { loading, setLoading, sectionErrors, setSectionErrors, sectionGenerations, loadSection } =
+    useStorageSections();
+  const { currentDisk, loadDisk } = useStorageDiskCapacity(
+    storage.disk,
+    storage.diskIdentity,
+    capacityIdentity,
+    setDiskInStore,
+    loadSection,
   );
   const reload = useCallback(
     async (sections: StorageSection[] = ["policy", "overview", "disk", "runs", "quarantine"]) => {
@@ -504,7 +523,7 @@ export function useStorageMaintenance() {
           case "overview":
             return loadSection("overview", fetchStorageOverview, setOverview);
           case "disk":
-            return loadSection("disk", fetchStorageDisk, setDisk);
+            return loadDisk();
           case "runs":
             return loadSection("runs", () => fetchStorageRuns(20), setRuns);
           case "quarantine":
@@ -517,7 +536,7 @@ export function useStorageMaintenance() {
       );
       if (failure) throw failure.reason;
     },
-    [loadSection, setDisk, setOverview, setPolicy, setQuarantine, setRuns],
+    [loadDisk, loadSection, setOverview, setPolicy, setQuarantine, setRuns],
   );
   const commitAdoptedPolicy = useCallback(
     (policy: StoragePolicyResponse) => {
@@ -529,12 +548,12 @@ export function useStorageMaintenance() {
     [setPolicy],
   );
   const actions = useStorageActions(reload, commitAdoptedPolicy);
-  useStorageMaintenanceEffects(
+  useStorageMaintenanceEffects({
     reload,
-    actions.setError,
     actions,
     analysisRevision,
-    storage.overview,
-  );
-  return { ...storage, ...actions, loading, sectionErrors, reload };
+    overview: storage.overview,
+    active,
+  });
+  return { ...storage, disk: currentDisk, ...actions, loading, sectionErrors, reload };
 }

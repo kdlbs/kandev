@@ -179,6 +179,7 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 		"",
 		LaunchActivationSourceUserAction,
 		LaunchActivationSourceSessionOpen,
+		LaunchActivationSourceSessionFocus,
 	} {
 		if err := validateLaunchActivationSource(source); err != nil {
 			t.Errorf("validateLaunchActivationSource(%q) = %v", source, err)
@@ -186,6 +187,13 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 	}
 	if err := validateLaunchActivationSource("background_recovery"); err == nil {
 		t.Fatal("unknown launch activation source was accepted")
+	}
+	if err := validateFocusActivationIntent(&LaunchSessionRequest{
+		ActivationSource: LaunchActivationSourceSessionFocus,
+		Intent:           IntentResume,
+		Prompt:           "must not become a synthetic prompt",
+	}); err == nil {
+		t.Fatal("session focus accepted a prompt")
 	}
 }
 

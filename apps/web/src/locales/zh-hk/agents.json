@@ -41,6 +41,7 @@
   "capabilityProbeFailed": "探測失敗。請查看代理程式日誌了解詳情。",
   "capabilityProbing": "正在檢查代理程式能力…",
   "changeTierMappingsFirst": "刪除此設定前，請先更改這些工作區層級映射。",
+  "cliFlagsGoToBridge": "命令列參數會附加到啟動的 ACP 橋接處理程序上，而不是它所封裝的代理程式 CLI。",
   "checkingAuthentication": "正在檢查身份驗證",
   "checkingCapabilitiesAndAuth": "正在檢查代理程式能力與身份驗證…",
   "checkingLatestRuntimeVersion": "正在檢查最新執行時版本…",
@@ -326,5 +327,8 @@
   "watcherKindGithubIssue": "GitHub 議題",
   "watcherKindGithubReview": "GitHub PR 審查",
   "watcherKindJira": "Jira",
-  "watcherKindLinear": "Linear"
+  "watcherKindLinear": "Linear",
+  "nativeCodexUnavailableTitle": "原生 Codex app server 不可用",
+  "nativeCodexUnavailable": "此已儲存的設定會保留，但 Codex app-server 功能關閉時無法編輯、複製、啓用或啓動。你可以刪除此設定，或在設定中啓用該功能。",
+  "nativeCodexUnavailableShort": "功能已關閉"
 }

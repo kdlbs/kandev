@@ -61,13 +61,14 @@ type errorWrapper struct {
 
 // PendingPermission represents a permission request waiting for user response
 type PendingPermission struct {
-	ID         string
-	RequestID  string
-	Request    *adapter.PermissionRequest
-	Snapshot   streams.PendingAgentPermission
-	ResponseCh chan *adapter.PermissionResponse
-	CreatedAt  time.Time
-	State      string
+	ID                string
+	RequestID         string
+	Request           *adapter.PermissionRequest
+	Snapshot          streams.PendingAgentPermission
+	ResponseCh        chan *adapter.PermissionResponse
+	CreatedAt         time.Time
+	State             string
+	AutoApproveOption *adapter.PermissionOption
 }
 
 // PermissionOperationError carries a stable code across the agentctl stream.
@@ -227,8 +228,9 @@ type Manager struct {
 	shellMgr *shell.Manager
 
 	// Protocol adapter for agent communication
-	adapter    adapter.AgentAdapter
-	adapterCfg *adapter.Config
+	adapter                 adapter.AgentAdapter
+	adapterCfg              *adapter.Config
+	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
@@ -482,6 +484,12 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetUserInputRequestHandler configures protocol-native question routing before
+// the agent process starts. Adapters without question support ignore it.
+func (m *Manager) SetUserInputRequestHandler(handler adapter.UserInputRequestHandler) {
+	m.userInputRequestHandler = handler
 }
 
 func (m *Manager) currentWorkspaceSourceRoots() []string {
@@ -1770,19 +1778,19 @@ func lookupEnvValue(env []string, key string) string {
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, false)
+func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
 // effective indexed Git configuration block supplied by env. Ordinary
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
-func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, true)
+func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool) error {
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -1818,11 +1826,6 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
-	// Set approval policy if provided
-	if approvalPolicy != "" {
-		m.cfg.ApprovalPolicy = approvalPolicy
-	}
-
 	// Store continue command for one-shot adapters
 	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
@@ -1841,7 +1844,6 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.logger.Info("agent configured",
 		zap.String("command", command),
 		zap.Strings("args", args),
-		zap.String("approval_policy", m.cfg.ApprovalPolicy),
 		zap.String("continue_command", continueCommand),
 		zap.Int("env_count", len(env)))
 
@@ -1952,6 +1954,9 @@ func (m *Manager) createAdapter() error {
 
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
+	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
+		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
+	}
 
 	return nil
 }
@@ -2791,23 +2796,30 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 
-	// If auto-approve is enabled, immediately approve with the first "allow" option
+	// The backend must persist the selected option before it resolves the live
+	// request. Keep the provider waiting here until that durable claim succeeds.
+	var autoApproveOption *adapter.PermissionOption
 	if m.cfg.AutoApprovePermissions {
-		return m.autoApprovePermission(req)
+		if decision, approved := m.autoApprovePermission(req); approved {
+			autoApproveOption = &decision.option
+		}
 	}
-	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
-		return response, nil
+	if autoApproveOption == nil {
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
 	}
 
 	// Create pending permission with response channel
 	createdAt := time.Now().UTC()
 	pending := &PendingPermission{
-		ID:         pendingID,
-		RequestID:  uuid.NewString(),
-		Request:    req,
-		ResponseCh: make(chan *adapter.PermissionResponse, 1),
-		CreatedAt:  createdAt,
-		State:      streams.PermissionStatusPending,
+		ID:                pendingID,
+		RequestID:         uuid.NewString(),
+		Request:           req,
+		ResponseCh:        make(chan *adapter.PermissionResponse, 1),
+		CreatedAt:         createdAt,
+		State:             streams.PermissionStatusPending,
+		AutoApproveOption: autoApproveOption,
 	}
 	pending.Snapshot = m.permissionSnapshot(pending)
 
@@ -2870,36 +2882,38 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	}
 }
 
-// autoApprovePermission automatically approves a permission request
-// by selecting the first "allow" option, or the first option if no allow option exists
-func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
-	if len(req.Options) == 0 {
-		m.logger.Warn("no options available for auto-approve, cancelling")
-		return &adapter.PermissionResponse{Cancelled: true}, nil
-	}
+// autoApprovePermission answers a permission request by selecting the first
+// offered option whose kind is an allow. It reports false when no such option
+// exists, including for an empty option list, so the caller falls through to
+// the pending permission flow rather than answering with an option the provider
+// meant as a refusal.
+type autoApprovalDecision struct {
+	response *adapter.PermissionResponse
+	option   adapter.PermissionOption
+}
 
-	// Find the first "allow" option
+func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (autoApprovalDecision, bool) {
 	var selectedOption *adapter.PermissionOption
 	for i := range req.Options {
-		opt := &req.Options[i]
-		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
-			selectedOption = opt
+		if isAllowPermissionKind(req.Options[i].Kind) {
+			selectedOption = &req.Options[i]
 			break
 		}
 	}
-
-	// If no allow option, use the first option
 	if selectedOption == nil {
-		selectedOption = &req.Options[0]
+		m.logger.Info("auto-approve found no allow option, prompting instead",
+			zap.Int("option_count", len(req.Options)))
+		return autoApprovalDecision{}, false
 	}
 
 	m.logger.Info("auto-approving permission request",
 		zap.String("option_id", selectedOption.OptionID),
 		zap.String("kind", string(selectedOption.Kind)))
 
-	return &adapter.PermissionResponse{
-		OptionID: selectedOption.OptionID,
-	}, nil
+	return autoApprovalDecision{
+		response: &adapter.PermissionResponse{OptionID: selectedOption.OptionID},
+		option:   *selectedOption,
+	}, true
 }
 
 // sendPermissionNotification sends a permission request notification through the updates channel.
@@ -2914,7 +2928,10 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 // it must park instead: the wait ends either because a backend later
 // attaches (which starts draining the channel, satisfying the same select
 // sendUpdateBlocking already performs) or because the instance stops.
-func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
+// permissionRequestEvent builds the stream event describing a permission
+// request. Shared by the pending flow and by the auto-approved record so both
+// present the same redacted snapshot to the backend.
+func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.AgentEvent {
 	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
 	for i, option := range pending.Snapshot.Options {
 		options[i] = streams.PermissionOption{
@@ -2934,6 +2951,17 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		ActionType:        pending.Snapshot.Action.Type,
 		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
+	if pending.AutoApproveOption != nil {
+		event.AutoApprovedOptionID = pending.AutoApproveOption.OptionID
+		event.AutoApprovedOptionKind = string(pending.AutoApproveOption.Kind)
+		event.AutoApprovalSource = streams.PermissionDecisionSourceAutoApprove
+		event.AutoApprovalPending = true
+	}
+	return event
+}
+
+func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
+	event := m.permissionRequestEvent(pending)
 
 	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),

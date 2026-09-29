@@ -5,6 +5,7 @@ import { ChatStatusBar, shouldRenderChatStatusBar } from "./chat-status-bar";
 
 const statusStore = vi.hoisted(() => {
   const state = {
+    features: { agentBackgroundWork: false },
     userSettings: { showTranscriptAutoScrollControl: false },
     taskSessions: {
       items: {
@@ -45,6 +46,7 @@ vi.mock("@/components/state-provider", () => ({
       () => selector(statusStore.state),
       () => selector(statusStore.state),
     ),
+  useAppStoreApi: () => ({ getState: () => statusStore.state }),
 }));
 
 vi.mock("@/components/task/workflow-move-proceed-button", () => ({

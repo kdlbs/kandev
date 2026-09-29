@@ -41,6 +41,58 @@ old inventory record.
 
 ## Safety
 
+### Recovery enumeration outcomes
+
+For AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.5, carry per-pass typed outcomes
+from `StandaloneExecutor.RecoverInstances` through `ExecutorRegistry` to
+`Manager.Start`. Add an optional detailed recovery interface alongside
+`ExecutorBackend.RecoverInstances`; existing backends and callers remain valid.
+The detailed path returns recovered instances and outcomes keyed by the exact
+input record identity. The registry invokes each backend once and accepts
+outcomes only for records owned by that backend. A backend without detailed
+outcomes retains the existing unknown fallback.
+
+Standalone successful enumeration classifies records with no matching session
+as `no_matching_instance`; failed enumeration reports `enumeration_failed`.
+Correlation ambiguity, stop refusal, cancellation, and deadline remain separate
+when the existing branch proves them, otherwise unknown. A winner later refused
+by Manager reconstruction receives only that reconstruction reason. Never use
+the total minus returned-instance count as evidence of absence. Plugin recovery
+retains unknown for omissions until its own provider can prove a specific
+outcome; standalone evidence cannot classify plugin records.
+
+The summary adds fixed numeric fields for these outcomes, retains existing
+fields, and resets its state on every pass. Internal record keys are not logged.
+Candidate count equals retracked plus classified not-retracked plus unknown
+for known inventory, including mixed-runtime and partially recovered sets.
+No new outcome increments startup progress or changes recovery guards, stops,
+deadlines, persistence, or readiness. The existing below-total warning remains.
+
+### Cleanup inspection attribution
+
+For AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.6, preserve the task-owned
+[cleanup contract](../../tasks/system-design/runtime-cleanup.md), including
+immutable snapshots, changed-branch refusal, and bounded/cascade retry policy.
+`worktree.Manager.branchExists` must return absence only for Git's documented
+missing-ref result. Use quiet verification to distinguish that result from
+fatal repository/command errors; retain subprocess admission and timeout bounds.
+Propagate start errors and other Git exits with the underlying error intact.
+
+The audit boundary attaches a closed inspection stage and reason to failures
+from branch lookup and registration inspection. Differentiate repository-context
+unavailability from executable-launch failure without claiming ENOENT proves
+either one when evidence is ambiguous. Existing ownership and commit mismatch
+branches get their own typed reasons. The cleanup worker logs stage/reason and
+attempt alongside its existing job/task identity, without adding raw command
+output, environment, or new filesystem paths. Wrapped errors remain compatible
+with existing dirty-worktree classification and retry policy.
+
+Do not refresh an audited commit to the current branch, adopt another task's
+path, mark an inspection failure complete, or mutate historical cleanup jobs.
+The underlying records can still require explicit operator reconciliation.
+
+## Diagnostic safety
+
 Do not log SQL, DSNs, webhook URLs or keys, request queries, headers, bodies,
 tokens, local paths, repository URLs, or raw comparison identities. Use fixed
 enum values and numeric measurements; keep identifiers to existing safe task,
@@ -55,3 +107,4 @@ readiness state, retry, stop decision, or persisted record.
 ## Implementation plan
 
 - [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)
+- [Startup log corrections](../../../plans/startup-log-corrections/plan.md)

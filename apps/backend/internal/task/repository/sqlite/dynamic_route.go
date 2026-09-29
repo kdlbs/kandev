@@ -6,18 +6,26 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
+
+const unclassifiedRouteStateStarting = "starting"
 
 var _ dynamicruntime.Persistence = (*Repository)(nil)
 var _ dynamicruntime.ContinuationPersistence = (*Repository)(nil)
 var _ dynamicruntime.GenerationStatusClaimer = (*Repository)(nil)
+var _ dynamicruntime.RouteStateSnapshotClaimer = (*Repository)(nil)
+var _ dynamicruntime.UnclassifiedRouteDecisionRecorder = (*Repository)(nil)
+var _ dynamicruntime.UnclassifiedFallbackLaunchClaimer = (*Repository)(nil)
 
 func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.RouteState) error {
 	if isTransientRouteSession(state.SessionID) {
@@ -112,6 +120,35 @@ func (r *Repository) ClaimRouteStateFrom(
 	return rows == 1, err
 }
 
+// ClaimRouteStateFromSnapshot atomically updates a same-generation route only
+// while both status and the observed policy JSON still match. Streak updates
+// can remain action_required on both sides, so status alone is not an
+// idempotency fence.
+func (r *Repository) ClaimRouteStateFromSnapshot(
+	ctx context.Context,
+	expectedGeneration int64,
+	expectedStatus string,
+	expectedPolicyState string,
+	state dynamicruntime.RouteState,
+) (bool, error) {
+	if isTransientRouteSession(state.SessionID) {
+		return true, nil
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE dynamic_route_states
+		SET logical_profile_id = ?, execution_profile_id = ?,
+			route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, policy_state_json = ?, updated_at = ?
+		WHERE session_id = ? AND route_generation = ? AND state = ? AND policy_state_json = ?
+	`), state.LogicalProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt,
+		state.SessionID, expectedGeneration, expectedStatus, expectedPolicyState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 // RecordRouteDecision commits the generation claim and immutable attempt row
 // together. A stale claim returns dynamicruntime.ErrStaleGeneration.
 func (r *Repository) RecordRouteDecision(ctx context.Context, decision dynamicruntime.RouteDecision, state dynamicruntime.RouteState) error {
@@ -123,8 +160,185 @@ func (r *Repository) RecordRouteDecision(ctx context.Context, decision dynamicru
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := recordRouteDecisionTx(ctx, r, tx, decision, state); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RecordUnclassifiedRouteDecision checks the exact workflow context used to
+// admit the failure while holding the same step-then-task locks as workflow
+// mutations. The route generation and its immutable attempt are committed in
+// that transaction, so a moved or newly vetoed task cannot claim a successor.
+func (r *Repository) RecordUnclassifiedRouteDecision(
+	ctx context.Context,
+	decision dynamicruntime.RouteDecision,
+	state dynamicruntime.RouteState,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.validateUnclassifiedWorkflowContextTx(ctx, tx, evidence); err != nil {
+		return err
+	}
+	if !isTransientRouteSession(state.SessionID) {
+		if err := recordRouteDecisionTx(ctx, r, tx, decision, state); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ClaimUnclassifiedFallbackLaunch is the final automatic-launch fence. It
+// serializes with step edits and task moves, then confirms that this route
+// generation still owns the starting claim before the detached worker starts
+// the successor.
+func (r *Repository) ClaimUnclassifiedFallbackLaunch(
+	ctx context.Context,
+	decision dynamicruntime.RouteDecision,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.validateUnclassifiedWorkflowContextTx(ctx, tx, evidence); err != nil {
+		return err
+	}
+	query := `SELECT logical_profile_id, execution_profile_id, route_generation, profile_version, state
+		FROM dynamic_route_states WHERE session_id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var logicalProfileID, executionProfileID, status string
+	var generation, profileVersion int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), decision.SessionID).Scan(
+		&logicalProfileID, &executionProfileID, &generation, &profileVersion, &status,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dynamicruntime.ErrStaleGeneration
+		}
+		return err
+	}
+	if logicalProfileID != decision.LogicalProfileID || executionProfileID != decision.ExecutionProfileID ||
+		generation != decision.Generation || profileVersion != decision.ProfileVersion || status != unclassifiedRouteStateStarting {
+		return dynamicruntime.ErrStaleGeneration
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) validateUnclassifiedWorkflowContextTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+) error {
+	if !evidence.TaskScope || evidence.TaskID == "" || !evidence.StepKnown {
+		return dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable
+	}
+	if err := r.lockUnclassifiedWorkflowStep(ctx, tx, evidence.StepID); err != nil {
+		return err
+	}
+	if err := r.validateUnclassifiedTaskStepTx(ctx, tx, evidence); err != nil {
+		return err
+	}
+	if err := r.validateUnclassifiedSessionTaskTx(ctx, tx, evidence); err != nil {
+		return err
+	}
+	return r.validateUnclassifiedStepRevisionTx(ctx, tx, evidence)
+}
+
+func (r *Repository) lockUnclassifiedWorkflowStep(ctx context.Context, tx *sqlx.Tx, stepID string) error {
+	if stepID == "" {
+		return nil
+	}
+	if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
+		return fmt.Errorf("%w: lock workflow step: %v", dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable, err)
+	}
+	return nil
+}
+
+func (r *Repository) validateUnclassifiedTaskStepTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+) error {
+	workflowID, stepID, found, err := r.readTaskStepInTx(ctx, tx, evidence.TaskID)
+	if err != nil {
+		return fmt.Errorf("%w: read task step: %v", dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable, err)
+	}
+	if !found {
+		return dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable
+	}
+	if workflowID != evidence.WorkflowID || stepID != evidence.StepID {
+		return dynamicruntime.ErrUnclassifiedWorkflowContextChanged
+	}
+	return nil
+}
+
+func (r *Repository) validateUnclassifiedSessionTaskTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+) error {
+	var sessionTaskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), evidence.SessionID).Scan(&sessionTaskID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable
+		}
+		return fmt.Errorf("%w: read task session: %v", dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable, err)
+	}
+	if sessionTaskID != evidence.TaskID {
+		return dynamicruntime.ErrUnclassifiedWorkflowContextChanged
+	}
+	return nil
+}
+
+func (r *Repository) validateUnclassifiedStepRevisionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	evidence dynamicruntime.UnclassifiedFailureEvidence,
+) error {
+	if evidence.StepID == "" {
+		if evidence.StepVeto || !evidence.StepUpdatedAt.IsZero() {
+			return dynamicruntime.ErrUnclassifiedWorkflowContextChanged
+		}
+		return nil
+	}
+
+	stepQuery := `SELECT workflow_id, disable_unclassified_fallback, updated_at FROM workflow_steps WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		stepQuery += forUpdateClause
+	}
+	var currentWorkflowID string
+	var veto int
+	var updatedAt time.Time
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(stepQuery), evidence.StepID).Scan(&currentWorkflowID, &veto, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dynamicruntime.ErrUnclassifiedWorkflowContextChanged
+		}
+		return fmt.Errorf("%w: read workflow step: %v", dynamicruntime.ErrUnclassifiedWorkflowContextUnavailable, err)
+	}
+	if currentWorkflowID != evidence.WorkflowID || veto != 0 || evidence.StepVeto ||
+		evidence.StepUpdatedAt.IsZero() || !updatedAt.Equal(evidence.StepUpdatedAt) {
+		return dynamicruntime.ErrUnclassifiedWorkflowContextChanged
+	}
+	return nil
+}
+
+func recordRouteDecisionTx(
+	ctx context.Context,
+	r *Repository,
+	tx *sqlx.Tx,
+	decision dynamicruntime.RouteDecision,
+	state dynamicruntime.RouteState,
+) error {
 	expectedGeneration := state.Generation - 1
 	var result sql.Result
+	var err error
 	if expectedGeneration == 0 {
 		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO dynamic_route_states (
@@ -165,7 +379,7 @@ func (r *Repository) RecordRouteDecision(ctx context.Context, decision dynamicru
 		decision.Reason, createdAt); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func decisionReasonTime(_ dynamicruntime.RouteDecision, state dynamicruntime.RouteState) time.Time {
@@ -260,7 +474,7 @@ func (r *Repository) ListStartingRouteStates(ctx context.Context) ([]dynamicrunt
 			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
 		FROM dynamic_route_states
 		WHERE state = ? ORDER BY updated_at ASC
-	`), "starting")
+	`), unclassifiedRouteStateStarting)
 	if err != nil {
 		return nil, err
 	}

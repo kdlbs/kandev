@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/store"
 )
 
 func TestValidateDynamicAgentProfile(t *testing.T) {
@@ -195,6 +197,43 @@ func TestDynamicPolicyCanonicalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUnclassifiedPolicyRoundTrip(t *testing.T) {
+	const input = `{"version":1,"candidates":[{"position":0,"execution_profile_id":"candidate","enabled":true,"policies":{"version":1,"transient":{"on_exhausted":"skip"},"hard":{"on_exhausted":"skip"},"unclassified":{"enabled":true,"consecutive_failure_threshold":3}}}]}`
+	var profile dto.DynamicAgentProfileDTO
+	if err := json.Unmarshal([]byte(input), &profile); err != nil {
+		t.Fatalf("unmarshal profile: %v", err)
+	}
+	if err := validateDynamicAgentProfile(&profile); err != nil {
+		t.Fatalf("validateDynamicAgentProfile: %v", err)
+	}
+	routes, err := dynamicRoutesFromDTO("dynamic", &profile)
+	if err != nil {
+		t.Fatalf("dynamicRoutesFromDTO: %v", err)
+	}
+	got, err := dynamicProfileDTO(&models.DynamicAgentProfile{ProfileID: "dynamic", Version: 1}, routes)
+	if err != nil {
+		t.Fatalf("dynamicProfileDTO: %v", err)
+	}
+	encoded, err := json.Marshal(got.Candidates[0].Policies)
+	if err != nil {
+		t.Fatalf("marshal policies: %v", err)
+	}
+	var policy map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &policy); err != nil {
+		t.Fatalf("unmarshal response policies: %v", err)
+	}
+	var unclassified struct {
+		Enabled                     bool  `json:"enabled"`
+		ConsecutiveFailureThreshold int64 `json:"consecutive_failure_threshold"`
+	}
+	if err := json.Unmarshal(policy["unclassified"], &unclassified); err != nil {
+		t.Fatalf("unmarshal response unclassified policy: %v", err)
+	}
+	if !unclassified.Enabled || unclassified.ConsecutiveFailureThreshold != 3 {
+		t.Fatalf("unclassified policy = %#v, want enabled threshold 3", unclassified)
+	}
+}
+
 func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 	ctrl, repo := newSQLiteBackedController(t)
 	if err := ctrl.agentRegistry.Register(agents.NewDynamicAgent()); err != nil {
@@ -216,6 +255,15 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 		t.Fatalf("create candidate: %v", err)
 	}
 
+	policy := &dto.DynamicAgentPolicyDTO{
+		Version:   1,
+		Transient: dto.DynamicErrorPolicyDTO{OnExhausted: "skip"},
+		Hard:      dto.DynamicErrorPolicyDTO{OnExhausted: "skip"},
+		Unclassified: &dto.DynamicUnclassifiedPolicyDTO{
+			Enabled:                     true,
+			ConsecutiveFailureThreshold: 3,
+		},
+	}
 	created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
 		AgentID: agents.DynamicAgentID,
 		Name:    "Balanced",
@@ -223,7 +271,7 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 			Position:           0,
 			ExecutionProfileID: candidate.ID,
 			Enabled:            true,
-			Rules:              map[string]string{"on_provider_error": "try_next"},
+			Policies:           policy,
 		}}},
 	})
 	if err != nil {
@@ -232,6 +280,44 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 	if created.Kind != "dynamic" || created.Dynamic == nil || created.Dynamic.Version != 1 {
 		t.Fatalf("created dynamic profile = %#v", created)
 	}
+	dynamicRepo, ok := repo.(store.DynamicProfileRepository)
+	if !ok {
+		t.Fatal("repository does not implement dynamic profile storage")
+	}
+	assertStoredUnclassifiedPolicy := func(wantVersion int64, wantThreshold int64) {
+		t.Helper()
+		storedDynamic, storedRoutes, err := dynamicRepo.GetDynamicAgentProfile(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("get dynamic profile from SQLite: %v", err)
+		}
+		storedDTO, err := dynamicProfileDTO(storedDynamic, storedRoutes)
+		if err != nil {
+			t.Fatalf("normalize stored dynamic profile: %v", err)
+		}
+		gotPolicy := storedDTO.Candidates[0].Policies.Unclassified
+		if storedDTO.Version != wantVersion || gotPolicy == nil || !gotPolicy.Enabled || gotPolicy.ConsecutiveFailureThreshold != wantThreshold {
+			t.Fatalf("stored policy = %#v, version = %d; want enabled threshold %d at version %d", gotPolicy, storedDTO.Version, wantThreshold, wantVersion)
+		}
+	}
+	assertStoredUnclassifiedPolicy(1, 3)
+
+	invalidPolicy := *policy
+	invalidPolicy.Unclassified = &dto.DynamicUnclassifiedPolicyDTO{Enabled: true, ConsecutiveFailureThreshold: 11}
+	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
+		ID: created.ID,
+		Dynamic: &dto.DynamicAgentProfileDTO{
+			Version: 1,
+			Candidates: []dto.DynamicAgentCandidateDTO{{
+				Position:           0,
+				ExecutionProfileID: candidate.ID,
+				Enabled:            true,
+				Policies:           &invalidPolicy,
+			}},
+		},
+	}); !errors.Is(err, ErrDynamicProfileRule) {
+		t.Fatalf("invalid threshold update error = %v, want %v", err, ErrDynamicProfileRule)
+	}
+	assertStoredUnclassifiedPolicy(1, 3)
 
 	updated, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
 		ID: created.ID,
@@ -241,6 +327,7 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 				Position:           0,
 				ExecutionProfileID: candidate.ID,
 				Enabled:            false,
+				Policies:           policy,
 			}},
 		},
 	})
@@ -250,6 +337,7 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 	if updated.Dynamic == nil || updated.Dynamic.Version != 2 || updated.Dynamic.Candidates[0].Enabled {
 		t.Fatalf("updated dynamic profile = %#v", updated)
 	}
+	assertStoredUnclassifiedPolicy(2, 3)
 	staleName := "Stale overwrite"
 	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
 		ID:   created.ID,

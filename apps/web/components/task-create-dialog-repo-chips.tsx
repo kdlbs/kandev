@@ -11,6 +11,10 @@ import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
+import { RepositoryDiscoveryDialog } from "@/components/repository-discovery-dialog";
+import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
+import { useToast } from "@/components/toast-provider";
+import { addDesktopDiscoveryRootAction } from "@/app/actions/workspaces";
 import { RepositorySetsControl } from "@/components/task-create-dialog-repository-sets-control";
 import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
 import { SaveRepositorySetMenuAction } from "@/components/task-create-dialog-repository-sets-save-action";
@@ -160,6 +164,123 @@ function LocalRepositoryCreationSurface({
   );
 }
 
+function useRepoCreationFocus(
+  chipRowRef: React.RefObject<HTMLDivElement | null>,
+  clear: () => string | null,
+  target: CreatingRepositoryTarget | null,
+) {
+  return useCallback(
+    (open: boolean) => {
+      if (open || target === null) return;
+      const rowKey = clear();
+      if (rowKey === null) return;
+      requestAnimationFrame(() => {
+        const row = Array.from(
+          chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
+        ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
+        row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
+      });
+    },
+    [chipRowRef, clear, target],
+  );
+}
+
+function useDiscoverySettingsState(workspaceId: string | null) {
+  const discovery = useRepositoryDiscovery(workspaceId);
+  const showDiscoveryControls = discovery.desktopRuntime;
+  const [discoverySettingsOpen, setDiscoverySettingsOpen] = useState(false);
+  const [addingHome, setAddingHome] = useState(false);
+  const { toast } = useToast();
+  const { t } = useTranslation();
+  const handleAddHomeAndOpenDiscovery = useCallback(async () => {
+    setDiscoverySettingsOpen(true);
+    setAddingHome(true);
+    try {
+      await addDesktopDiscoveryRootAction("~");
+      await discovery.load();
+    } catch (error) {
+      toast({
+        title: t("workspaces:failedToDiscoverRepositories"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
+        variant: "error",
+      });
+    } finally {
+      setAddingHome(false);
+    }
+  }, [discovery, toast, t]);
+  return {
+    showDiscoveryControls,
+    discoverySettingsOpen,
+    addingHome,
+    setDiscoverySettingsOpen,
+    handleAddHomeAndOpenDiscovery,
+  };
+}
+
+function RepoChipsSurfaces({
+  repositorySets,
+  fs,
+  onToggleRemote,
+  onToggleNoRepository,
+  localRepositoryCreation,
+  target,
+  targetRef,
+  workspaceId,
+  handleCreationOpenChange,
+  discoverySettingsOpen,
+  showDiscoveryControls,
+  setDiscoverySettingsOpen,
+  isInitialDiscoveryLoading,
+  repositories,
+}: {
+  repositorySets: RepoChipsRowProps["repositorySets"];
+  fs: DialogFormState;
+  onToggleRemote?: () => void;
+  onToggleNoRepository?: () => void;
+  localRepositoryCreation: RepoChipsRowProps["localRepositoryCreation"];
+  target: CreatingRepositoryTarget | null;
+  targetRef: { current: CreatingRepositoryTarget | null };
+  workspaceId: string | null;
+  handleCreationOpenChange: (open: boolean) => void;
+  discoverySettingsOpen: boolean;
+  showDiscoveryControls?: boolean;
+  setDiscoverySettingsOpen: (open: boolean) => void;
+  isInitialDiscoveryLoading?: boolean;
+  repositories: Repository[];
+}) {
+  return (
+    <>
+      {repositorySets && !fs.useRemote && !fs.noRepository ? (
+        <RepositorySetsSurface
+          repositorySets={repositorySets}
+          repositories={repositories}
+          rows={fs.repositories}
+        />
+      ) : null}
+      <SourceModeSwitch
+        useRemote={fs.useRemote}
+        noRepository={fs.noRepository}
+        onToggleRemote={onToggleRemote}
+        onToggleNoRepository={onToggleNoRepository}
+      />
+      <LocalRepositoryCreationSurface
+        creation={localRepositoryCreation}
+        target={target}
+        targetRef={targetRef}
+        workspaceId={workspaceId}
+        multiRow={fs.repositories.length > 1}
+        onOpenChange={handleCreationOpenChange}
+      />
+      <RepositoryDiscoveryDialog
+        open={discoverySettingsOpen && !!showDiscoveryControls}
+        onOpenChange={setDiscoverySettingsOpen}
+        workspaceId={workspaceId}
+        isInitialLoading={isInitialDiscoveryLoading}
+      />
+    </>
+  );
+}
+
 export function RepoChipsRow({
   fs,
   repositories,
@@ -184,18 +305,15 @@ export function RepoChipsRow({
   repositorySets,
 }: RepoChipsRowProps) {
   const chipRowRef = useRef<HTMLDivElement>(null);
+  const {
+    showDiscoveryControls,
+    discoverySettingsOpen,
+    addingHome,
+    setDiscoverySettingsOpen,
+    handleAddHomeAndOpenDiscovery,
+  } = useDiscoverySettingsState(workspaceId);
   const { target, targetRef, openForRow, clear } = useCreatingRepositoryTarget();
-  const handleCreationOpenChange = (open: boolean) => {
-    if (open || target === null) return;
-    const rowKey = clear();
-    if (rowKey === null) return;
-    requestAnimationFrame(() => {
-      const row = Array.from(
-        chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
-      ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
-      row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
-    });
-  };
+  const handleCreationOpenChange = useRepoCreationFocus(chipRowRef, clear, target);
   // Local executor branch behavior:
   //   - chip is clickable (user can switch to any existing branch on disk)
   //   - row.branch seeds from the workspace's current branch (currentLocalBranch)
@@ -249,31 +367,29 @@ export function RepoChipsRow({
         lastUsedBranch={lastUsedBranch}
         userSettingsLoaded={userSettingsLoaded}
         onCreateRepository={localRepositoryCreation ? openForRow : undefined}
+        showDiscoveryControls={showDiscoveryControls}
+        onOpenDiscoverySettings={() => setDiscoverySettingsOpen(true)}
+        onAddHomeAndOpenDiscovery={
+          showDiscoveryControls ? handleAddHomeAndOpenDiscovery : undefined
+        }
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
       />
-      {/* Sets select workspace repositories, so they are offered only in the mode
-          that selects those: not in Remote URL or No repository. */}
-      {repositorySets && !fs.useRemote && !fs.noRepository ? (
-        <RepositorySetsSurface
-          repositorySets={repositorySets}
-          repositories={repositories}
-          rows={fs.repositories}
-        />
-      ) : null}
-      <SourceModeSwitch
-        useRemote={fs.useRemote}
-        noRepository={fs.noRepository}
+      <RepoChipsSurfaces
+        repositorySets={repositorySets}
+        fs={fs}
         onToggleRemote={onToggleRemote}
         onToggleNoRepository={onToggleNoRepository}
-      />
-      <LocalRepositoryCreationSurface
-        creation={localRepositoryCreation}
+        localRepositoryCreation={localRepositoryCreation}
         target={target}
         targetRef={targetRef}
         workspaceId={workspaceId}
-        multiRow={fs.repositories.length > 1}
-        onOpenChange={handleCreationOpenChange}
+        handleCreationOpenChange={handleCreationOpenChange}
+        discoverySettingsOpen={discoverySettingsOpen}
+        showDiscoveryControls={showDiscoveryControls}
+        setDiscoverySettingsOpen={setDiscoverySettingsOpen}
+        isInitialDiscoveryLoading={addingHome}
+        repositories={repositories}
       />
     </div>
   );
@@ -319,6 +435,32 @@ function RepositorySetsSurface({
   );
 }
 
+type ModeBodyProps = {
+  fs: DialogFormState;
+  repositories: Repository[];
+  workspaceId: string | null;
+  isLocalExecutor: boolean;
+  canAddMore: boolean;
+  addHint: string | undefined;
+  freshBranchAvailable?: boolean;
+  freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
+  onRowRepositoryChange: (key: string, value: string) => void;
+  onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
+  onToggleFreshBranch?: (enabled: boolean) => void;
+  onWorkspacePathChange?: (value: string) => void;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
+  onCreateRepository?: (key: string) => void;
+  showDiscoveryControls?: boolean;
+  onOpenDiscoverySettings?: () => void;
+  onAddHomeAndOpenDiscovery?: () => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
+};
+
 function ModeBody({
   fs,
   repositories,
@@ -338,30 +480,12 @@ function ModeBody({
   lastUsedBranch,
   userSettingsLoaded,
   onCreateRepository,
+  showDiscoveryControls,
+  onOpenDiscoverySettings,
+  onAddHomeAndOpenDiscovery,
   onRefreshRepositories,
   repositoriesRefreshing,
-}: {
-  fs: DialogFormState;
-  repositories: Repository[];
-  workspaceId: string | null;
-  isLocalExecutor: boolean;
-  canAddMore: boolean;
-  addHint: string | undefined;
-  freshBranchAvailable?: boolean;
-  freshBranchEnabled?: boolean;
-  branchPolicyDisabledReason?: string;
-  onRowRepositoryChange: (key: string, value: string) => void;
-  onRowBranchChange: (key: string, value: string) => void;
-  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
-  onPolicySelected?: () => void;
-  onToggleFreshBranch?: (enabled: boolean) => void;
-  onWorkspacePathChange?: (value: string) => void;
-  lastUsedBranch?: string | null;
-  userSettingsLoaded?: boolean;
-  onCreateRepository?: (key: string) => void;
-  onRefreshRepositories?: () => void;
-  repositoriesRefreshing?: boolean;
-}) {
+}: ModeBodyProps) {
   if (fs.noRepository) {
     return <NoRepositoryMode fs={fs} onWorkspacePathChange={onWorkspacePathChange} />;
   }
@@ -398,7 +522,9 @@ function ModeBody({
       onRowPolicyChange={onRowPolicyChange}
       onPolicySelected={onPolicySelected}
       showBranchPolicies
-      showDiscoveryControls
+      showDiscoveryControls={showDiscoveryControls}
+      onOpenDiscoverySettings={onOpenDiscoverySettings}
+      onAddHomeAndOpenDiscovery={onAddHomeAndOpenDiscovery}
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}

@@ -927,6 +927,30 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	require.Equal(t, true, usage["estimated"])
 }
 
+func TestPersistNativeCodexTurnIDBindsProviderTurnToActiveKandevTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_id": "codex-app-server"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.config.CodexAppServerEnabled = true
+	svc.turnService = &repoTurnService{repo: repo}
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.persistNativeCodexTurnID(ctx, &lifecycle.AgentStreamEventPayload{
+		SessionID: "s1",
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeTurnStarted, OperationID: "native-turn-1"},
+	})
+
+	stored, err := repo.GetTurn(ctx, turn.ID)
+	require.NoError(t, err)
+	require.Equal(t, "native-turn-1", stored.Metadata[models.TurnMetaKeyCodexNativeTurnID])
+}
+
 // TestToolEventsWakeSessionAndTaskTogether locks in the fix for the
 // REVIEW + RUNNING split: when an out-of-turn tool event (e.g. a Monitor
 // watcher firing after on_turn_complete moved the task to REVIEW) wakes
@@ -1826,6 +1850,61 @@ func TestUsageEventIDFor(t *testing.T) {
 	// under-count cost, so it must keep falling back to a random id.
 	require.NotEqual(t, usageEventIDFor("s1", "exec-1", 0), usageEventIDFor("s1", "exec-1", 0),
 		"promptGeneration==0 must not derive a stable id")
+}
+
+func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-native-usage", "session-native-usage", "")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	cacheWrite := int64(7)
+	observation := &streams.NativeUsageObservation{
+		SchemaVersion: 1, Source: "response", ProviderThreadID: "native-root",
+		ProviderTurnID: "native-turn", ProviderResponseID: "response-1", Scope: "direct",
+		Completeness: "exact", Model: "gpt-5-codex", ReportedCacheWriteTokens: &cacheWrite,
+		PriceSuppressed: true,
+	}
+	frame := &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-native-usage", SessionID: "session-native-usage", ExecutionID: "execution-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: streams.EventTypeUsageObservation, TurnID: "turn-kandev-1",
+			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5}, UsageObservation: observation,
+		},
+	}
+	svc.publishNativeUsageObservation(ctx, frame)
+	svc.publishNativeUsageObservation(ctx, frame)
+	if len(eb.events) != 2 {
+		t.Fatalf("published events = %d, want 2", len(eb.events))
+	}
+	first := eb.events[0].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	second := eb.events[1].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	if first.UsageEventID == "" || first.UsageEventID != second.UsageEventID {
+		t.Fatalf("usage event IDs = %q and %q, want stable non-empty ID", first.UsageEventID, second.UsageEventID)
+	}
+	if first.TurnID != "turn-kandev-1" || first.Model != "gpt-5-codex" || first.UsageObservation != observation || !first.Usage.PriceSuppressed {
+		t.Fatalf("published native usage payload = %#v", first)
+	}
+	if eb.events[0].subject != events.BuildSessionPromptUsageSubject("session-native-usage") {
+		t.Fatalf("subject = %q", eb.events[0].subject)
+	}
+
+	child := *observation
+	child.ProviderThreadID = "native-child"
+	child.ProviderResponseID = "response-child"
+	child.Scope = "child"
+	child.Model = ""
+	childFrame := *frame
+	childData := *frame.Data
+	childData.UsageObservation = &child
+	childData.CurrentModelID = "must-not-infer"
+	childFrame.Data = &childData
+	svc.publishNativeUsageObservation(ctx, &childFrame)
+	third := eb.events[2].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	if third.Model != "" || third.UsageEventID == first.UsageEventID {
+		t.Fatalf("child usage attribution model/id = %q/%q, want no inferred parent model and distinct identity", third.Model, third.UsageEventID)
+	}
 }
 
 // TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID is the

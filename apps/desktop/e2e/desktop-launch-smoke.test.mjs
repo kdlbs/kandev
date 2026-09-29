@@ -16,6 +16,7 @@ import {
   writeJsonAtomically,
   createAtomicRecordWriter,
   waitForFile,
+  writeInstanceRecord,
   writeFakeRuntime,
   writeReleaseShapedRuntime,
 } from "./desktop-launch-smoke.mjs";
@@ -92,6 +93,21 @@ test("waitForFile resolves once the target file appears", async () => {
     const target = join(dir, "marker");
     const write = new Promise((r) => setTimeout(r, 50)).then(() => writeFile(target, "1"));
     await Promise.all([waitForFile(target, 2_000), write]);
+  });
+});
+
+test("instance records remain valid during concurrent updates", async () => {
+  await withTempDir(async (dir) => {
+    const target = join(dir, "instance.json");
+    await writeInstanceRecord(dir, { pid: 1, payload: "a".repeat(100_000) });
+    const writes = Array.from({ length: 30 }, (_, i) =>
+      writeInstanceRecord(dir, { pid: i + 2, payload: "b".repeat(100_000) }),
+    );
+    const reads = Array.from({ length: 100 }, async () => {
+      const record = JSON.parse(await readFile(target, "utf8"));
+      assert.equal(record.payload.length, 100_000);
+    });
+    await Promise.all([...writes, ...reads]);
   });
 });
 

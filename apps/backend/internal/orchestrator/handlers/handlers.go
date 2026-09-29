@@ -38,6 +38,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
+	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
 	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
@@ -167,6 +168,41 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+publicErr.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsForkConversationRequest struct {
+	TaskID          string `json:"task_id"`
+	SourceSessionID string `json:"session_id"`
+	TurnID          string `json:"turn_id"`
+	RequestID       string `json:"request_id"`
+}
+
+func (h *Handlers) wsForkConversation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsForkConversationRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SourceSessionID == "" || req.TurnID == "" || req.RequestID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, turn_id, and request_id are required", nil)
+	}
+	response, err := h.service.ForkConversation(ctx, orchestrator.ForkConversationRequest{
+		TaskID: req.TaskID, SourceSessionID: req.SourceSessionID,
+		TurnID: req.TurnID, RequestID: req.RequestID,
+	})
+	if err != nil {
+		if errors.Is(err, orchestrator.ErrCodexForkUnsupported) ||
+			errors.Is(err, orchestrator.ErrCodexForkActive) ||
+			errors.Is(err, orchestrator.ErrCodexForkUncertain) ||
+			errors.Is(err, orchestrator.ErrCodexForkInProgress) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
+		}
+		h.logger.Warn("conversation fork failed", zap.String("session_id", req.SourceSessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "conversation fork failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 type wsEnsureSessionRequest struct {

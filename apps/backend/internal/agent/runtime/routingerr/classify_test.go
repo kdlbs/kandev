@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 )
 
 func resetInjection() {
@@ -275,6 +276,74 @@ func TestError_String(t *testing.T) {
 	e := &Error{Code: CodeAuthRequired, ClassifierRule: "claude.stderr.auth.v1"}
 	if got := e.Error(); got != "auth_required: claude.stderr.auth.v1" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// Codex sends the usage-limit notice as a plain agent message with a
+// typographic apostrophe, and the terminal ACP error is only "Internal error".
+// Classifying the notice text itself must yield a fallback-eligible quota error
+// carrying the provider's retry time so dynamic routing can advance.
+func TestClassify_CodexUsageLimitPlainText(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name string
+		text string
+	}{
+		{
+			"curly apostrophe",
+			"You\u2019ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 27th, 2026 3:09 AM.",
+		},
+		{
+			"straight apostrophe",
+			"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 27th, 2026 3:09 AM.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{
+				Phase:      PhaseStreaming,
+				ProviderID: "codex-acp",
+				Stderr:     tc.text,
+			})
+			if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+				t.Fatalf("classification = %s/%s, want quota_limited/high (rule=%s)",
+					e.Code, e.Confidence, e.ClassifierRule)
+			}
+			if !e.FallbackAllowed {
+				t.Fatalf("quota failure must allow fallback: %+v", e)
+			}
+			if e.ResetHint != nil {
+				t.Fatalf("ResetHint = %v, want no hint for an unzoned provider time", e.ResetHint)
+			}
+		})
+	}
+}
+
+func TestClassify_CodexUsageLimitExplicitTimezone(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "codex-acp",
+		Stderr:     "You've hit your usage limit. try again at Sep 27th, 2026 3:09 AM UTC.",
+	})
+	want := time.Date(2026, time.September, 27, 3, 9, 0, 0, time.UTC)
+	if e.ResetHint == nil || !e.ResetHint.Equal(want) {
+		t.Fatalf("ResetHint = %v, want %v", e.ResetHint, want)
+	}
+}
+
+// The structured reset hint from the adapter always wins over text parsing.
+func TestClassify_ResetHintStructuredWins(t *testing.T) {
+	resetInjection()
+	hint := time.Date(2030, time.January, 2, 4, 5, 0, 0, time.UTC)
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "codex-acp",
+		Stderr:     "You\u2019ve hit your usage limit. try again at Sep 27th, 2026 3:09 AM.",
+		ResetHint:  &hint,
+	})
+	if e.ResetHint == nil || !e.ResetHint.Equal(hint) {
+		t.Fatalf("ResetHint = %v, want the structured %v", e.ResetHint, hint)
 	}
 }
 
