@@ -48,6 +48,10 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.POST("/coordinators/:cid/proposals/:pid/approve", h.httpApproveProposal)
 	workspace.POST("/coordinators/:cid/proposals/:pid/reject", h.httpRejectProposal)
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
+	if svc.phase2 {
+		workspace.GET("/coordinators/:cid/settings", h.httpGetSettings)
+		workspace.PUT("/coordinators/:cid/settings", h.httpPutSettings)
+	}
 }
 
 // coordinatorDTO builds the coordinator wire shape, adding the phase-2 policy
@@ -276,7 +280,13 @@ func (h *Handlers) httpListStalls(c *gin.Context) {
 func (h *Handlers) respondError(c *gin.Context, err error) {
 	var fieldErr *FieldError
 	var conflictErr *ProposalConflictError
+	var settingsErr *SettingsError
+	var deniedErr *PolicyDeniedError
 	switch {
+	case errors.As(err, &settingsErr):
+		c.JSON(http.StatusBadRequest, gin.H{"error": settingsErr.Message, "field": settingsErr.Field, "code": settingsErr.Code})
+	case errors.As(err, &deniedErr):
+		c.JSON(http.StatusConflict, gin.H{"error": "policy_denied", "action": deniedErr.Action})
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
 	case errors.As(err, &conflictErr):
