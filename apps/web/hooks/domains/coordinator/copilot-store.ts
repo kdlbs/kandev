@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { create } from "zustand";
+import { create, type StoreApi, type UseBoundStore } from "zustand";
 import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 
 export type { CopilotItemRef, CopilotItemRefKind } from "@/lib/coordinator/copilot-id";
@@ -14,20 +14,20 @@ export type CopilotEntry = {
 
 export const INITIAL_COPILOT_ENTRY: CopilotEntry = { open: false, chip: null, draft: "" };
 
-type CopilotSlot = CopilotEntry & {
+export type CopilotSlot = CopilotEntry & {
   /** The coordinator the slot belongs to; null while nothing has been opened. */
   coordinatorId: string | null;
   /** True once the composer's stored draft text was cleared for this slot. */
   draftsSwept: boolean;
 };
 
-const INITIAL_SLOT: CopilotSlot = {
+export const INITIAL_SLOT: CopilotSlot = {
   ...INITIAL_COPILOT_ENTRY,
   coordinatorId: null,
   draftsSwept: false,
 };
 
-type CopilotStoreState = CopilotSlot & {
+export type CopilotStoreState = CopilotSlot & {
   getEntry: (coordinatorId: string) => CopilotEntry;
   setOpen: (coordinatorId: string, open: boolean) => void;
   /** `label` always equals `id` in phase 1. */
@@ -59,6 +59,51 @@ function entryOf(slot: CopilotSlot): CopilotEntry {
   return { open: slot.open, chip: slot.chip, draft: slot.draft };
 }
 
+type SlotSet = (fn: (state: CopilotStoreState) => Partial<CopilotStoreState>) => void;
+
+/** The slot state and actions shared by the Coordinator-screen store and the
+ *  workspace host store; the caller supplies the writer. */
+export function createCopilotSlot(set: SlotSet, get: () => CopilotStoreState): CopilotStoreState {
+  return {
+    ...INITIAL_SLOT,
+    getEntry: (coordinatorId) => {
+      const state = get();
+      return state.coordinatorId === coordinatorId ? entryOf(state) : INITIAL_COPILOT_ENTRY;
+    },
+    setOpen: (coordinatorId, open) => set((state) => ({ ...slotFor(state, coordinatorId), open })),
+    askAboutThis: (coordinatorId, id, ref, draft) =>
+      set((state) => ({
+        ...slotFor(state, coordinatorId),
+        open: true,
+        chip: { id, label: id, ref },
+        draft,
+      })),
+    clearDraft: (coordinatorId) =>
+      set((state) => (state.coordinatorId === coordinatorId ? { draft: "" } : state)),
+    removeChip: (coordinatorId) =>
+      set((state) => (state.coordinatorId === coordinatorId ? { chip: null } : state)),
+    clearChipAndDraft: (coordinatorId) =>
+      set((state) => ({ ...slotFor(state, coordinatorId), chip: null, draft: "" })),
+    removeEntry: (coordinatorId) =>
+      set((state) => (state.coordinatorId === coordinatorId ? INITIAL_SLOT : state)),
+    keepOnlyFor: (coordinatorId) =>
+      set((state) =>
+        state.coordinatorId === null || state.coordinatorId === coordinatorId
+          ? state
+          : INITIAL_SLOT,
+      ),
+    markDraftsSwept: (coordinatorId) =>
+      set((state) => (state.coordinatorId === coordinatorId ? { draftsSwept: true } : state)),
+  };
+}
+
+export type CopilotStore = UseBoundStore<StoreApi<CopilotStoreState>>;
+
+/** A fresh, independent copilot slot store. */
+export function createCopilotStore(): CopilotStore {
+  return create<CopilotStoreState>()((set, get) => createCopilotSlot(set, get));
+}
+
 /**
  * Client-memory store for the copilot panel and **Ask about this**: a single
  * `{coordinatorId, open, chip, draft}` slot (`docs/specs/coordinator/
@@ -68,35 +113,7 @@ function entryOf(slot: CopilotSlot): CopilotEntry {
  * the panel; acting for a different coordinator replaces it, and
  * `keepOnlyFor` resets it on any other path.
  */
-export const useCopilotStore = create<CopilotStoreState>()((set, get) => ({
-  ...INITIAL_SLOT,
-  getEntry: (coordinatorId) => {
-    const state = get();
-    return state.coordinatorId === coordinatorId ? entryOf(state) : INITIAL_COPILOT_ENTRY;
-  },
-  setOpen: (coordinatorId, open) => set((state) => ({ ...slotFor(state, coordinatorId), open })),
-  askAboutThis: (coordinatorId, id, ref, draft) =>
-    set((state) => ({
-      ...slotFor(state, coordinatorId),
-      open: true,
-      chip: { id, label: id, ref },
-      draft,
-    })),
-  clearDraft: (coordinatorId) =>
-    set((state) => (state.coordinatorId === coordinatorId ? { draft: "" } : state)),
-  removeChip: (coordinatorId) =>
-    set((state) => (state.coordinatorId === coordinatorId ? { chip: null } : state)),
-  clearChipAndDraft: (coordinatorId) =>
-    set((state) => ({ ...slotFor(state, coordinatorId), chip: null, draft: "" })),
-  removeEntry: (coordinatorId) =>
-    set((state) => (state.coordinatorId === coordinatorId ? INITIAL_SLOT : state)),
-  keepOnlyFor: (coordinatorId) =>
-    set((state) =>
-      state.coordinatorId === null || state.coordinatorId === coordinatorId ? state : INITIAL_SLOT,
-    ),
-  markDraftsSwept: (coordinatorId) =>
-    set((state) => (state.coordinatorId === coordinatorId ? { draftsSwept: true } : state)),
-}));
+export const useCopilotStore = createCopilotStore();
 
 /** Reactive entry read for `coordinatorId`, for components; `getEntry` above
  *  reads a snapshot outside React. */
