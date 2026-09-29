@@ -154,9 +154,15 @@ export function createEnvironmentLiveResource(
       if (!taskId) return EMPTY_SNAPSHOT;
       return getEntry(registry, owner, taskId)?.snapshot ?? EMPTY_SNAPSHOT;
     },
-    subscribe(owner: object | null, taskId: string, consumerId: symbol, listener: () => void) {
+    subscribe(
+      owner: object | null,
+      taskId: string,
+      consumerId: symbol,
+      listener: () => void,
+      active = false,
+    ) {
       const entry = entryFor(registry, owner, taskId);
-      entry.consumers.set(consumerId, entry.consumers.get(consumerId) ?? false);
+      entry.consumers.set(consumerId, active);
       entry.listeners.set(consumerId, listener);
       updateTimer(registry, entry);
       if (!entry.snapshot.response && !entry.snapshot.notFound && !entry.request) {

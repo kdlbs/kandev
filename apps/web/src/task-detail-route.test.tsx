@@ -371,6 +371,26 @@ describe("TaskDetailRoute", () => {
   });
 });
 
+describe("TaskDetailRoute optional enrichment", () => {
+  it("keeps the destination shell ready when enrichment fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.fetchTaskNavigationEnrichment.mockRejectedValueOnce(new Error("session list offline"));
+
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(ROUTE_READY_ATTRIBUTE),
+      ).toBe("true");
+      expect(warn).toHaveBeenCalled();
+    });
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
+      TASK_ONE_ID,
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
 describe("TaskDetailRoute client navigation", () => {
   it("renders a cached destination immediately while its shared identity read is pending", () => {
     const routeData = deferred<TaskNavigationIdentity>();

@@ -7,6 +7,7 @@ import type { AppState } from "./store";
 export type TaskNavigationIdentity = {
   task: Task;
   allSessionsResponse: TaskSessionsResponse;
+  sessionListUnavailable?: boolean;
 };
 
 export type TaskNavigationContext = {
@@ -61,13 +62,18 @@ export class TaskNavigationReads {
     const existing = this.reads.get(key);
     if (existing) return existing;
 
-    const promise = Promise.resolve(this.loadIdentity(taskId)).then((identity) => {
-      if (!this.scopeIsCurrent()) {
-        throw new Error("Task navigation read scope changed");
-      }
-      return identity;
-    });
+    const promise = Promise.resolve()
+      .then(() => this.loadIdentity(taskId))
+      .then((identity) => {
+        if (!this.scopeIsCurrent()) {
+          throw new Error("Task navigation read scope changed");
+        }
+        return identity;
+      });
     this.reads.set(key, promise);
+    void promise.catch(() => {
+      if (this.reads.get(key) === promise) this.reads.delete(key);
+    });
     while (this.reads.size > MAX_RETAINED_READS) {
       const oldest = this.reads.keys().next().value;
       if (oldest === undefined) break;
@@ -87,8 +93,11 @@ export function createTaskNavigationReads(
 function fetchTaskNavigationIdentity(taskId: string): Promise<TaskNavigationIdentity> {
   return Promise.all([
     fetchTask(taskId, { cache: "no-store" }),
-    listTaskSessions(taskId, { cache: "no-store" }),
-  ]).then(([task, allSessionsResponse]) => ({ task, allSessionsResponse }));
+    listTaskSessions(taskId, { cache: "no-store" }).then(
+      (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
+      () => ({ allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true }),
+    ),
+  ]).then(([task, sessionList]) => ({ task, ...sessionList }));
 }
 
 function storeIdentity(state: AppState) {

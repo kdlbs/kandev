@@ -234,6 +234,30 @@ describe("progressive task navigation state", () => {
 });
 
 describe("task navigation shell turn hydration", () => {
+  it("retries a failed session-list read after revealing the task shell", async () => {
+    const session = makeSession();
+    const identity: TaskNavigationIdentity = {
+      task: makeTask({ primary_session_id: sessionId(SESSION_ID) }),
+      allSessionsResponse: { sessions: [], total: 0 },
+      sessionListUnavailable: true,
+    };
+    mocks.listTaskSessions.mockResolvedValueOnce({ sessions: [session], total: 1 });
+    mocks.fetchTaskSession.mockResolvedValue({ session });
+    mocks.listTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false });
+    mocks.listSessionTurns.mockResolvedValue({ turns: [], total: 0 });
+
+    const shell = buildTaskNavigationShellData(identity);
+    expect(shell.sessionId).toBe(SESSION_ID);
+    expect(shell.initialState.taskSessionsByTask?.loadedByTaskId[TASK_ID]).toBeUndefined();
+
+    const enrichment = await fetchTaskNavigationEnrichment(identity);
+
+    expect(mocks.listTaskSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchTaskSession).toHaveBeenCalledWith(SESSION_ID, { cache: "no-store" });
+    expect(enrichment.initialState.taskSessionsByTask?.loadedByTaskId[TASK_ID]).toBe(true);
+    expect(enrichment.initialState.taskSessions?.items[SESSION_ID]).toEqual(session);
+  });
+
   it("lets authoritative enrichment replace the shell without losing live turns", async () => {
     const session = makeSession();
     const identity: TaskNavigationIdentity = {

@@ -204,9 +204,15 @@ function useEnvironmentLiveSnapshot(
   const subscribe = useCallback(
     (listener: () => void) =>
       taskId
-        ? environmentLiveResource.subscribe(storeOwner, taskId, consumerId.current, listener)
+        ? environmentLiveResource.subscribe(
+            storeOwner,
+            taskId,
+            consumerId.current,
+            listener,
+            active,
+          )
         : () => undefined,
-    [storeOwner, taskId],
+    [active, storeOwner, taskId],
   );
   const getSnapshot = useCallback(
     () => environmentLiveResource.getSnapshot(storeOwner, taskId),

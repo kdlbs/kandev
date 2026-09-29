@@ -94,9 +94,40 @@ describe("task navigation reads", () => {
     response.resolve(identity("task-1"));
     await expect(result).rejects.toThrow("Task navigation read scope changed");
   });
+
+  it("retries a rejected shared identity read in the same navigation generation", async () => {
+    const load = vi
+      .fn<(taskId: string) => Promise<TaskNavigationIdentity>>()
+      .mockRejectedValueOnce(new Error("temporary task read failure"))
+      .mockResolvedValueOnce(identity("task-1"));
+    const reads = createTaskNavigationReads(load);
+    const generation = reads.beginNavigation({}, "/t/task-1");
+
+    await expect(reads.read("task-1", generation)).rejects.toThrow("temporary task read failure");
+    await expect(reads.read("task-1", generation)).resolves.toMatchObject({
+      task: { id: "task-1" },
+    });
+    expect(load).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("task navigation store scope", () => {
+  it("keeps task identity available when the session list fails", async () => {
+    apiMocks.fetchTask.mockResolvedValue({
+      id: "task-a",
+      primary_session_id: "session-a",
+    } as TaskNavigationIdentity["task"]);
+    apiMocks.listTaskSessions.mockRejectedValue(new Error("session list unavailable"));
+    const store = createAppStore();
+
+    const result = await readTaskNavigationIdentity(store, "task-a");
+
+    expect(result.task.id).toBe("task-a");
+    expect(result.sessionListUnavailable).toBe(true);
+    expect(result.allSessionsResponse.sessions).toEqual([]);
+    expect(store.getState().tasks.activeTaskId).toBeNull();
+  });
+
   it("rejects an old-store read after a new identity owner replaces its scope", async () => {
     const taskA = deferred<TaskNavigationIdentity["task"]>();
     const sessionsA = deferred<TaskNavigationIdentity["allSessionsResponse"]>();

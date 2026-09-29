@@ -74,10 +74,34 @@ function deferred<T>() {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 describe("useTaskEnvironment Kubernetes status", () => {
+  it("uses the active polling interval on the first subscription", async () => {
+    vi.useFakeTimers();
+    mocks.fetchTaskEnvironmentLive.mockResolvedValue({ environment: ENVIRONMENT });
+    mocks.getKubernetesTaskSession.mockResolvedValue(KUBERNETES_SESSION);
+
+    renderHook(() => useEnvironmentWithSession(TASK_ONE, SESSION_ONE, true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_999);
+    });
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(2);
+  });
+
   it("shares the task environment read across mounted status consumers", async () => {
     const pending = deferred<{ environment: TaskEnvironment }>();
     mocks.fetchTaskEnvironmentLive.mockImplementation(() => pending.promise);

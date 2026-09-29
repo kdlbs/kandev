@@ -119,6 +119,15 @@ export class PRFeedbackResourceScope {
     return this.start(key, entry, fetch);
   }
 
+  ensureFresh(key: string, fetch: () => Promise<PRFeedback>, refreshToken?: string): Promise<void> {
+    const entry = this.entry(key);
+    if (!this.active) return Promise.resolve();
+    if (refreshToken !== undefined) entry.refreshToken = refreshToken;
+    if (entry.queuedRefresh) return entry.queuedRefresh;
+    if (entry.flight) return entry.flight;
+    return this.start(key, entry, fetch);
+  }
+
   invalidate(key: string, fetch: () => Promise<PRFeedback>): Promise<void> {
     const entry = this.entry(key);
     if (!this.active) return Promise.resolve();

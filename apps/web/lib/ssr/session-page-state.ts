@@ -162,6 +162,7 @@ type BuildSessionPageStateParams = {
   turns?: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
   userSettingsResponse?: UserSettingsResponse | null;
   messagesResponse?: ListMessagesResponse | null;
+  taskSessionsLoaded?: boolean;
 };
 
 /**
@@ -252,7 +253,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
 
 /** Builds the session-page hydration slice (task sessions, turns, models) for the page's task. */
 function buildSessionState(p: BuildSessionPageStateParams) {
-  const { task, sessionId, allSessions, activeSession, turns } = p;
+  const { task, sessionId, allSessions, activeSession, turns, taskSessionsLoaded = true } = p;
   // Prefer the full active session payload (with agent_profile_snapshot) over
   // its summary entry in allSessions so the model selector can resolve the
   // persisted model on first render without flashing the agent default.
@@ -263,11 +264,15 @@ function buildSessionState(p: BuildSessionPageStateParams) {
   return {
     taskSessions: { items: itemsBySessionId },
     ...buildSessionModelsState(activeSession),
-    taskSessionsByTask: {
-      itemsByTaskId: { [task.id]: allSessions },
-      loadingByTaskId: { [task.id]: false },
-      loadedByTaskId: { [task.id]: true },
-    },
+    ...(taskSessionsLoaded
+      ? {
+          taskSessionsByTask: {
+            itemsByTaskId: { [task.id]: allSessions },
+            loadingByTaskId: { [task.id]: false },
+            loadedByTaskId: { [task.id]: true },
+          },
+        }
+      : {}),
     ...(turns !== undefined
       ? {
           turns: sessionId
@@ -423,7 +428,9 @@ export function buildTaskNavigationShellData(
   const allSessions = (allSessionsResponse.sessions ?? []).filter(
     (session) => session.task_id === task.id,
   );
-  const sessionId = resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  const sessionId = identity.sessionListUnavailable
+    ? (requestedSessionId ?? task.primary_session_id ?? null)
+    : resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
   return {
     task,
     sessionId,
@@ -432,6 +439,7 @@ export function buildTaskNavigationShellData(
       sessionId,
       allSessions,
       activeSession: null,
+      taskSessionsLoaded: !identity.sessionListUnavailable,
     }),
     initialTerminals: [],
   };
@@ -443,7 +451,10 @@ export async function fetchTaskNavigationEnrichment(
   requestedSessionId?: string,
   options: { store?: StoreApi<AppState> } = {},
 ): Promise<FetchedSessionData> {
-  const { task, allSessionsResponse } = identity;
+  const { task } = identity;
+  const allSessionsResponse = identity.sessionListUnavailable
+    ? await listTaskSessions(task.id, { cache: "no-store" })
+    : identity.allSessionsResponse;
   const sessionId = resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
   const loadAgentList = options.store
     ? () => getAgentListResourceScope(options.store!).ensure()

@@ -63,9 +63,16 @@ function useFeedbackFetch(workspaceId: string | null, pr: TaskPR | null) {
       void scope.ensure(request.key, request.fetch, request.refreshToken);
     }
   }, [scope]);
+  const ensureFreshForOpen = useCallback(() => {
+    const request = requestRef.current;
+    if (request.key && request.refreshToken !== null) {
+      void scope.ensureFresh(request.key, request.fetch, request.refreshToken);
+    }
+  }, [scope]);
   return {
     refetch,
     ensureForRefresh,
+    ensureFreshForOpen,
     refreshToken,
     isFetching: snapshot.loading,
     feedback: snapshot.feedback,
@@ -111,7 +118,7 @@ export function usePRCIPopover(
   enabled: boolean,
   refreshTaskPR?: () => void | Promise<void>,
 ): Result {
-  const { refetch, ensureForRefresh, isFetching, feedback, lastUpdatedAt } = useFeedbackFetch(
+  const { refetch, ensureFreshForOpen, isFetching, feedback, lastUpdatedAt } = useFeedbackFetch(
     workspaceId,
     pr,
   );
@@ -127,12 +134,12 @@ export function usePRCIPopover(
       const sync = refreshTaskPR?.();
       trackSync(sync);
       if (sync) {
-        void sync.then(ensureForRefresh, ensureForRefresh);
+        void sync.then(ensureFreshForOpen, ensureFreshForOpen);
       } else {
-        ensureForRefresh();
+        ensureFreshForOpen();
       }
     });
-  }, [enabled, ensureForRefresh, refreshTaskPR, trackSync]);
+  }, [enabled, ensureFreshForOpen, refreshTaskPR, trackSync]);
 
   return {
     feedback,

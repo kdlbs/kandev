@@ -14,7 +14,13 @@ type Reconciliation = {
   inFlight: boolean;
   startedAt: number;
   etag: string | null;
+  requestGeneration: number;
   timer?: ReturnType<typeof setTimeout>;
+};
+
+type ReconciliationRequest = {
+  generation: number;
+  hydrationEpochAtRequestStart: ReturnType<typeof captureTaskSessionHydrationEpoch>;
 };
 
 const reconciliationsByStore = new WeakMap<StoreApi<AppState>, Map<string, Reconciliation>>();
@@ -48,6 +54,7 @@ export function acquireSessionStateReconciliation(
   const reconciliations = reconciliationMap(store);
   const existing = reconciliations.get(sessionId);
   if (existing) {
+    if (existing.consumers === 0) existing.startedAt = Date.now();
     existing.consumers += 1;
     return () => releaseReconciliation(reconciliations, sessionId, existing);
   }
@@ -57,14 +64,21 @@ export function acquireSessionStateReconciliation(
     inFlight: false,
     startedAt: Date.now(),
     etag: null,
+    requestGeneration: 0,
   };
   reconciliations.set(sessionId, reconciliation);
 
-  const scheduleNext = () => {
+  const scheduleNext = (requestGeneration: number) => {
     if (!stillOwnsReconciliation(reconciliations, sessionId, reconciliation)) return;
     reconciliation.inFlight = false;
     if (reconciliation.consumers === 0) {
       reconciliations.delete(sessionId);
+      return;
+    }
+    if (requestGeneration !== reconciliation.requestGeneration) {
+      reconciliation.startedAt = Date.now();
+      reconciliation.etag = null;
+      reconcile();
       return;
     }
     const current = store.getState().taskSessions.items[sessionId];
@@ -75,19 +89,17 @@ export function acquireSessionStateReconciliation(
 
   function reconcile() {
     reconciliation.inFlight = true;
+    const requestGeneration = reconciliation.requestGeneration;
     const hydrationEpochAtRequestStart = captureTaskSessionHydrationEpoch(
       store.getState(),
       sessionId,
     );
-    readAndReconcile(
-      store,
-      sessionId,
-      reconciliation,
-      reconciliations,
+    readAndReconcile(store, sessionId, reconciliation, reconciliations, {
+      generation: requestGeneration,
       hydrationEpochAtRequestStart,
-    )
+    })
       .catch(() => {})
-      .finally(scheduleNext);
+      .finally(() => scheduleNext(requestGeneration));
   }
 
   reconcile();
@@ -99,10 +111,12 @@ async function readAndReconcile(
   sessionId: string,
   reconciliation: Reconciliation,
   reconciliations: Map<string, Reconciliation>,
-  hydrationEpochAtRequestStart: ReturnType<typeof captureTaskSessionHydrationEpoch>,
+  request: ReconciliationRequest,
 ): Promise<void> {
+  const { generation: requestGeneration, hydrationEpochAtRequestStart } = request;
   const owns = () =>
     reconciliation.consumers > 0 &&
+    reconciliation.requestGeneration === requestGeneration &&
     stillOwnsReconciliation(reconciliations, sessionId, reconciliation);
   if (!owns()) return;
 
@@ -149,6 +163,7 @@ function releaseReconciliation(
   if (!stillOwnsReconciliation(reconciliations, sessionId, reconciliation)) return;
   reconciliation.consumers -= 1;
   if (reconciliation.consumers > 0) return;
+  reconciliation.requestGeneration += 1;
   reconciliation.etag = null;
   if (reconciliation.timer) clearTimeout(reconciliation.timer);
   // Keep an in-flight owner registered until its request settles. React can
