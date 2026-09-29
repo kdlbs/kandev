@@ -192,6 +192,8 @@ test.describe("Coordinator copilot", () => {
     ).toBeVisible({ timeout: 30_000 });
 
     const launcher = testPage.getByTestId("coordinator-copilot-launcher");
+    // Escape closes the panel only while focus is inside it.
+    await popover.getByRole("button", { name: "Close" }).focus();
     await testPage.keyboard.press("Escape");
     await expect(popover).not.toBeVisible();
     await expect(launcher).toBeFocused();
@@ -241,6 +243,8 @@ test.describe("Coordinator copilot", () => {
     });
 
     const launcher = testPage.getByTestId("coordinator-copilot-launcher");
+    // Escape closes the panel only while focus is inside it.
+    await popover.getByRole("button", { name: "Close" }).focus();
     await testPage.keyboard.press("Escape");
     await expect(popover).not.toBeVisible();
     await expect(launcher).toHaveAccessibleName(`${coordinator.name} is working`);
@@ -254,12 +258,15 @@ test.describe("Coordinator copilot", () => {
     await cancelButton.click();
 
     await expect(cancelButton).not.toBeVisible({ timeout: 15_000 });
+    // The launcher is hidden while the panel is open.
+    await reopened.getByRole("button", { name: "Close" }).click();
+    await expect(reopened).not.toBeVisible();
     await expect(launcher).toHaveAccessibleName(`Chat with ${coordinator.name}`, {
       timeout: 15_000,
     });
   });
 
-  test("fits within the viewport at 1200px, clear of the sidebar (Acceptance: screens leave room for the popover)", async ({
+  test("sits beside the list at 1200px, full height and clear of the sidebar (Acceptance: screens leave room for the panel)", async ({
     testPage,
     apiClient,
     seedData,
@@ -276,18 +283,92 @@ test.describe("Coordinator copilot", () => {
 
     const box = await popover.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeLessThanOrEqual(420);
-    expect(box!.height).toBeLessThanOrEqual(550);
     expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.y).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(1200);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
     expect(box!.y + box!.height).toBeLessThanOrEqual(800);
+    // Full content height, not the old 550px popover.
+    expect(box!.height).toBeGreaterThan(550);
 
     const sidebarRow = testPage.getByTestId(`sidebar-coordinator-${coordinator.id}`);
     await expect(sidebarRow).toBeVisible();
     const sidebarBox = await sidebarRow.boundingBox();
     expect(sidebarBox).not.toBeNull();
     expect(sidebarBox!.x + sidebarBox!.width).toBeLessThanOrEqual(box!.x);
+  });
+
+  test("titles the panel with the coordinator, offers Close without maximize, and closes on Close, returning focus to the launcher", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Header Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const popover = await openCopilot(testPage);
+    await expect(popover.getByText("Coordinator: Header Coordinator")).toBeVisible();
+    await expect(popover.getByRole("button", { name: /maximize/i })).toHaveCount(0);
+    // The launcher is hidden while the panel is open.
+    await expect(testPage.getByTestId("coordinator-copilot-launcher")).toHaveCount(0);
+
+    await popover.getByRole("button", { name: "Close" }).click();
+    await expect(popover).not.toBeVisible();
+    await expect(testPage.getByTestId("coordinator-copilot-launcher")).toBeFocused();
+  });
+
+  test("keeps every Needs you item action uncovered beside the panel at 1440px with the sidebar expanded", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Wide Layout Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Wide Layout Card",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an active session for the clarification task");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification session should block before the Needs you screen is opened",
+      timeout: 60_000,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const card = testPage.getByTestId(`needs-you-item-${task.id}`);
+    await expect(card).toBeVisible();
+    const popover = await openCopilot(testPage);
+
+    const panelBox = await popover.boundingBox();
+    expect(panelBox).not.toBeNull();
+    await expect(card).toBeVisible();
+    const buttons = card.getByRole("button");
+    const count = await buttons.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const buttonBox = await buttons.nth(i).boundingBox();
+      if (!buttonBox) continue;
+      expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(panelBox!.x + 1);
+    }
   });
 
   test("a failure opening the conversation shows no composer and no session recovery feedback (AC .004.6, reachable row)", async ({
