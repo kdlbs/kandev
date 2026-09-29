@@ -56,6 +56,7 @@ type CoordinatorDTO struct {
 	OpenProposals         *int           `json:"open_proposals,omitempty"`
 	AgentProfileStatus    *ProfileStatus `json:"agent_profile_status,omitempty"`
 	ExecutorProfileStatus *ProfileStatus `json:"executor_profile_status,omitempty"`
+	Summary               *SummaryDTO    `json:"summary,omitempty"`
 
 	*CoordinatorPhase2
 }
@@ -66,6 +67,36 @@ type CoordinatorPhase2 struct {
 	Policy         CoordinatorPolicyDTO `json:"policy"`
 	PolicyRevision int                  `json:"policy_revision"`
 	Watches        CoordinatorWatchDTO  `json:"watches"`
+}
+
+// SummaryDTO is the list route's per-coordinator card summary, present only
+// while phase 2 is on. WatchedCount is the effective watch set size and is 0
+// for scope all; ApprovalActions counts actions set to requires_approval.
+type SummaryDTO struct {
+	WatchScope      string `json:"watch_scope"`
+	WatchedCount    int    `json:"watched_count"`
+	ApprovalActions int    `json:"approval_actions"`
+	ActiveOrders    int    `json:"active_orders"`
+}
+
+// WithSummary derives the card summary from the attached phase-2 fields and
+// the active standing order count, and returns the receiver. It is a no-op
+// while phase 2 is off.
+func (d *CoordinatorDTO) WithSummary(activeOrders int) *CoordinatorDTO {
+	if d.CoordinatorPhase2 == nil {
+		return d
+	}
+	sum := &SummaryDTO{WatchScope: d.Watches.Scope, ActiveOrders: activeOrders}
+	if d.Watches.Scope != watchScopeAll {
+		sum.WatchedCount = len(d.Watches.WorkflowIDs)
+	}
+	for _, setting := range d.Policy.Actions {
+		if setting == SettingRequiresApproval {
+			sum.ApprovalActions++
+		}
+	}
+	d.Summary = sum
+	return d
 }
 
 // CoordinatorPolicyDTO is the effective permission map.
