@@ -56,6 +56,13 @@ without redundant reads or data from another navigation context.
   surface, visible touch actions, safe-area clearance, and a single content
   scroll owner without horizontal document overflow.
 
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7:** Selecting a task already present
+  in the current workspace SHALL render its available task context and owned
+  cached conversation without waiting for route refresh requests. Client
+  navigation SHALL NOT wait for unrelated optional boot enrichment. Unknown
+  task/session ownership SHALL resolve before displaying a conversation;
+  stale responses SHALL NOT replace the selected task or newer session state.
+
 ## Compatibility
 
 These criteria supplement existing [column visibility](board-step-visibility-filter.md),

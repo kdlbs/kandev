@@ -691,10 +691,15 @@ type LaunchOptions struct {
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
 	OnExecutionAdmitted func(executionID string)
-	Prompt              string
-	PriorACPSession     string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID      string
-	StartAgent          bool
+	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
+	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
+	// closes that ownership when delivery fails before acceptance.
+	OnInitialPromptAccepted func(executionID string)
+	OnInitialPromptFailed   func()
+	Prompt                  string
+	PriorACPSession         string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID          string
+	StartAgent              bool
 	// RefuseIfAgentRunning makes peer-message admission fail closed when the
 	// selected session already has an active agent. Other internal launch paths
 	// retain their existing workspace reuse behavior.

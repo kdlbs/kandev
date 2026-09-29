@@ -271,5 +271,11 @@
   "placement.none": "Nenhuma unidade encontrada",
   "placement.moved": "Área de trabalho movida.",
   "placement.failed": "Não foi possível mover a área de trabalho.",
-  "placement.ownerOnly": "Só o proprietário pode mover"
+  "placement.ownerOnly": "Só o proprietário pode mover",
+  "idlePolicyDescription": "Suspenda os agentes ACP inativos nesta área de trabalho para reduzir a utilização de recursos. Esta opção está desativada por predefinição.",
+  "idlePolicyResumeDescription": "A sessão selecionada é retomada quando abre a tarefa ou envia uma mensagem.",
+  "idlePolicyTitle": "Poupar recursos",
+  "idleSuspensionEnabled": "Suspender agentes ACP inativos",
+  "idleTimeoutMinutes": "Tempo limite de inatividade (minutos)",
+  "idleTimeoutMustBePositive": "Introduza um número inteiro superior a zero."
 }

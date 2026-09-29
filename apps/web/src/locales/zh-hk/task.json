@@ -2395,7 +2395,7 @@
   "toolPayloadRemoved": "工具詳細數據已刪除。",
   "copyRecoveryDetails": "複製詳情",
   "recoveryDetailsCopied": "已複製詳情",
-  "recoveryDetailsCopyFailed": "無法複製詳情。請選擇文字進行複製。",
+  "recoveryDetailsCopyFailed": "無法複製詳情。請選擇文字進行復制。",
   "recoveryMoreOptions": "更多選項",
   "recoveryOptions": "恢復選項",
   "viewRecovery": "查看恢復選項",

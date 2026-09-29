@@ -102,6 +102,8 @@ export async function updateWorkspaceAction(
     default_environment_id?: string;
     default_agent_profile_id?: string;
     default_config_agent_profile_id?: string;
+    acp_idle_suspension_enabled?: boolean;
+    acp_idle_timeout_minutes?: number;
   },
 ) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {
@@ -370,6 +372,7 @@ type BackendTemplateStep = {
   session_target?: StepDefinition["session_target"];
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
   complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
@@ -392,6 +395,7 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     pull_from_step_id: step.pull_from_step_id ?? null,
   }));
   return {
@@ -429,6 +433,7 @@ type BackendWorkflowStep = {
   session_target?: WorkflowStep["session_target"];
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
   complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
@@ -459,6 +464,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
     step.profile_session_end_policy,
   ),
+  disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
   complete_task_on_enter: step.complete_task_on_enter,
   auto_advance_requires_signal: step.auto_advance_requires_signal,
   cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
@@ -515,6 +521,7 @@ export async function createWorkflowStepAction(payload: {
   cancel_triggers_turn_complete?: boolean;
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
 }): Promise<WorkflowStep> {
   const body = {
     workflow_id: payload.workflow_id,
@@ -535,6 +542,7 @@ export async function createWorkflowStepAction(payload: {
     cancel_triggers_turn_complete: payload.cancel_triggers_turn_complete ?? false,
     profile_session_start_policy: payload.profile_session_start_policy,
     profile_session_end_policy: payload.profile_session_end_policy,
+    disable_unclassified_fallback: payload.disable_unclassified_fallback ?? false,
     auto_advance_requires_signal: payload.auto_advance_requires_signal ?? false,
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
@@ -567,6 +575,7 @@ export async function updateWorkflowStepAction(
       | "stage_type"
       | "profile_session_start_policy"
       | "profile_session_end_policy"
+      | "disable_unclassified_fallback"
       | "complete_task_on_enter"
     >
   >,

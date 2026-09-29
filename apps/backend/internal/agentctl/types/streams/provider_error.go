@@ -4,12 +4,17 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
 // MaxProviderMessageBytes bounds a sanitized provider diagnostic message.
 const MaxProviderMessageBytes = 2048
+
+// MaxCompleteProviderDiagnosticBytes caps the raw text used to attest an exact
+// provider diagnostic identity. The sanitized display message may be larger.
+const MaxCompleteProviderDiagnosticBytes = 1024
 
 var (
 	providerMessageURLPattern        = regexp.MustCompile(`(?i)https?://[^\s]+`)
@@ -40,6 +45,15 @@ func SanitizeProviderMessage(message string) string {
 	return message
 }
 
+// IsCompleteProviderDiagnostic reports whether raw is safe to use as an exact
+// diagnostic identity. Identity is complete only when the original valid
+// UTF-8 text is short and the display sanitizer leaves it unchanged.
+func IsCompleteProviderDiagnostic(raw string) bool {
+	return raw != "" && utf8.ValidString(raw) &&
+		len(raw) <= MaxCompleteProviderDiagnosticBytes &&
+		SanitizeProviderMessage(raw) == raw
+}
+
 const (
 	ProviderErrorSourceOpenCodeStderr = "opencode_stderr"
 	// ProviderErrorSourceOpenCodeACP marks a provider diagnostic projected
@@ -64,6 +78,9 @@ type ProviderError struct {
 	Source     string `json:"source,omitempty"`
 	ProviderID string `json:"provider_id,omitempty"`
 	ModelID    string `json:"model_id,omitempty"`
+	// DiagnosticIdentityComplete is set only when the adapter extracted the
+	// complete raw diagnostic and sanitization made no change to it.
+	DiagnosticIdentityComplete bool `json:"diagnostic_identity_complete,omitempty"`
 	// RPCCode is the JSON-RPC error code from a terminal ACP prompt error,
 	// carried verbatim. JSON-RPC forbids code 0, so 0 means absent.
 	RPCCode int `json:"rpc_code,omitempty"`

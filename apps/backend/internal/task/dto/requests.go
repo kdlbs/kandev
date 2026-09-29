@@ -25,12 +25,14 @@ type CreateWorkspaceRequest struct {
 }
 
 type UpdateWorkspaceRequest struct {
-	ID                    string
-	Name                  *string
-	Description           *string
-	DefaultExecutorID     *string
-	DefaultEnvironmentID  *string
-	DefaultAgentProfileID *string
+	ID                       string
+	Name                     *string
+	Description              *string
+	DefaultExecutorID        *string
+	DefaultEnvironmentID     *string
+	DefaultAgentProfileID    *string
+	ACPIdleSuspensionEnabled *bool
+	ACPIdleTimeoutMinutes    *int
 }
 
 type DeleteWorkspaceRequest struct {

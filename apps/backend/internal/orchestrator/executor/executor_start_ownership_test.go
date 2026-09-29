@@ -55,7 +55,7 @@ func TestExistingWorkspaceStart_ActiveAgent(t *testing.T) {
 	}
 
 	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "queued follow-up", true, "", request, nil, true,
+		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, true,
 	)
 	if err == nil {
 		<-started
@@ -99,7 +99,7 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	}
 
 	execution, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "initial brief", true, "", request, nil, true,
+		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, true,
 	)
 
 	require.NoError(t, err)

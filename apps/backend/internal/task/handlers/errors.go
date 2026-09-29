@@ -267,7 +267,8 @@ func isValidationError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) {
+	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) ||
+		errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) {
 		return true
 	}
 	if errors.Is(err, service.ErrInvalidWorkflowChange) {

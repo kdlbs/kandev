@@ -83,6 +83,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	terminalCompleteStream := false
+	var observedOutput, observedEffect bool
 
 	if eventType == agentEventComplete {
 		if marker, ok := s.terminalExecutionMarker(sessionID, payload.ExecutionID); ok {
@@ -121,6 +122,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.Data.Text,
 			)
 		} else {
+			observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 			s.observePromptAttempt(
 				payload.SessionID,
 				eventExecutionID,
@@ -130,6 +132,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			)
 		}
 	case "thinking_streaming":
+		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
@@ -138,6 +141,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
+		observedEffect = true
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
@@ -145,6 +149,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			false,
 			true,
 		)
+	}
+	if observedOutput || observedEffect {
+		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
+			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
+			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
+		}, true)
 	}
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
@@ -467,6 +477,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		failure := watcher.AgentEventData{
 			TaskID:           taskID,
 			SessionID:        sessionID,
+			OwnerKind:        string(payload.OwnerKind),
 			AgentExecutionID: executionID,
 			AgentID:          payload.AgentID,
 			AgentProfileID:   payload.AgentProfileID,
@@ -478,7 +489,10 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			failure.ErrorMessage = payload.Data.Text
 		}
 		failure = s.withPromptAttemptEvidence(failure)
-		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
+		result := s.routeDynamicAgentFailureWithEvidence(
+			ctx, failure, classifyKanbanFailure(failure), nil, true,
+		)
+		if result.handled && !result.manualRecovery {
 			return
 		}
 	}
