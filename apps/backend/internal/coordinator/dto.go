@@ -49,6 +49,7 @@ type CoordinatorDTO struct {
 	ExecutorProfileID     string         `json:"executor_profile_id"`
 	Context               string         `json:"context"`
 	ConversationTaskID    *string        `json:"conversation_task_id"`
+	ConfigRevision        int64          `json:"config_revision"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	OpenProposals         *int           `json:"open_proposals,omitempty"`
@@ -67,6 +68,7 @@ func NewCoordinatorDTO(c *Coordinator) *CoordinatorDTO {
 		ExecutorProfileID:  c.ExecutorProfileID,
 		Context:            c.Context,
 		ConversationTaskID: c.ConversationTaskID,
+		ConfigRevision:     c.ConfigRevision,
 		CreatedAt:          c.CreatedAt,
 		UpdatedAt:          c.UpdatedAt,
 	}

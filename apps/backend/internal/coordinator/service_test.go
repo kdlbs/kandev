@@ -273,6 +273,50 @@ func TestServiceListCoordinators(t *testing.T) {
 		}
 		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
+
+	t.Run("pairs each of several coordinators with its own count, not another's", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+
+		busy, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Busy", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		idle, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Idle", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		for i := 0; i < 3; i++ {
+			if err := svc.store.InsertProposal(ctx, &Proposal{
+				CoordinatorID: busy.ID, WorkspaceID: workspaceID,
+				Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
+			}); err != nil {
+				t.Fatalf("InsertProposal() unexpected error: %v", err)
+			}
+		}
+
+		items, err := svc.ListCoordinators(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("ListCoordinators() unexpected error: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("ListCoordinators() len = %d, want 2", len(items))
+		}
+		byID := make(map[string]int, len(items))
+		for _, item := range items {
+			byID[item.Coordinator.ID] = item.OpenProposals
+		}
+		if byID[busy.ID] != 3 {
+			t.Errorf("busy coordinator's OpenProposals = %d, want 3", byID[busy.ID])
+		}
+		if byID[idle.ID] != 0 {
+			t.Errorf("idle coordinator's OpenProposals = %d, want 0", byID[idle.ID])
+		}
+	})
 }
 
 func TestServicePatchCoordinator(t *testing.T) {
@@ -582,6 +626,46 @@ func TestServiceListStalls(t *testing.T) {
 		_, err := svc.ListStalls(context.Background(), workspaceID)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("ListStalls() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+}
+
+func TestServiceGetStall(t *testing.T) {
+	const workspaceID = "ws-1"
+
+	t.Run("returns the one stall row for the task", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		ctx := context.Background()
+		now := svc.store.now()
+		if _, err := svc.store.UpsertStall(ctx, &Stall{
+			TaskID: "task-a", WorkspaceID: workspaceID, StalledForMs: 1000, LastEventAt: now, DetectedAt: now,
+		}); err != nil {
+			t.Fatalf("UpsertStall() unexpected error: %v", err)
+		}
+		stall, err := svc.GetStall(ctx, workspaceID, "task-a")
+		if err != nil {
+			t.Fatalf("GetStall() unexpected error: %v", err)
+		}
+		if stall.TaskID != "task-a" || stall.WorkspaceID != workspaceID {
+			t.Fatalf("GetStall() = %#v", stall)
+		}
+	})
+
+	t.Run("not found when the task never stalled", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		_, err := svc.GetStall(context.Background(), workspaceID, "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetStall() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, nil, nil, wantErr)
+		_, err := svc.GetStall(context.Background(), workspaceID, "task-a")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("GetStall() error = %v, want %v", err, wantErr)
 		}
 		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})

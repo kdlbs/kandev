@@ -10,7 +10,7 @@ type CoordinatorCopilotChipRowProps = {
 };
 
 /** The "about `<id>`" chip above the composer
- *  (docs/specs/coordinator/system-design/copilot-popover.md#ask-about-this).
+ *  (docs/specs/coordinator/system-design/copilot-panel.md#ask-about-this).
  *  Reuses the transcript tag's translated key so the chip and the sent
  *  message's tag read the same. */
 export function CoordinatorCopilotChipRow({ chip, onRemove }: CoordinatorCopilotChipRowProps) {
@@ -39,7 +39,7 @@ type CoordinatorCopilotEmptyIntroProps = {
 
 /** The empty-conversation intro and one fixed suggestion, shown above the
  *  composer only while the transcript has no messages
- *  (docs/specs/coordinator/system-design/copilot-popover.md#empty-conversation). */
+ *  (docs/specs/coordinator/system-design/copilot-panel.md#panel). */
 export function CoordinatorCopilotEmptyIntro({ onSuggest }: CoordinatorCopilotEmptyIntroProps) {
   const { t } = useTranslation();
   const suggestion = t("coordinator:copilotSuggestionQuestion");

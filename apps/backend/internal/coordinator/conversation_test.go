@@ -377,7 +377,7 @@ func TestOpenConversationRacingOpensOverEndedTaskConverge(t *testing.T) {
 		winnerTaskID = winner.Task.ID
 		// The concurrent winner races over the same ended task: its stale
 		// value is also first.TaskID.
-		ok, err := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, winnerTaskID, first.TaskID)
+		ok, err := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, winnerTaskID, first.TaskID, deps.coordinator.ConfigRevision)
 		if err != nil || !ok {
 			t.Fatalf("commit winner task: ok=%v err=%v", ok, err)
 		}
@@ -477,7 +477,7 @@ func TestOpenConversationCreateRaceConverges(t *testing.T) {
 			t.Fatalf("seed winner task: %v", err)
 		}
 		winnerTaskID = winner.Task.ID
-		ok, err := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, winnerTaskID, "")
+		ok, err := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, winnerTaskID, "", deps.coordinator.ConfigRevision)
 		if err != nil || !ok {
 			t.Fatalf("commit winner task: ok=%v err=%v", ok, err)
 		}
@@ -537,7 +537,38 @@ func TestResolveConversationCreateRaceReferenceCleared(t *testing.T) {
 	// The coordinator's conversation_task_id is already NULL (never set),
 	// simulating the reread landing after a concurrent clear.
 
-	_, err = deps.svc.resolveConversationCreateRace(ctx, deps.coordinator.ID, created.Task.ID)
+	_, err = deps.svc.resolveConversationCreateRace(ctx, deps.coordinator.ID, created.Task.ID, deps.coordinator.ConfigRevision)
+	if !errors.Is(err, ErrConversationConflict) {
+		t.Fatalf("resolveConversationCreateRace() error = %v, want ErrConversationConflict", err)
+	}
+	if _, exists := deps.tasks.tasks[created.Task.ID]; exists {
+		t.Error("the task created by the losing call was not deleted")
+	}
+}
+
+// TestResolveConversationCreateRaceConfigRevisionMismatch covers step 4's
+// zero-rows branch when the reread's config_revision differs from the value
+// read in step 1: a context/profile change was saved while this call created
+// its task under the earlier configuration, so it must report
+// ErrConversationConflict and delete the task it created, even when the
+// reference happens to be NULL on both sides (checked before the
+// reference-cleared branch).
+func TestResolveConversationCreateRaceConfigRevisionMismatch(t *testing.T) {
+	deps := newConversationTestDeps(t)
+	ctx := context.Background()
+
+	created, err := deps.tasks.CreateTask(ctx, &taskservice.CreateTaskRequest{WorkspaceID: deps.coordinator.WorkspaceID, Title: "Coordinator: mine"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	newContext := "changed context"
+	if _, _, err := deps.svc.store.PatchCoordinator(ctx, deps.coordinator.WorkspaceID, deps.coordinator.ID, CoordinatorPatch{Context: &newContext}, nil); err != nil {
+		t.Fatalf("PatchCoordinator: %v", err)
+	}
+
+	staleConfigRevision := deps.coordinator.ConfigRevision
+	_, err = deps.svc.resolveConversationCreateRace(ctx, deps.coordinator.ID, created.Task.ID, staleConfigRevision)
 	if !errors.Is(err, ErrConversationConflict) {
 		t.Fatalf("resolveConversationCreateRace() error = %v, want ErrConversationConflict", err)
 	}
@@ -620,7 +651,7 @@ func TestOpenConversationConfirmMismatchIsConflict(t *testing.T) {
 		resp, err := origEnsure.EnsureSession(ctx, taskID, opts...)
 		if err == nil && !repointed {
 			repointed = true
-			if ok, casErr := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, other.Task.ID, taskID); casErr != nil || !ok {
+			if ok, casErr := deps.svc.store.SetConversationTaskID(ctx, deps.coordinator.ID, other.Task.ID, taskID, deps.coordinator.ConfigRevision); casErr != nil || !ok {
 				t.Fatalf("repoint coordinator: ok=%v err=%v", ok, casErr)
 			}
 		}

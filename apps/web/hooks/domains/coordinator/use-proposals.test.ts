@@ -67,6 +67,16 @@ function proposal(overrides: Partial<Proposal> & { id: string }): Proposal {
   };
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 type UpdatedHandler = (message: { payload: Record<string, unknown> }) => void;
 
 function makeWsClient() {
@@ -605,9 +615,7 @@ describe("cross-path interleaving", () => {
   const PROPOSAL_ID = "p-1";
 
   it("backfill vs by-id: a stale by-id 404 issued before a fresher backfill success cannot evict its row", async () => {
-    useProposalsStore
-      .getState()
-      .mergeOne(COORDINATOR_ID, proposal({ id: PROPOSAL_ID, status: "pending" }));
+    seedProposal(COORDINATOR_ID, proposal({ id: PROPOSAL_ID, status: "pending" }));
 
     const byIdRead = deferred<Proposal>();
     const backfillRead = deferred<Proposal>();

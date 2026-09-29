@@ -10,10 +10,10 @@ import (
 )
 
 // coordinatorSurfaceActions is the execution-time mirror of the fixed
-// six-tool coordinator catalog (docs/specs/coordinator/system-design/
-// copilot.md#tool-surface, AC-COORDINATOR-COPILOT-003.1). Discovery alone is
-// not an authorization boundary because an agent can still send a raw
-// WebSocket action.
+// seven-tool coordinator catalog (docs/specs/coordinator/system-design/
+// copilot-tools.md#tool-surface, AC-COORDINATOR-COPILOT-003.1). Discovery
+// alone is not an authorization boundary because an agent can still send a
+// raw WebSocket action.
 var coordinatorSurfaceActions = map[string]struct{}{
 	ws.ActionMCPListTasks:           {},
 	ws.ActionMCPGetTaskConversation: {},
@@ -21,23 +21,47 @@ var coordinatorSurfaceActions = map[string]struct{}{
 	ws.ActionMCPListWorkflowSteps:   {},
 	ws.ActionMCPListRepositories:    {},
 	coordinator.ActionProposeTask:   {},
+	coordinator.ActionGetItem:       {},
+}
+
+// coordinatorPrincipalOnlyActions are registered coordinator-surface actions
+// that must never be reachable by a non-coordinator principal, even though
+// they are allowlisted above: coordinator.propose_task and
+// coordinator.get_item both dispatch to handlers that trust the principal's
+// own WorkspaceID/CoordinatorID rather than any payload field
+// (copilot-tools.md#tool-surface).
+var coordinatorPrincipalOnlyActions = map[string]struct{}{
+	coordinator.ActionProposeTask: {},
+	coordinator.ActionGetItem:     {},
 }
 
 // authorizeCoordinatorRequest is the one execution-time boundary for the
-// fixed coordinator surface: a coordinator principal may call only the six
-// allowlisted actions, each scoped to its own workspace, and
-// coordinator.propose_task may only be called by a coordinator principal.
+// fixed coordinator surface: a coordinator principal may call only the seven
+// allowlisted actions, each scoped to its own workspace, and the two
+// coordinatorPrincipalOnlyActions (coordinator.propose_task,
+// coordinator.get_item) may only be called by a coordinator principal.
+// Before either of those checks, the reserved decision action names
+// (coordinator.DecisionActions) are refused for a coordinator principal or an
+// unresolved (no) principal, per
+// docs/specs/coordinator/system-design/proposals.md#security; an ordinary
+// principal is left untouched here and reaches the dispatcher, which answers
+// the same unregistered action as unknown.
 //
 // Cross-workspace checks on coordinator.propose_task's own workflow_id,
 // step_id, repository_id and source_task_id fields are deliberately left to
 // coordinator.Service.ProposeTask, which returns a *FieldError naming the
 // offending field (AC-COORDINATOR-PROPOSALS-001.3) rather than this guard's
-// blanket not-found.
+// blanket not-found. coordinator.get_item's own kind/id validation and
+// per-kind scope resolution are likewise left to its handler
+// (copilot-tools.md#item-read).
 func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Message) (*ws.Message, *ws.Message, error) {
 	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
 	isCoordinator := hasPrincipal && principal.IsCoordinator()
 
-	if msg.Action == coordinator.ActionProposeTask && !isCoordinator {
+	if _, reserved := coordinator.DecisionActions[msg.Action]; reserved && (isCoordinator || !hasPrincipal) {
+		return coordinatorUnknownAction(msg)
+	}
+	if _, principalOnly := coordinatorPrincipalOnlyActions[msg.Action]; principalOnly && !isCoordinator {
 		return coordinatorUnknownAction(msg)
 	}
 	if !isCoordinator {

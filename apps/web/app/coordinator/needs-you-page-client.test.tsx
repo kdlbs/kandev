@@ -142,6 +142,16 @@ function setLocation(path: string) {
   window.history.replaceState({}, "", path);
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 beforeEach(() => {
   capturedProps = undefined;
   readyContext = readyContextWith([]);
@@ -198,7 +208,7 @@ describe("NeedsYouPageClient", () => {
 describe("NeedsYouPageClient - deep-linked proposal form", () => {
   it("opens the reject form with focus on Reason, and clears the query params", async () => {
     setLocation("/workspaces/ws-1/coordinator/co-1?proposal=p-1&form=reject");
-    useProposalsStore.getState().mergeOne("co-1", proposalRow());
+    seedProposal("co-1", proposalRow());
     readyContext = readyContextWith([proposalItem()], true);
 
     renderPage();
@@ -222,7 +232,7 @@ describe("NeedsYouPageClient - deep-linked proposal form", () => {
 
   it("ignores an unrecognized form value and leaves the query untouched", () => {
     setLocation("/workspaces/ws-1/coordinator/co-1?proposal=p-1&form=bogus");
-    useProposalsStore.getState().mergeOne("co-1", proposalRow());
+    seedProposal("co-1", proposalRow());
     readyContext = readyContextWith([proposalItem()], true);
 
     renderPage();

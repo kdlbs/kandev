@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 ---
 
 # Coordinator copilot and tool surface Requirements
@@ -41,7 +41,7 @@ prototype banner, the demo controls and the `P1` and `WC-` labels are mockup
 chrome, not product; the data is seeded fiction.
 
 The mockup draws the copilot as a floating popover. The copilot is a
-right-side panel instead (maintainer direction on PR #3981, 2026-09-28), so
+right-side panel instead (PR #3981), so
 the screenshots are the reference for the copilot's content (header,
 transcript, context chip, composer and proposal card), not for its frame, size
 or position; [REQ-COORDINATOR-COPILOT-004](#req-coordinator-copilot-004-copilot-panel)
@@ -326,7 +326,10 @@ Mockup:
   that proposal of its own coordinator (spec, status, error and timestamps);
   with a `stall` reference, the stall record of that task in its workspace.
   A reference to another coordinator's proposal or another workspace's task
-  shall be refused like any foreign id (`AC-COORDINATOR-COPILOT-003.3`).
+  shall be refused like any foreign id (`AC-COORDINATOR-COPILOT-003.3`), as
+  shall a missing proposal; a task of its workspace with no stall record
+  is not found; another `kind` (even `task`) or empty id is refused, naming
+  it.
 - **AC-COORDINATOR-COPILOT-005.4:** When the chip is removed, the next message
   shall be sent without a prefix.
 - **AC-COORDINATOR-COPILOT-005.5:** Choosing **Ask about this** on another item
@@ -344,11 +347,10 @@ Mockup:
 - `ask_user_question` for coordinators: coordinators ask through proposals.
 - Showing an ended conversation's transcript after a new one replaces it
   (`AC-COORDINATOR-COPILOT-001.10`): the archived task keeps its messages but
-  no surface lists or opens it. A later "past conversations" view would need a
-  read route over the coordinator's archived conversation tasks.
+  no surface lists or opens it. A "past conversations" view needs a read route
+  over archived conversation tasks.
 - Resuming or restarting an ended coordinator session in place: Kandev
   rejects messages to a terminal session, and the copilot's recovery is a new
   conversation, never a resume (`AC-COORDINATOR-COPILOT-002.2`).
 - Coordinator-specific recovery copy: the copilot reuses Kandev's session
-  recovery feedback and its existing translated title, detail fallback and
-  Retry label.
+  recovery feedback and its existing translated copy.

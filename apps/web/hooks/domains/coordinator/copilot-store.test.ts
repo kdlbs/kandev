@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useCopilotStore, INITIAL_COPILOT_ENTRY } from "./copilot-store";
+import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 
 function reset() {
   useCopilotStore.setState({ entries: {} });
 }
 
 const WHY_KAN_418 = "Why is KAN-418 here?";
+const REF_KAN_418: CopilotItemRef = { kind: "task", id: "task-418" };
 
 describe("copilot store", () => {
   beforeEach(reset);
@@ -14,46 +16,47 @@ describe("copilot store", () => {
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual(INITIAL_COPILOT_ENTRY);
   });
 
-  it("askAboutThis sets the chip, draft and opens the popover", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+  it("askAboutThis sets the chip (with its ref), draft and opens the popover", () => {
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
       open: true,
-      chip: { id: "KAN-418", label: "KAN-418" },
+      chip: { id: "KAN-418", label: "KAN-418", ref: REF_KAN_418 },
       draft: WHY_KAN_418,
     });
   });
 
   it("a second askAboutThis call replaces the chip and draft again", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-9", "Why is KAN-9 here?");
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
+    const refKan9: CopilotItemRef = { kind: "proposal", id: "proposal-9" };
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-9", refKan9, "Why is KAN-9 here?");
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
       open: true,
-      chip: { id: "KAN-9", label: "KAN-9" },
+      chip: { id: "KAN-9", label: "KAN-9", ref: refKan9 },
       draft: "Why is KAN-9 here?",
     });
   });
 
   it("keeps separate entries per coordinator id", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     expect(useCopilotStore.getState().getEntry("coord-2")).toEqual(INITIAL_COPILOT_ENTRY);
   });
 
   it("clearDraft resets the draft to empty once it has been applied", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     useCopilotStore.getState().clearDraft("coord-1");
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
       open: true,
-      chip: { id: "KAN-418", label: "KAN-418" },
+      chip: { id: "KAN-418", label: "KAN-418", ref: REF_KAN_418 },
       draft: "",
     });
   });
 
   it("setOpen updates only the open flag", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     useCopilotStore.getState().setOpen("coord-1", false);
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
       open: false,
-      chip: { id: "KAN-418", label: "KAN-418" },
+      chip: { id: "KAN-418", label: "KAN-418", ref: REF_KAN_418 },
       draft: WHY_KAN_418,
     });
   });
@@ -68,7 +71,7 @@ describe("copilot store", () => {
   });
 
   it("removeChip clears the chip and leaves the draft as-is", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     useCopilotStore.getState().removeChip("coord-1");
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
       open: true,
@@ -78,7 +81,7 @@ describe("copilot store", () => {
   });
 
   it("clearChipAndDraft clears both but keeps open unchanged (a 404 while open)", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     useCopilotStore.getState().clearChipAndDraft("coord-1");
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
       open: true,
@@ -88,7 +91,7 @@ describe("copilot store", () => {
   });
 
   it("clearChipAndDraft keeps open=false unchanged (a 404 while closed)", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     useCopilotStore.getState().setOpen("coord-1", false);
     useCopilotStore.getState().clearChipAndDraft("coord-1");
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual({
@@ -99,7 +102,7 @@ describe("copilot store", () => {
   });
 
   it("removeEntry resets the coordinator back to the initial entry", () => {
-    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", WHY_KAN_418);
+    useCopilotStore.getState().askAboutThis("coord-1", "KAN-418", REF_KAN_418, WHY_KAN_418);
     useCopilotStore.getState().removeEntry("coord-1");
     expect(useCopilotStore.getState().getEntry("coord-1")).toEqual(INITIAL_COPILOT_ENTRY);
   });

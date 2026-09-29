@@ -5,7 +5,7 @@ import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from
 import { cn } from "@/lib/utils";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import { useProposalRow } from "@/hooks/domains/coordinator/use-proposals";
-import { deriveCopilotItemId } from "@/lib/coordinator/copilot-id";
+import { deriveCopilotItemId, deriveCopilotItemRef } from "@/lib/coordinator/copilot-id";
 import { formatAge } from "@/lib/coordinator/format";
 import { resolveProposalSourceTask, severityFor, whyClearsText } from "@/lib/coordinator/item-text";
 import { ProposalCard, type ProposalCardForm } from "../proposal-card/proposal-card";
@@ -78,6 +78,7 @@ export function NeedsYouItemCard({
   const severity = severityFor(item);
   const { why, clears } = whyClearsText(item, t);
   const copilotId = deriveCopilotItemId(item, openTasksById);
+  const copilotRef = deriveCopilotItemRef(item);
   const headingRef = useRef<HTMLDivElement>(null);
   const proposalId = item.kind === "proposal" ? item.proposal.id : null;
   const proposalRow = useProposalRow(coordinatorId, proposalId);
@@ -114,7 +115,12 @@ export function NeedsYouItemCard({
           <span className="text-muted-foreground ml-auto font-normal">{formatAge(item.ageMs)}</span>
         </CardTitle>
         <CardAction>
-          <AskAboutThisButton coordinatorId={coordinatorId} id={copilotId} canManage={canManage} />
+          <AskAboutThisButton
+            coordinatorId={coordinatorId}
+            id={copilotId}
+            itemRef={copilotRef}
+            canManage={canManage}
+          />
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-2">

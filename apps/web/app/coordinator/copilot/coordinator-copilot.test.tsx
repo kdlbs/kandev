@@ -48,7 +48,11 @@ const conversation: ConversationResponse = {
   archive_state: false,
 };
 
-const chip: CopilotChip = { id: "KAN-418", label: "KAN-418" };
+const chip: CopilotChip = {
+  id: "KAN-418",
+  label: "KAN-418",
+  ref: { kind: "task", id: "task-418" },
+};
 const SUGGESTION_QUESTION = "What needs me first, and why?";
 const QUICK_CHAT_MARKER_TEST_ID = "quick-chat-session-view-marker";
 
@@ -318,7 +322,9 @@ describe("CoordinatorCopilot - ready conversation: transformOutgoing", () => {
     const transformOutgoing = quickChatSessionViewCalls[0].transformOutgoing as (
       message: string,
     ) => string;
-    expect(transformOutgoing("Why is this here?")).toBe("About KAN-418: Why is this here?");
+    expect(transformOutgoing("Why is this here?")).toBe(
+      "About KAN-418 [task:task-418]: Why is this here?",
+    );
   });
 
   it("passes no transformOutgoing when no chip is set", async () => {
