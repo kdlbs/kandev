@@ -84,6 +84,7 @@ type Service struct {
 
 	conversationTasks    ConversationTaskManager
 	convReader           ConversationReader
+	deliverLocks         keyedLock
 	wakeFinder           WakeMessageFinder
 	wakeSender           WakeSender
 	conversationSessions SessionEnsurer

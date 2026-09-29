@@ -46,6 +46,9 @@ type Admission struct {
 	OK     bool
 	Reason string
 	Detail string
+	// TaskID and SessionID name the admitted conversation when OK.
+	TaskID    string
+	SessionID string
 	// Until is set for a cooldown hold: the newest settled turn's finish plus the cooldown.
 	Until *time.Time
 }
@@ -74,10 +77,15 @@ func (s *Service) Admit(ctx context.Context, coordinatorID string, mode AdmitMod
 	if a, ok := s.admitSpend(ctx, coord); !ok {
 		return a
 	}
-	if a, ok := s.admitConversation(ctx, coord); !ok {
-		return a
+	conv, ok := s.admitConversation(ctx, coord)
+	if !ok {
+		return conv
 	}
-	return s.admitCooldown(ctx, coordinatorID)
+	res := s.admitCooldown(ctx, coordinatorID)
+	if res.OK {
+		res.TaskID, res.SessionID = conv.TaskID, conv.SessionID
+	}
+	return res
 }
 
 func (s *Service) admitContainment(ctx context.Context, coord *Coordinator, mode AdmitMode) (Admission, bool) {
@@ -135,7 +143,9 @@ func (s *Service) admitConversation(ctx context.Context, coord *Coordinator) (Ad
 	case taskmodels.TaskSessionStateCreated:
 		return held(admitConvUnavailable, admitDetailNotStarted), false
 	}
-	return s.admitIdle(ctx, coord.ID, sess)
+	a, ok := s.admitIdle(ctx, coord.ID, sess)
+	a.TaskID, a.SessionID = task.ID, sess.ID
+	return a, ok
 }
 
 func (s *Service) admitIdle(ctx context.Context, coordinatorID string, sess *ConversationSession) (Admission, bool) {
