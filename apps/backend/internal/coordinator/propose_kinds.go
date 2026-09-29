@@ -102,6 +102,7 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 	if !deduped {
 		s.logger.Info("proposal created", zap.String("coordinator_id", coordinatorID),
 			zap.String("proposal_id", p.ID), zap.String("kind", kind))
+		s.publishCoordinatorUpdated(ctx, c.WorkspaceID, coordinatorID)
 	}
 	return p, deduped, nil
 }

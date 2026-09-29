@@ -55,13 +55,16 @@ func ActionForTool(name string) Action {
 // actionTools maps each coordinator-surface WebSocket action to the MCP tool
 // that exposes it. An action absent from the table has no tool.
 var actionTools = map[string]string{
-	ws.ActionMCPListTasks:           "list_tasks_kandev",
-	ws.ActionMCPGetTaskConversation: "get_task_conversation_kandev",
-	ws.ActionMCPListWorkflows:       "list_workflows_kandev",
-	ws.ActionMCPListWorkflowSteps:   "list_workflow_steps_kandev",
-	ws.ActionMCPListRepositories:    "list_repositories_kandev",
-	mcpcontract.ActionGetItem:       "get_coordinator_item_kandev",
-	mcpcontract.ActionProposeTask:   "propose_task_kandev",
+	ws.ActionMCPListTasks:            "list_tasks_kandev",
+	ws.ActionMCPGetTaskConversation:  "get_task_conversation_kandev",
+	ws.ActionMCPListWorkflows:        "list_workflows_kandev",
+	ws.ActionMCPListWorkflowSteps:    "list_workflow_steps_kandev",
+	ws.ActionMCPListRepositories:     "list_repositories_kandev",
+	mcpcontract.ActionGetItem:        "get_coordinator_item_kandev",
+	mcpcontract.ActionProposeTask:    "propose_task_kandev",
+	mcpcontract.ActionProposeResume:  "propose_resume_kandev",
+	mcpcontract.ActionProposeMessage: "propose_message_kandev",
+	mcpcontract.ActionProposeMove:    "propose_move_kandev",
 }
 
 // ToolForAction returns the MCP tool name that exposes a WebSocket action.
