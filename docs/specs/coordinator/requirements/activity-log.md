@@ -109,22 +109,49 @@ Mockup:
   refused call that named no known action can be found; an unrecognised
   `?class=` value in the page address selects All.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.4:** Each row shall show the relative time
-  (exact time on hover), the action's detail with the target task's
-  identifier linking to the task (plain "Task no longer available" text with
-  no link when the identifier is null), the action class, the outcome with "with
-  edits" when edited and "x N" when a refusal repeated, and the actor's name
-  for approved, rejected and undone rows. With no person recorded
-  (authentication off) the outcome shows alone ("Approved", "Rejected",
-  "Undone"); when the recorded person no longer exists it shows "A former
-  member". The outcome reads "Requires approval" (proposed), "Approved by <name>", "Rejected by <name>",
-  "Failed", "Denied" (refused) or "Undone by <name>". The Action cell shows
-  the row's detail, prefixed "Rejected: " on a rejected row (whose detail is the
-  manager's reason) and "Failed: " on a failed row (whose detail is the
-  error); an `undone` row carries the reversed row's detail. A refused row shows, in place of a detail, the reason text of its
-  code: `binding_invalid` "Its tool settings could not be read.",
-  `not_in_profile` "It called something it is not allowed to use.",
-  `policy_denied` "A manager has set this action to Denied."; any other code
-  shows "Refused." followed by the code.
+  (exact time on hover), the Action cell, the action class and the How it
+  was authorised cell. The Action cell shows the row's `detail` as the
+  coordinator or manager wrote it (an approved or proposed row's detail is the
+  proposal's one-line title, shown with no prefix and no invented verb), and
+  the target task's identifier linking to the task when the row has one; a
+  row with an empty detail shows the action class label in its place. The
+  Action cell prefixes a rejected row's detail (the manager's reason) with
+  "Rejected: " and a failed row's detail (the error) with "Failed: ", showing
+  "Rejected" or "Failed" alone when that detail is empty; an `undone` row
+  carries the reversed row's detail with no prefix. A refused row shows, in
+  place of a detail, the reason text of its code: `binding_invalid` "Its tool
+  settings could not be read.", `not_in_profile` "It called something it is
+  not allowed to use.", `policy_denied` "A manager has set this action to
+  Denied."; any other code shows "Refused. " followed by the code, and a
+  refused row with no code shows "Refused.". The How it was authorised cell
+  shows the authorization line, "Requires approval" or "Denied" (with " x N"
+  after "Denied" when `refusal_count` is above 1), and, for an approved,
+  rejected, failed or undone row, a second outcome line: "Approved by <name>"
+  (with ", with edits" when edited), "Rejected by <name>", "Failed" or
+  "Undone by <name>". With no person recorded (authentication off) the
+  outcome line has no "by <name>" ("Approved", "Rejected", "Undone"); when the
+  recorded person is not a member any more it reads "by a former member"; a
+  proposed or refused row has no second line. The full texts and their forms
+  are the copy table of the system design.
+- **AC-COORDINATOR-ACTIVITY-LOG-002.8:** The server sends user ids and no
+  display names. The client shall resolve each `actor_user_id` and
+  `undone_by` to a name from the workspace member list, once per section (a
+  refetch of the first page does not reread it). While the member list has
+  not loaded, or when reading it failed, a row whose person is recorded shall
+  show the no-person form of its outcome, so a transient failure never reads
+  "a former member"; only a member list that loaded and does not hold the id
+  shall show "a former member". Two members with the same display name show
+  the same name.
+- **AC-COORDINATOR-ACTIVITY-LOG-002.9:** The text "Task no longer available"
+  shall show, with no link, only on a row that has a `target_task_id` whose
+  task cannot be found: the workspace's task snapshots have loaded without
+  error and do not hold that id, and the row has no `target_task_identifier`.
+  A row with no `target_task_id` (a proposed, rejected or failed create, a
+  refusal, an `unknown` class row) shows nothing in its place, and a row
+  whose snapshots have not loaded or failed to load shows the link when the
+  server sent an identifier and nothing otherwise. A row whose task the
+  snapshots hold but that has no `target_task_identifier` links to it with the
+  text "Open task".
 - **AC-COORDINATOR-ACTIVITY-LOG-002.5:** With no row, the section shall say "It
   has not done anything yet."; with no row for the chosen filter, it shall
   say that nothing matches the filter.
@@ -192,6 +219,33 @@ Mockup:
   `from_step_id` and `to_step_id`. A row missing any of them, or whose
   proposal is gone or whose outcome does not parse, shall list `undoable`
   false and answer undo with 409 `not_undoable`.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.10:** Undo shall first open a dialog
+  titled "Undo this?" with **Undo** and **Cancel**, Cancel focused on open;
+  Cancel or Escape closes it and sends nothing; Undo closes it and sends one
+  request. Its text is one whole sentence chosen by the row, never a noun
+  phrase inserted into a sentence: for a created task "The task <identifier>
+  will be archived. Any agent working on it will be stopped." or, when the
+  identifier is unknown, "This task will be archived. Any agent working on it
+  will be stopped."; for a move "The task <identifier> will move back to <step
+  name>.", "The task <identifier> will move back to the step it came from."
+  when the step name is unknown, "This task will move back to <step name>."
+  when the identifier is unknown, and "This task will move back to the step
+  it came from." when neither is known. The step name is the title of the
+  step whose id is the row's `from_step_id`, resolved on the client from the
+  workspace's workflow snapshots; it is unknown when the id is null or not in
+  the snapshots.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.11:** When undo answers 409
+  `undo_conflict`, the row shall show the conflict text of `003.7` inline in
+  its Undo cell below the Undo button, which stays clickable. Any other
+  failure (`not_undoable`, 500, network, 404) shows its own text the same way
+  except 404, which shows "This action is no longer listed." in a section
+  notice above the list. The message clears when the first page is refetched
+  (a `coordinator.updated` event, a filter change, a successful retry of that
+  row's undo), when the filter changes, or when the row's Undo is confirmed
+  again; Load more does not clear it. A `not_undoable` or 404 refetches at
+  once and its message survives that one refetch, clearing on the next. A
+  `409 already_undone` shows no message. Two rows can each hold a message at
+  once; a second failure on one row replaces its message.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.4:** Undoing a row that is already undone,
   or two undos at once, shall reverse the action at most once; the second
   shall return 409 `already_undone`. Undoing a row that is not undoable shall
@@ -201,7 +255,7 @@ Mockup:
   403 and change nothing.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.6:** An undone row shall show "Undone by
   <name>, <relative time>" in place of Undo, or "Undone, <relative time>"
-  when no person is recorded (authentication is off) and "Undone by A former
+  when no person is recorded (authentication is off) and "Undone by a former
   member, <relative time>" when the recorded person no longer exists; the row's outcome text follows
   `AC-COORDINATOR-ACTIVITY-LOG-002.4`.
 

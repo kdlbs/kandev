@@ -16,9 +16,13 @@ acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-002.4
   - AC-COORDINATOR-ACTIVITY-LOG-002.5
   - AC-COORDINATOR-ACTIVITY-LOG-002.6
+  - AC-COORDINATOR-ACTIVITY-LOG-002.8
+  - AC-COORDINATOR-ACTIVITY-LOG-002.9
   - AC-COORDINATOR-ACTIVITY-LOG-003.1
   - AC-COORDINATOR-ACTIVITY-LOG-003.6
   - AC-COORDINATOR-ACTIVITY-LOG-003.7
+  - AC-COORDINATOR-ACTIVITY-LOG-003.10
+  - AC-COORDINATOR-ACTIVITY-LOG-003.11
 system_design:
   - ../../specs/coordinator/system-design/activity-log.md
 ---
@@ -52,6 +56,14 @@ managers, and the undone state.
   reversed row from `undone_by_name` and `undone_at`, and nothing in the
   Undo cell of the `undone` outcome row (`003.1`, `003.6`).
 - Refresh on `coordinator.updated`. Six locales.
+
+- Client-side names: member names from the workspace member list, step names
+  and task availability from the Queue's snapshots (`002.8`, `002.9`,
+  `003.10`); the server sends ids only.
+- The full copy table of the system design in six locales, with whole-sentence
+  undo dialog fallbacks and the conflict text for an unknown reason.
+- Undo failure lifecycle (`003.11`): inline below the still-clickable Undo,
+  cleared on first-page refetch, filter change or a new confirmed Undo.
 
 ## Out of scope
 
@@ -95,6 +107,17 @@ Phone: each row is a card; Undo is a full-width button.
 - A component test clicks Undo on a create row and asserts the dialog
   "Undo this?" with "The task <identifier> will be archived." and focus on
   Cancel; Cancel sends no request; confirming sends one undo request.
+
+- Component tests: every copy-table key renders in its form (approved named,
+  no person, former member, edited; rejected and failed prefixes with and
+  without detail; each refusal reason and an unknown code); "Task no longer
+  available" only for a target id absent from loaded snapshots (not for a
+  row with no target, not while snapshots load or failed); all six dialog
+  sentences; the conflict text for an unknown reason; the message survives
+  Load more, clears on filter change, and `not_undoable` survives one
+  refetch. A locale test asserts every `activity*` key exists in all six
+  locales with `{{name}}`, `{{time}}`, `{{count}}`, `{{identifier}}`,
+  `{{step}}`, `{{code}}` and `{{detail}}` placeholders kept.
 
 ## Verification
 

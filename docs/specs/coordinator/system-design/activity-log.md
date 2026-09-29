@@ -166,17 +166,11 @@ row has a `target_task_id`, a move row's proposal exists and its
 `outcome_json` parses with both `from_step_id` and `to_step_id`; the page's
 move proposals are read in one query by id), `target_task_identifier` (the task's identifier such as KAN-431, read
 through the seam's `GetTask`, null when the task is gone or the read fails)
-and, on a move row, `from_step_name` (the proposal outcome's `from_step_id`
-resolved through the seam's `GetStep`, null when the step is gone or the read
-fails; both read once per row of the page, a failed read is logged at warn
-and never fails the list), `actor_name` resolved from `actor_user_id` through the user
-service at read time, and `undone_by_name` resolved from `undone_by` the
-same way (null while the id is null). The row also carries `actor_missing` and
-`undone_by_missing`, true only when the id is set and the user no longer
-exists (the name is then null); the client shows the translated "A former
-member" for them, so the server sends no display text. When the user service
-fails, the names are null and the flags false for that page, a warn is
-logged and the list still returns.
+andand, on a move row, `from_step_id` (the proposal outcome's id, null when
+absent). The server sends user ids (`actor_user_id`, `undone_by`) and no
+display names or step names: the client resolves both ([What it did
+UI](#what-it-did-ui), `002.8`, `003.10`), so the list never reads the user
+service or the step store and a failure of either cannot affect it.
 
 ## Undo
 
@@ -282,7 +276,7 @@ phase-2 coordinator session ([permissions](permissions.md#tool-profile)).
 The MCP action `coordinator.list_activity` resolves the coordinator from the
 principal only; it takes no coordinator or workspace argument, so it cannot
 read another coordinator's rows (`004.1`). It returns the list route's rows
-without `actor_user_id`, `undone_by`, `actor_name` or `undone_by_name`, and
+without `actor_user_id` and `undone_by`, and
 with both `created_at` and `updated_at` (`004.2`; a coalesced refusal's
 `updated_at` is the time of its latest repeat), default limit
 20, and refuses a limit outside 1 to 50 or a bad cursor naming the field
@@ -339,52 +333,121 @@ deletes its rows whatever the flag.
 
 ## What it did UI
 
-`apps/web/app/coordinator/queue/what-it-did.tsx`, below the phase-1 Queue
-groups, fed by `hooks/domains/coordinator/use-activity.ts`:
+`apps/web/app/coordinator/queue/what-it-did.tsx` and `what-it-did-row.tsx`,
+below the phase-1 Queue groups, fed by
+`hooks/domains/coordinator/use-activity.ts`. The section renders only with
+`features.coordinatorPhase2` on and mounts after the groups render, so a long
+log never delays them.
+
+### Data
 
 - Loads the first page on mount; **Load more** appends by cursor; a
-  `coordinator.updated` event refetches the first page and merges by id.
-- A class filter select (All, the six classes and "Unknown action"); `?class=`
-  in the URL preselects it, which May do's link uses; an unrecognised value
-  selects All.
-- Columns When, Action, Action class, How it was authorised, Undo, as in
-  `AC-COORDINATOR-ACTIVITY-LOG-002.4`. How it was authorised shows
-  "Requires approval" or "Denied", plus "Approved by <name>" ("Approved" when
-  the actor is null and not missing, "Approved by A former member" when
-  `actor_missing`), "with edits", "x N". A refused row's Action cell shows the
-  reason text of its `reason_code` (`002.4`), keyed by code in all six
-  locales, with "Refused." plus the code for a code with no text.
-- Undo column: **Undo** for managers on rows with `undoable` true; "No undo"
-  on every row whose action class is `message` or `resume`, whatever its
-  outcome (`proposed`, `approved`, `rejected`, `failed` or `refused`), and
-  for readers too; "Undone by <name>, <time>" on the original row that was
-  reversed (`undone_at` set), in place of Undo, with `<name>` from
-  `undone_by_name` and `<time>` from `undone_at` (`003.6`); nothing on any
-  other row, including the separate row whose outcome is `undone`, which
-  shows the undoer through `actor_name` in How it was authorised (`002.4`)
-  (`003.1`). The 409 `undo_conflict` message shows inline by its `reason`:
-  "It has moved since" for `moved`, `archived` and any unknown or absent reason, "An agent is working on
-  it. Stop it, then undo." for `agent_running`, "The step it came from no
-  longer exists." for `step_deleted`, "The step it came from is now a
-  finishing step." for `step_done`, "The step it came from is full." for
-  `step_full` (`003.7`). A 404 from undo shows "This action is no longer
-  listed." and refetches. "Undone by" shows "Undone,
-  <time>" when `undone_by_name` is null because `undone_by` is null.
-  Undo first opens a confirmation dialog titled "Undo this?" whose text
-  names the effect: for a created task "The task <identifier> will be
-  archived. Any agent working on it will be stopped.", for a move "The task <identifier> will move back to
-  <from step name>." ("the step it came from" when `from_step_name` is null; "the task" when `target_task_identifier` is null) It has two buttons, **Undo** and **Cancel**, with
-  Cancel focused on open. Cancel or Escape closes it and sends nothing;
-  Undo sends the request and closes it, and the outcomes below apply.
-  The other two refusals: 409 `already_undone` (a double click, or another
-  manager undid it first) shows no error; the list refetches, so the row
-  shows "Undone by <name>, <time>" of whoever undid it. 409 `not_undoable`
-  (reachable only from a direct API call, since `undoable` is computed
-  from fields undo never changes; the UI handles it defensively) shows "This can no longer be undone" inline in place of
-  the button and refetches the list. Any other error (500, network) shows
-  "Undo failed. Try again." inline and keeps the Undo button.
-- Empty states from `002.5`. Readers see no Undo (`002.6`).
-- Phone width stacks each row as a card with the same fields.
+  `coordinator.updated` event refetches the first page and merges by id
+  (rows already loaded beyond the first page stay). A filter change resets
+  the list to its first page.
+- `?class=` preselects the filter (May do's link uses it); an unrecognised
+  value selects All. The filter offers All, the six classes and "Unknown
+  action".
+- Names: the workspace member list (`listWorkspaceMembers`), read once per
+  section mount, gives `user_id` to `display_name`. State is
+  `loading | failed | loaded`; `loading` and `failed` render the no-person
+  outcome forms, and `loaded` with the id absent renders "a former member"
+  (`002.8`). A null `actor_user_id` (authentication off) is the no-person
+  form in every state.
+- Step names: a workspace-wide map from step id to step title, built from the
+  workflow snapshots the Queue already holds (`useAllWorkflowSnapshots`);
+  step ids are unique across workflows. A `from_step_id` absent from the map
+  is unknown.
+- Task availability: `target_task_id` present in the Queue's task snapshot
+  set is available; the set is trusted only once the snapshot read has
+  completed without error (`002.9`).
+
+### Rows
+
+Columns When, Action, Action class, How it was authorised, Undo. The Action
+cell is `detail` (line-clamped to two lines, the full text as the title
+attribute, rendered as text) with the identifier link after it: the
+identifier links to the task when `target_task_identifier` is set, "Open
+task" when only the snapshots hold it, "Task no longer available" as plain
+text under `002.9`, nothing when the row has no `target_task_id`. Phone width
+stacks each row as a card (When and class first, then Action, authorisation
+and Undo as a full-width button).
+
+Undo cell, first match wins: "Undone by <name>, <time>" when `undone_at` is
+set (`003.6`); **Undo** for a manager when `undoable` is true; "No undo" on
+every row of class `message` or `resume` whatever its outcome and for readers
+too; nothing otherwise, including the `undone` outcome row, whose undoer shows
+in How it was authorised. A row's failure message (`003.11`) renders below the
+Undo button in a `role="status"` region.
+
+### Copy table
+
+All keys are in the `coordinator` namespace, six locales, each a whole
+sentence with interpolation only for names, times, counts and codes (never a
+noun phrase spliced into a sentence). "x" is the ASCII letter. No em dash.
+
+| Key | English |
+| --- | --- |
+| `activityTitle` | What it did |
+| `activityEmpty` | It has not done anything yet. |
+| `activityFilteredEmpty` | Nothing matches this filter. |
+| `activityFilterLabel` | Action class |
+| `activityFilterAll` | All |
+| `activityClassCreateTask` / `StartAgent` / `Message` / `Move` / `Resume` / `Stop` / `Unknown` | Create task / Start agent / Message task / Move task / Resume task / Stop task / Unknown action |
+| `activityAuthRequires` / `activityAuthDenied` | Requires approval / Denied |
+| `activityAuthDeniedRepeated` | Denied x {{count}} |
+| `activityApprovedBy` / `ApprovedByEdited` | Approved by {{name}} / Approved by {{name}}, with edits |
+| `activityApproved` / `ApprovedEdited` | Approved / Approved, with edits |
+| `activityRejectedBy` / `activityRejected` | Rejected by {{name}} / Rejected |
+| `activityFailed` | Failed |
+| `activityUndoneBy` / `activityUndone` | Undone by {{name}} / Undone |
+| `activityFormerMember` | a former member (the `{{name}}` value) |
+| `activityRejectedDetail` / `activityFailedDetail` | Rejected: {{detail}} / Failed: {{detail}} |
+| `activityRefusedBindingInvalid` | Its tool settings could not be read. |
+| `activityRefusedNotInProfile` | It called something it is not allowed to use. |
+| `activityRefusedPolicyDenied` | A manager has set this action to Denied. |
+| `activityRefusedCode` / `activityRefused` | Refused. {{code}} / Refused. |
+| `activityTaskGone` / `activityOpenTask` | Task no longer available / Open task |
+| `activityUndoAction` / `activityNoUndo` | Undo / No undo |
+| `activityUndoneByAt` / `activityUndoneAt` | Undone by {{name}}, {{time}} / Undone, {{time}} |
+| `activityUndoTitle` | Undo this? |
+| `activityUndoConfirmCreate` / `...CreateNoId` | The task {{identifier}} will be archived. Any agent working on it will be stopped. / This task will be archived. Any agent working on it will be stopped. |
+| `activityUndoConfirmMove` / `...MoveNoStep` / `...MoveNoId` / `...MoveNoIdNoStep` | The task {{identifier}} will move back to {{step}}. / The task {{identifier}} will move back to the step it came from. / This task will move back to {{step}}. / This task will move back to the step it came from. |
+| `activityUndoConfirm` / `activityUndoCancel` | Undo / Cancel |
+| `activityConflictMoved` (moved, archived, unknown or absent reason) | It has moved since |
+| `activityConflictAgentRunning` | An agent is working on it. Stop it, then undo. |
+| `activityConflictStepDeleted` | The step it came from no longer exists. |
+| `activityConflictStepDone` | The step it came from is now a finishing step. |
+| `activityConflictStepFull` | The step it came from is full. |
+| `activityNotUndoable` | This can no longer be undone |
+| `activityUndoFailed` | Undo failed. Try again. |
+| `activityGone` | This action is no longer listed. |
+| `activityLoadMore` | Load more |
+
+A row's relative time uses the app's existing relative-time formatter. The
+Traditional Chinese locales come from `pnpm run i18n:zh-hant`.
+
+### Undo flow
+
+Undo opens the dialog (`003.10`); confirming sends `POST activity/:rid/undo`
+and disables that row's Undo until the response returns, so one row cannot
+have two requests in flight. Results:
+
+- 200: refetch the first page; no message.
+- 409 `already_undone`: refetch, no message.
+- 409 `undo_conflict`: the text by `reason`; an unknown or absent reason (a
+  new server code the client predates, or a body with no `reason`) reads
+  `activityConflictMoved`. No refetch, so the row stays and Undo stays
+  clickable.
+- 409 `not_undoable`: `activityNotUndoable`, refetch at once.
+- 404: `activityGone` in the section notice, refetch at once.
+- Anything else, including a network error and a 409 with an unrecognised
+  `code`: `activityUndoFailed`, no refetch, Undo stays clickable.
+
+A message is state keyed by row id (`Map<rowId, {text, survivesRefetch}>`);
+`not_undoable` and 404 set `survivesRefetch` to 1, which the refetch they
+trigger decrements instead of clearing. Otherwise a first-page refetch, a
+filter change or a new confirmed Undo of that row clears it (`003.11`).
 
 ## Phase 3 contract
 
