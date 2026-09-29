@@ -48,7 +48,7 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-STANDING-ORDERS-001.1:** When a manager adds a standing
-  order whose text, after trimming, is 1 to 500 characters, the system shall
+  order whose text, after trimming, is 1 to 500 Unicode code points, the system shall
   store it with a new id, the trimmed text, `created_at` and the manager's
   user id, and return it. Other text shall be refused with 400 naming
   `text`.

@@ -58,13 +58,22 @@ func initCoordinatorWiring(
 // coordinator.StandingInstructions.
 func coordinatorStandingInstructionsReader(
 	svc *coordinator.Service,
+	log *logger.Logger,
 ) func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error) {
 	return func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error) {
 		name, coordinatorContext, err := svc.CoordinatorStandingInstructionsData(ctx, coordinatorID)
 		if err != nil {
 			return "", err
 		}
-		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext), nil
+		var sections []string
+		orders, orderErr := svc.StandingOrdersInstructionSection(ctx, coordinatorID)
+		if orderErr != nil {
+			log.Warn("standing orders unreadable; instructions built without them",
+				zap.String("coordinator_id", coordinatorID), zap.Error(orderErr))
+		} else {
+			sections = append(sections, orders)
+		}
+		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext, sections...), nil
 	}
 }
 

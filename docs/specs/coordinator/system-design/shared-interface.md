@@ -146,6 +146,7 @@ func (s *Store) ActiveGoal(ctx context.Context, coordinatorID string) (*Goal, er
 func (s *Store) LastMetGoal(ctx context.Context, coordinatorID string) (*Goal, error)
 func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row ActivityRow) error
 func (s *Store) MarkUndone(ctx context.Context, exec coordinatorExec, rowID, undoneBy string, at time.Time) (bool, error)
+func (s *Store) MarkApplied(ctx context.Context, exec coordinatorExec, coordinatorID string, orderIDs []string, at time.Time) error
 
 func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView, error)
 func (s *Service) Record(ctx context.Context, exec coordinatorExec, row ActivityRow) error
