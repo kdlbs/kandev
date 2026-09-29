@@ -10,6 +10,10 @@ const ActionProposeTask = "coordinator.propose_task"
 // dispatches (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = "coordinator.get_item"
 
+// ActionListActivity is the MCP action the list_coordinator_activity_kandev
+// tool dispatches (docs/specs/coordinator/system-design/activity-log.md#read-tool).
+const ActionListActivity = "coordinator.list_activity"
+
 // ActionApproveProposal and ActionRejectProposal are reserved MCP action
 // names (docs/specs/coordinator/system-design/proposals.md#security): approve
 // and reject are reachable only through the two REST routes, and no handler

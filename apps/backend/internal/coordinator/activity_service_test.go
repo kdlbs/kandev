@@ -353,3 +353,30 @@ func TestGetActivitySummary_ValidatesDaysAndScope(t *testing.T) {
 		t.Fatalf("scopes = %v", az.scopes)
 	}
 }
+
+func TestActivityPage_ForToolDropsIdentitiesKeepsEverythingElse(t *testing.T) {
+	svc, store, c, _, _ := newActivityService(t, true)
+	u := "user-1"
+	seedApproved(t, store, c, "a", ActionMessage, time.Now().UTC(), func(r *ActivityRow) { r.ActorUserID = &u; r.UndoneBy = &u })
+	page, err := svc.ListActivity(context.Background(), "ws-1", c.ID, ListActivityParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listKeys, toolKeys map[string]any
+	raw, _ := json.Marshal(page.Rows[0])
+	_ = json.Unmarshal(raw, &listKeys)
+	raw, _ = json.Marshal(page.ForTool().Rows[0])
+	_ = json.Unmarshal(raw, &toolKeys)
+	for k := range listKeys {
+		_, inTool := toolKeys[k]
+		wantMissing := k == "actor_user_id" || k == "undone_by" || k == "coordinator_id" || k == "workspace_id"
+		if inTool == wantMissing {
+			t.Errorf("key %q: in tool = %v", k, inTool)
+		}
+	}
+	for _, k := range []string{"created_at", "updated_at"} {
+		if _, ok := toolKeys[k]; !ok {
+			t.Errorf("tool row lacks %s", k)
+		}
+	}
+}

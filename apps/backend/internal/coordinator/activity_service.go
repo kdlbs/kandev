@@ -297,3 +297,46 @@ func (s *Service) ActivitySummary(ctx context.Context, coordinatorID string, day
 	}
 	return sum, nil
 }
+
+// ActivityToolRow is a list row as the coordinator's own read tool sees it:
+// the same fields as the list route without the identities of the managers.
+type ActivityToolRow struct {
+	ID                   string                `json:"id"`
+	ActionClass          Action                `json:"action_class"`
+	Outcome              ActivityOutcome       `json:"outcome"`
+	Authorization        ActivityAuthorization `json:"authorization"`
+	TargetTaskID         *string               `json:"target_task_id"`
+	TargetTaskIdentifier *string               `json:"target_task_identifier"`
+	ProposalID           *string               `json:"proposal_id"`
+	ReasonCode           *string               `json:"reason_code"`
+	Detail               string                `json:"detail"`
+	Edited               bool                  `json:"edited"`
+	RefusalCount         int                   `json:"refusal_count"`
+	UndoneAt             *time.Time            `json:"undone_at"`
+	UndoOfID             *string               `json:"undo_of_id"`
+	FromStepID           *string               `json:"from_step_id"`
+	Undoable             bool                  `json:"undoable"`
+	CreatedAt            time.Time             `json:"created_at"`
+	UpdatedAt            time.Time             `json:"updated_at"`
+}
+
+// ActivityToolPage is one page of the read tool's result.
+type ActivityToolPage struct {
+	Rows       []ActivityToolRow `json:"rows"`
+	NextCursor *string           `json:"next_cursor"`
+}
+
+// ForTool strips the manager identities from a page.
+func (p *ActivityPage) ForTool() *ActivityToolPage {
+	out := &ActivityToolPage{Rows: make([]ActivityToolRow, len(p.Rows)), NextCursor: p.NextCursor}
+	for i, r := range p.Rows {
+		out.Rows[i] = ActivityToolRow{
+			ID: r.ID, ActionClass: r.ActionClass, Outcome: r.Outcome, Authorization: r.Authorization,
+			TargetTaskID: r.TargetTaskID, TargetTaskIdentifier: r.TargetTaskIdentifier, ProposalID: r.ProposalID,
+			ReasonCode: r.ReasonCode, Detail: r.Detail, Edited: r.Edited, RefusalCount: r.RefusalCount,
+			UndoneAt: r.UndoneAt, UndoOfID: r.UndoOfID, FromStepID: r.FromStepID, Undoable: r.Undoable,
+			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		}
+	}
+	return out
+}

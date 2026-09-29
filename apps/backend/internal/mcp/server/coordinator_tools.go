@@ -60,6 +60,7 @@ func (s *Server) registerCoordinatorTools() {
 	)
 	s.registerProposeTaskTool()
 	s.registerGetCoordinatorItemTool()
+	s.registerListCoordinatorActivityTool()
 }
 
 func (s *Server) registerProposeTaskTool() {
@@ -143,6 +144,41 @@ func (s *Server) getCoordinatorItemHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"kind": kind, "id": id}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionGetItem, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// registerListCoordinatorActivityTool registers list_coordinator_activity_kandev
+// (docs/specs/coordinator/system-design/activity-log.md#read-tool): the
+// coordinator's own activity log, resolved from the principal alone. Which
+// sessions may call it is decided by the coordinator tool profile.
+func (s *Server) registerListCoordinatorActivityTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_coordinator_activity_kandev",
+			mcp.WithDescription("List what this coordinator has proposed and what happened to each proposal, newest first: outcome, action class, target task, reason and timestamps. Returns your own activity only. Use limit (1 to 50, default 20) and the returned next_cursor as before to page."),
+			mcp.WithNumber("limit", mcp.Description("Optional page size, 1 to 50 (default 20)")),
+			mcp.WithString("before", mcp.Description("Optional cursor: the next_cursor of the previous page")),
+		),
+		s.wrapHandler("list_coordinator_activity_kandev", s.listCoordinatorActivityHandler()),
+	)
+}
+
+func (s *Server) listCoordinatorActivityHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{}
+		if args := req.GetArguments(); args != nil {
+			if v, ok := args["limit"]; ok {
+				payload["limit"] = v
+			}
+			if v, ok := args["before"]; ok {
+				payload["before"] = v
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionListActivity, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
