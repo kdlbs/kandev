@@ -305,11 +305,11 @@ always an array. The store-level `StandingOrder` is the row shape `{id,
 coordinator_id, text, created_by, created_at, retired_at, retired_by,
 source_proposal_id, last_applied_at}` and is not serialised by any route.
 The routes serialise the wire shape `{id, number, text, created_at,
-created_by_name, retired_at, last_applied_at}` of
+created_by, retired_at, last_applied_at}` of
 [standing orders](standing-orders.md#routes) for the list, create, retire and
 restore responses; the typed client uses only that wire shape, and
-`number` and `created_by_name` are filled by the route from the row order and
-the user lookup. The guided setup
+`number` is filled by the route from the row order and `created_by` is the
+row's creator id; no display name is sent. The guided setup
 201 body is the coordinator DTO of `POST .../coordinators`; setup adds no
 other body. The typed client covers only routes whose bodies the designs
 define.

@@ -12,15 +12,18 @@ requirements:
   - REQ-COORDINATOR-STANDING-ORDERS-001
   - REQ-COORDINATOR-GOALS-001
   - REQ-COORDINATOR-GOALS-002
+  - REQ-COORDINATOR-GOALS-003
 acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-009.1
   - AC-COORDINATOR-STANDING-ORDERS-001.4
   - AC-COORDINATOR-STANDING-ORDERS-001.5
   - AC-COORDINATOR-STANDING-ORDERS-001.6
   - AC-COORDINATOR-GOALS-001.9
+  - AC-COORDINATOR-GOALS-001.10
   - AC-COORDINATOR-GOALS-002.1
   - AC-COORDINATOR-GOALS-002.2
   - AC-COORDINATOR-GOALS-002.3
+  - AC-COORDINATOR-GOALS-003.4
 system_design:
   - ../../specs/coordinator/system-design/coordinators.md
   - ../../specs/coordinator/system-design/standing-orders.md
@@ -52,6 +55,18 @@ above Needs you. Standing orders and the goal save through their own routes.
   goal; readers see no buttons (`GOALS-002.1` to `002.3`).
 - Readers see every section without controls. Six locales.
 
+- Web client and hooks: the standing-order and goal typed functions and types
+  in `lib/api/domains/coordinator-api.ts` (list with `include=retired`, add,
+  retire, restore, get goal, put goal, toggle criterion, mark met), and the
+  `use-standing-orders.ts` and `use-goal.ts` hooks under
+  `hooks/domains/coordinator/`. Task 01 lists these but they are absent on the
+  branch; task 09 consumes `use-standing-orders.ts`.
+- `AddStandingOrderDialog` (`components/coordinators/add-standing-order-dialog.tsx`)
+  is the single add component (a dialog, not an inline form). Whichever of
+  tasks 09 and 11 lands second imports the file the first created.
+- Error, empty, loading, concurrency and `?section=` behaviour are those in the
+  three system designs' UI sections, which bind this task.
+
 ## Out of scope
 
 - May do, Watches and Watches filtering (task 06); guided setup (task 07).
@@ -80,8 +95,9 @@ and its button is full width.
 
 - [`assets/p2-02-settings-coordinator-sections.png`](assets/p2-02-settings-coordinator-sections.png)
 - Scenario `18-v21-copilot-anywhere` (settings sections) maps to
-  `tests/coordinator/configure-sections.spec.ts`, whose Sections row,
-  Standing orders and Goal cases this task adds. The goal note has no
+  `tests/coordinator/configure-sections.spec.ts`, which does not exist yet:
+  this task creates it with the Sections row, Standing orders and Goal cases
+  (task 06 adds its own cases to it). The goal note has no
   scenario; `tests/coordinator/needs-you-goal.spec.ts` is new.
 
 ## Acceptance
@@ -94,7 +110,7 @@ and its button is full width.
 ## Verification
 
 ```bash
-cd apps/web && pnpm test -- app/settings/workspace app/coordinator/components/goal-note
+cd apps/web && pnpm test -- components/coordinators hooks/domains/coordinator lib/api/domains app/coordinator/components/goal-note
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/configure-sections.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/configure-sections.spec.ts
@@ -108,10 +124,17 @@ account (auth project) sees no controls; flag-off shows the phase-1 page.
 
 ## Likely files
 
-- `apps/web/app/settings/workspace/[id]/coordinators/[coordinatorId]/page.tsx`
-- `apps/web/app/settings/workspace/[id]/coordinators/components/`
-  `sections-row.tsx`, `standing-orders-section.tsx`, `goal-section.tsx`
+- `apps/web/components/coordinators/coordinator-editor-page.tsx` (the page's
+  body; `app/settings/workspace/[id]/coordinators/[coordinatorId]/page.tsx`
+  only wraps it)
+- `apps/web/components/coordinators/sections/` `sections-row.tsx`,
+  `standing-orders-section.tsx`, `goal-section.tsx`, and
+  `components/coordinators/add-standing-order-dialog.tsx`
+- `apps/web/lib/api/domains/coordinator-api.ts`,
+  `apps/web/hooks/domains/coordinator/use-standing-orders.ts`, `use-goal.ts`
 - `apps/web/app/coordinator/components/goal-note.tsx`
+- `apps/web/e2e/tests/coordinator/configure-sections.spec.ts` (new),
+  `needs-you-goal.spec.ts` (new)
 - `apps/web/src/locales/*/coordinator.json`, `eslint.i18n.options.mjs`
 
 ## Dependencies
