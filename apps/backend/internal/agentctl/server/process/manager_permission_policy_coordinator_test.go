@@ -18,11 +18,11 @@ func coordinatorPermissionManager(t *testing.T) *Manager {
 	return m
 }
 
-// TestCoordinatorPermissionPolicyApprovesOnlySixTools pins the exact-name
-// allowlist: each of the six coordinator tools is auto-approved and an
+// TestCoordinatorPermissionPolicyApprovesOnlySevenTools pins the exact-name
+// allowlist: each of the seven coordinator tools is auto-approved and an
 // unlisted Kandev tool, even one that the generic injected-MCP policy would
 // approve, is not (docs/specs/coordinator/system-design/copilot.md#permission-policy).
-func TestCoordinatorPermissionPolicyApprovesOnlySixTools(t *testing.T) {
+func TestCoordinatorPermissionPolicyApprovesOnlySevenTools(t *testing.T) {
 	m := coordinatorPermissionManager(t)
 	allowOption := []adapter.PermissionOption{{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce}}
 
@@ -32,6 +32,7 @@ func TestCoordinatorPermissionPolicyApprovesOnlySixTools(t *testing.T) {
 		"mcp__kandev__list_workflows_kandev",
 		"mcp__kandev__list_workflow_steps_kandev",
 		"mcp__kandev__list_repositories_kandev",
+		"mcp__kandev__get_coordinator_item_kandev",
 		"mcp__kandev__propose_task_kandev",
 	} {
 		t.Run(toolName, func(t *testing.T) {
@@ -65,7 +66,7 @@ func TestCoordinatorPermissionPolicyApprovesOnlySixTools(t *testing.T) {
 
 // TestCoordinatorPermissionPolicyRequiresCoordinatorMode proves the
 // allowlist function only fires when the instance's own McpMode is
-// coordinator, so a non-coordinator instance never gets the six-tool
+// coordinator, so a non-coordinator instance never gets the seven-tool
 // shortcut.
 func TestCoordinatorPermissionPolicyRequiresCoordinatorMode(t *testing.T) {
 	m := injectedKandevPermissionManager(t, injectedKandevMCPServers(43210))
@@ -151,7 +152,7 @@ func TestCoordinatorModeIgnoresBlanketApprovalAndGenericInjectedPolicy(t *testin
 
 // TestCoordinatorModeAutoApprovesThroughHandlePermissionRequest is the
 // end-to-end companion: a coordinator-mode instance auto-approves one of the
-// six tools through the full handlePermissionRequest path, even with the
+// seven tools through the full handlePermissionRequest path, even with the
 // blanket flag and env-style override both set to true.
 func TestCoordinatorModeAutoApprovesThroughHandlePermissionRequest(t *testing.T) {
 	m := coordinatorPermissionManager(t)
