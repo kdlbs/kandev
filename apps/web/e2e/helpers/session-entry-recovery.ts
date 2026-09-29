@@ -215,3 +215,64 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
     rejectedResponseCount: (action) => rejectedCounts.get(action) ?? 0,
   };
 }
+
+export async function rejectSessionEnsureRequests(
+  page: Page,
+  message: string,
+): Promise<{ requestCount: () => Promise<number> }> {
+  await page.addInitScript((failureMessage) => {
+    const testWindow = window as Window & { __e2eSessionEnsureRequestCount?: number };
+    testWindow.__e2eSessionEnsureRequestCount = 0;
+    const nativeSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data !== "string") {
+        nativeSend.call(this, data);
+        return;
+      }
+      const forwarded: string[] = [];
+      let intercepted = false;
+      for (const part of data.split("\n")) {
+        let frame: { id?: unknown; type?: unknown; action?: unknown } | null = null;
+        try {
+          frame = JSON.parse(part) as { id?: unknown; type?: unknown; action?: unknown };
+        } catch {
+          forwarded.push(part);
+          continue;
+        }
+        if (
+          frame?.type === "request" &&
+          frame.action === "session.ensure" &&
+          typeof frame.id === "string"
+        ) {
+          intercepted = true;
+          testWindow.__e2eSessionEnsureRequestCount =
+            (testWindow.__e2eSessionEnsureRequestCount ?? 0) + 1;
+          const response = JSON.stringify({
+            id: frame.id,
+            type: "error",
+            action: "session.ensure",
+            payload: { code: "E2E_SIMULATED_ERROR", message: failureMessage },
+            timestamp: new Date().toISOString(),
+          });
+          queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: response })));
+          continue;
+        }
+        forwarded.push(part);
+      }
+      if (!intercepted) {
+        nativeSend.call(this, data);
+      } else if (forwarded.length > 0) {
+        nativeSend.call(this, forwarded.join("\n"));
+      }
+    };
+  }, message);
+
+  return {
+    requestCount: () =>
+      page.evaluate(
+        () =>
+          (window as Window & { __e2eSessionEnsureRequestCount?: number })
+            .__e2eSessionEnsureRequestCount ?? 0,
+      ),
+  };
+}

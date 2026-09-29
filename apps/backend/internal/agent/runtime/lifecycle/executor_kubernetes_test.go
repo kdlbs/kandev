@@ -474,6 +474,26 @@ func TestKubernetesStopInstancePreservesOrdinaryStopAndForceCleansManagedResourc
 		require.Equal(t, []string{"pvc-rv-1"}, resources.deletedPVCResourceVersions)
 		require.Equal(t, []string{"pod", "pvc"}, resources.deletionOrder)
 	})
+
+	t.Run("idle suspension preserves task resources", func(t *testing.T) {
+		controlPort := startKubernetesAgentctlServer(t, true, 41001)
+		instancePort := startKubernetesAgentctlServer(t, false, 0)
+		resources := &fakeKubernetesResources{}
+		forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+			uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+			41001:                                    instancePort,
+		}}
+		executor := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
+		instance, err := executor.CreateInstance(context.Background(), validKubernetesCreateRequest())
+		require.NoError(t, err)
+		instance.StopReason = StopReasonIdleSuspension
+
+		require.NoError(t, executor.StopInstance(context.Background(), instance, false))
+
+		require.Empty(t, resources.deletedPods)
+		require.Empty(t, resources.deletedPVCs)
+		require.True(t, forwards.lastSession().isClosed(), "idle suspension must close the process-local forward")
+	})
 }
 
 func TestDeleteKubernetesResourcesWaitsForPodAndPVCRemoval(t *testing.T) {

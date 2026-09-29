@@ -75,9 +75,15 @@ type DynamicAgentProfileDTO struct {
 // for one dynamic candidate. The two classes are deliberately explicit so a
 // missing class can never silently inherit another class's behavior.
 type DynamicAgentPolicyDTO struct {
-	Version   int64                 `json:"version"`
-	Transient DynamicErrorPolicyDTO `json:"transient"`
-	Hard      DynamicErrorPolicyDTO `json:"hard"`
+	Version      int64                         `json:"version"`
+	Transient    DynamicErrorPolicyDTO         `json:"transient"`
+	Hard         DynamicErrorPolicyDTO         `json:"hard"`
+	Unclassified *DynamicUnclassifiedPolicyDTO `json:"unclassified,omitempty"`
+}
+
+type DynamicUnclassifiedPolicyDTO struct {
+	Enabled                     bool  `json:"enabled"`
+	ConsecutiveFailureThreshold int64 `json:"consecutive_failure_threshold"`
 }
 
 type DynamicErrorPolicyDTO struct {
@@ -465,11 +471,25 @@ type CommandPreviewRequest struct {
 	CommandPrefix      string          `json:"command_prefix,omitempty"`
 }
 
+// Flag destinations reported by CommandPreviewResponse.
+const (
+	// FlagDestinationAgentCLI means the flags reach the agent CLI itself.
+	FlagDestinationAgentCLI = "agent_cli"
+	// FlagDestinationACPBridge means the flags are appended to the launched ACP
+	// bridge process, which forwards no unrecognized argument to the agent CLI.
+	FlagDestinationACPBridge = "acp_bridge"
+)
+
 // CommandPreviewResponse is the response for the command preview endpoint
 type CommandPreviewResponse struct {
 	Supported     bool     `json:"supported"`
 	Command       []string `json:"command"`
 	CommandString string   `json:"command_string"`
+	// FlagDestination names the process the profile's CLI flags are appended
+	// to. Over ACP that is the bridge, not the agent CLI it wraps, and the
+	// difference is the whole reason a flag can look enabled and change
+	// nothing. Values: "agent_cli" or "acp_bridge".
+	FlagDestination string `json:"flag_destination,omitempty"`
 }
 
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.

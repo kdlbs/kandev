@@ -110,6 +110,14 @@ settings appear only after typing, while **Go to Settings** remains in the comma
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
 configuration content.
 
+Workspace managers can enable **Suspend idle ACP agents** in **Settings > Workspaces > Overview**.
+The policy is off by default and keeps a saved timeout of 120 minutes. When enabled, Kandev may
+stop an idle agent process after that timeout while preserving the task, workspace, and conversation.
+Opening the task or sending it a message resumes the same conversation. The agent can be suspended
+again after a new idle interval. The policy applies to ACP agents and uses activity Kandev can
+observe; provider-internal work that is not reported to Kandev may not prevent suspension. It does
+not apply to passthrough terminal sessions or manually stopped sessions.
+
 ## Customize the sidebar
 
 Open **Settings > Preferences > Sidebar** to customize the optional navigation for the active

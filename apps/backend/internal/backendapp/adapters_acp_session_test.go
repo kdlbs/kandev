@@ -16,6 +16,14 @@ type acpSessionIDProvider interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 }
 
+type initialPromptAdmissionRegistrar interface {
+	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+}
+
+type initialPromptDispatchRegistrar interface {
+	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+}
+
 // TestLifecycleAdapter_SatisfiesACPSessionIDSeam is the regression test for a
 // QA-caught production gap: orchestrator.Service.currentACPSessionID selects
 // its generation-safety seam with an optional type assertion
@@ -80,5 +88,39 @@ func TestLifecycleAdapter_GetACPSessionIDForSession_ForwardsLiveIdentity(t *test
 
 	if _, ok := adapter.GetACPSessionIDForSession("no-such-session"); ok {
 		t.Fatal("expected (_, false) for a session with no registered execution")
+	}
+}
+
+func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID: "exec-model-switch-restart", TaskID: "task-model-switch", SessionID: "session-model-switch",
+		WorkspacePath: t.TempDir(),
+	}); err != nil {
+		t.Fatalf("seed replacement execution: %v", err)
+	}
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+	registrar, ok := client.(initialPromptAdmissionRegistrar)
+	if !ok {
+		t.Fatal("production lifecycleAdapter cannot register the replacement startup prompt's final admission callback")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		"exec-model-switch-restart", func() error { return nil }, func() {}, func() {},
+	); err != nil {
+		t.Fatalf("register replacement startup admission: %v", err)
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		"missing-model-switch-restart", func() error { return nil }, nil, nil,
+	); err == nil {
+		t.Fatal("adapter did not forward lifecycle execution lookup errors")
+	}
+	dispatchRegistrar, ok := client.(initialPromptDispatchRegistrar)
+	if !ok {
+		t.Fatal("production lifecycleAdapter cannot register the replacement startup prompt's dispatch callbacks")
+	}
+	if err := dispatchRegistrar.RegisterInitialPromptDispatchCallbacks(
+		"exec-model-switch-restart", func() {}, func() {},
+	); err != nil {
+		t.Fatalf("register replacement startup dispatch callbacks: %v", err)
 	}
 }

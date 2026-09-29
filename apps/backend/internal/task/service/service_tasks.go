@@ -4095,9 +4095,18 @@ func (s *Service) cleanupDestructiveTaskResources(
 			s.logger.Info("retaining archived worktree after final cleanliness check",
 				zap.String("task_id", taskID), zap.Error(cleanupErr))
 		} else {
-			s.logger.Warn("failed to cleanup task worktrees",
+			fields := []zap.Field{
 				zap.String("task_id", taskID),
-				zap.Error(cleanupErr))
+				zap.Error(cleanupErr),
+			}
+			var inspErr *worktree.CleanupInspectionError
+			if errors.As(cleanupErr, &inspErr) {
+				fields = append(fields,
+					zap.String("stage", inspErr.Stage),
+					zap.String("reason", inspErr.Reason),
+				)
+			}
+			s.logger.Warn("failed to cleanup task worktrees", fields...)
 			errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
 		}
 	}

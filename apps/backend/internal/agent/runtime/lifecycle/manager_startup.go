@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -107,6 +108,15 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		if onInitialPromptFailure != nil {
+			onInitialPromptFailure()
+		}
+	}()
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}
@@ -196,7 +206,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
+	agentDisplayName := m.resolveAgentDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
@@ -227,10 +237,10 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution)
 		if err != nil {
 			execution.remoteInstanceLifecycleMu.Unlock()
-			return err
+			return routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, execution.AgentID, err)
 		}
 
 		m.logger.Info("agent process started",
@@ -240,7 +250,10 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	execution.remoteInstanceLifecycleMu.Unlock()
 
-	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
+	if err := m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription); err != nil {
+		return routingerr.NewAgentStartupFailure(routingerr.PhaseSessionInit, execution.AgentID, err)
+	}
+	return nil
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {

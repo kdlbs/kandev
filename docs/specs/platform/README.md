@@ -24,7 +24,8 @@ Domain systems retain ownership of source records and workspace context identity
 ## Ownership
 
 This system owns startup and shutdown contracts, process and port-independent
-runtime safety, configuration precedence, diagnostics, notifications,
+runtime safety, foreground delivery semantics (including explicit same-turn
+steering), configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
 
 Settings discovery and interface parity belong to Platform. Each settings domain

@@ -99,6 +99,17 @@ const (
 	// never crossing the process boundary. The backend consumes it to clear
 	// the background-launch attestation for the turn that is starting.
 	EventTypeTurnStarted = "turn_started"
+
+	// EventTypeUsageObservation carries one provider-scoped native usage
+	// measurement. It is separate from turn completion because one turn can
+	// contain multiple model responses.
+	EventTypeUsageObservation = "usage_observation"
+
+	// EventTypeBackgroundWorkUpdated carries an update for an agent background workload.
+	EventTypeBackgroundWorkUpdated = "background_work_updated"
+
+	// EventTypeBackgroundWorkOutput carries a chunk of stdout/stderr from an active background workload.
+	EventTypeBackgroundWorkOutput = "background_work_output"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
@@ -249,6 +260,28 @@ type AgentEvent struct {
 	// PermissionOptions contains the available permission choices.
 	PermissionOptions []PermissionOption `json:"permission_options,omitempty"`
 
+	// RequestedModeID is set on a session_mode event only when Kandev asked for
+	// a mode the agent did not end up in, or could not confirm. It is what makes
+	// a clamped mode distinguishable from an applied one; empty means the
+	// reported mode is exactly what was asked for.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+
+	// AutoApprovedOptionID names the option Kandev already selected on the
+	// user's behalf. When set, the request is a record rather than a prompt:
+	// nobody needs to answer it, and the consumer must not treat the session
+	// as waiting for input. Empty for a request that still needs an answer.
+	AutoApprovedOptionID string `json:"auto_approved_option_id,omitempty"`
+	// AutoApprovalPending means the selected option is only a proposal. The
+	// backend must persist it before resolving the live request.
+	AutoApprovalPending bool `json:"auto_approval_pending,omitempty"`
+
+	// AutoApprovedOptionKind preserves the provider's selected allow semantics
+	// alongside the option ID for durable permission history.
+	AutoApprovedOptionKind string `json:"auto_approved_option_kind,omitempty"`
+
+	// AutoApprovalSource identifies the Kandev policy that selected the option.
+	AutoApprovalSource string `json:"auto_approval_source,omitempty"`
+
 	// ActionType categorizes the action requiring approval.
 	// Use ActionType* constants: "command", "file_write", "file_read", "network", "mcp_tool", "other".
 	ActionType string `json:"action_type,omitempty"`
@@ -382,6 +415,35 @@ type AgentEvent struct {
 
 	// Usage contains token usage stats from the prompt response.
 	Usage *PromptUsage `json:"usage,omitempty"`
+
+	// UsageObservation is one immutable native response measurement or a
+	// documented estimated turn fallback.
+	UsageObservation *NativeUsageObservation `json:"usage_observation,omitempty"`
+
+	// --- Background work fields (for "background_work_updated" and "background_work_output") ---
+
+	// BackgroundWork contains a normalized workload observation.
+	BackgroundWork *WorkloadRunObservation `json:"background_work,omitempty"`
+
+	// BackgroundWorkOutput contains an incremental output stream chunk.
+	BackgroundWorkOutput *WorkloadOutputChunk `json:"background_work_output,omitempty"`
+}
+
+// NativeUsageObservation identifies the native protocol scope for one usage
+// row. Provider identifiers never replace Kandev task, session, or turn IDs.
+type NativeUsageObservation struct {
+	SchemaVersion            int    `json:"schema_version"`
+	Source                   string `json:"source"`
+	ProviderThreadID         string `json:"provider_thread_id"`
+	ProviderTurnID           string `json:"provider_turn_id"`
+	ProviderResponseID       string `json:"provider_response_id,omitempty"`
+	Scope                    string `json:"scope"`
+	Completeness             string `json:"completeness"`
+	Model                    string `json:"model,omitempty"`
+	ReasoningOutputTokens    *int64 `json:"reasoning_output_tokens,omitempty"`
+	ReportedCacheWriteTokens *int64 `json:"reported_cache_write_tokens,omitempty"`
+	ReportedTotalTokens      *int64 `json:"reported_total_tokens,omitempty"`
+	PriceSuppressed          bool   `json:"price_suppressed,omitempty"`
 }
 
 // ModelSelectionWarning is the structured, provider-neutral explanation for
@@ -604,6 +666,9 @@ type PromptUsage struct {
 	// estimation downstream.
 	ProviderReportedCostPresent bool `json:"provider_reported_cost_present,omitempty"`
 	Estimated                   bool `json:"estimated,omitempty"`
+	// PriceSuppressed marks a native measurement whose input categories do
+	// not map to the ledger's reviewed pricing components.
+	PriceSuppressed bool `json:"price_suppressed,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

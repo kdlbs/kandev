@@ -237,3 +237,17 @@ The first CI monitor stopped after five failed policy lookups (26 passed,
 0 failed, 31 pending at that snapshot). Direct GitHub ruleset retrieval succeeded;
 this monitor result does not establish terminal CI. Follow-up delivery preserves
 that limitation and does not claim the PR merged or deployed.
+
+Backend CI follow-up: integrated current main to include its corrected unordered
+Codex background-work assertion. Fixed the Codex utility fake-npx readiness race
+by publishing captured arguments with a same-directory rename after writing,
+instead of exposing an empty file before `printf` finishes. Both failing tests
+passed 20 race-enabled repetitions; both owning packages passed three complete
+race-enabled runs. Merged sidebar cache/hook tests (27) and frontend typecheck
+passed; desktop sidebar and drag/drop E2E passed all nine scenarios without
+retries. The change is confined to test fixtures and base integration.
+Phone sidebar E2E also passed all three scenarios with retries disabled. Harness
+validation, specification lint, and conflict/whitespace checks passed.
+Backend lint against the integrated main SHA passed with zero issues using
+`GOMAXPROCS=2` and `--concurrency=2`; the initial higher-concurrency run was
+interrupted after exceeding its budget and is not counted as a pass.

@@ -20,6 +20,7 @@ This design preserves the technical source detail for `REQ-EXECUTORS-SSH-EXECUTO
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `REQ-EXECUTORS-SSH-EXECUTOR-001`                                          | [Migrated source detail](#migrated-source-detail)                   |
 | `AC-EXECUTORS-SSH-EXECUTOR-001.11` and `AC-EXECUTORS-SSH-EXECUTOR-001.12` | [Credential-file conflict policy](#credential-file-conflict-policy) |
+| `AC-EXECUTORS-SSH-EXECUTOR-001.13` through `AC-EXECUTORS-SSH-EXECUTOR-001.17` | [Orphaned agentctl sweep](#orphaned-agentctl-sweep) |
 
 ## Migrated source detail
 
@@ -188,6 +189,42 @@ This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../..
 
 - Same step-progress callback used by Sprites (`OnProgress`) reports the per-step status: "Connecting → Detecting remote OS → Uploading agent controller → Preparing task directory → Starting agent controller → Connecting to agent controller".
 - Connection errors surface verbatim (host unreachable, auth failed, host key mismatch, unsupported platform) — no swallowing into generic "executor failed".
+
+### Orphaned agentctl sweep
+
+Every per-session stop path is best effort: a stop on a lost transport skips
+the remote kill, and several reconciliation paths delete the
+`executors_running` row without a remote stop. Once the row is gone nothing
+records the remote pid, so the host's own process table is the only inventory
+that can find the leak. The sweep reconciles that inventory against Kandev's
+task and session state.
+
+- **Trigger.** An `executor.reachability.changed` event whose status becomes
+  reachable for an SSH executor, plus a slow per-executor interval while it
+  stays reachable. One sweep per executor at a time; a trigger that arrives
+  during a sweep is coalesced.
+- **Inventory.** One SSH command lists `pid ppid command` for every process
+  whose command is the managed `agentctl` binary with a `--workdir` equal to
+  `<workdir_root>/tasks/task-<task-id>`, and reads every
+  `<task dir>/.kandev/sessions/<session-id>/agentctl.pid`. Any process outside
+  the executor's configured workdir root is ignored.
+- **Ownership.** A pidfile that names the pid attributes the process to that
+  session. A process no pidfile claims is attributed to its task only.
+- **Decision.** Stop when the attributed session is terminal, or when an
+  unclaimed process's task is archived or has only terminal sessions. Preserve
+  when the task is unknown to this Kandev database, when any
+  `executors_running` row for a non-terminal session names the pid, or when an
+  inventory read fails.
+- **Stop.** SIGTERM, bounded wait, then SIGKILL of the pid and of its direct
+  children's process groups (agent processes run in their own groups, so a
+  SIGKILL of `agentctl` alone would strand them). The session runtime
+  directory is removed only for a pidfile-attributed stop; the task
+  directory is never touched (remote task directory reclamation owns it).
+- **Reporting.** One structured log line per sweep with executor id and
+  counts; no environment values or credentials.
+- **Absence probe on macOS.** `ps -p <pid>` exiting non-zero on a host
+  without `/proc` is absence, not an unavailable probe, once `ps -p` itself
+  has been shown to work on that host.
 
 ## Scenarios
 

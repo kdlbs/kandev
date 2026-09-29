@@ -118,6 +118,7 @@ const (
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
+	ActionSessionFork         = "session.fork"
 	ActionSessionEnsure       = "session.ensure"
 	ActionSessionRecover      = "session.recover"
 	ActionSessionResetContext = "session.reset_context"
@@ -285,6 +286,7 @@ const (
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
+	ActionSessionUsageUpdated           = "session.usage_updated"
 	ActionSessionPollModeChanged        = "session.poll_mode_changed"
 	ActionSessionRouteChanging          = "session.route_changing"
 	ActionSessionRouteChanged           = "session.route_changed"
@@ -384,6 +386,13 @@ const (
 	ActionSessionProcessOutput = "session.process.output"
 	ActionSessionProcessStatus = "session.process.status"
 
+	// Background work actions
+	ActionSessionBackgroundWorkList    = "session.background_work.list"
+	ActionSessionBackgroundWorkGet     = "session.background_work.get"
+	ActionSessionBackgroundWorkAction  = "session.background_work.action"
+	ActionSessionBackgroundWorkUsage   = "session.background_work.usage"
+	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
+	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote

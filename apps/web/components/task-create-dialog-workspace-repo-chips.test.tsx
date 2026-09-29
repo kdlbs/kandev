@@ -144,6 +144,34 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     expect(onCreateRepository).toHaveBeenCalledWith("r1");
   });
 
+  it("offers discovery settings action when enabled", () => {
+    const onOpenDiscoverySettings = vi.fn();
+    renderChips({
+      rows: [rows[0]],
+      showDiscoveryControls: true,
+      onOpenDiscoverySettings,
+    });
+    fireEvent.click(screen.getByTestId(CHIP_TRIGGER));
+    expect(screen.getByTestId("repository-discovery-settings-button")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("repository-discovery-settings-button"));
+    expect(onOpenDiscoverySettings).toHaveBeenCalledOnce();
+  });
+
+  it("renders scan home folder hint when repositories list is empty and triggers action on click", () => {
+    const onAddHomeAndOpenDiscovery = vi.fn();
+    renderChips({
+      rows: [rows[0]],
+      repositories: [],
+      showDiscoveryControls: true,
+      onAddHomeAndOpenDiscovery,
+    });
+    fireEvent.click(screen.getByTestId(CHIP_TRIGGER));
+    expect(screen.getByTestId("scan-home-folder-hint-button")).toBeTruthy();
+    expect(screen.getByText(/Scan your Home folder/i)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("scan-home-folder-hint-button"));
+    expect(onAddHomeAndOpenDiscovery).toHaveBeenCalledOnce();
+  });
+
   it.each([0, 1])("keeps both actions in empty lists on row %i while refreshing", (rowIndex) => {
     renderChips({
       repositories: [],

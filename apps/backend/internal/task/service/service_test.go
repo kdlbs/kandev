@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -181,43 +182,31 @@ func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, in
 // testUnits exposes each test's unit service so a seed can build a tree.
 var testUnits = map[string]*orgunit.Service{}
 
+var serviceTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *sqlx.DB) error {
+	if _, err := sqliterepo.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	if _, err := worktree.NewSQLiteStore(database, database); err != nil {
+		return err
+	}
+	// Match production startup order, including Office's task constraints.
+	if _, err := officesqlite.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	if _, err := workflowrepo.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	_, err := orgunit.NewStore(db.NewPool(database, database))
+	return err
+})
+
 func createTestServiceWithSessionsRepo(
 	t *testing.T,
 	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
 ) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
-	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
-		t.Fatalf("failed to init worktree store: %v", err)
-	}
-	// Apply office migrations on top of the task schema. The office
-	// package adds CHECK constraints (notably tasks.priority) and
-	// enables foreign_keys=ON. Running both migrations here mirrors
-	// production startup so service-layer tests catch cross-package
-	// constraint regressions automatically.
-	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
-		t.Fatalf("failed to apply office migrations: %v", err)
-	}
-	if _, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
-		t.Fatalf("failed to initialize workflow repository: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqlxDB.Close(); err != nil {
-			t.Errorf("failed to close sqlite db: %v", err)
-		}
-		if err := cleanup(); err != nil {
-			t.Errorf("failed to close repo: %v", err)
-		}
-	})
+	sqlxDB, _ := serviceTestSQLiteTemplate.Open(t)
+	repo := sqliterepo.NewWithInitializedDB(sqlxDB, sqlxDB, nil)
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
@@ -239,6 +228,7 @@ func createTestServiceWithSessionsRepo(
 		Reviews:           repo,
 		ResourceCleanups:  repo,
 		Usage:             repo,
+		BackgroundWork:    repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
 	// Reach comes from the unit tree, so the service tests wire the real one

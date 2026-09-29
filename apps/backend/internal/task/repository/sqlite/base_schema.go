@@ -43,6 +43,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
 		r.initClarificationInboxSidecarSchema,
+		r.initBackgroundWorkSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -330,6 +331,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
 		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0,
 		stage_type TEXT NOT NULL DEFAULT 'custom',
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
@@ -404,6 +406,8 @@ const infraSchemaDDL = `
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
 		default_config_agent_profile_id TEXT DEFAULT '',
+		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -447,6 +451,8 @@ const infraSchemaDDL = `
 		executor_id TEXT NOT NULL,
 		runtime TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'starting',
+		idle_suspension_state TEXT NOT NULL DEFAULT '',
+		idle_suspension_policy_updated_at TIMESTAMP,
 		resumable INTEGER NOT NULL DEFAULT 0,
 		resume_token TEXT DEFAULT '',
 		agent_execution_id TEXT DEFAULT '',

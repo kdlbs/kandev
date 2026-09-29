@@ -1508,25 +1508,8 @@ func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
 	}
 	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
-	lock, release := svc.acquireCancelInFlightGuard("session-silent-stream-drain")
-	lock.Lock()
-	guardLocked := true
-	unlockGuard := func() {
-		if guardLocked {
-			lock.Unlock()
-			guardLocked = false
-		}
-	}
-	relockGuard := func() {
-		if !guardLocked {
-			lock.Lock()
-			guardLocked = true
-		}
-	}
-	defer func() {
-		unlockGuard()
-		release()
-	}()
+	guard := svc.lockCancelInFlightGuard("session-silent-stream-drain")
+	defer guard.release()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -1534,8 +1517,8 @@ func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
 		ctx,
 		"task-silent-stream-drain",
 		"session-silent-stream-drain",
-		unlockGuard,
-		relockGuard,
+		guard.unlock,
+		guard.relockWithContext,
 	)
 	require.NoError(t, err)
 	select {
@@ -4757,6 +4740,9 @@ type mockMessageCreator struct {
 	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
 	permissionUpdateFn        func(context.Context, string, string, string, string, models.PermissionStatus) error
+	permissionMessageDecision *models.PermissionDecision
+	permissionMessageWrites   int
+	permissionMessageCreateFn func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, *models.PermissionDecision) (string, error)
 }
 
 type mockUserMessage struct {
@@ -4887,7 +4873,12 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 	return nil
 }
 
-func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
+func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
+	m.permissionMessageDecision = decision
+	m.permissionMessageWrites++
+	if m.permissionMessageCreateFn != nil {
+		return m.permissionMessageCreateFn(ctx, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID, options, actionType, actionDetails, decision)
+	}
 	return "", nil
 }
 
@@ -5725,6 +5716,47 @@ func TestResumeTaskSession_WrongTask(t *testing.T) {
 	_, err := svc.ResumeTaskSession(context.Background(), "task1", "session1")
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
+	}
+}
+
+func TestResumeTaskSession_DynamicRouteActionOwnsRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.RouteState = dynamicRouteStatusActionRequired
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		isAgentRunningFn: func(context.Context, string) bool { return false },
+		isAgentReadyFn:   func(context.Context, string) bool { return true },
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			if err := repo.UpdateTaskSessionState(ctx, "session1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+				t.Fatalf("failed to make resumed session ready: %v", err)
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-replacement"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	var blocked *sessionOpenRecoveryBlockedError
+	if !errors.As(err, &blocked) || blocked.reason != autoResumeBlockedDynamicRoute {
+		t.Fatalf("ResumeTaskSession error = %v, want dynamic-route ownership rejection", err)
+	}
+	if got := launchCalls.Load(); got != 0 {
+		t.Fatalf("dynamic-route-owned session launched %d replacement processes, want 0", got)
 	}
 }
 

@@ -157,6 +157,7 @@ describe("system storage slice", () => {
       overview,
       analysisRevision: 0,
       disk: null,
+      diskIdentity: null,
       runs: [],
       quarantine: [],
     });

@@ -249,6 +249,16 @@ describe("QueueAffordance", () => {
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["queue mutation", { isLoading: true }],
+    ["session cancellation", { cancellationPending: true }],
+  ])("disables clear-all during %s", (_name, extra) => {
+    useQueueMock.mockReturnValue(queueState([entry()], extra));
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect((screen.getByTestId("queue-clear-all") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("shows compact Auto-run and Auto-merge controls without legacy dispatch actions", () => {
     const state = queueState([entry()]);
     useQueueMock.mockReturnValue(state);

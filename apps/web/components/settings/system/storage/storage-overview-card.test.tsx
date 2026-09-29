@@ -270,6 +270,79 @@ describe("StorageOverviewCard system temporary resources", () => {
   });
 });
 
+describe("StorageOverviewCard temporary entry breakdown", () => {
+  it("renders bounded entry sizes and ownership without starting cleanup", () => {
+    const onReviewTemporaryArtifacts = vi.fn();
+    const onRunTemporaryArtifacts = vi.fn();
+    const overview = {
+      ...degradedOverview,
+      capabilities: { ...degradedOverview.capabilities, temporary_artifacts_available: true },
+      summary: {
+        ...degradedOverview.summary,
+        temporary_artifacts: {
+          available: true,
+          stale_count: 2,
+          stale_bytes: 128,
+        },
+        system_temporary: {
+          status: "partial",
+          included_in_total: false,
+          roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              status: "partial",
+              breakdown: {
+                status: "partial",
+                entries: [
+                  {
+                    name: "build-output",
+                    kind: "directory",
+                    size_bytes: 900,
+                    completeness: "measured",
+                    ownership: "untracked",
+                  },
+                  {
+                    name: "active-profile",
+                    kind: "directory",
+                    completeness: "partial",
+                    ownership: "unknown",
+                  },
+                ],
+                other_observed_bytes: 12,
+                other_observed_count: 3,
+              },
+            },
+          ],
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(
+      <StorageOverviewCard
+        overview={overview}
+        onRunGoCache={vi.fn()}
+        onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID));
+    const entries = screen.getByTestId("storage-temporary-entries");
+    expect(entries.textContent).toContain("build-output");
+    expect(entries.textContent).toContain("900 B");
+    expect(entries.textContent).toContain("Not tracked by Kandev");
+    expect(entries.textContent).toContain("active-profile");
+    expect(entries.textContent).toContain("Unavailable");
+    expect(entries.textContent).toContain("Ownership unknown");
+    expect(entries.textContent).toContain("3 other observed entries");
+    expect(entries.textContent).toContain("2 stale candidates");
+    fireEvent.click(screen.getByTestId("storage-temporary-review-cleanup"));
+    expect(onReviewTemporaryArtifacts).toHaveBeenCalledTimes(1);
+    expect(onRunTemporaryArtifacts).not.toHaveBeenCalled();
+  });
+});
+
 describe("StorageOverviewCard database footprint", () => {
   it("renders database rows with paths, scope details, and total contribution", () => {
     const overview = {

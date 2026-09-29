@@ -3,6 +3,8 @@ import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
+  repositoryId as toRepositoryId,
+  sessionId as toSessionId,
   type Repository,
   type Task,
 } from "@/lib/types/http";
@@ -14,6 +16,8 @@ import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useAppStore } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -29,6 +33,34 @@ export function selectWorkspaceRepositories(
   workspaceId: string | null | undefined,
 ): Repository[] {
   return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
+}
+
+export function shouldReservePageLevelMobileFeedbackOffset(params: {
+  isMobile: boolean;
+  hasTaskMoveError: boolean;
+  hasEnsureSessionError: boolean;
+  hasBootstrapRecoveryError: boolean;
+  effectiveSessionId: string | null;
+  isSessionPassthrough: boolean;
+  hasResumptionError: boolean;
+  hasResumptionNotice: boolean;
+  hasStatusUnavailable: boolean;
+}): boolean {
+  const hasPageRecoveryFeedback = params.hasBootstrapRecoveryError
+    ? Boolean(params.effectiveSessionId && params.isSessionPassthrough)
+    : params.hasResumptionError || params.hasResumptionNotice || params.hasStatusUnavailable;
+  return (
+    params.isMobile &&
+    (params.hasTaskMoveError || params.hasEnsureSessionError || hasPageRecoveryFeedback)
+  );
+}
+
+export function resolveTaskPageBootstrapRecoveryError(
+  statusSummary: TaskStatusSummary | null | undefined,
+  sessionId: string | null,
+  sessionMetadata: Record<string, unknown> | null | undefined,
+) {
+  return selectSessionRecoveryError(statusSummary?.active_error, sessionId, sessionMetadata);
 }
 
 type ACPDebugInfo = {
@@ -224,11 +256,39 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     workflow_step_id: kanbanTask.workflowStepId,
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
-    workspace_id: toWorkspaceId(""),
+    workspace_id: toWorkspaceId(kanbanTask.workspaceId ?? ""),
     workflow_id: toWorkflowId(kanbanTask.workflowId ?? ""),
     priority: kanbanTask.priority ?? "medium",
-    repositories: [],
-    created_at: "",
+    repositories:
+      kanbanTask.repositories?.map((repository) => ({
+        ...repository,
+        task_id: toTaskId(kanbanTask.id),
+        repository_id: toRepositoryId(repository.repository_id),
+        created_at: "",
+        updated_at: "",
+      })) ?? [],
+    workspace_folders: kanbanTask.workspaceFolders?.map((folder) => ({
+      ...folder,
+      task_id: toTaskId(kanbanTask.id),
+    })),
+    primary_session_id: kanbanTask.primarySessionId
+      ? toSessionId(kanbanTask.primarySessionId)
+      : null,
+    primary_session_pending_action: kanbanTask.primarySessionPendingAction,
+    task_pending_action: kanbanTask.taskPendingAction,
+    status_summary: kanbanTask.statusSummary,
+    foreground_activity: kanbanTask.foregroundActivity,
+    interrupted: kanbanTask.interrupted,
+    workspace_orphaned: kanbanTask.workspaceOrphaned,
+    auto_start_failed: kanbanTask.autoStartFailed,
+    is_from_office: kanbanTask.isFromOffice,
+    is_remote_executor: kanbanTask.isRemoteExecutor,
+    runner_editable: kanbanTask.runnerEditable,
+    runner_ineligible_reason: kanbanTask.runnerIneligibleReason,
+    autopilot: kanbanTask.autopilot,
+    workflow_agent_overrides: kanbanTask.workflowAgentOverrides,
+    parent_id: kanbanTask.parentTaskId ? toTaskId(kanbanTask.parentTaskId) : undefined,
+    created_at: kanbanTask.createdAt ?? "",
     updated_at: kanbanTask.updatedAt ?? "",
     metadata: kanbanTask.metadata,
   };
