@@ -208,6 +208,21 @@ Review remediation completed on 2026-09-29:
   option; another failure retains Retry focus. A pending-route desktop E2E and
   the phone E2E cover these behaviors.
 
+PR fixup completed on 2026-09-29:
+
+- The unbroken step assertion now checks every rendered text line against its
+  preview group at a 640px viewport. Retry sizing is verified at 28px on a wide
+  fine-pointer desktop, at 44px in the narrow fine-pointer layout, and with a
+  48px minimum and 44px hit target on a coarse-pointer phone.
+- The phone run exposed a focus race when the Tasks drawer closed after opening
+  Create Task. Its delayed focus return could move focus to the task-picker
+  trigger and dismiss the workflow picker. Drawer close now leaves focus in the
+  active task dialog, which owns the pending focus transition. The selector
+  popover also uses the task dialog's portal container.
+- Final verification passed: 52 focused Vitest tests, desktop preview E2E (1),
+  phone preview E2E (3 consecutive repeats), typecheck, E2E Vite build, targeted
+  ESLint, and `git diff --check`.
+
 ## Risks
 
 - Unstable hook dependencies can repeatedly fetch all options; test rerenders.

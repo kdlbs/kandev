@@ -4,6 +4,7 @@ import { expectTaskDescription } from "../../pages/task-description-editor";
 import {
   cleanupWorkflowStepPreviewScenario,
   expectStepsInOrder,
+  expectUnbrokenStepToFitGroup,
   seedWorkflowStepPreviewScenario,
   workflowStepsResponse,
 } from "./workflow-step-previews-helpers";
@@ -79,17 +80,11 @@ test("loads every workflow preview from a task page and retries one failed row",
     await optionList.evaluate((element) => {
       element.scrollTop = 0;
     });
-    const featureStepGroup = testPage.getByTestId("workflow-option-steps-" + scenario.feature.id);
-    const unbrokenStep = featureStepGroup.getByText(scenario.feature.unbrokenStepName, {
-      exact: true,
-    });
-    const [stepBox, stepGroupBox] = await Promise.all([
-      unbrokenStep.boundingBox(),
-      featureStepGroup.boundingBox(),
-    ]);
-    if (!stepBox || !stepGroupBox) throw new Error("Unbroken workflow step has no layout box");
-    expect(stepBox.x).toBeGreaterThanOrEqual(stepGroupBox.x - 1);
-    expect(stepBox.x + stepBox.width).toBeLessThanOrEqual(stepGroupBox.x + stepGroupBox.width + 1);
+    await expectUnbrokenStepToFitGroup(
+      testPage,
+      scenario.feature.id,
+      scenario.feature.unbrokenStepName,
+    );
 
     await retry.scrollIntoViewIfNeeded();
     const narrowRetryBox = await retry.boundingBox();
@@ -102,6 +97,7 @@ test("loads every workflow preview from a task page and retries one failed row",
     await retry.scrollIntoViewIfNeeded();
     const wideRetryBox = await retry.boundingBox();
     if (!wideRetryBox) throw new Error("Workflow retry has no wide layout box");
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
     expect(wideRetryBox.height).toBe(28);
 
     await testPage.setViewportSize({ width: 640, height: 720 });
@@ -125,10 +121,18 @@ test("loads every workflow preview from a task page and retries one failed row",
     await expectStepsInOrder(testPage, scenario.review.id, scenario.review.stepNames);
     await expect(reviewOption).toBeFocused();
     await expect(workflowSelector).toHaveAttribute("aria-expanded", "true");
+    const popover = testPage.getByTestId("workflow-selector-popover");
+    await testPage.keyboard.press("Escape");
+    await expect(popover).toHaveCount(0);
+    await expect(workflowSelector).toBeFocused();
+    const featureRefresh = workflowStepsResponse(testPage, scenario.feature.id);
+    await workflowSelector.press("Enter");
+    expect((await featureRefresh).ok()).toBe(true);
+    await expect(popover).toBeVisible();
+    await expectStepsInOrder(testPage, scenario.feature.id, scenario.feature.stepNames);
     await expect(title).toHaveValue("Preserve the task draft");
     await expectTaskDescription(description, "Compare the workflow steps before choosing.");
 
-    const popover = testPage.getByTestId("workflow-selector-popover");
     const box = await popover.boundingBox();
     if (!box) throw new Error("Workflow selector has no layout box");
     expect(box.x).toBeGreaterThanOrEqual(0);

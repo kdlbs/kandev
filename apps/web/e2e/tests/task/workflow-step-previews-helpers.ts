@@ -19,16 +19,55 @@ export async function expectStepsInOrder(page: Page, workflowId: string, stepNam
   }
 }
 
+export async function expectUnbrokenStepToFitGroup(
+  page: Page,
+  workflowId: string,
+  stepName: string,
+) {
+  const text = page
+    .getByTestId("workflow-option-steps-" + workflowId)
+    .getByText(stepName, { exact: true });
+  await expect(text).toBeVisible();
+  const layout = await text.evaluate((element) => {
+    const group = element.closest<HTMLElement>("[data-testid^='workflow-option-steps-']");
+    if (!group) throw new Error("Workflow step text is outside its step group");
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const groupBox = group.getBoundingClientRect();
+    return {
+      group: {
+        left: groupBox.left,
+        right: groupBox.right,
+      },
+      text: Array.from(range.getClientRects(), (rect) => ({
+        left: rect.left,
+        right: rect.right,
+      })),
+    };
+  });
+  expect(layout.text.length).toBeGreaterThan(1);
+  for (const line of layout.text) {
+    expect(line.left).toBeGreaterThanOrEqual(layout.group.left - 1);
+    expect(line.right).toBeLessThanOrEqual(layout.group.right + 1);
+  }
+}
+
 export type WorkflowStepPreviewScenario = {
   taskId: string;
   kanban: { id: string; stepNames: string[] };
   feature: { id: string; stepNames: string[]; unbrokenStepName: string };
   review: { id: string; stepNames: string[] };
+  extraWorkflows: Array<{ id: string; stepName: string }>;
+};
+
+type WorkflowStepPreviewScenarioOptions = {
+  extraWorkflowCount?: number;
 };
 
 export async function seedWorkflowStepPreviewScenario(
   apiClient: ApiClient,
   workspaceId: string,
+  { extraWorkflowCount = 0 }: WorkflowStepPreviewScenarioOptions = {},
 ): Promise<WorkflowStepPreviewScenario> {
   const kanban = await apiClient.createWorkflow(workspaceId, "Preview Kanban");
   const feature = await apiClient.createWorkflow(workspaceId, "Feature Plan");
@@ -37,13 +76,7 @@ export async function seedWorkflowStepPreviewScenario(
   const featureSteps = [
     "Analysis",
     unbrokenStepName,
-    ...Array.from(
-      { length: 40 },
-      (_, index) =>
-        "Implementation checkpoint " +
-        (index + 1) +
-        " with a long review note and enough detail to wrap on a phone",
-    ),
+    "Implementation checkpoint with a long review note and enough detail to wrap on a phone",
     "Review",
     "Done",
   ];
@@ -65,6 +98,16 @@ export async function seedWorkflowStepPreviewScenario(
         is_start_step: position === 0,
       });
     }
+  }
+
+  const extraWorkflows: Array<{ id: string; stepName: string }> = [];
+  for (let index = 0; index < extraWorkflowCount; index += 1) {
+    const workflow = await apiClient.createWorkflow(workspaceId, `Picker overflow ${index + 1}`);
+    const stepName = `Overflow start ${index + 1}`;
+    await apiClient.createWorkflowStep(workflow.id, stepName, 0, {
+      is_start_step: true,
+    });
+    extraWorkflows.push({ id: workflow.id, stepName });
   }
 
   const kanbanSteps = await apiClient.listWorkflowSteps(kanban.id);
@@ -91,6 +134,7 @@ export async function seedWorkflowStepPreviewScenario(
       id: review.id,
       stepNames: ["Triage", "Prepare contribution", "Maintainer review", "Complete"],
     },
+    extraWorkflows,
   };
 }
 
@@ -98,7 +142,12 @@ export async function cleanupWorkflowStepPreviewScenario(
   apiClient: ApiClient,
   scenario: WorkflowStepPreviewScenario,
 ): Promise<void> {
-  for (const workflowId of [scenario.review.id, scenario.feature.id, scenario.kanban.id]) {
+  for (const workflowId of [
+    ...scenario.extraWorkflows.map(({ id }) => id),
+    scenario.review.id,
+    scenario.feature.id,
+    scenario.kanban.id,
+  ]) {
     await apiClient.deleteWorkflow(workflowId).catch(() => {});
   }
 }

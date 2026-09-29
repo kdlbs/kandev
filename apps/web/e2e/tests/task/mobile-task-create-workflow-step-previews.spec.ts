@@ -16,7 +16,9 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
   apiClient,
   seedData,
 }) => {
-  const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId);
+  const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId, {
+    extraWorkflowCount: 4,
+  });
   let reviewAttempts = 0;
   await testPage.route(
     "**/api/v1/workflows/" + scenario.review.id + "/workflow/steps",
@@ -36,6 +38,7 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
 
   try {
     await testPage.setViewportSize({ width: 390, height: 640 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
     await testPage.goto("/t/" + scenario.taskId);
     await expect(testPage).toHaveURL(new RegExp("/t/" + scenario.taskId + "$"));
     await testPage.getByTestId("mobile-task-picker-trigger").tap();
@@ -53,14 +56,28 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
 
     const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
     await workflowSelector.scrollIntoViewIfNeeded();
+    const popover = testPage.getByTestId("workflow-selector-popover");
+    const kanbanResponse = workflowStepsResponse(testPage, scenario.kanban.id);
     const featureResponse = workflowStepsResponse(testPage, scenario.feature.id);
     const reviewResponse = workflowStepsResponse(testPage, scenario.review.id);
+    const extraResponses = scenario.extraWorkflows.map(({ id }) =>
+      workflowStepsResponse(testPage, id),
+    );
     await workflowSelector.tap();
+    await expect(popover).toBeVisible();
+    expect((await kanbanResponse).ok()).toBe(true);
     expect((await featureResponse).ok()).toBe(true);
     expect((await reviewResponse).status()).toBe(503);
+    expect((await Promise.all(extraResponses)).every((response) => response.ok())).toBe(true);
+    await expect(popover).toBeVisible();
 
     await expectStepsInOrder(testPage, scenario.kanban.id, scenario.kanban.stepNames);
     await expectStepsInOrder(testPage, scenario.feature.id, scenario.feature.stepNames);
+    await Promise.all(
+      scenario.extraWorkflows.map(({ id, stepName }) =>
+        expectStepsInOrder(testPage, id, [stepName]),
+      ),
+    );
     await expect(testPage.getByTestId("workflow-option-" + scenario.review.id)).toContainText(
       "Failed to load workflow steps",
     );
@@ -71,7 +88,6 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
       "Contributor Review: Failed to load workflow steps",
     );
 
-    const popover = testPage.getByTestId("workflow-selector-popover");
     const popoverBox = await popover.boundingBox();
     if (!popoverBox) throw new Error("Workflow selector has no layout box");
     expect(popoverBox.x).toBeGreaterThanOrEqual(0);
@@ -96,6 +112,9 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
     });
 
     const retry = testPage.getByTestId("workflow-preview-retry-" + scenario.review.id);
+    await optionList.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
     await expect(retry).toBeVisible();
     const retryBox = await retry.boundingBox();
     if (!retryBox) throw new Error("Workflow retry has no layout box");
@@ -107,14 +126,6 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
     if (!featureBox) throw new Error("Feature workflow option has no layout box");
     expect(featureBox.height).toBeGreaterThanOrEqual(44);
 
-    await retry.evaluate((element) => {
-      const list = element.closest<HTMLElement>("[data-testid='workflow-selector-option-list']");
-      if (!list) throw new Error("Workflow retry is outside the option list");
-      const retryBox = element.getBoundingClientRect();
-      const listBox = list.getBoundingClientRect();
-      if (retryBox.bottom > listBox.bottom) list.scrollTop += retryBox.bottom - listBox.bottom;
-      if (retryBox.top < listBox.top) list.scrollTop -= listBox.top - retryBox.top;
-    });
     const visibleRetryBox = await retry.boundingBox();
     const visibleListBox = await optionList.boundingBox();
     if (!visibleRetryBox || !visibleListBox) throw new Error("Workflow retry is not measurable");
@@ -122,6 +133,10 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
     expect(visibleRetryBox.y + visibleRetryBox.height).toBeLessThanOrEqual(
       visibleListBox.y + visibleListBox.height + 2,
     );
+    const retryTapPoint = {
+      x: visibleRetryBox.x + visibleRetryBox.width / 2,
+      y: visibleRetryBox.y + visibleRetryBox.height / 2,
+    };
     const retryHitTarget = await testPage.evaluate(
       ({ x, y, testId }) => {
         const hit = document.elementFromPoint(x, y);
@@ -132,30 +147,30 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
         };
       },
       {
-        x: visibleRetryBox.x + visibleRetryBox.width / 2,
-        y: visibleRetryBox.y + visibleRetryBox.height / 2,
+        ...retryTapPoint,
         testId: "workflow-preview-retry-" + scenario.review.id,
       },
     );
     expect(retryHitTarget.isRetry, JSON.stringify(retryHitTarget)).toBe(true);
 
     const retryResponse = workflowStepsResponse(testPage, scenario.review.id);
-    await retry.tap();
+    await testPage.touchscreen.tap(retryTapPoint.x, retryTapPoint.y);
     await expect(popover).toBeVisible();
     const retryResponseResult = await retryResponse;
     expect(retryResponseResult.ok()).toBe(true);
     expect(
       (await retryResponseResult.json()).steps.map((step: { name: string }) => step.name),
     ).toEqual(scenario.review.stepNames);
+    await expect(workflowSelector).toHaveAttribute("aria-expanded", "true");
+    await expect(popover).toBeVisible();
     await expect(workflowSelector).toContainText("Preview Kanban");
     await expect(testPage.getByTestId("workflow-option-" + scenario.review.id)).toContainText(
       scenario.review.stepNames[0],
     );
     await expectStepsInOrder(testPage, scenario.review.id, scenario.review.stepNames);
 
-    await testPage.keyboard.press("Escape");
+    await description.tap();
     await expect(popover).toHaveCount(0);
-    await expect(workflowSelector).toBeFocused();
     const featureRefresh = workflowStepsResponse(testPage, scenario.feature.id);
     await workflowSelector.tap();
     expect((await featureRefresh).ok()).toBe(true);

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type PointerEvent,
   type Ref,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,6 +31,7 @@ import {
   DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { useWorkflowOptionPreviews } from "@/hooks/use-workflow-option-previews";
 import type { WorkflowOptionPreview } from "@/hooks/use-workflow-option-previews";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -245,8 +247,13 @@ function useWorkflowRetryFocus(
 ) {
   const [retrying, setRetrying] = useState(false);
   const optionButtonRef = useRef<HTMLButtonElement>(null);
-  const retryHadFocus = useRef(false);
   const retryEnteredLoading = useRef(false);
+
+  const handleRetryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "touch") {
+      event.currentTarget.focus({ preventScroll: true });
+    }
+  }, []);
 
   useLayoutEffect(() => {
     if (!retrying) return;
@@ -254,19 +261,23 @@ function useWorkflowRetryFocus(
       retryEnteredLoading.current = true;
       return;
     }
+    if (previewStatus === "success") {
+      setRetrying(false);
+      optionButtonRef.current?.focus({ preventScroll: true });
+      retryEnteredLoading.current = false;
+      return;
+    }
     if (!retryEnteredLoading.current) return;
     setRetrying(false);
-    if (retryHadFocus.current && previewStatus === "success") {
-      optionButtonRef.current?.focus();
-    }
-    retryHadFocus.current = false;
     retryEnteredLoading.current = false;
   }, [previewStatus, retrying]);
 
   const handleRetry = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
       if (retrying) return;
-      retryHadFocus.current = document.activeElement === event.currentTarget;
+      if (document.activeElement !== event.currentTarget) {
+        optionButtonRef.current?.focus({ preventScroll: true });
+      }
       retryEnteredLoading.current = false;
       setRetrying(true);
       onRetry(workflowId);
@@ -275,6 +286,7 @@ function useWorkflowRetryFocus(
   );
 
   return {
+    handleRetryPointerDown,
     handleRetry,
     optionButtonRef,
     retrying,
@@ -285,10 +297,12 @@ function useWorkflowRetryFocus(
 function WorkflowPreviewRetryButton({
   workflowId,
   retrying,
+  onPointerDown,
   onClick,
 }: {
   workflowId: string;
   retrying: boolean;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation();
@@ -302,6 +316,7 @@ function WorkflowPreviewRetryButton({
       )}
       aria-disabled={retrying || undefined}
       data-testid={`workflow-preview-retry-${workflowId}`}
+      onPointerDown={onPointerDown}
       onClick={onClick}
     >
       {t("common:retryPreview")}
@@ -391,6 +406,7 @@ function WorkflowOption({
         <WorkflowPreviewRetryButton
           workflowId={workflow.id}
           retrying={retry.retrying}
+          onPointerDown={retry.handleRetryPointerDown}
           onClick={retry.handleRetry}
         />
       )}
@@ -411,6 +427,7 @@ type WorkflowSelectorOptionListProps = {
   onClose: () => void;
   triggerRef: { current: HTMLButtonElement | null };
   restoreFocusOnCloseRef: { current: boolean };
+  portalContainer: HTMLElement | null;
 };
 
 function WorkflowSelectorOptionList({
@@ -426,6 +443,7 @@ function WorkflowSelectorOptionList({
   onClose,
   triggerRef,
   restoreFocusOnCloseRef,
+  portalContainer,
 }: WorkflowSelectorOptionListProps) {
   const { t } = useTranslation();
   const previewStatusAnnouncement = workflows
@@ -451,6 +469,7 @@ function WorkflowSelectorOptionList({
       align="start"
       collisionPadding={8}
       data-testid="workflow-selector-popover"
+      portalContainer={portalContainer}
       onKeyDownCapture={(event) => {
         if (event.key === "Escape") restoreFocusOnCloseRef.current = true;
       }}
@@ -527,6 +546,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const restoreFocusOnCloseRef = useRef(false);
+  const portalContainer = useTaskCreateDialogPopoverContainer();
   const taskCreatePreviewMode = previewWorkspaceId !== undefined;
   const { previews, retry } = useWorkflowOptionPreviews(
     taskCreatePreviewMode ? previewWorkspaceId : null,
@@ -573,6 +593,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
         onClose={() => setOpen(false)}
         triggerRef={triggerRef}
         restoreFocusOnCloseRef={restoreFocusOnCloseRef}
+        portalContainer={portalContainer}
       />
     </Popover>
   );

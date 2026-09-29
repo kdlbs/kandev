@@ -162,3 +162,14 @@ stable, announces row states in one translated region, and retains keyboard
 focus during retry. Successful retry returns focus to the workflow option, and
 Escape returns focus to the selector trigger on phone. The plan records browser
 geometry and focused verification.
+
+PR fixup verification passed on 2026-09-29. A 640px viewport regression checks
+each rendered line of an unbroken step name against the picker step-group
+bounds. Desktop E2E confirms a 28px Retry control at 1280px with a fine pointer;
+phone E2E confirms a 48px minimum and a 44px hit target. The phone run also
+exposed delayed focus restoration from the Tasks drawer, which could dismiss
+the workflow picker after opening Create Task. The drawer now leaves focus
+with the active task dialog, and the selector popover portals into that dialog.
+Final checks passed: 52 focused Vitest tests; one desktop preview E2E; three
+consecutive phone preview E2E runs; typecheck; managed E2E Vite build; targeted
+ESLint; and `git diff --check`.

@@ -1,12 +1,15 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { WorkflowSelectorRow } from "./workflow-selector-row";
 import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 
 const touchState = vi.hoisted(() => ({ enabled: false }));
 const workflowApiMocks = vi.hoisted(() => ({ listWorkflowSteps: vi.fn() }));
 const WORKFLOW_SELECTOR_TRIGGER = "workflow-selector-trigger";
+const ARIA_EXPANDED_ATTRIBUTE = "aria-expanded";
+const ARIA_TRUE = "true";
 
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => touchState.enabled,
@@ -88,11 +91,11 @@ describe("WorkflowSelectorRow launch destination", () => {
 
     const launchStepInfo = screen.getByTestId("task-create-launch-step-info");
     expect(launchStepInfo.getAttribute("aria-haspopup")).toBe("dialog");
-    expect(launchStepInfo.getAttribute("aria-expanded")).toBe("false");
+    expect(launchStepInfo.getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
 
     fireEvent.click(launchStepInfo);
 
-    expect(launchStepInfo.getAttribute("aria-expanded")).toBe("true");
+    expect(launchStepInfo.getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe(ARIA_TRUE);
     expect(screen.getByTestId("task-create-launch-step-help-drawer").textContent).toContain(
       "The task starts in this workflow step.",
     );
@@ -103,6 +106,34 @@ describe("WorkflowSelectorRow launch destination", () => {
 
     expect(screen.queryByTestId("task-create-launch-step")).toBeNull();
   });
+});
+
+it("keeps the workflow picker inside its task dialog portal container", async () => {
+  const portalContainer = document.createElement("div");
+  document.body.append(portalContainer);
+  const view = render(
+    <TaskCreateDialogPopoverContainerProvider container={portalContainer}>
+      <TooltipProvider>
+        <WorkflowSelectorRow
+          workflows={[{ id: "workflow-1", name: "Development" }]}
+          snapshots={{}}
+          selectedWorkflowId="workflow-1"
+          onWorkflowChange={() => {}}
+          agentProfiles={[]}
+          launchPreview={launchPreview}
+        />
+      </TooltipProvider>
+    </TaskCreateDialogPopoverContainerProvider>,
+  );
+
+  try {
+    fireEvent.click(screen.getByTestId(WORKFLOW_SELECTOR_TRIGGER));
+    const popover = await screen.findByTestId("workflow-selector-popover");
+    expect(portalContainer.contains(popover)).toBe(true);
+  } finally {
+    view.unmount();
+    portalContainer.remove();
+  }
 });
 
 // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.1
@@ -232,7 +263,7 @@ it("shows independent loading and failure states and retries without selecting",
 
   fireEvent.click(retry);
   expect(retry.isConnected).toBe(true);
-  expect(retry.getAttribute("aria-disabled")).toBe("true");
+  expect(retry.getAttribute("aria-disabled")).toBe(ARIA_TRUE);
   expect(document.activeElement).toBe(retry);
   expect(workflowOption.getAttribute("aria-label")).toBe("Review");
   expect(status.textContent).toContain("Review: Loading steps");
@@ -242,9 +273,68 @@ it("shows independent loading and failure states and retries without selecting",
     });
   });
   expect(await screen.findByText("Recovered")).toBeTruthy();
-  expect(screen.getByTestId(WORKFLOW_SELECTOR_TRIGGER).getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByTestId(WORKFLOW_SELECTOR_TRIGGER).getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe(
+    ARIA_TRUE,
+  );
   expect(document.activeElement).toBe(workflowOption);
   expect(onWorkflowChange).not.toHaveBeenCalled();
+});
+
+// @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.3 and AC-TASKS-CREATE-WORKFLOW-STEPS-001.6
+it("returns focus to the workflow option after a touch retry succeeds", async () => {
+  const failed = deferred<{
+    steps: Array<{ id: string; name: string; position: number; color: string }>;
+  }>();
+  let attempts = 0;
+  workflowApiMocks.listWorkflowSteps.mockImplementation((workflowId: string) => {
+    if (workflowId === "review") {
+      attempts += 1;
+      return attempts === 1
+        ? failed.promise
+        : Promise.resolve({
+            steps: [{ id: "review-step", name: "Recovered", position: 0, color: "#123456" }],
+          });
+    }
+    return Promise.resolve({
+      steps: [{ id: "feature-step", name: "Analysis", position: 0, color: "#abcdef" }],
+    });
+  });
+
+  render(
+    <TooltipProvider>
+      <WorkflowSelectorRow
+        workflows={[
+          { id: "feature", name: "Feature" },
+          { id: "review", name: "Review" },
+        ]}
+        snapshots={{}}
+        previewWorkspaceId="workspace-1"
+        selectedWorkflowId="feature"
+        onWorkflowChange={() => {}}
+        agentProfiles={[]}
+      />
+    </TooltipProvider>,
+  );
+  const trigger = screen.getByTestId(WORKFLOW_SELECTOR_TRIGGER);
+  fireEvent.click(trigger);
+  await act(async () => {
+    failed.reject(new Error("private server detail"));
+  });
+
+  const retry = await screen.findByTestId("workflow-preview-retry-review");
+  const workflowOption = screen.getByRole("button", { name: "Review" });
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement) activeElement.blur();
+  expect(document.activeElement).toBe(document.body);
+
+  fireEvent.pointerDown(retry, { pointerType: "touch" });
+  expect(document.activeElement).toBe(retry);
+  fireEvent.click(retry);
+  expect(document.activeElement).toBe(retry);
+
+  expect(await screen.findByText("Recovered")).toBeTruthy();
+  expect(document.activeElement).toBe(workflowOption);
+  expect(trigger.getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe(ARIA_TRUE);
 });
 
 // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.5
