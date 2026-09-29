@@ -249,7 +249,7 @@ func (m *Manager) stopAndPersistIdleSuspension(
 		exec.FinishedAt = &now
 	})
 	execution.EndSessionSpan()
-	m.RemoveExecution(execution.ID)
+	m.removeExecutionLocked(execution.ID, execution)
 	m.clearRemoteStatus(execution.SessionID)
 	m.logger.Info("suspended idle ACP execution",
 		zap.String("execution_id", execution.ID),
