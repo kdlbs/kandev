@@ -1227,6 +1227,60 @@ func TestResumedSessionStatusUsesExistingActiveTurn(t *testing.T) {
 	require.Equal(t, "Session resumed", messages[0].Content)
 }
 
+func TestReplayedTodosWithoutActiveTurnDoNotCreateTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+
+	svc.persistTodoMessage(ctx, "task1", "session1",
+		[]streams.PlanEntry{{Description: "fix blockers", Status: agentEventCompleted}})
+
+	require.Zero(t, openTurnCount(t, repo, "session1"),
+		"a todo replay on resume must not open a prompt-less turn that the next prompt would adopt")
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Empty(t, messages, "a todo replay without an active turn must not persist a message")
+}
+
+func TestTodosAttachToExistingActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+
+	svc.persistTodoMessage(ctx, "task1", "session1",
+		[]streams.PlanEntry{{Description: "fix blockers", Status: "in_progress"}})
+
+	require.Equal(t, 1, openTurnCount(t, repo, "session1"))
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "turn1", messages[0].TurnID)
+	require.Equal(t, string(models.MessageTypeTodo), string(messages[0].Type))
+}
+
 func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

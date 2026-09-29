@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001
   - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003
+  - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004
 ---
 
 # Completion signal recovery system design
@@ -20,6 +21,7 @@ It preserves the current turn stamp, signal claim, and workflow transition rules
 | --- | --- |
 | REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001 | Applicability response (`advances`/`note`) |
 | REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003 | Diagnostic response, Recovery instructions, Verification |
+| REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004 | Resume replay turn ownership, Verification |
 
 ## Applicability response (`advances`/`note`)
 
@@ -87,6 +89,27 @@ No tool call silently creates a turn, restamps an old turn, or moves the task.
 The existing operator move remains documented as a separate manual decision.
 An error does not grant an agent new authority to use `move_task_kandev`.
 
+## Resume replay turn ownership
+
+A resumed ACP session can replay its todo list before any prompt is dispatched.
+`internal/orchestrator/event_handlers_streaming.go:persistTodoMessage` used
+`getActiveTurnID`, which lazily starts a turn when none is active. That turn
+was stamped with the task's step at replay time and stayed open, because no
+prompt owned it. When the task later returned to its previous step,
+`startTurnForSessionWithOwnershipChecked` adopted the open turn for the
+workflow prompt. Every completion attempt in that turn then carried the old
+launch stamp and was rejected as stale.
+
+`persistTodoMessage` resolves the turn through `currentTurnIDForSession`,
+which never creates one. With no active turn the todo message is not persisted.
+The `SessionTodosUpdated` bus event is still published, so live clients keep
+the current list. The same rule already applies to the "Session resumed"
+status message in `handleSessionStatusEvent`.
+
+This keeps `workflow_step_id_at_start` immutable and leaves the mismatch guard
+unchanged. It removes a source of prompt-less turns; it does not suppress
+other producers or change which sessions are resumed.
+
 ## Persistence and compatibility
 
 There is no schema change, new response envelope, or new MCP argument.
@@ -110,6 +133,10 @@ signal-gated step returns `advances:true` with no `note`; a non-signal-gated
 step returns `advances:false` with a `note`; a step that fails to resolve
 omits both fields.
 
+Orchestrator tests cover resume replay ownership with the SQLite-backed task
+service: a todo report without an active turn creates neither a turn nor a
+message, and a todo report with an active turn attaches to it.
+
 ## Related decisions and contracts
 
 - [ADR 0015](../../../decisions/0015-explicit-completion-signal-for-auto-advance.md)
@@ -119,3 +146,4 @@ omits both fields.
 ## Implementation plans
 
 - [Issue 3772 recovery package](../../../plans/step-completion-stale-turn-recovery/plan.md)
+- [Issue 4047 resume replay package](../../../plans/resume-todo-replay-turn/plan.md)

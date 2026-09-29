@@ -4697,8 +4697,21 @@ func (s *Service) handleSessionTodosEvent(ctx context.Context, payload *lifecycl
 
 // persistTodoMessage creates a "todo" message with the todo entries as metadata.
 // Empty entries are persisted too — they represent the agent clearing all todos.
+//
+// The message attaches only to an already-active turn, never a lazily started
+// one. A resumed ACP session replays its todo list before any prompt arrives;
+// starting a turn for that replay leaves an open, prompt-less turn stamped with
+// whatever workflow step the task is in at that moment. The next workflow
+// prompt then adopts it and inherits the stale step stamp, so step_complete is
+// rejected for the whole turn. The live WS update above still reaches clients,
+// and the replayed list is already persisted from the turn that produced it —
+// same rule as handleSessionStatusEvent's "Session resumed" message.
 func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID string, entries []streams.PlanEntry) {
 	if s.messageCreator == nil {
+		return
+	}
+	turnID := s.currentTurnIDForSession(ctx, sessionID)
+	if turnID == "" {
 		return
 	}
 	todos := make([]map[string]interface{}, len(entries))
@@ -4712,7 +4725,7 @@ func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID stri
 	metadata := map[string]interface{}{"todos": todos}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx, taskID, "Updated Todos", sessionID,
-		string(models.MessageTypeTodo), s.getActiveTurnID(sessionID), metadata, false,
+		string(models.MessageTypeTodo), turnID, metadata, false,
 	); err != nil {
 		s.logger.Warn("failed to create todo message",
 			zap.String("session_id", sessionID),

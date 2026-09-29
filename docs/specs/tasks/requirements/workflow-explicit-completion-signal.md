@@ -93,6 +93,29 @@ signal and recover without completing the wrong step.
 This addition specifies recovery guidance. Automatic turn restart, deferred-move
 scheduling repairs, and changes to completion authorization are outside its scope.
 
+### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004: No stale turn from resume replay
+
+**Status:** shipped.
+
+**Intent:** Resuming a parked session must not leave an open turn that a later
+step's prompt adopts, because that turn's launch stamp belongs to an earlier step
+and makes every completion attempt in it stale.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.1:** When an agent reports
+  its todo list while the session has no active turn, as it does when a resumed
+  session replays state before any prompt, the system does not create a turn and
+  does not persist a todo message. The live todo update is still broadcast.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.2:** When the session has an
+  active turn, a todo report is persisted as a todo message attached to that turn.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.3:** After such a replay, the
+  next workflow prompt for the session starts a new turn stamped with the task's
+  current step, so a completion attempt from it is eligible under the normal rules.
+
+This addition removes one producer of prompt-less turns. It does not change the
+launch-stamp guard, restamp existing turns, or alter automatic resume scheduling.
+
 ## Migrated source detail
 
 ## Why
