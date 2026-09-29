@@ -36,29 +36,54 @@ count or tabs (D14), or the clarification and permission contracts.
 ## Relay read
 
 `GET /api/v1/workspaces/:id/coordinators/:cid/relay/:taskId`
-(`workspace.read`, registered only while phase 3 is effective) returns:
+(`workspace.read`, registered only while phase 3 is effective, so 404
+otherwise) returns:
 
 ```json
 {
   "task_id": "...",
   "session_id": "...",
-  "clarification": {"pending_id": "...", "messages": []},
+  "clarification": {"pending_id": "...", "context": "...", "messages": []},
   "permission": {"message": {}}
 }
 ```
 
-- The task must be in the coordinator's workspace (404 otherwise); the route
-  reads the task's primary session.
-- `clarification` is the answerable bundle of that session, read with the
-  same repository query the Inbox list uses
-  (`task/repository/sqlite/clarification_bundle_query.go`), so "answerable"
-  means exactly what the Inbox means by it; `messages` has the shape the
-  Inbox's `ClarificationInboxBundle.messages` has. `null` when there is none.
-- `permission` is the session's newest `permission_request` message whose
-  status is pending, returned as the task chat receives it (including its
-  `request_id`, `pending_id`, `title`, `options` and action details in
-  metadata). `null` when there is none.
-- A read error is 500; the card treats it as "no answer available"
+- The coordinator must belong to workspace `:id` and the task to that
+  workspace, else 404 (the same guard the other coordinator routes use). The
+  route reads the task's primary session only. A task with no primary session
+  returns 200 with `session_id` empty and both fields `null`. A task whose
+  session is terminal or archived returns 200 with both `null`, because both
+  reads below exclude terminal sessions.
+- `clarification` is the one answerable bundle of that session. The query is
+  `ListUnresolvedClarificationBundles` (`task/repository/sqlite/
+  clarification_bundle_query.go`), which owns "answerable" for the Inbox; it
+  gains one optional `ListClarificationBundlesOptions.SessionID` predicate,
+  applied inside the bundle query and leaving the query byte-for-byte unchanged
+  when empty, as the `Sidecar` option does. The relay calls it with
+  `Unscoped: true`, `SessionID` set, `Sidecar` nil (no per-user dismiss or
+  snooze applies to a relay read) and `Limit: 1`. Its existing order,
+  `created_at ASC, pending_id ASC`, decides which bundle wins when a session
+  has several: the oldest. The bundle's `messages` and `context` are hydrated
+  by the Inbox's own hydration, exposed to the coordinator through one exported
+  wrapper in `internal/clarification` around `buildInboxBundleViews` for a
+  single summary, so the shape is exactly `ClarificationInboxBundle.messages`
+  and `context`; the Inbox's routes, responses and tests are unchanged.
+  `null` when there is no bundle or hydration yields no messages.
+- `permission` is read with `ListPendingInteractions` (task repository) for
+  `SessionIDs: [primary]` and `Kinds: [permission]`. That read applies the
+  authority the `pending_action` projection uses: the session's current turn,
+  non-terminal sessions only, the newest permission of the turn ordered by
+  `created_at DESC` then message row order `DESC`, and pending when its
+  `metadata.status` is absent or `pending`. It therefore returns at most one
+  row, the same one the chat shows. The message is returned in the chat's
+  message shape (including `request_id`, `pending_id`, `title`, `options` and
+  action details in metadata). `null` when there is none.
+- A task whose `pending_action` comes from a non-primary session shows
+  `clarification: null` and `permission: null`, so its item keeps the phase 1
+  text and **Open task**; answering another session's request from here is not
+  offered.
+- A read error is 500, counted in `coordinator_relay_read_failed_total`; a
+  404 is not counted. The card treats every non-200 as "no answer available"
   (`AC-COORDINATOR-RELAY-001.4`).
 
 The route works whether or not the Needs-you Inbox flag is on: it calls the
@@ -69,22 +94,37 @@ repository query directly, not the flag-gated Inbox handler.
 `apps/web/app/coordinator/components/question-answer.tsx`:
 
 - A question item (the `question or permission` group of
-  [needs-you](needs-you.md#classification) with `pending_action ==
-  "clarification"`) shows **Answer here** to managers while phase 3 is effective.
-  Readers and phase-3-off clients keep the phase 1 text and **Open task**.
-- **Answer here** fetches the relay read and renders
-  `ClarificationPanelSection` with `pending`, the bundle `messages`,
-  `maxHeightVh={50}` and an `onOutcome` handler, as
+  [needs-you](needs-you.md#classification)) is a question when its
+  `pending_action` is `clarification`, and a permission when it is
+  `permission`; the item's `pending_action`, which already gives permission
+  priority over clarification for a task, picks the card.
+- While phase 3 is effective and the viewer is a manager, the item performs
+  one relay read per item when it first renders, deduplicated by task id. Until
+  it resolves with a bundle (`clarification` non-null for a question item,
+  `permission` non-null for a permission item) the item shows the phase 1 text
+  and **Open task**; when it does, **Answer here** replaces the text. A
+  non-200 or a null field leaves the phase 1 text. The read is repeated when
+  `task.status_summary.updated` arrives for the task and each time **Answer
+  here** is expanded, so an expanded card always renders the bundle of that
+  moment; a null result on re-expand collapses the card to the phase 1 text.
+  Readers and phase-3-off clients make no relay read and keep the phase 1 text
+  and **Open task**.
+- **Answer here** renders `ClarificationPanelSection` with `pending`, the
+  bundle `messages`, `maxHeightVh={50}` and an `onOutcome` handler, as
   `needs-you-inbox-row.tsx` does. Submission therefore goes through
   `use-clarification-group.ts` to `POST /api/v1/clarification/:id/respond`
-  and the shared `Resolver.ResolveBundle`.
+  and the shared `Resolver.ResolveBundle`. The component's own submit control
+  is disabled while a submission is in flight, so one click sends one request;
+  Try again resubmits the retained answer for the same `pending_id` without
+  rereading the bundle.
 - Outcomes, from the component's `onOutcome`:
 
   | Outcome | Card |
   | --- | --- |
-  | recorded | collapse; the item leaves when `task.status_summary.updated` clears `pending_action` |
-  | lost to another caller | collapse; toast "Already answered: <winning outcome>" |
+  | recorded | collapse; the item leaves when `task.status_summary.updated` clears `pending_action`; if that event is missed the item leaves at the next Needs you list refresh |
+  | lost to another caller | collapse; toast "Already answered: <winning outcome>", using the winner's status when present and the generic answered wording when absent, as the Inbox row's `anotherCallerOutcomeKey` does |
   | no longer active | collapse; toast "This question is no longer waiting" |
+  | late message admitted | collapse; no toast; the card passes no `onLateAnswer` |
   | failed | stay expanded with the answer kept; **Try again** |
 
 - A relay read with `clarification: null`, or a failed read, shows the phase
@@ -94,19 +134,38 @@ repository query directly, not the flag-gated Inbox handler.
 
 `apps/web/app/coordinator/components/permission-answer.tsx`:
 
-- A permission item shows **Answer here** to managers while phase 3 is effective.
+- A permission item (`pending_action` `permission`) shows **Answer here** to
+  managers while phase 3 is effective, once the relay read of the previous
+  section has resolved with `permission` non-null; otherwise the phase 1 text
+  and **Open task**.
 - It renders the permission message's title, action details and one button
   per option, and resolves through the same `permission.respond` WebSocket
   request `use-permission-handlers.ts` sends, with the message's `task_id`,
-  `session_id`, `request_id` and `pending_id` and the chosen `option_id`.
-  The backend's existing handler records the `PermissionResolutionAudit` with
-  source `web` and the browser identity.
-- A stale-response error (the same `isStalePermissionResponse` test the chat
-  uses) collapses with the toast "This permission is no longer waiting"; any
-  other error keeps the card expanded with **Try again**.
-- The request builder is extracted from `use-permission-handlers.ts` into
-  `apps/web/lib/permissions/respond.ts` so both callers share it; the chat's
-  behaviour is unchanged and pinned by its existing tests.
+  `session_id`, `request_id` and `pending_id`. The backend's existing handler
+  records the `PermissionResolutionAudit` with source `web` and the browser
+  identity.
+- The extraction `apps/web/lib/permissions/respond.ts` carries three things
+  from `use-permission-handlers.ts`, exported for both callers: the request
+  builder, `isStalePermissionResponse`, and the option-to-request mapping.
+  The mapping is the chat's: an option of kind `reject_once` or
+  `reject_always` sends `rejected: true`; the Codex cancel decision sends
+  `cancelled: true` with no `option_id`; any other option sends its `option_id` with both flags false.
+  Button labels are the chat's: Approve for `allow_once`, Always allow for
+  `allow_always`, Reject for the reject kinds, the Codex decision label for
+  Codex options, and the option's own name otherwise, exported from the same
+  module.
+- A missing `request_id` on the message, or no WebSocket client, keeps the
+  card expanded and shows the failed-response toast with **Try again**
+  available; unlike the chat, the card never returns silently.
+- While a response is in flight every option button is disabled. **Try
+  again** resends the option last chosen; the card does not reread the
+  permission before retrying.
+- A stale-response error (the `isStalePermissionResponse` test) collapses
+  with the toast "This permission is no longer waiting"; any other error keeps
+  the card expanded with **Try again**. A success collapses the card; the item
+  leaves when `task.status_summary.updated` clears `pending_action`, or at the
+  next list refresh.
+- The chat's behaviour is unchanged and pinned by its existing tests.
 
 ## Reply store
 

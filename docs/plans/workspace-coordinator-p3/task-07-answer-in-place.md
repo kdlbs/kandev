@@ -15,10 +15,12 @@ acceptance_criteria:
   - AC-COORDINATOR-RELAY-001.3
   - AC-COORDINATOR-RELAY-001.4
   - AC-COORDINATOR-RELAY-001.5
+  - AC-COORDINATOR-RELAY-001.6
   - AC-COORDINATOR-RELAY-002.1
   - AC-COORDINATOR-RELAY-002.2
   - AC-COORDINATOR-RELAY-002.3
   - AC-COORDINATOR-RELAY-002.4
+  - AC-COORDINATOR-RELAY-002.5
 system_design:
   - ../../specs/coordinator/system-design/relay.md
 ---
@@ -36,7 +38,10 @@ chat's permission response. No answer contract changes.
 - Backend: `GET .../coordinators/:cid/relay/:taskId`
   ([Relay read](../../specs/coordinator/system-design/relay.md#relay-read)),
   reading the bundle through `clarification_bundle_query.go` directly (not the
-  flag-gated Inbox handler).
+  flag-gated Inbox handler), with one optional `SessionID` predicate added to
+  its options and one exported hydration wrapper in `internal/clarification`
+  (Inbox behaviour unchanged); the permission through
+  `ListPendingInteractions` for the primary session.
 - Web: extract the `permission.respond` builder and stale test from
   `components/task/chat/messages/use-permission-handlers.ts` into
   `apps/web/lib/permissions/respond.ts`, chat behaviour pinned by its existing
@@ -48,8 +53,9 @@ chat's permission response. No answer contract changes.
 
 ## Out of scope
 
-- Any change to the Inbox, `ClarificationPanelSection`, the resolver, or the
-  permission WebSocket handler.
+- Any change to Inbox behaviour, `ClarificationPanelSection`, the resolver, or
+  the permission WebSocket handler (the additive query predicate and the
+  hydration wrapper above change none of them).
 - Recording a clarification answerer (ADR residual).
 
 ## ASCII UI preview
@@ -70,8 +76,16 @@ See [plan UI-03](plan.md#ascii-ui-previews).
 - A manager answers a permission in place through the same WebSocket request
   the chat sends, with the audit source `web`; a stale response collapses with
   the notice, other errors keep the card with Try again.
-- The Inbox's rows and count are unchanged before and after answering in
-  place (`AC-COORDINATOR-RELAY-002.4`, D14).
+- Answering in place writes no Inbox dismiss or snooze state; answering a
+  permission leaves the Inbox rows and count unchanged, and answering a
+  question leaves the Inbox as answering it in the chat does
+  (`AC-COORDINATOR-RELAY-002.4`, D14).
+- The relay read is 404 off phase 3 and for a task or coordinator outside the
+  workspace, 200 with nulls when nothing is answerable, and the card shows
+  **Answer here** only after it resolves with an answerable item
+  (`AC-COORDINATOR-RELAY-001.6`).
+- The permission card sends the chat's `rejected`/`cancelled` fields for the
+  chosen option (`AC-COORDINATOR-RELAY-002.5`).
 
 ## Verification
 
