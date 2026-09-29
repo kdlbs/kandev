@@ -78,20 +78,31 @@ creates, archives or repoints a conversation.
   (it stores the message under a generated UUID id in the
   `afterDispatchAdmission` seam with `CreateUserMessageIdempotent`,
   `metadata.coordinator_wake_turn_id`, the claimed turn id, author type
-  `user`; never the message queue), the lookup
-  of the turn's stored message by that key, the sent test (a found message
-  counts as sent only when `GetTurn` of its `TurnID` exists in the row's
-  session), and the `send_failed` rollback for any refusal before dispatch
-  (identified by the wrapper sentinel `ErrWakePromptNotDispatched`, not an
-  enumerated list), for a stored message whose reserved turn was rolled back,
-  and for a store failure of that seam, each returning the wakes to `pending`
-  and conditional on `outcome IS NULL AND message_id IS NULL`
-  ([Delivery](../../specs/coordinator/system-design/wake.md#delivery)).
-- `internal/coordinator/turns.go`: `session_turn_id` from the stored
-  message, turn end on `turn.completed` for that turn id, the backstop's
-  missed-settle and unknown-send rules, the startup pass using the message
-  lookup, and cost via task 03's `TurnCost`
+  `user`; never the message queue), the sent test (a send counts as sent only
+  when `onAccepted` bound `session_turn_id`; a stored message with no binding
+  was not sent and is never re-sent), and the settle rule: `send_failed` for
+  any refusal before dispatch (identified by the wrapper sentinel
+  `ErrWakePromptNotDispatched`, not an enumerated list) and for a store
+  failure of that seam, each returning the wakes to `pending` with `turn_id`
+  null, marking the orphan message best effort, and conditional on
+  `outcome IS NULL AND session_turn_id IS NULL`
+  ([Delivery](../../specs/coordinator/system-design/wake.md#delivery),
+  [Sent test](../../specs/coordinator/system-design/wake-recovery.md#sent-test),
+  [Settle rule](../../specs/coordinator/system-design/wake-recovery.md#settle-rule)).
+- The delivery worker lifecycle: `svc.StopDelivery()` joins the worker in the
+  existing phase 3 cleanup closure of `registerCoordinatorRoutes`, and
+  `registerCoordinatorDelivery` wires the worker, subscribers and
+  `SetBackstopHooks` in its synchronous body and the startup pass in its
+  returned hook.
+- `internal/coordinator/turns.go`: `onAccepted` as the only writer of
+  `session_turn_id`, turn end on `turn.completed` for that turn id, the
+  backstop's missed-settle and unbound-row rules, the startup pass
+  ([Startup pass](../../specs/coordinator/system-design/wake-recovery.md#startup-pass))
+  and cost via task 03's `TurnCost`
   ([Turn end](../../specs/coordinator/system-design/wake.md#turn-end)).
+- `Spend`'s own diagnostic counter and log are exempt from the `AdmitReadOnly`
+  no-write rule: they move under `AdmitReadOnly` too, because they are not
+  check state.
 - The backstop hooks of task 04: the step 2 turn duties (message recovery,
   missed-settle re-derivation, per-turn cost recompute, and `CheckCeiling`,
   which run whatever `autonomy_enabled` reads) and the step 3.2 `Deliver`.
@@ -177,11 +188,13 @@ creates, archives or repoints a conversation.
   delivery holds with `conversation_busy` until the session is idle
   (`AC-COORDINATOR-WAKE-005.3`).
 - A refused send and a crash after marking with no stored message return the
-  wakes to `pending` and record `send_failed` or `interrupted`; a send that
-  times out after the message was stored is found by
-  `metadata.coordinator_wake_turn_id`, is not sent again, and continues as a
-  turn; a timed-out send with no message is settled `send_failed` by the
-  backstop after two minutes.
+  wakes to `pending` and record `send_failed` or `interrupted`. Three tests:
+  a bound `session_turn_id` means sent (the turn continues and is not sent
+  again); a stored message with no binding is settled `send_failed` by the
+  backstop after two minutes with the session not `RUNNING`, its wakes are
+  `pending`, its message is marked orphaned, and nothing is re-sent; a restart
+  during the gap between storing and binding settles the row `interrupted`
+  at startup, also with no re-send.
 - The session goes `WAITING_FOR_INPUT` and immediately runs a drained queued
   manager message while the `turn.completed` settle is suppressed: the
   backstop settles the unattended row `completed` because the active turn
@@ -212,7 +225,7 @@ creates, archives or repoints a conversation.
 - A stored message whose reserved turn was rolled back on a pre-acceptance
   dispatch failure is not sent: the turn settles `send_failed` (`interrupted`
   at startup), its wakes are `pending`, and the next delivery sends a new
-  message under a new turn id; a found message whose turn read errors leaves the
+  message under a new turn id; a failed message or session read leaves the
   row untouched that tick.
 - `Admit` in `AdmitReadOnly` mode moves no counter and writes no log; check 7
   holds for a queued message (read error: `read_error`) and for an open turn
@@ -238,4 +251,5 @@ make -C apps/backend lint
   (`HasPendingForSession`), not a message-table heuristic or `GetStatus`
   (which swallows errors); a wrong read sends into a busy session.
 - A stored message is not proof of a send: the orchestrator rolls back the
-  reserved turn on a pre-acceptance failure and leaves the message.
+  reserved turn on a pre-acceptance failure and leaves the message. Only the
+  `onAccepted` binding is proof; recovery must never re-send an unbound row.

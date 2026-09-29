@@ -233,8 +233,7 @@ Reads go through two coordinator-side interfaces, not orchestrator types:
   error and counts every entry, including a reserved in-flight one, so a send
   the queue is mid-delivering holds; `GetStatus` is not used because it
   swallows a failed list read as an empty queue); the active turn
-  (`ActiveTurnReader.GetActiveTurn`); and a turn by id (task service
-  `GetTurn`, a missing row distinct from a read error). A failed queue read
+  (`ActiveTurnReader.GetActiveTurn`). A failed queue read
   fails check 7 with `conversation_busy` and detail `read_error`.
 - A message finder ([Finding the turn's message](wake-recovery.md#finding-the-turns-message)).
 
@@ -257,15 +256,23 @@ check with its reason and detail `read_error`. `Admit` writes nothing.
 
 `Deliver(coordinatorID)` is serialised per coordinator by an in-process keyed
 mutex, and across processes by the partial unique index. `Kick` schedules a
-`Deliver` on a coalescing worker: one worker goroutine per coordinator. A kick
-while a `Deliver` runs sets one pending flag and re-runs once afterward; any
-number of kicks in that window coalesce to that one re-run. The worker has
-Start and Stop on a `WaitGroup` and goleak coverage; Stop latches the worker
-closed (a `Kick` after `Stop` is a no-op), cancels the context of a `Deliver`
-in progress, and waits for it. Task 05's registration function registers
-`Stop` through `routeParams.addCleanup` after the database pool's cleanup, so
-the worker is joined before the store closes whatever its order against the
-backstop's own cleanup. A `Deliver` error is
+`Deliver` on a coalescing per-coordinator worker that lives only while there
+is work: the first `Kick` for a coordinator with no live worker starts one
+goroutine on a `WaitGroup`; it runs `Deliver`, re-runs once if any kicks
+arrived during the run (any number coalesce to one pending flag), and exits
+when a run ends with the flag clear. At most one goroutine per coordinator is
+live and none for an idle or deleted one (`Deliver` for a missing coordinator
+ends at `Admit` with `coordinator_not_found`). `Stop` latches closed (a `Kick`
+after `Stop` is a no-op), cancels the context of every `Deliver` in progress
+and waits on the `WaitGroup`; goleak covers it. Task 05 adds
+`svc.StopDelivery()` to the phase 3 cleanup closure that
+`registerCoordinatorRoutes` (`internal/backendapp/coordinator.go`) already
+registers through `addCleanup` for `StopWakeRecorder` and `StopWakeBackstop`,
+after those two calls; cleanups run in reverse registration order and the
+database pool's was registered earlier, so the worker is joined before the
+store closes. `registerCoordinatorDelivery`'s synchronous body creates the
+worker, subscribes to `turn.completed` and the session state change, and calls
+`SetBackstopHooks`; the hook it returns runs the [startup pass](wake-recovery.md#startup-pass). A `Deliver` error is
 logged and left to the next trigger or backstop tick. A `cooldown` or
 `conversation_busy` hold schedules no timer: the next backstop tick (60
 seconds) or turn-end kick delivers. Triggers: a committed wake insert, a
@@ -293,7 +300,11 @@ below also counts and publishes as the [Observability](#observability) and
    `coordinator_wake_superseded_total`. A failed watch-set read aborts the whole
    delivery before any supersede, leaving every wake `pending`. A per-wake
    episode read error leaves that wake `pending` and excluded, and the next
-   held wake takes its slot, up to 20. Keep the first 20 that still hold. With none, return.
+   held wake takes its slot, up to 20. Keep the first 20 that still hold. After
+   the last supersede statement, when at least one changed a row, publish
+   `coordinator.updated` with `autonomy_changed: true` once for the delivery
+   (post-commit style: a failure is logged and changes nothing), whether or not a
+   turn follows. With none holding, return.
    This read is the evaluation point of "still holds"
    (`AC-COORDINATOR-WAKE-005.1`): an episode ending after it is still
    delivered, and the turn message tells the agent to read current state.
@@ -349,9 +360,11 @@ below also counts and publishes as the [Observability](#observability) and
    written for a wake send (a manager's message is deferred and replayed; a
    wake send is not, and the next trigger simply asks again). An error the
    entry point returns after the seam ran (timeout, cancelled context,
-   transport) is not wrapped. The residual is a crash between the store and
-   the first provider I/O: the message exists, so the turn is treated as sent
-   when its turn exists ([sent test](wake-recovery.md#finding-the-turns-message)). The stored message has `author_type` `user` (there is no
+   transport) is not wrapped. A stored message is never proof of a send: the
+   orchestrator rolls the reserved turn back on a pre-acceptance failure, but
+   `DeleteTurnIfUnreferenced` keeps a turn a message references, so the
+   message and its turn both survive. The only proof is the
+   [`onAccepted` binding](wake-recovery.md#sent-test). The stored message has `author_type` `user` (there is no
    system author type) and is marked only by that metadata key. Delivery
    never uses the message queue (`orchestrator/messagequeue`), so a wake
    message is never queued behind another turn: admission check 7 ran in
@@ -359,45 +372,32 @@ below also counts and publishes as the [Observability](#observability) and
    this send fail with `ErrAgentPromptInProgress` or
    `ErrSessionNotPromptable`. The options also carry the `onAccepted(turnID)`
    hook of `promptTaskOptions` (`orchestrator/task_operations.go`), run at the
-   agentctl acceptance boundary before the prompt runs. It sets
-   `session_turn_id` with `UPDATE ... SET session_turn_id = ? WHERE id = ? AND
-   outcome IS NULL AND session_turn_id IS NULL`, so the column binds at
-   acceptance. A request that beats the binding, or a failed binding (warn log),
-   is matched by session and denied ([containment](containment.md#unattended-permissions)).
-5. On success, set `message_id` to the generated message id (the message is
-   stored before dispatch) with `UPDATE ... WHERE id=? AND outcome IS NULL AND
-   message_id IS NULL`, and, if `onAccepted` did not, `session_turn_id` with
-   the conditional update above. The generated id is not stored on the turn
-   row before the send: after a crash, recovery looks only for
-   `metadata.coordinator_wake_turn_id`, never sends again and never reuses the
-   id. On a send error:
-   - `ErrWakePromptNotDispatched` (a refusal before dispatch): no message
-     exists, so skip the lookup and settle `send_failed` as below.
-   - Any other error: [find the turn's message](wake-recovery.md#finding-the-turns-message)
-     and apply its sent test. Found and its turn exists: set `message_id` from
-     it and record `session_turn_id` from the message's `TurnID`, because the
-     prompt was sent. Found but its turn is missing (the entry point rolled
-     the reserved turn back after a dispatch failure and left the message):
-     the prompt was not sent, so settle `send_failed` as below. Not found, or a
-     read error in the find or the turn read: leave the turn open with
-     `message_id` null for the backstop
-     (`AC-COORDINATOR-WAKE-005.3`); a timeout, cancelled context or transport
-     error takes this branch too.
-   - Settling `send_failed` is one transaction: `UPDATE
-     coordinator_unattended_turns SET outcome='send_failed', finished_at=?
-     WHERE id=? AND outcome IS NULL AND message_id IS NULL`, and only when it
-     changed a row, the wakes return to `pending` with `turn_id` null
-     (`UPDATE coordinator_wakes SET status='pending', turn_id=NULL,
-     updated_at=? WHERE turn_id=?`). A settle that changed no row lost to
-     another settle and does nothing further. After commit it counts
-     `coordinator_unattended_turn_total{outcome="send_failed"}` and publishes
-     `coordinator.updated` with `autonomy_changed: true`. The next trigger holds at
-     admission with `conversation_busy` until the session is idle, or at
-     `cooldown`; a refusal therefore repeats at most once per cooldown and
-     nothing else retries it.
-   Because nothing is queued, a message the lookup cannot find within two
-   minutes was never dispatched, which is what makes the two-minute
-   `send_failed` settle safe.
+   agentctl acceptance boundary before the prompt runs. It is the only writer
+   of `session_turn_id`: `UPDATE ... SET session_turn_id = ? WHERE id = ? AND
+   outcome IS NULL AND session_turn_id IS NULL`. An update that changes no row
+   or fails logs at warn and leaves the row unbound; nothing else binds it (the
+   message's `TurnID` and the session's active turn are never a source). A
+   request that beats the binding, or an unbound row, is matched by session and
+   denied ([containment](containment.md#unattended-permissions)).
+5. On a send that returns without error, set `message_id` to the generated id
+   with `UPDATE ... WHERE id=? AND outcome IS NULL AND message_id IS NULL`; a
+   statement that changes no row (a settle beat it, or a value is already
+   there) is a no-op that never overwrites and is not an error. `message_id`
+   is informational: nothing decides on it once `outcome` is set. The step
+   never writes `session_turn_id`; if `onAccepted` did not bind it the row
+   stays open and unbound, and the [sent test](wake-recovery.md#sent-test) and
+   the two-minute rule resolve it. The generated id is not stored on the turn
+   row before the send. On a send error:
+   - `ErrWakePromptNotDispatched` (a refusal before dispatch, no message and
+     no provider I/O): settle `send_failed` now by the
+     [settle rule](wake-recovery.md#settle-rule).
+   - Any other error (timeout, cancelled context, transport): leave the turn
+     open for the backstop (`AC-COORDINATOR-WAKE-005.3`); if `onAccepted` bound
+     the row it is sent and continues, otherwise the two-minute rule settles
+     it. Nothing is queued, so an unbound turn is never sent later.
+   A refusal therefore repeats at most once per cooldown: the next trigger
+   holds at admission with `conversation_busy` until the session is idle, or at
+   `cooldown`.
 
 ### Episode recheck
 
@@ -408,7 +408,7 @@ merely a condition of the same kind:
 | --- | --- |
 | `question` | the primary session's pending clarification bundle has `pending_id` equal to `episode_key` |
 | `permission` | a pending permission message on the primary session has `pending_id` equal to `episode_key` |
-| `stall` | the task's stall row is [current](#stall-currency) and its `last_event_at` equals `episode_key` |
+| `stall` | the task's stall row is [current](wake-backstop.md#stall-currency) and its `last_event_at` equals `episode_key` |
 | `error` | the primary session's active error has `stamp` equal to `episode_key` |
 | `completed` | the task's state is `COMPLETED` |
 
@@ -436,10 +436,14 @@ A subscriber on `turn.completed` settles the open turn row whose
 `session_turn_id` equals the completed turn's id. The outcome comes from the
 session's state when the settle runs: a row with
 `stop_requested_at` set settles `stopped_at_ceiling`; otherwise `FAILED`
-settles `failed`, `CANCELLED` settles `cancelled`, and any other state (including `RUNNING` on a drained queued message) settles
-`completed`. The settle is `UPDATE ... WHERE id=? AND outcome IS NULL`.
+settles `failed`, `CANCELLED` settles `cancelled`, a session that no longer
+exists settles `cancelled` (its wakes stay `delivered`), and any other state
+(including `RUNNING` on a drained queued message) settles `completed`. Every
+settle site sets `outcome` and `finished_at` (the service clock at the settle)
+in one `UPDATE ... SET outcome=?, finished_at=? WHERE id=? AND outcome IS NULL`.
 Only when it changed a row does it compute `cost_subcents`
-([spend](spend.md#per-turn-cost)), count
+([spend](spend.md#per-turn-cost); a `TurnCost` error never blocks the settle
+and the backstop recompute fills a null value), count
 `coordinator_unattended_turn_total{outcome}`, publish `coordinator.updated`
 with `autonomy_changed: true`, and call `Kick` so a wake recorded during the
 turn is delivered after the cooldown; a duplicate `turn.completed` or a
@@ -465,15 +469,15 @@ is never denied or stopped by this design.
 | Failure | Result |
 | --- | --- |
 | Event lost or subscriber error | Backstop stores the wake within 60 s |
-| Process stops after step 3 of delivery | Startup pass finds the message (turn continues) or sets `interrupted`, wakes back to `pending` |
+| Process stops after step 3 of delivery | Startup pass: a bound row is left to turn end; an unbound row is settled `interrupted`, wakes back to `pending` |
 | Send refused before dispatch | `send_failed`, wakes back to `pending`, retried on the next trigger after the cooldown |
-| Send outcome unknown | Message found: the turn continues. Not found after two minutes: `send_failed`, wakes back to `pending` |
+| Send outcome unknown | Bound by `onAccepted`: sent, the turn continues. Unbound after two minutes with the session not `RUNNING` or `STARTING`: `send_failed`, wakes back to `pending`, the orphan message marked, never re-sent |
 | Autonomy turned off during delivery | Step 3 re-reads the flag under the wake lock and rolls back |
 | Autonomy turned off while a turn is open | The turn runs on; the backstop keeps its ceiling check, recovery and settle until it ends; no wake is recorded or delivered |
 | Two deliveries race | Partial unique index admits one turn row |
 | Conversation busy, unavailable or not started (`CREATED`) | Wakes wait; nothing is created or started |
 | Message store fails at the dispatch boundary | Claim rolled back, nothing dispatched, `send_failed`, wakes back to `pending` |
-| Message stored but its reserved turn rolled back (pre-acceptance dispatch failure) | Not sent: the sent test fails, `send_failed` (or `interrupted` at startup), wakes back to `pending`; the orphan message is never matched again |
+| Message stored, never bound by `onAccepted` (pre-acceptance dispatch failure, or a lost binding) | Not sent: `send_failed` (or `interrupted` at startup), wakes back to `pending`, the orphan message marked and never re-sent; the turn the message references stays in the session |
 | A read the recovery or settle needs fails | The row is left untouched and retried on the next tick |
 
 ## Security

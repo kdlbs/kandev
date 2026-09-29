@@ -47,8 +47,10 @@ N equals the turn's `wake_count`, and the list has exactly the rows read back
 at step 3, oldest first. Step 4 reads each wake's task for the identifier and
 title; a task that cannot be read (deleted since step 2, or a failed read)
 is listed by the wake's `task_id` (the UUID) in place of the identifier,
-with an empty title, and the turn still sends. Titles are quoted, truncated to 80 characters (an empty title renders
-as `""`) and stripped of newlines; they are still board
+with an empty title, and the turn still sends. The line's kind word is `question` for a
+`question` wake and `stall` for a `stall` wake. A title is truncated to its first 80 runes (no
+ellipsis), each newline or tab is replaced by a single space, each `"` is replaced by `'`
+so the quoting stays intact, and an empty title renders as `""`; titles are still board
 content ([ADR residual](../../../decisions/2026-09-29-coordinator-phase-3-autonomy.md#residual-risk)).
 The web transcript renderer recognises `metadata.coordinator_wake_turn_id`
 and renders the message as the "Woken by N events" entry with an expandable
@@ -80,12 +82,20 @@ When `admission.reason` is `cooldown`, `admission` also carries `until`, the
 newest settled turn row's `finished_at` plus 5 minutes (RFC 3339 UTC); it is
 absent for every other reason.
 `last_turn.stop_state` is `null`, or `"stop_failing"` per
-[spend](spend.md#stopping).
+[spend](spend.md#stopping). `oldest_pending_at` is `null` when `pending_wakes`
+is 0, and `last_turn` is `null` when the coordinator has no turn row. When spend
+cannot be measured, `spend` is `{"measurable": false, "degraded": <bool>}` with
+`window_subcents`, `mean_daily_subcents_7d` and `ceiling_subcents` null.
+`containment.Check` never errors (an unreadable condition is `met: false` with
+detail `unreadable`); a failed store read for any other field returns 500
+`read_error` and no partial body.
 `coordinator.updated` gains optional `autonomy_changed: true`, so clients
 re-read. Each owner publishes it once, after its own commit and only when the
 write changed a row: the wake recorder for an inserted wake
-([recording](wake-recording.md)), delivery for a `delivered` transaction, a
-`superseded` settle and a `send_failed` or `interrupted` settle, the turn-end
+([recording](wake-recording.md)), delivery for a `delivered` transaction, the
+supersede pass of [step 2](wake.md#delivery) (once per delivery, after its last
+statement that changed a row) and a `send_failed` or `interrupted` settle
+([settle rule](wake-recovery.md#settle-rule)), the turn-end
 settle, and the autonomy PATCH that changes `autonomy_enabled` or the ceiling.
 A publish failure is logged at warn and never fails or rolls back the write; the
 next read or backstop pass converges.
