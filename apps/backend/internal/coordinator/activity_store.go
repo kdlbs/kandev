@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // ActivityCursor is the keyset position after which the next page starts.
@@ -87,4 +89,34 @@ func (s *Store) EarliestActivityAt(ctx context.Context, coordinatorID string) (*
 	}
 	at = at.UTC()
 	return &at, nil
+}
+
+// MoveOutcomes reads the outcome_json of the coordinator's proposals by id,
+// one query for a page. A proposal with no outcome maps to nil; an absent
+// proposal is absent from the map.
+func (s *Store) MoveOutcomes(ctx context.Context, coordinatorID string, ids []string) (map[string]*string, error) {
+	out := map[string]*string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	query, args, err := sqlx.In(`SELECT id, outcome_json FROM coordinator_proposals WHERE coordinator_id = ? AND id IN (?)`, coordinatorID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read proposal outcomes: %w", err)
+	}
+	var rows []struct {
+		ID      string         `db:"id"`
+		Outcome sql.NullString `db:"outcome_json"`
+	}
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("read proposal outcomes: %w", err)
+	}
+	for _, r := range rows {
+		if r.Outcome.Valid {
+			v := r.Outcome.String
+			out[r.ID] = &v
+		} else {
+			out[r.ID] = nil
+		}
+	}
+	return out, nil
 }
