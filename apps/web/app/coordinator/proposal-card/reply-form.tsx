@@ -7,6 +7,7 @@ import { Field, FieldContent, FieldError, FieldLabel } from "@kandev/ui/field";
 import { Spinner } from "@kandev/ui/spinner";
 import { Textarea } from "@kandev/ui/textarea";
 import { REPLY_TEXT_MAX, replyTextLength } from "@/hooks/domains/coordinator/use-proposal-reply";
+import { LONG_TEXT_FIELD_CLASS } from "@/components/coordinators/long-text-field";
 
 export type ReplyFormServerError = { message: string; field: string | null };
 
@@ -48,6 +49,7 @@ export function ReplyForm({ busy, serverError, onSend, onCancel }: ReplyFormProp
           <FieldLabel htmlFor="proposal-reply-text">{t("coordinator:replyLabel")}</FieldLabel>
           <Textarea
             id="proposal-reply-text"
+            className={LONG_TEXT_FIELD_CLASS}
             ref={textRef}
             value={text}
             disabled={busy}
