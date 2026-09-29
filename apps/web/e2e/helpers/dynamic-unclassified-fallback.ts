@@ -63,19 +63,16 @@ export async function waitForRouteActionRequired(
   minimumCompletedTurnCount?: number,
 ) {
   let current: Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"][number] | undefined;
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        current = sessions.find((candidate) => candidate.id === sessionId);
-        const { turns } = await apiClient.listSessionTurns(sessionId);
-        const openTurnCount = turns.filter((turn) => turn.completed_at == null).length;
-        return {
-          manualRecovery:
-            current?.route_state === "action_required" &&
-            (minimumCompletedTurnCount === undefined ||
-              (turns.length >= minimumCompletedTurnCount && openTurnCount === 0)),
-          snapshot: current
+  let latestSnapshot: Record<string, unknown> | null = null;
+  try {
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          current = sessions.find((candidate) => candidate.id === sessionId);
+          const { turns } = await apiClient.listSessionTurns(sessionId);
+          const openTurnCount = turns.filter((turn) => turn.completed_at == null).length;
+          latestSnapshot = current
             ? {
                 state: current.state,
                 route_state: current.route_state,
@@ -86,12 +83,27 @@ export async function waitForRouteActionRequired(
                 turn_count: turns.length,
                 open_turn_count: openTurnCount,
               }
-            : null,
-        };
+            : null;
+          return {
+            manualRecovery:
+              current?.route_state === "action_required" &&
+              (minimumCompletedTurnCount === undefined ||
+                (turns.length >= minimumCompletedTurnCount && openTurnCount === 0)),
+            snapshot: latestSnapshot,
+          };
+        },
+        { timeout: 60_000, message: "Waiting for the dynamic route manual recovery state" },
+      )
+      .toMatchObject({ manualRecovery: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${message}\nLatest route recovery session: ${JSON.stringify(latestSnapshot)}`,
+      {
+        cause: error,
       },
-      { timeout: 60_000, message: "Waiting for the dynamic route manual recovery state" },
-    )
-    .toMatchObject({ manualRecovery: true });
+    );
+  }
   if (!current) throw new Error(`Task session ${sessionId} disappeared during route recovery`);
   return current;
 }

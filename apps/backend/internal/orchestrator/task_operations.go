@@ -2234,6 +2234,9 @@ func applyResolvedExecution(session *models.TaskSession, resolved agentruntime.P
 			"dangerously_skip_permissions": resolved.Profile.DangerouslySkipPermissions,
 			"cli_passthrough":              resolved.Profile.CLIPassthrough,
 		}
+		if resolved.AgentName != "" {
+			session.AgentProfileSnapshot["agent_name"] = resolved.AgentName
+		}
 		session.IsPassthrough = resolved.Profile.CLIPassthrough
 	}
 }
