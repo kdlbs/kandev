@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -88,6 +89,14 @@ type Service struct {
 	decisionSteps WorkflowStepReader
 	eventBus      bus.EventBus
 
+	// undoTasks is the task-service seam undo and the activity list read
+	// through; nil until SetUndoDeps.
+	undoTasks UndoTaskService
+	undoLocks keyedLock
+
+	retentionWG      sync.WaitGroup
+	retentionRunning atomic.Bool
+
 	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
 	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
 	// docs/specs/coordinator/system-design/proposal-recovery.md#recovery.
@@ -153,6 +162,10 @@ func (s *Service) SetDecisionDeps(tasks DecisionTaskService, steps WorkflowStepR
 	s.decisionSteps = steps
 	s.eventBus = eventBus
 }
+
+// SetUndoDeps wires the task-service seam behind undo and the list's task
+// identifiers.
+func (s *Service) SetUndoDeps(tasks UndoTaskService) { s.undoTasks = tasks }
 
 // publishCoordinatorUpdated recomputes coordinatorID's open-proposal count
 // and publishes events.CoordinatorUpdated (proposals.md#events). A nil

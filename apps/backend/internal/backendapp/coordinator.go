@@ -45,6 +45,7 @@ func initCoordinatorWiring(
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
 	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2))
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
+	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
 }
 
@@ -213,5 +214,6 @@ func registerCoordinatorDecisions(
 	return func(ctx context.Context, t0 time.Time) {
 		svc.StartupRecoveryPass(ctx, t0)
 		svc.StartApprovalSweep(ctx)
+		svc.StartActivityRetention(ctx)
 	}
 }

@@ -555,6 +555,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	if h.coordinatorSvc != nil {
 		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
+		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // ErrInvalidActivity is returned when an activity row or refusal argument
@@ -153,7 +154,7 @@ func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row Ac
 func (s *Store) MarkUndone(ctx context.Context, exec coordinatorExec, rowID, undoneBy string, at time.Time) (bool, error) {
 	at = at.UTC()
 	res, err := exec.ExecContext(ctx, s.db.Rebind(`UPDATE coordinator_activity SET undone_at = ?, undone_by = ?, updated_at = ? WHERE id = ? AND undone_at IS NULL`),
-		at, undoneBy, at, rowID)
+		at, optString(undoneBy), at, rowID)
 	if err != nil {
 		return false, fmt.Errorf("mark activity undone: %w", err)
 	}
@@ -189,7 +190,23 @@ func (s *Service) RecordRefusal(ctx context.Context, coordinatorID, workspaceID 
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	s.publishRefusal(ctx, coordinatorID)
+	return nil
+}
+
+// publishRefusal announces a committed refusal row under the coordinator's own
+// workspace, so a caller-supplied workspace id never routes the event.
+func (s *Service) publishRefusal(ctx context.Context, coordinatorID string) {
+	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		s.logger.Warn("failed to resolve coordinator for refusal publish",
+			zap.String("coordinator_id", coordinatorID), zap.Error(err))
+		return
+	}
+	s.publishCoordinatorUpdated(ctx, c.WorkspaceID, coordinatorID)
 }
 
 func (s *Store) recordRefusalTx(ctx context.Context, tx coordinatorExec, coordinatorID, workspaceID string, class Action, reasonCode string) error {

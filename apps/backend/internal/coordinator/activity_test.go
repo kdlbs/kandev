@@ -335,7 +335,7 @@ func TestActivitySourceScan_WriteStatements(t *testing.T) {
 			}
 		}
 		if strings.Contains(src, "DELETE FROM coordinator_activity") &&
-			name != "store.go" && name != "store_workspace_delete.go" {
+			name != "store.go" && name != "store_workspace_delete.go" && name != "retention.go" {
 			t.Errorf("%s deletes activity rows outside retention and the deletion transactions", name)
 		}
 	}

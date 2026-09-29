@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 func TestInsertActivity_KeepsCallerTimestampsAndCount(t *testing.T) {
@@ -98,5 +100,38 @@ func TestProposeTask_RecordFailureRollsBackInsert(t *testing.T) {
 	n, err := f.svc.store.CountOpenProposals(context.Background(), f.coordinator.ID, true)
 	if err != nil || n != 0 {
 		t.Fatalf("open = %d err=%v, want proposal rolled back", n, err)
+	}
+}
+
+func TestRecordRefusal_PublishesCoordinatorUpdated(t *testing.T) {
+	store := newTestStore(t)
+	c := newTestCoordinator(t, store, "ws-1")
+	svc := newPhase2Service(t, store, true)
+	eventBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetDecisionDeps(nil, nil, eventBus)
+	received, cleanup := subscribeCoordinatorUpdated(t, eventBus)
+	defer cleanup()
+
+	for i := 0; i < 2; i++ { // insert, then coalesce
+		if err := svc.RecordRefusal(context.Background(), c.ID, "ws-foreign", ActionMove, "denied"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case p := <-received:
+			if p.WorkspaceID != "ws-1" || p.CoordinatorID != c.ID {
+				t.Fatalf("payload = %+v, want the coordinator's own workspace", p)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("refusal %d published nothing", i)
+		}
+	}
+
+	if err := svc.RecordRefusal(context.Background(), "gone", "ws-1", ActionMove, "denied"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-received:
+		t.Fatalf("published for a missing coordinator: %+v", p)
+	case <-time.After(50 * time.Millisecond):
 	}
 }

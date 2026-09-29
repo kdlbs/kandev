@@ -24,7 +24,8 @@ reads when it offers the first automatic setting.
 
 - **Activity row:** one log entry, for one coordinator, of one action class.
 - **Action class:** one of the six actions of
-  [permissions](permissions.md#terminology).
+  [permissions](permissions.md#terminology), or `unknown` for a refused call
+  that names no known action (`AC-COORDINATOR-ACTIVITY-LOG-001.3`).
 - **Outcome:** `proposed`, `approved`, `rejected`, `failed`, `refused` or
   `undone`.
 - **Authorization:** how the row was authorised: `requires_approval` for a
@@ -74,6 +75,10 @@ reads when it offers the first automatic setting.
   activity row, because the coordinator did not propose it.
 - **AC-COORDINATOR-ACTIVITY-LOG-001.6:** When a log write fails, the state
   change it records shall not commit; the caller shall receive the error.
+  Two writes are excepted: a refusal row, because the refusal already
+  happened and stands, so its write failure is logged at warn and nothing is
+  rolled back; and the undo marker (`AC-COORDINATOR-ACTIVITY-LOG-003.2`),
+  which follows the reversal it records in a second commit.
 
 ### REQ-COORDINATOR-ACTIVITY-LOG-002: What it did
 
@@ -98,15 +103,39 @@ Mockup:
   next page exists.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.3:** The section shall offer a filter by
   action class, including All; the route shall accept at most one action
-  class and refuse any other value with 400.
+  class and refuse any other value with 400. An absent or empty `class`
+  means All; a repeated `class` is refused with 400 naming `class`. The
+  filter offers All, the six classes and "Unknown action" (`unknown`), so a
+  refused call that named no known action can be found; an unrecognised
+  `?class=` value in the page address selects All.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.4:** Each row shall show the relative time
   (exact time on hover), the action's detail with the target task's
-  identifier linking to the task, the action class, the outcome with "with
+  identifier linking to the task (plain "Task no longer available" text with
+  no link when the identifier is null), the action class, the outcome with "with
   edits" when edited and "x N" when a refusal repeated, and the actor's name
-  for approved, rejected and undone rows.
+  for approved, rejected and undone rows. With no person recorded
+  (authentication off) the outcome shows alone ("Approved", "Rejected",
+  "Undone"); when the recorded person no longer exists it shows "A former
+  member". The outcome reads "Requires approval" (proposed), "Approved by <name>", "Rejected by <name>",
+  "Failed", "Denied" (refused) or "Undone by <name>". The Action cell shows
+  the row's detail, prefixed "Rejected: " on a rejected row (whose detail is the
+  manager's reason) and "Failed: " on a failed row (whose detail is the
+  error); an `undone` row carries the reversed row's detail. A refused row shows, in place of a detail, the reason text of its
+  code: `binding_invalid` "Its tool settings could not be read.",
+  `not_in_profile` "It called something it is not allowed to use.",
+  `policy_denied` "A manager has set this action to Denied."; any other code
+  shows "Refused." followed by the code.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.5:** With no row, the section shall say "It
   has not done anything yet."; with no row for the chosen filter, it shall
   say that nothing matches the filter.
+- **AC-COORDINATOR-ACTIVITY-LOG-002.7:** The list route shall take `limit`
+  as an integer from 1 to 50, default 50 when absent, and refuse any other
+  value (0, negative, above 50, empty, not an integer) with 400 naming
+  `limit`. It shall return `next_cursor` only when at least one older row
+  exists, so the last page has a null cursor. A cursor shall be valid with
+  any `class` and `limit`; one that does not parse, is empty or is repeated
+  is refused with 400 naming `before`; a repeated `limit` is refused with 400
+  naming `limit`.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.6:** A reader shall see the section
   without Undo controls. The list shall update when a `coordinator.updated`
   event arrives for the coordinator.
@@ -124,7 +153,8 @@ Mockup:
   create, the system shall first archive the created task, and then, in one
   transaction, mark the row undone with `undone_at` and `undone_by` and write
   an `undone` row pointing to it. A created task already archived shall
-  count as archived. When that transaction fails after the reversal, the
+  count as archived. Archiving stops any agent working on the task, and the
+  confirmation says so. When that transaction fails after the reversal, the
   undo shall return the error and the row shall stay undoable; a retry shall
   find the reversal already done and only mark the row.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.3:** When a manager undoes an approved
@@ -134,14 +164,46 @@ Mockup:
   left, unarchived, shall count as moved back. When the task is in any other
   step or was archived, the system shall refuse with 409 `undo_conflict` and
   the row shall say "It has moved since".
+- **AC-COORDINATOR-ACTIVITY-LOG-003.7:** The checks of an undo of a move run in
+  this order and the first that applies decides: the task is archived or
+  missing (`archived`); the task is already in the step it left (counts as
+  moved back, no refusal); the task is in the step it was moved to, and then
+  the step it left no longer exists (`step_deleted`), that step is now a
+  completing step (`step_done`), the task has an agent session that is
+  starting or running (`agent_running`), or that step is at its task limit
+  and refuses the task (`step_full`); the task is in any other step
+  (`moved`). Each refusal is 409 `undo_conflict` carrying that reason,
+  changes nothing and leaves the row undoable. Only an optioned move refuses on a move still pending on the task (the task
+  service's move conflict, reason `moved`); undo of a move to a step that
+  does not auto-start is a plain move, which clears a pending move marker,
+  and that is accepted. The row shall say "It has moved since" for
+  `moved`, `archived` and any reason the client does not know or that is absent, "An agent is working on it. Stop it, then undo."
+  for `agent_running`, "The step it came from no longer exists." for
+  `step_deleted`, "The step it came from is now a finishing step." for
+  `step_done` and "The step it came from is full." for `step_full`. When the
+  step it left queues the task because it is at its limit, the task counts as
+  moved back.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.8:** Moving a task back shall not start an
+  agent: the move enters the step without running its prompt, so the task
+  lands idle in the step it left.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.9:** A row shall count as undoable only
+  when everything undo needs is readable: an `approved` create row with a
+  target task id, or an `approved` move row whose proposal outcome holds both
+  `from_step_id` and `to_step_id`. A row missing any of them, or whose
+  proposal is gone or whose outcome does not parse, shall list `undoable`
+  false and answer undo with 409 `not_undoable`.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.4:** Undoing a row that is already undone,
   or two undos at once, shall reverse the action at most once; the second
   shall return 409 `already_undone`. Undoing a row that is not undoable shall
-  return 409 `not_undoable`.
+  return 409 `not_undoable`. Undoing a row retention has deleted meanwhile
+  shall return 404, with the reversal standing.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.5:** A reader's undo shall be refused with
   403 and change nothing.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.6:** An undone row shall show "Undone by
-  <name>, <relative time>" in place of Undo.
+  <name>, <relative time>" in place of Undo, or "Undone, <relative time>"
+  when no person is recorded (authentication is off) and "Undone by A former
+  member, <relative time>" when the recorded person no longer exists; the row's outcome text follows
+  `AC-COORDINATOR-ACTIVITY-LOG-002.4`.
 
 ### REQ-COORDINATOR-ACTIVITY-LOG-004: The coordinator reads its log
 
@@ -154,8 +216,8 @@ Mockup:
   (default 20) and an optional `before` cursor. It shall return only the
   calling coordinator's rows, in the order of
   `AC-COORDINATOR-ACTIVITY-LOG-002.2`, with the cursor for the next page.
-- **AC-COORDINATOR-ACTIVITY-LOG-004.2:** The tool shall return each row's time,
-  action class, outcome, target task id, proposal id, detail, edited flag,
+- **AC-COORDINATOR-ACTIVITY-LOG-004.2:** The tool shall return each row's `created_at`
+  and `updated_at` times, action class, outcome, target task id, proposal id, detail, edited flag,
   refusal count and undone time, and shall not return user ids or names.
 - **AC-COORDINATOR-ACTIVITY-LOG-004.3:** A `limit` outside 1 to 50, or a cursor
   that does not parse, shall be refused naming the field.
@@ -168,8 +230,10 @@ Mockup:
 
 - **AC-COORDINATOR-ACTIVITY-LOG-005.1:** While the phase-2 flag is on, at
   startup and once a day, the system shall delete activity rows older than
-  400 days, in batches, without
-  blocking proposal writes. While the flag is off no row is deleted by age
+  400 days, in batches of 500 rows, each batch in its own short transaction. The run repeats every 24 hours from startup. The flag is fixed for the
+  life of the process (a change takes a restart), so a run needs no flag
+  check of its own. While the flag is off at startup no run starts and no
+  row is deleted by age
   (`AC-COORDINATOR-COORDINATORS-007.3`). Rows of a deleted coordinator shall
   be deleted with it, whatever the flag.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.2:** The system shall return, for a
@@ -178,7 +242,9 @@ Mockup:
   `approved` (every approval, edited or not), `approved` with edits (the
   subset of `approved`), `rejected`, `failed`, `refused` (summing refusal
   counts) and `undone` (counted under the action class of the row undone), and the earliest row time the coordinator
-  has. A window outside 1 to 90 shall be refused with 400.
+  has. The class `unknown` shall appear only when it has a row created in the
+  window. A window outside 1 to 90, empty, repeated or not an integer shall be refused
+  with 400 naming `days`.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.3:** Any workspace member shall read the
   log and the summary; neither shall be available for another workspace's
   coordinator.

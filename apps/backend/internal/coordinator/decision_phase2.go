@@ -72,6 +72,15 @@ func specEdited(p *Proposal) bool {
 		f.StepID != o.StepID || f.RepositoryID != o.RepositoryID
 }
 
+// approvedDetail is the one-line title an approved row shows: the final title
+// when the manager edited it, else the proposed one.
+func approvedDetail(p *Proposal) string {
+	if p.FinalSpec != nil && strings.TrimSpace(p.FinalSpec.Title) != "" {
+		return p.FinalSpec.Title
+	}
+	return p.Spec.Title
+}
+
 // approvalFailedCode is the reason code carried by a failed approval row.
 const approvalFailedCode = "approval_failed"
 
@@ -95,6 +104,7 @@ func (s *Service) completeProposalStore(ctx context.Context, workspaceID, coordi
 		CoordinatorID: coordinatorID, WorkspaceID: workspaceID, ActionClass: ActionCreateTask,
 		Outcome: ActivityApproved, Authorization: AuthRequiresApproval,
 		TargetTaskID: &taskID, ProposalID: &proposalID, ActorUserID: actor,
+		Detail: approvedDetail(current),
 	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.CompleteProposalTx(ctx, tx, proposalID, token, taskID, time.Now())

@@ -22,6 +22,7 @@ var coordinatorSurfaceActions = map[string]struct{}{
 	ws.ActionMCPListRepositories:    {},
 	coordinator.ActionProposeTask:   {},
 	coordinator.ActionGetItem:       {},
+	coordinator.ActionListActivity:  {},
 }
 
 // coordinatorPrincipalOnlyActions are registered coordinator-surface actions
@@ -31,8 +32,9 @@ var coordinatorSurfaceActions = map[string]struct{}{
 // own WorkspaceID/CoordinatorID rather than any payload field
 // (copilot-tools.md#tool-surface).
 var coordinatorPrincipalOnlyActions = map[string]struct{}{
-	coordinator.ActionProposeTask: {},
-	coordinator.ActionGetItem:     {},
+	coordinator.ActionProposeTask:  {},
+	coordinator.ActionGetItem:      {},
+	coordinator.ActionListActivity: {},
 }
 
 // authorizeCoordinatorRequest is the one execution-time boundary for the
