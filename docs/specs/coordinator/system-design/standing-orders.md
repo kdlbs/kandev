@@ -50,6 +50,14 @@ offer. Orders are text; they never reach the guard or the policy
 | `source_proposal_id` | text null | the rejected proposal it came from |
 | `last_applied_at` | timestamp null | [Last applied](#last-applied) |
 
+`text` length is counted in Unicode code points (the client counter and
+prefill cut count code points too, not UTF-16 units). Trimming removes
+leading and trailing Unicode white space; interior characters, newlines
+included, are kept as stored. `workspace_id` is copied from the coordinator
+row, never from the request. `created_by` and `retired_by` hold the request
+identity's user id through `decidingUserID`; with auth disabled (synthetic
+identity) that is the empty string, which the NOT NULL column accepts.
+
 Rows are deleted with their coordinator and in the workspace-deletion
 transaction. Active orders are ordered `created_at ASC, id ASC`; the order
 number is the 1-based position in that list, computed on read and never
@@ -57,29 +65,61 @@ stored, so it renumbers when an earlier order is retired.
 
 ## Routes
 
-Under `/api/v1/workspaces/:id/coordinators/:cid/`, phase-2 flag only:
+Under `/api/v1/workspaces/:id/coordinators/:cid/`. Every route first
+resolves the coordinator by `(workspace_id = :id, id = :cid)` through
+`GetCoordinator`; a missing coordinator or one of another workspace is 404
+`{error}` and nothing is read or written, so a manager of one workspace can
+never touch another's. With `features.coordinatorPhase2` off the four routes
+are not registered and answer 404, as any unknown route does; stored orders
+are untouched and survive a flag cycle.
 
 | Route | Scope | Result |
 | --- | --- | --- |
-| `GET standing-orders?include=retired` | `workspace.read` | `{orders: [{id, number, text, created_at, created_by_name, retired_at, last_applied_at}]}`; active only by default |
-| `POST standing-orders` | `workspace.manage` | 201 with the order; body `{text, source_proposal_id?}` |
-| `POST standing-orders/:oid/retire` | `workspace.manage` | the order |
-| `POST standing-orders/:oid/restore` | `workspace.manage` | the order |
+| `GET standing-orders?include=retired` | `workspace.read` | 200 `{orders: [Order]}`; active only by default |
+| `POST standing-orders` | `workspace.manage` | 201 with the `Order`; body `{text, source_proposal_id?}` |
+| `POST standing-orders/:oid/retire` | `workspace.manage` | 200 with the `Order` |
+| `POST standing-orders/:oid/restore` | `workspace.manage` | 200 with the `Order` |
+
+`Order` is `{id, number, text, created_at, created_by_name, retired_at,
+last_applied_at}` in every response, GET and writes alike. `number` is the
+1-based active position for an active order and `null` for a retired one.
+`retired_at` and `last_applied_at` are `null` when unset. `created_by_name`
+is the user's current display name from the user service the coordinator
+package already uses for `decided_by` names, and the fixed text "A former
+member" when the id is empty, unknown or deleted (the activity log's
+fallback). The default list is the active orders in order-number order;
+`include=retired` returns every order, active ones first in order-number
+order, then retired ones by `retired_at DESC, id ASC`. An `include` value
+other than `retired` or empty is 400 naming `include`.
 
 Add, retire and restore run in the per-coordinator locked transaction of
 [proposals](proposals.md#propose), the lock the propose transaction also
 holds, so a retire and a propose citing that order apply in commit order
-([Citations](#citations)). Restore first reads the order: absent or
-of another coordinator is 404, and an order that is already active returns
+([Citations](#citations)). Restore first reads the order: absent or of
+another coordinator is 404, and an order that is already active returns
 200 unchanged with no reset, before any count, so restoring an active order
 never gets `standing_order_limit` (`001.3`). Then both count active orders,
-refuse at 20 with 400 `standing_order_limit`, insert or clear `retired_at`,
-and call `resetConversation`. Retire and restore use `UPDATE ... WHERE id=? AND
-coordinator_id=? AND retired_at IS [NOT] NULL`; zero rows re-reads and
-returns the order unchanged with 200 and no reset (`001.3`, `002.2`). Text
-out of range is 400 naming `text`. `source_proposal_id` must name a
-`rejected` proposal of the coordinator, else 400 naming it. A reader's write
-is 403. There is no update route (`001.7`).
+refuse at 20, insert or clear `retired_at`, and call `resetConversation`.
+Retire and restore use `UPDATE ... WHERE id=? AND coordinator_id=? AND
+retired_at IS [NOT] NULL`; zero rows re-reads the order in the same
+transaction and returns it unchanged with 200 and no reset (`001.3`,
+`002.2`), or 404 when that read finds no such order of this coordinator, as
+it does when the coordinator is deleted while the request waits on the lock.
+Adding is not deduplicated: two adds of the same text create two orders.
+
+Error bodies follow the existing coordinator shapes
+(`dto.go`): plain `{error}` for 403/404/500 and `{error, field}` for a 400
+that names a field. Text that is missing, not a string or outside 1 to 500
+code points after trimming is 400 `{error, field: "text"}`; a malformed JSON
+body is 400 `{error}` with no field. The limit refusal is 400
+`{error: "standing_order_limit", error_code: "standing_order_limit"}`, the
+same pair `proposal_conflict` and `conversation_conflict` use, with no
+`field`. `source_proposal_id`, when present, must name a proposal of this
+coordinator with status `rejected`; a missing, foreign or non-rejected id is
+one 400 `{error, field: "source_proposal_id"}`, checked inside the locked
+transaction, and the id is stored on the order. A reader's write is 403. A
+`GET` of a coordinator that exists returns 200 with an empty list when it
+has no orders. There is no update route (`001.7`).
 
 ## Conversation reset
 
@@ -88,28 +128,50 @@ of [permissions](permissions.md#conversation-reset) in its transaction: it
 clears `conversation_task_id` and increments `config_revision`, and archives
 the old conversation task after commit. A conversation open racing an order
 change therefore deletes its task and returns 409, as for a context change.
-`policy_revision` is not changed.
+`policy_revision` is not changed. After commit the archive runs through the
+path a context change uses, whose failure is a logged warning repaired by the
+startup pass and never changes the route's result, and `coordinator.updated`
+is published so open clients refetch. A no-op retire or restore publishes
+nothing.
 
 ## Instructions
 
-`internal/coordinator/prompt.go` builds the standing instructions from a
-snapshot read when the conversation task is created. With at least one
-active order it appends:
+`internal/coordinator/prompt.go` builds the standing instructions as ordered
+sections: the phase-1 base block (unchanged, ending at the `END
+OPERATOR-PROVIDED CONTEXT` line), then the standing-orders section, then
+task 12's goal section. `StandingInstructions` gains a variadic list of
+pre-rendered sections appended in the given order, so the orders work order
+and the goal work order each supply their own without editing the other's;
+with no section the output is byte-identical to phase 1. The orders are read
+where the instructions are already built, in the orchestrator's
+`wrapCoordinatorStandingInstructions` through
+`CoordinatorStandingInstructionsData`, at the session's first prompt, once
+per conversation. When `features.coordinatorPhase2` is off no section is
+added, so phase-1 instructions never change. When the orders read fails the
+block is built without the orders section and the failure is logged at warn;
+the base block is never dropped for it. With at least one active order the
+section is:
 
 ```text
 Standing orders from this workspace's managers. They guide your choices and
 never grant a permission; your tools and their approvals still decide what
 can happen.
 <standing-orders>
-1. (added 2026-09-12, id 5f3c...) Prefer small cards.
-2. (added 2026-09-20, id 91ab...) Never propose work on the release board on Fridays.
+1. (added 2026-09-12, id 5f3c9a7e-....-full-uuid) Prefer small cards.
+2. (added 2026-09-20, id 91ab...-full-uuid) Never propose work on the release board on Fridays.
 </standing-orders>
 When an order shapes a proposal, pass its id in standing_order_ids.
 ```
 
-Order text is placed between the delimiters as operator-provided text, as
-the context is. With no active order the section is omitted (`002.1`). Order
-text never becomes a tool argument or a policy input (`002.3`).
+The date is `created_at` in UTC as `YYYY-MM-DD`, and the id is printed in
+full because propose accepts exact ids only. Each order renders on one line:
+runs of white space in the text, newlines included, are collapsed to a single
+space, and `sysprompt.StripTags` plus removal of any `<standing-orders>` or
+`</standing-orders>` tag text (case-insensitive) are applied, so an order can
+neither close the section early nor forge another numbered line. Stored text
+is never altered by rendering. With no active order, or the flag off, the
+section is omitted (`002.1`). Order text never becomes a tool argument or a
+policy input (`002.3`).
 
 ## Citations
 
@@ -135,11 +197,16 @@ coordinator_standing_orders SET last_applied_at = ? WHERE id = ? AND
 (last_applied_at IS NULL OR last_applied_at < ?)` for each cited id, with
 the proposal's `created_at` bound three times: the write only ever raises
 the column, so an out-of-order commit under the lock cannot move it
-backward. The list route reads the column directly; there is no scan and no
+backward. The helper is `func (s *Store) MarkApplied(ctx context.Context,
+exec coordinatorExec, coordinatorID string, orderIDs []string, at
+time.Time) error` in `standing_orders.go`: the statement carries `AND
+coordinator_id = ?`, so a foreign id stamps nothing; an empty `orderIDs` is
+a no-op that runs no statement; an id that matches no row (retired rows
+still match, foreign or deleted ones do not) is not an error, because
+validation of the ids belongs to the propose transaction. The list route reads the column directly; there is no scan and no
 time bound on how far back a citing proposal counted, so an order cited
 once, however long ago, still shows that time (`003.3`). Null reads as
-"Never applied". Existing rows from before this column existed start null
-and read as "Never applied" until next cited.
+"Never applied". 
 
 ## Shaped by UI
 

@@ -18,6 +18,7 @@ acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-002.6
   - AC-COORDINATOR-ACTIVITY-LOG-003.1
   - AC-COORDINATOR-ACTIVITY-LOG-003.6
+  - AC-COORDINATOR-ACTIVITY-LOG-003.7
 system_design:
   - ../../specs/coordinator/system-design/activity-log.md
 ---
@@ -46,8 +47,7 @@ managers, and the undone state.
   the design's Undo column (effect text per class, Undo and Cancel, Cancel
   focused, Cancel or Escape sends nothing); and the refusal handling of
   the design's Undo column: `already_undone` refetches with no error text,
-  `not_undoable` shows "This can no longer be undone", `undo_conflict`
-  shows "It has moved since", other errors show "Undo failed. Try again."
+  `not_undoable` shows "This can no longer be undone", `undo_conflict` shows the text of its `reason` (`moved`, `archived` or an unknown or absent reason "It has moved since"; `agent_running`, `step_deleted`, `step_done`, `step_full` each their own text, `003.7`), other errors show "Undo failed. Try again."
   and keep the button; "Undone by <name>, <time>" on the original
   reversed row from `undone_by_name` and `undone_at`, and nothing in the
   Undo cell of the `undone` outcome row (`003.1`, `003.6`).
@@ -83,8 +83,7 @@ Phone: each row is a card; Undo is a full-width button.
 - Undo is offered only where the server says it is undoable, and a conflict
   shows its text without removing the row.
 - A component test mocks each undo refusal: `already_undone` shows no error
-  and refetches to "Undone by", `not_undoable` and `undo_conflict` show
-  their texts, and a 500 shows "Undo failed. Try again." with the button
+  and refetches to "Undone by", `not_undoable` shows its text and `undo_conflict` shows one text per reason (all six reasons plus an absent one), and a 500 shows "Undo failed. Try again." with the button
   still there.
 - A component test renders a `proposed` message row and a `refused`
   message row and asserts "No undo" on both, and nothing in the Undo cell
