@@ -130,6 +130,10 @@ type Service struct {
 	// kick asks the wake ticker to re-evaluate one coordinator; nil means no call.
 	kick func(ctx context.Context, coordinatorID string) error
 
+	// relayReader and relayTasks back the relay read; nil until SetRelayDeps.
+	relayReader RelayReader
+	relayTasks  RelayTasks
+
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
 	afterApproveRecheck func()
