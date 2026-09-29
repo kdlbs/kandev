@@ -87,6 +87,8 @@ function readyContextWith(needsYou: NeedsYouItem[], canManage = false): Coordina
       stepNameByWorkflowStep: new Map(),
       openTasksById: new Map(),
       prsByTaskId: new Map(),
+      watchSetUnavailable: false,
+      watchSet: undefined,
       tasks: [],
       loadedAt: 1,
       error: false,

@@ -17,6 +17,10 @@ const LINE_KEYS: Record<CoordinatorInputStatus["kind"], { withTime: string; firs
     withTime: "coordinator:bannerProposalsFailed",
     firstLoad: "coordinator:bannerProposalsFailedFirstLoad",
   },
+  watches: {
+    withTime: "coordinator:bannerWatchesFailed",
+    firstLoad: "coordinator:bannerWatchesFailedFirstLoad",
+  },
 };
 
 export type InputFailureBannerProps = {

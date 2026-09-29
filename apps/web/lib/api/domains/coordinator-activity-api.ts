@@ -124,3 +124,23 @@ export function getUndoConflict(error: unknown): UndoConflictBody | null {
     ...(typeof reason === "string" ? { reason } : {}),
   };
 }
+
+export type ClassSummary = { approved: number; rejected: number };
+
+export type ActivitySummary = {
+  days: number;
+  classes: Partial<Record<ActivityClass, ClassSummary>>;
+};
+
+/** The approved and rejected counts per class over the last `days` days. */
+export function getActivitySummary(
+  workspaceId: string,
+  coordinatorId: string,
+  days: number,
+  options?: ApiRequestOptions,
+): Promise<ActivitySummary> {
+  return fetchJson<ActivitySummary>(
+    activityPath(workspaceId, coordinatorId, `/summary?days=${days}`),
+    options,
+  );
+}

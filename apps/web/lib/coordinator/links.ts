@@ -24,6 +24,15 @@ export function linkToCoordinatorQueue(
   return group ? `${base}?group=${group}` : base;
 }
 
+/** The Queue's What it did section filtered to one action class (`?class=`). */
+export function linkToCoordinatorActivityClass(
+  workspaceId: string,
+  coordinatorId: string,
+  activityClass: string,
+): string {
+  return `${linkToCoordinatorNeedsYou(workspaceId, coordinatorId)}/queue?class=${encodeURIComponent(activityClass)}`;
+}
+
 /**
  * The Needs-you screen with `?proposal=<id>&form=edit|reject`
  * (proposal-cards.md#cards "Forms and navigation"), used by the chat card's

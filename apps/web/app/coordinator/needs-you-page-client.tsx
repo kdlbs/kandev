@@ -3,6 +3,7 @@
 import type { CoordinatorInputStatus } from "./use-coordinator-attention";
 import { CoordinatorRouteContent } from "./coordinator-route-content";
 import { NeedsYouItemsPanel } from "./components/needs-you-items-panel";
+import { WatchesNoneNotice } from "./components/watches-none-notice";
 import { GoalNote } from "./components/goal-note";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 
@@ -36,6 +37,14 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
               workspaceId={workspaceId}
               coordinatorId={coordinator.id}
               canManage={canManage}
+            />
+          )}
+          {phase2 && (
+            <WatchesNoneNotice
+              workspaceId={workspaceId}
+              coordinatorId={coordinator.id}
+              watchSet={attention.watchSet}
+              chooseBoards={canManage}
             />
           )}
           <NeedsYouItemsPanel

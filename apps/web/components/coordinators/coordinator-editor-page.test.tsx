@@ -338,10 +338,12 @@ describe("CoordinatorEditorPage: phase 2 sections", () => {
     expect(screen.getByLabelText("Name")).toBeTruthy();
   });
 
-  it("shows Identity, Standing orders and Goal with the phase-1 fields under Identity when on", () => {
+  it("shows Identity, Watches, May do, Standing orders and Goal with the phase-1 fields under Identity when on", () => {
     setup({ phase2: true });
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Identity",
+      "Watches",
+      "May do",
       "Standing orders",
       "Goal",
     ]);

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -156,6 +156,12 @@ export function WhatItDid(props: WhatItDidProps) {
   const [dialogItem, setDialogItem] = useState<ActivityItem | null>(null);
   const restoreRowId = useRef<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const section = useRef<HTMLElement>(null);
+  const arrivedFiltered = useRef(activityClass !== undefined);
+
+  useEffect(() => {
+    if (arrivedFiltered.current) section.current?.scrollIntoView?.({ block: "start" });
+  }, []);
 
   const changeFilter = useCallback(
     (next: ActivityClass | undefined) => {
@@ -184,7 +190,12 @@ export function WhatItDid(props: WhatItDidProps) {
   const stepName = dialogItem?.from_step_id ? stepNames.get(dialogItem.from_step_id) : undefined;
 
   return (
-    <section className="space-y-2" data-testid="what-it-did" aria-labelledby="activity-title">
+    <section
+      ref={section}
+      className="space-y-2"
+      data-testid="what-it-did"
+      aria-labelledby="activity-title"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
           id="activity-title"
