@@ -30,9 +30,12 @@ The loader, UI states, and targeted tests are complete as one vertical slice.
 - First add the failing partial-cache regression named in the plan. Run it red
   before production edits, then implement through TDD.
 - Add the local scoped hook and optional selector prop from the design.
-- Render independent status feedback and sibling retry controls. Preserve metadata.
+- Render independent status feedback and sibling retry controls. Keep one
+  translated status region, stable option names, keyboard retry focus, and
+  workflow metadata.
 - Add hook, component, desktop, and phone tests from the plan's scenario matrix.
-- Use existing localized keys for preview states and add brief public guidance on preview loading and retry.
+- Use existing localized keys for preview states and add one translated status
+  announcement frame. Add brief public guidance on preview loading and retry.
 
 ## Out of scope
 
@@ -116,6 +119,7 @@ changes another test suite, add its exact command before marking completion.
 - `apps/web/components/task-create-dialog-form-body.tsx` and `.test.tsx`.
 - `apps/web/e2e/tests/task/task-create-workflow-step-previews.spec.ts` (new).
 - `apps/web/e2e/tests/task/mobile-task-create-workflow-step-previews.spec.ts` (new).
+- `apps/web/e2e/tests/task/workflow-step-previews-helpers.ts` (new shared E2E setup and assertions).
 - `apps/web/src/locales/{en,pt-pt,zh-cn,zh-hk,zh-tw,ja}/workflows.json`.
 - `docs/public/tasks-and-workflows.md`.
 - This plan, work order, and paired requirement/design lifecycle fields.
@@ -148,9 +152,13 @@ Kanban snapshot store and never nest retry inside a selection button.
 
 Completed. All six acceptance criteria are covered. Existing localized keys
 provide the loading, empty, failure, and retry copy in all supported languages.
-See the plan's verification results for test counts and commands.
+A new status-announcement frame is translated in all supported languages. See
+the plan's verification results for test counts and commands.
 
 Review remediation is complete. The picker wraps unbroken step names inside the
 step group. Retry sizing uses the standard desktop control size and applies the
-48px minimum on coarse pointers. The plan records the measured browser geometry
-and focused verification results.
+48px minimum on coarse pointers. Accessibility behavior keeps option names
+stable, announces row states in one translated region, and retains keyboard
+focus during retry. Successful retry returns focus to the workflow option, and
+Escape returns focus to the selector trigger on phone. The plan records browser
+geometry and focused verification.

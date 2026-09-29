@@ -174,15 +174,17 @@ it("shows independent loading and failure states and retries without selecting",
   const failed = deferred<{
     steps: Array<{ id: string; name: string; position: number; color: string }>;
   }>();
+  const retrying = deferred<{
+    steps: Array<{ id: string; name: string; position: number; color: string }>;
+  }>();
   let attempts = 0;
   workflowApiMocks.listWorkflowSteps.mockImplementation((workflowId: string) => {
     if (workflowId === "review") {
       attempts += 1;
-      return attempts === 1
-        ? failed.promise
-        : Promise.resolve({
-            steps: [{ id: "review-step", name: "Recovered", position: 0, color: "#123456" }],
-          });
+      return attempts === 1 ? failed.promise : retrying.promise;
+    }
+    if (workflowId === "empty") {
+      return Promise.resolve({ steps: [] });
     }
     return Promise.resolve({
       steps: [{ id: "feature-step", name: "Analysis", position: 0, color: "#abcdef" }],
@@ -196,6 +198,7 @@ it("shows independent loading and failure states and retries without selecting",
         workflows={[
           { id: "feature", name: "Feature" },
           { id: "review", name: "Review" },
+          { id: "empty", name: "Empty" },
         ]}
         snapshots={{}}
         previewWorkspaceId="workspace-1"
@@ -207,24 +210,40 @@ it("shows independent loading and failure states and retries without selecting",
   );
   fireEvent.click(screen.getByTestId(WORKFLOW_SELECTOR_TRIGGER));
 
-  expect(screen.getAllByRole("status").map((status) => status.textContent)).toContain(
-    "Loading steps…",
-  );
+  expect(screen.getAllByRole("status")).toHaveLength(1);
+  expect(screen.getByRole("status").textContent).toContain("Review: Loading steps…");
   expect(await screen.findByText("Analysis")).toBeTruthy();
+  expect(await screen.findByText("No steps in this workflow")).toBeTruthy();
   await act(async () => {
     failed.reject(new Error("private server detail"));
   });
 
   expect(await screen.findByText("Failed to load workflow steps")).toBeTruthy();
   expect(screen.queryByText("private server detail")).toBeNull();
+  expect(screen.getAllByRole("status")).toHaveLength(1);
+  const status = screen.getByRole("status");
+  expect(status.closest("button")).toBeNull();
+  expect(status.textContent).toContain("Review: Failed to load workflow steps");
+  const workflowOption = screen.getByRole("button", { name: "Review" });
   const retry = screen.getByTestId("workflow-preview-retry-review");
   expect(retry.tagName).toBe("BUTTON");
   retry.focus();
   expect(document.activeElement).toBe(retry);
 
   fireEvent.click(retry);
+  expect(retry.isConnected).toBe(true);
+  expect(retry.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(retry);
+  expect(workflowOption.getAttribute("aria-label")).toBe("Review");
+  expect(status.textContent).toContain("Review: Loading steps");
+  await act(async () => {
+    retrying.resolve({
+      steps: [{ id: "review-step", name: "Recovered", position: 0, color: "#123456" }],
+    });
+  });
   expect(await screen.findByText("Recovered")).toBeTruthy();
   expect(screen.getByTestId(WORKFLOW_SELECTOR_TRIGGER).getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(workflowOption);
   expect(onWorkflowChange).not.toHaveBeenCalled();
 });
 

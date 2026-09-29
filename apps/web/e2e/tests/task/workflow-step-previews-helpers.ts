@@ -1,4 +1,23 @@
+import { expect, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+
+export function workflowStepsResponse(page: Page, workflowId: string) {
+  return page.waitForResponse((response) =>
+    response.url().includes("/api/v1/workflows/" + workflowId + "/workflow/steps"),
+  );
+}
+
+export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
+  const group = page.getByTestId("workflow-option-steps-" + workflowId);
+  await expect(group).toBeVisible();
+  const text = (await group.textContent()) ?? "";
+  let previousPosition = -1;
+  for (const name of stepNames) {
+    const position = text.indexOf(name);
+    expect(position).toBeGreaterThan(previousPosition);
+    previousPosition = position;
+  }
+}
 
 export type WorkflowStepPreviewScenario = {
   taskId: string;

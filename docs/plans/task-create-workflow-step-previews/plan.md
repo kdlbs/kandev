@@ -129,15 +129,15 @@ copy is localized. Views map to AC-001.1 through AC-001.6, using the full
 
 All files below are under `apps/web/`; named tests verify the acceptance criteria.
 
-| Acceptance criteria | Test file and named case |
-| --- | --- |
-| 001.1, 001.5 | `components/workflow-selector-row.test.tsx`: `loads every option with only one cached snapshot` (initial red regression) |
-| 001.2 | `hooks/use-workflow-option-previews.test.ts`: `distinguishes loading from successful empty results and orders step metadata` |
-| 001.3 | Same hook suite: `retains successful rows when one request fails and retries only that row`; selector suite: `shows independent loading and failure states and retries without selecting` |
-| 001.4 | Same hook suite: `masks old scopes synchronously and ignores their late responses`; `refreshes removed steps when the selector reopens`; `ignores results for workflows removed from the open selector` |
-| 001.1, 001.4 | Same hook suite: `does not duplicate requests on ordinary rerenders` |
-| 001.3, 001.5, 001.6 | Selector suite: `shows independent loading and failure states and retries without selecting` (retry is a focusable button); mobile E2E verifies touch retry |
-| 001.5 | Selector suite: `preserves loaded step order, colors, start markers, and agent badges`; `retains snapshot rendering for selectors without task-create scope`; form-body suite: `passes the workspace and visible workflows while retaining locked behavior`; desktop E2E verifies the task draft and launch label |
+| Acceptance criteria | Test file and named case                                                                                                                                                                                                                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 001.1, 001.5        | `components/workflow-selector-row.test.tsx`: `loads every option with only one cached snapshot` (initial red regression)                                                                                                                                                                                          |
+| 001.2               | `hooks/use-workflow-option-previews.test.ts`: `distinguishes loading from successful empty results and orders step metadata`                                                                                                                                                                                      |
+| 001.3               | Same hook suite: `retains successful rows when one request fails and retries only that row`; selector suite: `shows independent loading and failure states and retries without selecting`                                                                                                                         |
+| 001.4               | Same hook suite: `masks old scopes synchronously and ignores their late responses`; `refreshes removed steps when the selector reopens`; `ignores results for workflows removed from the open selector`                                                                                                           |
+| 001.1, 001.4        | Same hook suite: `does not duplicate requests on ordinary rerenders`                                                                                                                                                                                                                                              |
+| 001.3, 001.5, 001.6 | Selector suite: `shows independent loading and failure states and retries without selecting` (one translated status region, stable option name, and keyboard retry focus); desktop and phone E2E verify the same announcement and retry behavior                                                                  |
+| 001.5               | Selector suite: `preserves loaded step order, colors, start markers, and agent badges`; `retains snapshot rendering for selectors without task-create scope`; form-body suite: `passes the workspace and visible workflows while retaining locked behavior`; desktop E2E verifies the task draft and launch label |
 
 Use deferred promises to control response order. Include one mixed fixture
 containing successful, pending, failed, and empty rows. Verify the loader never
@@ -151,15 +151,19 @@ seed three workflows and a task in Kanban, then enter `/t/:taskId` directly.
 Open Create Task through its visible entry point, then open the selector.
 Verify every workflow's step names and order before selecting Feature.
 Verify selection, the Analysis launch label, and task draft preservation.
-Cover one failed step request followed by row retry, with another row successful.
-Check that an unbroken step name stays within its group and retry sizing matches
-wide and narrow fine-pointer controls. These scenarios cover AC-001.1, 001.2,
-001.3, 001.5, and 001.6.
+Cover one failed step request followed by keyboard row retry, with another row
+successful. Keep the response pending to verify Retry retains focus and its
+name, then returns focus to the workflow option after success. Verify the
+single translated status region identifies the loading row. Check that an
+unbroken step name stays within its group and retry sizing matches wide and
+narrow fine-pointer controls. These scenarios cover AC-001.1, 001.2, 001.3,
+001.5, and 001.6.
 
 `e2e/tests/task/mobile-task-create-workflow-step-previews.spec.ts` covers
 `mobile-chrome`. Use the same direct task route, tap the visible creation entry,
 and verify all previews and retry. Include long step names, viewport containment,
-internal scrolling, focus return, and 44px action targets (AC-001.6).
+internal scrolling, one translated status region, and 44px action targets
+(AC-001.6).
 The desktop test also verifies that an unbroken step name remains inside its
 preview group. It measures the retry control at 28px on a wide fine-pointer
 viewport and at the standard narrow fine-pointer size. The phone test checks a
@@ -178,7 +182,7 @@ Run existing desktop and mobile launch-preview suites as compatibility checks.
 Implementation checks passed on 2026-09-29:
 
 - Focused Vitest suite: 44 tests passed; frontend typecheck and targeted ESLint passed.
-- `pnpm run i18n:zh-hant` and `pnpm run i18n:check` passed. Existing localized keys cover preview states, so no translation keys were added.
+- `pnpm run i18n:zh-hant` and `pnpm run i18n:check` passed. The workflow/status announcement uses a new key translated in all supported locales.
 - Desktop E2E (`chromium`, preview and task-creation suites): 19 tests passed.
 - Phone E2E (`mobile-chrome`, preview and launch-preview suites): 2 tests passed.
 - Backend build and managed E2E Vite builds passed.
@@ -198,6 +202,11 @@ Review remediation completed on 2026-09-29:
   workflow-preview and launch-preview tests passed (2 tests). The focused Vitest
   suites passed (44 tests), frontend typecheck and targeted ESLint passed, and
   managed backend/Vite builds passed.
+- Accessibility review remediation adds one translated status region, keeps the
+  option name fixed to the workflow name, and keeps keyboard focus on Retry
+  while a retry is pending. Successful retry returns focus to the workflow
+  option; another failure retains Retry focus. A pending-route desktop E2E and
+  the phone E2E cover these behaviors.
 
 ## Risks
 

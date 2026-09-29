@@ -34,6 +34,9 @@ workflow's [launch destination](task-create-launch-preview.md).
 - **AC-TASKS-CREATE-WORKFLOW-STEPS-001.3:** If one workflow fails to load, its
   option shall show an error and a retry action. Successful options shall retain
   their previews. Retrying shall not select a workflow or clear the task draft.
+  If Retry is activated with the keyboard, focus shall remain on Retry while
+  loading, return to the workflow option after success, and remain on Retry if
+  the request fails again.
 - **AC-TASKS-CREATE-WORKFLOW-STEPS-001.4:** After workspace changes, selector
   dismissal, or workflow removal, late results shall not populate the current
   options. Reopening shall load current step definitions, including deletions.
@@ -45,6 +48,8 @@ workflow's [launch destination](task-create-launch-preview.md).
   same preview states and can select or retry with keyboard or touch controls.
   Long step lists shall remain readable without document horizontal overflow.
   Phone and coarse-pointer actions shall have hit areas of at least 44 CSS pixels.
+  Preview changes shall use one translated status region and shall not change a
+  workflow option's accessible name.
 
 ## Out of scope
 

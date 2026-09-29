@@ -1,6 +1,16 @@
 "use client";
 
-import { Fragment, memo, useMemo, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type Ref,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconArrowBigRightLines,
@@ -115,14 +125,17 @@ type WorkflowSelectorRowProps = {
 function WorkflowSelectorTrigger({
   selectedWorkflow,
   placeholder,
+  triggerRef,
 }: {
   selectedWorkflow: WorkflowSelectorRowProps["workflows"][number] | undefined;
   placeholder?: string;
+  triggerRef: Ref<HTMLButtonElement>;
 }) {
   const { t } = useTranslation();
   return (
     <PopoverTrigger asChild>
       <Button
+        ref={triggerRef}
         type="button"
         variant="ghost"
         className={`${controlSizingClassName("standard")} w-auto min-w-0 max-w-full justify-between cursor-pointer`}
@@ -211,10 +224,96 @@ function getOptionSteps(
   return snapshot ? [...snapshot.steps].sort((a, b) => a.position - b.position) : [];
 }
 
+type WorkflowPreviewStatusKey =
+  | "workflows:loadingSteps"
+  | "workflows:failedToLoadWorkflowSteps"
+  | "workflows:noStepsInThisWorkflow";
+
+function getWorkflowPreviewStatusKey(
+  preview: WorkflowOptionPreview | undefined,
+): WorkflowPreviewStatusKey | null {
+  if (!preview || (preview.status === "success" && preview.steps.length > 0)) return null;
+  if (preview.status === "loading") return "workflows:loadingSteps";
+  if (preview.status === "error") return "workflows:failedToLoadWorkflowSteps";
+  return "workflows:noStepsInThisWorkflow";
+}
+
+function useWorkflowRetryFocus(
+  workflowId: string,
+  previewStatus: WorkflowOptionPreview["status"] | undefined,
+  onRetry: (workflowId: string) => void,
+) {
+  const [retrying, setRetrying] = useState(false);
+  const optionButtonRef = useRef<HTMLButtonElement>(null);
+  const retryHadFocus = useRef(false);
+  const retryEnteredLoading = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!retrying) return;
+    if (previewStatus === "loading") {
+      retryEnteredLoading.current = true;
+      return;
+    }
+    if (!retryEnteredLoading.current) return;
+    setRetrying(false);
+    if (retryHadFocus.current && previewStatus === "success") {
+      optionButtonRef.current?.focus();
+    }
+    retryHadFocus.current = false;
+    retryEnteredLoading.current = false;
+  }, [previewStatus, retrying]);
+
+  const handleRetry = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      if (retrying) return;
+      retryHadFocus.current = document.activeElement === event.currentTarget;
+      retryEnteredLoading.current = false;
+      setRetrying(true);
+      onRetry(workflowId);
+    },
+    [onRetry, retrying, workflowId],
+  );
+
+  return {
+    handleRetry,
+    optionButtonRef,
+    retrying,
+    showRetry: previewStatus === "error" || retrying,
+  };
+}
+
+function WorkflowPreviewRetryButton({
+  workflowId,
+  retrying,
+  onClick,
+}: {
+  workflowId: string;
+  retrying: boolean;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className={controlSizingClassName(
+        "standard",
+        "[@media(pointer:coarse)]:min-h-[48px] shrink-0 px-2 text-xs",
+      )}
+      aria-disabled={retrying || undefined}
+      data-testid={`workflow-preview-retry-${workflowId}`}
+      onClick={onClick}
+    >
+      {t("common:retryPreview")}
+    </Button>
+  );
+}
+
 function WorkflowOption({
   workflow,
   snapshot,
   preview,
+  previewStatusKey,
   isSelected,
   taskCreatePreviewMode,
   agentProfiles,
@@ -225,6 +324,7 @@ function WorkflowOption({
   workflow: WorkflowItem;
   snapshot: WorkflowSnapshotData | undefined;
   preview: WorkflowOptionPreview | undefined;
+  previewStatusKey: WorkflowPreviewStatusKey | null;
   isSelected: boolean;
   taskCreatePreviewMode: boolean;
   agentProfiles: AgentProfileOption[];
@@ -232,8 +332,9 @@ function WorkflowOption({
   onClose: () => void;
   onRetry: (workflowId: string) => void;
 }) {
-  const { t } = useTranslation();
   const steps = getOptionSteps(taskCreatePreviewMode, preview, snapshot);
+  const previewStatus = preview?.status;
+  const retry = useWorkflowRetryFocus(workflow.id, previewStatus, onRetry);
   const workflowProfile = workflow.agent_profile_id
     ? agentProfiles.find((profile) => profile.id === workflow.agent_profile_id)
     : null;
@@ -245,6 +346,8 @@ function WorkflowOption({
     >
       <button
         type="button"
+        ref={retry.optionButtonRef}
+        aria-label={workflow.name}
         aria-pressed={isSelected}
         data-testid={`workflow-option-select-${workflow.id}`}
         onClick={() => {
@@ -281,24 +384,132 @@ function WorkflowOption({
             <InlineSteps steps={steps} agentProfiles={agentProfiles} />
           </div>
         )}
-        <WorkflowPreviewStatus preview={taskCreatePreviewMode ? preview : undefined} />
+        <WorkflowPreviewStatus statusKey={taskCreatePreviewMode ? previewStatusKey : null} />
         {isSelected && <IconCheck className="absolute right-2 top-3 h-4 w-4" aria-hidden="true" />}
       </button>
-      {preview?.status === "error" && (
-        <Button
-          type="button"
-          variant="ghost"
-          className={controlSizingClassName(
-            "standard",
-            "[@media(pointer:coarse)]:min-h-[48px] shrink-0 px-2 text-xs",
-          )}
-          data-testid={`workflow-preview-retry-${workflow.id}`}
-          onClick={() => onRetry(workflow.id)}
-        >
-          {t("common:retryPreview")}
-        </Button>
+      {retry.showRetry && (
+        <WorkflowPreviewRetryButton
+          workflowId={workflow.id}
+          retrying={retry.retrying}
+          onClick={retry.handleRetry}
+        />
       )}
     </div>
+  );
+}
+
+type WorkflowSelectorOptionListProps = {
+  workflows: WorkflowSelectorRowProps["workflows"];
+  snapshots: WorkflowSelectorRowProps["snapshots"];
+  previews: Record<string, WorkflowOptionPreview>;
+  selectedWorkflowId: string | null;
+  taskCreatePreviewMode: boolean;
+  agentProfiles: WorkflowSelectorRowProps["agentProfiles"];
+  clearLabel?: string;
+  onWorkflowChange: WorkflowSelectorRowProps["onWorkflowChange"];
+  onRetry: (workflowId: string) => void;
+  onClose: () => void;
+  triggerRef: { current: HTMLButtonElement | null };
+  restoreFocusOnCloseRef: { current: boolean };
+};
+
+function WorkflowSelectorOptionList({
+  workflows,
+  snapshots,
+  previews,
+  selectedWorkflowId,
+  taskCreatePreviewMode,
+  agentProfiles,
+  clearLabel,
+  onWorkflowChange,
+  onRetry,
+  onClose,
+  triggerRef,
+  restoreFocusOnCloseRef,
+}: WorkflowSelectorOptionListProps) {
+  const { t } = useTranslation();
+  const previewStatusAnnouncement = workflows
+    .map((workflow) => {
+      const statusKey = getWorkflowPreviewStatusKey(previews[workflow.id]);
+      return statusKey
+        ? t("workflows:workflowPreviewStatusAnnouncement", {
+            workflowName: workflow.name,
+            status: t(statusKey),
+          })
+        : null;
+    })
+    .filter((message): message is string => message !== null)
+    .join(" ");
+  const closeAndRestoreFocus = () => {
+    restoreFocusOnCloseRef.current = true;
+    onClose();
+  };
+
+  return (
+    <PopoverContent
+      className="max-h-[var(--radix-popover-content-available-height)] w-[min(30rem,calc(100vw-1rem))] min-w-0 max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-1"
+      align="start"
+      collisionPadding={8}
+      data-testid="workflow-selector-popover"
+      onKeyDownCapture={(event) => {
+        if (event.key === "Escape") restoreFocusOnCloseRef.current = true;
+      }}
+      onCloseAutoFocus={(event) => {
+        if (!restoreFocusOnCloseRef.current) return;
+        restoreFocusOnCloseRef.current = false;
+        event.preventDefault();
+        triggerRef.current?.focus({ preventScroll: true });
+        requestAnimationFrame(() => {
+          if (triggerRef.current?.isConnected) {
+            triggerRef.current.focus({ preventScroll: true });
+          }
+        });
+      }}
+    >
+      <div className="shrink-0 border-b px-2 py-1.5 text-xs text-muted-foreground">
+        {t("workflows:workflow")}
+      </div>
+      <div
+        className="sr-only"
+        role="status"
+        aria-atomic="true"
+        data-testid="workflow-preview-status-announcement"
+      >
+        {previewStatusAnnouncement}
+      </div>
+      <div
+        className="min-h-0 max-h-[min(32rem,calc(var(--radix-popover-content-available-height)-3rem))] overflow-y-auto overflow-x-hidden overscroll-contain"
+        data-testid="workflow-selector-option-list"
+      >
+        {clearLabel ? (
+          <button
+            type="button"
+            onClick={() => {
+              onWorkflowChange("");
+              closeAndRestoreFocus();
+            }}
+            className="min-h-11 w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+          >
+            {clearLabel}
+          </button>
+        ) : null}
+        {workflows.map((workflow) => (
+          <WorkflowOption
+            key={workflow.id}
+            workflow={workflow}
+            snapshot={snapshots[workflow.id]}
+            preview={previews[workflow.id]}
+            previewStatusKey={getWorkflowPreviewStatusKey(previews[workflow.id])}
+            isSelected={workflow.id === selectedWorkflowId}
+            taskCreatePreviewMode={taskCreatePreviewMode}
+            agentProfiles={agentProfiles}
+            onWorkflowChange={onWorkflowChange}
+            onClose={closeAndRestoreFocus}
+            onRetry={onRetry}
+          />
+        ))}
+      </div>
+    </PopoverContent>
   );
 }
 
@@ -313,8 +524,9 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   clearLabel,
   placeholder,
 }: WorkflowSelectorRowProps) {
-  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusOnCloseRef = useRef(false);
   const taskCreatePreviewMode = previewWorkspaceId !== undefined;
   const { previews, retry } = useWorkflowOptionPreviews(
     taskCreatePreviewMode ? previewWorkspaceId : null,
@@ -328,9 +540,19 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) restoreFocusOnCloseRef.current = false;
+        setOpen(nextOpen);
+      }}
+    >
       <div className="flex min-w-0 items-center gap-2" data-testid="workflow-selector-row">
-        <WorkflowSelectorTrigger selectedWorkflow={selectedWorkflow} placeholder={placeholder} />
+        <WorkflowSelectorTrigger
+          selectedWorkflow={selectedWorkflow}
+          placeholder={placeholder}
+          triggerRef={triggerRef}
+        />
         {launchPreview && (
           <>
             <LaunchDestinationInfo />
@@ -338,66 +560,31 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
           </>
         )}
       </div>
-      <PopoverContent
-        className="max-h-[var(--radix-popover-content-available-height)] w-[min(30rem,calc(100vw-1rem))] min-w-0 max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-1"
-        align="start"
-        collisionPadding={8}
-        data-testid="workflow-selector-popover"
-      >
-        <div className="shrink-0 border-b px-2 py-1.5 text-xs text-muted-foreground">
-          {t("workflows:workflow")}
-        </div>
-        <div
-          className="min-h-0 max-h-[min(32rem,calc(var(--radix-popover-content-available-height)-3rem))] overflow-y-auto overflow-x-hidden overscroll-contain"
-          data-testid="workflow-selector-option-list"
-        >
-          {clearLabel ? (
-            <button
-              type="button"
-              onClick={() => {
-                onWorkflowChange("");
-                setOpen(false);
-              }}
-              className="min-h-11 w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
-            >
-              {clearLabel}
-            </button>
-          ) : null}
-          {workflows.map((workflow) => (
-            <WorkflowOption
-              key={workflow.id}
-              workflow={workflow}
-              snapshot={snapshots[workflow.id]}
-              preview={previews[workflow.id]}
-              isSelected={workflow.id === selectedWorkflowId}
-              taskCreatePreviewMode={taskCreatePreviewMode}
-              agentProfiles={agentProfiles}
-              onWorkflowChange={onWorkflowChange}
-              onClose={() => setOpen(false)}
-              onRetry={retry}
-            />
-          ))}
-        </div>
-      </PopoverContent>
+      <WorkflowSelectorOptionList
+        workflows={workflows}
+        snapshots={snapshots}
+        previews={previews}
+        selectedWorkflowId={selectedWorkflowId}
+        taskCreatePreviewMode={taskCreatePreviewMode}
+        agentProfiles={agentProfiles}
+        clearLabel={clearLabel}
+        onWorkflowChange={onWorkflowChange}
+        onRetry={retry}
+        onClose={() => setOpen(false)}
+        triggerRef={triggerRef}
+        restoreFocusOnCloseRef={restoreFocusOnCloseRef}
+      />
     </Popover>
   );
 });
 
-function WorkflowPreviewStatus({ preview }: { preview?: WorkflowOptionPreview }) {
+function WorkflowPreviewStatus({ statusKey }: { statusKey: WorkflowPreviewStatusKey | null }) {
   const { t } = useTranslation();
-  if (!preview || (preview.status === "success" && preview.steps.length > 0)) return null;
-  let message: string;
-  if (preview.status === "loading") {
-    message = t("workflows:loadingSteps");
-  } else if (preview.status === "error") {
-    message = t("workflows:failedToLoadWorkflowSteps");
-  } else {
-    message = t("workflows:noStepsInThisWorkflow");
-  }
+  if (!statusKey) return null;
 
   return (
-    <span className="pl-[calc(0.875rem+0.5rem)] text-xs text-muted-foreground" role="status">
-      {message}
+    <span className="pl-[calc(0.875rem+0.5rem)] text-xs text-muted-foreground" aria-hidden="true">
+      {t(statusKey)}
     </span>
   );
 }

@@ -3,32 +3,12 @@ import { useRegularMode } from "../../helpers/regular-mode";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import {
   cleanupWorkflowStepPreviewScenario,
+  expectStepsInOrder,
   seedWorkflowStepPreviewScenario,
+  workflowStepsResponse,
 } from "./workflow-step-previews-helpers";
 
 useRegularMode();
-
-function workflowStepsResponse(page: import("@playwright/test").Page, workflowId: string) {
-  return page.waitForResponse((response) =>
-    response.url().includes("/api/v1/workflows/" + workflowId + "/workflow/steps"),
-  );
-}
-
-async function expectStepsInOrder(
-  page: import("@playwright/test").Page,
-  workflowId: string,
-  stepNames: string[],
-) {
-  const group = page.getByTestId("workflow-option-steps-" + workflowId);
-  await expect(group).toBeVisible();
-  const text = (await group.textContent()) ?? "";
-  let previousPosition = -1;
-  for (const name of stepNames) {
-    const position = text.indexOf(name);
-    expect(position).toBeGreaterThan(previousPosition);
-    previousPosition = position;
-  }
-}
 
 // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.1 AC-TASKS-CREATE-WORKFLOW-STEPS-001.2 AC-TASKS-CREATE-WORKFLOW-STEPS-001.3 AC-TASKS-CREATE-WORKFLOW-STEPS-001.5 AC-TASKS-CREATE-WORKFLOW-STEPS-001.6
 test("loads every workflow preview from a task page and retries one failed row", async ({
@@ -38,6 +18,14 @@ test("loads every workflow preview from a task page and retries one failed row",
 }) => {
   const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId);
   let reviewAttempts = 0;
+  let allowReviewRetry = () => {};
+  const reviewRetryGate = new Promise<void>((resolve) => {
+    allowReviewRetry = resolve;
+  });
+  let markRetryRequestStarted = () => {};
+  const retryRequestStarted = new Promise<void>((resolve) => {
+    markRetryRequestStarted = resolve;
+  });
   await testPage.route(
     "**/api/v1/workflows/" + scenario.review.id + "/workflow/steps",
     async (route) => {
@@ -50,6 +38,8 @@ test("loads every workflow preview from a task page and retries one failed row",
         });
         return;
       }
+      markRetryRequestStarted();
+      await reviewRetryGate;
       await route.continue();
     },
   );
@@ -117,9 +107,23 @@ test("loads every workflow preview from a task page and retries one failed row",
     await testPage.setViewportSize({ width: 640, height: 720 });
     await retry.scrollIntoViewIfNeeded();
     const retryResponse = workflowStepsResponse(testPage, scenario.review.id);
-    await retry.click();
+    const reviewOption = testPage.getByTestId("workflow-option-select-" + scenario.review.id);
+    await retry.focus();
+    await retry.press("Enter");
+    await retryRequestStarted;
+    await expect(retry).toBeFocused();
+    await expect(retry).toHaveAttribute("aria-disabled", "true");
+    await expect(reviewOption).toHaveAccessibleName("Contributor Review");
+    await expect(testPage.getByTestId("workflow-selector-popover").getByRole("status")).toHaveCount(
+      1,
+    );
+    await expect(testPage.getByTestId("workflow-preview-status-announcement")).toContainText(
+      "Contributor Review: Loading steps",
+    );
+    allowReviewRetry();
     expect((await retryResponse).ok()).toBe(true);
     await expectStepsInOrder(testPage, scenario.review.id, scenario.review.stepNames);
+    await expect(reviewOption).toBeFocused();
     await expect(workflowSelector).toHaveAttribute("aria-expanded", "true");
     await expect(title).toHaveValue("Preserve the task draft");
     await expectTaskDescription(description, "Compare the workflow steps before choosing.");
@@ -142,6 +146,7 @@ test("loads every workflow preview from a task page and retries one failed row",
     await expect(title).toHaveValue("Preserve the task draft");
     await expectTaskDescription(description, "Compare the workflow steps before choosing.");
   } finally {
+    allowReviewRetry();
     await cleanupWorkflowStepPreviewScenario(apiClient, scenario);
   }
 });

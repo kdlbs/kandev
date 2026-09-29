@@ -19,8 +19,8 @@ for the destination label and prompt composition. This repair leaves
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                           | Design sections                                                |
+| ------------------------------------- | -------------------------------------------------------------- |
 | `REQ-TASKS-CREATE-WORKFLOW-STEPS-001` | Loading lifecycle; Rendering and recovery; Responsive behavior |
 
 ## Components and contracts
@@ -81,6 +81,13 @@ when `previewWorkspaceId` is absent.
 Use a localized status announcement for asynchronous feedback. Error text must
 not contain raw server errors. Add new copy in all six supported languages and
 use the Traditional Chinese generation command for zh-tw and zh-hk.
+
+Keep each option's accessible name fixed to its workflow name. The visible
+per-row status text is not part of that name. Announce preview changes through
+one translated status region that identifies each workflow and its current
+loading, empty, or failure state. When keyboard activation starts a retry, keep
+focus on Retry while loading. After success, return focus to the workflow option;
+after another failure, keep focus on Retry.
 
 ## Responsive behavior
 
