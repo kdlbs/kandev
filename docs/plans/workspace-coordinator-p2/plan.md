@@ -36,6 +36,7 @@ system_design:
   - ../../specs/coordinator/system-design/activity-log.md
   - ../../specs/coordinator/system-design/proposal-kinds.md
   - ../../specs/coordinator/system-design/copilot-everywhere.md
+  - ../../specs/coordinator/system-design/shared-interface.md
 legacy_specs: []
 ---
 
