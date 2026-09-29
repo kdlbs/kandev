@@ -40,7 +40,7 @@ const (
 const (
 	activityDetailMaxRunes = 1000
 	refusalCoalesceWindow  = 60 * time.Second
-	activityColumns        = `id, coordinator_id, workspace_id, action_class, outcome, authorization, target_task_id, proposal_id, actor_user_id, reason_code, detail, edited, refusal_count, undone_at, undone_by, undo_of_id, created_at, updated_at`
+	activityColumns        = `id, coordinator_id, workspace_id, action_class, outcome, "authorization", target_task_id, proposal_id, actor_user_id, reason_code, detail, edited, refusal_count, undone_at, undone_by, undo_of_id, created_at, updated_at`
 )
 
 var activityRowsTotal = expvar.NewMap("coordinator_activity_rows_total")

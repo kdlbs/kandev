@@ -38,7 +38,7 @@ const phase2TablesSQL = `
 		workspace_id TEXT NOT NULL,
 		action_class TEXT NOT NULL,
 		outcome TEXT NOT NULL,
-		authorization TEXT NOT NULL,
+		"authorization" TEXT NOT NULL,
 		target_task_id TEXT,
 		proposal_id TEXT,
 		actor_user_id TEXT,
