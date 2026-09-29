@@ -783,6 +783,10 @@ type Service struct {
 	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
 	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
 
+	// unattendedPermissionHandler denies a permission request of a coordinator's
+	// unattended turn; nil = requests wait for a person. Set once at wiring.
+	unattendedPermissionHandler UnattendedPermissionHandler
+
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
 	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded

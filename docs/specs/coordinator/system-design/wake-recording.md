@@ -63,7 +63,7 @@ task and session ids.
 | --- | --- | --- |
 | `session.pending_action_changed` with `pending_action` `clarification` | `question` | the primary session's pending clarification bundle: its `pending_id` |
 | `session.pending_action_changed` with `pending_action` `permission` | `permission` | each pending permission message on the primary session: its `pending_id`, one wake per pending request, in message `created_at`, `id` order |
-| `coordinator_stalls` upsert (hooked in `stalls.go` after `UpsertStall` returns true) | `stall` | the stored row's `last_event_at` (the hook re-reads the row, it does not use the event's value), only while the row is [current](wake.md#stall-currency) |
+| `coordinator_stalls` upsert (hooked in `stalls.go` after `UpsertStall` returns true) | `stall` | the stored row's `last_event_at` (the hook re-reads the row, it does not use the event's value), only while the row is [current](wake-backstop.md#stall-currency) |
 | `task_session.error_changed` with `active: true` | `error` | the primary session's stored active error `stamp` |
 | `task.state_changed` with `state` `COMPLETED` | `completed` | `completed`, when the stored task state is `COMPLETED` |
 

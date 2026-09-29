@@ -1872,6 +1872,9 @@ const (
 	PermissionActorPersonalAccessToken PermissionResolutionActorKind = "personal_access_token"
 	PermissionActorAutomation          PermissionResolutionActorKind = "automation"
 	PermissionActorSynthetic           PermissionResolutionActorKind = "synthetic"
+	// PermissionActorCoordinatorUnattended marks a denial made by the backend
+	// for a coordinator's unattended turn, where no person is present.
+	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
 )
 
 type PermissionResolutionSource string
@@ -1885,6 +1888,9 @@ const (
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.
 	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
+	// PermissionSourceCoordinatorWake identifies a denial made during a
+	// coordinator wake's unattended turn.
+	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
 )
 
 type PermissionResolutionResult string
@@ -1913,6 +1919,8 @@ type PermissionResolutionAudit struct {
 	SelectedAt  time.Time                     `json:"selected_at"`
 	FinalizedAt *time.Time                    `json:"finalized_at,omitempty"`
 	Result      PermissionResolutionResult    `json:"result"`
+	// UnattendedTurnID is the coordinator unattended turn row a denial belongs to.
+	UnattendedTurnID string `json:"unattended_turn_id,omitempty"`
 }
 
 type PermissionResolutionClaimOutcome string

@@ -451,5 +451,9 @@
   "sendBackFailed": "送信できませんでした。もう一度お試しください。",
   "sendBackSent": "{{card}} に送信しました",
   "mergeAlwaysHuman": "プルリクエストのマージは常に人が行います。",
-  "answerHere": "ここで回答"
+  "answerHere": "ここで回答",
+  "containmentFixChangedSinceLaunch": "このコーディネーターと新しい会話を開始して、現在の設定で起動し直してください。",
+  "containmentFixUnreadable": "Kandev はこの設定を読み取れませんでした。プロファイルを確認して、もう一度お試しください。",
+  "containmentFixUnverifiedSource": "このコーディネーターの会話タスクには、Kandev が検証できないリポジトリバインディングがあります。タスクからバインディングを削除するか、バインディングのないコーディネーターを使用してください。",
+  "containmentFixCredentialSource": "このコーディネーターの実行環境プロファイルとエージェントプロファイルの環境から Kandev トークンを削除してください。検出: {{source}}。"
 }

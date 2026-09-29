@@ -24,6 +24,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/coordinator/system-design/wake.md
   - ../../specs/coordinator/system-design/wake-recording.md
+  - ../../specs/coordinator/system-design/wake-backstop.md
   - ../../specs/coordinator/system-design/integration.md
 ---
 
@@ -56,7 +57,7 @@ current episode from stored state.
   in backendapp over the task repository) and [Episode keys](../../specs/coordinator/system-design/wake-recording.md#episode-keys): one reader per kind returning the
   current episode key from stored state (pending clarification bundle,
   pending permission message, `coordinator_stalls` row only while
-  [current](../../specs/coordinator/system-design/wake.md#stall-currency),
+  [current](../../specs/coordinator/system-design/wake-backstop.md#stall-currency),
   active session error, task state), shared by the recorder, the backstop and task 05's re-check.
 - `internal/coordinator/wake_recorder.go`: subscribers for
   `session.pending_action_changed`, the stall upsert hook in `stalls.go`,

@@ -141,6 +141,7 @@ func registerCoordinatorRoutes(p routeParams) {
 			})
 		}
 		wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
+		wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}

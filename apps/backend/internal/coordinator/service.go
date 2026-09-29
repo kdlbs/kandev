@@ -157,6 +157,13 @@ type Service struct {
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
 	afterApproveRecheck func()
+
+	// permissionResolver resolves a denied unattended permission request; nil
+	// until SetUnattendedPermissionResolver, and then the handler does nothing.
+	permissionResolver UnattendedPermissionResolver
+	// containment evaluates the unattended-turn containment conditions; nil
+	// until phase 3 wiring sets it.
+	containment *ContainmentChecker
 }
 
 // ServiceOption configures optional Service behavior.
@@ -572,3 +579,9 @@ func (s *Service) PruneWakeState(ctx context.Context, now time.Time) (turns, wak
 func (s *Service) DeleteWorkspaceState(ctx context.Context, workspaceID string) error {
 	return s.store.DeleteWorkspaceState(ctx, workspaceID)
 }
+
+// SetContainment injects the containment checker once at wiring.
+func (s *Service) SetContainment(c *ContainmentChecker) { s.containment = c }
+
+// Containment returns the injected containment checker, or nil before wiring.
+func (s *Service) Containment() *ContainmentChecker { return s.containment }

@@ -451,5 +451,9 @@
   "sendBackFailed": "無法傳送。請重試。",
   "sendBackSent": "已傳送至 {{card}}",
   "mergeAlwaysHuman": "合併拉取要求始終由人來決定。",
-  "answerHere": "在此回答"
+  "answerHere": "在此回答",
+  "containmentFixChangedSinceLaunch": "請與此協調器開始新的對話，使其按目前設定啓動。",
+  "containmentFixUnreadable": "Kandev 無法讀取此設定。請檢查相關設定後重試。",
+  "containmentFixUnverifiedSource": "此協調器的對話任務帶有 Kandev 無法驗證的儲存庫綁定。請從任務中移除該綁定，或使用沒有綁定的協調器。",
+  "containmentFixCredentialSource": "請從此協調器的執行器設定檔和代理程式設定檔的環境中移除 Kandev 權杖。發現：{{source}}。"
 }

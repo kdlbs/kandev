@@ -451,5 +451,9 @@
   "sendBackFailed": "Não foi possível enviar. Tente novamente.",
   "sendBackSent": "Enviado para {{card}}",
   "mergeAlwaysHuman": "Integrar um pull request é sempre uma decisão humana.",
-  "answerHere": "Responder aqui"
+  "answerHere": "Responder aqui",
+  "containmentFixChangedSinceLaunch": "Inicie uma nova conversa com este coordenador para que arranque com as definições atuais.",
+  "containmentFixUnreadable": "O Kandev não conseguiu ler esta definição. Verifique o perfil e tente novamente.",
+  "containmentFixUnverifiedSource": "A tarefa de conversa deste coordenador tem uma ligação a repositório que o Kandev não consegue verificar. Remova a ligação da tarefa ou utilize um coordenador sem ela.",
+  "containmentFixCredentialSource": "Remova os tokens do Kandev do ambiente do perfil de executor e do perfil de agente deste coordenador. Encontrado: {{source}}."
 }

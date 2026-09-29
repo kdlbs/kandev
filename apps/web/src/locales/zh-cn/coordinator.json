@@ -451,5 +451,9 @@
   "sendBackFailed": "无法发送。请重试。",
   "sendBackSent": "已发送至 {{card}}",
   "mergeAlwaysHuman": "合并拉取请求始终由人来决定。",
-  "answerHere": "在此回答"
+  "answerHere": "在此回答",
+  "containmentFixChangedSinceLaunch": "请与此协调器开始新的对话，使其按当前设置启动。",
+  "containmentFixUnreadable": "Kandev 无法读取此设置。请检查相关配置后重试。",
+  "containmentFixUnverifiedSource": "此协调器的对话任务带有 Kandev 无法验证的仓库绑定。请从任务中移除该绑定，或使用没有绑定的协调器。",
+  "containmentFixCredentialSource": "请从此协调器的执行器配置和智能体配置的环境中移除 Kandev 令牌。发现：{{source}}。"
 }

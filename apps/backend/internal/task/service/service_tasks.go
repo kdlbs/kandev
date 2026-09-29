@@ -2025,6 +2025,12 @@ func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
 	s.hydrateTaskWorkspaceFolders(ctx, task)
 }
 
+// ListTaskRepositories returns the task's repository links, surfacing the read
+// error that GetTask's hydration only logs.
+func (s *Service) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	return s.taskRepos.ListTaskRepositories(ctx, taskID)
+}
+
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {

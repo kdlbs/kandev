@@ -564,6 +564,12 @@ func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
 	return m.streamManager.mcpHandlerFor(execution)
 }
 
+// CredentialsManager returns the credentials manager the manager launches
+// agents with, for read-only inspection by admission checks.
+func (m *Manager) CredentialsManager() CredentialsManager {
+	return m.credsMgr
+}
+
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
 // tool calls.
 //
