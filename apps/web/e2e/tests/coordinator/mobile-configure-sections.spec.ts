@@ -44,4 +44,26 @@ test.describe("Coordinator sections on a phone viewport", () => {
     await testPage.getByTestId("standing-order-save").click();
     await expect(testPage.getByTestId("standing-order-row")).toContainText("Keep cards small.");
   });
+
+  test("May do rows and the Watches list fit the phone viewport without horizontal scroll", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Mobile Control Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    const base = linkToCoordinatorSettings(seedData.workspaceId, coordinator.id);
+    for (const section of ["may-do", "watches"]) {
+      await testPage.goto(`${base}?section=${section}`);
+      await expect(testPage.getByTestId(`coordinator-section-${section}`)).toBeVisible();
+      const overflow = await testPage.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+    }
+  });
 });

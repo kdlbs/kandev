@@ -8,8 +8,11 @@ import { useCoordinatorInputs } from "./use-coordinator-inputs";
 import { useCoordinatorPRs } from "./use-coordinator-prs";
 import { useCoordinatorTasks } from "./use-coordinator-tasks";
 import { useNowTick } from "./use-now-tick";
+import { useCoordinatorWatchSet } from "./use-coordinator-watch-set";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { filterWatched, type WatchSet } from "@/lib/coordinator/watch-filter";
 
-export type CoordinatorInputKind = "tasks" | "stalls" | "proposals";
+export type CoordinatorInputKind = "tasks" | "stalls" | "proposals" | "watches";
 
 export type CoordinatorInputStatus = {
   kind: CoordinatorInputKind;
@@ -37,6 +40,10 @@ export type UseCoordinatorAttentionResult = {
   error: boolean;
   /** True once the tasks input has never had a successful read. */
   tasksNeverLoaded: boolean;
+  /** True while the phase-2 watch set has not loaded: task and stall items and the counts derived from them are withheld. */
+  watchSetUnavailable: boolean;
+  /** The coordinator's loaded watch set (phase 2), undefined until it has loaded. */
+  watchSet: WatchSet | undefined;
   /** Per-input status, in the banner order tasks, stall records, proposals. */
   inputs: CoordinatorInputStatus[];
   /** Re-issues only the reads currently in an error state, in parallel. */
@@ -69,10 +76,20 @@ export function useCoordinatorAttention(
     retryFailed: retryStallsAndProposals,
   } = useCoordinatorInputs(workspaceId, coordinatorId);
   const now = useNowTick();
+  const phase2 = useFeature("coordinatorPhase2");
+  const watchSet = useCoordinatorWatchSet(workspaceId, coordinatorId, phase2);
+  const watchValue = watchSet.input.value;
+  const watchSetUnavailable = phase2 && watchValue === undefined;
+
+  const { tasks: watchedTasks, stalls: watchedStalls } = useMemo(() => {
+    const input = { tasks: tasksInput.tasks, stalls: stalls.value ?? [] };
+    if (!phase2) return input;
+    return watchValue ? filterWatched(input, watchValue) : { tasks: [], stalls: [] };
+  }, [phase2, watchValue, tasksInput.tasks, stalls.value]);
 
   const classification = useMemo(
-    () => classify(tasksInput.tasks, stalls.value ?? [], proposals.value ?? [], now),
-    [tasksInput.tasks, stalls.value, proposals.value, now],
+    () => classify(watchedTasks, watchedStalls, proposals.value ?? [], now),
+    [watchedTasks, watchedStalls, proposals.value, now],
   );
 
   const openTasksById = useMemo(
@@ -85,15 +102,25 @@ export function useCoordinatorAttention(
     { kind: "tasks", error: tasksInput.error, loadedAt: tasksInput.loadedAt },
     { kind: "stalls", error: stalls.error, loadedAt: stalls.loadedAt },
     { kind: "proposals", error: proposals.error, loadedAt: proposals.loadedAt },
+    ...(phase2
+      ? [
+          {
+            kind: "watches" as const,
+            error: watchSet.input.error,
+            loadedAt: watchSet.input.loadedAt,
+          },
+        ]
+      : []),
   ];
 
   const retryFailed = () => {
     if (tasksInput.error) tasksInput.retry();
+    if (phase2 && watchSet.input.error) watchSet.retry();
     retryStallsAndProposals();
   };
 
-  const tasks = tasksInput.tasks;
-  const stallValues = stalls.value;
+  const tasks = watchedTasks;
+  const stallValues = watchedStalls;
   const computeNeedsYouCount = useCallback((): number => {
     if (!coordinatorId) return classification.needsYou.length;
     const coordinatorProposals = useProposalsStore.getState().byCoordinator[coordinatorId];
@@ -115,6 +142,8 @@ export function useCoordinatorAttention(
     loadedAt: tasksInput.loadedAt,
     error: tasksInput.error,
     tasksNeverLoaded: tasksInput.loadedAt === undefined,
+    watchSetUnavailable,
+    watchSet: phase2 ? watchValue : undefined,
     inputs,
     retryFailed,
     computeNeedsYouCount,

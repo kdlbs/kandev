@@ -112,6 +112,8 @@ function attention(
     loadedAt: 1,
     error: false,
     tasksNeverLoaded: false,
+    watchSetUnavailable: false,
+    watchSet: undefined,
     inputs,
     retryFailed: retryFailedMock,
     computeNeedsYouCount: vi.fn(() => 0),

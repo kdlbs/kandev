@@ -37,6 +37,31 @@ export type Coordinator = {
   policy?: { actions: Record<string, string> };
   policy_revision?: number;
   watches?: { scope: "all" | "selected"; workflow_ids: string[] };
+  // Present only on the list route while features.coordinatorPhase2 is on.
+  summary?: CoordinatorSummary;
+};
+
+// Mirrors internal/coordinator/dto.go's SummaryDTO.
+export type CoordinatorSummary = {
+  watch_scope: "all" | "selected";
+  watched_count: number;
+  approval_actions: number;
+  active_orders: number;
+};
+
+export type ControlAction = "create_task" | "start_agent" | "message" | "move" | "resume" | "stop";
+export type ControlSetting = "denied" | "requires_approval" | "automatic";
+
+// Mirrors GET/PUT .../settings (docs/specs/coordinator/system-design/permissions.md#settings-routes).
+export type CoordinatorSettings = {
+  policy: { actions: Record<ControlAction, ControlSetting> };
+  policy_revision: number;
+  watches: { scope: "all" | "selected"; workflow_ids: string[] };
+};
+
+export type PutSettingsRequest = {
+  policy?: { actions: Record<ControlAction, ControlSetting> };
+  watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
 };
 
 export type CoordinatorListResponse = {
@@ -584,4 +609,29 @@ function mutate<T>(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
   });
+}
+
+export function getCoordinatorSettings(
+  workspaceId: string,
+  coordinatorId: string,
+  options?: ApiRequestOptions,
+): Promise<CoordinatorSettings> {
+  return fetchJson<CoordinatorSettings>(
+    coordinatorPath(workspaceId, coordinatorId, "/settings"),
+    options,
+  );
+}
+
+export function putCoordinatorSettings(
+  workspaceId: string,
+  coordinatorId: string,
+  req: PutSettingsRequest,
+  options?: ApiRequestOptions,
+): Promise<CoordinatorSettings> {
+  return mutate<CoordinatorSettings>(
+    coordinatorPath(workspaceId, coordinatorId, "/settings"),
+    "PUT",
+    req,
+    options,
+  );
 }

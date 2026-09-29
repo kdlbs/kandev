@@ -24,6 +24,7 @@ export type AttentionTask = {
   identifier?: string;
   state?: string;
   workflowStepId?: string;
+  workflowId?: string | null;
   isArchived?: boolean;
   updatedAt?: string;
   statusSummary?: AttentionTaskStatusSummary | null;

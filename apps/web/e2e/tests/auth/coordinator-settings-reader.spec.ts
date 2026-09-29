@@ -208,4 +208,31 @@ test.describe.serial("Coordinators settings tab reader gating", () => {
     expect(putByReader.status()).toBe(403);
     await page.close();
   });
+
+  test("a reader sees May do and Watches with disabled controls and no Save, and a settings PUT is refused with 403", async ({
+    backend,
+  }) => {
+    const base = `${backend.baseUrl}/api/v1/workspaces/${workspaceId}/coordinators/${coordinatorId}`;
+    const page = await readerContext.newPage();
+    const settings = `/settings/workspaces/${workspaceId}/coordinators/${coordinatorId}`;
+
+    await page.goto(`${settings}?section=may-do`);
+    await expect(page.getByTestId("may-do-section")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("#may-do-message-approval")).toBeDisabled();
+    await expect(page.locator("#may-do-message-denied")).toBeDisabled();
+    await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
+
+    await page.goto(`${settings}?section=watches`);
+    await expect(page.getByTestId("watches-section")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("switch")).toBeDisabled();
+    await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
+    await page.close();
+
+    const read = await readerContext.request.get(`${base}/settings`);
+    expect(read.status(), await read.text()).toBe(200);
+    const put = await readerContext.request.put(`${base}/settings`, {
+      data: { watches: { scope: "all" } },
+    });
+    expect(put.status(), await put.text()).toBe(403);
+  });
 });

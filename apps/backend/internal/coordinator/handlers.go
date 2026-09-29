@@ -88,7 +88,16 @@ func (h *Handlers) httpListCoordinators(c *gin.Context) {
 			h.respondError(c, err)
 			return
 		}
-		dtos[i] = dto.WithOpenProposals(item.OpenProposals)
+		orders := 0
+		if h.service.phase2 {
+			active, err := h.service.store.ActiveStandingOrders(ctx, item.Coordinator.ID)
+			if err != nil {
+				h.respondError(c, err)
+				return
+			}
+			orders = len(active)
+		}
+		dtos[i] = dto.WithOpenProposals(item.OpenProposals).WithSummary(orders)
 	}
 	c.JSON(http.StatusOK, NewCoordinatorListResponse(dtos))
 }

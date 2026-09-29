@@ -64,6 +64,8 @@ page's `next_cursor`, a request generation, the message map and a status
   value selects All and is left in the address until the filter changes. A
   filter change replaces the current history entry (no new entry) with
   `?class=<class>`, and removes `class` when All is chosen. The filter offers All, the six classes and "Unknown action".
+  When the page loads with a `class` parameter present, What it did is scrolled
+  into view once on arrival (May do's **Review the last 30 days** link).
 - Names: the workspace member list (`listWorkspaceMembers`), read on mount
   and at most once more per mount, gives `user_id` to `display_name`.
   The member list is the only name source: a person who holds access through
