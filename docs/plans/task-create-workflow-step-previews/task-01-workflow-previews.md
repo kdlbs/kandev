@@ -173,3 +173,9 @@ with the active task dialog, and the selector popover portals into that dialog.
 Final checks passed: 52 focused Vitest tests; one desktop preview E2E; three
 consecutive phone preview E2E runs; typecheck; managed E2E Vite build; targeted
 ESLint; and `git diff --check`.
+
+A later CI run found the existing agent-override E2E reopened dialog controls
+before the workflow selector popover unmounted. The selection helper now waits
+for that popover to detach after each selection. The affected test passed once
+and then twice consecutively locally; CI verification is pending on the updated
+head.

@@ -219,6 +219,10 @@ PR fixup completed on 2026-09-29:
   trigger and dismiss the workflow picker. Drawer close now leaves focus in the
   active task dialog, which owns the pending focus transition. The selector
   popover also uses the task dialog's portal container.
+- A later full-suite run exposed an existing agent-override E2E reopening
+  controls before the workflow selector finished closing. Its selection helper
+  now waits for the selector popover to unmount. The focused test passed once
+  and then twice consecutively; remote checks must be rerun on the updated head.
 - Final verification passed: 52 focused Vitest tests, desktop preview E2E (1),
   phone preview E2E (3 consecutive repeats), typecheck, E2E Vite build, targeted
   ESLint, and `git diff --check`.
