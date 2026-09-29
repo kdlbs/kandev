@@ -38,7 +38,7 @@ and the `standing_order_ids` check in
 | `REQ-COORDINATOR-PROPOSAL-KINDS-001` | [Store](#store), [Propose](#propose) |
 | `REQ-COORDINATOR-PROPOSAL-KINDS-002` | [Propose](#propose), [Create with a start](#create-with-a-start) |
 | `REQ-COORDINATOR-PROPOSAL-KINDS-003` | [Approve](#approve), [At most once](#at-most-once) |
-| `REQ-COORDINATOR-PROPOSAL-KINDS-004` | [Cards](#cards) |
+| `REQ-COORDINATOR-PROPOSAL-KINDS-004` | [Cards](#cards), [Card outcome copy](#card-outcome-copy) |
 | `REQ-COORDINATOR-PROPOSAL-KINDS-005` | [Direct manager actions](#direct-manager-actions) |
 
 ## Store
@@ -319,26 +319,64 @@ offers no undo.
 
 ## Direct manager actions
 
-These are not proposals and write no activity row.
+These are not proposals and write no activity row. Each is shown only to a
+manager (`canManage`), except **Open the PR**, which readers see too, and only
+while the phase-2 flag is on.
 
-- **Stall Resume** (`005.1`). The stall card on Needs you, while the
-  phase-2 flag is on and the viewer is a manager, shows **Resume** as the
-  primary button when the stall's task has a resumable session, computed by
-  the classification input from the session state and executor record. It
-  sends the same resume request the task page's manual resume sends
+- **Stall Resume** (`005.1`, `005.5`). The stall card on Needs you shows
+  **Resume** as the primary button by this client rule, because the client
+  holds no executor record, live-execution flag or interrupted-recovery flag
+  (`Stall` is `{task_id, stalled_for_ms, last_event_at, detected_at}` and the
+  task's `statusSummary.primary_session` is `{id, state}`): the task's primary
+  session exists and its state is neither `COMPLETED` nor `CREATED`. A stall
+  already means no live execution
+  ([needs-you](needs-you.md#inputs)). The server's resume is the authority: a
+  session it refuses (for example one with no executor record) shows the
+  server's error text inline on the card, and no backend field is added. The
+  click sends the request the task page's manual resume sends
   (`useManualResumeSession` in
   `apps/web/hooks/domains/session/use-session-resumption.ts` is private to
-  the active-session hook, so the request builder and launch call it uses,
-  `buildResumeRequest` and `launchSession`, are the shared seam), which goes
-  through the orchestrator's resume with the user's own authority. The stall
-  clears through the phase-1 stall rules when the session changes state.
-- **Open the PR** (`005.2`). A link to the pull request URL the Queue row
-  already has, `target="_blank"`, `rel="noopener noreferrer"`.
-- **Send it back** (`005.3`). An inline note form (1 to 4,000 characters,
-  counted in code points) that sends the user's queued message to the task's
-  primary session through the existing task-page message action, as the
-  manager. Offered only when the row's session accepts a message; a send
-  failure shows the error inline and keeps the text.
+  the active-session hook, so `buildResumeRequest(taskId, sessionId)` and
+  `launchSession`, which it uses, are the shared seam), through the
+  orchestrator's resume with the user's own authority. A per-card lock (a ref
+  set before the request, cleared on settle) makes a second click send
+  nothing. While the request is in flight the button is disabled with a
+  spinner; after a resolved request it stays disabled labelled "Resuming"
+  until the stall leaves the list (the stall clears through the phase-1
+  rules when the session changes state and new activity passes
+  `detected_at`); a rejection or the 30-second launch timeout re-enables it and
+  shows the error inline (`role="alert"`, the error's message, or "Could not
+  resume. Try again." when it has none). A session that stopped being
+  resumable between render and click is such a refusal.
+- **Open the PR** (`005.2`, `005.7`). A link to `pr_url` of
+  `getPrimaryTaskPR(prsByTaskId.get(taskId))`, the same list the row's status
+  already reads, `target="_blank"`, `rel="noopener noreferrer"`. Absent PR
+  or a URL whose scheme is not `http`/`https`: the link is not rendered and
+  nothing else changes. It is a sibling of the row's task link, not inside it:
+  a Queue row's actions sit in an actions cell after the `TaskLink`, so
+  pressing an action never navigates to the task.
+- **Send it back** (`005.3`, `005.6`). Shown only when the row's
+  `statusSummary.primary_session.state` is one that accepts a message
+  ([requirements](../requirements/proposal-kinds.md#terminology)); otherwise
+  the line and button are absent. It opens an inline note form under the row
+  (focus moves to the textarea; Escape or Cancel closes it and discards the
+  text). On open the form reads the primary session with `fetchTaskSession`
+  for its `state` and `queue_incarnation_id`; while that read is pending Send
+  is disabled, and a session that no longer accepts a message, or has no
+  incarnation id, shows "This task is not accepting messages." inline with
+  Send disabled. Send trims the note (leading and trailing white space),
+  counts code points, and is disabled when the trimmed note is empty or
+  over 4000, with a counter. It calls the queued-message call the task page
+  uses (`queueMessage` in `lib/api/domains/queue-api.ts`, `message.queue.add`
+  with `session_id`, `session_incarnation_id`, `task_id`, and the trimmed
+  note as `content`), which is a queued message from the manager as the task
+  page's composer sends it, never a direct prompt. In flight, the note and
+  Send are disabled and a second activation sends nothing. Success closes and
+  clears the form and shows the toast "Sent to `<identifier>`" (raw task id
+  when the identifier is unknown); the row stays. Failure keeps the form open
+  with the text and shows the error inline: "This task's message queue is
+  full." for `QueueFullError`, else the error's message, else "Could not send.
+  Try again."
 - The Ready to merge group header shows "Merging a pull request is always
   human." (`005.4`). No merge control exists anywhere in the coordinator UI.
 
@@ -377,6 +415,51 @@ Approving this starts an agent.
   tool by the returned `proposal_id`, as phase 1 does for create.
 - With the phase-2 flag off, the client hides non-create proposals and the
   count excludes them ([coordinators](coordinators.md#phase-2)).
+- The `<task identifier>` and step names come from the loaded workspace tasks
+  and workflow snapshots (`004.6`). A target task not among them shows its id
+  and no link; an unresolved step shows its raw id; Approve and Reject stay.
+  A proposal whose kind is not `create_task`, `resume`, `message` or `move`
+  (a newer backend) renders no card and is excluded from the count, as with
+  the flag off.
+- The "Policy: `<action>` requires approval" line names the proposal kind's
+  action (Create a task, Resume a task, Message a task, Move a task) whatever
+  `starts_agent` says; it is fixed text from the stored kind, not a live read
+  of the policy.
+- After a 409 `policy_denied` the card shows "Its May do settings no longer
+  allow this", hides Approve and Edit and keeps Reject. That state lives in
+  the card's memory only: after a reload Approve is back and a second attempt
+  gets the same 409 and the same result.
+
+## Card outcome copy
+
+The status line of a `failed` card and the approve toast of an `approved` one,
+by kind. `<card>` is the target task's identifier (the id when unknown) and
+`<step>` the destination step name (the raw id when unresolved). Failure text
+is chosen by the row's `error` code; the Approve and Reject actions of a
+`failed` card are unchanged. The client reads the flags below from the row's
+`outcome` object.
+
+| Kind | Row | Copy |
+| --- | --- | --- |
+| any | `failed`, `outcome_unknown` | "It may or may not have run; check the task" |
+| any | `failed`, `task_archived` | "This task was archived. Nothing was changed." |
+| resume | `failed`, `not_resumable` | "This task's session can no longer be resumed. Nothing was changed." |
+| message | `failed`, `not_accepting` | "This task's session is not accepting messages. Nothing was sent." |
+| message | `failed`, `queue_full` | "This task's message queue is full. Nothing was sent." |
+| move | `failed`, `task_left_workflow` | "This task is no longer in its workflow. It was not moved." |
+| move | `failed`, `moved` | "This task moved to another workflow. It was not moved." |
+| move | `failed`, `step_missing` | "The destination step no longer exists. The task was not moved." |
+| move | `failed`, `step_is_done` | "The destination step now completes the task. The task was not moved." |
+| move | `failed`, `step_starts_agent` | "The destination step now starts an agent, which this proposal did not say. The task was not moved." |
+| move | `failed`, `agent_running` | "An agent is running on this task. The task was not moved." |
+| move | `failed`, `step_full` | "The destination step is at its work-in-progress limit. The task was not moved." |
+| any | `failed`, any other or empty code | "Could not do this: `<error>`. Check the task." (with no error text: "Could not do this. Check the task.") |
+| resume | `approved` | toast "Approved. Resuming `<card>`."; with `deferred` true "Approved. `<card>` will resume when there is room." |
+| message | `approved` | toast "Approved. Message queued for `<card>`." |
+| move | `approved` | toast "Approved. `<card>` moved to `<step>`."; with `queued` true "Approved. `<card>` is queued behind the limit of `<step>`."; with `noop` true "Approved. `<card>` was already in `<step>`." |
+
+Each toast is followed by the phase-1 "Next" line. A create proposal keeps
+the phase-1 copy. The error text is untrusted and rendered as text.
 
 ## Security
 

@@ -17,13 +17,20 @@ acceptance_criteria:
   - AC-COORDINATOR-PROPOSAL-KINDS-004.2
   - AC-COORDINATOR-PROPOSAL-KINDS-004.3
   - AC-COORDINATOR-PROPOSAL-KINDS-004.4
+  - AC-COORDINATOR-PROPOSAL-KINDS-004.5
+  - AC-COORDINATOR-PROPOSAL-KINDS-004.6
   - AC-COORDINATOR-PROPOSAL-KINDS-005.1
   - AC-COORDINATOR-PROPOSAL-KINDS-005.2
   - AC-COORDINATOR-PROPOSAL-KINDS-005.3
   - AC-COORDINATOR-PROPOSAL-KINDS-005.4
+  - AC-COORDINATOR-PROPOSAL-KINDS-005.5
+  - AC-COORDINATOR-PROPOSAL-KINDS-005.6
+  - AC-COORDINATOR-PROPOSAL-KINDS-005.7
   - AC-COORDINATOR-STANDING-ORDERS-003.2
+  - AC-COORDINATOR-STANDING-ORDERS-003.4
   - AC-COORDINATOR-STANDING-ORDERS-004.1
   - AC-COORDINATOR-STANDING-ORDERS-004.2
+  - AC-COORDINATOR-STANDING-ORDERS-004.3
 system_design:
   - ../../specs/coordinator/system-design/proposal-kinds.md
   - ../../specs/coordinator/system-design/standing-orders.md
@@ -45,12 +52,22 @@ Shaped by labels, and offer to turn a reject reason into a standing order.
   starts an agent", Edit only for message text, the failed text for
   `outcome_unknown` (`004.1` to `004.4`, `STANDING-ORDERS-003.2`).
 - The approve 409 `policy_denied` text on a card.
-- Stall card Resume for managers when the session is resumable, using the
-  existing session resume call (`useManualResumeSession`) (`005.1`).
-- Ready to merge row: Open the PR in a new tab, "Or send it back with a
-  note", Send it back with a 1 to 4000 character note delivered through the
-  existing message route, only for managers and sessions that accept one,
-  and the "always human" line (`005.2` to `005.4`).
+- Stall card Resume for managers by the client rule of the design (session
+  exists, not `COMPLETED` or `CREATED`; no backend field), sending
+  `buildResumeRequest` through `launchSession`, the seam the private
+  `useManualResumeSession` uses, with in-flight, "Resuming" and inline-error
+  states (`005.1`, `005.5`).
+- Ready to merge row: Open the PR in a new tab (`pr_url` of the first
+  `taskPRs` entry, `http(s)` only), "Or send it back with a note", Send it back
+  with a trimmed 1 to 4000 code point note queued through `queueMessage`, only
+  for managers and sessions that accept one (hidden otherwise), actions outside
+  the row's task link, and the "always human" line (`005.2` to `005.7`).
+- Card outcome copy for every failure code and approved variant, the missing
+  target and unresolved step fallbacks, and unknown kinds hidden (`004.5`,
+  `004.6`).
+- A shared standing-orders read with retired orders for the Shaped by labels
+  (`003.4`) and a page-level `RejectOfferHost` that owns the reject offer and
+  its dialog (`004.3`).
 - Reject with a reason shows the 10-second offer; Make it a standing order
   opens the add dialog with the reason and `source_proposal_id` (`004.1`,
   `004.2`).
@@ -96,7 +113,7 @@ Toast: "Rejected. Keep the reason as a standing order?"  [Make it a standing ord
 ## Verification
 
 ```bash
-cd apps/web && pnpm test -- app/coordinator/components
+cd apps/web && pnpm test -- app/coordinator/components app/coordinator/proposal-card components/coordinators
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run e2e/tests/coordinator/proposal-kinds.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/coordinator/proposal-kinds.spec.ts
@@ -110,9 +127,11 @@ assert the order in Configure.
 
 ## Likely files
 
-- `apps/web/app/coordinator/components/proposal-details.tsx`,
-  `needs-you-item-card.tsx`, `queue-row.tsx`, `queue-group.tsx`,
-  `shaped-by.tsx`, `send-it-back.tsx`, `reject-offer.tsx`
+- `apps/web/app/coordinator/proposal-card/proposal-card.tsx` (there is no
+  `proposal-details.tsx`), new `shaped-by.tsx`, `outcome-copy.ts` and
+  `reject-offer-host.tsx` beside it, `app/coordinator/components/`
+  `needs-you-item-card.tsx`, `queue-row.tsx`, `queue-group.tsx`, a new
+  `send-it-back.tsx` there, and `hooks/domains/coordinator/use-standing-orders.ts`
 
 ## Dependencies
 
