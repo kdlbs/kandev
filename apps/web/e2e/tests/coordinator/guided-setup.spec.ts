@@ -30,6 +30,13 @@ async function chooseIdentity(page: Page) {
   await page.getByRole("option").first().click();
 }
 
+async function reachReview(page: Page) {
+  await page.getByLabel("Name").fill(NAME);
+  if (await page.getByTestId("setup-next").isDisabled()) await chooseIdentity(page);
+  for (let i = 0; i < 5; i++) await page.getByTestId("setup-next").click();
+  await expect(page.getByTestId("setup-review")).toBeVisible();
+}
+
 test.describe("Guided setup", () => {
   test("completes six steps with two boards and a goal, Change from Review, then Finish", async ({
     testPage,
@@ -97,6 +104,47 @@ test.describe("Guided setup", () => {
     await testPage.goto(`${base}?section=watches`);
     await expect(testPage.getByTestId(`watches-board-${first.id}`)).toContainText("In scope");
     await expect(testPage.getByTestId(`watches-board-${second.id}`)).toContainText("In scope");
+  });
+
+  test("a 400 returns to its step with values kept and nothing is created", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const before = (await apiClient.listCoordinators(seedData.workspaceId)).coordinators.length;
+    await testPage.route(SETUP_PATH, (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "nope", step: "identity", field: "name" }),
+      }),
+    );
+    await testPage.goto(linkToCoordinatorAdd(seedData.workspaceId));
+    await reachReview(testPage);
+    const answered = waitForHttp(testPage, "POST", SETUP_PATH);
+    await testPage.getByTestId("setup-finish").click();
+    await answered;
+    await expect(testPage.getByTestId("setup-step-identity")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(testPage.getByLabel("Name")).toHaveValue(NAME);
+    await expect(testPage.getByTestId("setup-next")).toBeDisabled();
+    const after = (await apiClient.listCoordinators(seedData.workspaceId)).coordinators.length;
+    expect(after).toBe(before);
+  });
+
+  test("a dropped response says it could not confirm and stays on Review", async ({
+    testPage,
+    seedData,
+  }) => {
+    await testPage.route(SETUP_PATH, (route) => route.abort("failed"));
+    await testPage.goto(linkToCoordinatorAdd(seedData.workspaceId));
+    await reachReview(testPage);
+    await testPage.getByTestId("setup-finish").click();
+    await expect(testPage.getByTestId("setup-banner-unconfirmed")).toBeVisible();
+    await expect(testPage.getByTestId("setup-review")).toBeVisible();
+    await expect(testPage.getByTestId("setup-finish")).toBeEnabled();
   });
 
   test("leaving mid-setup creates nothing", async ({ testPage, apiClient, seedData }) => {
