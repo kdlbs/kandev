@@ -98,7 +98,7 @@ transaction and the caller returns the error (`001.6`).
 | completion update to `approved` | `approved`, actor = `decided_by`, `edited` = `final_spec_json` differs from `spec_json` on any edited field, target = created or target task |
 | reject | `rejected`, actor, `reason_code` and `detail` both hold the reason text as the manager gave it (1 to 500 characters, so no truncation applies) |
 | failure update to `failed` | `failed`, `reason_code` = the failure code (`approval_failed` for a created task; each other kind defines its own closed set in [proposal kinds](proposal-kinds.md)), detail = the error, actor = the approving manager when known, else NULL |
-| undo | `undone` row plus the marker on the original ([Undo](#undo)) |
+| undo | `undone` row (its `detail` copies the reversed row's) plus the marker on the original ([Undo](#undo)) |
 
 The completion and failure updates are the claim-fenced updates of
 [proposals](proposals.md#approve); the insert runs only when that update
@@ -164,7 +164,12 @@ or `move`, `undone_at` null, and not a move whose proposal outcome has
 `noop: true`, and everything undo needs is readable per `003.9`: a create
 row has a `target_task_id`, a move row's proposal exists and its
 `outcome_json` parses with both `from_step_id` and `to_step_id`; the page's
-move proposals are read in one query by id), `actor_name` resolved from `actor_user_id` through the user
+move proposals are read in one query by id), `target_task_identifier` (the task's identifier such as KAN-431, read
+through the seam's `GetTask`, null when the task is gone or the read fails)
+and, on a move row, `from_step_name` (the proposal outcome's `from_step_id`
+resolved through the seam's `GetStep`, null when the step is gone or the read
+fails; both read once per row of the page, a failed read is logged at warn
+and never fails the list), `actor_name` resolved from `actor_user_id` through the user
 service at read time, and `undone_by_name` resolved from `undone_by` the
 same way (null while the id is null). The row also carries `actor_missing` and
 `undone_by_missing`, true only when the id is set and the user no longer
@@ -190,14 +195,13 @@ logged and the list still returns.
    and not found count as done. Any other error: 500, nothing written.
 3. **Move.** Read the task and the proposal's `outcome_json.from_step_id`
    and `to_step_id` ([proposal kinds](proposal-kinds.md#approve)), then
-   check in this order, stopping at the first that applies (`003.7`); a
-   `GetTask` or step read error that is not a not-found is 500 with nothing
+   check in this order, stopping at the first that applies (`003.7`); a `GetTask`, step or `HasActiveSession` read error that is not a not-found is 500 with nothing
    written, and a not-found task is `archived`:
-   1. task archived, or not found: 409 `undo_conflict` reason `archived`;
-   2. task on `from_step_id` (a retry after a failed step 4, or a person
-      who moved it back): counts as reversed; skip the call and go to
-      step 4;
-   3. task on `to_step_id`. Read the from step through the seam (`GetStep`),
+   a. task archived, or not found: 409 `undo_conflict` reason `archived`;
+   b. task on `from_step_id` (a retry after a failed marker step, or a person
+      who moved it back): counts as reversed; skip the call and go to the
+      marker step (top-level step 4);
+   c. task on `to_step_id`. Read the from step through the seam (`GetStep`),
       then: from step not found, 409 `undo_conflict` reason `step_deleted`;
       from step completing on enter, `step_done`; any session of the task
       starting or running (seam `HasActiveSession`, the same two states the
@@ -210,12 +214,15 @@ logged and the list still returns.
       auto-start and no session), so no agent starts (`003.8`). Results:
       `ErrWIPLimitExceeded`, 409 reason `step_full`; the move accepted but the
       task queued behind the step's limit (result `WIPAdmitted` false), counts
-      as moved back and step 4 runs; `ErrWorkflowResolutionConflict` or
+      as moved back and the marker step (top-level step 4) runs; `ErrWorkflowResolutionConflict` or
       `ErrMoveConflict`, 409 reason `moved`; a session-blocked refusal that the
-      pre-check missed (a session started in the window, reported by the task
+            pre-check missed (a session started in the window, reported by the task
       service as an unsentineled error) is not classified and, like any other
-      error, is 500 with nothing written, so a retry re-checks;
-   4. any other step: 409 `undo_conflict` reason `moved`.
+      error, is 500 with nothing written, so a retry re-checks. A move still
+      pending on the task is not read: the move-conflict refusal above covers
+      an optioned move, and a plain move (a from step that does not
+      auto-start) clears the pending marker, which is accepted (`003.7`);
+   d. any other step: 409 `undo_conflict` reason `moved`.
 
    The observed step is not fenced against a person moving the task in
    the window between the read and the move: the task service exposes no
@@ -259,10 +266,10 @@ resume is `not_undoable`; the UI shows "No undo" (`003.1`).
 ### Task service seam
 
 `internal/coordinator/undo.go` defines the one interface undo uses, which task
-04 reuses: `ArchiveTask(ctx, id)`, `GetTask(ctx, id)` (archived time,
+04 reuses: `ArchiveTask(ctx, id)`, `GetTask(ctx, id)` (identifier, archived time,
 workflow id, workflow step id), `MoveTaskWithOptions(ctx, id, workflowID,
 stepID, position, opts)` (returning whether the task was admitted),
-`GetStep(ctx, stepID)` (workflow id, auto-start, completes-on-enter, or
+`GetStep(ctx, stepID)` (name, workflow id, auto-start, completes-on-enter, or
 `ErrStepNotFound`) and `HasActiveSession(ctx, taskID)`. The backend wiring
 adapts the task service for the first four and the workflow service's
 `GetStep` (mapping `ErrWorkflowStepNotFound` to `ErrStepNotFound`) and the
@@ -313,19 +320,22 @@ days through the same service function ([goals](goals.md#baselines)).
 
 ## Retention
 
-While `features.coordinatorPhase2` is on, a ticker of a fixed 24-hour interval, started with the
-other coordinator background work (and one run in the startup pass, in its
-own goroutine so it never delays readiness)
-deletes `created_at < cutoff` in batches of 500 selected
-`ORDER BY created_at, id LIMIT 500`, each batch its own short transaction, so
-a proposal write waits for at most one batch. The cutoff (now minus 400 days)
-is computed once per run. Runs never overlap: a run that starts while
-another is in progress returns at once. It stops on context cancel, and between batches when the flag reads off. A batch error is logged at warn and the run ends; the next
-run retries (`005.1`). With the flag off neither the ticker nor the startup
-run starts, so no row is deleted by age while phase-2 data is kept
-([coordinators](coordinators.md#phase-2), `AC-COORDINATOR-COORDINATORS-007.3`);
-the first run after the flag returns deletes whatever is past 400 days by
-then. Deleting a coordinator deletes its rows whatever the flag.
+With `features.coordinatorPhase2` on at startup, a ticker of a fixed 24-hour
+interval is started with the other coordinator background work, and one run
+happens in the startup pass, in its own goroutine so it never delays
+readiness. The flag needs a restart to change, so a running ticker never
+re-reads it and a restart with the flag off starts no ticker. A run deletes
+`created_at < cutoff` in batches of 500 selected `ORDER BY created_at, id
+LIMIT 500`, each batch its own short transaction, so a proposal write waits
+for at most one batch. The cutoff (now minus 400 days) is computed once per
+run. Runs never overlap: a run that starts while another is in progress
+returns at once. It stops on context cancel. A batch error is logged at warn
+and the run ends; the next run retries (`005.1`). With the flag off neither
+the ticker nor the startup run starts, so no row is deleted by age while
+phase-2 data is kept ([coordinators](coordinators.md#phase-2),
+`AC-COORDINATOR-COORDINATORS-007.3`); the first run after a restart with the
+flag on deletes whatever is past 400 days by then. Deleting a coordinator
+deletes its rows whatever the flag.
 
 ## What it did UI
 
@@ -353,7 +363,7 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
   other row, including the separate row whose outcome is `undone`, which
   shows the undoer through `actor_name` in How it was authorised (`002.4`)
   (`003.1`). The 409 `undo_conflict` message shows inline by its `reason`:
-  "It has moved since" for `moved` and `archived`, "An agent is working on
+  "It has moved since" for `moved`, `archived` and any unknown or absent reason, "An agent is working on
   it. Stop it, then undo." for `agent_running`, "The step it came from no
   longer exists." for `step_deleted`, "The step it came from is now a
   finishing step." for `step_done`, "The step it came from is full." for
@@ -363,7 +373,7 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
   Undo first opens a confirmation dialog titled "Undo this?" whose text
   names the effect: for a created task "The task <identifier> will be
   archived. Any agent working on it will be stopped.", for a move "The task <identifier> will move back to
-  <from step name>." It has two buttons, **Undo** and **Cancel**, with
+  <from step name>." ("the step it came from" when `from_step_name` is null; "the task" when `target_task_identifier` is null) It has two buttons, **Undo** and **Cancel**, with
   Cancel focused on open. Cancel or Escape closes it and sends nothing;
   Undo sends the request and closes it, and the outcomes below apply.
   The other two refusals: 409 `already_undone` (a double click, or another

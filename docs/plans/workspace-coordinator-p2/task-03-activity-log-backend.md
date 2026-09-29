@@ -14,11 +14,17 @@ requirements:
 acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-001.1
   - AC-COORDINATOR-ACTIVITY-LOG-001.2
-  - AC-COORDINATOR-ACTIVITY-LOG-001.5
+    - AC-COORDINATOR-ACTIVITY-LOG-001.5
+  - AC-COORDINATOR-ACTIVITY-LOG-002.7
+
   - AC-COORDINATOR-ACTIVITY-LOG-003.2
   - AC-COORDINATOR-ACTIVITY-LOG-003.3
   - AC-COORDINATOR-ACTIVITY-LOG-003.4
-  - AC-COORDINATOR-ACTIVITY-LOG-003.5
+    - AC-COORDINATOR-ACTIVITY-LOG-003.5
+  - AC-COORDINATOR-ACTIVITY-LOG-003.7
+  - AC-COORDINATOR-ACTIVITY-LOG-003.8
+  - AC-COORDINATOR-ACTIVITY-LOG-003.9
+
   - AC-COORDINATOR-ACTIVITY-LOG-004.1
   - AC-COORDINATOR-ACTIVITY-LOG-004.2
   - AC-COORDINATOR-ACTIVITY-LOG-004.3
@@ -113,7 +119,7 @@ undo of a create archives a task with a running agent; a row deleted by
 retention mid-undo is 404; cursor validation, repeated `limit`/`before`/`days`
 and empty `days` are 400; a failing user service leaves the list served with
 null names; an unset actor with an existing user names it and a missing user
-sets `actor_missing`; retention stops between batches when the flag turns off.
+sets `actor_missing`; retention starts no ticker and no startup run when the flag is off, and stops on context cancel.
 
 ## Likely files
 

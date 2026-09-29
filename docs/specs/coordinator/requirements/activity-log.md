@@ -110,12 +110,17 @@ Mockup:
   `?class=` value in the page address selects All.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.4:** Each row shall show the relative time
   (exact time on hover), the action's detail with the target task's
-  identifier linking to the task, the action class, the outcome with "with
+  identifier linking to the task (plain "Task no longer available" text with
+  no link when the identifier is null), the action class, the outcome with "with
   edits" when edited and "x N" when a refusal repeated, and the actor's name
   for approved, rejected and undone rows. With no person recorded
   (authentication off) the outcome shows alone ("Approved", "Rejected",
   "Undone"); when the recorded person no longer exists it shows "A former
-  member". A refused row shows, in place of a detail, the reason text of its
+  member". The outcome reads "Requires approval" (proposed), "Approved by <name>", "Rejected by <name>",
+  "Failed", "Denied" (refused) or "Undone by <name>". The Action cell shows
+  the row's detail, prefixed "Rejected: " on a rejected row (whose detail is the
+  manager's reason) and "Failed: " on a failed row (whose detail is the
+  error); an `undone` row carries the reversed row's detail. A refused row shows, in place of a detail, the reason text of its
   code: `binding_invalid` "Its tool settings could not be read.",
   `not_in_profile` "It called something it is not allowed to use.",
   `policy_denied` "A manager has set this action to Denied."; any other code
@@ -168,9 +173,11 @@ Mockup:
   starting or running (`agent_running`), or that step is at its task limit
   and refuses the task (`step_full`); the task is in any other step
   (`moved`). Each refusal is 409 `undo_conflict` carrying that reason,
-  changes nothing and leaves the row undoable. A pending move on the task
-  also refuses with `moved`. The row shall say "It has moved since" for
-  `moved` and `archived`, "An agent is working on it. Stop it, then undo."
+  changes nothing and leaves the row undoable. Only an optioned move refuses on a move still pending on the task (the task
+  service's move conflict, reason `moved`); undo of a move to a step that
+  does not auto-start is a plain move, which clears a pending move marker,
+  and that is accepted. The row shall say "It has moved since" for
+  `moved`, `archived` and any reason the client does not know or that is absent, "An agent is working on it. Stop it, then undo."
   for `agent_running`, "The step it came from no longer exists." for
   `step_deleted`, "The step it came from is now a finishing step." for
   `step_done` and "The step it came from is full." for `step_full`. When the
@@ -223,8 +230,10 @@ Mockup:
 
 - **AC-COORDINATOR-ACTIVITY-LOG-005.1:** While the phase-2 flag is on, at
   startup and once a day, the system shall delete activity rows older than
-  400 days, in batches of 500 rows, each batch in its own short transaction. The run repeats every 24 hours from startup and stops between batches when
-  the flag turns off. While the flag is off no row is deleted by age
+  400 days, in batches of 500 rows, each batch in its own short transaction. The run repeats every 24 hours from startup. The flag is fixed for the
+  life of the process (a change takes a restart), so a run needs no flag
+  check of its own. While the flag is off at startup no run starts and no
+  row is deleted by age
   (`AC-COORDINATOR-COORDINATORS-007.3`). Rows of a deleted coordinator shall
   be deleted with it, whatever the flag.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.2:** The system shall return, for a
