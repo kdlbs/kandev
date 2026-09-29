@@ -116,6 +116,56 @@ test.describe("Coordinator page sections", () => {
   });
 });
 
+const SETTINGS_PATH = /\/coordinators\/[^/]+\/settings$/;
+
+test.describe("Coordinator May do and Watches", () => {
+  test("saves Message to Requires approval and a narrowed watch set in one PUT, and survives a reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const second = await apiClient.createWorkflow(seedData.workspaceId, "Second board");
+    const coordinator = await seed(apiClient, seedData);
+    const base = linkToCoordinatorSettings(seedData.workspaceId, coordinator.id);
+
+    await testPage.goto(`${base}?section=watches`);
+    await testPage.getByRole("switch").click();
+    await testPage.getByTestId(`watches-toggle-${second.id}`).click();
+
+    await testPage.getByRole("tab", { name: "May do" }).click();
+    await testPage.locator("#may-do-message-approval").click();
+
+    const put = waitForHttp(testPage, "PUT", SETTINGS_PATH);
+    await testPage.getByRole("button", { name: "Save changes" }).click();
+    await put;
+
+    await testPage.reload();
+    await expect(testPage.locator("#may-do-message-approval")).toBeChecked();
+    await testPage.getByRole("tab", { name: "Watches" }).click();
+    await expect(testPage.getByTestId(`watches-toggle-${second.id}`)).toHaveText(
+      "Put this board in scope",
+    );
+    await expect(testPage.getByTestId(`watches-toggle-${seedData.workflowId}`)).toHaveText(
+      "Take this board out of scope",
+    );
+  });
+
+  test("the Review link lands on What it did filtered by class", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await seed(apiClient, seedData);
+    await testPage.goto(
+      `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=may-do`,
+    );
+    await testPage.getByTestId("may-do-review-message").click();
+    await expect(testPage).toHaveURL(/\/queue\?class=message$/);
+    await expect(testPage.getByTestId("what-it-did")).toBeInViewport();
+  });
+});
+
 test.describe("Coordinator page with the phase-2 flag off", () => {
   test("shows the phase-1 page with no Sections row", async ({
     testPage,
