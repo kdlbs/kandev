@@ -1550,6 +1550,25 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 	return err
 }
 
+// CreateLifecycleSessionMessage persists a message in an already-completed
+// lifecycle-only turn.
+func (a *messageCreatorAdapter) CreateLifecycleSessionMessage(
+	ctx context.Context,
+	taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 // CreateSessionMessageIdempotent persists a lifecycle/status message with a
 // deterministic ID so a replayed failure event cannot add another transcript
 // entry for the same failure stamp.

@@ -4873,6 +4873,23 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 	return nil
 }
 
+func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, taskID, content, sessionID, messageType string, metadata map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
+	if m.sessionMessageErr != nil {
+		return m.sessionMessageErr
+	}
+	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		taskID:      taskID,
+		content:     content,
+		sessionID:   sessionID,
+		messageType: messageType,
+		metadata:    metadata,
+	})
+	return nil
+}
+
 func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
 	m.permissionMessageDecision = decision
 	m.permissionMessageWrites++

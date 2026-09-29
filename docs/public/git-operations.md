@@ -183,9 +183,14 @@ missing, and the recorded branch still resolves in the source repository. Local,
 container, SSH, Sprites, Kubernetes, and other remote executor workspaces keep
 their own recovery behavior. A remote Git origin does not make an executor remote.
 
-For this metadata failure, Kandev checks every selected repository slot before
-it changes any slot. It keeps the original checkout and creates a sibling
-recovery worktree with a branch named
+A main repository can also be the selected host **Worktree** checkout. Its `.git`
+directory does not require linked-worktree recovery. When Git metadata is valid,
+Kandev keeps using the same checkout and does not create recovery artifacts. A
+successful relaunch clears the matching task-level launch error.
+
+For missing linked-worktree metadata, Kandev checks every selected repository
+slot before it changes any slot. It keeps the original checkout and creates a
+sibling recovery worktree with a branch named
 `{recorded-branch}-recovered-{operation-prefix}`. It copies tracked, untracked,
 and ignored files, deletions, modes, and symbolic links. It does not restore the
 old index, staging choices, or commits that are no longer available.

@@ -309,7 +309,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
-	handle, valid, err := m.openReusableWorktreePath(wt.Path, wt)
+	handle, valid, err := m.openReusableWorktreePath(ctx, wt.Path, wt)
 	if err != nil {
 		return nil, err
 	}
@@ -378,14 +378,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
-			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
 			if err != nil {
 				return nil, true, err
 			}
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid && m.IsValid(existing.Path) {
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -414,14 +414,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
-			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
 			if err != nil {
 				return nil, true, err
 			}
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid && m.IsValid(existing.Path) {
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -505,7 +505,7 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 	return handle, nil
 }
 
-func (m *Manager) openReusableWorktreePath(worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
 	handle, err := m.validateWorktreePathSafe(worktreePath)
 	if err != nil {
 		return nil, false, err
@@ -516,7 +516,15 @@ func (m *Manager) openReusableWorktreePath(worktreePath string, wt *Worktree) (s
 		}
 		return nil, false, err
 	}
-	if handle == nil || !handle.IsValidWorktree() {
+	if handle == nil {
+		return nil, false, nil
+	}
+	inspection := m.inspectCheckout(ctx, worktreePath, handle)
+	if inspection.operationalErr != nil {
+		_ = handle.Close()
+		return nil, false, fmt.Errorf("inspect checkout before reuse: %w", inspection.operationalErr)
+	}
+	if inspection.class != checkoutLinkedHealthy && inspection.class != checkoutMainHealthy {
 		if handle != nil {
 			_ = handle.Close()
 		}

@@ -674,6 +674,53 @@ func (r *ProfileExecutionResolver) executionFromDecision(
 	}, nil
 }
 
+// dynamicSourceProfileID returns the profile whose dynamic candidate set backs
+// logicalProfileID. An Office identifier binds an execution profile (spec
+// dynamic-agent-routing "Use in Office"): the bound profile owns the routes
+// while the Office ID remains the logical session identity. Ordinary profiles
+// keep selecting themselves.
+func (r *ProfileExecutionResolver) dynamicSourceProfileID(ctx context.Context, logicalProfileID string) (string, error) {
+	if r.profiles == nil {
+		return logicalProfileID, nil
+	}
+	profile, err := r.profiles.GetAgentProfile(ctx, logicalProfileID)
+	if err != nil {
+		return "", fmt.Errorf("resolve profile %s: %w", logicalProfileID, err)
+	}
+	sourceProfileID := logicalProfileID
+	if profile != nil && profile.ExecutionAgentProfileID != "" {
+		sourceProfileID = profile.ExecutionAgentProfileID
+	}
+	if err := r.validateDynamicSourceProfile(ctx, logicalProfileID, sourceProfileID, profile); err != nil {
+		return "", err
+	}
+	return sourceProfileID, nil
+}
+
+func (r *ProfileExecutionResolver) validateDynamicSourceProfile(
+	ctx context.Context, logicalProfileID, sourceProfileID string, logicalProfile *agentsettingsmodels.AgentProfile,
+) error {
+	source, err := r.profiles.GetAgentProfile(ctx, sourceProfileID)
+	if err != nil {
+		return fmt.Errorf("resolve dynamic source profile %s: %w", sourceProfileID, err)
+	}
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return fmt.Errorf("dynamic source profile %s is unavailable", sourceProfileID)
+	}
+	if logicalProfile != nil && sourceProfileID != logicalProfileID &&
+		source.WorkspaceID != "" && source.WorkspaceID != logicalProfile.WorkspaceID {
+		return fmt.Errorf("dynamic source profile %s belongs to a different workspace", sourceProfileID)
+	}
+	agent, err := r.profiles.GetAgent(ctx, source.AgentID)
+	if err != nil {
+		return fmt.Errorf("resolve dynamic source profile family %s: %w", sourceProfileID, err)
+	}
+	if agent == nil || agent.Name != agents.DynamicAgentID {
+		return fmt.Errorf("execution profile %s is not a dynamic profile", sourceProfileID)
+	}
+	return nil
+}
+
 func (r *ProfileExecutionResolver) agentNameForProfile(
 	ctx context.Context,
 	profile *agentsettingsmodels.AgentProfile,
@@ -698,7 +745,11 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	if r.dynamic == nil {
 		return dynamic.Profile{}, errors.New("dynamic profile execution is not configured")
 	}
-	config, routes, err := r.dynamic.GetDynamicAgentProfile(ctx, profileID)
+	sourceProfileID, err := r.dynamicSourceProfileID(ctx, profileID)
+	if err != nil {
+		return dynamic.Profile{}, err
+	}
+	config, routes, err := r.dynamic.GetDynamicAgentProfile(ctx, sourceProfileID)
 	if err != nil {
 		return dynamic.Profile{}, fmt.Errorf("load dynamic profile %s: %w", profileID, err)
 	}

@@ -52,6 +52,7 @@ The [native Codex integration](../../agents/requirements/codex-app-server.md) su
 - **AC-COSTS-CONVERSATION-USAGE-003.2:** A session usage control shall show recorded totals without installing a plugin or enabling Office.
 - **AC-COSTS-CONVERSATION-USAGE-003.3:** Desktop and phone users shall reach the same detail and provenance. Phone disclosure shall use a touch-accessible drawer with one scroll owner.
 - **AC-COSTS-CONVERSATION-USAGE-003.4:** Delayed accounting and fetch errors shall appear as pending or unavailable states. They shall not block the agent or erase known values.
+- **AC-COSTS-CONVERSATION-USAGE-003.5:** When the composer is shown, available, pending, or failed usage shall have one icon-only Usage control in the status row above the composer, alongside transcript navigation and sharing. An archived transcript shall retain the same control in its read-only banner. The control shall have a localized accessible name, and the transcript footer shall not show a second Usage control.
 
 ### REQ-COSTS-CONVERSATION-USAGE-004: Compatible durable accounting
 
@@ -66,7 +67,9 @@ The [native Codex integration](../../agents/requirements/codex-app-server.md) su
 - Invoices, billing reconciliation, subscription purchase, and pricing claims for undocumented amounts.
 - Retroactive reconstruction of missing historical response measurements.
 - Replacement of third-party cost plugins or their independent features.
+- Changes to permission approval actions or their desktop sizing.
 
 ## Implementation plans
 
 - [Native Codex support](../../../plans/codex-app-server/plan.md)
+- [Chat Usage control placement](../../../plans/conversation-usage-toolbar/plan.md)

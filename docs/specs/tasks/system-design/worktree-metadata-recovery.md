@@ -137,6 +137,53 @@ The new branch retains the existing `<branch>-recovered-<operation-prefix>` form
 The original directory and snapshot remain available. Recovery does not restore
 the old index or unavailable commits.
 
+### Main-repository checkout compatibility
+
+The manager distinguishes a healthy main checkout from a healthy linked worktree.
+A main checkout has its own `.git` directory. It does not need a linked admin
+entry, `commondir` file, or reciprocal backlink. This distinction implements
+`AC-TASKS-WORKTREE-METADATA-RECOVERY-002.8` and `002.9`.
+
+A read-only checkout classifier wraps the strict linked-worktree inspector.
+For a directory-shaped `.git`, bounded Git inspection must establish a non-bare
+working tree with the expected top-level, Git directory, and common directory.
+Use explicit checkout and metadata paths. Do not accept Git discovery from a
+parent repository or ambient Git environment overrides. Reject symlink metadata,
+invalid metadata, and path identity changes. An empty `.git` directory is invalid.
+An unborn branch remains valid when its repository metadata is otherwise healthy.
+A symbolic `HEAD` must name a syntactically valid local branch under `refs/heads/`;
+tags and remote-tracking refs are invalid even when they resolve to a commit. A
+detached `HEAD` remains valid when it resolves to a commit.
+
+Both selected-environment and legacy admission use this classification after the
+existing path and ownership checks. Healthy main checkouts return without a
+recovery claim, snapshot, replacement, or linked-worktree relocation. Every slot
+must pass inspection. One healthy main checkout cannot mask another invalid slot.
+Non-Worktree executors retain their early return before host inspection.
+When a selected slot carries managed-provider identity proof, admission also
+checks the canonical selected destination, confirms that its `.git` directory is
+the checkout's Git directory, and verifies the provider origin. A mismatch fails
+closed without attempting linked-worktree relocation of the main checkout.
+
+Reuse needs the same main-checkout acceptance in `openReusableWorktreePath` and
+`tryReuseExisting`. Preserve pinned-directory and owner checks throughout validation.
+The additional-session path remains read-only, including contribution setup and
+repository scripts. Read-only Git inspection does not authorize Git mutation.
+
+Keep `inspectLinkedWorktree`, `Manager.IsValid`, and
+`DirectoryHandle.IsValidWorktree` strict for linked-worktree consumers. Add the
+main-checkout alternative at admission and reuse boundaries. Do not broaden a
+shared predicate that recovery, archive, or replacement validation uses.
+Main-checkout acceptance provides no cleanup, relocation, or replacement authority.
+
+A valid main checkout produces no `WorktreeRecoveryError`. Real metadata failures
+retain fail-closed classification and their existing retry restrictions. Normal
+successful relaunch uses the existing stamp-guarded launch-error retirement path.
+Do not clear a newer error, bulk rewrite historical errors, or add dismissal APIs.
+
+Implementation is complete in the
+[main-checkout fix package](../../../plans/main-checkout-recovery-admission/plan.md).
+
 ## Multiple repositories
 
 Admission first classifies the complete selected inventory without mutation.

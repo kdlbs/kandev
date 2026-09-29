@@ -79,6 +79,18 @@ issue #4052. Implementation status is recorded in the linked plans.
   request before replacement starts. A later failure must preserve completed slot
   repairs and all original checkouts. No agent can start with an incomplete inventory.
 
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-002.8:** A healthy main-repository
+  checkout in the selected inventory shall remain usable for launch, additional
+  sessions, resume, and workspace restoration. Admission shall preserve its path,
+  branch, index, tracked edits, untracked files, and ignored files without repair.
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-002.9:** A directory named `.git` alone
+  shall not establish checkout health. Invalid, redirected, or unreadable metadata
+  shall stop admission without changing the checkout or granting replacement authority.
+  A symbolic `HEAD` shall name a valid local branch under `refs/heads/` or resolve
+  as a detached commit. When admission includes managed-provider identity proof,
+  the checkout metadata directory and origin shall match the selected destination
+  and provider identity; a mismatch shall fail closed without relocating the main checkout.
+
 ### REQ-TASKS-WORKTREE-METADATA-RECOVERY-003: Exclusive recovery authority
 
 **Intent:** Recovery must not redirect a workspace that another consumer can use.
@@ -170,3 +182,4 @@ Worktree environment when its recorded branch survives.
 - [System design](../system-design/worktree-metadata-recovery.md)
 - [Metadata implementation plan](../../../plans/worktree-metadata-recovery/plan.md)
 - [Missing-checkout fix package](../../../plans/missing-worktree-checkout-recovery/plan.md)
+- [Main-checkout compatibility fix](../../../plans/main-checkout-recovery-admission/plan.md) tracks criteria 002.8 and 002.9.

@@ -207,3 +207,23 @@ Task 02 implementation checks on 2026-09-29:
 - A crash after materialization can leave a healthy path with an unfinished claim.
 - PostgreSQL checks require a disposable DSN. A skipped test is not concurrency evidence.
 - This recovery restores surviving committed content only.
+
+## Current-main integration validation
+
+Integrated `origin/main` at `ccaa7c0a8d80ef4f2f089b1f416bd1230417da0a` into
+the PR branch after the base advanced. The three overlapping files were merged
+additively: selected main checkouts keep main's health and provider-identity
+checks, missing checkouts keep their record preflight and exclusive operation
+lock, and the requirements and public guide retain both contracts. The
+auto-merged launch tests retain the main-checkout fixtures and the explicit
+`resume_new_branch` coverage.
+
+On that merge candidate, `go test -race ./internal/worktree -count=1` and the
+focused orchestrator, executor, and lifecycle recovery race tests passed.
+`make -C apps/backend lint`, `make -C apps/backend build`, Windows/amd64 and
+Darwin/arm64 worktree test cross-compiles, and the Chromium attachment E2E
+passed. The targeted E2E ran three times with 3 passed and 0 failed. The docs
+catalog validated 331 decisions and 1246 specifications; specification lint,
+all 62 public-doc tests, all 47 published-page checks, and PR work-order
+reference coverage passed. PostgreSQL claim verification remains outstanding
+because `KANDEV_TEST_POSTGRES_DSN` is not configured.

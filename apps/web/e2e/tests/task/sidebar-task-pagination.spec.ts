@@ -1,3 +1,4 @@
+import { exerciseSidebarViewReuse } from "./sidebar-view-reuse-fixtures";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
@@ -254,4 +255,14 @@ test("desktop keeps multi-selection across pages and bulk archives rows from bot
   await expect(
     session.activeChat().getByText("selection paging keeps the open conversation").last(),
   ).toBeVisible();
+});
+
+test("sidebar view reuse preserves rows and offers one recovery action", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseSidebarViewReuse(testPage, apiClient, seedData, false, prCapture);
 });

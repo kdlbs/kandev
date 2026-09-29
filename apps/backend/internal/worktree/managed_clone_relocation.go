@@ -113,6 +113,31 @@ func managedCloneRelocationProofComplete(wt *Worktree, proof *ManagedCloneReloca
 	return strings.EqualFold(proof.Identity.Provider, "github") || strings.EqualFold(proof.Identity.Provider, "gitlab")
 }
 
+func (m *Manager) validateManagedMainCheckoutIdentity(
+	ctx context.Context,
+	taskID string,
+	wt *Worktree,
+	proof *ManagedCloneRelocationProof,
+) error {
+	if !managedCloneRelocationProofComplete(wt, proof) {
+		return nil
+	}
+	_, destination, err := canonicalManagedCloneDestination(taskID, wt, proof)
+	if err != nil {
+		return err
+	}
+	if !sameDirectoryIdentity(filepath.Join(wt.Path, ".git"), filepath.Join(destination, ".git")) {
+		return managedCloneRelocationError(taskID, "main checkout does not match the selected managed destination")
+	}
+	if err := verifyManagedCloneOrigin(ctx, m, destination, proof.Identity); err != nil {
+		if operationalErr := checkoutInspectionOperationalError(ctx, err); operationalErr != nil {
+			return operationalErr
+		}
+		return managedCloneRelocationError(taskID, "main checkout provider origin does not match the selected repository")
+	}
+	return nil
+}
+
 func canonicalManagedCloneDestination(
 	taskID string,
 	wt *Worktree,

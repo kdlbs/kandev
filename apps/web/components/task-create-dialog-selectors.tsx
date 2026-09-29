@@ -156,6 +156,9 @@ type AgentSelectorProps = {
   placeholder: string;
   triggerClassName?: string;
   popoverPortal?: boolean;
+  touchTarget?: boolean;
+  testId?: string;
+  triggerId?: string;
 };
 
 export const AgentSelector = memo(function AgentSelector({
@@ -166,6 +169,9 @@ export const AgentSelector = memo(function AgentSelector({
   placeholder,
   triggerClassName,
   popoverPortal,
+  touchTarget,
+  testId,
+  triggerId,
 }: AgentSelectorProps) {
   const { t } = useTranslation();
   return (
@@ -181,7 +187,9 @@ export const AgentSelector = memo(function AgentSelector({
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
-      testId="agent-profile-selector"
+      touchTarget={touchTarget}
+      testId={testId ?? "agent-profile-selector"}
+      triggerId={triggerId}
     />
   );
 });

@@ -2,6 +2,8 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +81,44 @@ func TestSidebarTaskViewQueryNegativeFilterSemanticsRemainExplicit(t *testing.T)
 		}
 		if err := query.Validate(); err != nil {
 			t.Errorf("negative operator %q rejected: %v", operator, err)
+		}
+	}
+}
+
+// @covers AC-UI-SIDEBAR-ARCHIVED-FILTER-002.14
+func TestSidebarTaskViewQueryMembershipLimits(t *testing.T) {
+	for _, dimension := range []string{"workflow", "repository"} {
+		for _, count := range []int{0, 6, 7, 1000, 1001} {
+			t.Run(fmt.Sprintf("%s/%d", dimension, count), func(t *testing.T) {
+				values := make([]string, count)
+				for i := range values {
+					values[i] = fmt.Sprintf("organization/repository-with-long-name-%04d", i)
+					if dimension == "workflow" {
+						values[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
+					}
+				}
+				raw, _ := json.Marshal(values)
+				q := SidebarTaskViewQuery{Filters: []SidebarTaskViewClause{{Dimension: dimension, Op: "in", Value: raw}}, Sort: SidebarTaskViewSort{Key: "state", Direction: "asc"}, Group: "none", Page: 1, PageSize: 100, Locale: "en"}
+				if err := q.Validate(); (err != nil) != (count > 1000) {
+					t.Fatalf("count %d: %v", count, err)
+				}
+			})
+		}
+	}
+	for _, value := range []string{strings.Repeat("a", 256), strings.Repeat("界", 85), strings.Repeat("\"", 256)} {
+		raw, _ := json.Marshal(value)
+		q := SidebarTaskViewQuery{Filters: []SidebarTaskViewClause{{Dimension: "titleMatch", Op: "matches", Value: raw}}, Sort: SidebarTaskViewSort{Key: "state", Direction: "asc"}, Group: "none", Page: 1, PageSize: 100, Locale: "en"}
+		if err := q.Validate(); err != nil {
+			t.Errorf("valid decoded string length %d: %v", len(value), err)
+		}
+	}
+}
+
+func TestSidebarTaskViewQueryScalarBoundaries(t *testing.T) {
+	for _, raw := range []string{`null`, `[null]`, `[true]`, `12`, `["` + strings.Repeat("a", 257) + `"]`, `["` + strings.Repeat("界", 86) + `"]`} {
+		q := SidebarTaskViewQuery{Filters: []SidebarTaskViewClause{{Dimension: "repository", Op: "in", Value: json.RawMessage(raw)}}, Sort: SidebarTaskViewSort{Key: "state", Direction: "asc"}, Group: "none", Page: 1, PageSize: 100, Locale: "en"}
+		if err := q.Validate(); err == nil {
+			t.Errorf("invalid value accepted: %s", raw)
 		}
 	}
 }
