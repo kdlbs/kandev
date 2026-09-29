@@ -1,4 +1,4 @@
-import { createElement, type ReactNode, useEffect } from "react";
+import { createElement, type ReactNode, useEffect, useState } from "react";
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -50,6 +50,33 @@ describe("TaskLoadErrorState", () => {
 });
 
 describe("useTaskDetails reconnect refresh", () => {
+  it("retains a reconnect refresh until route hydration finishes", async () => {
+    const initialTask = { id: taskId(TASK_A), title: "Before reconnect" } as Task;
+    const refreshedTask = { ...initialTask, title: "After reconnect" };
+    const fetchTask = vi.spyOn(api, "fetchTask").mockResolvedValue(refreshedTask);
+    let setReady!: (ready: boolean) => void;
+    function Wrapper({ children }: { children: ReactNode }) {
+      const [isReady, updateReady] = useState(false);
+      setReady = updateReady;
+      return (
+        <StateProvider initialState={{ connection: { status: "disconnected" } } as never}>
+          <TaskRouteSessionHydrationProvider isReady={isReady}>
+            {children}
+          </TaskRouteSessionHydrationProvider>
+        </StateProvider>
+      );
+    }
+    const { result } = renderHook(
+      () => ({ details: useTaskDetails(TASK_A, initialTask), store: useAppStoreApi() }),
+      { wrapper: Wrapper },
+    );
+    act(() => result.current.store.getState().setConnectionStatus("connected"));
+    expect(fetchTask).not.toHaveBeenCalled();
+    act(() => setReady(true));
+    await waitFor(() => expect(result.current.details.task?.title).toBe("After reconnect"));
+    expect(fetchTask).toHaveBeenCalledTimes(1);
+  });
+
   it("reloads task placement after the websocket reconnects", async () => {
     const initialTask = {
       id: taskId(TASK_A),

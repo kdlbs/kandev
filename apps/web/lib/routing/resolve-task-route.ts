@@ -18,6 +18,6 @@ export async function resolveTaskRoute(taskId: string, requestedSessionId?: stri
   return {
     task,
     sessionId,
-    allSessionsResponse: { ...allSessionsResponse, sessions: ownedSessions },
+    allSessionsResponse: { sessions: ownedSessions, total: ownedSessions.length },
   };
 }

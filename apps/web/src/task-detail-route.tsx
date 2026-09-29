@@ -24,7 +24,7 @@ import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-co
 import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
-import { useTaskRouteProjection } from "./task-route-projection";
+import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
 
 type TaskDetailRouteProps = {
   taskId: string;
@@ -267,11 +267,13 @@ function useTaskDetailRouteFetch(args: {
     }
     let cancelled = false;
     setRouteState({ routeKey, status: "loading", data: null });
-    const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
-      store.getState(),
-      taskId,
-    );
-    fetchTaskNavigationData(taskId, sessionId)
+    const requestState = store.getState();
+    const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(requestState, taskId);
+    const selectedSessionId =
+      sessionId ??
+      getOwnedTaskSessionId(requestState, taskId, requestState.tasks.activeSessionId) ??
+      undefined;
+    fetchTaskNavigationData(taskId, selectedSessionId)
       .then((next) => {
         if (!cancelled) {
           const loadedState: TaskDetailRouteState = {

@@ -19,6 +19,7 @@ const STATE_HYDRATOR_TEST_ID = "state-hydrator";
 const FORCE_SESSION_ID_ATTRIBUTE = "data-force-session-id";
 const ROUTE_READY_ATTRIBUTE = "data-route-ready";
 const TASK_DATA_ATTRIBUTE = "data-task-id";
+const SESSION_DATA_ATTRIBUTE = "data-session-id";
 const LOADING_TASK_COPY = "Loading task";
 const TASK_ONE_ID = "task-1";
 const TASK_TWO_ID = "task-2";
@@ -282,7 +283,7 @@ describe("TaskDetailRoute client navigation", () => {
 
     const shell = screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID);
     expect(shell.getAttribute(TASK_DATA_ATTRIBUTE)).toBe(TASK_TWO_ID);
-    expect(shell.getAttribute("data-session-id")).toBe("session-2");
+    expect(shell.getAttribute(SESSION_DATA_ATTRIBUTE)).toBe("session-2");
     expect(shell.closest("[inert]")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
     expect(shell.getAttribute(ROUTE_READY_ATTRIBUTE)).toBe("false");
@@ -354,9 +355,9 @@ describe("TaskDetailRoute client navigation", () => {
     renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="missing-session" />);
 
     await waitFor(() => {
-      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-session-id")).toBe(
-        "session-1",
-      );
+      expect(
+        screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE),
+      ).toBe("session-1");
     });
     expect(mocks.fetchTaskNavigationData).toHaveBeenCalledWith(TASK_ONE_ID, "missing-session");
   });
@@ -403,6 +404,34 @@ describe("TaskDetailRoute fallback", () => {
   });
 });
 
+describe("TaskDetailRoute saved conversation", () => {
+  it("preserves the selected owned conversation through route refresh without a session URL", async () => {
+    const state = makeKnownTaskState();
+    state.tasks = { activeTaskId: TASK_TWO_ID, activeSessionId: "secondary" } as AppState["tasks"];
+    state.taskSessions!.items.secondary = {
+      id: "secondary",
+      task_id: TASK_TWO_ID,
+    } as TaskSession;
+    const pending = deferred<FetchedSessionData>();
+    mocks.fetchTaskNavigationData.mockReturnValueOnce(pending.promise);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_TWO_ID} />, state);
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE)).toBe(
+      "secondary",
+    );
+    expect(mocks.fetchTaskNavigationData).toHaveBeenCalledWith(TASK_TWO_ID, "secondary");
+    await act(async () =>
+      pending.resolve({
+        ...makeFetchedData(),
+        task: { ...makeFetchedData().task, id: taskId(TASK_TWO_ID) },
+        sessionId: "secondary",
+      }),
+    );
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE)).toBe(
+      "secondary",
+    );
+  });
+});
+
 describe("TaskDetailRoute cached presentation boundaries", () => {
   it("waits for fresh hydration on a return visit before enabling read tracking", async () => {
     const taskB = {
@@ -438,11 +467,12 @@ describe("TaskDetailRoute cached presentation boundaries", () => {
     );
   });
 
-  it.each(["workspace", "authentication", "requested-session"])(
+  it.each(["workspace", "authentication", "requested-session", "archived-task"])(
     "waits for authoritative loading across the %s boundary",
     (boundary) => {
       const state = makeKnownTaskState();
       if (boundary === "workspace") state.workspaces!.activeId = "other-workspace";
+      if (boundary === "archived-task") state.kanban!.tasks[0].isArchived = true;
       if (boundary === "authentication")
         state.auth = { mode: "enabled", authenticated: false, user: null };
       mocks.fetchTaskNavigationData.mockReturnValueOnce(new Promise(() => {}));

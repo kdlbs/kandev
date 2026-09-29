@@ -259,7 +259,10 @@ Client route resolution fetches only the task and its owned session list, then
 hydrates those essential slices. The full boot/SSR enrichment entry points
 remain unchanged. Existing mounted domain hooks own message/turn backfill,
 profile reconciliation, repositories, workflow snapshots, settings, and shells;
-one slow optional resource must not delay other content. Omitted messages/turns
+one slow optional resource must not delay other content. The existing full-session
+reconciler also initializes missing persisted model/configuration state through
+the shared boot hydration mapper; a model event already in the store wins over
+that background response. Omitted messages/turns
 must remain unloaded, never become fabricated empty histories.
 
 Read-cursor capture remains gated until the fresh session list is hydrated.
@@ -268,10 +271,16 @@ route key: returning to the same route requires its fresh snapshot to hydrate.
 Automatic session creation also waits for authoritative task/session hydration;
 a lightweight projection is presentation data, not permission to launch.
 Task details supplied by route resolution must not trigger a duplicate details
-request. Reconnect/foreground refresh and route-error recovery remain available.
+request. Reconnects received before route readiness retain one pending details
+refresh and drain it once hydration completes. Foreground refresh and route-error
+recovery remain available.
 
 Task/session ownership is checked before cached presentation. The task projection
-preserves workspace, repository, status, and recovery metadata. Route request
+preserves workspace, repository, status, and recovery metadata. Projection and
+session selection use one store snapshot. Without an explicit session in the
+URL, authoritative resolution preserves the currently selected owned session;
+it falls back to the primary session only if that selection is no longer valid.
+Route request
 cancellation and session hydration epochs reject obsolete navigation and live
 session overwrites. There is no new persistent cache or backend API.
 

@@ -191,6 +191,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   const activeTaskIdRef = useRef(activeTaskId);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const previousConnectionStatus = useRef(connectionStatus);
+  const reconnectRefreshPending = useRef(false);
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
   const kanbanTask = useAppStore((state) =>
     resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
@@ -241,7 +242,11 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     const reconnected =
       previousConnectionStatus.current !== "connected" && connectionStatus === "connected";
     previousConnectionStatus.current = connectionStatus;
-    if (reconnected && routeDataReady) void loadTaskDetails();
+    if (reconnected) reconnectRefreshPending.current = true;
+    if (connectionStatus === "connected" && routeDataReady && reconnectRefreshPending.current) {
+      reconnectRefreshPending.current = false;
+      void loadTaskDetails();
+    }
   }, [connectionStatus, routeDataReady, loadTaskDetails]);
 
   useForegroundRefresh(loadTaskDetails, routeDataReady && Boolean(activeTaskId), activeTaskId);

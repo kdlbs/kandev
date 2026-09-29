@@ -27,7 +27,8 @@ Render existing selected-task state immediately and use essential task/session
 resolution for client navigation. Full boot hydration remains unchanged.
 
 Own `src/task-detail-route.tsx`, `lib/ssr/session-page-state.ts`, task projection
-and details helpers, their tests, and focused desktop/mobile navigation E2E.
+and details helpers, the existing background session reconciler and shared model
+hydration mapper, their tests, and focused desktop/mobile navigation E2E.
 The shared ownership resolver lives in `lib/routing/resolve-task-route.ts`;
 the current-store presentation hook lives in `src/task-route-projection.ts`.
 Do not change backend APIs, message pagination, task eligibility, or live data.
@@ -63,7 +64,7 @@ control is introduced. Both use the same route resolver and existing store.
 From `apps/web`, with the repository's Node/pnpm toolchain:
 
 ```bash
-pnpm exec vitest run src/task-detail-route.test.tsx lib/ssr/session-page-state.test.ts components/task/task-page-content-helpers.test.ts components/task/task-page-content.test.tsx components/task/chat/use-session-read-tracking.test.ts
+pnpm exec vitest run src/task-detail-route.test.tsx lib/routing/resolve-task-route.test.ts lib/ssr/session-page-state.test.ts components/task/task-page-content-helpers.test.ts components/task/task-page-content.test.tsx components/task/chat/use-session-read-tracking.test.ts hooks/domains/session/use-ensure-task-session.test.ts hooks/domains/session/use-session.test.ts hooks/domains/session/session-state-reconciler.test.ts
 pnpm run typecheck
 pnpm e2e:run --project chromium tests/task/task-route-responsiveness.spec.ts
 pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-task-route-responsiveness.spec.ts
@@ -82,14 +83,15 @@ case requires the exact new hydration snapshot to finish before read tracking
 or session creation can proceed. Authoritative task data replaces the provisional
 projection; optional boot reads are absent from the client route loader.
 
-All 133 focused unit cases pass across route, hydration, task details/projection,
-read tracking, and automatic session creation. TypeScript, changed-file ESLint
+All 145 focused unit cases pass across route resolution, hydration, task
+details/projection, read tracking, automatic session creation, and session
+reconciliation. TypeScript, changed-file ESLint
 and Prettier, localization checks, specification validation, harness validation,
 and public documentation validation pass. The final managed production build
-passes 10 Chromium and 10 mobile-chrome cases with one worker per run:
+passes 14 Chromium and 10 mobile-chrome cases with one worker per run:
 
 ```bash
-pnpm e2e:run --host --project chromium tests/task/task-route-responsiveness.spec.ts tests/task/task-loading-state.spec.ts tests/chat/unread-divider.spec.ts
+pnpm e2e:run --host --project chromium tests/task/task-route-responsiveness.spec.ts tests/task/task-loading-state.spec.ts tests/chat/unread-divider.spec.ts tests/chat/model-selector-consecutive-switch.spec.ts tests/terminal/terminal-ended-session.spec.ts
 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-task-route-responsiveness.spec.ts tests/task/mobile-task-loading-state.spec.ts tests/chat/mobile-unread-divider.spec.ts tests/layout/mobile-spa-resilience.spec.ts
 ```
 
@@ -105,8 +107,8 @@ a 1440x960 viewport, 20 warm switches per browser/build produced:
 
 | Browser | Previous fix median | Follow-up median | Follow-up p95 | HTTP reads per switch |
 | --- | --- | --- | --- | --- |
-| Chromium 149.0.7827.55 | 841 ms | 221 ms | 238 ms | 41 to 20 |
-| Firefox 151.0 | 1,782 ms | 416 ms | 504 ms | 41 to 20 |
+| Chromium 149.0.7827.55 | 841 ms | 216 ms | 233 ms | 41 to 20 |
+| Firefox 151.0 | 1,782 ms | 419 ms | 484 ms | 41 to 20 |
 
 The previous fix's seeded preview blocked content on all 20 switches in each
 browser; the final follow-up blocked none and reported no page errors. Timings
@@ -116,8 +118,32 @@ rest of a minimum one-second observation window. They are not compositor paint
 measurements, cold-start timings, or certification of the personal browser.
 
 The baseline asset was `index-wjFzt6FH.js`; the final follow-up asset was
-`index-D_MFQBmy.js`. Ignored raw samples, measurement/capture scripts, and the
+`index-4hqlzLbb.js`. Ignored raw samples, measurement/capture scripts, and the
 render profile are under `.kandev/diagnostics/task-route-followup/`. A separate
 CPU sample shows remaining React/workbench, layout/virtualizer measurement, and
 Markdown costs. This change removes the route network barrier; it does not claim
 zero rendering latency or repair an unproven memory leak.
+
+
+## Review and CI remediation
+
+Review regressions now cover persisted model/configuration backfill without
+replacing newer runtime events, selected secondary-session preservation during
+route refresh, deferred reconnect refresh, filtered session-list totals, and
+archived-task projection exclusion. Task and session projection share one store
+snapshot. The persisted model mapper is shared with full boot hydration and
+runs in the existing background session reconciler without an extra request.
+
+CI's ended-session terminal case assumed a stopped agent always implies an
+unavailable workspace. Protocol traces and the backend recovery contract show
+that workspace-only restoration is allowed while the agent remains stopped.
+The unavailable case now explicitly supplies a recovery-ineligible status and
+retains its ended-notice/no-spinner assertion. A companion case executes a real
+shell command after workspace readiness and verifies unchanged terminal session
+state and no running agent. Both pass without retries; no terminal production
+logic was changed to suppress valid recovery. The provisional shell-hydration
+gate was disproved during diagnosis and removed.
+
+The initial PR-head CI failure was limited to that terminal case and its two
+aggregate checks. Final-head CI, automated review dispositions, current-base
+merge validation, and the authorized merge are tracked in the external task plan.
