@@ -271,5 +271,11 @@
   "placement.none": "Ńō ũńĩţś ƒōũńď",
   "placement.moved": "Ŵōŕķśƥàćē ḿōvēď.",
   "placement.failed": "Ţĥē ŵōŕķśƥàćē ćōũĺď ńōţ ƀē ḿōvēď.",
-  "placement.ownerOnly": "Ōńĺŷ ţĥē ŵōŕķśƥàćē ōŵńēŕ ćàń ḿōvē ĩţ"
+  "placement.ownerOnly": "Ōńĺŷ ţĥē ŵōŕķśƥàćē ōŵńēŕ ćàń ḿōvē ĩţ",
+  "idlePolicyDescription": "Śũśƥēńď ĩďĺē ÀĆƤ àĝēńţś ĩń ţĥĩś ŵōŕķśƥàćē ţō ŕēďũćē ŕēśōũŕćē ũśē. Ţĥĩś śēţţĩńĝ ĩś ōƒƒ ƀŷ ďēƒàũĺţ.",
+  "idlePolicyResumeDescription": "Ţĥē śēĺēćţēď śēśśĩōń ŕēśũḿēś ŵĥēń ŷōũ ōƥēń ţĥē ţàśķ ōŕ śēńď à ḿēśśàĝē.",
+  "idlePolicyTitle": "Ŕēśōũŕćē śàvĩńĝ",
+  "idleSuspensionEnabled": "Śũśƥēńď ĩďĺē ÀĆƤ àĝēńţś",
+  "idleTimeoutMinutes": "Ĩďĺē ţĩḿēōũţ (ḿĩńũţēś)",
+  "idleTimeoutMustBePositive": "Ēńţēŕ à ŵĥōĺē ńũḿƀēŕ ĝŕēàţēŕ ţĥàń źēŕō."
 }

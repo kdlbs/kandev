@@ -227,6 +227,8 @@ type UpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string    `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string    `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

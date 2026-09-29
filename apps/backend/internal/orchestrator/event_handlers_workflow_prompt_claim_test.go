@@ -147,6 +147,22 @@ func (m *dispatchBoundaryAgentManager) PromptAgentWithDispatchCallback(
 	return result, nil
 }
 
+func (m *dispatchBoundaryAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+}
+
 func (r *terminalizeAfterPromotionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
 	r.mu.Lock()
 	r.getCalls++

@@ -48,13 +48,24 @@ func TestPluginExecutorStopMatrix(t *testing.T) {
 		t.Fatalf("ordinary stop destroyed compute or skipped agentctl stop: destroy=%#v stop_requests=%d", operations.destroyRequest, stopRequests)
 	}
 
+	idleSuspensionClient := newPluginExecutorTestClient(t, server)
+	if err := runtime.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
+		Client: idleSuspensionClient, StopReason: StopReasonIdleSuspension,
+	}, false); err != nil {
+		t.Fatalf("idle suspension: %v", err)
+	}
+	if operations.destroyRequest != nil || stopRequests != 2 {
+		t.Fatalf("idle suspension destroyed compute or skipped agentctl stop: destroy=%#v stop_requests=%d", operations.destroyRequest, stopRequests)
+	}
+
 	shutdownClient := newPluginExecutorTestClient(t, server)
 	if err := runtime.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "execution-plugin-recovery", StopReason: StopReasonBackendShutdown, Client: shutdownClient,
 	}, false); err != nil {
 		t.Fatalf("backend shutdown: %v", err)
 	}
-	if operations.destroyRequest != nil || stopRequests != 1 {
+	if operations.destroyRequest != nil || stopRequests != 2 {
 		t.Fatalf("backend shutdown stopped or destroyed remote compute: destroy=%#v stop_requests=%d", operations.destroyRequest, stopRequests)
 	}
 

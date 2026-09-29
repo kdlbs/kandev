@@ -104,11 +104,22 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 // that prompt asynchronously, so callers that own startup cancellation must
 // wait for either provider acceptance or a pre-acceptance delivery failure.
 func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks(executionID, nil, onDispatched, onFailure)
+}
+
+// RegisterInitialPromptAdmissionCallbacks installs a final admission check and
+// one-shot acceptance/failure callbacks for the initial prompt sent during
+// StartAgentProcess.
+func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	execution.setInitialPromptDispatchCallbacks(beforeAdmission, onDispatched, onFailure)
 	return nil
 }
 
@@ -134,6 +145,48 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	}
 	defer operationRelease()
 	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
+	}
+	return result, err
+}
+
+// PromptAgentWithAdmissionCallback lets the orchestrator revalidate its
+// dispatch reservation after lifecycle stream preparation and before a new
+// prompt generation is allocated.
+func (m *Manager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
+	if err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
+	defer operationRelease()
+	result, err := m.sessionManager.SendPromptWithAdmissionCallback(
+		ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {
@@ -2144,13 +2197,40 @@ func (m *Manager) markBootReadyForStartup(
 		ctx, executionID, events.AgentBootReady, false, startupGeneration,
 		func(execution *AgentExecution) {
 			m.finalWorkspaceRefresh(execution, "startup_grace")
+			execution.markLifecycleActivity()
 		},
 		func(execution *AgentExecution) {
 			m.setRuntimeInterest(execution.SessionID, false)
 			m.releaseActivity(executionActivityKey(execution.ID))
+			if err := m.clearIdleSuspensionAfterReady(ctx, execution); err != nil {
+				m.logger.Warn("failed to clear idle suspension provenance after agent readiness",
+					zap.String("execution_id", execution.ID), zap.String("session_id", execution.SessionID), zap.Error(err))
+			}
 		},
 	)
 	return err
+}
+
+func (m *Manager) clearIdleSuspensionAfterReady(ctx context.Context, execution *AgentExecution) error {
+	store, ok := m.runningWriter.(idleSuspensionInventory)
+	if !ok || execution == nil {
+		return nil
+	}
+	running, err := store.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	if err != nil {
+		return err
+	}
+	if running.AgentExecutionID != execution.ID || running.IdleSuspensionState == models.ExecutorIdleSuspensionNone {
+		return nil
+	}
+	if err := store.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, execution.SessionID, execution.ID, time.Time{},
+		running.IdleSuspensionState, models.ExecutorIdleSuspensionNone,
+	); err != nil {
+		return err
+	}
+	execution.idleSuspensionAgentStopped.Store(false)
+	return nil
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
@@ -2175,9 +2255,14 @@ func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID strin
 			return fmt.Errorf("execution %q has no startup generation for resume attempt %q", executionID, attemptID)
 		}
 	}
-	return m.markReadyEventWithStartupGeneration(
-		ctx, executionID, events.AgentBootReady, false, startupGeneration, nil, nil,
+	err := m.markReadyEventWithStartupGeneration(
+		ctx, executionID, events.AgentBootReady, false, startupGeneration,
+		func(current *AgentExecution) { current.markLifecycleActivity() }, nil,
 	)
+	if err != nil {
+		return err
+	}
+	return m.clearIdleSuspensionAfterReady(ctx, execution)
 }
 
 // markReadyEventWithContext flips executionID to Ready and publishes

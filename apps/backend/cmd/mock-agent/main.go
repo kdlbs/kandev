@@ -49,17 +49,18 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn              sessionUpdater
-	model             string
-	sessions          map[acp.SessionId]bool
-	promptCancels     map[acp.SessionId]context.CancelFunc
-	promptCancelHolds map[acp.SessionId]chan struct{}
-	sessionMCPServers map[acp.SessionId]map[string]mcpServerDef
-	sessionConfig     map[acp.SessionId][]acp.SessionConfigOption
-	sessionModes      map[acp.SessionId]acp.SessionModeId
-	commandsEmitted   map[acp.SessionId]bool
-	nextSessionID     uint64
-	mu                sync.Mutex
+	conn                           sessionUpdater
+	model                          string
+	sessions                       map[acp.SessionId]bool
+	promptCancels                  map[acp.SessionId]context.CancelFunc
+	promptCancelHolds              map[acp.SessionId]chan struct{}
+	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
+	sessionModes                   map[acp.SessionId]acp.SessionModeId
+	commandsEmitted                map[acp.SessionId]bool
+	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
+	nextSessionID                  uint64
+	mu                             sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
@@ -88,14 +89,15 @@ func main() {
 	defer closeMCPClients()
 
 	ag := &mockAgent{
-		model:             model,
-		sessions:          make(map[acp.SessionId]bool),
-		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
-		promptCancelHolds: make(map[acp.SessionId]chan struct{}),
-		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
-		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
-		sessionModes:      make(map[acp.SessionId]acp.SessionModeId),
-		commandsEmitted:   make(map[acp.SessionId]bool),
+		model:                          model,
+		sessions:                       make(map[acp.SessionId]bool),
+		promptCancels:                  make(map[acp.SessionId]context.CancelFunc),
+		promptCancelHolds:              make(map[acp.SessionId]chan struct{}),
+		sessionMCPServers:              make(map[acp.SessionId]map[string]mcpServerDef),
+		sessionConfig:                  make(map[acp.SessionId][]acp.SessionConfigOption),
+		sessionModes:                   make(map[acp.SessionId]acp.SessionModeId),
+		commandsEmitted:                make(map[acp.SessionId]bool),
+		dynamicFallbackCounterSessions: make(map[acp.SessionId]acp.SessionId),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
 	ag.conn = asc
@@ -368,8 +370,9 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
+	acceptanceMarker, cancelHoldPrompt := cancelHoldAcceptanceMarker(prompt)
 	var cancelHold chan struct{}
-	if isCancelHoldPrompt(prompt) {
+	if cancelHoldPrompt {
 		cancelHold = make(chan struct{})
 	}
 	a.mu.Lock()
@@ -394,9 +397,18 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
 	if cancelHold != nil {
+		if acceptanceMarker != "" {
+			// The newline flushes the acceptance marker through lifecycle message buffering before the hold.
+			(&emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}).text(acceptanceMarker + "\n")
+		}
 		<-cancelHold
 		time.Sleep(mockCancelHoldDuration())
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
+	// Dynamic unclassified fallback scenarios must return a terminal ACP
+	// RequestError directly from Prompt, just like real provider failures.
+	if resp, err, handled := a.handleDynamicUnclassifiedFallback(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
 	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
@@ -577,9 +589,19 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.sessionConfig, req.SessionId)
 	delete(a.sessionModes, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
+	dynamicFallbackCounterID := a.dynamicFallbackCounterSessions[req.SessionId]
+	delete(a.dynamicFallbackCounterSessions, req.SessionId)
 	a.mu.Unlock()
+	if dynamicFallbackCounterID == "" {
+		if raw, err := os.ReadFile(dynamicUnclassifiedFallbackBindingPath(req.SessionId)); err == nil {
+			dynamicFallbackCounterID = acp.SessionId(strings.TrimSpace(string(raw)))
+		}
+	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	if dynamicFallbackCounterID == "" {
+		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
+	}
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -808,10 +830,17 @@ func parseMCPConfigFromArgs(args []string) string {
 	return ""
 }
 
-// isCancelHoldPrompt identifies the E2E-only fixture that holds an acknowledged
-// cancellation long enough to exercise remount and hydration projections.
-func isCancelHoldPrompt(prompt string) bool {
-	return strings.EqualFold(strings.TrimSpace(stripKandevSystem(prompt)), "/e2e:cancel-hold")
+// cancelHoldAcceptanceMarker identifies the E2E-only fixture and its optional
+// prompt-correlated provider acceptance marker.
+func cancelHoldAcceptanceMarker(prompt string) (string, bool) {
+	command, marker, hasMarker := strings.Cut(strings.TrimSpace(stripKandevSystem(prompt)), " ")
+	if !strings.EqualFold(command, "/e2e:cancel-hold") {
+		return "", false
+	}
+	if !hasMarker {
+		return "", true
+	}
+	return strings.TrimSpace(marker), true
 }
 
 func mockCancelHoldDuration() time.Duration {

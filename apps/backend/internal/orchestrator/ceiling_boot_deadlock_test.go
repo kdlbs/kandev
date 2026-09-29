@@ -40,6 +40,24 @@ func (m *gatedPromptAgentManager) PromptAgentWithDispatchCallback(
 	)
 }
 
+func (m *gatedPromptAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 // @covers AC-AGENTS-SESSION-CEILING-001.5
 func TestCeilingReplayReleasesAdmissionBeforeProviderDispatch(t *testing.T) {
 	ctx := context.Background()

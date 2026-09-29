@@ -72,6 +72,7 @@ type StepPortable struct {
 	AgentProfile                 *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
 	ProfileSessionStartPolicy    taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy      taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback  bool                                         `json:"disable_unclassified_fallback" yaml:"disable_unclassified_fallback"`
 	AutoAdvanceRequiresSignal    bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
 	CancelTriggersTurnComplete   bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
 	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
@@ -94,6 +95,9 @@ func (s *StepPortable) UnmarshalJSON(data []byte) error {
 	if raw, ok := fields["complete_task_on_enter"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
 	}
+	if raw, ok := fields["disable_unclassified_fallback"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("disable_unclassified_fallback must be a boolean, not null")
+	}
 	var decoded plainStepPortable
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
@@ -110,12 +114,13 @@ func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
 	type plainStepPortable StepPortable
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
-			if node.Content[i].Value != "complete_task_on_enter" {
+			field := node.Content[i].Value
+			if field != "complete_task_on_enter" && field != "disable_unclassified_fallback" {
 				continue
 			}
 			valueNode := node.Content[i+1]
 			if valueNode.Tag == "!!null" || valueNode.ShortTag() == "!!null" {
-				return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+				return fmt.Errorf("%s must be a boolean, not null", field)
 			}
 		}
 	}
@@ -201,22 +206,23 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			return WorkflowPortable{}, fmt.Errorf("workflow %q step %q: %w", wf.Name, s.Name, err)
 		}
 		sp := StepPortable{
-			Name:                       s.Name,
-			Position:                   s.Position,
-			Color:                      s.Color,
-			Prompt:                     s.Prompt,
-			Events:                     ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
-			IsStartStep:                s.IsStartStep,
-			ShowInCommandPanel:         s.ShowInCommandPanel,
-			AllowManualMove:            s.AllowManualMove,
-			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
-			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
-			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
-			SessionTarget:              sessionTarget,
-			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
-			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
-			CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
-			WIPLimit:                   s.WIPLimit,
+			Name:                        s.Name,
+			Position:                    s.Position,
+			Color:                       s.Color,
+			Prompt:                      s.Prompt,
+			Events:                      ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
+			IsStartStep:                 s.IsStartStep,
+			ShowInCommandPanel:          s.ShowInCommandPanel,
+			AllowManualMove:             s.AllowManualMove,
+			AutoArchiveAfterHours:       s.AutoArchiveAfterHours,
+			ProfileSessionStartPolicy:   taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
+			ProfileSessionEndPolicy:     taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
+			DisableUnclassifiedFallback: s.DisableUnclassifiedFallback,
+			SessionTarget:               sessionTarget,
+			AutoAdvanceRequiresSignal:   s.AutoAdvanceRequiresSignal,
+			CancelTriggersTurnComplete:  s.CancelTriggersTurnComplete,
+			CompleteTaskOnEnter:         s.CompleteTaskOnEnter,
+			WIPLimit:                    s.WIPLimit,
 		}
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
 			sp.PullFromStepPosition = &pos

@@ -356,7 +356,6 @@ jobs:
           # to compiler/process lines and package-level pass/fail summaries.
           go test \
             -race \
-            -timeout 20m \
             -coverprofile="coverage-${SHARD_NUMBER}.out" \
             -covermode=atomic \
             -json \
