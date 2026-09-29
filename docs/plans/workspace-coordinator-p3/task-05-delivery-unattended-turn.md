@@ -166,6 +166,7 @@ creates, archives or repoints a conversation.
 ## Out of scope
 
 - Screens and the transcript rendering (task 06).
+- Failed rollback of a reserved turn: when `RollbackReservedTurn` errors the orchestrator keeps the session's reservation, so every later wake fails `ErrAgentPromptInProgress` and settles `send_failed` (cooldown-bounded) until restart; not designed away.
 - Residuals of the orphan-turn completion, stated in
   [Orphan turn](../../specs/coordinator/system-design/wake-recovery.md#orphan-turn)
   and not designed away: a manager prompt that starts between the session-state
@@ -230,7 +231,11 @@ creates, archives or repoints a conversation.
   `ErrOrphanTurnSessionBusy`, completes nothing and leaves the row untouched; a
   different active turn returns the superseded error and leaves the row
   untouched; no active turn returns nil and the settle proceeds; a null or
-  empty `reserved_turn_id` completes nothing. After the completion a following
+  empty `reserved_turn_id` completes nothing; when the turn is already
+  completed in the database but `activeTurns` still holds its id, the method
+  returns nil and clears that entry. The startup pass leaves a row whose
+  session is `RUNNING` or `STARTING` for the backstop (`send_failed`) and
+  settles it `interrupted` otherwise. After the completion a following
   wake send on the same session receives a reservation (the seam sees a
   non-empty reserved turn id) rather than a stale completed turn.
 - An unbound row with `reserved_turn_id` set denies a permission request only
