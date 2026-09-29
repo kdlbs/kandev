@@ -649,3 +649,34 @@ func TestListUnresolvedClarificationBundles_IncludesNestedOnlyQuestionID(t *test
 		t.Fatalf("bundles = %+v, want exactly pending-L16b (nested question.id resolves the fallback)", page.Bundles)
 	}
 }
+
+func TestListUnresolvedClarificationBundles_SessionIDFilter(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-S", Name: "S"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	seedBundleTask(t, repo, "task-S", "ws-S")
+	seedBundleSession(t, repo, "sess-S1", "task-S")
+	seedBundleSession(t, repo, "sess-S2", "task-S")
+	seedBundleTurn(t, repo, "turn-S1", "sess-S1", "task-S")
+	seedBundleTurn(t, repo, "turn-S2", "sess-S2", "task-S")
+	base := time.Now().UTC()
+	insertClarificationMessage(t, repo, "msg-S1", "sess-S1", "task-S", "turn-S1", "pending-S1", "q1", "pending", 0, base)
+	insertClarificationMessage(t, repo, "msg-S2", "sess-S2", "task-S", "turn-S2", "pending-S2", "q1", "pending", 0, base.Add(-time.Minute))
+
+	opts := unscopedOpts(50)
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, opts)
+	if err != nil || len(page.Bundles) != 2 {
+		t.Fatalf("empty SessionID must not filter: bundles=%+v err=%v", page, err)
+	}
+
+	opts.SessionID = "sess-S1"
+	page, err = repo.ListUnresolvedClarificationBundles(ctx, opts)
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 1 || page.Bundles[0].PendingID != "pending-S1" {
+		t.Fatalf("bundles = %+v, want only pending-S1", page.Bundles)
+	}
+}
