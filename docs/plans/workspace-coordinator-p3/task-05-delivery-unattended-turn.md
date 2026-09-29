@@ -94,8 +94,15 @@ creates, archives or repoints a conversation.
   `s.reservedPromptTurnID(sessionID)` and calls `onReserved(turnID)`, which
   writes the new nullable `reserved_turn_id` column of
   `coordinator_unattended_turns` (additive `ALTER`, covered by the store's
-  upgrade conformance test). The message finder interface gains
-  `CompleteOrphanTurn`, run by every not-sent settle before its UPDATE
+  upgrade conformance test: the prior-schema fixture has the table without the
+  column, and the test asserts the `ALTER` replays, existing rows read NULL and
+  a NULL or empty value is treated as null, on SQLite and on env-gated
+  PostgreSQL). The message finder interface gains `CompleteOrphanTurn`, run by
+  every not-sent settle before its UPDATE; its adapter calls the new exported
+  `Service.CompleteUnattendedOrphanTurn` in `internal/orchestrator/service.go`,
+  a guard over the existing `completeExpectedTurn` that clears `activeTurns`
+  and returns `ErrOrphanTurnSessionBusy` while the session is `RUNNING` or
+  `STARTING`
   ([Orphan turn](../../specs/coordinator/system-design/wake-recovery.md#orphan-turn)).
   Task 02's permission handler match adds the `reserved_turn_id` condition
   ([containment](../../specs/coordinator/system-design/containment.md#unattended-permissions)).
@@ -159,6 +166,14 @@ creates, archives or repoints a conversation.
 ## Out of scope
 
 - Screens and the transcript rendering (task 06).
+- Residuals of the orphan-turn completion, stated in
+  [Orphan turn](../../specs/coordinator/system-design/wake-recovery.md#orphan-turn)
+  and not designed away: a manager prompt that starts between the session-state
+  read and the completion can have its adopted turn completed once; a manager
+  prompt that adopts the orphan turn defers the settle for its whole turn and
+  unallowed permission requests in it are denied and counted; a failed
+  `reserved_turn_id` write leaves the orphan turn, and `conversation_busy`, until
+  a manager acts on the conversation.
 
 ## Acceptance
 
@@ -208,11 +223,16 @@ creates, archives or repoints a conversation.
   at startup, also with no re-send.
 - A stored message with a rolled-back reservation leaves an active orphan
   turn: before the settle `Admit` holds `conversation_busy`; the settle
-  completes that turn only when it belongs to the session, is not completed
-  and the session is not `RUNNING` or `STARTING`, after which `GetActiveTurn`
-  is nil and the next `Admit` passes check 7; a session `RUNNING` a manager's
-  turn completes nothing and defers the settle; a null `reserved_turn_id`
-  completes nothing.
+  completes that turn through `CompleteUnattendedOrphanTurn` only when it is
+  the session's active turn and the session is not `RUNNING` or `STARTING`,
+  after which `GetActiveTurn` is nil, the orchestrator's `activeTurns` entry is
+  gone and the next `Admit` passes check 7; a session `RUNNING` returns
+  `ErrOrphanTurnSessionBusy`, completes nothing and leaves the row untouched; a
+  different active turn returns the superseded error and leaves the row
+  untouched; no active turn returns nil and the settle proceeds; a null or
+  empty `reserved_turn_id` completes nothing. After the completion a following
+  wake send on the same session receives a reservation (the seam sees a
+  non-empty reserved turn id) rather than a stale completed turn.
 - An unbound row with `reserved_turn_id` set denies a permission request only
   in a turn carrying that id; a request in another turn of the session is not
   denied; with the column null it is denied by session match.
