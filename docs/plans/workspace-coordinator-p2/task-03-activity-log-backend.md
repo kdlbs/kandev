@@ -57,7 +57,9 @@ read tool and daily retention. This is the phase-3 evidence source.
 - The What it did screen (task 08).
 - The writer and refusal coalescing (task 01); the guard's `RecordRefusal`
   call (task 02).
-- Registering the read tool in the profile (task 02's `ToolNames`).
+- Naming the read tool in the bound profile (task 02's `ToolNames`). This
+  task adds the tool's `ToolForAction` row and handler, which makes task 02's
+  `registerCoordinatorTools` register it.
 
 ## Acceptance
 
