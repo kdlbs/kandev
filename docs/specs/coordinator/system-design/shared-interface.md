@@ -41,14 +41,23 @@ migrated. Statements run on the handle are rendered with `s.db.Rebind`
 exists. When the coordinator row is missing under the lock the helper
 returns `ErrNotFound` and `fn` does not run.
 
-Rule for `fn`: it uses only the handle it is given (and pure computation).
-It never calls `s.db`, `s.ro`, another store method, or any service method
-that opens its own statement or transaction, because the SQLite writer pool
-holds one connection and such a call blocks until the context ends. Reads
-`fn` needs (for example a goal baseline) are performed before the lock or
-through the handle. A test calls `withCoordinatorLock` with an `fn` that
-runs a statement on the handle and asserts it commits, and the source scan
-in the task 01 tests forbids `s.db.` inside functions passed to it.
+Rule for `fn`, defined by pool: `fn` must not touch the writer pool other
+than through the handle it is given, because the SQLite writer pool holds one
+connection and any other writer-pool statement or transaction blocks until
+the context ends. Allowed callees are the handle's own methods, the `*Tx`
+methods and any other store method that takes a `coordinatorExec` (passing it
+the handle), `Service.Record`, and pure computation. Forbidden are store
+methods that take no `exec` and write or open a transaction (the phase-1
+`CompleteProposal`, `FailProposal`, `RejectProposal`, `InsertProposal`,
+`ReclaimStale`, `PatchCoordinator`), any service method that calls them, and
+`s.db` used for anything except `s.db.Rebind`. Reader-pool reads (`s.ro`, for
+example a goal baseline or `Service.Policy`) are allowed in principle but are
+performed before the lock, so the value they return is not part of the locked
+state. A test calls `withCoordinatorLock` with an `fn` that runs a statement on
+the handle and asserts it commits. The source scan in the task 01 tests fails
+when a function literal passed to `withCoordinatorLock` contains a call to one
+of the forbidden non-`Tx` store writers above or the token `.db.` other than
+`.db.Rebind`.
 
 ### Transaction-bound proposal writes
 
@@ -60,14 +69,24 @@ call site changes for them (`*sqlx.DB` satisfies `coordinatorExec`):
 func (s *Store) CompleteProposalTx(ctx context.Context, exec coordinatorExec, id, token, taskID string, now time.Time) (bool, error)
 func (s *Store) FailProposalTx(ctx context.Context, exec coordinatorExec, id, token, errMsg string, now time.Time) (bool, error)
 func (s *Store) RejectProposalTx(ctx context.Context, exec coordinatorExec, id, reason, decidedBy string, now time.Time) (bool, error)
-func (s *Store) InsertProposalWith(ctx context.Context, p *Proposal, phase2 bool, inTx func(tx coordinatorExec) error) error
+func (s *Store) InsertProposalWith(ctx context.Context, p *Proposal, phase2 bool, pre func(tx coordinatorExec) (*Proposal, error), inTx func(tx coordinatorExec) error) error
 ```
 
 `CompleteProposal`, `FailProposal` and `RejectProposal` call their `Tx`
 variant with `s.db`. `InsertProposal(ctx, p, phase2)` calls
-`InsertProposalWith(ctx, p, phase2, nil)`; `InsertProposalWith` runs `inTx`
-inside the insert's own locked transaction after the cap check and the row
-insert, and an `inTx` error rolls the whole insert back.
+`InsertProposalWith(ctx, p, phase2, nil, nil)`. `InsertProposalWith` runs, in
+the insert's own locked transaction and in this order: `pre` (when non-nil),
+the cap check through `CountOpenProposalsTx`, the row insert, then `inTx`
+(when non-nil). `pre` is the dedupe and standing-order hook of
+[proposal kinds](proposal-kinds.md#propose) and runs before the count: when it
+returns a non-nil proposal, nothing is inserted, the cap is not checked,
+`inTx` does not run, `*p` is set to the returned proposal and the call
+returns nil (so a repeat propose at 25 open rows returns the existing
+proposal, not `ErrCoordinatorProposalCapReached`); when it returns an error
+the transaction rolls back and the error is returned. An `inTx` error rolls
+the whole insert back. `InsertProposalWith` passes `phase2` to
+`CountOpenProposalsTx`. Task 04 supplies `pre` and `inTx`; no task 01
+signature changes later.
 
 Only the service switches. With `phase2` false the service calls the
 phase-1 methods exactly as today, takes no extra lock and writes no
@@ -79,9 +98,11 @@ handle; a `Record` error fails `fn` and rolls the status write back
 (`AC-COORDINATOR-ACTIVITY-LOG-001.6`). Propose passes `inTx` that calls
 `Record` for the `proposed` row. When `withCoordinatorLock` returns
 `ErrNotFound` (the coordinator was deleted), the service treats it as a zero
-matched row and goes through the existing `settleWriteRace` path (404 with
-the existing info log, no activity written). A zero matched row inside `fn`
-commits nothing and writes no activity.
+matched row and takes the same race handler its phase-1 path uses for that
+write: complete and fail go through `settleWriteRace` (404 with the existing
+info log), reject goes through `claimRaceResult` (409, as in
+`reject.go`). A zero matched row inside `fn` commits nothing, writes no
+activity, and produces the same per-write result. Propose has no such path.
 
 ### Open-proposal counting and the flag-off kind predicate
 
@@ -173,11 +194,15 @@ func WithPhase2(on bool) ServiceOption
   clear at `store.go` and is deliberately not moved, so phase-1 tests are
   untouched. That PATCH increments `config_revision` only when it changed
   `context`, `agent_profile_id` or `executor_profile_id`
-  ([coordinators](coordinators.md#routes)). A parity test asserts both paths
-  leave the same `conversation_task_id` and advance `updated_at`, and change
-  no other column; the only allowed difference is `config_revision`, which
-  `resetConversation` increments unconditionally and PATCH increments only
-  for a config-field change (both cases tested).
+  ([coordinators](coordinators.md#routes)). One parity test drives a
+  PATCH that changes a config field (`context`) and a `resetConversation` on
+  an identical fixture and asserts the same end state for
+  `conversation_task_id` (NULL), `config_revision` (each incremented by
+  exactly 1) and `updated_at` (both set to the service clock `s.now()`),
+  ignoring the config column the PATCH was asked to change. A second test
+  asserts `resetConversation` increments `config_revision` and clears the
+  conversation on a coordinator whose config is otherwise unchanged, and that
+  a PATCH without a config-field change does not increment it.
 - `MarkUndone` runs `UPDATE coordinator_activity SET undone_at = ?, undone_by
   = ?, updated_at = ? WHERE id = ? AND undone_at IS NULL` and reports whether
   a row changed. Task 01 owns it; the undo route's work order calls it.
@@ -216,7 +241,7 @@ type PolicyView struct {
     WorkspaceID    string             `json:"workspace_id"`
     PolicyRevision int                `json:"policy_revision"`
     Actions        map[Action]Setting `json:"actions"` // always all six keys
-    WatchScope     string             `json:"watch_scope"`
+    WatchScope     string             `json:"watch_scope"` // normalised: "all" or "selected"
     WorkflowIDs    []string           `json:"workflow_ids"` // sorted ascending, never nil
 }
 ```
@@ -225,8 +250,8 @@ type PolicyView struct {
 missing coordinator. With `phase2` false it returns `PhaseOnePolicy()`
 actions, scope `all`, empty workflow ids and `PolicyRevision` 0 regardless of
 stored data. With `phase2` true and an unreadable stored policy it returns
-a full view (all six `denied`, the stored revision, the stored scope and
-watches) and a nil error, after the once-per-revision error log of
+a full view (all six `denied`, the stored revision, the normalised scope
+and the stored watches) and a nil error, after the once-per-revision error log of
 `policyFor`; the caller enforces `denied`, and only a failed query returns an
 error with the zero view. A coordinator GET or list of an unreadable stored
 policy reports the same view. For a PUT that carries `policy`, an unreadable
@@ -305,15 +330,18 @@ actions, proposal `kind`, `status`, `outcome`, activity `action_class`,
 before the row is written; nothing writes an unknown one. Readers of
 policy fail closed as [Policy](#policy) tabulates. `LoadWatchSet` reads any
 `watch_scope` other than `all` as `selected`, so an unknown scope watches
-only its stored rows, none when there are none. A stored proposal `kind`
+only its stored rows, none when there are none. `PolicyView.WatchScope` and
+the coordinator GET and list `watches.scope` carry that same normalised value
+(`all` or `selected`), never the raw stored string. A stored proposal `kind`
 outside the four is listed only with `phase2` true, as a card whose `kind`
 is the stored string and whose `spec` is the raw stored JSON; the TypeScript
 union has no branch for it, so the web renders it as an unsupported card
 with no action. With `phase2` true, `GET proposals/:pid` returns the same
-raw card; approve returns 500 and writes nothing, and claims nothing (the
-registry has no executor, per [proposal kinds](proposal-kinds.md#executors));
-reject is allowed on a pending or failed row and marks it `rejected`, which
-frees its cap slot. `CountOpenProposalsTx` counts it like any other open row
+raw card; approve and reject both return 500 and write nothing, claim nothing
+and record no activity row (an unknown stored kind is a failed read, per
+[proposal kinds](proposal-kinds.md#executors); the registry has no executor and
+no `action_class` exists for it). The row is only ever removed by workspace or
+coordinator deletion. `CountOpenProposalsTx` counts it like any other open row
 with `phase2` true. With `phase2` false it is invisible, like every
 non-create kind. An unknown activity `action_class`, `outcome` or
 `authorization` is returned to the list as stored. No code path writes
