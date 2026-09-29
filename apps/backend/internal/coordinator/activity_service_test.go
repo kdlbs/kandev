@@ -28,6 +28,8 @@ type fakeUndoTasks struct {
 	onArchive func()
 	getTasks  int
 	getSteps  int
+	nodes     []StepNode
+	nodesErr  error
 }
 
 type fakeMove struct {
@@ -79,6 +81,10 @@ func (f *fakeUndoTasks) GetStep(_ context.Context, id string) (*UndoStep, error)
 		return &c, nil
 	}
 	return nil, ErrStepNotFound
+}
+
+func (f *fakeUndoTasks) ListSteps(context.Context, string) ([]StepNode, error) {
+	return f.nodes, f.nodesErr
 }
 
 func (f *fakeUndoTasks) HasActiveSession(context.Context, string) (bool, error) {

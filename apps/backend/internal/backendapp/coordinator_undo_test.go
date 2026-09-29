@@ -39,12 +39,31 @@ func (f *fakeUndoTaskAPI) ListTaskSessions(context.Context, string) ([]*taskmode
 }
 
 type fakeUndoStepAPI struct {
-	step *wfmodels.WorkflowStep
-	err  error
+	step  *wfmodels.WorkflowStep
+	steps []*wfmodels.WorkflowStep
+	err   error
 }
 
 func (f *fakeUndoStepAPI) GetStep(context.Context, string) (*wfmodels.WorkflowStep, error) {
 	return f.step, f.err
+}
+
+func (f *fakeUndoStepAPI) ListStepsByWorkflow(context.Context, string) ([]*wfmodels.WorkflowStep, error) {
+	return f.steps, f.err
+}
+
+func TestUndoSeam_ListStepsBuildsFeederGraph(t *testing.T) {
+	steps := []*wfmodels.WorkflowStep{
+		{ID: "a", PullFromStepID: "", AllowManualMove: true},
+		{ID: "b", Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}}, PullFromStepID: "a"},
+	}
+	nodes, err := (&coordinatorUndoSeam{steps: &fakeUndoStepAPI{steps: steps}}).ListSteps(context.Background(), "wf")
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("nodes = %+v err = %v", nodes, err)
+	}
+	if !coordinator.StartsAgentOnEnter(nodes, "a") {
+		t.Fatal("a feeds an auto-start step, want StartsAgentOnEnter true")
+	}
 }
 
 func TestUndoSeam_ArchiveMapsErrors(t *testing.T) {

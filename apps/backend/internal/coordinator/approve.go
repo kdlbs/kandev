@@ -68,6 +68,9 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	if err := s.checkApprovable(proposal); err != nil {
 		return nil, err
 	}
+	if exec := s.kindExecutor(proposal.Kind); exec != nil {
+		return s.approveKind(ctx, exec, proposal, edits)
+	}
 	carriesEdits := carriesApproveEdits(edits)
 	decidedBy := decidingUserID(ctx)
 
@@ -298,6 +301,14 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 // request's inline stale re-claim (cutoff = now - 2 minutes) and the startup
 // recovery pass (cutoff = T0, task 08).
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
+	if row, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true); err == nil && row.Kind != "" && row.Kind != ProposalKindCreateTask {
+		exec := s.kindExecutor(row.Kind)
+		if exec == nil {
+			s.logger.Error("unknown_kind", zap.String("proposal_id", proposalID), zap.String("kind", row.Kind))
+			return nil, fmt.Errorf("%w: %q", ErrUnknownProposalKind, row.Kind)
+		}
+		return s.settleStaleKind(ctx, row, exec, cutoff)
+	}
 	token := uuid.New().String()
 	now := time.Now().UTC()
 	matched, err := s.store.ReclaimStale(ctx, proposalID, token, now, cutoff, s.phase2)

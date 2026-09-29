@@ -108,6 +108,8 @@ type Proposal struct {
 	// RawSpec is the stored spec JSON of a non-create_task kind, whose shape
 	// this package does not parse.
 	RawSpec string
+	// RawFinalSpec is the frozen spec of a non-create_task kind, set once claimed.
+	RawFinalSpec string
 }
 
 // Proposal kinds.

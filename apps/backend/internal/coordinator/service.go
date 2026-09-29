@@ -65,10 +65,14 @@ type CoordinatorWithOpenProposals struct {
 // conversation, approve/reject, and subscriber routes are added by later work
 // packages on the same Store.
 type Service struct {
-	store     *Store
-	validator *Validator
-	authz     WorkspaceAuthorizer
-	logger    *logger.Logger
+	// kinds is the registry of non-create proposal kinds; executeTimeout bounds one Execute.
+	kinds          map[string]KindExecutor
+	kindDeps       KindDeps
+	executeTimeout time.Duration
+	store          *Store
+	validator      *Validator
+	authz          WorkspaceAuthorizer
+	logger         *logger.Logger
 
 	onConversationCleared ConversationClearedHook
 	onCoordinatorDeleted  CoordinatorDeletedHook
@@ -142,6 +146,8 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 		authz:     authorizer,
 		logger:    log.WithFields(zap.String("component", "coordinator-service")),
 	}
+	s.registerKinds()
+	s.executeTimeout = executeDeadline
 	for _, opt := range opts {
 		opt(s)
 	}
