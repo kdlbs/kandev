@@ -83,6 +83,9 @@ type Service struct {
 	proposalSteps        WorkflowStepReader
 
 	conversationTasks    ConversationTaskManager
+	convReader           ConversationReader
+	wakeFinder           WakeMessageFinder
+	wakeSender           WakeSender
 	conversationSessions SessionEnsurer
 
 	// decisionTasks, decisionSteps and eventBus back Approve and Reject
