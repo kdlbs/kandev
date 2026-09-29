@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   },
   route: { kind: "kanban" } as { kind: string; taskId?: string },
   listCoordinators: vi.fn(),
+  panelRenders: [] as string[],
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
@@ -59,19 +60,27 @@ vi.mock("./use-page-context", async (importOriginal) => ({
 }));
 vi.mock("./workspace-copilot-panel", () => ({
   WorkspaceCopilotPanel: (props: {
+    workspaceId: string;
     coordinator: Coordinator;
     onGone: (id: string) => void;
     onSwitch: (id: string) => void;
-  }) => (
-    <div data-testid={IDS.panel} data-coordinator={props.coordinator.id}>
-      <button
-        type="button"
-        data-testid={IDS.goneButton}
-        onClick={() => props.onGone(props.coordinator.id)}
-      />
-      <button type="button" data-testid={IDS.switchButton} onClick={() => props.onSwitch("c-2")} />
-    </div>
-  ),
+  }) => {
+    mocks.panelRenders.push(`${props.workspaceId}/${props.coordinator.id}`);
+    return (
+      <div data-testid={IDS.panel} data-coordinator={props.coordinator.id}>
+        <button
+          type="button"
+          data-testid={IDS.goneButton}
+          onClick={() => props.onGone(props.coordinator.id)}
+        />
+        <button
+          type="button"
+          data-testid={IDS.switchButton}
+          onClick={() => props.onSwitch("c-2")}
+        />
+      </div>
+    );
+  },
 }));
 
 import { WorkspaceCopilotHost } from "./workspace-copilot-host";
@@ -101,6 +110,7 @@ beforeEach(() => {
   mocks.scope.workspaceId = "ws-1";
   mocks.scope.mode = "kanban";
   mocks.route = { kind: "kanban" };
+  mocks.panelRenders.length = 0;
   mocks.listCoordinators.mockReset();
   mocks.listCoordinators.mockResolvedValue(LIST);
 });
@@ -256,5 +266,18 @@ describe("WorkspaceCopilotHost losing the coordinator or eligibility", () => {
     mocks.scope.workspaceId = "ws-2";
     view.rerender(tree());
     await waitFor(() => expect(panelCoordinator()).toBeUndefined());
+  });
+
+  it("never renders a coordinator against another workspace on a workspace change", async () => {
+    const view = mount();
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    fireEvent.click(launcher()!);
+    await waitFor(() => expect(panelCoordinator()).toBe("c-1"));
+    mocks.panelRenders.length = 0;
+    mocks.listCoordinators.mockResolvedValue({ coordinators: [coordinator("c-9")] });
+    mocks.scope.workspaceId = "ws-2";
+    view.rerender(tree());
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    expect(mocks.panelRenders).toEqual([]);
   });
 });
