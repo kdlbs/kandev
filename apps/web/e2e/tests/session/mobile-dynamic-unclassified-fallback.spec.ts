@@ -6,6 +6,7 @@ import {
   expectCurrentCandidate,
   retryCurrentDynamicCandidate,
   startDynamicFallbackSession,
+  waitForDynamicRouteRecoveryControls,
   waitForRouteActionRequired,
 } from "../../helpers/dynamic-unclassified-fallback";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -38,8 +39,7 @@ test.describe("mobile: dynamic unclassified fallback", () => {
         attempt.taskId,
         attempt.sessionId,
       );
-      const retry = attempt.session.activeChat().getByTestId("dynamic-route-retry");
-      await expect(retry).toBeVisible();
+      await waitForDynamicRouteRecoveryControls(testPage, attempt.sessionId);
       await expectCurrentCandidate(
         apiClient,
         attempt.taskId,

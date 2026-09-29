@@ -6,6 +6,16 @@ import { openTaskSession } from "./session";
 export const DYNAMIC_FALLBACK_SUCCESS = "Dynamic fallback successor response.";
 export const DYNAMIC_FALLBACK_DRAFT = "Keep this composer draft during route recovery.";
 
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      taskSessions: {
+        items: Record<string, { route_generation?: number; route_state?: string }>;
+      };
+    };
+  };
+};
+
 export async function createDynamicFallbackProfile(
   apiClient: ApiClient,
   seedData: SeedData,
@@ -108,6 +118,19 @@ export async function waitForRouteActionRequired(
   return current;
 }
 
+export async function waitForDynamicRouteRecoveryControls(page: Page, sessionId: string) {
+  await page.waitForFunction(
+    (id) => {
+      const session = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().taskSessions
+        .items[id];
+      return session?.route_state === "action_required" && session.route_generation !== undefined;
+    },
+    sessionId,
+    { timeout: 30_000, message: "Waiting for dynamic route recovery state in the page store" },
+  );
+  await expect(page.getByTestId("dynamic-route-retry")).toBeVisible({ timeout: 30_000 });
+}
+
 export async function retryCurrentDynamicCandidate(options: {
   page: Page;
   apiClient: ApiClient;
@@ -116,16 +139,19 @@ export async function retryCurrentDynamicCandidate(options: {
   mobile?: boolean;
 }) {
   await waitForRouteActionRequired(options.apiClient, options.taskId, options.sessionId);
+  await waitForDynamicRouteRecoveryControls(options.page, options.sessionId);
   const { turns } = await options.apiClient.listSessionTurns(options.sessionId);
   const retry = options.page.getByTestId("dynamic-route-retry");
   if (options.mobile) await retry.tap();
   else await retry.click();
-  return waitForRouteActionRequired(
+  const failedAgain = await waitForRouteActionRequired(
     options.apiClient,
     options.taskId,
     options.sessionId,
     turns.length + 1,
   );
+  await waitForDynamicRouteRecoveryControls(options.page, options.sessionId);
+  return failedAgain;
 }
 
 export async function expectCurrentCandidate(

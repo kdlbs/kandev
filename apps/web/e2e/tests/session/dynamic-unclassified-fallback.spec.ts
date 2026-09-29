@@ -6,6 +6,7 @@ import {
   expectCurrentCandidate,
   retryCurrentDynamicCandidate,
   startDynamicFallbackSession,
+  waitForDynamicRouteRecoveryControls,
   waitForRouteActionRequired,
 } from "../../helpers/dynamic-unclassified-fallback";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
@@ -41,7 +42,7 @@ test.describe("dynamic unclassified fallback", () => {
         profileId: enabled.dynamicProfile.id,
       });
       const firstFailure = await waitForRouteActionRequired(apiClient, core.taskId, core.sessionId);
-      await expect(core.session.activeChat().getByTestId("dynamic-route-retry")).toBeVisible();
+      await waitForDynamicRouteRecoveryControls(testPage, core.sessionId);
       await expectCurrentCandidate(
         apiClient,
         core.taskId,
@@ -143,7 +144,7 @@ test.describe("dynamic unclassified fallback", () => {
             sessionId: attempt.sessionId,
           });
         }
-        await expect(attempt.session.activeChat().getByTestId("dynamic-route-retry")).toBeVisible();
+        await waitForDynamicRouteRecoveryControls(testPage, attempt.sessionId);
         await expectCurrentCandidate(
           apiClient,
           attempt.taskId,
