@@ -52,8 +52,10 @@ otherwise) returns:
   workspace, else 404 (the same guard the other coordinator routes use). The
   route reads the task's primary session only. A task with no primary session
   returns 200 with `session_id` empty and both fields `null`. A task whose
-  session is terminal or archived returns 200 with both `null`, because both
-  reads below exclude terminal sessions.
+  primary session is completed, failed or cancelled returns 200 with both
+  `null`, because both reads below exclude those states
+  (`nonTerminalSessionPredicate`). No archive filter is added: an archived
+  session that is not in one of those states is read like any other.
 - `clarification` is the one answerable bundle of that session. The query is
   `ListUnresolvedClarificationBundles` (`task/repository/sqlite/
   clarification_bundle_query.go`), which owns "answerable" for the Inbox; it
@@ -63,11 +65,20 @@ otherwise) returns:
   `Unscoped: true`, `SessionID` set, `Sidecar` nil (no per-user dismiss or
   snooze applies to a relay read) and `Limit: 1`. Its existing order,
   `created_at ASC, pending_id ASC`, decides which bundle wins when a session
-  has several: the oldest. The bundle's `messages` and `context` are hydrated
-  by the Inbox's own hydration, exposed to the coordinator through one exported
-  wrapper in `internal/clarification` around `buildInboxBundleViews` for a
-  single summary, so the shape is exactly `ClarificationInboxBundle.messages`
-  and `context`; the Inbox's routes, responses and tests are unchanged.
+  has several: the oldest. The bundle query itself applies the session's
+  current-turn authority and the non-terminal predicate, so an unresolved
+  clarification from an earlier turn is not answerable and not returned, the
+  same scope the permission read has. The bundle's `messages` and `context` are hydrated
+  by the Inbox's own hydration. That hydration is a method on the unexported
+  `*Handlers`, so it is extracted, not wrapped: the message lookup
+  (`FindMessagesByPendingIDs`), `orderInboxMessages`, `inboxBundleContext` and
+  `renderInboxMessages` move into one exported package-level function in
+  `internal/clarification` taking the bundle store and one summary, which the
+  Inbox method then calls. The coordinator's relay handler takes only that
+  store, never a second `Handlers`. The shape is exactly
+  `ClarificationInboxBundle.messages` and `context`; the task title and
+  session state enrichment stay in the Inbox method; the Inbox's routes,
+  responses and tests are unchanged.
   `null` when there is no bundle or hydration yields no messages.
 - `permission` is read with `ListPendingInteractions` (task repository) for
   `SessionIDs: [primary]` and `Kinds: [permission]`. That read applies the
@@ -75,7 +86,11 @@ otherwise) returns:
   non-terminal sessions only, the newest permission of the turn ordered by
   `created_at DESC` then message row order `DESC`, and pending when its
   `metadata.status` is absent or `pending`. It therefore returns at most one
-  row, the same one the chat shows. The message is returned in the chat's
+  row, the newest, which is the row the chat picks. The read then returns
+  `null`, never an older permission, when that row cannot be answered the way
+  the chat can: its `metadata.request_id` is absent or empty (the chat's
+  `parsePermission` renders such a row as expired), or its `options` list is
+  empty. The message is returned in the chat's
   message shape (including `request_id`, `pending_id`, `title`, `options` and
   action details in metadata). `null` when there is none.
 - A task whose `pending_action` comes from a non-primary session shows
@@ -105,8 +120,16 @@ repository query directly, not the flag-gated Inbox handler.
   and **Open task**; when it does, **Answer here** replaces the text. A
   non-200 or a null field leaves the phase 1 text. The read is repeated when
   `task.status_summary.updated` arrives for the task and each time **Answer
-  here** is expanded, so an expanded card always renders the bundle of that
-  moment; a null result on re-expand collapses the card to the phase 1 text.
+  here** is clicked to expand. Only the newest request issued for a task
+  applies: a response for an older request is dropped. Expanding renders the
+  last resolved bundle at once while the expand read runs; when that read
+  returns a null field or a non-200 the card collapses to the phase 1 text.
+  While the card is expanded, a repeated read never replaces the rendered
+  bundle or discards entered input: a result with a different `pending_id`
+  or a null field is ignored until the card is collapsed, and the next
+  submit reaches the resolver's own lost or no-longer-active outcome. A
+  collapsed card whose read failed makes no other retry; the next event or
+  expand repeats the read.
   Readers and phase-3-off clients make no relay read and keep the phase 1 text
   and **Open task**.
 - **Answer here** renders `ClarificationPanelSection` with `pending`, the
@@ -121,10 +144,10 @@ repository query directly, not the flag-gated Inbox handler.
 
   | Outcome | Card |
   | --- | --- |
-  | recorded | collapse; the item leaves when `task.status_summary.updated` clears `pending_action`; if that event is missed the item leaves at the next Needs you list refresh |
-  | lost to another caller | collapse; toast "Already answered: <winning outcome>", using the winner's status when present and the generic answered wording when absent, as the Inbox row's `anotherCallerOutcomeKey` does |
-  | no longer active | collapse; toast "This question is no longer waiting" |
-  | late message admitted | collapse; no toast; the card passes no `onLateAnswer` |
+  | recorded | collapse; when answering reveals another pending action on the task the item follows the next `task.status_summary.updated` or list refresh and is a new item state, never a card switch inside the same expansion; the item leaves when `task.status_summary.updated` clears `pending_action`; if that event is missed the item leaves at the next Needs you list refresh |
+  | lost to another caller | collapse; toast with the Inbox row's existing copy: `needsYouInbox:anotherCallerRejected` when the winner's status is `rejected`, else `needsYouInbox:anotherCallerResolved` (including when the status is absent), with the bundle's first question text as `{question}`; no new copy |
+  | no longer active | collapse; toast `needsYouInbox:bundleNoLongerActive` with the same `{question}`; no new copy |
+  | late message admitted | not reachable on this card: the component reports it only when `onLateAnswer` is passed and the card passes none; no handler branch is required |
   | failed | stay expanded with the answer kept; **Try again** |
 
 - A relay read with `clarification: null`, or a failed read, shows the phase
@@ -138,6 +161,9 @@ repository query directly, not the flag-gated Inbox handler.
   managers while phase 3 is effective, once the relay read of the previous
   section has resolved with `permission` non-null; otherwise the phase 1 text
   and **Open task**.
+- A permission whose relay `options` list is empty is never returned by the
+  relay read, so its item keeps the phase 1 text and **Open task**
+  (`AC-COORDINATOR-RELAY-002.5`).
 - It renders the permission message's title, action details and one button
   per option, and resolves through the same `permission.respond` WebSocket
   request `use-permission-handlers.ts` sends, with the message's `task_id`,
@@ -150,10 +176,18 @@ repository query directly, not the flag-gated Inbox handler.
   The mapping is the chat's: an option of kind `reject_once` or
   `reject_always` sends `rejected: true`; the Codex cancel decision sends
   `cancelled: true` with no `option_id`; any other option sends its `option_id` with both flags false.
-  Button labels are the chat's: Approve for `allow_once`, Always allow for
-  `allow_always`, Reject for the reject kinds, the Codex decision label for
-  Codex options, and the option's own name otherwise, exported from the same
-  module.
+  The buttons are the chat's row, not one per option. For a non-Codex
+  request: **Deny** sends the first `reject_once` option, else the first
+  `reject_always` option, else the cancel decision; **Approve** sends the
+  first `allow_once` option, else the first `allow_always` option;
+  **Always allow** appears only when an `allow_always` option exists and sends
+  it. So two reject options never produce two buttons. For a request whose
+  options carry `metadata.codex_app_server`, the card renders the chat's
+  offered choices: one button per such option, labelled by the chat's
+  `codexDecisionLabel` (a Codex `decline` reads **Deny**), and a
+  `codex_decision` of `cancel` sends `cancelled: true`. Labels and the
+  builders are exported from the same module and reuse the chat's `task:`
+  and `common:` keys, so the card adds no new copy for them.
 - A missing `request_id` on the message, or no WebSocket client, keeps the
   card expanded and shows the failed-response toast with **Try again**
   available; unlike the chat, the card never returns silently.

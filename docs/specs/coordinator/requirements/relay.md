@@ -72,8 +72,10 @@ Mockup:
   notice naming the winning outcome, or a generic answered notice when the
   winning outcome is unknown, no error); no longer active (the item closes with
   a notice); failed (the item stays expanded with the entered answer kept and
-  Try again). A late-message-admitted outcome closes the item without a
-  notice, as the Inbox row does; the card offers no late-answer recovery.
+  Try again). The notices reuse the Inbox row's existing copy. The card offers no
+  late-answer recovery, so the late-message-admitted outcome cannot occur on it.
+  When answering reveals another pending action on the task, the item follows
+  the next status event or list refresh.
 - **AC-COORDINATOR-RELAY-001.4:** When the task has no answerable bundle, or
   the bundle cannot be read, the item shall show the phase 1 text and
   **Open task** only.
@@ -83,8 +85,10 @@ Mockup:
   coordinator's workspace shall return 200 with the clarification bundle and
   the pending permission of the task's primary session, each `null` when there
   is none (including when the task has no primary session or the session is
-  terminal); at most one bundle, the oldest by creation time then pending id;
-  at most one permission, the newest of the session's current turn. A task
+  completed, failed or cancelled); at most one bundle, the oldest by creation time then pending id;
+  at most one permission, the newest of the session's current turn, and `null`
+  when that permission has no `request_id` or no options; a bundle is
+  returned only for the session's current turn. A task
   outside the workspace, or a coordinator outside the workspace, shall get 404;
   a read error shall get 500 and the card shall treat any non-200 as no answer
   available. While phase 3 is not effective the route shall be 404.
@@ -122,8 +126,8 @@ Mockup:
 - **AC-COORDINATOR-RELAY-002.5:** The permission card shall send the same
   response fields the task chat sends for the chosen option: `rejected` for a
   reject option, `cancelled` with no option id for the cancel decision, and
-  the option id otherwise. A permission with no options offered shall show
-  **Open task** only.
+  the option id otherwise. A permission with no options offered shall show the phase 1
+  text and **Open task** only, without **Answer here**.
 
 ### REQ-COORDINATOR-RELAY-003: Replying with a condition
 

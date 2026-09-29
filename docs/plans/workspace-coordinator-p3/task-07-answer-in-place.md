@@ -39,7 +39,7 @@ chat's permission response. No answer contract changes.
   ([Relay read](../../specs/coordinator/system-design/relay.md#relay-read)),
   reading the bundle through `clarification_bundle_query.go` directly (not the
   flag-gated Inbox handler), with one optional `SessionID` predicate added to
-  its options and one exported hydration wrapper in `internal/clarification`
+  its options and one exported hydration function extracted from the Inbox method in `internal/clarification`
   (Inbox behaviour unchanged); the permission through
   `ListPendingInteractions` for the primary session.
 - Web: extract the `permission.respond` builder and stale test from
