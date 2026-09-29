@@ -224,6 +224,8 @@ function buildProfileUpdatePatch(
     cli_passthrough: draft.cliPassthrough,
     cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
     cursor_plugins_mcp_enabled: changedCursorPluginsMcpPreference(draft, savedProfile),
+    mcp_selection_mode: draft.mcpSelectionMode,
+    mcp_selected_servers: draft.mcpSelectedServers,
     // Omit an unchanged enabled value so a profile editor save cannot
     // resurrect a concurrent list-toggle response from its stale draft.
     enabled: changedEnabledPreference(draft, savedProfile),
