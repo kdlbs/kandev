@@ -150,5 +150,18 @@
   "toastForbidden": "您不再有權決定提案。",
   "toastNotFound": "此提案已不存在。",
   "toastNetworkError": "無法連線到 Kandev。未做出任何決定。請重試。",
-  "toastProposalNoLongerWaiting": "此提案已不再等待決定。"
+  "toastProposalNoLongerWaiting": "此提案已不再等待決定。",
+  "activityChipSources_one": "已檢視 {{count}} 個來源",
+  "activityChipSources_other": "已檢視 {{count}} 個來源",
+  "activityChipFailed_one": "{{count}} 個失敗",
+  "activityChipFailed_other": "{{count}} 個失敗",
+  "activityVerbListTasks": "正在讀取任務",
+  "activityVerbTaskConversation": "正在讀取對話",
+  "activityVerbListWorkflows": "正在檢查工作流程",
+  "activityVerbListWorkflowSteps": "正在檢查工作流程步驟",
+  "activityVerbListRepositories": "正在檢查儲存庫",
+  "activityVerbCoordinatorItem": "正在查詢條目",
+  "activityVerbProposeTask": "正在起草提案",
+  "activityVerbWaiting": "正在等待你的決定",
+  "activityVerbWorking": "處理中"
 }

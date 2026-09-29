@@ -90,4 +90,12 @@ describe("hideSuccessfulStartupRows", () => {
 
     expect(hideSuccessfulStartupRows([setupScript, answer])).toEqual([setupScript, answer]);
   });
+
+  it("hides a later restart's preparation row but keeps its failed start row", () => {
+    const first: RenderItem = { type: "message", message: boot("b1", "exited", 0) };
+    const failed: RenderItem = { type: "message", message: boot("b2", "failed", 1) };
+    const items: RenderItem[] = [first, answer, prepare, failed];
+
+    expect(hideSuccessfulStartupRows(items)).toEqual([answer, failed]);
+  });
 });

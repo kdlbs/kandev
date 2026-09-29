@@ -15,6 +15,10 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-006.3
   - AC-COORDINATOR-COPILOT-006.4
   - AC-COORDINATOR-COPILOT-006.5
+  - AC-COORDINATOR-COPILOT-006.6
+  - AC-COORDINATOR-COPILOT-006.7
+  - AC-COORDINATOR-COPILOT-006.8
+  - AC-COORDINATOR-COPILOT-006.9
 system_design:
   - ../../specs/coordinator/system-design/copilot.md
   - ../../specs/coordinator/system-design/copilot-panel.md
@@ -33,8 +37,9 @@ row.
 ## In scope
 
 - `hideStartupRows` on `QuickChatSessionView`, backed by
-  `hideSuccessfulStartupRows` in `components/quick-chat/startup-rows.ts`.
-- The status line above the composer: a fixed tool-name-to-verb table with a
+  `hideSuccessfulStartupRows` in `components/quick-chat/startup-rows.ts`:
+  already built; this task only verifies it and pins it with tests.
+- The status line, via the `activityDisplay` prop, above the composer: a fixed tool-name-to-verb table with a
   generic fallback, and the elapsed seconds.
 - The collapsed tool chip per finished turn, with `propose_task_kandev` calls
   kept out of it.
@@ -71,7 +76,26 @@ row.
   stays visible.
 - Start-up rows are hidden after a successful start and kept while starting or
   after a failed start.
-- Settings configuration chat and Quick Chat render as before.
+- Settings configuration chat, Quick Chat and the task page render as before.
+- A tool call awaiting permission stays visible with Approve and Deny while
+  the turn runs, including while the session waits for that decision; a
+  stopped or failed turn still collapses into a chip.
+- A proposal card is visible while its turn is still running; an unreturned
+  or failed proposal call stays hidden until the turn ends
+  (`AC-COORDINATOR-COPILOT-006.6`).
+- After Approve or Deny of a permission the status line keeps its verb and
+  count, and the turn's other calls stay hidden until it ends; a stale
+  pending request of an older turn does not keep the line running (unit tests
+  on the derived running-turn id).
+- A message with a malformed `created_at` leaves the chip label without a
+  duration instead of showing a wrong one.
+- The chip label states count, duration (`Ns`, `Nm Ss`, `Nh Mm`) and a
+  "N failed" text; unit tests pin the formats, the one-call and no-call cases
+  and the proposal exclusion (`AC-COORDINATOR-COPILOT-006.7`).
+- The status line shows "Working" when no tool runs or the tool is unknown,
+  continues the count after a reload, and is absent while `STARTING`; unit
+  tests on the verb table and the running-turn rules pin it
+  (`AC-COORDINATOR-COPILOT-006.9`).
 
 ## Verification
 
