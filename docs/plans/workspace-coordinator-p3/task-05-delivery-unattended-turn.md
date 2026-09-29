@@ -89,6 +89,16 @@ creates, archives or repoints a conversation.
   ([Delivery](../../specs/coordinator/system-design/wake.md#delivery),
   [Sent test](../../specs/coordinator/system-design/wake-recovery.md#sent-test),
   [Settle rule](../../specs/coordinator/system-design/wake-recovery.md#settle-rule)).
+- The entry point pins `model=""`, `planMode=false`, no attachments and
+  `launchOriginManual`; its seam closure reads the reserved turn id with
+  `s.reservedPromptTurnID(sessionID)` and calls `onReserved(turnID)`, which
+  writes the new nullable `reserved_turn_id` column of
+  `coordinator_unattended_turns` (additive `ALTER`, covered by the store's
+  upgrade conformance test). The message finder interface gains
+  `CompleteOrphanTurn`, run by every not-sent settle before its UPDATE
+  ([Orphan turn](../../specs/coordinator/system-design/wake-recovery.md#orphan-turn)).
+  Task 02's permission handler match adds the `reserved_turn_id` condition
+  ([containment](../../specs/coordinator/system-design/containment.md#unattended-permissions)).
 - The delivery worker lifecycle: `svc.StopDelivery()` joins the worker in the
   existing phase 3 cleanup closure of `registerCoordinatorRoutes`, and
   `registerCoordinatorDelivery` wires the worker, subscribers and
@@ -184,7 +194,8 @@ creates, archives or repoints a conversation.
   after the step 2 read is still delivered.
 - A manager message that makes the session `RUNNING` between admission and
   the send: `PromptTask` returns `ErrAgentPromptInProgress`, nothing is
-  queued, the turn is `send_failed`, its wakes are `pending`, and the next
+  queued, the turn is `send_failed` (`errors.Is` finds both
+  `ErrWakePromptNotDispatched` and `ErrAgentPromptInProgress`), its wakes are `pending`, and the next
   delivery holds with `conversation_busy` until the session is idle
   (`AC-COORDINATOR-WAKE-005.3`).
 - A refused send and a crash after marking with no stored message return the
@@ -195,6 +206,20 @@ creates, archives or repoints a conversation.
   `pending`, its message is marked orphaned, and nothing is re-sent; a restart
   during the gap between storing and binding settles the row `interrupted`
   at startup, also with no re-send.
+- A stored message with a rolled-back reservation leaves an active orphan
+  turn: before the settle `Admit` holds `conversation_busy`; the settle
+  completes that turn only when it belongs to the session, is not completed
+  and the session is not `RUNNING` or `STARTING`, after which `GetActiveTurn`
+  is nil and the next `Admit` passes check 7; a session `RUNNING` a manager's
+  turn completes nothing and defers the settle; a null `reserved_turn_id`
+  completes nothing.
+- An unbound row with `reserved_turn_id` set denies a permission request only
+  in a turn carrying that id; a request in another turn of the session is not
+  denied; with the column null it is denied by session match.
+- The entry point called with a non-empty model is a programming error the
+  pinned arguments make unreachable: a test asserts the send passes
+  `model=""` and the seam ran with a non-empty reservation id; an empty
+  reservation id fails the seam and settles `send_failed`.
 - The session goes `WAITING_FOR_INPUT` and immediately runs a drained queued
   manager message while the `turn.completed` settle is suppressed: the
   backstop settles the unattended row `completed` because the active turn

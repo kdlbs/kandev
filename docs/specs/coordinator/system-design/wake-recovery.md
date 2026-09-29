@@ -21,7 +21,7 @@ This design owns how an open turn row learns whether its send reached the conver
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-COORDINATOR-WAKE-005` | [Sent test](#sent-test), [Settle rule](#settle-rule), [Finding the turn's message](#finding-the-turns-message), [Startup pass](#startup-pass) |
+| `REQ-COORDINATOR-WAKE-005` | [Sent test](#sent-test), [Settle rule](#settle-rule), [Orphan turn](#orphan-turn), [Finding the turn's message](#finding-the-turns-message), [Startup pass](#startup-pass) |
 
 ## Sent test
 
@@ -36,11 +36,17 @@ The message's `TurnID` and the session's active turn are never a source of `sess
 
 ## Settle rule
 
-A not-sent row is settled by one transaction: `UPDATE coordinator_unattended_turns SET outcome=?, finished_at=? WHERE id=? AND outcome IS NULL AND session_turn_id IS NULL`, with `outcome` `send_failed` (Delivery step 5 and the backstop) or `interrupted` (the startup pass). Only when it changed a row do the wakes return to `pending` with `turn_id` null (`UPDATE coordinator_wakes SET status='pending', turn_id=NULL, updated_at=? WHERE turn_id=?`), and after commit it counts `coordinator_unattended_turn_total{outcome}`, publishes `coordinator.updated` with `autonomy_changed: true`, and marks the orphan message. A settle that changed no row lost to another settle or to a late binding and does nothing further. Because the guard is `session_turn_id IS NULL`, a binding that lands first makes the settle a no-op and a settle that lands first makes a later binding a warn-logged no-op (the residual: a prompt accepted with a lost binding may have run, and the next turn re-reports still-current events, which is safe because each turn tells the agent to read current state).
+A not-sent row is first cleared of its [orphan turn](#orphan-turn), then settled by one transaction: `UPDATE coordinator_unattended_turns SET outcome=?, finished_at=? WHERE id=? AND outcome IS NULL AND session_turn_id IS NULL`, with `outcome` `send_failed` (Delivery step 5 and the backstop) or `interrupted` (the startup pass). Only when it changed a row do the wakes return to `pending` with `turn_id` null (`UPDATE coordinator_wakes SET status='pending', turn_id=NULL, updated_at=? WHERE turn_id=?`), and after commit it counts `coordinator_unattended_turn_total{outcome}`, publishes `coordinator.updated` with `autonomy_changed: true`, and marks the orphan message. A settle that changed no row lost to another settle or to a late binding and does nothing further. Because the guard is `session_turn_id IS NULL`, a binding that lands first makes the settle a no-op and a settle that lands first makes a later binding a warn-logged no-op (the residual: a prompt accepted with a lost binding may have run, and the next turn re-reports still-current events, which is safe because each turn tells the agent to read current state).
 
 Marking the orphan message is best effort: the message finder's `MarkOrphan(sessionID, messageID)` sets `metadata.coordinator_wake_orphaned` to true so the transcript can show it as not delivered; a failure is logged at warn and changes nothing, because the settled `outcome` is what decides.
 
 The backstop settles `send_failed` only once two minutes have passed since `started_at` and the conversation session is not `RUNNING` or `STARTING` (a session that no longer exists counts as neither; a failed session-state read defers the settle to the next tick). While the session is `RUNNING` the row stays open and unbound and containment keeps denying by session match, so a turn that did start is never treated as attended.
+
+## Orphan turn
+
+When a pre-acceptance failure follows the seam, the orchestrator rolls the reserved turn back, but `DeleteTurnIfUnreferenced` keeps a turn a message references, so the orphan turn stays the session's active turn (`completed_at` null) and admission check 7 would hold `conversation_busy` with nothing to clear it. A manager's next prompt would also adopt it. So every settle by the settle rule whose row has a non-null `reserved_turn_id` first calls the message finder interface's `CompleteOrphanTurn(ctx, sessionID, turnID)`, then runs the conditional UPDATE. The adapter completes the turn through the task turn service's `CompleteTurn` (which publishes `turn.completed`; no bound row matches it, so this design's subscriber does nothing) only when all of these hold on a fresh read: the turn belongs to the row's session, `completed_at` is null, and the session's state is not `RUNNING` or `STARTING`. A turn already completed or missing returns nil and changes nothing. A failed read or completion returns an error, and the settle then leaves the row untouched that tick (the next backstop tick retries; a repeat is a no-op). A null `reserved_turn_id` (the seam never ran, or its write failed) completes nothing. Until the settle, the conversation holds `conversation_busy`, bounded by the two-minute rule plus one backstop tick; the startup pass settles pre-`t0` rows at once.
+
+The reserved id also narrows [containment](containment.md#unattended-permissions): an unbound row denies a request only when `reserved_turn_id` is null or equals the request's active turn id. A manager prompt that adopted the orphan turn before the settle carries that id, so within the bounded window above its unallowed permission requests are denied and counted (the residual; the denial text tells the manager the turn is unattended); after the settle the turn is completed and never adopted.
 
 ## Finding the turn's message
 

@@ -187,8 +187,9 @@ receives the `watcher.PermissionRequestData` and the active turn id, and:
 
 - does nothing unless the task is of `coordinator` origin and holds an open
   unattended turn row for that session whose `session_turn_id` equals the
-  request's active session turn id or is still empty (the unbound window
-  above);
+  request's active session turn id, or is still empty (the unbound window
+  above) and whose `reserved_turn_id` is null or equals the request's active
+  turn id ([orphan turn](wake-recovery.md#orphan-turn));
 - otherwise, and only when the permission message was stored (a failed message
   write leaves the request to a person: nothing is recorded, counted or
   resolved), runs one transaction that re-reads the row with `outcome IS NULL`,

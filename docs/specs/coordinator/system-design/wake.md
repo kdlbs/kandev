@@ -125,6 +125,7 @@ Unique index `(coordinator_id, task_id, kind, episode_key)`; index
 | `session_id` | text not null | |
 | `message_id` | text null | set after the turn's message is stored |
 | `session_turn_id` | text null | the task session turn (`task_session_turns.id`) the message started; set with `message_id` |
+| `reserved_turn_id` | text null | the prompt's reserved turn id, written at the seam; matching and orphan cleanup only, never proof of a send ([recovery](wake-recovery.md#orphan-turn)) |
 | `wake_count` | integer not null | |
 | `denied_permissions` | integer not null default 0 | [containment](containment.md#unattended-permissions) |
 | `start_ceiling_subcents` | bigint not null | the coordinator's ceiling when the turn started; the ceiling check falls back to it when the ceiling is cleared after autonomy is turned off ([spend](spend.md#stopping)) |
@@ -171,8 +172,7 @@ error` (task 01) is the one helper for the three writes. Contract:
 - Order inside the transaction, on both dialects: first the advisory lock
   (PostgreSQL only; a no-op on SQLite), then `lockCoordinatorRow` with
   `FOR UPDATE`, then `fn`. The wake lock is always taken before the
-  coordinator row lock, never after, and a holder that needs the row reads it
-  only after the lock. The autonomy-off PATCH cannot use the helper's own
+  coordinator row lock, never after. The autonomy-off PATCH cannot use the helper's own
   transaction, because phase 2's PATCH already owns one; it takes the same
   advisory lock as the first statement of that transaction, before
   `lockedCoordinatorRow`, by calling the shared `takeWakeLock(ctx, tx,
@@ -344,11 +344,18 @@ below also counts and publishes as the [Observability](#observability) and
    succeeds and before any provider I/O, and an error there rolls the claim
    back and dispatches nothing. So a send refused before or at admission stores
    no message, and "no stored message" still means "never dispatched". The
-   turn id stored on the message is the prompt's claimed (reserved) turn id,
-   which the entry point resolves from the reservation, because the seam runs
-   before `bindPromptTurnID` and the session's active turn may not yet be
-   bound; a reservation that yields no id fails the seam like a store failure.
-   The entry point records whether the seam ran. Every error it returns
+   entry point pins `model=""`, `planMode=false`, no attachments,
+   `dispatchOnly=true` and `launchOriginManual` (a non-empty model would run
+   the seam with no reservation). The seam closure is built inside the
+   orchestrator, so it reads the reserved turn id with
+   `s.reservedPromptTurnID(sessionID)`: no signature change, and the seam runs
+   before `bindPromptTurnID`, so the session's active turn may not be bound.
+   The id is the turn id stored on the message; an empty id fails the seam like
+   a store failure. After the store succeeds the seam calls the options'
+   `onReserved(turnID)`, which writes `reserved_turn_id` conditionally
+   (`WHERE id=? AND outcome IS NULL AND reserved_turn_id IS NULL`; a failure or
+   no-op logs at warn and never fails the seam). The entry point records whether
+   the seam ran. Every error it returns
    before the seam ran (an admission refusal, `ErrAgentPromptInProgress`,
    `ErrSessionNotPromptable`, `ErrSessionRuntimeUnavailable`,
    `ErrIdleSuspensionProvenanceRequired`, a runtime-ceiling seam-3 refusal, an
@@ -360,10 +367,9 @@ below also counts and publishes as the [Observability](#observability) and
    written for a wake send (a manager's message is deferred and replayed; a
    wake send is not, and the next trigger simply asks again). An error the
    entry point returns after the seam ran (timeout, cancelled context,
-   transport) is not wrapped. A stored message is never proof of a send: the
-   orchestrator rolls the reserved turn back on a pre-acceptance failure, but
-   `DeleteTurnIfUnreferenced` keeps a turn a message references, so the
-   message and its turn both survive. The only proof is the
+   transport) is not wrapped. A stored message is never proof of a send (the
+   message and its reserved turn survive a rollback,
+   [orphan turn](wake-recovery.md#orphan-turn)). The only proof is the
    [`onAccepted` binding](wake-recovery.md#sent-test). The stored message has `author_type` `user` (there is no
    system author type) and is marked only by that metadata key. Delivery
    never uses the message queue (`orchestrator/messagequeue`), so a wake
@@ -376,9 +382,11 @@ below also counts and publishes as the [Observability](#observability) and
    of `session_turn_id`: `UPDATE ... SET session_turn_id = ? WHERE id = ? AND
    outcome IS NULL AND session_turn_id IS NULL`. An update that changes no row
    or fails logs at warn and leaves the row unbound; nothing else binds it (the
-   message's `TurnID` and the session's active turn are never a source). A
-   request that beats the binding, or an unbound row, is matched by session and
-   denied ([containment](containment.md#unattended-permissions)).
+   message's `TurnID` and the session's active turn are never a source). The
+   binding UPDATE runs on a detached context bounded to 5 seconds, so `Stop`
+   does not lose a binding that reached agentctl. A request that beats the
+   binding, or an unbound row, is matched as [containment](containment.md#unattended-permissions)
+   states.
 5. On a send that returns without error, set `message_id` to the generated id
    with `UPDATE ... WHERE id=? AND outcome IS NULL AND message_id IS NULL`; a
    statement that changes no row (a settle beat it, or a value is already
@@ -477,7 +485,7 @@ is never denied or stopped by this design.
 | Two deliveries race | Partial unique index admits one turn row |
 | Conversation busy, unavailable or not started (`CREATED`) | Wakes wait; nothing is created or started |
 | Message store fails at the dispatch boundary | Claim rolled back, nothing dispatched, `send_failed`, wakes back to `pending` |
-| Message stored, never bound by `onAccepted` (pre-acceptance dispatch failure, or a lost binding) | Not sent: `send_failed` (or `interrupted` at startup), wakes back to `pending`, the orphan message marked and never re-sent; the turn the message references stays in the session |
+| Message stored, never bound by `onAccepted` (pre-acceptance dispatch failure, or a lost binding) | Not sent: `send_failed` (or `interrupted` at startup), wakes back to `pending`, the orphan message marked and never re-sent; the orphan session turn is [completed](wake-recovery.md#orphan-turn) so the conversation is idle again |
 | A read the recovery or settle needs fails | The row is left untouched and retried on the next tick |
 
 ## Security
