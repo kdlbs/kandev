@@ -506,13 +506,13 @@ run at the same time. Results:
 - Anything else, including a network error, a 403 and a 409 with an
   unrecognised `code`: `activityUndoFailed`, no re-read, Undo stays clickable.
 
-The message map is `Map<rowId, {text, survives, setAt}>` plus the section notice (one more entry, same lifecycle, no row); `setAt` is the re-read sequence number when the message was set. `not_undoable` and
-404 set `survives` true. A re-read starting after `setAt` is the only kind that can clear a message, and only on success. `survives` is consumed by the first re-read that starts after the
+The message map is `Map<rowId, {text, survives, setAt}>` plus the section notice (same rule, no row); the re-read counter rises when a re-read starts, never when queued, and `setAt` is its value when the message is set. `not_undoable` and
+404 set `survives` true. Only a successful re-read numbered above `setAt` clears one. `survives` is consumed by the first re-read that starts after the
 refusal settles (the refusal's own at-once re-read; a queued trailing one is it), when it settles
 (success, failure or superseded): the message stays
 through it and `survives` becomes false. A re-read already in flight when the
 refusal settled neither clears nor consumes. An event or reconnect
-re-read starting later coalesces into that trailing one. A later successful re-read that started after `setAt`
+re-read starting later coalesces into that trailing one. A successful re-read numbered above `setAt`
 clears a message with `survives` false, as do a
 filter or coordinator change and a new confirmed Undo of that row (`003.11`);
 a failed re-read and Load more clear nothing. A second failure on one row replaces its message.

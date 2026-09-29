@@ -246,7 +246,7 @@ Mockup:
   its Undo cell below the Undo button, which stays clickable. Any other
   failure (`not_undoable`, 500, network, 404) shows its own text the same way
   except 404, which shows "This action is no longer listed." in a section
-  notice above the list. The message clears when a re-read that started after the message was set completes with success (a `coordinator.updated` event, a reconnect, a successful retry of that row's undo), when the filter or coordinator changes, or when the row's Undo is confirmed again; a failed re-read and Load more do not clear it. A `not_undoable` or 404 re-reads at once and its message survives the first re-read that starts after the refusal settles (one already in flight neither clears nor consumes it), clearing on the next later-started success. A
+  notice above the list. The message clears when a re-read that started after the message was set (not merely queued) completes with success (a `coordinator.updated` event, a reconnect, a successful retry of that row's undo), when the filter or coordinator changes, or when the row's Undo is confirmed again; a failed re-read and Load more do not clear it. A `not_undoable` or 404 re-reads at once and its message survives the first re-read that starts after the refusal settles (one already in flight neither clears nor consumes it), clearing on the next later-started success; the section notice too. A
   `409 already_undone` shows no message. Two rows can each hold a message at
   once; a second failure on one row replaces its message.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.4:** Undoing a row that is already undone,
