@@ -44,7 +44,8 @@ calm by default, detail on demand.
 - **AC-COORDINATOR-COPILOT-006.4:** Once the agent has started successfully, the
   session start-up rows (environment preparation and agent start) shall be
   hidden; while the agent is still starting, or when it failed to start, they
-  shall stay visible.
+  shall stay visible (a failed restart after an earlier success keeps its own
+  failed start row).
 - **AC-COORDINATOR-COPILOT-006.5:** The activity display applies to the
   coordinator panel only; Settings configuration chat, Quick Chat and the
   task page shall render as before.

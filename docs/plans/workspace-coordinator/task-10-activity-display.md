@@ -39,7 +39,7 @@ row.
 - `hideStartupRows` on `QuickChatSessionView`, backed by
   `hideSuccessfulStartupRows` in `components/quick-chat/startup-rows.ts`:
   already built; this task only verifies it and pins it with tests.
-- The status line above the composer: a fixed tool-name-to-verb table with a
+- The status line, via the `activityDisplay` prop, above the composer: a fixed tool-name-to-verb table with a
   generic fallback, and the elapsed seconds.
 - The collapsed tool chip per finished turn, with `propose_task_kandev` calls
   kept out of it.
@@ -78,7 +78,15 @@ row.
   after a failed start.
 - Settings configuration chat, Quick Chat and the task page render as before.
 - A tool call awaiting permission stays visible with Approve and Deny while
-  the turn runs; a stopped or failed turn still collapses into a chip.
+  the turn runs, including while the session waits for that decision; a
+  stopped or failed turn still collapses into a chip.
+- The chip label states count, duration (`Ns`, `Nm Ss`, `Nh Mm`) and a
+  "N failed" text; unit tests pin the formats, the one-call and no-call cases
+  and the proposal exclusion (`AC-COORDINATOR-COPILOT-006.7`).
+- The status line shows "Working" when no tool runs or the tool is unknown,
+  continues the count after a reload, and is absent while `STARTING`; unit
+  tests on the verb table and the running-turn rules pin it
+  (`AC-COORDINATOR-COPILOT-006.9`).
 
 ## Verification
 
