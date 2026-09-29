@@ -32,8 +32,13 @@ to both admission paths and every reuse path without expanding mutation authorit
 - Add `checkout_inspection.go` and `checkout_inspection_test.go` in the worktree package.
 - Keep the linked inspector strict. Add a distinct healthy-main classification
   and bounded, read-only validation of the working-tree and metadata roots.
+- Accept symbolic `HEAD` only for a valid branch under `refs/heads/`; continue to
+  accept a detached commit when it resolves successfully.
 - Use explicit Git inputs. Reject parent discovery, ambient Git overrides,
   symlink metadata, malformed directories, bare repositories, and path changes.
+- When selected managed-provider identity proof is available, verify the main
+  checkout's canonical destination, Git metadata directory, and provider origin.
+  Fail closed without moving or repairing a main checkout.
 - Preserve `validateWorktreePathSafe`, `validateExistingWorktreePathOwner`, and
   handle verification before accepting a checkout. Propagate context to new checks.
 - Adapt `openReusableWorktreePath` to accept a validated main checkout as a
@@ -55,9 +60,11 @@ to both admission paths and every reuse path without expanding mutation authorit
    with the pointer-file rejection. It passes for initialized and unborn main
    repositories after the correction. It covers both admission methods, ordinary
    reuse by session and ID, and additional-session `Create` with `ReuseRequired`.
-2. `TestMainCheckoutRejectsInvalidMetadata` and `TestMainCheckoutMixedInventoryRefusesBeforeRecovery`
-   cover the plan's negative matrix. A healthy main slot never masks an invalid
-   sibling. Proven missing linked metadata retains its existing guarded recovery.
+2. `TestMainCheckoutRejectsInvalidMetadata`, `TestMainCheckoutManagedCloneIdentity`,
+   `TestMainCheckoutAcceptsDetachedCommit`, and
+   `TestMainCheckoutMixedInventoryRefusesBeforeRecovery` cover the metadata and
+   identity boundaries. A healthy main slot never masks an invalid sibling.
+   Proven missing linked metadata retains its existing guarded recovery.
 3. Compare path, branch, HEAD, index bytes, tracked edits, staged edits, untracked
    files, and ignored files before and after successful admission and reuse.
    No main-checkout recovery record, claim, snapshot, sibling, or relocation is
@@ -115,3 +122,18 @@ An unborn branch has no commit, so requiring `HEAD` to resolve incorrectly rejec
 - `(cd apps/backend && go test ./internal/worktree ./internal/system/storage/workspaces -count=1)` passed.
 - `git diff --check` passed. The Git-inspection denial was injected because this root-run environment cannot rely on filesystem permission errors.
 - Native macOS and Windows tests were not available in this Linux environment.
+
+### PR review remediation
+
+- `TestMainCheckoutRejectsInvalidMetadata` rejects symbolic `HEAD` references in
+  `refs/tags/` and `refs/remotes/`, even when those refs point to a commit.
+- `TestMainCheckoutManagedCloneIdentity` proves a matching selected managed clone
+  remains readable and rejects a different clone or provider origin without
+  changing checkout data or creating recovery state.
+- `TestMainCheckoutTestGitHelpersIgnoreAmbientGitOverrides` proves both fixture
+  Git helpers remain scoped to their requested repository.
+- `(cd apps/backend && go test ./internal/worktree -count=1)`: passed.
+- `mapfile -t gofiles < <(git diff --name-only -- apps/backend | rg '[.]go$'); bash scripts/lint-go-changed "${gofiles[@]}"`: passed with 0 issues.
+- Submodule fixtures pass a scoped file-protocol allowance to the specific Git
+  command that needs it; generic test helpers continue to scrub ambient `GIT_*`
+  variables.

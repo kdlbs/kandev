@@ -172,7 +172,14 @@ func (m *Manager) inspectMainCheckoutGit(ctx context.Context, checkoutPath, gitD
 }
 
 func (m *Manager) inspectMainCheckoutHead(ctx context.Context, checkoutPath, gitDir string) checkoutInspection {
-	if _, err := m.runMainCheckoutGit(ctx, checkoutPath, gitDir, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+	if ref, err := m.runMainCheckoutGit(ctx, checkoutPath, gitDir, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+		ref = strings.TrimSpace(ref)
+		if !strings.HasPrefix(ref, "refs/heads/") || strings.TrimPrefix(ref, "refs/heads/") == "" {
+			return checkoutInspection{class: checkoutAmbiguous, reason: "Git HEAD does not reference a local branch"}
+		}
+		if _, err := m.runMainCheckoutGit(ctx, checkoutPath, gitDir, "check-ref-format", ref); err != nil {
+			return mainCheckoutInspectionFailure(ctx, "Git HEAD references an invalid local branch", err)
+		}
 		return checkoutInspection{class: checkoutMainHealthy}
 	} else if operationalErr := checkoutInspectionOperationalError(ctx, err); operationalErr != nil {
 		return checkoutInspection{

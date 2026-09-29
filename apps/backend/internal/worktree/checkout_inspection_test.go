@@ -265,6 +265,18 @@ func TestMainCheckoutRejectsInvalidMetadata(t *testing.T) {
 				t.Fatalf("corrupt HEAD: %v", err)
 			}
 		}},
+		{name: "tag HEAD", mutate: func(t *testing.T, _ *Manager, wt *Worktree) {
+			runGit(t, wt.Path, "update-ref", "refs/tags/main-as-head", "HEAD")
+			if err := os.WriteFile(filepath.Join(wt.Path, ".git", "HEAD"), []byte("ref: refs/tags/main-as-head\n"), 0o600); err != nil {
+				t.Fatalf("write tag HEAD: %v", err)
+			}
+		}},
+		{name: "remote-tracking HEAD", mutate: func(t *testing.T, _ *Manager, wt *Worktree) {
+			runGit(t, wt.Path, "update-ref", "refs/remotes/origin/main", "HEAD")
+			if err := os.WriteFile(filepath.Join(wt.Path, ".git", "HEAD"), []byte("ref: refs/remotes/origin/main\n"), 0o600); err != nil {
+				t.Fatalf("write remote-tracking HEAD: %v", err)
+			}
+		}},
 		{name: "Git inspection denied", mutate: func(t *testing.T, _ *Manager, _ *Worktree) {
 			scriptDir := writeFakeGitScript(t, `echo "fatal: permission denied reading Git metadata" >&2; exit 128`)
 			t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -294,6 +306,118 @@ func TestMainCheckoutRejectsInvalidMetadata(t *testing.T) {
 				t.Fatalf("recovery record exists after refusal: %v", err)
 			}
 		})
+	}
+}
+
+func TestMainCheckoutManagedCloneIdentity(t *testing.T) {
+	for _, testCase := range []struct {
+		name              string
+		mainAtDestination bool
+		origin            string
+		wantErr           bool
+	}{
+		{name: "matching managed clone", mainAtDestination: true, origin: "https://github.com/acme/widget.git"},
+		{name: "main checkout from another clone", origin: "https://github.com/acme/widget.git", wantErr: true},
+		{name: "provider origin mismatch", mainAtDestination: true, origin: "https://github.com/untrusted/widget.git", wantErr: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			mgr, store, wt, before := newMainCheckoutFixture(t, false)
+			managedRoot := filepath.Dir(wt.Path)
+			destination := wt.Path
+			if !testCase.mainAtDestination {
+				destination = filepath.Join(managedRoot, "managed", "widget")
+				if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+					t.Fatalf("create managed clone root: %v", err)
+				}
+				if err := os.Mkdir(destination, 0o755); err != nil {
+					t.Fatalf("create managed clone destination: %v", err)
+				}
+				runGit(t, destination, "init", "-b", "main")
+			}
+			if _, err := execGit(t, wt.Path, "remote", "add", "origin", testCase.origin); err != nil {
+				t.Fatalf("set main checkout origin: %v", err)
+			}
+			if !testCase.mainAtDestination {
+				if _, err := execGit(t, destination, "remote", "add", "origin", "https://github.com/acme/widget.git"); err != nil {
+					t.Fatalf("set managed destination origin: %v", err)
+				}
+				wt.RepositoryPath = destination
+			}
+			configBefore := mustReadPath(t, filepath.Join(wt.Path, ".git", "config"))
+			proof := &ManagedCloneRelocationProof{
+				ManagedRoot: managedRoot, ExpectedDestinationPath: destination,
+				Identity: ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "widget"},
+			}
+			admission, err := mgr.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
+				TaskID: wt.TaskID, SessionID: wt.SessionID, TaskEnvironmentID: wt.TaskEnvironmentID,
+				OwnerTaskID: wt.TaskID, OwnershipGeneration: 1, ExecutorType: "worktree",
+				Slots: []RecoverySlot{{
+					WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, BranchSlug: wt.BranchSlug,
+					RepositoryPath: destination, CloneRelocation: proof,
+				}},
+			})
+			if testCase.wantErr {
+				var recoveryErr *WorktreeRecoveryError
+				if !errors.As(err, &recoveryErr) {
+					t.Fatalf("AdmitRecovery() error = %v, want WorktreeRecoveryError", err)
+				}
+				if admission != nil {
+					_ = admission.Release(context.Background())
+					t.Fatal("invalid main checkout acquired a recovery admission")
+				}
+			} else if err != nil || admission != nil {
+				if admission != nil {
+					_ = admission.Release(context.Background())
+				}
+				t.Fatalf("AdmitRecovery() = (%v, %v), want read-only acceptance", admission, err)
+			}
+			assertMainCheckoutState(t, wt.Path, before)
+			if got := mustReadPath(t, filepath.Join(wt.Path, ".git", "config")); !bytes.Equal(got, configBefore) {
+				t.Fatal("main checkout Git config changed during managed identity validation")
+			}
+			if _, err := os.Lstat(wt.Path + ".kandev-recovery.json"); !os.IsNotExist(err) {
+				t.Fatalf("recovery record exists after managed identity validation: %v", err)
+			}
+			if len(store.worktrees) != 1 || store.worktrees[wt.ID] == nil || store.worktrees[wt.ID].Path != wt.Path {
+				t.Fatalf("worktree inventory changed during managed identity validation: %#v", store.worktrees)
+			}
+		})
+	}
+}
+
+func TestMainCheckoutAcceptsDetachedCommit(t *testing.T) {
+	mgr, _, wt, _ := newMainCheckoutFixture(t, false)
+	runGit(t, wt.Path, "checkout", "--detach", "HEAD")
+	headBefore := mustReadPath(t, filepath.Join(wt.Path, ".git", "HEAD"))
+	indexBefore := mustReadPath(t, filepath.Join(wt.Path, ".git", "index"))
+
+	if err := mgr.AdmitTaskRecovery(context.Background(), wt.TaskID); err != nil {
+		t.Fatalf("AdmitTaskRecovery for detached commit: %v", err)
+	}
+	if got := mustReadPath(t, filepath.Join(wt.Path, ".git", "HEAD")); !bytes.Equal(got, headBefore) {
+		t.Fatalf("detached HEAD changed during inspection: got %q, want %q", got, headBefore)
+	}
+	if got := mustReadPath(t, filepath.Join(wt.Path, ".git", "index")); !bytes.Equal(got, indexBefore) {
+		t.Fatal("detached checkout index changed during inspection")
+	}
+}
+
+func TestMainCheckoutTestGitHelpersIgnoreAmbientGitOverrides(t *testing.T) {
+	_, _, wt, _ := newMainCheckoutFixture(t, false)
+	otherRepo := initGitRepoForWorktreeTest(t)
+	t.Setenv("GIT_DIR", filepath.Join(otherRepo, ".git"))
+	t.Setenv("GIT_WORK_TREE", otherRepo)
+	t.Setenv("GIT_COMMON_DIR", filepath.Join(otherRepo, ".git"))
+
+	output, err := execGit(t, wt.Path, "rev-parse", "--show-toplevel")
+	if err != nil {
+		t.Fatalf("execGit with ambient Git overrides: %v", err)
+	}
+	if got := filepath.Clean(strings.TrimSpace(output)); got != filepath.Clean(wt.Path) {
+		t.Fatalf("execGit repository root = %q, want %q", got, wt.Path)
+	}
+	if got := filepath.Clean(strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "--show-toplevel"))); got != filepath.Clean(wt.Path) {
+		t.Fatalf("runGit repository root = %q, want %q", got, wt.Path)
 	}
 }
 
@@ -534,6 +658,7 @@ func execGit(t *testing.T, repoPath string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
+	cmd.Env = mainCheckoutInspectionEnvironment(os.Environ())
 	output, err := cmd.CombinedOutput()
 	return string(output), err
 }

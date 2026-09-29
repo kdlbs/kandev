@@ -663,6 +663,9 @@ func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *
 		if err := handle.VerifyPath(filepath.Clean(wt.Path)); err != nil {
 			return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
 		}
+		if err := m.validateManagedMainCheckoutIdentity(ctx, taskID, wt, slot.CloneRelocation); err != nil {
+			return recoverySlotInspection{}, fmt.Errorf("verify selected managed repository for main checkout: %w", err)
+		}
 		return recoverySlotInspection{}, nil
 	}
 	if inspection.class == checkoutLinkedHealthy {

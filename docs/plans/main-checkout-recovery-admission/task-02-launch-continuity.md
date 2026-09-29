@@ -39,6 +39,9 @@ error while preserving a newer error and the existing session.
   healthy main checkout. Retain its identity, dirty files, and staging state.
 - Add `TestMainCheckoutRelaunchRetiresMatchingError` at the orchestrator service
   boundary. Seed the prior task-level metadata failure and launch normally.
+- Seed the retained refusal with its production-shaped empty recovery-action list;
+  successful `StartTask` must retire the matching stamp without invoking an action,
+  while a successor-stamped error remains untouched.
 - Assert successful launch clears only the captured error stamp. A newer error
   survives. Preserve existing refusal and `noRetry` behavior for unsafe metadata.
 - Add a short paragraph to the public Git recovery guide after tests pass:
@@ -118,6 +121,8 @@ the exact path and reconcile the recovery contract before adding another action.
 
 - `(cd apps/backend && go test ./internal/orchestrator/executor -run 'TestMainCheckout|TestWorktreeRecovery' -count=1 -v)` passed. The launch, additional-session, and resume cases use real manager admission.
 - `(cd apps/backend && go test ./internal/orchestrator -run 'TestMainCheckout|TestClearTaskLaunch|TestTaskLaunch' -count=1 -v)` passed. The matching old error clears after launch; a successor error remains.
+- `(cd apps/backend && go test ./internal/orchestrator -run '^TestMainCheckoutRelaunchRetiresMatchingError$' -count=1)` passed after review remediation. The retained metadata-refusal fixture has no recovery actions, ordinary `StartTask` retires the matching error without invoking an action, and a successor-stamped error remains.
+- `(cd apps/backend && go test ./internal/orchestrator/executor -run '^TestMainCheckoutInspectionTimeoutRemainsRetryable$' -count=1)` passed. An inspection timeout keeps the ordinary retry action and is not classified as a metadata refusal.
 - `(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestMainCheckout' -count=1 -v)` passed. Workspace-only restoration kept the main checkout path and repository inventory.
 - `(cd apps/backend && go test ./internal/worktree -count=1)` passed. The full executor suite and the full lifecycle suite also passed.
 - `(cd apps/backend && go build ./...)` passed.

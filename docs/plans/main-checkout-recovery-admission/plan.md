@@ -81,6 +81,10 @@ paths of `manager_lifecycle.go`. Propagate context for bounded inspection.
 Keep `Manager.IsValid` and the storage handle's linked-worktree predicate strict.
 A healthy main result skips repair and linked-worktree relocation. Preserve owner,
 canonical slot, and pinned path validation. Do not infer cleanup authority from health.
+Require symbolic `HEAD` to name a valid local branch under `refs/heads/`, while
+continuing to accept a valid detached commit. If a selected managed-provider slot
+has identity proof, require its canonical destination, Git metadata identity, and
+provider origin to match; fail closed without relocating a main checkout.
 
 All selected slots must pass. Main-plus-invalid inventories refuse before any
 replacement. Main-plus-recoverable-linked inventories preserve the main checkout
@@ -108,7 +112,15 @@ blocker before introducing another recovery contract.
   002.1, 002.8. Cover legacy admission, selected admission, ordinary reuse by ID
   and session, and `Create` with `ReuseRequired`.
 - `TestMainCheckoutRejectsInvalidMetadata`: 002.3, 002.9. Include no metadata,
-  empty metadata, symlinks, bare metadata, redirection, and ambient Git overrides.
+  empty metadata, symlinks, bare metadata, redirection, ambient Git overrides,
+  and symbolic HEAD references outside `refs/heads/`.
+- `TestMainCheckoutAcceptsDetachedCommit`: preserve admission for a detached HEAD
+  that resolves to a commit.
+- `TestMainCheckoutManagedCloneIdentity`: accept a matching selected managed
+  clone and reject a checkout from another clone or a mismatched provider origin
+  without mutation or a recovery claim.
+- `TestMainCheckoutTestGitHelpersIgnoreAmbientGitOverrides`: keep both Git test
+  helpers pinned to their requested repositories when ambient `GIT_*` values exist.
 - `TestMainCheckoutMixedInventoryRefusesBeforeRecovery`: 002.6, 002.7. Preserve the healthy main slot
   with a damaged linked slot. Refuse all replacement for an ambiguous sibling.
 - `TestMainCheckoutLaunchIntegration` in the executor integration file: 001.2,
@@ -149,8 +161,24 @@ the expected linked-pointer rejection.
 - `git diff --check`: passed.
 - Native macOS and Windows path behavior was not tested in this Linux environment.
 
-The scoped production, test, specification, plan, and public-documentation
-changes are ready for review. The temporary reproduction was removed.
+### PR review remediation verification
+
+- `(cd apps/backend && go test ./internal/worktree -count=1)`: passed, including
+  symbolic-HEAD namespace, managed-clone identity, and ambient-Git helper regressions.
+- `(cd apps/backend && go test ./internal/orchestrator/executor -run 'Test(MainCheckout|WorktreeRecoveryFailure)' -count=1)`: passed.
+- `(cd apps/backend && go test ./internal/orchestrator -run '^TestMainCheckoutRelaunchRetiresMatchingError$' -count=1)`: passed with the retained error's empty recovery-action list.
+- `(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run '^TestMainCheckoutWorkspaceRestore$' -count=1)`: passed.
+- `(cd apps/backend && go build ./...)`: passed.
+- `mapfile -t gofiles < <(git diff --name-only -- apps/backend | rg '[.]go$'); bash scripts/lint-go-changed "${gofiles[@]}"`: passed with 0 issues.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `node scripts/validate-public-docs.mjs`: passed.
+- `git diff --check`: passed.
+- Generic Git test helpers now scrub ambient `GIT_*` values. Submodule fixtures use
+  an explicit, scoped file-protocol allowance so they do not depend on inherited
+  Git configuration.
+- Native macOS and Windows path behavior was not tested in this Linux environment.
+
+The temporary investigation reproduction was removed. Implementation and review
+remediation are complete in this package.
 
 The earlier [metadata recovery package](../worktree-metadata-recovery/plan.md)
 retains its historical implementation status and outstanding integration evidence.

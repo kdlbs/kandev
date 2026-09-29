@@ -83,6 +83,10 @@ Runtime verification status is recorded in the linked implementation plan.
 - **AC-TASKS-WORKTREE-METADATA-RECOVERY-002.9:** A directory named `.git` alone
   shall not establish checkout health. Invalid, redirected, or unreadable metadata
   shall stop admission without changing the checkout or granting replacement authority.
+  A symbolic `HEAD` shall name a valid local branch under `refs/heads/` or resolve
+  as a detached commit. When admission includes managed-provider identity proof,
+  the checkout metadata directory and origin shall match the selected destination
+  and provider identity; a mismatch shall fail closed without relocating the main checkout.
 
 ### REQ-TASKS-WORKTREE-METADATA-RECOVERY-003: Exclusive recovery authority
 
