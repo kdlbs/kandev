@@ -353,7 +353,22 @@ Add coordinator
 
 - The coordinator page gains a Sections row (Identity, Watches, May do,
   Standing orders, Goal) with the help text of each section; the section is
-  kept in `?section=` (`009.1`). Identity is the phase-1 form. Watches and
+  kept in `?section=` (`009.1`). The row takes a list of `{slug, label, help,
+  render}` entries in that fixed order. Slugs are `identity`, `watches`,
+  `may-do`, `standing-orders` and `goal`. A missing, empty, unknown or
+  unavailable value (Watches and May do before task 06 registers them) shows
+  Identity, and for the first value of a repeated parameter the rest are
+  ignored; choosing a section replaces the `section` parameter, keeps every
+  other query parameter and adds a history entry, so back and forward move
+  between sections. With the flag off the parameter is ignored and the
+  phase-1 page renders. Help lines (one line each, in `coordinator.json`):
+  Identity "Name, description and context.", Watches "Which boards this
+  coordinator watches.", May do "What this coordinator may do, and what needs
+  your approval.", Standing orders "Rules the coordinator follows in every
+  conversation.", Goal "The milestone this coordinator's list is ranked
+  against.". The five-section AC is met when task 06 has registered Watches
+  and May do; task 11 alone asserts the entries it registers and the list
+  contract. Identity is the phase-1 form. Watches and
   May do share the settings save bar and one PUT
   ([permissions](permissions.md#settings-routes)); Standing orders writes
   immediately; the Goal form uses the save bar and its checkboxes write

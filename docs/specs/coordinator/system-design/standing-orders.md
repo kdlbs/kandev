@@ -218,14 +218,36 @@ all (deleted with a coordinator) is skipped.
 
 ## Standing orders UI
 
-`sections/standing-orders.tsx` on the coordinator page:
+`components/coordinators/sections/standing-orders-section.tsx` on the
+coordinator page:
 
-- the active list per `001.4`, with "Added <date>" and "Last applied
-  <relative>" or "Never applied";
-- **Add standing order** opens an inline form with a 500-character counter;
-- **Retire this order** retires at once and shows a toast with **Undo** for
-  10 seconds that calls restore (`001.5`); a restore refused at the limit
-  shows the limit message in the toast;
+- the active list per `001.4`, with "Added <date>" (viewer time zone, the
+  locale's medium date format) and "Last applied <relative>" or "Never
+  applied"; the relative text refreshes once a minute and a time in the future
+  (clock skew) reads "just now";
+- **Add standing order** opens `AddStandingOrderDialog`
+  (`components/coordinators/add-standing-order-dialog.tsx`), the one add
+  component; the reject offer below reuses it. Props: `coordinatorId`,
+  optional `initialText` and `sourceProposalId`, `onAdded`. Whichever of
+  tasks 09 and 11 lands second imports the file the first created. The dialog
+  shows a counter of Unicode code points (the backend rule, not UTF-16 units),
+  disables Save for empty or over-500 text and while a request is in flight (a
+  second submit is never sent), and keeps the typed text on any failure. A
+  400 `standing_order_limit` shows "You can have up to 20 standing orders.
+  Retire one to add another." in the dialog; any other failure shows a generic
+  error in the dialog. With 20 active orders **Add standing order** stays
+  enabled and the limit message is the outcome;
+- **Retire this order** sends the retire request; on success the order leaves
+  the list and a toast says it was retired with **Undo** for 10 seconds
+  counted from the response (`001.5`). Undo calls restore and re-lists. A
+  failed retire (404, 500) leaves the list unchanged and shows an error toast
+  with no Undo. Each retire has its own toast, so two quick retires give two
+  toasts. Undo answered 404, or refused at the limit (400
+  `standing_order_limit`), shows that message in the toast and re-lists; a
+  restore that returns an already-active order is a success. Closing the toast
+  or leaving the page ends the offer with no request;
+- a failed list load shows the page's error state, and a loading list shows
+  the page's skeleton;
 - readers see the list only (`001.6`);
 - order writes save immediately, not through the settings save bar, and the
   section says each change starts the next conversation fresh.
