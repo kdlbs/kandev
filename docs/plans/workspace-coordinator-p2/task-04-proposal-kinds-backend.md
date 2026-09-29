@@ -6,6 +6,7 @@ wave: 3
 depends_on:
   - "02-policy-enforcement"
   - "03-activity-log-backend"
+  - "05-standing-orders-backend"
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-PROPOSAL-KINDS-001
@@ -73,8 +74,10 @@ creates, and `standing_order_ids` on every propose tool.
   claim as a new approval (`003.5`).
 - `standing_order_ids` on all four propose tools: at most 5 and unique
   before the transaction; active orders of the caller checked inside the
-  locked propose transaction; stored on the proposal
-  (`STANDING-ORDERS-003.1`).
+  locked propose transaction; stored on the proposal; when the list is
+  non-empty, task 05's `MarkApplied(tx, orderIDs, createdAt)` called in the
+  same transaction right after the insert
+  (`STANDING-ORDERS-003.1`, [design](../../specs/coordinator/system-design/standing-orders.md#last-applied)).
 - Activity rows for every change of these kinds through task 03's writer.
 
 ## Out of scope
@@ -143,7 +146,7 @@ asserts the task's step after approval through the task API.
 ## Dependencies
 
 - Task 02 (guard, bound tool list); task 03 (activity writer, move undo
-  reads the recorded `from_step_id`).
+  reads the recorded `from_step_id`); task 05 (`MarkApplied` helper).
 
 ## Risks
 

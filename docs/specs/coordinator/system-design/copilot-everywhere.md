@@ -22,6 +22,7 @@ shell for the board, task pages and the Inbox, a coordinator switcher, and
 the page context chip of ADR D12. Expand stays dropped (D11). The
 conversation, open sequence, attended-only rule and tool surface are
 unchanged ([copilot](copilot.md)); the server adds no route and no field.
+Precondition: phase-1 [task 11, panel swap](../../../plans/workspace-coordinator/task-11-panel-swap.md), which adds `RightSidePanel` and its `mobileFullScreen` opt-in that this design builds on.
 
 ## Requirement mapping
 

@@ -84,10 +84,11 @@ renders and which do not exist in the code before it.
 ```text
 phase-1 task 12 ──> task-01 shared interface, log writer
                       ├──> task-02 policy, Watches enforcement ──┬──> task-04 proposal kinds backend ──> task-09 proposal kinds UI
-                      ├──> task-03 activity log backend ─────────┤                                        (also after 05)
+                      ├──> task-03 activity log backend ─────────┤        (also after 05)                (also after 05)
                       │      ├──> task-08 What it did UI         └──> task-06 May do, Watches ──┐
                       │      └──> task-12 goals backend ──┐              (also after 11)        ├──> task-07 guided setup
                       ├──> task-05 standing orders ───────┴──> task-11 sections row, orders, goal ┘
+                      │                                   └──> (also feeds task-04, task-09 above)
                       └──> task-10 copilot everywhere (also after phase-1 task 11)
 ```
 
@@ -98,7 +99,7 @@ phase-1 task 12 ──> task-01 shared interface, log writer
 | [task-03](task-03-activity-log-backend.md) | WP-6 | M | 01 | Rows written with every proposal change; list, summary, undo, read tool, retention |
 | [task-05](task-05-standing-orders-backend.md) | WP-7 | M | 01 | Standing order routes, instructions, last applied |
 | [task-10](task-10-copilot-everywhere.md) | WP-9 | M | 01; phase-1 task 11 | Launcher and panel on board, task page and Inbox; page chip |
-| [task-04](task-04-proposal-kinds-backend.md) | WP-8 | L | 02, 03 | Resume, message and move proposals with at-most-once execution |
+| [task-04](task-04-proposal-kinds-backend.md) | WP-8 | L | 02, 03, 05 | Resume, message and move proposals with at-most-once execution |
 | [task-08](task-08-what-it-did-ui.md) | WP-6 | M | 03 | What it did in the Queue with Undo |
 | [task-12](task-12-goals-backend.md) | WP-10 | M | 01, 03 | Goal routes, instructions, baselines and measures |
 | [task-11](task-11-orders-goal-sections.md) | WP-7, WP-10 | M | 05, 12 | Sections row, Standing orders and Goal sections, goal note |

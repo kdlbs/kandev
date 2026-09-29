@@ -46,7 +46,8 @@ task history table is added.
 | `criteria_json` | text not null default '[]' | `[{id, text, done}]`, at most 10, text 1 to 200 |
 | `baseline_json` | text not null | [Baselines](#baselines) |
 | `set_at` | timestamp not null | when it became active |
-| `met_at`, `met_by` | null | |
+| `met_at` | timestamp null | |
+| `met_by` | text null | |
 | `created_at`, `updated_at` | timestamp not null | |
 
 Partial unique index `(coordinator_id) WHERE status = 'active'` enforces one

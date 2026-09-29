@@ -49,8 +49,9 @@ screen.
   Follow `/runtime-feature-flags`.
 - Store: `coordinators.policy_json`, `policy_revision`, `watch_scope`;
   `coordinator_watches`; `coordinator_activity`;
-  `coordinator_standing_orders`; `coordinator_goals` with its active
-  partial unique index; proposal columns `kind`, `target_task_id`,
+  `coordinator_standing_orders` with its `last_applied_at` column (starts
+  null, only ever raised by task 05's `MarkApplied` helper); `coordinator_goals`
+  with its active partial unique index; proposal columns `kind`, `target_task_id`,
   `standing_order_ids`, `starts_agent`, `outcome_json` and
   `coordinator_proposals_open_target`. Deletion of the new rows in the
   coordinator delete and workspace-deletion transactions. Upgrade tests from
