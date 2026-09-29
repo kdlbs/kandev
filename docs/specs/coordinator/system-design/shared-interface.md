@@ -69,7 +69,7 @@ call site changes for them (`*sqlx.DB` satisfies `coordinatorExec`):
 func (s *Store) CompleteProposalTx(ctx context.Context, exec coordinatorExec, id, token, taskID string, now time.Time) (bool, error)
 func (s *Store) FailProposalTx(ctx context.Context, exec coordinatorExec, id, token, errMsg string, now time.Time) (bool, error)
 func (s *Store) RejectProposalTx(ctx context.Context, exec coordinatorExec, id, reason, decidedBy string, now time.Time) (bool, error)
-func (s *Store) InsertProposalWith(ctx context.Context, p *Proposal, phase2 bool, pre func(tx coordinatorExec) (*Proposal, error), inTx func(tx coordinatorExec) error) error
+func (s *Store) InsertProposalWith(ctx context.Context, p *Proposal, phase2 bool, pre func(ctx context.Context, tx coordinatorExec) (*Proposal, error), inTx func(ctx context.Context, tx coordinatorExec, p *Proposal) error) error
 ```
 
 `CompleteProposal`, `FailProposal` and `RejectProposal` call their `Tx`
@@ -167,7 +167,8 @@ func WithPhase2(on bool) ServiceOption
   truncates `Detail` to 1,000 runes; and it returns a wrapped
   `ErrInvalidActivity` without writing when `ActionClass`, `Outcome` or
   `Authorization` is outside its set, or `CoordinatorID` or `WorkspaceID` is
-  empty. `RecordRefusal` with an empty `reasonCode` or an `actionClass`
+  empty. It then overwrites `WorkspaceID` with the coordinator row's own
+  workspace (a missing coordinator returns `ErrNotFound`, nothing written). `RecordRefusal` with an empty `reasonCode` or an `actionClass`
   outside the six actions and `unknown` returns `ErrInvalidActivity` and
   writes nothing. `InsertActivity` increments the
   `coordinator_activity_rows_total` counter named in
@@ -378,7 +379,8 @@ transaction, including the completion and failure writes of the claim-fenced
 proposal transaction, which take it before their `UPDATE`. Under that
 precondition a `Record` either commits before the delete and is removed with
 it, or blocks and then finds the coordinator missing (`ErrNotFound`, nothing
-written). `InsertActivity` itself does not check the coordinator row. The
+written). `InsertActivity` reads the coordinator's `workspace_id` on the handle and
+returns `ErrNotFound` when the row is gone. The
 concurrent test runs `Record` inside `withCoordinatorLock` against
 `DeleteCoordinator` and asserts no activity row survives. Activity rows are found by
 `workspace_id` through the index `coordinator_activity(workspace_id)`. Orphan

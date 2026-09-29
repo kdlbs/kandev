@@ -61,6 +61,9 @@ func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordina
 		return WatchSet{}, fmt.Errorf("read watch scope: %w", err)
 	}
 	set := WatchSet{All: normalizeWatchScope(scope) == watchScopeAll, WorkflowIDs: []string{}}
+	if set.All {
+		return set, nil
+	}
 	rows, err := exec.QueryContext(ctx, s.db.Rebind(`SELECT workflow_id FROM coordinator_watches WHERE coordinator_id = ?`), coordinatorID)
 	if err != nil {
 		return WatchSet{}, fmt.Errorf("read watches: %w", err)
@@ -77,9 +80,6 @@ func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordina
 		return WatchSet{}, fmt.Errorf("read watches: %w", err)
 	}
 	sort.Strings(set.WorkflowIDs)
-	if set.All {
-		set.WorkflowIDs = []string{}
-	}
 	return set, nil
 }
 

@@ -59,11 +59,33 @@ func (s *Service) settleDecision(ctx context.Context, coordinatorID string, row 
 	return matched, nil
 }
 
+// specEdited reports whether the approved final spec differs from the proposed
+// spec on any editable field.
+func specEdited(p *Proposal) bool {
+	if p.FinalSpec == nil {
+		return false
+	}
+	f, o := p.FinalSpec, p.Spec
+	return f.Title != o.Title || f.Description != o.Description || f.WorkflowID != o.WorkflowID ||
+		f.StepID != o.StepID || f.RepositoryID != o.RepositoryID
+}
+
+// approvalFailedCode is the reason code carried by a failed approval row.
+const approvalFailedCode = "approval_failed"
+
 func (s *Service) completeProposalStore(ctx context.Context, workspaceID, coordinatorID, proposalID, token, taskID string) (bool, error) {
 	if !s.phase2 {
 		return s.store.CompleteProposal(ctx, proposalID, token, taskID, time.Now())
 	}
+	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	row := ActivityRow{
+		Edited:        specEdited(current),
 		CoordinatorID: coordinatorID, WorkspaceID: workspaceID, ActionClass: ActionCreateTask,
 		Outcome: ActivityApproved, Authorization: AuthRequiresApproval,
 		TargetTaskID: &taskID, ProposalID: &proposalID, ActorUserID: optString(decidingUserID(ctx)),
@@ -79,7 +101,7 @@ func (s *Service) failProposalStore(ctx context.Context, workspaceID, coordinato
 	}
 	row := ActivityRow{
 		CoordinatorID: coordinatorID, WorkspaceID: workspaceID, ActionClass: ActionCreateTask,
-		Outcome: ActivityFailed, Authorization: AuthRequiresApproval,
+		Outcome: ActivityFailed, Authorization: AuthRequiresApproval, ReasonCode: optString(approvalFailedCode),
 		ProposalID: &proposalID, ActorUserID: optString(decidingUserID(ctx)), Detail: errMsg,
 	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
@@ -97,7 +119,7 @@ func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, 
 	}
 	row := ActivityRow{
 		CoordinatorID: p.CoordinatorID, WorkspaceID: p.WorkspaceID, ActionClass: class,
-		Outcome: ActivityRejected, Authorization: AuthRequiresApproval,
+		Outcome: ActivityRejected, Authorization: AuthRequiresApproval, ReasonCode: optString(reason),
 		TargetTaskID: p.TargetTaskID, ProposalID: &p.ID, ActorUserID: optString(decidedBy), Detail: reason,
 	}
 	return s.settleDecision(ctx, p.CoordinatorID, row, func(tx coordinatorExec) (bool, error) {

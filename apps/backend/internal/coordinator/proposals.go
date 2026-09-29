@@ -118,6 +118,7 @@ func (s *Service) recordProposed(ctx context.Context, tx coordinatorExec, p *Pro
 		Outcome:       ActivityProposed,
 		Authorization: AuthRequiresApproval,
 		ProposalID:    &id,
+		Detail:        p.Spec.Title,
 	})
 }
 

@@ -78,7 +78,7 @@ func PhaseOnePolicy() Policy {
 // action outside the six is never allowed.
 func (p Policy) Allows(a Action) bool {
 	s, ok := p.Actions[a]
-	if !ok {
+	if !ok || !isPolicyAction(a) {
 		return false
 	}
 	return s == SettingRequiresApproval || s == SettingAutomatic

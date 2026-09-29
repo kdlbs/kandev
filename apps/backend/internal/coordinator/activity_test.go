@@ -226,12 +226,17 @@ func TestRecordRefusal_WindowBoundaryIsInclusive(t *testing.T) {
 }
 
 func TestRecordRefusal_ConcurrentMakesOneRow(t *testing.T) {
-	store := newTestStore(t)
+	assertConcurrentRefusalsCoalesce(t, newTestStore(t))
+}
+
+func assertConcurrentRefusalsCoalesce(t *testing.T, store *Store) {
+	t.Helper()
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	svc := newPhase2Service(t, store, true)
+	const n = 10
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -242,7 +247,7 @@ func TestRecordRefusal_ConcurrentMakesOneRow(t *testing.T) {
 	}
 	wg.Wait()
 	rows := listActivity(t, store, c.ID)
-	if len(rows) != 1 || rows[0].RefusalCount != 8 {
+	if len(rows) != 1 || rows[0].RefusalCount != n {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
@@ -301,6 +306,12 @@ func TestActivitySourceScan_WriteStatements(t *testing.T) {
 		t.Fatal(err)
 	}
 	update := regexp.MustCompile("(?s)UPDATE coordinator_activity(.*?)WHERE")
+	matches := 0
+	defer func() {
+		if matches < 2 {
+			t.Errorf("source scan matched %d UPDATE coordinator_activity statements, want at least 2", matches)
+		}
+	}()
 	allowedSets := []string{"undone_at = ?, undone_by = ?, updated_at = ?", "refusal_count = refusal_count + 1, updated_at = ?"}
 	for _, e := range entries {
 		name := e.Name()
@@ -313,6 +324,7 @@ func TestActivitySourceScan_WriteStatements(t *testing.T) {
 		}
 		src := string(b)
 		for _, m := range update.FindAllStringSubmatch(src, -1) {
+			matches++
 			set := strings.Join(strings.Fields(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(m[1]), "SET"))), " ")
 			ok := false
 			for _, a := range allowedSets {
