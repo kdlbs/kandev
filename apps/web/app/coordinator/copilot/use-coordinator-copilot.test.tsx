@@ -651,6 +651,22 @@ describe("useCoordinatorCopilot - stored composer draft sweep", () => {
     expect(useCopilotStore.getState().draftsSwept).toBe(true);
   });
 
+  it("hands the composer a loading state until the sweep has run, then the ready session", () => {
+    const observed: string[] = [];
+    act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
+    const { result } = renderHook(() => {
+      const value = useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true);
+      observed.push(
+        `${value.openSequence.state.kind}:${getChatDraftText(conversation.session_id)}`,
+      );
+      return value;
+    });
+
+    expect(observed[0]).toBe("loading:left over from a reset slot");
+    expect(result.current.openSequence.state.kind).toBe("ready");
+    expect(getChatDraftText(conversation.session_id)).toBe("");
+  });
+
   it("keeps text typed after the sweep across a close and reopen of the same slot", () => {
     act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
     const { result } = renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));

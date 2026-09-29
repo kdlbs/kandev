@@ -239,11 +239,18 @@ export function useCoordinatorCopilot(
     setAskKey((k) => k + 1);
   }, []);
 
+  // The composer mounts only once the stored draft was cleared, so it never
+  // reads text left from an earlier slot lifetime.
+  const gatedOpenSequence =
+    openSequence.state.kind === "ready" && !draftsSwept
+      ? { ...openSequence, state: { kind: "loading" as const } }
+      : openSequence;
+
   return {
     enabled,
     open: entry.open,
     launcher,
-    openSequence,
+    openSequence: gatedOpenSequence,
     routeSession,
     chip: entry.chip,
     pendingDraft,

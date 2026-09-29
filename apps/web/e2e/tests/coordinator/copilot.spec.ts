@@ -444,6 +444,70 @@ test.describe("Coordinator copilot", () => {
     await expect(testPage.getByTestId("coordinator-copilot-launcher")).toBeVisible();
   });
 
+  test("unsent composer text survives Close/reopen and Needs you to Queue, and is gone after leaving or a reload (AC .004.12)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Draft Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    const other = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Other Draft Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    const editorOf = (panel: Locator) => panel.getByTestId("chat-input-editor");
+    const typeDraft = async (panel: Locator, text: string) => {
+      const editor = editorOf(panel);
+      await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
+      await editor.fill(text);
+      await expect
+        .poll(() =>
+          testPage.evaluate(() =>
+            Object.keys(sessionStorage).some((k) => k.startsWith("kandev.chatDraft")),
+          ),
+        )
+        .toBe(true);
+    };
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const popover = await openCopilot(testPage);
+    await typeDraft(popover, "unsent draft one");
+
+    await testPage.getByTestId("count-working").click();
+    await expect(testPage).toHaveURL(/\/queue/);
+    await expect(editorOf(popover)).toContainText("unsent draft one");
+
+    await popover.getByRole("button", { name: /close/i }).first().click();
+    await expect(popover).not.toBeVisible();
+    const reopened = await openCopilot(testPage);
+    await expect(editorOf(reopened)).toContainText("unsent draft one");
+
+    await testPage.getByTestId("coordinator-selector").click();
+    await testPage.getByRole("option", { name: other.name }).click();
+    await expect(testPage).toHaveURL(new RegExp(other.id));
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const afterLeaving = await openCopilot(testPage);
+    await expect(editorOf(afterLeaving)).toHaveAttribute("contenteditable", "true", {
+      timeout: 15_000,
+    });
+    await expect(editorOf(afterLeaving)).not.toContainText("unsent draft one");
+
+    await typeDraft(afterLeaving, "unsent draft two");
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    const afterReload = await openCopilot(testPage);
+    await expect(editorOf(afterReload)).toHaveAttribute("contenteditable", "true", {
+      timeout: 15_000,
+    });
+    await expect(editorOf(afterReload)).not.toContainText("unsent draft two");
+  });
+
   test("resizes by dragging the left edge, remembers the width across reloads, and stays within 320px and 95vw (AC .004.11)", async ({
     testPage,
     apiClient,
