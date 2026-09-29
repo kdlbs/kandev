@@ -34,6 +34,7 @@ system_design:
   - ../../specs/coordinator/system-design/standing-orders.md
   - ../../specs/coordinator/system-design/goals.md
   - ../../specs/coordinator/system-design/activity-log.md
+  - ../../specs/coordinator/system-design/what-it-did-ui.md
   - ../../specs/coordinator/system-design/proposal-kinds.md
   - ../../specs/coordinator/system-design/copilot-everywhere.md
   - ../../specs/coordinator/system-design/shared-interface.md
@@ -189,6 +190,12 @@ What it did                                        Action class [All      v]
                                   [Load more]
 Empty: "It has not done anything yet."   Filtered empty: "Nothing matches this filter."
 ```
+
+This sketch is non-normative for row wording: the Action cell shows the row's
+detail with no invented verb, refused rows show the reason text of their code,
+"It has moved since" is a temporary message under a still-clickable Undo, and
+refused message or resume rows read "No undo". The copy table and acceptance
+criteria of the activity-log system design win.
 
 Phone: each row becomes a card (When and class on the first line, action,
 authorisation, then Undo as a full-width button).

@@ -16,11 +16,18 @@ acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-002.4
   - AC-COORDINATOR-ACTIVITY-LOG-002.5
   - AC-COORDINATOR-ACTIVITY-LOG-002.6
+  - AC-COORDINATOR-ACTIVITY-LOG-002.8
+  - AC-COORDINATOR-ACTIVITY-LOG-002.9
+  - AC-COORDINATOR-ACTIVITY-LOG-002.10
+  - AC-COORDINATOR-ACTIVITY-LOG-002.11
   - AC-COORDINATOR-ACTIVITY-LOG-003.1
   - AC-COORDINATOR-ACTIVITY-LOG-003.6
   - AC-COORDINATOR-ACTIVITY-LOG-003.7
+  - AC-COORDINATOR-ACTIVITY-LOG-003.10
+  - AC-COORDINATOR-ACTIVITY-LOG-003.11
 system_design:
   - ../../specs/coordinator/system-design/activity-log.md
+  - ../../specs/coordinator/system-design/what-it-did-ui.md
 ---
 
 # Task 08: What It Did (WP-6)
@@ -49,9 +56,17 @@ managers, and the undone state.
   the design's Undo column: `already_undone` refetches with no error text,
   `not_undoable` shows "This can no longer be undone", `undo_conflict` shows the text of its `reason` (`moved`, `archived` or an unknown or absent reason "It has moved since"; `agent_running`, `step_deleted`, `step_done`, `step_full` each their own text, `003.7`), other errors show "Undo failed. Try again."
   and keep the button; "Undone by <name>, <time>" on the original
-  reversed row from `undone_by_name` and `undone_at`, and nothing in the
+  reversed row from `undone_by` (resolved through the member list) and `undone_at`, and nothing in the
   Undo cell of the `undone` outcome row (`003.1`, `003.6`).
 - Refresh on `coordinator.updated`. Six locales.
+
+- Client-side names: member names from the workspace member list, step names
+  and task availability from the Queue's snapshots (`002.8`, `002.9`,
+  `003.10`); the server sends ids only.
+- The full copy table of the system design in six locales, with whole-sentence
+  undo dialog fallbacks and the conflict text for an unknown reason.
+- Undo failure lifecycle (`003.11`): inline below the still-clickable Undo,
+  cleared on the next successful re-read, filter change or a new confirmed Undo.
 
 ## Out of scope
 
@@ -59,17 +74,24 @@ managers, and the undone state.
 
 ## ASCII UI preview
 
-From [UI-01](plan.md#ui-01-what-it-did-entry-queue-below-the-groups):
+Non-normative sketch; the copy table and ACs of the system design win where
+they differ. From [UI-01](plan.md#ui-01-what-it-did-entry-queue-below-the-groups):
 
 ```text
 What it did                                        Action class [All      v]
-| When       | Action                         | Action class | How it was authorised | Undo               |
-| 2 min ago  | Created KAN-431 Retry webhooks | Create task  | Approved by Ana, with edits | [Undo]       |
-| 1 h ago    | Moved KAN-411 Build -> Review  | Move task    | Approved by Ana       | It has moved since |
-| 5 h ago    | Refused: not allowed by May do | Message task | Denied  x 3           | No undo            |
+| When       | Action                          | Action class | How it was authorised       | Undo     |
+| 2 min ago  | Retry webhooks KAN-431          | Create task  | Requires approval           | [Undo]   |
+|            |                                 |              | Approved by Ana, with edits |          |
+| 1 h ago    | Build to Review KAN-411         | Move task    | Requires approval           | [Undo]   |
+|            |                                 |              | Approved by Ana             | It has moved since |
+| 5 h ago    | It called something it is not   | Message task | Denied x 3                  | No undo  |
+|            | allowed to use.                 |              |                             |          |
                                   [Load more]
 ```
 
+The Action cell shows the row's detail with the identifier after it, never an
+invented verb. The "It has moved since" text is a temporary message under a
+still-clickable Undo. Refused and other message or resume rows read "No undo".
 Phone: each row is a card; Undo is a full-width button.
 
 ## Mockup screenshots and scenarios
@@ -85,16 +107,35 @@ Phone: each row is a card; Undo is a full-width button.
 - A component test mocks each undo refusal: `already_undone` shows no error
   and refetches to "Undone by", `not_undoable` shows its text and `undo_conflict` shows one text per reason (all six reasons plus an absent one), and a 500 shows "Undo failed. Try again." with the button
   still there.
+- Component tests for the list lifecycle: a refresh re-reads every loaded page
+  and a row beyond page 1 flips to "Undone by"; a response for a discarded
+  filter is dropped; a failed first load shows the load-failed text and Retry,
+  not the empty text; a failed Load more keeps rows and button; Enter in the
+  dialog never sends an undo; the filter change replaces the address; a
+  message survives its own triggered re-read but not an event re-read.
 - A component test renders a `proposed` message row and a `refused`
   message row and asserts "No undo" on both, and nothing in the Undo cell
   of a `rejected` create row.
 - A component test renders an undone create row (approver Ana,
-  `undone_by_name` Bo) and its `undone` outcome row, and asserts "Undone by
+  `undone_by` Bo's id, member list holding Bo) and its `undone` outcome row, and asserts "Undone by
   Bo" on the original row, no Undo on it, and an empty Undo cell on the
   `undone` row.
 - A component test clicks Undo on a create row and asserts the dialog
   "Undo this?" with "The task <identifier> will be archived." and focus on
   Cancel; Cancel sends no request; confirming sends one undo request.
+
+- Component tests: every copy-table key renders in its form (approved named,
+  no person, former member, edited; rejected and failed prefixes with and
+  without detail; each refusal reason and an unknown code); "Task no longer
+  available" only for a target id absent from loaded snapshots (not for a
+  row with no target, not while snapshots load or failed); all six dialog
+  sentences; the conflict text for an unknown reason; the message survives
+  Load more, clears on filter change, and `not_undoable` survives one
+  refetch. A locale test asserts every new copy-table key (not the existing
+  `activityChip*` and `activityVerb*` keys) exists in all six
+  locales with the placeholders of its English value kept (each key its own set of
+  `{{name}}`, `{{time}}`, `{{count}}`, `{{identifier}}`, `{{step}}`, `{{code}}`
+  and `{{detail}}`).
 
 ## Verification
 
