@@ -3297,7 +3297,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 				return nil, attemptErr
 			}
 			persistBranchRecovery()
-			s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
+			s.recordExactProfileStartFailure(resumeCtx, taskID, sessionID, execution.AgentExecutionID, err)
 			return nil, decorateResumeFailure(err)
 		}
 	}

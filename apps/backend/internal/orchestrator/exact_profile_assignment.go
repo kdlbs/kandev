@@ -256,9 +256,6 @@ func (s *Service) recordExactProfileStartFailure(
 	if launchErr == nil || sessionID == "" || executionID == "" {
 		return
 	}
-	if !s.exactProfileStartFailureStillCurrent(ctx, taskID, sessionID, executionID) {
-		return
-	}
 	receipts, ok := s.repo.(interface {
 		GetCurrentExactProfileLaunchAttempt(context.Context, string, string) (*models.ExactProfileLaunchAttemptBinding, error)
 		RecordExactProfileLaunchReceiptForAttempt(context.Context, *models.ExactProfileLaunchAttemptBinding, *models.ExactProfileLaunchReceipt) (bool, error)
@@ -274,20 +271,6 @@ func (s *Service) recordExactProfileStartFailure(
 	if _, err := receipts.RecordExactProfileLaunchReceiptForAttempt(ctx, binding, receipt); err != nil {
 		s.logger.Warn("failed to record exact-profile attempt failure", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
-}
-
-func (s *Service) exactProfileStartFailureStillCurrent(ctx context.Context, taskID, sessionID, executionID string) bool {
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.TaskID != taskID || (session.AgentExecutionID != "" && session.AgentExecutionID != executionID) {
-		return false
-	}
-	if s.agentManager != nil {
-		current, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-		if err == nil && current != "" && current != executionID {
-			return false
-		}
-	}
-	return session.AgentProfileID != "" && session.ExactProfileGeneration > 0 && session.ExactProfileRevision != 0 && session.QueueIncarnationID != ""
 }
 
 func (s *Service) admitExactProfileLaunchAttempt(ctx context.Context, session *models.TaskSession, exact *ExactProfileLaunchDecision, executionID string) error {

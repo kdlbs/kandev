@@ -333,6 +333,17 @@ func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t 
 	if receipt == nil {
 		t.Fatal("missing exact launch receipt")
 	}
+	binding, err := repo.GetCurrentExactProfileLaunchAttempt(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("get admitted exact launch attempt: %v", err)
+	}
+	if binding == nil || binding.ExecutionID != "exec-resumed" {
+		t.Fatalf("current exact launch attempt = %#v, want admitted execution exec-resumed", binding)
+	}
+	if receipt.AgentProfileID != binding.AgentProfileID || receipt.ProfileRevision != binding.ProfileRevision ||
+		receipt.Generation != binding.Generation || receipt.Model != binding.Model {
+		t.Fatalf("failed-closed receipt = %#v, want evidence for admitted attempt %#v", receipt, binding)
+	}
 	if receipt.Outcome != models.ExactProfileLaunchOutcomeFailedClosed {
 		t.Fatalf("receipt outcome = %q, want failed_closed", receipt.Outcome)
 	}
