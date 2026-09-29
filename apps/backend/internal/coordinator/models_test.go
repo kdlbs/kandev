@@ -12,6 +12,15 @@ func TestActionProposeTask_Value(t *testing.T) {
 	}
 }
 
+// TestActionGetItem_Value pins the coordinator package's re-export of the
+// get_coordinator_item_kandev tool's MCP action name, per
+// docs/specs/coordinator/system-design/copilot-tools.md#item-read.
+func TestActionGetItem_Value(t *testing.T) {
+	if ActionGetItem != "coordinator.get_item" {
+		t.Errorf("ActionGetItem = %q, want %q", ActionGetItem, "coordinator.get_item")
+	}
+}
+
 // TestDecisionActions_Value pins the coordinator package's re-export of the
 // reserved approve/reject MCP action names, per
 // docs/specs/coordinator/system-design/proposals.md#security.

@@ -631,6 +631,46 @@ func TestServiceListStalls(t *testing.T) {
 	})
 }
 
+func TestServiceGetStall(t *testing.T) {
+	const workspaceID = "ws-1"
+
+	t.Run("returns the one stall row for the task", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		ctx := context.Background()
+		now := svc.store.now()
+		if _, err := svc.store.UpsertStall(ctx, &Stall{
+			TaskID: "task-a", WorkspaceID: workspaceID, StalledForMs: 1000, LastEventAt: now, DetectedAt: now,
+		}); err != nil {
+			t.Fatalf("UpsertStall() unexpected error: %v", err)
+		}
+		stall, err := svc.GetStall(ctx, workspaceID, "task-a")
+		if err != nil {
+			t.Fatalf("GetStall() unexpected error: %v", err)
+		}
+		if stall.TaskID != "task-a" || stall.WorkspaceID != workspaceID {
+			t.Fatalf("GetStall() = %#v", stall)
+		}
+	})
+
+	t.Run("not found when the task never stalled", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		_, err := svc.GetStall(context.Background(), workspaceID, "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetStall() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, nil, nil, wantErr)
+		_, err := svc.GetStall(context.Background(), workspaceID, "task-a")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("GetStall() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+}
+
 // TestService_CoordinatorForConversationTask exercises the lookup the
 // mcp/scope resolver and the executor's fail-closed checks use
 // (copilot.md#principal-and-mode): no workspace scope of its own, since the

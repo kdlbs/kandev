@@ -488,8 +488,9 @@ func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 	h.canvasAuthoringSvc = svc
 }
 
-// SetCoordinatorService wires coordinator.propose_task. Leave it unset when
-// features.coordinator is disabled so the action is not registered either.
+// SetCoordinatorService wires coordinator.propose_task and
+// coordinator.get_item. Leave it unset when features.coordinator is
+// disabled so neither action is registered either.
 func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
 	h.coordinatorSvc = svc
 }
@@ -538,6 +539,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
 	if h.coordinatorSvc != nil {
 		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
+		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 	}
 }
 

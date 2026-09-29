@@ -221,6 +221,34 @@ func TestAuthorizeCoordinatorRequest_ProposeTaskRequiresCoordinatorPrincipal(t *
 	})
 }
 
+// TestAuthorizeCoordinatorRequest_GetItemRequiresCoordinatorPrincipal covers
+// coordinator.get_item's other half, mirroring propose_task
+// (copilot-tools.md#tool-surface): from a principal that is not a
+// coordinator, it is refused as unknown rather than exposing that the action
+// exists at all.
+func TestAuthorizeCoordinatorRequest_GetItemRequiresCoordinatorPrincipal(t *testing.T) {
+	h, _ := newCoordinatorGuardTestHandlers(t)
+	msg := makeWSMessage(t, coordinator.ActionGetItem, map[string]interface{}{"kind": "proposal", "id": "prop-1"})
+
+	t.Run("no principal", func(t *testing.T) {
+		guarded, _, err := h.authorizeCoordinatorRequest(context.Background(), msg)
+		require.NoError(t, err)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	})
+
+	t.Run("kanban principal", func(t *testing.T) {
+		ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+			WorkspaceID:     "ws-1",
+			CallerTaskID:    "kanban-task",
+			CallerSessionID: "kanban-session",
+			Surface:         mcpprofile.SurfaceKanbanTask,
+		})
+		guarded, _, err := h.authorizeCoordinatorRequest(ctx, msg)
+		require.NoError(t, err)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	})
+}
+
 // TestAuthorizeCoordinatorRequest_ReservedDecisionNamesNeverReachable covers
 // the guard's three-layer defense over approve and reject
 // (proposals.md#security, AC-COORDINATOR-PROPOSALS-002.15): the reserved

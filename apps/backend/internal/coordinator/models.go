@@ -16,6 +16,10 @@ import (
 // The dispatch site is owned by a later work package.
 const ActionProposeTask = mcpcontract.ActionProposeTask
 
+// ActionGetItem is mcpcontract.ActionGetItem, re-exported
+// (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
+const ActionGetItem = mcpcontract.ActionGetItem
+
 // ActionApproveProposal, ActionRejectProposal and DecisionActions re-export
 // mcpcontract's reserved decision action names
 // (docs/specs/coordinator/system-design/proposals.md#security) for callers

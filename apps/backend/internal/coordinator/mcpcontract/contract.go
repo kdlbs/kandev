@@ -6,6 +6,10 @@ package mcpcontract
 // ActionProposeTask is the MCP action the propose_task_kandev tool dispatches.
 const ActionProposeTask = "coordinator.propose_task"
 
+// ActionGetItem is the MCP action the get_coordinator_item_kandev tool
+// dispatches (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
+const ActionGetItem = "coordinator.get_item"
+
 // ActionApproveProposal and ActionRejectProposal are reserved MCP action
 // names (docs/specs/coordinator/system-design/proposals.md#security): approve
 // and reject are reachable only through the two REST routes, and no handler

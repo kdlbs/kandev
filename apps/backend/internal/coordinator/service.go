@@ -398,6 +398,16 @@ func (s *Service) ListStalls(ctx context.Context, workspaceID string) ([]*Stall,
 	return s.store.ListStalls(ctx, workspaceID)
 }
 
+// GetStall returns the one stall record for taskID in workspaceID
+// (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
+// ErrNotFound if the task never stalled or its row was cleared.
+func (s *Service) GetStall(ctx context.Context, workspaceID, taskID string) (*Stall, error) {
+	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
+		return nil, err
+	}
+	return s.store.GetStall(ctx, workspaceID, taskID)
+}
+
 // PruneStalls deletes stall records for a missing or archived task, and
 // records older than 30 days (needs-you.md#stall-records). Unauthorized: it
 // is only ever called from the coordinator startup pass, never from a
