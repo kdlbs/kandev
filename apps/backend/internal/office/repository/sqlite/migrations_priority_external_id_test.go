@@ -14,10 +14,11 @@ import (
 // test: the priority-to-TEXT rebuild (docs: taskPriorityMigrationStatements)
 // recreates the tasks table via DROP TABLE + CREATE TABLE, which silently
 // drops every index on the old table — including the project cost lookup and
-// external-id uniqueness indexes — unless each is explicitly relisted among
-// the indexes the rebuild recreates. Without that, task create-idempotency
-// loses its uniqueness guarantee and project budget queries lose their index
-// on any install that still needs this historical rebuild.
+// external-id and Coordinator parent-key uniqueness indexes — unless each is
+// explicitly relisted among the indexes the rebuild recreates. Without that,
+// task create-idempotency loses its uniqueness guarantee, project budget
+// queries lose their index, and the Coordinator grant foreign key becomes
+// invalid on any install that still needs this historical rebuild.
 func TestMigrate_PriorityRebuildPreservesRequiredIndexes(t *testing.T) {
 	dbPath := t.TempDir() + "/test.db?_journal_mode=WAL"
 	db, err := sqlx.Open("sqlite3", dbPath)
@@ -72,6 +73,11 @@ func TestMigrate_PriorityRebuildPreservesRequiredIndexes(t *testing.T) {
 		SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_project_id'
 	`); err != nil {
 		t.Fatalf("idx_tasks_project_id index missing after priority rebuild: %v", err)
+	}
+	if err := db.Get(&indexName, `
+		SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'uniq_tasks_workspace_id_id'
+	`); err != nil {
+		t.Fatalf("uniq_tasks_workspace_id_id index missing after priority rebuild: %v", err)
 	}
 
 	now := time.Now().UTC()

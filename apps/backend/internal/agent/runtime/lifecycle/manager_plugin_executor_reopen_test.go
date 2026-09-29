@@ -31,6 +31,16 @@ func (s *pluginExecutorManagerInventoryStore) UpsertExecutorRunning(_ context.Co
 	return nil
 }
 
+func (s *pluginExecutorManagerInventoryStore) UpdateExecutorRunningStatusIfCurrent(
+	_ context.Context, sessionID, executionID, status string,
+) error {
+	if s.record == nil || s.record.SessionID != sessionID || s.record.AgentExecutionID != executionID {
+		return models.ErrExecutionRotated
+	}
+	s.record.Status = status
+	return nil
+}
+
 func (s *pluginExecutorManagerInventoryStore) DeleteExecutorRunningBySessionID(_ context.Context, sessionID string) error {
 	if s.record != nil && s.record.SessionID == sessionID {
 		s.record = nil

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -96,6 +97,9 @@ func dispatchTrustedMCP(
 	ctx := context.Background()
 	if ts.mcpCallerTaskID != "" && ts.mcpCallerSessionID != "" {
 		resolver := mcpscope.NewResolver(ts.TaskRepo, nil, func() bool { return false }, ts.Logger)
+		ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
+			ExecutionID: "mcp-caller-execution", TaskID: ts.mcpCallerTaskID, SessionID: ts.mcpCallerSessionID,
+		})
 		ctx, err = resolver.ScopePrincipal(ctx, ts.mcpCallerTaskID, ts.mcpCallerSessionID)
 		if err != nil {
 			return nil, err

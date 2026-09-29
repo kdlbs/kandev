@@ -68,6 +68,68 @@ func pendingMoveRepos(t *testing.T) map[string]Repository {
 	}
 }
 
+func pendingMoveRowID(t *testing.T, move *PendingMove) string {
+	t.Helper()
+	if move == nil {
+		t.Fatal("pending move is nil")
+	}
+	return move.ID
+}
+
+func TestRepository_PendingMoveIdentityRoundTrips(t *testing.T) {
+	for name, repo := range pendingMoveRepos(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			move := &PendingMove{MoveID: "move-a", TaskID: "task-a", WorkflowID: "workflow-a", WorkflowStepID: "step-a"}
+			if err := repo.SetPendingMove(ctx, "session-a", move); err != nil {
+				t.Fatalf("set pending move: %v", err)
+			}
+			first, err := repo.GetPendingMove(ctx, "session-a")
+			if err != nil {
+				t.Fatalf("get pending move: %v", err)
+			}
+			firstID := pendingMoveRowID(t, first)
+			if firstID == "" {
+				t.Fatal("persisted pending row ID is empty")
+			}
+
+			if err := repo.ReplaceSession(ctx, "session-a", nil, first); err != nil {
+				t.Fatalf("restore session snapshot: %v", err)
+			}
+			restored, err := repo.GetPendingMove(ctx, "session-a")
+			if err != nil {
+				t.Fatalf("get restored pending move: %v", err)
+			}
+			if restoredID := pendingMoveRowID(t, restored); restoredID != firstID {
+				t.Fatalf("snapshot restore changed pending row ID: got %q want %q", restoredID, firstID)
+			}
+
+			if err := repo.TransferSession(ctx, "session-a", "session-b"); err != nil {
+				t.Fatalf("transfer session: %v", err)
+			}
+			transferred, err := repo.GetPendingMove(ctx, "session-b")
+			if err != nil {
+				t.Fatalf("get transferred pending move: %v", err)
+			}
+			if transferredID := pendingMoveRowID(t, transferred); transferredID != firstID {
+				t.Fatalf("session transfer changed pending row ID: got %q want %q", transferredID, firstID)
+			}
+
+			move.MoveID = "move-b"
+			if err := repo.SetPendingMove(ctx, "session-b", move); err != nil {
+				t.Fatalf("replace pending move: %v", err)
+			}
+			replacement, err := repo.GetPendingMove(ctx, "session-b")
+			if err != nil {
+				t.Fatalf("get replacement pending move: %v", err)
+			}
+			if replacementID := pendingMoveRowID(t, replacement); replacementID == "" || replacementID == firstID {
+				t.Fatalf("replacement did not rotate pending row ID: first=%q replacement=%q", firstID, replacementID)
+			}
+		})
+	}
+}
+
 func TestRepository_ListPendingMoves(t *testing.T) {
 	for name, repo := range pendingMoveRepos(t) {
 		t.Run(name, func(t *testing.T) {
