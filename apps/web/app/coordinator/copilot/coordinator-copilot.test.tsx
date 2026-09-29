@@ -81,7 +81,9 @@ function renderCopilot() {
         coordinatorId={COORDINATOR_ID}
         coordinatorName={COORDINATOR_NAME}
         canManage
-      />
+      >
+        <div data-testid="screen" />
+      </CoordinatorCopilot>
     </TooltipProvider>,
   );
 }
@@ -115,8 +117,10 @@ afterEach(() => {
 describe("CoordinatorCopilot", () => {
   it("renders nothing when disabled", () => {
     mockController({ enabled: false });
-    const { container } = renderCopilot();
-    expect(container.firstChild).toBeNull();
+    renderCopilot();
+    expect(screen.getByTestId("screen")).toBeTruthy();
+    expect(screen.queryByTestId("coordinator-copilot-launcher")).toBeNull();
+    expect(screen.queryByTestId("coordinator-copilot-popover")).toBeNull();
   });
 
   it("renders the launcher with an idle accessible name", () => {
@@ -464,7 +468,9 @@ describe("CoordinatorCopilot - ended session retry", () => {
           coordinatorId={COORDINATOR_ID}
           coordinatorName={COORDINATOR_NAME}
           canManage
-        />
+        >
+          <div data-testid="screen" />
+        </CoordinatorCopilot>
       </TooltipProvider>,
     );
     await waitFor(() => expect(screen.queryByTestId(SESSION_RECOVERY_TEST_ID)).toBeNull());

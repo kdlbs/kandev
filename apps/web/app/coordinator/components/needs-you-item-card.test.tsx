@@ -153,7 +153,13 @@ function seedProposal(coordinatorId: string, incoming: Proposal): void {
 }
 
 afterEach(() => {
-  useCopilotStore.setState({ entries: {} });
+  useCopilotStore.setState({
+    coordinatorId: null,
+    open: false,
+    chip: null,
+    draft: "",
+    draftsSwept: false,
+  });
   useProposalsStore.setState({ byCoordinator: {} });
 });
 
@@ -304,7 +310,11 @@ describe("NeedsYouItemCard - actions by kind", () => {
     const button = screen.getByRole("button", { name: ASK_ABOUT_THIS });
     expect(button.hasAttribute("disabled")).toBe(true);
     fireEvent.click(button);
-    expect(useCopilotStore.getState().entries["co-1"]).toBeUndefined();
+    expect(useCopilotStore.getState().getEntry("co-1")).toEqual({
+      open: false,
+      chip: null,
+      draft: "",
+    });
   });
 
   it("enables Ask about this for a manager on every kind", () => {
@@ -327,7 +337,7 @@ describe("NeedsYouItemCard - actions by kind", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
-    expect(useCopilotStore.getState().entries["co-1"]).toEqual({
+    expect(useCopilotStore.getState().getEntry("co-1")).toEqual({
       open: true,
       chip: { id: "KAN-1", label: "KAN-1", ref: { kind: "task", id: "t-1" } },
       draft: "Why is KAN-1 here?",
@@ -340,7 +350,7 @@ describe("NeedsYouItemCard - actions by kind", () => {
     withoutSource.proposal.spec.title = "New feature";
     renderCard(<NeedsYouItemCard item={withoutSource} {...NO_OP_MAPS} coordinatorName="Planner" />);
     fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
-    expect(useCopilotStore.getState().entries["co-1"]?.chip).toEqual({
+    expect(useCopilotStore.getState().getEntry("co-1").chip).toEqual({
       id: "New feature",
       label: "New feature",
       ref: { kind: "proposal", id: "p-1" },
@@ -350,7 +360,7 @@ describe("NeedsYouItemCard - actions by kind", () => {
   it("refs the task id, as kind stall, for a stall item", () => {
     render(<NeedsYouItemCard item={stallItem()} {...NO_OP_MAPS} coordinatorName="Planner" />);
     fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
-    expect(useCopilotStore.getState().entries["co-1"]?.chip?.ref).toEqual({
+    expect(useCopilotStore.getState().getEntry("co-1").chip?.ref).toEqual({
       kind: "stall",
       id: "t-2",
     });

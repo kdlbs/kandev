@@ -58,6 +58,48 @@ function RedirectToCoordinator({ href }: { href: string }) {
   return null;
 }
 
+type CoordinatorScreenListProps = CoordinatorReadyContext & {
+  workspaceId: string;
+  view: CoordinatorHeaderView;
+  tasksHardFailed: boolean;
+  children: (ctx: CoordinatorReadyContext) => ReactNode;
+};
+
+/** The scrolling screen content: count strip, failure banner and the ready
+ *  children, which the copilot panel sits beside. */
+function CoordinatorScreenList({
+  workspaceId,
+  view,
+  coordinator,
+  coordinators,
+  attention,
+  canManage,
+  tasksHardFailed,
+  children,
+}: CoordinatorScreenListProps) {
+  return (
+    <div className="h-full min-h-0 overflow-y-auto">
+      {/* Full width under the topbar, not inside the content column: the
+          derived-facts caption sits beside the counts, which only fits when
+          the strip spans the window (mockup v2.1 `.strip`). */}
+      {!tasksHardFailed && (
+        <div className="bg-background sticky top-0 z-10 border-b px-4">
+          <CountStrip
+            classification={attention.classification}
+            workspaceId={workspaceId}
+            coordinatorId={coordinator.id}
+            view={view}
+          />
+        </div>
+      )}
+      <div className="w-full max-w-3xl space-y-4 p-4">
+        <InputFailureBanner inputs={attention.inputs} retry={attention.retryFailed} />
+        {!tasksHardFailed && children({ coordinator, coordinators, attention, canManage })}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Shared shell for the Needs you and Queue screens: resolves the viewed
  * coordinator, renders the page chrome (the topbar crumb carrying the
@@ -119,6 +161,20 @@ export function CoordinatorRouteContent({
   const tasksInput = attention.inputs.find((input) => input.kind === "tasks");
   const tasksHardFailed = attention.tasksNeverLoaded && Boolean(tasksInput?.error);
 
+  const list = (
+    <CoordinatorScreenList
+      workspaceId={workspaceId}
+      view={view}
+      coordinator={resolved.coordinator}
+      coordinators={resolved.coordinators}
+      attention={attention}
+      canManage={canManage}
+      tasksHardFailed={tasksHardFailed}
+    >
+      {children}
+    </CoordinatorScreenList>
+  );
+
   return (
     <PageShell
       title={title}
@@ -140,41 +196,24 @@ export function CoordinatorRouteContent({
         ) : undefined
       }
       topbarTestId="coordinator-topbar"
+      scroll="none"
     >
-      {/* Full width under the topbar, not inside the content column: the
-          derived-facts caption sits beside the counts, which only fits when
-          the strip spans the window (mockup v2.1 `.strip`). */}
-      {!tasksHardFailed && (
-        <div className="bg-background sticky top-0 z-10 border-b px-4">
-          <CountStrip
-            classification={attention.classification}
-            workspaceId={workspaceId}
-            coordinatorId={resolved.coordinator.id}
-            view={view}
-          />
-        </div>
-      )}
-      <div className="w-full max-w-3xl space-y-4 p-4">
-        <InputFailureBanner inputs={attention.inputs} retry={attention.retryFailed} />
-        {!tasksHardFailed &&
-          children({
-            coordinator: resolved.coordinator,
-            coordinators: resolved.coordinators,
-            attention,
-            canManage,
-          })}
+      <div className="min-h-0 flex-1">
         {/* Keyed on the viewed coordinator: a coordinator switch fully
           remounts the controller, so every hook, ref, and draft resets to
           its initial value by construction instead of relying on each
           hook to detect and unwind a `coordinatorId` change itself
-          (docs/specs/coordinator/system-design/copilot-popover.md). */}
+          (docs/specs/coordinator/system-design/copilot-popover.md). The
+          panel wraps the list so it narrows beside the inline panel. */}
         <CoordinatorCopilot
           key={resolved.coordinator.id}
           workspaceId={workspaceId}
           coordinatorId={resolved.coordinator.id}
           coordinatorName={resolved.coordinator.name}
           canManage={canManage}
-        />
+        >
+          {list}
+        </CoordinatorCopilot>
       </div>
     </PageShell>
   );
