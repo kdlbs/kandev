@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ACTIVITY_CLASSES,
   getActivitySummary,
   type ActivityClass,
   type ClassSummary,
 } from "@/lib/api/domains/coordinator-activity-api";
+import { CONTROL_ACTIONS } from "@/lib/coordinators/control-draft";
 import { useWebSocketClient } from "@/lib/ws/connection";
 
 export type ActionSummaryStatus = "loading" | "ready" | "error";
@@ -15,13 +15,20 @@ export type ActionCounts = Partial<Record<ActivityClass, ClassSummary>>;
 const isCount = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 0;
 
-/** A read is usable only when every class is present with integer counts. */
+const validEntry = (entry: ClassSummary | undefined): boolean =>
+  !!entry && isCount(entry.approved) && isCount(entry.rejected);
+
+/**
+ * A read is usable only when every policy action is present with integer
+ * counts. `unknown` is present only when it has a row in the window
+ * (activity-log.md#summary), so it is checked only when it appears.
+ */
 export function validCounts(classes: ActionCounts | undefined): ActionCounts | null {
   if (!classes) return null;
-  for (const action of ACTIVITY_CLASSES) {
-    const entry = classes[action];
-    if (!entry || !isCount(entry.approved) || !isCount(entry.rejected)) return null;
+  for (const action of CONTROL_ACTIONS) {
+    if (!validEntry(classes[action])) return null;
   }
+  if ("unknown" in classes && !validEntry(classes.unknown)) return null;
   return classes;
 }
 
