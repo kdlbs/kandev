@@ -286,6 +286,20 @@ dialog closes and a toast says "Standing order added."; the Configure list
 loads its own data when opened. Readers never reject, so never see it. The
 chat card's Reject navigates to Needs you and so reaches the same host.
 
+The host holds one offer. `offer()` while the dialog is closed opens it for
+the proposal it names, each call replacing any earlier one (two calls in one
+tick: the later wins). While the dialog is open a toast action cannot be
+pressed (the dialog is modal), so a second offer is never replaced under the
+user; a toast action pressed after the dialog closed opens its own
+proposal's reason. Save is the existing `AddStandingOrderDialog` save: it is
+disabled while the request is in flight, so a double activation posts once,
+and a failed save keeps the dialog open with the reason text and shows the
+dialog's inline error (`coordinator:standingOrderLimit` for the limit code,
+else `coordinator:standingOrderAddFailed`). The dialog cannot be dismissed
+while saving. A lost response after the server created the order is not
+reconciled: a retry creates a second order with the same text, which the
+Configure list shows and the manager can retire.
+
 ## Security
 
 - Writes need `workspace.manage`; the coordinator's surface has no order

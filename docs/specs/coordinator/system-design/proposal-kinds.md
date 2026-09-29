@@ -105,9 +105,8 @@ coordinator from the principal, passes the guard of
    proposed step, still returns the open proposal; its approval settles it
    as [Approve](#approve) says). This is what `001.5` means by "return that
    proposal"; step 2 repeats the lookup under the lock for concurrent calls.
-   A returned existing proposal is the same result shape as a new one plus
-   `deduplicated: true`, so the coordinator can tell it did not create a
-   proposal; its `status` shows whether it is `pending`, `approving` or
+   A returned existing proposal has the shape of a new one plus
+   `deduplicated: true`; its `status` shows `pending`, `approving` or
    `failed`. A `failed` proposal is open, so it blocks a new proposal for the
    same target until a manager rejects it or approves it again; this is
    intended, because two cards for one target would let two approvals run.
@@ -320,60 +319,63 @@ offers no undo.
 ## Direct manager actions
 
 These are not proposals and write no activity row. Each is shown only to a
-manager (`canManage`), except **Open the PR**, which readers see too, and only
+manager (`canManage`), except **Open the PR** (readers see it too), and only
 while the phase-2 flag is on.
 
 - **Stall Resume** (`005.1`, `005.5`). The stall card on Needs you shows
-  **Resume** as the primary button by this client rule, because the client
-  holds no executor record, live-execution flag or interrupted-recovery flag
-  (`Stall` is `{task_id, stalled_for_ms, last_event_at, detected_at}` and the
-  task's `statusSummary.primary_session` is `{id, state}`): the task's primary
-  session exists and its state is neither `COMPLETED` nor `CREATED`. A stall
-  already means no live execution
-  ([needs-you](needs-you.md#inputs)). The server's resume is the authority: a
-  session it refuses (for example one with no executor record) shows the
-  server's error text inline on the card, and no backend field is added. The
-  click sends the request the task page's manual resume sends
+  **Resume** as the primary button by a client rule, because the client holds
+  no executor record or live-execution flag (`statusSummary.primary_session` is
+  `{id, state}`): the primary session exists and its state is neither
+  `COMPLETED` nor `CREATED`. A stall
+  already means no live execution ([needs-you](needs-you.md#inputs)). The server's resume is the authority: a
+  session it refuses (for example no executor record) shows the server's
+  error inline, and no backend field is added. The click sends the request the task page's manual resume sends
   (`useManualResumeSession` in
-  `apps/web/hooks/domains/session/use-session-resumption.ts` is private to
-  the active-session hook, so `buildResumeRequest(taskId, sessionId)` and
-  `launchSession`, which it uses, are the shared seam), through the
-  orchestrator's resume with the user's own authority. A per-card lock (a ref
+  `apps/web/hooks/domains/session/use-session-resumption.ts` is private, so
+  `buildResumeRequest(taskId, sessionId)` and `launchSession` are the shared
+  seam), with the user's own authority. A per-card lock (a ref
   set before the request, cleared on settle) makes a second click send
-  nothing. While the request is in flight the button is disabled with a
-  spinner; after a resolved request it stays disabled labelled "Resuming"
-  until the stall leaves the list (the stall clears through the phase-1
-  rules when the session changes state and new activity passes
-  `detected_at`); a rejection or the 30-second launch timeout re-enables it and
-  shows the error inline (`role="alert"`, the error's message, or "Could not
-  resume. Try again." when it has none). A session that stopped being
-  resumable between render and click is such a refusal.
+  nothing. In flight the button is disabled with a spinner. A resolved `launchSession` is read by its body, not by resolving:
+  `success` true with no `activation_disposition` leaves the button disabled
+  labelled "Resuming" until the stall leaves the list (the phase-1 rules
+  clear it when the session changes state and new activity passes
+  `detected_at`); with `activation_disposition` `queued` the label is "Resume
+  queued"; `success` false or `suppressed` is a refusal. A refusal, a rejected
+  request and the 30-second launch timeout re-enable the button and show the error inline (`role="alert"`: the
+  response's `error`, else the thrown error's message, else "Could not resume.
+  Try again."). A session that stopped being resumable before the click is
+  such a refusal. A label that outlives a success stays until the next
+  refetch or reload; there is no timer. **Open task** and
+  **Show the evidence** (`NEEDS-YOU-002.6`) stay beside **Resume**.
+- With the flag on, `NEEDS-YOU-004.5` (no Queue row action but opening the
+  task) no longer holds for Ready to merge rows, and only them. Every other
+  group keeps the phase-1 row.
 - **Open the PR** (`005.2`, `005.7`). A link to `pr_url` of
   `getPrimaryTaskPR(prsByTaskId.get(taskId))`, the same list the row's status
-  already reads, `target="_blank"`, `rel="noopener noreferrer"`. Absent PR
-  or a URL whose scheme is not `http`/`https`: the link is not rendered and
-  nothing else changes. It is a sibling of the row's task link, not inside it:
-  a Queue row's actions sit in an actions cell after the `TaskLink`, so
-  pressing an action never navigates to the task.
+  already reads, `target="_blank"`, `rel="noopener noreferrer"`. No PR, or a
+  scheme other than `http`/`https`: not rendered, nothing else changes. Row
+  actions sit in a cell after the `TaskLink`, never inside it, so pressing
+  one never navigates to the task.
 - **Send it back** (`005.3`, `005.6`). Shown only when the row's
   `statusSummary.primary_session.state` is one that accepts a message
   ([requirements](../requirements/proposal-kinds.md#terminology)); otherwise
   the line and button are absent. It opens an inline note form under the row
   (focus moves to the textarea; Escape or Cancel closes it and discards the
-  text). On open the form reads the primary session with `fetchTaskSession`
-  for its `state` and `queue_incarnation_id`; while that read is pending Send
-  is disabled, and a session that no longer accepts a message, or has no
-  incarnation id, shows "This task is not accepting messages." inline with
-  Send disabled. Send trims the note (leading and trailing white space),
-  counts code points, and is disabled when the trimmed note is empty or
-  over 4000, with a counter. It calls the queued-message call the task page
+  text). On open it reads the primary session with `fetchTaskSession` for
+  `state` and `queue_incarnation_id`; Send is disabled while that is pending,
+  a session that no longer accepts a message or has no incarnation id shows
+  "This task is not accepting messages.", and a failed read (network or 404)
+  shows "Could not check the task. Try again.", both inline with Send
+  disabled. Send trims the note, counts code points, and is disabled when the
+  trimmed note is empty or over 4000, with a counter. It calls the queued-message call the task page
   uses (`queueMessage` in `lib/api/domains/queue-api.ts`, `message.queue.add`
-  with `session_id`, `session_incarnation_id`, `task_id`, and the trimmed
-  note as `content`), which is a queued message from the manager as the task
-  page's composer sends it, never a direct prompt. In flight, the note and
+  with `session_id`, `session_incarnation_id`, `task_id`, the trimmed note as
+  `content`, and a `client_queue_id` made when the form opens and reused by
+  every send from it, as the task page's composer does, so a retry after an
+  uncertain error queues it once), a queued message as the
+  task page's composer sends it, never a direct prompt. In flight, the note and
   Send are disabled and a second activation sends nothing. Success closes and
-  clears the form and shows the toast "Sent to `<identifier>`" (raw task id
-  when the identifier is unknown); the row stays. Failure keeps the form open
+  clears the form and shows the toast "Sent to `<identifier>`" (task id if unknown); the row stays. Failure keeps the form open
   with the text and shows the error inline: "This task's message queue is
   full." for `QueueFullError`, else the error's message, else "Could not send.
   Try again."
@@ -406,43 +408,48 @@ Approving this starts an agent.
 - "Shaped by" labels come from the proposal's `standing_order_ids` and the
   store's orders, as [standing orders](standing-orders.md#shaped-by-ui)
   specifies (`004.2`).
-- "Approving this starts an agent" shows when the proposal's stored
-  `starts_agent` is true, for a create or a move (`004.3`); it is never
-  computed from the live workflow steps store, so the card shows what was
-  proposed and a later step change fails the move rather than widening it.
+- "Approving this starts an agent" shows when the stored `starts_agent` is
+  true, for a create or a move (`004.3`); it is never computed from live
+  steps, so a later step change fails the move rather than widening it.
 - Edit only on message cards, editing the text (`004.4`).
-- The chat transcript attaches the card to the tool call of any propose
-  tool by the returned `proposal_id`, as phase 1 does for create.
-- With the phase-2 flag off, the client hides non-create proposals and the
-  count excludes them ([coordinators](coordinators.md#phase-2)).
+- The chat transcript attaches the card to any propose tool call by the
+  returned `proposal_id`.
+- With the phase-2 flag off, non-create proposals are hidden and uncounted
+  ([coordinators](coordinators.md#phase-2)).
 - The `<task identifier>` and step names come from the loaded workspace tasks
   and workflow snapshots (`004.6`). A target task not among them shows its id
   and no link; an unresolved step shows its raw id; Approve and Reject stay.
-  A proposal whose kind is not `create_task`, `resume`, `message` or `move`
-  (a newer backend) renders no card and is excluded from the count, as with
-  the flag off.
-- The "Policy: `<action>` requires approval" line names the proposal kind's
-  action (Create a task, Resume a task, Message a task, Move a task) whatever
-  `starts_agent` says; it is fixed text from the stored kind, not a live read
-  of the policy.
+  A kind other than `create_task`, `resume`, `message` or `move` renders no
+  card and is not counted, as with the flag off.
+- The "Policy: `<action>` requires approval" line names the kind's action
+  (Create a task, Resume a task, Message a task, Move a task) whatever
+  `starts_agent` says: fixed text from the stored kind, not a live policy read.
 - After a 409 `policy_denied` the card shows "Its May do settings no longer
-  allow this", hides Approve and Edit and keeps Reject. That state lives in
-  the card's memory only: after a reload Approve is back and a second attempt
-  gets the same 409 and the same result.
+  allow this", hides Approve and Edit and keeps Reject. That state is card
+  memory only: after a reload Approve returns and a second attempt gets the
+  same 409. The client recognises it by
+  status 409 with `body.error` `"policy_denied"` (no `error_code`, so
+  `ApiError.errorCode` is not used). The decision hook accepts a
+  `proposal_conflict` 409 for every known kind, not only create, so a
+  conflict on a resume, message or move card updates the card from the
+  returned row instead of the "network" outcome.
+- The compact chat card keeps the starts-agent line, the outcome copy below
+  and the `policy_denied` state, and omits the Policy line and Shaped by
+  labels (they need the Needs-you orders read). An unknown kind renders no
+  chat card.
 
 ## Card outcome copy
 
-The status line of a `failed` card and the approve toast of an `approved` one,
-by kind. `<card>` is the target task's identifier (the id when unknown) and
-`<step>` the destination step name (the raw id when unresolved). Failure text
-is chosen by the row's `error` code; the Approve and Reject actions of a
-`failed` card are unchanged. The client reads the flags below from the row's
-`outcome` object.
+The status line of a `failed` card and the approve toast of an `approved` one.
+`<card>` is the target task's identifier (the id when unknown), `<step>` the
+destination step name (the raw id when unresolved). Failure text is chosen by
+the row's `error` code; a `failed` card keeps Approve and Reject. The flags
+below are read from the row's `outcome` object.
 
 | Kind | Row | Copy |
 | --- | --- | --- |
 | any | `failed`, `outcome_unknown` | "It may or may not have run; check the task" |
-| any | `failed`, `task_archived` | "This task was archived. Nothing was changed." |
+| any | `failed`, `task_archived` | "This task is archived or no longer available. Nothing was changed." (also used for a deleted task, another workspace's task or a spec mismatch) |
 | resume | `failed`, `not_resumable` | "This task's session can no longer be resumed. Nothing was changed." |
 | message | `failed`, `not_accepting` | "This task's session is not accepting messages. Nothing was sent." |
 | message | `failed`, `queue_full` | "This task's message queue is full. Nothing was sent." |
@@ -459,7 +466,7 @@ is chosen by the row's `error` code; the Approve and Reject actions of a
 | move | `approved` | toast "Approved. `<card>` moved to `<step>`."; with `queued` true "Approved. `<card>` is queued behind the limit of `<step>`."; with `noop` true "Approved. `<card>` was already in `<step>`." |
 
 Each toast is followed by the phase-1 "Next" line. A create proposal keeps
-the phase-1 copy. The error text is untrusted and rendered as text.
+the phase-1 copy. The error text is untrusted, rendered as text.
 
 ## Security
 

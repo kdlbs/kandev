@@ -152,6 +152,8 @@ a pull request or moves a task to Done.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.2:** Every card shall show "Policy:
   <action> requires approval" and, for each cited order, the Shaped by label
   of [standing orders](standing-orders.md#req-coordinator-standing-orders-003-shaped-by-and-last-applied).
+  "Every card" is the Needs-you card; the compact chat card omits the Policy
+  line and the Shaped by labels and otherwise follows 004.3 to 004.6.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.3:** A create or move card with
   `starts_agent` true shall say "Approving this starts an agent" next to
   Approve. The warning shall come from the stored proposal, not from the
@@ -197,9 +199,12 @@ and merging stays human.
   shall merge a pull request.
 - **AC-COORDINATOR-PROPOSAL-KINDS-005.5:** While a **Resume** request is in
   flight its button shall be disabled with a spinner and a second click shall
-  send nothing. On success the button shall stay disabled with the label
-  "Resuming" until the stall leaves Needs you, and shall re-enable and show
-  the error inline if the request is rejected or times out. **Resume** shall be
+  send nothing. On a successful answer the button shall stay disabled with the
+  label "Resuming" (or "Resume queued" when the answer says the activation was
+  queued) until the stall leaves Needs you, and shall re-enable and show the
+  error inline if the answer says it failed or was suppressed, or the request
+  is rejected or times out. **Open task** and **Show the evidence** shall stay
+  on the stall card. **Resume** shall be
   shown for a stall whose task's primary session exists and is neither
   `COMPLETED` nor `CREATED`, and no other; a session the server then refuses
   shall show the server's error inline.
@@ -210,14 +215,18 @@ and merging stays human.
   send nothing. On success the note shall close and clear and a toast shall
   say "Sent to `<task identifier>`"; on failure the note shall stay open with
   its text and show the error inline. The row shall stay in Ready to merge
-  either way.
+  either way. Sends from one open form shall share one client queue id, so a
+  retry after an uncertain transport error queues the note once, and a
+  session read that fails when the form opens shall show an inline error with
+  Send disabled.
 - **AC-COORDINATOR-PROPOSAL-KINDS-005.7:** **Open the PR** shall open the
   `pr_url` of the task's first pull request in the shared `taskPRs` list
   (the one Ready to merge already reads) with an `http` or `https` scheme; a
   row with no such URL shall show no **Open the PR** and no error. The
   "Or send it back with a note" line and **Send it back** shall be hidden,
   not disabled, for a reader and for a row whose primary session does not
-  accept a message; **Open the PR** shall be shown to readers too.
+  accept a message; **Open the PR** shall be shown to readers too. With the
+  flag on this supersedes `NEEDS-YOU-004.5` for Ready to merge rows only.
 
 ## Out of scope
 

@@ -143,7 +143,9 @@ Mockup:
   trimming shall show no offer. The dialog shall prefill the trimmed reason
   cut to 500 code points, shall stay open when its toast expires, and on a
   successful save shall close and show "Standing order added." and leave the
-  Configure list to refetch on its next load.
+  Configure list to refetch on its next load. While the save is in flight Save
+  shall be disabled so a second activation posts nothing, and a failed save
+  shall keep the dialog open with the reason text and show an inline error.
 
 ## Out of scope
 
