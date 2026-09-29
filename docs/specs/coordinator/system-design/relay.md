@@ -278,6 +278,13 @@ repository query directly, not the flag-gated Inbox handler.
 | `reply_delivery_claimed_at` | timestamp null | when the latest delivery attempt started, kept for diagnostics and the warn log; it gates nothing and is never rendered. At-most-once rests on the message key, see [Reply delivery](#reply-delivery) |
 | `in_reply_to` | text null | a `returned` proposal id of the same coordinator |
 
+The time of a reply is the row's `updated_at`, which the reply's update sets;
+no decided-at column is added. The proposal DTO carries `reply_text`,
+`reply_delivered_at` and `in_reply_to` only while phase 3 is effective, and
+omits all three otherwise (the `CoordinatorPhase3` pattern); a `returned` row
+read while phase 3 is off shows status `returned` with none of them, and its
+card is settled with no **Send again**.
+
 `status` gains `returned`, a settled status set only from `pending`. It is
 not open, so it does not count toward the 25, does not hold its task's
 open-target slot and is not listed by `status=pending`; it is not claimable
@@ -289,6 +296,9 @@ log row a reply writes are in
 existing column and this design does not add it.
 
 ## Reply route
+
+Both routes below are registered only while phase 3 is effective, so they
+answer 404 otherwise, as the relay read does.
 
 `POST .../proposals/:pid/reply` (`workspace.manage`) with body
 `{"text": "..."}`:
@@ -307,7 +317,11 @@ existing column and this design does not add it.
    approve's claim and reject use, so a reply racing either leaves one
    winner.
 5. Publish `coordinator.updated`, then run [Reply delivery](#reply-delivery)
-   and return the proposal with `reply_delivered_at`.
+   and return 200 with the proposal as read after delivery. A failed delivery
+   is not an HTTP error: the reply is saved, so the response is 200 with
+   `reply_delivered_at` null, which the card renders as "Reply saved, not
+   delivered" with **Send again**. Only a failure to read or write the
+   proposal itself (steps 2 and 4's status update) is a 500.
 
 `POST .../proposals/:pid/reply/deliver` (`workspace.manage`) re-runs delivery
 for a `returned` proposal whose `reply_delivered_at` is null, returns 409 for
@@ -316,7 +330,11 @@ whatever `reply_delivery_claimed_at` holds, so after a crash between step 1
 and step 4 **Send again** delivers. When step 1 changes no row because a
 concurrent delivery has meanwhile set `reply_delivered_at`, it returns 200
 with the current proposal and sends nothing; when another delivery is still
-running, both reach step 3 and exactly one message is stored.
+running, both reach step 3 and exactly one message is stored. Like the reply
+route, a delivery that fails (conversation open, `ErrQueueFull`, a repository
+error) returns 200 with the proposal and `reply_delivered_at` null, never a 5xx;
+`ErrQueueFull` and the other failures are told apart only in the warn log. Its
+404 covers an absent proposal or one of another coordinator.
 
 ## Reply delivery
 
@@ -328,6 +346,10 @@ length limit, and the 128-character check in
 the client-supplied `client_message_id`, which this path does not use), used
 as both the message id and the queue entry id; the message table's primary key is the uniqueness constraint that decides, so no deadline,
 lookup or cancellation is needed for at-most-once.
+
+Delivery runs synchronously inside the request, under a context detached from
+the client's cancellation (so a disconnect after step 1 does not leave a
+half-finished delivery), bounded by the server's request timeout.
 
 1. Record the attempt: `UPDATE coordinator_proposals SET
    reply_delivery_claimed_at = ? WHERE id = ? AND status = 'returned' AND
@@ -345,7 +367,9 @@ lookup or cancellation is needed for at-most-once.
    message and its `messagequeue.QueuedMessage` together under the caller's
    id). Phase 3 adds a plain variant without plan-comment refs,
    `CreateQueuedMessageOnce(ctx, id, req, queued, maxPerSession) (message,
-   created bool, err)`, whose message insert is `INSERT ... ON CONFLICT (id)
+   created bool, err)` (in `internal/task/service`, beside
+   `CreateQueuedMessageIdempotent`, with `maxPerSession` from the queue's
+   `MaxQueuedPromptsPerSession()` as the composer passes it), whose message insert is `INSERT ... ON CONFLICT (id)
    DO NOTHING`: one affected row inserts the queue entry with the same id,
    commits and returns `created = true`; zero affected rows inserts nothing,
    rolls back and returns the stored message with `created = false`. The
@@ -358,16 +382,27 @@ lookup or cancellation is needed for at-most-once.
    session drains it when its turn ends, as any queued manager message
    does. The queue removes an entry when it dispatches it, so the entry is
    dispatched once; a second notify finds nothing to drain. The agent-facing
-   text depends on the proposal's `kind`. For `create_task`: `Reply to your proposal
-   "<title>" (proposal <id>): <reply text>. If you still think the work is
-   needed, propose it again with in_reply_to set to <id>.` For `improvement`:
-   `Reply to your improvement "<title>" (proposal <id>): <reply text>. If you
-   still think a change is needed, propose a new improvement.`
-   `propose_improvement_kandev` takes no `in_reply_to`, so an improvement
-   card never shows "Revised after your reply".
+   text depends on the proposal's `kind`, and `<title>` is the proposal's
+   stored title (`spec_json.title`; for a `message`, `move` or `resume`
+   proposal, the title its card shows). For `create_task`: `Reply to your
+   proposal "<title>" (proposal <id>): <reply text>. If you still think the
+   work is needed, propose it again with in_reply_to set to <id>.` For
+   `message`, `move` and `resume`: `Reply to your <kind> proposal "<title>"
+   (proposal <id>): <reply text>. If you still think it is needed, send a new
+   <kind> proposal that meets the condition.` where `<kind>` is the literal
+   `message`, `move` or `resume`; these kinds take no `in_reply_to`, so their
+   cards never show "Revised after your reply". The delivery text of the
+   `improvement` kind is added by the improvements work
+   ([improvements](improvements.md#tool)): `Reply to your improvement
+   "<title>" (proposal <id>): <reply text>. If you still think a change is
+   needed, propose a new improvement.` An improvement card never shows
+   "Revised after your reply". A kind with no text registered is not
+   replyable and its card shows no **Reply with a condition**.
 4. Finalise: when step 3 returned a message, `created` or not, `UPDATE ...
    SET reply_delivered_at = ?, reply_delivery_claimed_at = NULL WHERE id = ?
    AND reply_delivered_at IS NULL`, because the reply is in the conversation.
+   When that update changed a row, publish `coordinator.updated` again so
+   other clients drop "Reply saved, not delivered".
    On any error before step 3 committed (conversation open, a full queue
    (`ErrQueueFull`), a repository error), log at warn and `UPDATE ... SET
    reply_delivery_claimed_at = NULL WHERE id = ? AND reply_delivered_at IS
@@ -401,9 +436,18 @@ nothing, so Send again stores the reply once.
   `kind = 'create_task'`, otherwise the call is refused naming `in_reply_to`.
   `propose_improvement_kandev` has no `in_reply_to` argument
   ([improvements](improvements.md#tool)).
+- Any number of new proposals may name one returned row; each is an
+  independent `pending` proposal and none reopens or edits the returned one.
+  The revised proposal's own target and fields are unconstrained by the
+  returned row's, and the open-target rule applies to it as to any proposal.
+- `in_reply_to` is accepted only while phase 3 is effective; with phase 3 off a
+  non-empty value is refused naming `in_reply_to` (the argument is always in the
+  tool schema; the refusal is the only difference).
 - A proposal card with `in_reply_to` shows "Revised after your reply" and the
   quoted `reply_text` of the returned proposal, read through the proposal get
-  route.
+  route. While that read is pending the card shows the phase 2 card with no
+  quote; on a 404 or an error it shows "Revised after your reply" with no quote
+  and no retry (the next `coordinator.updated` or remount repeats the read).
 - A `returned` card shows "Returned with your condition: <reply text>" with no
   actions, plus **Send again** while `reply_delivered_at` is null. While
   this client's reply or deliver request is in flight, the card shows
@@ -413,6 +457,12 @@ nothing, so Send again stores the reply once.
   the returned proposal.
 
 ## Cards
+
+A `returned` proposal leaves Needs you, which lists `status=pending` only. Its
+card is shown by the copilot chat card and by the proposals list under
+`status=all`; the response of the reply request renders the returned state in
+place until the list refreshes, and **Send again** is offered on those two
+surfaces only.
 
 The **Reply with a condition** control is added to `ProposalCard` for
 `pending` proposals (not `failed`), for managers, while phase 3 is effective: a
@@ -424,7 +474,14 @@ shows the current state as approve does.
 ## Security
 
 - The reply route and the deliver route are on the coordinator's refused
-  list; the coordinator surface has no reply tool.
+  list the way approve and reject are
+  ([proposals](proposals.md#security)): `mcpcontract` gains the reserved MCP
+  action names `ActionReplyProposal` (`coordinator.reply_proposal`) and
+  `ActionDeliverReply` (`coordinator.deliver_reply`) in `DecisionActions`, with
+  no handler ever registered for either, so the guard answers a coordinator or
+  unresolved principal calling either name with the same unknown-action
+  response it gives approve and reject, and both routes are reachable only as
+  REST. The coordinator surface has no reply tool.
 - The relay read exposes a pending bundle and permission only for tasks in
   the coordinator's workspace, under `workspace.read`, the scope Needs you
   already needs.
@@ -433,7 +490,11 @@ shows the current state as approve does.
 
 ## Observability
 
-`coordinator_reply_total{delivered}` and
+`coordinator_reply_total{delivered}` (`delivered` is `true` or `false`; each
+reply request and each deliver request that runs delivery steps 1 to 4
+increments it once, with `true` when it ended with `reply_delivered_at` set
+and `false` otherwise, and a request that sent nothing because delivery was
+already recorded increments nothing) and
 `coordinator_relay_read_failed_total` counters, plus a warn log for each
 undelivered reply with the proposal id.
 

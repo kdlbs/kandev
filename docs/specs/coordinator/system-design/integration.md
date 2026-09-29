@@ -360,7 +360,6 @@ toward the 25 and does not hold its task's target slot).
   'pending'`. A `failed` proposal is refused with 409 because approve's retry
   of a failed create reconciles a task the failed attempt may already have
   created (the idempotent external id), and a reply would orphan it.
-  This narrows the `pending or failed` of [relay](relay.md#reply-route).
 - Not claimable, not swept: `ApproveProposal` and `approveKind` switch on the
   status and default to an unknown-status error; task 08 adds `returned` to
   the settled-conflict case of both (409 with the current proposal), and to
