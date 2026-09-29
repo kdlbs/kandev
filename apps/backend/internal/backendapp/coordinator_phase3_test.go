@@ -133,3 +133,15 @@ func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 		t.Fatalf("warn entries = %v, want one prune failure warning", logs.All())
 	}
 }
+
+func TestWireCoordinatorSpend_MissingDependenciesFailClosed(t *testing.T) {
+	svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, newTestLogger())
+	if err != nil {
+		t.Fatalf("initCoordinatorWiring: %v", err)
+	}
+	wireCoordinatorSpend(nil, svc, nil, nil)
+	reading, err := svc.Spend(context.Background(), &coordinator.Coordinator{ID: "c-1", WorkspaceID: "ws-1"}, time.Now().UTC())
+	if err == nil && reading.Measurable {
+		t.Fatalf("spend with no ledger read as measurable: %+v", reading)
+	}
+}

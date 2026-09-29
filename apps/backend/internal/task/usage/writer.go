@@ -48,6 +48,15 @@ type Writer struct {
 
 	events chan *usageEventPayload
 
+	// notices carries one (task, session) pair per committed row to the
+	// observer consumer. Only the worker sends and only Stop closes it, after
+	// the worker has been joined.
+	notices   chan usageNotice
+	observer  RecordedObserver
+	obsCtx    context.Context
+	obsCancel context.CancelFunc
+	obsWG     sync.WaitGroup
+
 	mu       sync.Mutex
 	started  bool
 	draining bool
@@ -62,7 +71,11 @@ type Writer struct {
 // log may be nil; metrics are still recorded, just not logged.
 func NewWriter(repo Repository, pricing PricingLookup, log *logger.Logger) *Writer {
 	workCtx, cancel := context.WithCancel(context.Background())
+	obsCtx, obsCancel := context.WithCancel(context.Background())
 	return &Writer{
+		notices:    make(chan usageNotice, observerQueueCapacity),
+		obsCtx:     obsCtx,
+		obsCancel:  obsCancel,
 		repo:       repo,
 		pricing:    pricing,
 		log:        log,
@@ -82,6 +95,8 @@ func (w *Writer) Start() {
 	w.started = true
 	w.wg.Add(1)
 	go w.run()
+	w.obsWG.Add(1)
+	go w.runObserver()
 }
 
 // Stop stops accepting new events, drains whatever is already buffered, and
@@ -102,6 +117,10 @@ func (w *Writer) Stop() {
 	timer := time.AfterFunc(drainDeadline, w.cancelWork)
 	defer timer.Stop()
 	w.wg.Wait()
+
+	close(w.notices)
+	w.obsCancel()
+	w.obsWG.Wait()
 }
 
 // Subscribe registers the writer's bus callback on the session-prompt-usage
@@ -198,6 +217,7 @@ func (w *Writer) processEvent(ctx context.Context, p *usageEventPayload) {
 	case err == nil:
 		w.recordWritten(event.CostSource, event.Provider)
 		w.publishUsageUpdated(ctx, event)
+		w.offerNotice(event.TaskID, event.SessionID)
 	case errors.Is(err, sqliterepo.ErrDuplicateUsageEvent):
 		w.recordDropped(dropReasonDuplicate, p.TaskID)
 	default:

@@ -130,6 +130,14 @@ type Service struct {
 	// kick asks the wake ticker to re-evaluate one coordinator; nil means no call.
 	kick func(ctx context.Context, coordinatorID string) error
 
+	// spendLedger, activeTurns and turnCanceller back spend and the ceiling
+	// stop; wired by SetSpendDeps. ceilingLocks holds one in-process
+	// try-lock per coordinator.
+	spendLedger   SpendLedger
+	activeTurns   ActiveTurnReader
+	turnCanceller TurnCanceller
+	ceilingLocks  keyedLock
+
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
 	afterApproveRecheck func()
