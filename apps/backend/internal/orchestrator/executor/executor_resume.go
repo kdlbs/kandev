@@ -1021,6 +1021,10 @@ type ResumeOptions struct {
 	// or a pinned follow-up dispatch. It does not change the global terminal
 	// session predicate or permit implicit resume paths.
 	AllowCompletedSessionResume bool
+	// RequireIdleSuspensionProvenance admits only a session parked by the
+	// workspace idle policy. It protects focus recovery from reviving a manual
+	// stop, cancellation, archive, or workflow-owned session.
+	RequireIdleSuspensionProvenance bool
 	// Origin carries the session ceiling's explicit automatic/manual launch
 	// classification ("automatic" or "manual") from the caller into
 	// ResumeTaskSessionWithOptions's admission gate. A plain string rather

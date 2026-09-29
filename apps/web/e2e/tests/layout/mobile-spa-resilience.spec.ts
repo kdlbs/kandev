@@ -5,6 +5,9 @@ import type { ConsoleMessage, Page, Route } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import type { AppState } from "../../../lib/state/store";
+import type { StoreApi } from "zustand";
+import { exposeNavigationStore } from "../task/task-navigation-helpers";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 const SETTINGS_URL = "/settings/system/updates";
@@ -176,6 +179,7 @@ test.describe("Mobile SPA resilience", () => {
     if (!task.session_id) throw new Error("multi-repository task has no session");
 
     const mobile = new MobileKanbanPage(testPage);
+    await exposeNavigationStore(testPage);
     await mobile.goto();
     await expect(mobile.taskCard(task.id)).toBeVisible();
 
@@ -190,11 +194,15 @@ test.describe("Mobile SPA resilience", () => {
     const repositoryPath = `/api/v1/workspaces/${seedData.workspaceId}/repositories`;
     const sessionPath = `/api/v1/task-sessions/${task.session_id}`;
     const repositoryPattern = new RegExp(
-      `${repositoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\?include_scripts=true$`,
+      `${repositoryPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\?include_scripts=true)?$`,
     );
     const sessionPattern = new RegExp(`${sessionPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
     const failRepositories = async (route: Route) => {
+      if (repositoryFailures > 0) {
+        await route.continue();
+        return;
+      }
       repositoryFailures += 1;
       repositoryObserved.resolve();
       await releaseFailures.promise;
@@ -205,9 +213,8 @@ test.describe("Mobile SPA resilience", () => {
       }
     };
     const failSession = async (route: Route) => {
-      // Fail the route loader's optional hydration request once. The mounted
-      // session reconciler is expected to retry authoritatively, and that
-      // recovery request must be allowed through.
+      // Fail the independent session refresh once; subsequent reconciliation
+      // requests remain available.
       if (sessionFailures > 0) {
         await route.continue();
         return;
@@ -225,10 +232,26 @@ test.describe("Mobile SPA resilience", () => {
     await testPage.route(repositoryPattern, failRepositories);
     await testPage.route(sessionPattern, failSession);
     try {
+      // Reproduce an unloaded repository cache so its domain hook refreshes
+      // independently of route hydration.
+      await testPage.evaluate((workspaceId) => {
+        const store = (window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> })
+          .__KANDEV_E2E_STORE__;
+        const repositories = store.getState().repositories;
+        store.setState({
+          repositories: {
+            ...repositories,
+            loadedByWorkspaceId: { ...repositories.loadedByWorkspaceId, [workspaceId]: false },
+          },
+        });
+      }, seedData.workspaceId);
       await mobile.taskCard(task.id).tap();
       await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
       await Promise.all([repositoryObserved.promise, sessionObserved.promise]);
-      await expect(testPage.getByRole("status").filter({ hasText: "Loading task…" })).toBeVisible();
+      await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+      await expect(testPage.getByRole("status").filter({ hasText: "Loading task…" })).toHaveCount(
+        0,
+      );
 
       releaseFailures.resolve();
       await Promise.all([repositorySettled.promise, sessionSettled.promise]);

@@ -5,9 +5,11 @@ import { useTranslation } from "react-i18next";
 import { IconChartBar, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { DrawerClose } from "@kandev/ui/drawer";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConversationUsage } from "@/hooks/domains/session/use-conversation-usage";
 import type { UsageResponse, UsageTokenBreakdown, UsageTurn } from "@/lib/types/conversation-usage";
 import {
@@ -345,8 +347,11 @@ function UsageDisclosure({ usage, close }: { usage: ConversationUsage; close: ()
 
 export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsageDisplayProps) {
   const { t } = useTranslation();
+  const label = t("task:conversationUsage.open");
   const [open, setOpen] = useState(false);
-  const touch = useTouchDrawer();
+  const { isMobile } = useResponsiveBreakpoint();
+  const touchDrawer = useTouchDrawer();
+  const touch = isMobile || touchDrawer;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const usage = useConversationUsage(taskId ?? null, sessionId);
   const hasUsage = (usage.totals?.event_count ?? 0) > 0;
@@ -365,13 +370,16 @@ export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsag
       ref={triggerRef}
       type="button"
       variant="ghost"
-      className={touch ? "h-11 min-w-11 gap-1 px-2 text-xs" : "h-8 gap-1 px-2 text-xs"}
-      aria-label={t("task:conversationUsage.open")}
+      className={
+        touch
+          ? "h-11 w-11 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          : "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      }
+      aria-label={label}
       data-testid="conversation-usage-trigger"
       onClick={openDisclosure}
     >
       <IconChartBar className="h-4 w-4" aria-hidden="true" />
-      <span>{t("task:conversationUsage.open")}</span>
     </Button>
   );
 
@@ -405,29 +413,34 @@ export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsag
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent
-        align="end"
-        side="top"
-        className="max-h-[min(75dvh,34rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-4"
-        data-testid="conversation-usage-popover"
-      >
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">{t("task:conversationUsage.title")}</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            aria-label={t("common:close")}
-            onClick={() => setOpen(false)}
-          >
-            <IconX className="h-4 w-4" />
-          </Button>
-        </div>
-        <UsageDisclosure usage={usage} close={() => setOpen(false)} />
-      </PopoverContent>
-    </Popover>
+    <Tooltip open={open ? false : undefined}>
+      <Popover open={open} onOpenChange={setOpen}>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{label}</TooltipContent>
+        <PopoverContent
+          align="end"
+          side="top"
+          className="max-h-[min(75dvh,34rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-4"
+          data-testid="conversation-usage-popover"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">{t("task:conversationUsage.title")}</h2>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              aria-label={t("common:close")}
+              onClick={() => setOpen(false)}
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </div>
+          <UsageDisclosure usage={usage} close={() => setOpen(false)} />
+        </PopoverContent>
+      </Popover>
+    </Tooltip>
   );
 }

@@ -1,4 +1,8 @@
-import { launchSession, type LaunchSessionRequest } from "@/lib/services/session-launch-service";
+import {
+  launchSession,
+  type LaunchActivationSource,
+  type LaunchSessionRequest,
+} from "@/lib/services/session-launch-service";
 import {
   buildResumeRequest,
   buildRestoreWorkspaceRequest,
@@ -34,6 +38,7 @@ export type SessionStatus = {
   is_agent_running: boolean;
   is_resumable: boolean;
   needs_resume: boolean;
+  is_idle_suspended?: boolean;
   auto_resume_allowed?: boolean;
   auto_resume_blocked_reason?: string;
   needs_workspace_restore?: boolean;
@@ -465,15 +470,18 @@ export async function resumeWithSilentFallback(
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-  canContinue: () => boolean = () => true,
+  options: { canContinue?: () => boolean; activationSource?: LaunchActivationSource } = {},
 ): Promise<boolean> {
+  const canContinue = options.canContinue ?? (() => true);
   if (!canContinue()) return false;
   const startingProjection = markSessionStarting(taskId, sessionId, session, setters);
   setters.setResumptionState("resuming");
   setters.setRecoveryFailure?.(null);
   const context = { taskId, sessionId, session, setters, canContinue };
   const resumeAttempt = await tryLaunch(
-    buildResumeRequest(taskId, sessionId, { activationSource: "session_open" }).request,
+    buildResumeRequest(taskId, sessionId, {
+      activationSource: options.activationSource ?? "session_open",
+    }).request,
     context,
   );
   return finishSilentResume(context, startingProjection, resumeAttempt);
@@ -518,6 +526,7 @@ export type ResumeAction = "running" | "skip" | "resume" | "restore" | "idle";
 
 export function decideResumeAction(status: SessionStatus, preventAutoStart: boolean): ResumeAction {
   if (status.is_agent_running) return "running";
+  if (status.is_idle_suspended) return "idle";
   if (status.auto_resume_allowed === false) return "idle";
   // Completed sessions remain passive until the user explicitly chooses the
   // completed-chat Resume action. Workspace recovery is separate and does not

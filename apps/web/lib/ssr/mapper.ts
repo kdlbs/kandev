@@ -43,6 +43,7 @@ function snapshotWorkflowStep(step: WorkflowSnapshot["steps"][number]) {
     session_target: step.session_target ?? null,
     profile_session_start_policy: step.profile_session_start_policy,
     profile_session_end_policy: step.profile_session_end_policy,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     complete_task_on_enter: step.complete_task_on_enter,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
     wip_limit: step.wip_limit,

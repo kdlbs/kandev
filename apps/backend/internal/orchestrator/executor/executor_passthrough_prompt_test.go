@@ -665,3 +665,32 @@ func TestExecutor_PromptWithDispatchCallback_RequiresCapableManager(t *testing.T
 		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)
 	}
 }
+
+func TestExecutor_PromptWithAdmissionCallback_RequiresCapableManager(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return false },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	beforeAdmissionCalled := false
+	onDispatchedCalled := false
+	_, err := exec.PromptWithAdmissionCallback(
+		context.Background(), "task-1", "sess-1", "hello", nil, false,
+		func() error {
+			beforeAdmissionCalled = true
+			return nil
+		},
+		func() { onDispatchedCalled = true },
+	)
+	if !errors.Is(err, ErrPromptAdmissionCallbackUnsupported) {
+		t.Fatalf("expected explicit prompt admission capability error, got: %v", err)
+	}
+	if beforeAdmissionCalled || onDispatchedCalled {
+		t.Fatal("callbacks must not run when the agent manager cannot revalidate admission")
+	}
+	if agentManager.promptAgentCallCount != 0 {
+		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)
+	}
+}
