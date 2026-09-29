@@ -17,6 +17,8 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+const BILLING_RULE = "never touch billing";
+
 describe("offerPrefill", () => {
   it("trims and cuts to the limit in code points", () => {
     expect(offerPrefill("  hi  ")).toBe("hi");
@@ -44,18 +46,64 @@ describe("RejectOfferHost", () => {
         onAdded={onAdded}
       />,
     );
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("never touch billing");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(BILLING_RULE);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /add|save/i }));
     });
     expect(addMock).toHaveBeenCalledWith("ws", "co", {
-      text: "never touch billing",
+      text: BILLING_RULE,
       source_proposal_id: "p-1",
     });
     expect(toastMock).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Standing order added.", variant: "success" }),
     );
     expect(onAdded).toHaveBeenCalled();
+  });
+
+  it("keeps the dialog open with an inline error when the save fails", async () => {
+    addMock.mockRejectedValueOnce(new Error("boom"));
+    const onClose = vi.fn();
+    const onAdded = vi.fn();
+    render(
+      <RejectOfferHost
+        {...base}
+        offer={{ proposalId: "p-1", reason: BILLING_RULE }}
+        onClose={onClose}
+        onAdded={onAdded}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /add|save/i }));
+    });
+    expect(screen.getByRole("alert")).not.toBeNull();
+    expect(screen.getByRole("dialog")).not.toBeNull();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(BILLING_RULE);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onAdded).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  it("stays open past the 10 second offer window and closes through onClose", () => {
+    vi.useFakeTimers();
+    try {
+      const onClose = vi.fn();
+      render(
+        <RejectOfferHost
+          {...base}
+          offer={{ proposalId: "p-1", reason: "x" }}
+          onClose={onClose}
+          onAdded={vi.fn()}
+        />,
+      );
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(screen.getByRole("dialog")).not.toBeNull();
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      expect(onClose).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("re-keys on a later offer so its reason wins", () => {

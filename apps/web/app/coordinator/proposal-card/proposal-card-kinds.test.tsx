@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
 import type {
@@ -129,6 +129,9 @@ function renderCard(
   );
 }
 
+const ORDER_TEXT = "Keep it small";
+const OFFER_ACTION = "Make it a standing order";
+
 describe("kind cards: title, target link and copy", () => {
   it("resume: title links to the task, with rationale and its policy line", () => {
     renderCard(row("resume"));
@@ -195,7 +198,7 @@ describe("kind cards: Shaped by", () => {
       {},
       {
         enabled: true,
-        orders: [order("o1", null, "Old rule"), order("o2", 2, "Keep it small")],
+        orders: [order("o1", null, "Old rule"), order("o2", 2, ORDER_TEXT)],
         offerReject: undefined,
       },
     );
@@ -204,6 +207,32 @@ describe("kind cards: Shaped by", () => {
       "Shaped by: Standing order 2",
       "Shaped by: a retired standing order",
     ]);
+  });
+
+  it("reveals the order text on hover, keyboard activation and tap", async () => {
+    renderCard(
+      row("resume", { standing_order_ids: ["o2"] }),
+      {},
+      {
+        enabled: true,
+        orders: [order("o2", 2, ORDER_TEXT)],
+        offerReject: undefined,
+      },
+    );
+    const label = screen.getByRole("button", { name: /Shaped by/ });
+    expect(screen.queryByText(ORDER_TEXT)).toBeNull();
+    fireEvent.mouseEnter(label);
+    expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
+    fireEvent.mouseLeave(label);
+    await waitFor(() => expect(screen.queryByText(ORDER_TEXT)).toBeNull());
+    label.focus();
+    fireEvent.keyDown(label, { key: "Enter" });
+    fireEvent.click(label);
+    expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
+    fireEvent.click(label);
+    await waitFor(() => expect(screen.queryByText(ORDER_TEXT)).toBeNull());
+    fireEvent.click(label);
+    expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
   });
 
   it("shows no label while the orders are unloaded, and the compact card omits Policy and Shaped by", () => {
@@ -319,8 +348,41 @@ describe("kind cards: reject offer", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm reject" }));
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Make it a standing order" }));
+    fireEvent.click(await screen.findByRole("button", { name: OFFER_ACTION }));
     expect(offerReject).toHaveBeenCalledWith({ proposalId: "p-1", reason: "Too noisy" });
+  });
+
+  it("keeps the offer for 10 seconds and then drops it", async () => {
+    vi.useFakeTimers();
+    try {
+      decisionState.current = {
+        busy: false,
+        approve: vi.fn(),
+        reject: vi.fn().mockResolvedValue({
+          kind: "decided",
+          proposal: row("resume", { status: "rejected" }),
+        }),
+      };
+      renderCard(row("resume"), {}, { enabled: true, orders: undefined, offerReject: vi.fn() });
+      fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+      fireEvent.change(screen.getByLabelText("Reason (optional)"), {
+        target: { value: "Too noisy" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Confirm reject" }));
+      });
+      expect(screen.getByRole("button", { name: OFFER_ACTION })).not.toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(9_000);
+      });
+      expect(screen.getByRole("button", { name: OFFER_ACTION })).not.toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1_500);
+      });
+      expect(screen.queryByRole("button", { name: OFFER_ACTION })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the plain toast for a blank reason", async () => {
@@ -338,7 +400,7 @@ describe("kind cards: reject offer", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm reject" }));
     });
-    expect(screen.queryByRole("button", { name: "Make it a standing order" })).toBeNull();
+    expect(screen.queryByRole("button", { name: OFFER_ACTION })).toBeNull();
   });
 });
 
