@@ -361,14 +361,133 @@ test.describe("Coordinator copilot", () => {
     const panelBox = await popover.boundingBox();
     expect(panelBox).not.toBeNull();
     await expect(card).toBeVisible();
-    const buttons = card.getByRole("button");
+    // Inline, not floating: no backdrop, and the list narrowed to clear the panel.
+    await expect(testPage.getByTestId("coordinator-copilot-popover-backdrop")).toHaveCount(0);
+    const cardBox = await card.boundingBox();
+    expect(cardBox).not.toBeNull();
+    expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(panelBox!.x + 1);
+    const buttons = card.getByRole("button").filter({ visible: true });
     const count = await buttons.count();
     expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i++) {
       const buttonBox = await buttons.nth(i).boundingBox();
-      if (!buttonBox) continue;
-      expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(panelBox!.x + 1);
+      expect(buttonBox).not.toBeNull();
+      expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(panelBox!.x + 1);
     }
+  });
+
+  test("a backdrop click closes the floating panel and returns focus to the launcher (AC .004.7, .004.8)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 900, height: 800 });
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Backdrop Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const popover = await openCopilot(testPage);
+    const backdrop = testPage.getByTestId("coordinator-copilot-popover-backdrop");
+    await expect(backdrop).toBeVisible();
+
+    await backdrop.click({ position: { x: 10, y: 300 } });
+    await expect(popover).not.toBeVisible();
+    await expect(testPage.getByTestId("coordinator-copilot-launcher")).toBeFocused();
+  });
+
+  test("the panel stays open across Needs you and Queue, closes on another coordinator, and a reload leaves it closed (AC .004.12)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Persist Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    const other = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Other Persist Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const popover = await openCopilot(testPage);
+    await sendMessage(popover, "/e2e:simple-message");
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    await testPage.getByTestId("count-working").click();
+    await expect(testPage).toHaveURL(/\/queue/);
+    await expect(popover).toBeVisible();
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible();
+
+    await testPage.getByTestId("coordinator-selector").click();
+    await testPage.getByRole("option", { name: other.name }).click();
+    await expect(testPage).toHaveURL(new RegExp(other.id));
+    await expect(popover).not.toBeVisible();
+    await expect(testPage.getByTestId("coordinator-copilot-launcher")).toBeVisible();
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const reopened = await openCopilot(testPage);
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    await expect(reopened).not.toBeVisible();
+    await expect(testPage.getByTestId("coordinator-copilot-launcher")).toBeVisible();
+  });
+
+  test("resizes by dragging the left edge, remembers the width across reloads, and stays within 320px and 95vw (AC .004.11)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Resize Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    const popover = await openCopilot(testPage);
+    const widthOf = async () => (await popover.boundingBox())!.width;
+    expect(Math.round(await widthOf())).toBe(500);
+
+    const dragHandle = async (deltaX: number) => {
+      const box = await testPage
+        .getByTestId("coordinator-copilot-popover-resize-handle")
+        .boundingBox();
+      const startX = box!.x + box!.width / 2;
+      const y = box!.y + box!.height / 2;
+      await testPage.mouse.move(startX, y);
+      await testPage.mouse.down();
+      await testPage.mouse.move(startX + deltaX, y, { steps: 5 });
+      await testPage.mouse.up();
+    };
+
+    await dragHandle(-120);
+    await expect.poll(widthOf).toBeGreaterThan(580);
+    const resized = Math.round(await widthOf());
+
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    const reopened = await openCopilot(testPage);
+    expect(Math.round((await reopened.boundingBox())!.width)).toBe(resized);
+
+    await dragHandle(-3000);
+    await expect.poll(widthOf).toBeLessThanOrEqual(1440 * 0.95 + 1);
+    // The stored width is not capped (only the rendered one is), so shrink past it.
+    await dragHandle(6000);
+    await expect.poll(async () => Math.round(await widthOf())).toBe(320);
   });
 
   test("a failure opening the conversation shows no composer and no session recovery feedback (AC .004.6, reachable row)", async ({
