@@ -145,14 +145,39 @@ repository query directly, not the flag-gated Inbox handler.
   for it and does not disable it.
   Readers and phase-3-off clients make no relay read and keep the phase 1 text
   and **Open task**.
+- An expanded item is held. The expanded state, the card kind chosen at
+  expansion (question or permission) and the panel's entered answer belong to
+  the item, keyed by task id, not to the task's current `pending_action`. While
+  an item is expanded the list keeps rendering it, at its position, when
+  `task.status_summary.updated` clears the `pending_action` or changes its
+  kind, when the viewer stops being a manager, and when phase 3 stops being
+  effective; none of these swaps or unmounts the card. The item is released
+  only when the manager collapses it through **Answer here**, an outcome
+  below collapses it, or a not-engaged expand read collapses it as described
+  above, and once collapsed it renders from the live task state,
+  so it leaves the list at once if the task no longer needs the manager. A
+  submit from a held item reaches the resolver (or, for a permission, the
+  permission response path), whose own lost, no-longer-active or stale outcome
+  applies; when the viewer is no longer allowed, the endpoint's refusal is a
+  failed outcome. Expanding again requires manager and phase 3.
+- When an outcome collapses the card, the item's cached relay result is
+  discarded and one fresh relay read is issued at once (latest request wins);
+  until it resolves with an answerable item the item shows the phase 1 text
+  and **Open task**, so **Answer here** never reappears on the answered
+  request.
 - **Answer here** renders `ClarificationPanelSection` with `pending`, the
   bundle `messages`, `maxHeightVh={50}` and an `onOutcome` handler, as
   `needs-you-inbox-row.tsx` does. Submission therefore goes through
   `use-clarification-group.ts` to `POST /api/v1/clarification/:id/respond`
   and the shared `Resolver.ResolveBundle`. The component's own submit control
   is disabled while a submission is in flight, so one click sends one request;
-  Try again resubmits the retained answer for the same `pending_id` without
-  rereading the bundle.
+  The component's own retry banner (`task:retry`, `data-testid`
+  `clarification-retry`) shows on a failed submit and replays its last action,
+  the answer or the skip, for the same `pending_id` without rereading the
+  bundle; the card adds no retry control of its own. The card passes the
+  props the Inbox row passes: `pending`, `messages`, `maxHeightVh`,
+  `onOutcome`, a no-op `onResolved` and the item's root element as
+  `shortcutScopeRef`, and passes neither `onLateAnswer` nor `lateAnswerState`.
 - Outcomes, from the component's `onOutcome`:
 
   | Outcome | Card |
@@ -161,7 +186,7 @@ repository query directly, not the flag-gated Inbox handler.
   | lost to another caller | collapse; toast with the Inbox row's existing copy: `needsYouInbox:anotherCallerRejected` when the winner's status is `rejected`, else `needsYouInbox:anotherCallerResolved` (including when the status is absent), with the bundle's first question text as `{question}`, or `needsYouInbox:questionFromAgent` when that text is empty (the Inbox row's fallback); no new copy |
   | no longer active | collapse; toast `needsYouInbox:bundleNoLongerActive` with the same `{question}` and fallback; no new copy |
   | late message admitted | not reachable on this card: the component reports it only when `onLateAnswer` is passed and the card passes none; no handler branch is required |
-  | failed | stay expanded with the answer kept; **Try again** |
+  | failed | stay expanded with the answer kept; the component's Retry (see above) |
 
 - A relay read with `clarification: null`, or a failed read, shows the phase
   1 text and **Open task**.
@@ -177,8 +202,25 @@ repository query directly, not the flag-gated Inbox handler.
 - A permission whose relay `options` list is empty is never returned by the
   relay read, so its item keeps the phase 1 text and **Open task**
   (`AC-COORDINATOR-RELAY-002.5`).
-- It renders the permission message's title, action details and the decision
-  buttons of the bullet below, and resolves through the same `permission.respond` WebSocket
+- On expand, the card applies the question card's read rules with these
+  substitutions. The identity of a request is its `request_id`: a read returning
+  a different `request_id` while the card is expanded and not engaged replaces
+  the rendered title, action summary and buttons, and the same `request_id`
+  never replaces them. A permission has no typed input, so the card is
+  "engaged" from the first click on a decision button for the rest of that
+  expansion (in flight or failed), and every read is ignored while engaged.
+  While not engaged, an expand read returning `permission: null` or a non-200
+  collapses the card to the phase 1 text, and an event read never collapses
+  it. A newer request that arrives after the manager engaged is reached only
+  through the resolver's stale outcome below.
+- It renders the permission message's title, the action summary and the decision
+  buttons of the bullet below. The action summary is the chat's:
+  `summarizePermissionAction(metadata.action_details, title)` from
+  `components/task/chat/messages/permission-action-summary.ts`, which picks the
+  first non-empty, non-title value of `description`, the `raw_input` pick,
+  `command`, `path`, `cwd` and truncates it; it is exported for the card, shown
+  in the chat's `permission-action-detail` element, and absent when it returns
+  null, and resolves through the same `permission.respond` WebSocket
   request `use-permission-handlers.ts` sends, with the message's `task_id`,
   `session_id`, `request_id` and `pending_id`. The backend's existing handler
   records the `PermissionResolutionAudit` with source `web` and the browser

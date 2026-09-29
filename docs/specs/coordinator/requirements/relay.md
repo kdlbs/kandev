@@ -72,10 +72,14 @@ Mockup:
   notice naming the winning outcome, or a generic answered notice when the
   winning outcome is unknown, no error); no longer active (the item closes with
   a notice); failed (the item stays expanded with the entered answer kept and
-  Try again). The notices reuse the Inbox row's existing copy. The card offers no
+  the component's own Retry, which replays the last action, answer or skip).
+  The notices reuse the Inbox row's existing copy. The card offers no
   late-answer recovery, so the late-message-admitted outcome cannot occur on it.
   When answering reveals another pending action on the task, the item follows
-  the next status event or list refresh.
+  the next status event or list refresh. An item the manager has expanded stays
+  in place, with its card and any entered answer, until one of these outcomes
+  or the manager collapses it, even when the task's pending action clears or
+  changes kind meanwhile; a submit then reaches the resolver's own outcome.
 - **AC-COORDINATOR-RELAY-001.4:** When the task has no answerable bundle, or
   the bundle cannot be read, the item shall show the phase 1 text and
   **Open task** only.
@@ -110,7 +114,7 @@ Mockup:
   `AC-COORDINATOR-NEEDS-YOU-002.5` for permissions while phase 3 is
   effective.
 - **AC-COORDINATOR-RELAY-002.2:** **Answer here** shall show the request's
-  title, action details and the same decision buttons the task chat shows for
+  title, the action summary the task chat shows for it and the same decision buttons the task chat shows for
   that request (Deny, Approve and, when offered, Always allow; or, for a
   request whose options carry Codex decisions, one button per such option), so
   a request offering two reject options shows one Deny button. Choosing one
@@ -120,7 +124,10 @@ Mockup:
   no longer pending, the item shall close with a notice; any other failure
   shall keep the item expanded with Try again, which sends the same option
   again. While a response is in flight every option button shall be disabled,
-  so one choice sends one request.
+  so one choice sends one request. As for a question, an expanded permission
+  item stays in place until it reaches one of these outcomes or the manager
+  collapses it, even when the task's pending action clears or changes kind
+  meanwhile.
 - **AC-COORDINATOR-RELAY-002.4:** Answering in place shall write no Inbox
   dismiss or snooze state and shall not itself add or remove Inbox rows; the
   Inbox keeps its own row set (D14). A permission answer leaves the Inbox rows
