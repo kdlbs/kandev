@@ -128,6 +128,9 @@ func registerCoordinatorRoutes(p routeParams) {
 		if p.taskRepo != nil && p.taskSvc != nil {
 			svc.SetRelayDeps(p.taskRepo, p.taskSvc)
 		}
+		if p.taskSvc != nil && p.orchestratorSvc != nil {
+			svc.SetReplyDeps(p.taskSvc, p.orchestratorSvc)
+		}
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}

@@ -38,6 +38,8 @@ const ActionListActivity = mcpcontract.ActionListActivity
 const (
 	ActionApproveProposal = mcpcontract.ActionApproveProposal
 	ActionRejectProposal  = mcpcontract.ActionRejectProposal
+	ActionReplyProposal   = mcpcontract.ActionReplyProposal
+	ActionDeliverReply    = mcpcontract.ActionDeliverReply
 )
 
 // DecisionActions is mcpcontract.DecisionActions, re-exported.
@@ -79,6 +81,9 @@ const (
 	ProposalStatusApproved  ProposalStatus = "approved"
 	ProposalStatusRejected  ProposalStatus = "rejected"
 	ProposalStatusFailed    ProposalStatus = "failed"
+	// ProposalStatusReturned is set only from pending, by a manager's reply
+	// with a condition. It is settled and not open.
+	ProposalStatusReturned ProposalStatus = "returned"
 )
 
 // ProposalSpec is the proposed task's shape, serialized into spec_json /
@@ -123,6 +128,14 @@ type Proposal struct {
 	RawSpec string
 	// RawFinalSpec is the frozen spec of a non-create_task kind, set once claimed.
 	RawFinalSpec string
+
+	// ReplyText, ReplyDeliveredAt and ReplyDeliveryClaimedAt are set by a
+	// reply with a condition; InReplyTo names the returned proposal a revised
+	// proposal answers.
+	ReplyText              *string
+	ReplyDeliveredAt       *time.Time
+	ReplyDeliveryClaimedAt *time.Time
+	InReplyTo              *string
 }
 
 // Proposal kinds.

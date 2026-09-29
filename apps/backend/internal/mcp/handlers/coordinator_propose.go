@@ -31,6 +31,7 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 		RepositoryID     string   `json:"repository_id"`
 		SourceTaskID     string   `json:"source_task_id"`
 		StandingOrderIDs []string `json:"standing_order_ids"`
+		InReplyTo        string   `json:"in_reply_to"`
 	}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -53,6 +54,7 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 		RepositoryID:     payload.RepositoryID,
 		SourceTaskID:     payload.SourceTaskID,
 		StandingOrderIDs: payload.StandingOrderIDs,
+		InReplyTo:        payload.InReplyTo,
 	}
 	proposal, openCount, err := h.coordinatorSvc.ProposeTask(ctx, principal.CoordinatorID, req)
 	if err != nil {

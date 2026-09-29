@@ -25,7 +25,11 @@ var ErrCoordinatorProposalCapReached = errors.New("coordinator: open proposal ca
 // reported as a coordinator's open_proposals count (decision 9).
 var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed}
 
-const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json`
+const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, reply_text, reply_delivered_at, reply_delivery_claimed_at, in_reply_to`
+
+// proposalInsertColumns are the columns a new proposal row sets; the reply
+// columns other than in_reply_to stay NULL until a reply.
+const proposalInsertColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, in_reply_to`
 
 // proposalRow is the DB scan target for coordinator_proposals.
 type proposalRow struct {
@@ -48,6 +52,11 @@ type proposalRow struct {
 	StandingIDs   string         `db:"standing_order_ids"`
 	StartsAgent   bool           `db:"starts_agent"`
 	OutcomeJSON   sql.NullString `db:"outcome_json"`
+
+	ReplyText              sql.NullString `db:"reply_text"`
+	ReplyDeliveredAt       sql.NullTime   `db:"reply_delivered_at"`
+	ReplyDeliveryClaimedAt sql.NullTime   `db:"reply_delivery_claimed_at"`
+	InReplyTo              sql.NullString `db:"in_reply_to"`
 }
 
 func (r *proposalRow) toProposal() (*Proposal, error) {
@@ -116,6 +125,18 @@ func (r *proposalRow) copyNullables(p *Proposal) {
 	}
 	if r.DecidedBy.Valid {
 		p.DecidedBy = &r.DecidedBy.String
+	}
+	if r.ReplyText.Valid {
+		p.ReplyText = &r.ReplyText.String
+	}
+	if r.ReplyDeliveredAt.Valid {
+		p.ReplyDeliveredAt = &r.ReplyDeliveredAt.Time
+	}
+	if r.ReplyDeliveryClaimedAt.Valid {
+		p.ReplyDeliveryClaimedAt = &r.ReplyDeliveryClaimedAt.Time
+	}
+	if r.InReplyTo.Valid {
+		p.InReplyTo = &r.InReplyTo.String
 	}
 }
 
@@ -197,11 +218,12 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 	p.UpdatedAt = now
 
 	_, err = exec.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO coordinator_proposals (`+proposalColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		INSERT INTO coordinator_proposals (`+proposalInsertColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		p.ID, p.CoordinatorID, p.WorkspaceID, string(p.Status), string(specJSON),
 		nil, nil, nil, nil, nil, nil, nil, p.CreatedAt, p.UpdatedAt,
-		p.Kind, nullableString(p.TargetTaskID), string(idsJSON), p.StartsAgent, nullableString(p.OutcomeJSON))
+		p.Kind, nullableString(p.TargetTaskID), string(idsJSON), p.StartsAgent, nullableString(p.OutcomeJSON),
+		nullableString(p.InReplyTo))
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
 	}

@@ -97,6 +97,7 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString(mcpcontract.FieldStepID, mcp.Description("Optional workflow step the task would be created in. Defaults to the workflow's start step")),
 			mcp.WithString(mcpKeyRepositoryID, mcp.Description("Optional repository the task would target")),
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
+			mcp.WithString("in_reply_to", mcp.Description("Optional id of a returned proposal of yours that this one revises after the manager's reply")),
 			standingOrderIDsOption(),
 		),
 		s.wrapHandler("propose_task_kandev", s.proposeTaskHandler()),
@@ -129,6 +130,7 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 			mcpcontract.FieldStepID:     req.GetString(mcpcontract.FieldStepID, ""),
 			mcpKeyRepositoryID:          req.GetString(mcpKeyRepositoryID, ""),
 			"source_task_id":            req.GetString("source_task_id", ""),
+			"in_reply_to":               req.GetString("in_reply_to", ""),
 			standingOrderIDsArg:         req.GetStringSlice(standingOrderIDsArg, nil),
 		}
 		var result map[string]interface{}

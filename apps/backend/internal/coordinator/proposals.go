@@ -59,6 +59,8 @@ type ProposeTaskRequest struct {
 	StepID       string
 	RepositoryID string
 	SourceTaskID string
+	// InReplyTo names the returned create_task proposal this one revises.
+	InReplyTo string
 	// StandingOrderIDs cites the standing orders that shaped the proposal.
 	StandingOrderIDs []string
 }
@@ -89,6 +91,9 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 	if !s.phase2 {
 		req.StandingOrderIDs = nil
 	}
+	if err := s.checkInReplyTo(ctx, found, req.InReplyTo); err != nil {
+		return nil, 0, err
+	}
 	if err := checkOrderIDsShape(req.StandingOrderIDs); err != nil {
 		return nil, 0, err
 	}
@@ -108,6 +113,7 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 		WorkspaceID:   found.WorkspaceID,
 		Spec:          spec,
 		StartsAgent:   startsAgent,
+		InReplyTo:     optString(req.InReplyTo),
 	}
 	if s.phase2 {
 		proposal.StandingOrderIDs = append([]string{}, req.StandingOrderIDs...)
@@ -349,4 +355,28 @@ func proposalStepNodes(steps []*wfmodels.WorkflowStep) []StepNode {
 		}
 	}
 	return nodes
+}
+
+// checkInReplyTo refuses an in_reply_to that does not name a returned
+// create_task proposal of this coordinator, and any non-empty value while
+// phase 3 is off. Several proposals may name one returned row.
+func (s *Service) checkInReplyTo(ctx context.Context, c *Coordinator, inReplyTo string) error {
+	if inReplyTo == "" {
+		return nil
+	}
+	refused := &FieldError{Field: "in_reply_to", Message: "in_reply_to must name a returned proposal of this coordinator"}
+	if !s.phase3 {
+		return refused
+	}
+	target, err := s.store.GetProposal(ctx, c.WorkspaceID, c.ID, inReplyTo, s.phase2)
+	if errors.Is(err, ErrNotFound) {
+		return refused
+	}
+	if err != nil {
+		return fmt.Errorf("read in_reply_to proposal: %w", err)
+	}
+	if target.Status != ProposalStatusReturned || replyKind(target) != ProposalKindCreateTask {
+		return refused
+	}
+	return nil
 }

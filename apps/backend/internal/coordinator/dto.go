@@ -267,6 +267,17 @@ type ProposalDTO struct {
 	// ProposalPhase2 is nil, and its fields are absent from the body, while
 	// the phase-2 flag is off.
 	*ProposalPhase2
+
+	// ProposalPhase3 is nil, and its fields are absent from the body, while
+	// the phase-3 flag is off.
+	*ProposalPhase3
+}
+
+// ProposalPhase3 holds the proposal wire fields added by phase 3.
+type ProposalPhase3 struct {
+	ReplyText        *string    `json:"reply_text"`
+	ReplyDeliveredAt *time.Time `json:"reply_delivered_at"`
+	InReplyTo        *string    `json:"in_reply_to"`
 }
 
 // ProposalPhase2 holds the proposal wire fields added by phase 2.
@@ -288,6 +299,18 @@ func NewProposalDTO(p *Proposal) *ProposalDTO {
 // raw stored JSON of any other kind.
 func NewProposalDTOFor(p *Proposal, phase2 bool) *ProposalDTO {
 	return newProposalDTO(p, phase2)
+}
+
+// NewProposalDTOPhases builds a ProposalDTO carrying the phase-2 fields when
+// phase2 is true and the phase-3 reply fields when phase3 is true.
+func NewProposalDTOPhases(p *Proposal, phase2, phase3 bool) *ProposalDTO {
+	dto := newProposalDTO(p, phase2)
+	if phase3 {
+		dto.ProposalPhase3 = &ProposalPhase3{
+			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo,
+		}
+	}
+	return dto
 }
 
 func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
@@ -358,10 +381,16 @@ type ProposalConflictResponse struct {
 // NewProposalConflictResponse builds the 409 body from the proposal row, as
 // re-read after the conflict.
 func NewProposalConflictResponse(p *Proposal, phase2 bool) *ProposalConflictResponse {
+	return NewProposalConflictResponsePhases(p, phase2, false)
+}
+
+// NewProposalConflictResponsePhases is NewProposalConflictResponse carrying
+// the phase-3 reply fields when phase3 is true.
+func NewProposalConflictResponsePhases(p *Proposal, phase2, phase3 bool) *ProposalConflictResponse {
 	return &ProposalConflictResponse{
 		Error:     ErrorCodeProposalConflict,
 		ErrorCode: ErrorCodeProposalConflict,
-		Proposal:  *NewProposalDTOFor(p, phase2),
+		Proposal:  *NewProposalDTOPhases(p, phase2, phase3),
 	}
 }
 

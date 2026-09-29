@@ -17,7 +17,7 @@ import (
 // re-runs Execute on a claim that has gone stale (see settleStaleKind).
 func (s *Service) approveKind(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
 	switch proposal.Status {
-	case ProposalStatusApproved, ProposalStatusRejected:
+	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned:
 		return nil, &ProposalConflictError{Proposal: proposal}
 	case ProposalStatusApproving:
 		return s.approveApprovingKind(ctx, proposal, edits)

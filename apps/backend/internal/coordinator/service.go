@@ -134,6 +134,10 @@ type Service struct {
 	relayReader RelayReader
 	relayTasks  RelayTasks
 
+	// replyMessenger and replyNotifier deliver a reply; nil until SetReplyDeps.
+	replyMessenger ReplyMessenger
+	replyNotifier  ReplyNotifier
+
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
 	afterApproveRecheck func()
