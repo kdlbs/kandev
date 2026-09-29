@@ -747,8 +747,15 @@ func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*w
 			if err != nil {
 				return nil, err
 			}
+			filter, err := h.coordinatorWatchFilter(ctx)
+			if err != nil {
+				return nil, err
+			}
 			dtos := make([]dto.WorkflowDTO, 0, len(workflows))
 			for _, w := range workflows {
+				if filter != nil && !filter.Contains(w.ID) {
+					continue
+				}
 				dtos = append(dtos, dto.FromWorkflow(w))
 			}
 			return dto.ListWorkflowsResponse{Workflows: dtos, Total: len(dtos)}, nil

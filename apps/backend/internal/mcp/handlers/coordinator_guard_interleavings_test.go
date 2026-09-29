@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -28,6 +29,8 @@ type guardFixture struct {
 	svc    *coordinator.Service
 	c      *coordinator.Coordinator
 	rawDB  *sqlx.DB
+	repo   *sqliterepo.Repository
+	store  *coordinator.Store
 	ctxFor func(binding *mcpprofile.CoordinatorToolPolicy, required bool) context.Context
 }
 
@@ -47,7 +50,7 @@ func newPhase2GuardFixture(t *testing.T) *guardFixture {
 	require.NoError(t, err)
 	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), allowAllAuthorizer{}, testLogger(t), coordinator.WithPhase2(true))
 
-	taskSvc, _ := newTestTaskService(t)
+	taskSvc, repo := newTestTaskService(t)
 	h := &Handlers{taskSvc: taskSvc, logger: testLogger(t).WithFields()}
 	h.SetCoordinatorService(svc)
 
@@ -57,7 +60,7 @@ func newPhase2GuardFixture(t *testing.T) *guardFixture {
 	c := &coordinator.Coordinator{WorkspaceID: workspaces[0].ID, Name: "c", AgentProfileID: "ap", ExecutorProfileID: "ep"}
 	require.NoError(t, store.CreateCoordinator(context.Background(), c))
 
-	f := &guardFixture{h: h, svc: svc, c: c, rawDB: writer}
+	f := &guardFixture{h: h, svc: svc, c: c, rawDB: writer, repo: repo, store: store}
 	f.ctxFor = func(binding *mcpprofile.CoordinatorToolPolicy, required bool) context.Context {
 		principal := coordinatorTestPrincipal(c.WorkspaceID)
 		principal.CoordinatorID = c.ID

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -195,7 +196,9 @@ func (h *Handlers) refuseCoordinator(
 }
 
 // coordinatorWatchesFields applies the effective watch set to the workflow a
-// read names, directly or through its task. A failed read fails closed.
+// read names, directly or through its task (a stall item names its task by
+// id). A read naming neither is not filtered here. A task without a workflow
+// is never watched, and a failed read fails closed.
 func (h *Handlers) coordinatorWatchesFields(
 	ctx context.Context, principal mcpscope.Principal, action string, fields map[string]json.RawMessage,
 ) bool {
@@ -203,22 +206,46 @@ func (h *Handlers) coordinatorWatchesFields(
 		return true
 	}
 	workflowID := jsonStringField(fields, "workflow_id")
-	if taskID := jsonStringField(fields, "task_id"); taskID != "" {
+	taskID := jsonStringField(fields, "task_id")
+	if action == coordinator.ActionGetItem && jsonStringField(fields, coordinatorItemFieldKind) == coordinatorItemKindStall {
+		taskID = strings.TrimSpace(jsonStringField(fields, "id"))
+	}
+	if taskID == "" && workflowID == "" {
+		return true
+	}
+	if taskID != "" {
 		task, err := h.taskSvc.GetTask(ctx, taskID)
 		if err != nil || task == nil {
 			return false
 		}
 		workflowID = task.WorkflowID
 	}
-	if workflowID == "" {
-		return true
-	}
+	return h.coordinatorWatchesWorkflow(ctx, principal, workflowID)
+}
+
+// coordinatorWatchesWorkflow reports whether the workflow is in the
+// coordinator's effective watch set; an unreadable set refuses.
+func (h *Handlers) coordinatorWatchesWorkflow(ctx context.Context, principal mcpscope.Principal, workflowID string) bool {
 	set, err := h.coordinatorSvc.EffectiveWatchSet(ctx, principal.CoordinatorID)
 	if err != nil {
 		h.logger.Error("coordinator watch set read failed; refusing", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
 		return false
 	}
 	return set.Contains(workflowID)
+}
+
+// coordinatorWatchFilter is the effective watch set a coordinator principal's
+// enumerating read is filtered by, or nil when the read is not filtered.
+func (h *Handlers) coordinatorWatchFilter(ctx context.Context) (*coordinator.WatchSet, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || !principal.IsCoordinator() || h.coordinatorSvc == nil || !h.coordinatorSvc.Phase2() {
+		return nil, nil
+	}
+	set, err := h.coordinatorSvc.EffectiveWatchSet(ctx, principal.CoordinatorID)
+	if err != nil {
+		return nil, err
+	}
+	return &set, nil
 }
 
 // authorizeCoordinatorReferenceFields checks the workspace_id, workflow_id
