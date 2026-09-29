@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-EVERYWHERE-001.5
   - AC-COORDINATOR-COPILOT-EVERYWHERE-001.6
   - AC-COORDINATOR-COPILOT-EVERYWHERE-001.7
+  - AC-COORDINATOR-COPILOT-EVERYWHERE-001.8
   - AC-COORDINATOR-COPILOT-EVERYWHERE-002.1
   - AC-COORDINATOR-COPILOT-EVERYWHERE-002.2
   - AC-COORDINATOR-COPILOT-EVERYWHERE-002.3
@@ -66,6 +67,21 @@ around.
   read (`002.4` client half; the server not-found half is task 02's guard);
   a foreign or unknown id sends only the id (`002.5`, a server test that
   the read tools return not found for another workspace's id).
+
+- Split the phase-1 `CoordinatorCopilot` into panel content plus wrappers, turn
+  `copilot-store.ts` into a `createCopilotStore()` factory with a store-handle
+  parameter on `useCoordinatorCopilot`, and keep the reset bridge on the
+  Coordinator instance only (see the design's Reuse boundary and Store).
+- Widen `CopilotItemRefKind` and `COORDINATOR_REFERENCED_PREFIX_RE` to
+  `workflow`, with unit cases.
+- The one standing-instruction sentence for `[workflow:<id>]` in
+  `apps/backend/internal/coordinator/prompt.go` with its `prompt_test.go`
+  case; a server test that read tools return not found for another workspace's
+  or an unknown task or workflow id.
+- The router hook that returns the resolved route kind with the same feature
+  options `SpaRoutes` passes, shared by the host and `SpaRoutes`.
+- The coordinator list read, its re-read triggers and the coordinator GET
+  re-fetch rules of the design's Host and Chip sections; `001.8`.
 
 ## Out of scope
 
@@ -124,7 +140,13 @@ sees no launcher; phone opens a sheet.
 
 - `apps/web/app/coordinator/copilot/workspace-copilot-host.tsx`,
   `coordinator-switcher.tsx`, `coordinator-copilot-chip.tsx`
-- `apps/web/hooks/domains/coordinator/copilot-store.ts`,
+- `apps/web/hooks/domains/coordinator/copilot-store.ts` (factory),
+  `apps/web/app/coordinator/copilot/coordinator-copilot.tsx`,
+  `use-coordinator-copilot.ts`, `apps/web/components/coordinator-copilot-reset-bridge.tsx`,
+  `apps/web/lib/coordinator/copilot-id.ts`,
+  `apps/web/components/task/chat/messages/user-message-body.tsx`,
+  `apps/backend/internal/coordinator/prompt.go` and `prompt_test.go`,
+  `apps/web/src/spa-routes.tsx` (route-kind hook),
   `use-coordinator-launcher.ts`, `use-page-context-chip.ts`
 - `apps/web/components/kanban-with-preview.tsx` (one right panel)
 - `apps/web/src/app-shell.tsx`, which mounts the host

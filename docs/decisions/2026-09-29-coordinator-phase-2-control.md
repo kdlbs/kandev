@@ -56,7 +56,7 @@ and adds D18 to D25.
 
 | # | Question | Decision | Status |
 | --- | --- | --- | --- |
-| D11 | Expand opens a Quick Chat tab of kind `"coordinator"`, or is dropped | **Dropped.** The copilot is a resizable right-side panel available on every page of the workspace (D12). A Quick Chat tab would put the same conversation in a second surface with its own lifecycle, and it would need a third `QuickChatSessionKind`. The mockup's "Expand into a Quick Chat tab" (v21-05) is not built. | proposed, G2 |
+| D11 | Expand opens a Quick Chat tab of kind `"coordinator"`, or is dropped | **Dropped.** The copilot is a resizable right-side panel available on every workspace page (the board, a task page and the Inbox) (D12). A Quick Chat tab would put the same conversation in a second surface with its own lifecycle, and it would need a third `QuickChatSessionKind`. The mockup's "Expand into a Quick Chat tab" (v21-05) is not built. | proposed, G2 |
 | D12 | Page context | Ids only. A page offers one chip, `{kind, id}`, with kind `task` or `workflow`. The client composes it into the phase-1 Ask about this prefix format, which carries the reference and a label: the task's display identifier, or for a board the workflow's name (a name the manager gave the board, not task content). Never a task title or any content. No chip is offered until its label has loaded, so a message never carries a placeholder label. The client attaches only ids of the active workspace. The server needs no new check, because every read the coordinator makes with that id passes the workspace and Watches guard: a foreign or unwatched id reads as not found. | proposed, G2 |
 | D13 | When a write action may first be `automatic` | Unchanged in substance: no write action is `automatic` in phase 2. The setting's value space includes `automatic` from the first stored policy, the May do UI shows it disabled, and the settings route refuses it with `automatic_not_available`. Phase 3 chooses the first `automatic` action from at least 30 days of log rows (D20) and lifts the refusal for that action only. | proposed, G2 |
 | D18 | Storage and editing of D17's settings | A policy per coordinator, shaped like the managed tool policy of ADR-2026-09-25 (#3994): a principal, a revision and an allowlist. **Stored value:** columns on `coordinators`: `policy_json` (a versioned action-to-setting map, NULL meaning the phase-1 policy), `policy_revision` and `watch_scope`, plus `coordinator_watches` rows. **Bound value:** at conversation open the service derives `CoordinatorToolPolicy{coordinator_id, workspace_id, conversation_task_id, policy_revision, tool_names}` and binds it to the conversation task's metadata under `kandev.coordinator_tool_policy`, as the managed tool policy is bound under `kandev.managed_tool_policy`. **Editing:** only through the coordinator settings routes, which require `workspace.manage`; the coordinator's surface has no route to it. A later move to a plugin maps `tool_names` onto the managed policy's `agent_tool_names` mechanically. | proposed, G2 |
@@ -161,8 +161,9 @@ because it only adds tools to the next session.
   happens only on a card that says it will.
 - **Merging:** merging a pull request and moving a task to Done stay human in
   every phase. The May do table shows both as "Always human".
-- **Copilot:** its store moves from the Coordinator route to the workspace
-  shell. The board's task preview and the copilot share the right side, one
+- **Copilot:** the workspace shell hosts a second copilot store instance and a
+  launcher beside the Coordinator screens' own; the Coordinator screens keep
+  theirs. The board's task preview and the copilot share the right side, one
   at a time.
 
 ## Alternatives considered
