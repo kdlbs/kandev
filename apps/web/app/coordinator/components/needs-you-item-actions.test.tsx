@@ -80,7 +80,7 @@ describe("stall Resume button", () => {
     expect(screen.getByRole("button", { name: "Show the evidence" })).not.toBeNull();
   });
 
-  it("disables while in flight, sends once, then reads Resuming with a stable name and a status", async () => {
+  it("disables while in flight, sends once, then reads Resuming as both its name and label, with a status", async () => {
     let resolve!: (value: unknown) => void;
     launchMock.mockReturnValue(new Promise((res) => (resolve = res)));
     renderActions(stall("FAILED"));
@@ -90,7 +90,8 @@ describe("stall Resume button", () => {
     expect(launchMock).toHaveBeenCalledTimes(1);
     expect(button.disabled).toBe(true);
     await act(async () => resolve({ success: true }));
-    const after = screen.getByRole("button", { name: "Resume" }) as HTMLButtonElement;
+    expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+    const after = screen.getByRole("button", { name: "Resuming" }) as HTMLButtonElement;
     expect(after.textContent).toBe("Resuming");
     expect(after.disabled).toBe(true);
     expect(screen.getByRole("status").textContent).toBe("Resuming this task.");
@@ -102,7 +103,7 @@ describe("stall Resume button", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     });
-    expect(screen.getByRole("button", { name: "Resume" }).textContent).toBe("Resume queued");
+    expect(screen.getByRole("button", { name: "Resume queued" }).textContent).toBe("Resume queued");
   });
 
   it("shows a generic alert on refusal, never the raw text, and re-enables the button", async () => {

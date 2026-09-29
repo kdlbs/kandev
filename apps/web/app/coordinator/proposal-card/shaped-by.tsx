@@ -37,7 +37,7 @@ function ShapedByLabel({ order }: { order: StandingOrder }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="cursor-pointer text-xs/relaxed underline decoration-dotted"
+          className="cursor-pointer text-xs/relaxed underline decoration-dotted max-md:min-h-11 pointer-coarse:min-h-11"
           onMouseEnter={() => setOpen(true)}
           onMouseLeave={() => {
             if (!pinned) setOpen(false);

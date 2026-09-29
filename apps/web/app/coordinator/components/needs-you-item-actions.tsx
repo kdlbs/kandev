@@ -50,14 +50,11 @@ function ResumeAction({ task, sessionId }: { task: AttentionTask; sessionId: str
       <Button
         variant="outline"
         size="sm"
-        aria-label={t("coordinator:resume")}
         disabled={locked}
         className={cn("cursor-pointer", !isFinePointer && "min-h-11 min-w-11")}
         onClick={() => resumeStalledTask(task.id, sessionId)}
       >
-        {entry?.phase === "sending" && (
-          <Spinner aria-label={t("coordinator:resumeSending")} className="mr-1.5" />
-        )}
+        {entry?.phase === "sending" && <Spinner aria-hidden="true" className="mr-1.5" />}
         {resumeLabel(entry, t)}
       </Button>
       <span role="status" className="sr-only">

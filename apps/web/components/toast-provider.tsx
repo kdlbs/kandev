@@ -164,7 +164,7 @@ function ToastActionButton({
   return (
     <button
       type="button"
-      className="pointer-events-auto cursor-pointer text-xs font-medium underline"
+      className="pointer-events-auto cursor-pointer text-xs font-medium underline max-md:min-h-11 pointer-coarse:min-h-11"
       onClick={() => {
         action.onClick();
         onDone();

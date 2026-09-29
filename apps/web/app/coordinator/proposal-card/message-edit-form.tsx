@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Field, FieldContent, FieldError, FieldLabel } from "@kandev/ui/field";
@@ -28,6 +28,7 @@ export function MessageEditForm({
   onCancel,
 }: MessageEditFormProps) {
   const { t } = useTranslation();
+  const fieldId = useId();
   const [value, setValue] = useState(text);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = value.trim();
@@ -48,11 +49,9 @@ export function MessageEditForm({
     <form className="space-y-3" onSubmit={handleSubmit}>
       <Field>
         <FieldContent>
-          <FieldLabel htmlFor="proposal-edit-message">
-            {t("coordinator:editMessageLabel")}
-          </FieldLabel>
+          <FieldLabel htmlFor={fieldId}>{t("coordinator:editMessageLabel")}</FieldLabel>
           <Textarea
-            id="proposal-edit-message"
+            id={fieldId}
             ref={areaRef}
             value={value}
             disabled={busy}
