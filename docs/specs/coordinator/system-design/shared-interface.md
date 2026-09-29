@@ -51,7 +51,7 @@ methods that take no `exec` and write or open a transaction (the phase-1
 `CompleteProposal`, `FailProposal`, `RejectProposal`, `InsertProposal`,
 `ReclaimStale`, `PatchCoordinator`), any service method that calls them, and
 `s.db` used for anything except `s.db.Rebind`. Reader-pool reads (`s.ro`, for
-example a goal baseline or `Service.Policy`) are allowed in principle but are
+example `Service.Policy`) are allowed in principle but are
 performed before the lock, so the value they return is not part of the locked
 state. A test calls `withCoordinatorLock` with an `fn` that runs a statement on
 the handle and asserts it commits. The source scan in the task 01 tests fails

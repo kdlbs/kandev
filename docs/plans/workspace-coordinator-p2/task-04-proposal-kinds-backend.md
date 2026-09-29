@@ -57,6 +57,11 @@ creates, and `standing_order_ids` on every propose tool.
   open proposal, read first, before target validation, so a repeat call
   returns it even after the target stopped validating, and repeated under
   the lock (`001.5`).
+- The end-state catalog test that the registered coordinator tools equal
+  `ToolNames(policy, true)` for every policy, and the `001.4` walk of the
+  `KindExecutor` registry asserting no kind merges or targets a
+  `CompleteTaskOnEnter` step. The three propose tools' `ToolForAction` rows
+  and handlers are registered here.
 - `start_agent` for creates: `EligibleStep` widened only while
   `requires_approval`, `starts_agent` stored, `auto_start_on_create` marker
   on approval, and the approve-time 409 `policy_denied` (`002.1` to `002.3`).
