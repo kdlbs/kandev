@@ -5,20 +5,21 @@ import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
-import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
+import type { PermissionActionType } from "@/lib/types/permission";
+import {
+  allowAlwaysDecision,
+  approveDecision,
+  buildPermissionRespondRequest,
+  denyDecision,
+  isStalePermissionResponse,
+  offeredChoiceDecision,
+  offeredChoices as toOfferedChoices,
+  type PermissionActionChoice,
+  type PermissionDecision,
+  type PermissionOption,
+} from "@/lib/permissions/respond";
 
-export type PermissionOption = {
-  option_id: string;
-  name: string;
-  kind: PermissionOptionKind;
-  metadata?: Record<string, unknown>;
-};
-
-export type PermissionActionChoice = {
-  option_id: string;
-  label: string;
-  kind: PermissionOptionKind;
-};
+export type { PermissionActionChoice, PermissionOption };
 
 export type PermissionActionDetails = {
   command?: string;
@@ -34,11 +35,7 @@ export type PermissionActionDetails = {
   raw_input?: Record<string, unknown>;
 };
 
-type RespondPermission = (
-  optionId: string,
-  cancelled?: boolean,
-  rejected?: boolean,
-) => Promise<void>;
+type RespondPermission = (decision: PermissionDecision) => Promise<void>;
 
 export type PermissionRequestMetadata = {
   request_id?: string;
@@ -80,13 +77,6 @@ export function resolvePermissionAvailability(
   return { permissionStatus: "expired", isPermissionPending: false };
 }
 
-function isStalePermissionResponse(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return ["permission_not_found", "permission_stale", "permission_already_resolved"].some((code) =>
-    error.message.includes(code),
-  );
-}
-
 type UsePermissionHandlersParams = {
   permissionMetadata: PermissionRequestMetadata | undefined;
   permissionMessage: Message | undefined;
@@ -108,7 +98,7 @@ export function usePermissionResponseHandlers({
   }, [requestId]);
 
   const handleRespond = useCallback(
-    async (optionId: string, cancelled: boolean = false, rejected: boolean = false) => {
+    async (decision: PermissionDecision) => {
       if (!permissionMessage) return;
       if (!requestId) {
         setIsUnavailable(true);
@@ -122,15 +112,18 @@ export function usePermissionResponseHandlers({
       }
       setIsResponding(true);
       try {
-        await client.request("permission.respond", {
-          task_id: permissionMessage.task_id,
-          session_id: permissionMessage.session_id,
-          request_id: requestId,
-          pending_id: permissionMetadata.pending_id,
-          option_id: cancelled ? undefined : optionId,
-          cancelled,
-          rejected,
-        });
+        await client.request(
+          "permission.respond",
+          buildPermissionRespondRequest(
+            {
+              task_id: permissionMessage.task_id,
+              session_id: permissionMessage.session_id,
+              request_id: requestId,
+              pending_id: permissionMetadata.pending_id,
+            },
+            decision,
+          ),
+        );
       } catch (error) {
         console.error("Failed to respond to permission request:", error);
         if (currentRequestIdRef.current !== requestId) return;
@@ -149,41 +142,23 @@ export function usePermissionResponseHandlers({
     [permissionMessage, permissionMetadata, requestId],
   );
 
-  // "Approve" is the one-shot allow. Prefer an explicit allow_once option and
-  // only fall back to allow_always when the agent offers nothing else, so the
-  // dedicated "Always allow" button (handleAllowAlways) stays distinct.
   const handleApprove = useCallback(() => {
-    const options = permissionMetadata?.options ?? [];
-    const allowOption =
-      options.find((opt) => opt.kind === "allow_once") ??
-      options.find((opt) => opt.kind === "allow_always");
-    if (allowOption) handleRespond(allowOption.option_id);
+    const decision = approveDecision(permissionMetadata?.options ?? []);
+    if (decision) handleRespond(decision);
   }, [permissionMetadata, handleRespond]);
 
-  // "Always allow" maps to the agent's allow_always option, telling the agent
-  // to persist the decision so the same action is not re-prompted. Only some
-  // agents offer it (Cursor does); hasAllowAlways gates the button.
-  const allowAlwaysOption = useMemo(
-    () => permissionMetadata?.options.find((opt) => opt.kind === "allow_always"),
+  // Only some agents offer allow_always (Cursor does); hasAllowAlways gates the button.
+  const allowAlways = useMemo(
+    () => allowAlwaysDecision(permissionMetadata?.options ?? []),
     [permissionMetadata],
   );
-  const hasAllowAlways = !!allowAlwaysOption;
+  const hasAllowAlways = !!allowAlways;
   const handleAllowAlways = useCallback(() => {
-    if (allowAlwaysOption) handleRespond(allowAlwaysOption.option_id);
-  }, [allowAlwaysOption, handleRespond]);
+    if (allowAlways) handleRespond(allowAlways);
+  }, [allowAlways, handleRespond]);
 
   const handleReject = useCallback(() => {
-    const rejectOption = permissionMetadata?.options.find(
-      (opt) => opt.kind === "reject_once" || opt.kind === "reject_always",
-    );
-    if (rejectOption) {
-      // rejected=true tells the backend to persist "rejected" status without
-      // treating this as a dialog cancellation (cancelled=true would race with
-      // the EventTypePermissionCancelled → "expired" update path).
-      handleRespond(rejectOption.option_id, false, true);
-    } else {
-      handleRespond("", true);
-    }
+    handleRespond(denyDecision(permissionMetadata?.options ?? []));
   }, [permissionMetadata, handleRespond]);
 
   const { offeredChoices, handleOfferedChoice } = useOfferedDecisionHandlers(
@@ -208,52 +183,15 @@ function useOfferedDecisionHandlers(
   handleRespond: RespondPermission,
 ) {
   const offeredChoices: PermissionActionChoice[] = useMemo(
-    () =>
-      (permissionMetadata?.options ?? [])
-        .filter((option) => option.metadata?.codex_app_server === true)
-        .map((option) => ({
-          option_id: option.option_id,
-          kind: option.kind,
-          label: codexDecisionLabel(option),
-        })),
+    () => toOfferedChoices(permissionMetadata?.options ?? []),
     [permissionMetadata],
   );
   const handleOfferedChoice = useCallback(
     (optionId: string) => {
-      const option = permissionMetadata?.options.find(
-        (candidate) =>
-          candidate.option_id === optionId && candidate.metadata?.codex_app_server === true,
-      );
-      if (!option) return;
-      if (option.metadata?.codex_decision === "cancel") {
-        handleRespond("", true);
-        return;
-      }
-      const rejected = option.kind === "reject_once" || option.kind === "reject_always";
-      handleRespond(option.option_id, false, rejected);
+      const decision = offeredChoiceDecision(permissionMetadata?.options ?? [], optionId);
+      if (decision) handleRespond(decision);
     },
     [permissionMetadata, handleRespond],
   );
   return { offeredChoices, handleOfferedChoice };
-}
-
-function codexDecisionLabel(option: PermissionOption): string {
-  switch (option.metadata?.codex_decision) {
-    case "accept":
-      return t("task:approve");
-    case "accept_for_session":
-      return t("task:alwaysAllow");
-    case "decline":
-      return t("task:deny");
-    case "cancel":
-      return t("common:cancel");
-    case "accept_with_execpolicy_amendment":
-      return t("task:approveWithCommandPolicy");
-    case "apply_network_policy_allow":
-      return t("task:allowNetworkAccess");
-    case "apply_network_policy_deny":
-      return t("task:blockNetworkAccess");
-    default:
-      return option.name;
-  }
 }
