@@ -2785,7 +2785,7 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 
 	// A coordinator session's agentctl instance does not consult its own
 	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
-	// injected-MCP approval; only the exact six-tool coordinator allowlist
+	// injected-MCP approval; only the exact seven-tool coordinator allowlist
 	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
 	switch {
 	case m.cfg.McpMode == mcpmode.Coordinator:

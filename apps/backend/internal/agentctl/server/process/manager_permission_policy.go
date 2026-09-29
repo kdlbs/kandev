@@ -18,7 +18,7 @@ import (
 // server/config/config.go.
 const injectedKandevMCPServerName = "kandev"
 
-// coordinatorAutoApprovedTools is the exact six-tool allowlist a coordinator
+// coordinatorAutoApprovedTools is the exact seven-tool allowlist a coordinator
 // session auto-approves, regardless of the profile's auto_approve flag or
 // AGENTCTL_AUTO_APPROVE_PERMISSIONS
 // (docs/specs/coordinator/system-design/copilot.md#permission-policy).
@@ -28,13 +28,14 @@ var coordinatorAutoApprovedTools = map[string]bool{
 	"list_workflows_kandev":        true,
 	"list_workflow_steps_kandev":   true,
 	"list_repositories_kandev":     true,
+	"get_coordinator_item_kandev":  true,
 	"propose_task_kandev":          true,
 }
 
 // autoApproveCoordinatorPermission auto-approves a permission request from a
 // coordinator session's agent only when it carries the same host-injected
 // MCP provenance as autoApproveInjectedKandevPermission and its tool name
-// parses to server "kandev" and one of the six coordinator tool names, each
+// parses to server "kandev" and one of the seven coordinator tool names, each
 // compared as the full string, never by prefix. It is the only auto-approval
 // path consulted in coordinator mode: the blanket AutoApprovePermissions
 // flag and the generic "any kandev tool" injected-MCP approval are both
