@@ -33,6 +33,12 @@ const (
 // s.decisionTasks and s.decisionSteps must be wired via SetDecisionDeps
 // before this is called.
 func (s *Service) validateProposalSpec(ctx context.Context, workspaceID string, spec ProposalSpec) (ProposalSpec, error) {
+	return s.validateProposalSpecFor(ctx, workspaceID, spec, false)
+}
+
+// validateProposalSpecFor is validateProposalSpec with the agent-starting
+// clauses of the step check relaxed for a proposal stored with starts_agent.
+func (s *Service) validateProposalSpecFor(ctx context.Context, workspaceID string, spec ProposalSpec, relaxed bool) (ProposalSpec, error) {
 	title := strings.TrimSpace(spec.Title)
 	if n := utf8.RuneCountInString(title); n == 0 || n > proposalTitleMaxRunes {
 		return ProposalSpec{}, &FieldError{
@@ -61,7 +67,7 @@ func (s *Service) validateProposalSpec(ctx context.Context, workspaceID string, 
 	if err := s.validateWorkflowInWorkspace(ctx, workspaceID, spec.WorkflowID); err != nil {
 		return ProposalSpec{}, err
 	}
-	if err := s.validateStepEligible(ctx, spec.WorkflowID, spec.StepID); err != nil {
+	if err := s.validateStepEligible(ctx, spec.WorkflowID, spec.StepID, relaxed); err != nil {
 		return ProposalSpec{}, err
 	}
 	if spec.RepositoryID != "" {
@@ -146,7 +152,7 @@ func (s *Service) validateSourceTaskInWorkspace(ctx context.Context, workspaceID
 // exists, so a step-graph read error here is a genuine read failure, not a
 // missing-workflow case (a deleted workflow yields an empty graph, which
 // this reports as "the step does not belong to the workflow").
-func (s *Service) validateStepEligible(ctx context.Context, workflowID, stepID string) error {
+func (s *Service) validateStepEligible(ctx context.Context, workflowID, stepID string, relaxed bool) error {
 	if stepID == "" {
 		return &FieldError{Field: ApproveFieldStepID, Message: "step_id is required"}
 	}
@@ -164,7 +170,11 @@ func (s *Service) validateStepEligible(ctx context.Context, workflowID, stepID s
 	if !belongs {
 		return &FieldError{Field: ApproveFieldStepID, Message: "the step does not belong to the workflow"}
 	}
-	if !EligibleStep(nodes, stepID) {
+	eligible := EligibleStep(nodes, stepID)
+	if relaxed {
+		eligible = EligibleStartingStep(nodes, stepID)
+	}
+	if !eligible {
 		return &FieldError{Field: ApproveFieldStepID, Message: "the step is not an eligible step"}
 	}
 	return nil

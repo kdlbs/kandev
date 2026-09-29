@@ -138,5 +138,6 @@ type StepNode struct {
 	IsStart          bool
 	AllowManualMove  bool
 	AutoStartOnEnter bool
+	CompletesOnEnter bool
 	PullFromStepID   string
 }

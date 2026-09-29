@@ -59,6 +59,8 @@ type ProposeTaskRequest struct {
 	StepID       string
 	RepositoryID string
 	SourceTaskID string
+	// StandingOrderIDs cites the standing orders that shaped the proposal.
+	StandingOrderIDs []string
 }
 
 // SetProposalDeps registers the readers ProposeTask needs to validate a
@@ -84,7 +86,11 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 	if err != nil {
 		return nil, 0, err
 	}
-	spec, err := s.buildProposalSpec(ctx, found.WorkspaceID, req)
+	if err := checkOrderIDsShape(req.StandingOrderIDs); err != nil {
+		return nil, 0, err
+	}
+	relaxed := s.phase2 && s.policyFor(found).Allows(ActionStartAgent)
+	spec, startsAgent, err := s.buildProposalSpec(ctx, found.WorkspaceID, req, relaxed)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -98,8 +104,21 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 		CoordinatorID: coordinatorID,
 		WorkspaceID:   found.WorkspaceID,
 		Spec:          spec,
+		StartsAgent:   startsAgent,
 	}
-	if err := s.store.InsertProposalWith(ctx, proposal, s.phase2, nil, s.recordProposed); err != nil {
+	if s.phase2 {
+		proposal.StandingOrderIDs = append([]string{}, req.StandingOrderIDs...)
+	}
+	pre := func(ctx context.Context, tx coordinatorExec) (*Proposal, error) {
+		return nil, s.checkOrdersActive(ctx, tx, coordinatorID, req.StandingOrderIDs)
+	}
+	inTx := func(ctx context.Context, tx coordinatorExec, p *Proposal) error {
+		if err := s.recordProposed(ctx, tx, p); err != nil {
+			return err
+		}
+		return s.store.MarkApplied(ctx, tx, coordinatorID, req.StandingOrderIDs, p.CreatedAt)
+	}
+	if err := s.store.InsertProposalWith(ctx, proposal, s.phase2, pre, inTx); err != nil {
 		return nil, 0, err
 	}
 	openCount, err := s.store.CountOpenProposals(ctx, coordinatorID, s.phase2)
@@ -131,22 +150,22 @@ func (s *Service) recordProposed(ctx context.Context, tx coordinatorExec, p *Pro
 // AC-COORDINATOR-PROPOSALS-001.3, defaults an omitted step to the workflow's
 // start step per .2, and runs EligibleStep on the resolved step. Every
 // failure is a *FieldError naming the offending field.
-func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req ProposeTaskRequest) (ProposalSpec, error) {
+func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req ProposeTaskRequest, relaxed bool) (ProposalSpec, bool, error) {
 	title := strings.TrimSpace(req.Title)
 	if n := utf8.RuneCountInString(title); n < proposalTitleMinRunes || n > proposalTitleMaxRunes {
-		return ProposalSpec{}, &FieldError{
+		return ProposalSpec{}, false, &FieldError{
 			Field:   "title",
 			Message: fmt.Sprintf("title must be %d to %d characters", proposalTitleMinRunes, proposalTitleMaxRunes),
 		}
 	}
 	if utf8.RuneCountInString(req.Description) > proposalTextMaxRunes {
-		return ProposalSpec{}, &FieldError{
+		return ProposalSpec{}, false, &FieldError{
 			Field:   "description",
 			Message: fmt.Sprintf("description must be at most %d characters", proposalTextMaxRunes),
 		}
 	}
 	if utf8.RuneCountInString(req.Rationale) > proposalTextMaxRunes {
-		return ProposalSpec{}, &FieldError{
+		return ProposalSpec{}, false, &FieldError{
 			Field:   "rationale",
 			Message: fmt.Sprintf("rationale must be at most %d characters", proposalTextMaxRunes),
 		}
@@ -158,19 +177,19 @@ func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req
 		func(w *taskmodels.Workflow) string { return w.WorkspaceID }, workspaceID,
 		&FieldError{Field: "workflow_id", Message: "workflow not found in this workspace"},
 	); err != nil {
-		return ProposalSpec{}, err
+		return ProposalSpec{}, false, err
 	}
 
 	if err := s.validateProposalSourceTask(ctx, workspaceID, req.SourceTaskID); err != nil {
-		return ProposalSpec{}, err
+		return ProposalSpec{}, false, err
 	}
 	if err := s.validateProposalRepository(ctx, workspaceID, req.RepositoryID); err != nil {
-		return ProposalSpec{}, err
+		return ProposalSpec{}, false, err
 	}
 
-	stepID, err := s.resolveProposalStep(ctx, req.WorkflowID, req.StepID)
+	stepID, startsAgent, err := s.resolveProposalStep(ctx, req.WorkflowID, req.StepID, relaxed)
 	if err != nil {
-		return ProposalSpec{}, err
+		return ProposalSpec{}, false, err
 	}
 
 	return ProposalSpec{
@@ -181,7 +200,7 @@ func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req
 		StepID:       stepID,
 		RepositoryID: req.RepositoryID,
 		SourceTaskID: req.SourceTaskID,
-	}, nil
+	}, startsAgent, nil
 }
 
 // checkProposalWatched refuses a proposal whose workflow, or whose source
@@ -266,27 +285,34 @@ func resolveWorkspaceScopedRef[T any](
 // resolveProposalStep defaults an empty stepID to workflowID's start step,
 // otherwise checks stepID belongs to workflowID, then runs EligibleStep
 // against the workflow's full step graph either way.
-func (s *Service) resolveProposalStep(ctx context.Context, workflowID, stepID string) (string, error) {
+func (s *Service) resolveProposalStep(ctx context.Context, workflowID, stepID string, relaxed bool) (string, bool, error) {
 	steps, err := s.proposalSteps.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
-		return "", fmt.Errorf("list workflow steps: %w", err)
+		return "", false, fmt.Errorf("list workflow steps: %w", err)
 	}
 
 	trimmed := strings.TrimSpace(stepID)
 	if trimmed == "" {
 		startID, ok := proposalStartStepID(steps)
 		if !ok {
-			return "", &FieldError{Field: ApproveFieldStepID, Message: "workflow has no start step"}
+			return "", false, &FieldError{Field: ApproveFieldStepID, Message: "workflow has no start step"}
 		}
 		trimmed = startID
 	} else if !proposalStepBelongsToWorkflow(steps, trimmed) {
-		return "", &FieldError{Field: ApproveFieldStepID, Message: "step does not belong to this workflow"}
+		return "", false, &FieldError{Field: ApproveFieldStepID, Message: "step does not belong to this workflow"}
 	}
 
-	if !EligibleStep(proposalStepNodes(steps), trimmed) {
-		return "", &FieldError{Field: ApproveFieldStepID, Message: "step is not an eligible placement for a proposed task"}
+	nodes := proposalStepNodes(steps)
+	if relaxed {
+		if !EligibleStartingStep(nodes, trimmed) {
+			return "", false, &FieldError{Field: ApproveFieldStepID, Message: "step is not an eligible placement for a proposed task"}
+		}
+		return trimmed, StartsAgentOnEnter(nodes, trimmed), nil
 	}
-	return trimmed, nil
+	if !EligibleStep(nodes, trimmed) {
+		return "", false, &FieldError{Field: ApproveFieldStepID, Message: "step is not an eligible placement for a proposed task"}
+	}
+	return trimmed, false, nil
 }
 
 func proposalStartStepID(steps []*wfmodels.WorkflowStep) (string, bool) {
@@ -315,6 +341,7 @@ func proposalStepNodes(steps []*wfmodels.WorkflowStep) []StepNode {
 			IsStart:          step.IsStartStep,
 			AllowManualMove:  step.AllowManualMove,
 			AutoStartOnEnter: step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent),
+			CompletesOnEnter: step.CompleteTaskOnEnter,
 			PullFromStepID:   step.PullFromStepID,
 		}
 	}

@@ -28,6 +28,20 @@ func EligibleStep(steps []StepNode, stepID string) bool {
 	return true
 }
 
+// EligibleStartingStep is EligibleStep with the agent-starting clauses
+// relaxed: the step exists, is the start step or allows manual moves, and does
+// not complete the task on enter. It is used only while start_agent needs
+// approval, and the caller stores StartsAgentOnEnter for the disclosure.
+func EligibleStartingStep(steps []StepNode, stepID string) bool {
+	for _, step := range steps {
+		if step.ID != stepID {
+			continue
+		}
+		return !step.CompletesOnEnter && (step.IsStart || step.AllowManualMove)
+	}
+	return false
+}
+
 // feedsInto reports whether target is reachable from fromStepID by walking
 // pull_from_step_id links. A visited set guards against a cycle in the
 // feeder graph.
