@@ -295,10 +295,11 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID     string `json:"task_id"`
-	SessionID  string `json:"session_id"`
-	Action     string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
-	ErrorStamp string `json:"error_stamp,omitempty"`
+	TaskID         string                        `json:"task_id"`
+	SessionID      string                        `json:"session_id"`
+	Action         string                        `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+	SettingsPolicy executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+	ErrorStamp     string                        `json:"error_stamp,omitempty"`
 }
 
 func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -359,6 +360,13 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if req.SettingsPolicy != executor.ResumeSettingsPolicyStrict &&
+		req.SettingsPolicy != executor.ResumeSettingsPolicyProviderRestored {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery settings policy", nil)
+	}
+	if req.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored && req.Action != "resume" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "provider-restored settings policy requires the explicit resume action", nil)
+	}
 	// Cancel an in-progress transient provider retry loop and surface
 	// the manual recovery banner. Distinct from resume/fresh_start: it does not
 	// relaunch the agent, it stops the backoff timer.
@@ -373,8 +381,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Action == "relocate_and_resume" && req.ErrorStamp == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required for managed clone recovery", nil)
 	}
-
-	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action, req.ErrorStamp)
+	resp, err := h.service.RecoverSessionWithSettingsPolicy(
+		ctx, req.TaskID, req.SessionID, req.Action, req.SettingsPolicy, req.ErrorStamp,
+	)
 	if err != nil {
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr

@@ -3167,6 +3167,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	options executor.ResumeOptions,
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 ) (*executor.TaskExecution, error) {
+	if err := validateSessionRecoverySettingsPolicyAction(recoveryActionResume, options.SettingsPolicy); err != nil {
+		return nil, err
+	}
 	entryBinding := ceilingEntryBindingFromContext(ctx)
 	s.logger.Debug("resuming task session",
 		zap.String("task_id", taskID),
@@ -3232,6 +3235,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, err
 	}
 	if !owner {
+		if options.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
+			return nil, fmt.Errorf("provider-restored recovery is already owned by another resume attempt")
+		}
 		if continuation != nil {
 			// A compound retry cannot safely hand its prompt to an attempt owned
 			// by another caller. The owner may finish and remove the registry
@@ -3257,6 +3263,23 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, ErrResumeAttemptCancelled
 	}
 	defer attempt.finish(s.resumeAttemptStore())
+	if options.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
+		currentSession, loadErr := s.repo.GetTaskSession(ctx, sessionID)
+		if loadErr != nil {
+			return nil, fmt.Errorf("reload session at provider-restored recovery admission: %w", loadErr)
+		}
+		if currentSession == nil || currentSession.TaskID != taskID {
+			return nil, fmt.Errorf("session not found at provider-restored recovery admission")
+		}
+		if err := s.validateProviderRestoredRecoveryEligibility(ctx, taskID, currentSession); err != nil {
+			return nil, err
+		}
+		if !s.resumeAttemptStore().setSettingsPolicy(attempt, options.SettingsPolicy) {
+			return nil, ErrResumeAttemptCancelled
+		}
+		options.SettingsPolicy = s.resumeAttemptStore().settingsPolicy(attempt)
+		session = currentSession
+	}
 	resumeCtx := cancellableResumeContext(attempt)
 	decorateResumeFailure := func(failure error) error {
 		return s.withSessionRecoveryFailureIdentity(

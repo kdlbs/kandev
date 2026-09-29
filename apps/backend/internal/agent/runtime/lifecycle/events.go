@@ -158,8 +158,14 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		FailureCode:        execution.FailureCode,
 		FailureDetails:     execution.FailureDetails,
 		ProviderError:      execution.ProviderError,
-		ExitCode:           execution.ExitCode,
-		PromptGeneration:   execution.promptGeneration,
+		SessionSettingsPolicy: func() streams.SessionSettingsPolicy {
+			if execution.SessionSettingsPolicy == SessionSettingsPolicyProviderRestored {
+				return streams.SessionSettingsPolicyProviderRestored
+			}
+			return ""
+		}(),
+		ExitCode:         execution.ExitCode,
+		PromptGeneration: execution.promptGeneration,
 	}
 	if evidence != nil {
 		payload.EvidenceKnown = evidence.EvidenceKnown
@@ -328,6 +334,8 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		Error:                       event.Error,
 		ProviderError:               event.ProviderError,
 		SessionStatus:               event.SessionStatus,
+		SessionSettingsPolicy:       event.SessionSettingsPolicy,
+		SessionSettingsGeneration:   event.SessionSettingsGeneration,
 		PromptGeneration:            event.PromptGeneration,
 		RetractedMessageIDs:         append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                      event.TurnID,

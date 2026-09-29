@@ -69,6 +69,10 @@ function useStoppedRecoveryChoices(
     choices.push({
       kind: "resume",
       label: props.resumeLabel ?? t("task:resume"),
+      disclosure:
+        !completed && props.actions.providerRestoredResumeEligible
+          ? t("task:providerRestoredResumeDisclosure")
+          : undefined,
       disabled: !profileExists,
       testId: "recovery-resume-button",
       onClick: () => {

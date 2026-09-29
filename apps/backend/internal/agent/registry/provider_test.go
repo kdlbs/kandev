@@ -227,6 +227,30 @@ func TestProvide_MockProviders_RegistersExtraAliases(t *testing.T) {
 	}
 }
 
+func TestProvide_E2EMockAuggieIsExplicitlyOptIn(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_AUGGIE", "true")
+
+	log := newTestLogger()
+	reg, cleanup, err := Provide(log)
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	provider, ok := reg.Get("auggie")
+	if !ok {
+		t.Fatal("expected explicit E2E Auggie mock alias")
+	}
+	if _, isMock := provider.(*agents.MockAgent); !isMock {
+		t.Fatalf("auggie provider = %T, want *agents.MockAgent", provider)
+	}
+	if !provider.Enabled() {
+		t.Fatal("explicit E2E Auggie mock alias must be enabled")
+	}
+}
+
 // TestProvide_MockProviders_SkipsUnknownIDs verifies that entries in
 // KANDEV_MOCK_PROVIDERS not present in RoutableProviderIDs are skipped
 // with a warning (not registered).

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { SessionStoppedBannerProps } from "./session-stopped-banner";
+import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
 const MORE_OPTIONS = "More options";
@@ -205,6 +206,35 @@ describe("SessionStoppedBanner basics", () => {
   });
 });
 
+describe("SessionStoppedBanner provider-restored Resume", () => {
+  it("discloses skipped settings before Resume for eligible recovery", () => {
+    const recoveryActions: SessionRecoveryActions = {
+      providerRestoredResumeEligible: true,
+      busyAction: null,
+      recoveryError: null,
+      branchDetails: null,
+      guardDetails: null,
+      managedCloneRecoveryStamp: null,
+      lastFailedAction: null,
+      recoveryNotice: null,
+      manualRecoveryFailure: null,
+      handleRecover: vi.fn().mockResolvedValue(true),
+      handleRetry: vi.fn().mockResolvedValue(true),
+      handleRestore: vi.fn().mockResolvedValue(undefined),
+      handleNewBranch: vi.fn().mockResolvedValue(true),
+      handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
+    };
+    render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
+
+    const disclosure = screen.getByTestId("provider-restored-resume-disclosure");
+    const resume = screen.getByTestId(RESUME_BUTTON_TEST_ID);
+    expect(disclosure.textContent).toBe("task:providerRestoredResumeDisclosure");
+    expect(
+      disclosure.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
 describe("SessionStoppedBanner recovery failures", () => {
   it("keeps a typed branch error visible and offers explicit continuation", async () => {
     const branchError = new WebSocketRequestError(
@@ -360,6 +390,7 @@ function guardRecoveryActions(
     busyAction: null,
     recoveryError: new Error(message),
     branchDetails: null,
+    providerRestoredResumeEligible: false,
     guardDetails: { kind: "session_recovery_in_progress", retryable: true },
     recoveryNotice: null,
     managedCloneRecoveryStamp: null,

@@ -146,6 +146,70 @@ it("preserves bootstrap restore eligibility and separate cause details", () => {
   expect(document.body.textContent).toContain("original cause");
 });
 
+describe("read-only recovery presentation", () => {
+  it("does not repeat the read-only status below its title", () => {
+    const notice = "Workspace restored in read-only mode";
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{
+            sessionId: "session",
+            kind: "generic",
+            error: { message: "Workspace recovery failed.", phase: "bootstrap" },
+          }}
+          actions={{ ...actions, recoveryNotice: notice, manualRecoveryFailure: null }}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
+
+    const title = screen.getByRole("heading", { name: notice });
+    expect(title.getAttribute("aria-live")).toBe("polite");
+    expect(title.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getAllByText(notice)).toHaveLength(1);
+  });
+
+  it("keeps a distinct recovery failure visible and announced", () => {
+    const recoveryError = new Error("The provider rejected the restored session.");
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{
+            sessionId: "session",
+            kind: "generic",
+            error: { message: "Workspace recovery failed.", phase: "bootstrap" },
+          }}
+          actions={{
+            ...actions,
+            recoveryError,
+            recoveryNotice: null,
+            manualRecoveryFailure: { operation: "resume" },
+          }}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
+
+    const error = screen.getByTestId("session-recovery-error");
+    expect(error.getAttribute("role")).toBe("status");
+    expect(error.textContent).toContain("Failed to resume session");
+  });
+});
+
 it("shows only the confirmed managed clone relocation action", () => {
   render(
     <StateProvider

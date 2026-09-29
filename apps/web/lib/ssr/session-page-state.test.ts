@@ -260,6 +260,68 @@ describe("fetchSessionDataForTask model hydration", () => {
       configOptions: [expect.objectContaining({ id: "effort", currentValue: "high" })],
     });
   });
+
+  it("hydrates provider-restored effective model and mode over saved launch overrides", async () => {
+    const session = {
+      ...makeSession(),
+      metadata: {
+        runtime_config: { model: "saved-model", mode: "saved-mode" },
+        runtime_config_overrides: { model: "saved-override-model", mode: "saved-override-mode" },
+        acp_model_state: {
+          settings_policy: "provider_restored",
+          current_model_id: "effective-model",
+          current_mode_id: "effective-mode",
+          models: [{ model_id: "effective-model", name: "Effective Model" }],
+          config_options: [],
+        },
+      },
+    };
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.fetchTaskSession.mockResolvedValue({ session });
+
+    const result = await fetchSessionDataForTask(TASK_ID);
+    const initialState = result.initialState as unknown as Partial<AppState>;
+
+    expect(initialState.sessionModels?.bySessionId[session.id]).toMatchObject({
+      currentModelId: "effective-model",
+      settingsPolicy: "provider_restored",
+    });
+    expect(initialState.sessionMode?.bySessionId[session.id]).toMatchObject({
+      currentModeId: "effective-mode",
+      settingsPolicy: "provider_restored",
+    });
+  });
+
+  it("keeps unknown provider-restored selectors empty instead of reviving saved inputs", async () => {
+    const session = {
+      ...makeSession(),
+      metadata: {
+        runtime_config: { model: "saved-model", mode: "saved-mode" },
+        runtime_config_overrides: { model: "saved-override-model", mode: "saved-override-mode" },
+        acp_model_state: {
+          settings_policy: "provider_restored",
+          current_model_id: "",
+          current_mode_id: "",
+          models: [],
+          config_options: [],
+        },
+      },
+    };
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.fetchTaskSession.mockResolvedValue({ session });
+
+    const result = await fetchSessionDataForTask(TASK_ID);
+    const initialState = result.initialState as unknown as Partial<AppState>;
+
+    expect(initialState.sessionModels?.bySessionId[session.id]).toMatchObject({
+      currentModelId: "",
+      settingsPolicy: "provider_restored",
+    });
+    expect(initialState.sessionMode?.bySessionId[session.id]).toMatchObject({
+      currentModeId: "",
+      settingsPolicy: "provider_restored",
+    });
+  });
 });
 
 describe("fetchSessionDataForTask agent hydration", () => {

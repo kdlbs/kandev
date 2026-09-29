@@ -400,54 +400,77 @@ func TestInitializeAndPromptWithLayers_UnadvertisedModelFailsBeforeInference(t *
 	}
 }
 
-func TestInitializeAndPromptWithLayers_HoldsPromptWhenModeIsUnconfirmed(t *testing.T) {
-	mock := newMockAgentServer(t)
-	t.Cleanup(mock.Close)
-	mock.handler = func(msg ws.Message) *ws.Message {
-		if msg.Action == "agent.session.set_mode" {
-			response, _ := ws.NewResponse(msg.ID, msg.Action, agentctl.ModeResult{
-				Requested: "plan",
+func TestInitializeAndPromptWithLayers_AuggieTaskRejectsUnappliedMode(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentID   string
+		result    agentctl.ModeResult
+		refused   bool
+		wantError string
+	}{
+		{name: "unconfirmed", result: agentctl.ModeResult{Requested: "plan"}, wantError: "confirmed"},
+		{name: "clamped", result: agentctl.ModeResult{Requested: "plan", Effective: "default", Confirmed: true}, wantError: "not applied"},
+		{name: "refused", refused: true, wantError: "apply requested permission mode"},
+		{name: "other provider still requires confirmation", agentID: "codex", result: agentctl.ModeResult{Requested: "plan"}, wantError: "confirmed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newMockAgentServer(t)
+			t.Cleanup(mock.Close)
+			mock.handler = func(msg ws.Message) *ws.Message {
+				if msg.Action == "agent.session.set_mode" {
+					if tc.refused {
+						response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "mode refused", nil)
+						return response
+					}
+					response, _ := ws.NewResponse(msg.ID, msg.Action, tc.result)
+					return response
+				}
+				return mock.defaultHandler(msg)
+			}
+
+			log := newSessionTestLogger()
+			stopCh := newTestStopCh(t)
+			sm := NewSessionManager(log, stopCh)
+			sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), nil, nil, nil)
+			client := createTestClient(t, mock.server.URL)
+			disconnected := connectAgentStream(t, mock, client)
+			t.Cleanup(func() {
+				closeStopChOnce(stopCh)
+				client.Close()
+				select {
+				case <-disconnected:
+				case <-time.After(5 * time.Second):
+					t.Error("agent stream did not finish draining during cleanup")
+				}
 			})
-			return response
-		}
-		return mock.defaultHandler(msg)
-	}
+			agentID := tc.agentID
+			if agentID == "" {
+				agentID = "auggie"
+			}
+			execution := &AgentExecution{
+				ID: "exec-mode-unapplied", TaskID: "task-mode-unapplied", SessionID: "session-mode-unapplied",
+				TaskScope: TaskLaunchScopeTask, WorkspacePath: "/workspace", agentctl: client,
+				promptDoneCh: make(chan PromptCompletionSignal, 1),
+			}
+			agentConfig := &testAgent{id: agentID, enabled: true, runtimeConfig: &agents.RuntimeConfig{
+				Cmd: agents.NewCommand(agentID), Protocol: agent.ProtocolACP,
+				SessionConfig: agents.SessionConfig{}, ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+			}}
 
-	log := newSessionTestLogger()
-	stopCh := newTestStopCh(t)
-	sm := NewSessionManager(log, stopCh)
-	sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), nil, nil, nil)
-	client := createTestClient(t, mock.server.URL)
-	disconnected := connectAgentStream(t, mock, client)
-	t.Cleanup(func() {
-		closeStopChOnce(stopCh)
-		client.Close()
-		select {
-		case <-disconnected:
-		case <-time.After(5 * time.Second):
-			t.Error("agent stream did not finish draining during cleanup")
-		}
-	})
-	execution := &AgentExecution{
-		ID: "exec-mode-unconfirmed", TaskID: "task-mode-unconfirmed", SessionID: "session-mode-unconfirmed",
-		WorkspacePath: "/workspace", agentctl: client, promptDoneCh: make(chan PromptCompletionSignal, 1),
-	}
-	agentConfig := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{
-		Cmd: agents.NewCommand("test-agent"), Protocol: agent.ProtocolACP,
-		SessionConfig: agents.SessionConfig{}, ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
-	}}
-
-	err := sm.InitializeAndPromptWithLayers(
-		context.Background(), execution, agentConfig, "do work", nil, nil,
-		func(string) error { return nil }, "", "plan", nil, "", "", nil, StartModelPolicy{},
-	)
-	if err == nil || !strings.Contains(err.Error(), "plan") || !strings.Contains(err.Error(), "confirmed") {
-		t.Fatalf("unconfirmed mode error = %v, want mode-specific confirmation error", err)
-	}
-	for _, action := range mock.getActionLog() {
-		if action == "agent.prompt" {
-			t.Fatal("initial prompt was dispatched with an unconfirmed explicit mode")
-		}
+			err := sm.InitializeAndPromptWithLayers(
+				context.Background(), execution, agentConfig, "do work", nil, nil,
+				func(string) error { return nil }, "", "plan", nil, "", "", nil, StartModelPolicy{},
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("mode error = %v, want %q", err, tc.wantError)
+			}
+			for _, action := range mock.getActionLog() {
+				if action == "agent.prompt" {
+					t.Fatal("initial prompt was dispatched with an unapplied explicit mode")
+				}
+			}
+		})
 	}
 }
 
@@ -616,6 +639,198 @@ func TestInitializeAndPromptWithLayers_ReappliesModeAfterResumeBeforePrompt(t *t
 	}
 }
 
+func TestInitializeAndPromptWithLayers_ProviderRestoredOmitsSavedStartupSettings(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	var mu sync.Mutex
+	var loadedSessionID string
+	var configWrites []struct{ id, value, policy string }
+	var promptTexts []string
+	mock.handler = func(msg ws.Message) *ws.Message {
+		switch msg.Action {
+		case "agent.session.load":
+			var request struct {
+				SessionID string `json:"session_id"`
+			}
+			_ = msg.ParsePayload(&request)
+			mu.Lock()
+			loadedSessionID = request.SessionID
+			mu.Unlock()
+			response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"success":    true,
+				"session_id": request.SessionID,
+				"model_state": streams.SessionModelState{
+					CurrentModelID: "provider-default",
+					Models: []streams.SessionModelInfo{
+						{ModelID: "profile-model"}, {ModelID: "runtime-model"},
+					},
+					ConfigOptions: []streams.ConfigOption{
+						{ID: "primary_model", CurrentValue: "provider-default"},
+						{ID: "PRIMARY_MODEL", Category: "model", CurrentValue: "provider-default"},
+						{ID: "permission_level", CurrentValue: "default"},
+						{ID: "permission_mode", Category: "mode", CurrentValue: "default"},
+						{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "medium"},
+					},
+					ConfigOptionsSettled: true,
+				},
+			})
+			return response
+		case "agent.session.set_config_option":
+			var request struct {
+				ConfigID              string `json:"config_id"`
+				Value                 string `json:"value"`
+				SessionSettingsPolicy string `json:"session_settings_policy"`
+			}
+			_ = msg.ParsePayload(&request)
+			mu.Lock()
+			configWrites = append(configWrites, struct{ id, value, policy string }{request.ConfigID, request.Value, request.SessionSettingsPolicy})
+			mu.Unlock()
+		case "agent.prompt":
+			var request struct {
+				Text string `json:"text"`
+			}
+			_ = msg.ParsePayload(&request)
+			mu.Lock()
+			promptTexts = append(promptTexts, request.Text)
+			mu.Unlock()
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	eventBus := &MockEventBusWithTracking{}
+	sm.SetDependencies(NewEventPublisher(eventBus, log), nil, nil, nil)
+	client := createTestClient(t, mock.server.URL)
+	disconnected := connectAgentStream(t, mock, client)
+	t.Cleanup(func() {
+		closeStopChOnce(stopCh)
+		client.Close()
+		select {
+		case <-disconnected:
+		case <-time.After(5 * time.Second):
+			t.Error("agent stream did not finish draining during cleanup")
+		}
+	})
+	execution := &AgentExecution{
+		ID: "exec-provider-restored", TaskID: "task-provider-restored", SessionID: "session-provider-restored",
+		ACPSessionID: "saved-native-token", TaskScope: TaskLaunchScopeTask,
+		SessionSettingsPolicy: SessionSettingsPolicyProviderRestored, WorkspacePath: "/workspace", agentctl: client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	agentConfig := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{
+		Cmd: agents.NewCommand("test-agent"), Protocol: agent.ProtocolACP,
+		SessionConfig:  agents.SessionConfig{NativeSessionResume: true},
+		ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+	}}
+	profileOptions := map[string]string{
+		"primary_model": "saved-profile-model", "permission_mode": "saved-profile-mode",
+		"permission_level": "saved-profile-level", "reasoning_effort": "profile-effort",
+	}
+	runtimeOptions := map[string]string{
+		"primary_model": "saved-runtime-model", "permission_mode": "saved-runtime-mode",
+		"permission_level": "saved-runtime-level", "reasoning_effort": "runtime-effort",
+	}
+	profileOptionsBefore := map[string]string{}
+	for id, value := range profileOptions {
+		profileOptionsBefore[id] = value
+	}
+	runtimeOptionsBefore := map[string]string{}
+	for id, value := range runtimeOptions {
+		runtimeOptionsBefore[id] = value
+	}
+	readyCalls := 0
+	err := sm.InitializeAndPromptWithLayers(
+		context.Background(), execution, agentConfig, "", nil, nil,
+		func(string) error { readyCalls++; return nil },
+		"profile-model", "saved-profile-mode", profileOptions,
+		"runtime-model", "saved-runtime-mode", runtimeOptions,
+		StartModelPolicy{RequireExactModel: true},
+	)
+	if err != nil {
+		t.Fatalf("InitializeAndPromptWithLayers: %v", err)
+	}
+	if !execution.isSessionInitialized() {
+		t.Fatal("provider-restored session was not initialized")
+	}
+	if readyCalls != 1 {
+		t.Fatalf("mark ready calls = %d, want 1", readyCalls)
+	}
+	mu.Lock()
+	gotLoadedSessionID := loadedSessionID
+	gotConfigWrites := append([]struct{ id, value, policy string }(nil), configWrites...)
+	mu.Unlock()
+	if gotLoadedSessionID != "saved-native-token" {
+		t.Fatalf("session/load token = %q, want saved-native-token", gotLoadedSessionID)
+	}
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.new" || action == "agent.session.set_model" || action == "agent.session.set_mode" {
+			t.Errorf("provider-restored startup must not issue %q", action)
+		}
+	}
+	if len(gotConfigWrites) != 2 || gotConfigWrites[0] != (struct{ id, value, policy string }{"reasoning_effort", "profile-effort", string(streams.SessionSettingsPolicyProviderRestored)}) || gotConfigWrites[1] != (struct{ id, value, policy string }{"reasoning_effort", "runtime-effort", string(streams.SessionSettingsPolicyProviderRestored)}) {
+		t.Errorf("startup config writes = %v, want profile then runtime reasoning_effort with provider_restored provenance", gotConfigWrites)
+	}
+	if !reflect.DeepEqual(profileOptions, profileOptionsBefore) || !reflect.DeepEqual(runtimeOptions, runtimeOptionsBefore) {
+		t.Fatal("startup filtering mutated the saved profile/runtime options")
+	}
+	var sessionModelEvents []*AgentStreamEventData
+	for _, payload := range eventBus.getStreamEvents() {
+		if payload.Data != nil && payload.Data.Type == streams.EventTypeSessionModels {
+			sessionModelEvents = append(sessionModelEvents, payload.Data)
+		}
+	}
+	if len(sessionModelEvents) == 0 {
+		t.Fatal("expected provider-restored lifecycle session_models reports")
+	}
+	for _, event := range sessionModelEvents {
+		if event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+			t.Errorf("session_models settings policy = %q, want provider_restored", event.SessionSettingsPolicy)
+		}
+	}
+	manager := newTestManager(t)
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("register recovered execution for later selectors: %v", err)
+	}
+	if err := manager.SetSessionModel(context.Background(), execution.ID, "user-selected-model"); err != nil {
+		t.Fatalf("later explicit model selection: %v", err)
+	}
+	if err := manager.SetSessionMode(context.Background(), execution.ID, "", "user-selected-mode"); err != nil {
+		t.Fatalf("later explicit mode selection: %v", err)
+	}
+	dispatched := make(chan struct{}, 1)
+	if _, err := sm.SendPromptWithDispatchCallback(context.Background(), execution, "next prompt", false, nil, true, func() {
+		dispatched <- struct{}{}
+	}); err != nil {
+		t.Fatalf("send next prompt: %v", err)
+	}
+	select {
+	case <-dispatched:
+	case <-time.After(3 * time.Second):
+		t.Fatal("next prompt did not dispatch")
+	}
+	mu.Lock()
+	gotPrompts := append([]string(nil), promptTexts...)
+	mu.Unlock()
+	if !reflect.DeepEqual(gotPrompts, []string{"next prompt"}) {
+		t.Fatalf("prompt texts = %v, want [next prompt]", gotPrompts)
+	}
+	actions := mock.getActionLog()
+	modelSelections, modeSelections := 0, 0
+	for _, action := range actions {
+		if action == "agent.session.set_model" {
+			modelSelections++
+		}
+		if action == "agent.session.set_mode" {
+			modeSelections++
+		}
+	}
+	if modelSelections != 1 || modeSelections != 1 {
+		t.Fatalf("explicit selector actions = model:%d mode:%d, want one each after recovery", modelSelections, modeSelections)
+	}
+}
+
 func TestInitializeAndPromptWithLayers_UnadvertisedModelAutoFallbackWarns(t *testing.T) {
 	mock := newMockAgentServer(t)
 	defer mock.Close()
@@ -682,6 +897,137 @@ func TestInitializeAndPromptWithLayers_UnadvertisedModelAutoFallbackWarns(t *tes
 	}
 	if warning.Data.ModelSelectionWarning.RequestedModel != "claude-gone" {
 		t.Errorf("warning requested model = %q, want claude-gone", warning.Data.ModelSelectionWarning.RequestedModel)
+	}
+}
+
+func TestAuggieTaskStartRequiresSelectedModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		agentID       string
+		taskScope     TaskLaunchScope
+		passthrough   bool
+		profileModel  string
+		runtimeModel  string
+		rejectModel   bool
+		nativeResume  bool
+		wantStartFail bool
+		wantError     string
+	}{
+		{name: "task Auggie rejects profile fallback", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
+		{name: "task Auggie rejects missing runtime override", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", runtimeModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
+		{name: "task Auggie rejects selected model refusal", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", rejectModel: true, wantStartFail: true, wantError: "failed to set start model"},
+		{name: "native resumed task Auggie preserves stored conversation when runtime model is missing", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", runtimeModel: "missing-model", nativeResume: true, wantStartFail: true, wantError: "requested_not_advertised"},
+		{name: "unset task Auggie selection retains provider model", agentID: "auggie", taskScope: TaskLaunchScopeTask},
+		{name: "Office Auggie retains profile fallback", agentID: "auggie", taskScope: TaskLaunchScopeOffice, profileModel: "missing-model"},
+		{name: "other provider retains profile fallback", agentID: "codex", taskScope: TaskLaunchScopeTask, profileModel: "missing-model"},
+		{name: "Auggie passthrough retains CLI policy", agentID: "auggie", taskScope: TaskLaunchScopeTask, passthrough: true, profileModel: "missing-model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newMockAgentServer(t)
+			defer mock.Close()
+			loadedSessionID := ""
+			mock.handler = func(msg ws.Message) *ws.Message {
+				if msg.Action == "agent.session.load" {
+					var request struct {
+						SessionID string `json:"session_id"`
+					}
+					_ = msg.ParsePayload(&request)
+					loadedSessionID = request.SessionID
+					response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+					return response
+				}
+				if tc.rejectModel && msg.Action == "agent.session.set_model" {
+					response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "model rejected", nil)
+					return response
+				}
+				return mock.defaultHandler(msg)
+			}
+
+			stopCh := newTestStopCh(t)
+			sm := NewSessionManager(newSessionTestLogger(), stopCh)
+			client := createTestClient(t, mock.server.URL)
+			disconnected := connectAgentStream(t, mock, client)
+			t.Cleanup(func() {
+				closeStopChOnce(stopCh)
+				client.Close()
+				select {
+				case <-disconnected:
+				case <-time.After(5 * time.Second):
+					t.Error("agent stream did not finish draining during cleanup")
+				}
+			})
+			execution := &AgentExecution{
+				ID:            "exec-1",
+				TaskID:        "task-1",
+				SessionID:     "session-1",
+				ACPSessionID:  "stored-provider-session",
+				TaskScope:     tc.taskScope,
+				IsPassthrough: tc.passthrough,
+				WorkspacePath: "/workspace",
+				agentctl:      client,
+				promptDoneCh:  make(chan PromptCompletionSignal, 1),
+			}
+			execution.SetModelState(modelState("gpt-5"))
+			agentConfig := &testAgent{
+				id:      tc.agentID,
+				enabled: true,
+				runtimeConfig: &agents.RuntimeConfig{
+					Cmd:            agents.NewCommand(tc.agentID),
+					Protocol:       agent.ProtocolACP,
+					SessionConfig:  agents.SessionConfig{NativeSessionResume: tc.nativeResume},
+					ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+				},
+			}
+
+			promptDispatched := make(chan struct{}, 1)
+			execution.setInitialPromptDispatchCallbacks(nil, func() {
+				promptDispatched <- struct{}{}
+			}, nil)
+			readyCalls := 0
+			err := sm.InitializeAndPromptWithLayers(
+				context.Background(), execution, agentConfig, "continue this task", nil, nil,
+				func(string) error { readyCalls++; return nil },
+				tc.profileModel, "", nil,
+				tc.runtimeModel, "", nil,
+				StartModelPolicy{FallbackModel: "gpt-5", AutoFallback: true},
+			)
+			if tc.wantStartFail {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("strict Auggie task start error = %v, want %q", err, tc.wantError)
+				}
+				if readyCalls != 0 || execution.sessionInitialized {
+					t.Fatalf("failed strict startup initialized session or marked ready: ready=%d initialized=%v", readyCalls, execution.sessionInitialized)
+				}
+				for _, action := range mock.getActionLog() {
+					if action == "agent.prompt" {
+						t.Fatal("failed strict startup dispatched a nonempty initial prompt")
+					}
+				}
+				if tc.nativeResume && (loadedSessionID != "stored-provider-session" || execution.ACPSessionID != "stored-provider-session") {
+					t.Fatalf("native resume used/stored session %q/%q, want stored provider conversation", loadedSessionID, execution.ACPSessionID)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("legacy fallback policy error = %v, want successful continuation", err)
+			}
+			if !execution.sessionInitialized {
+				t.Fatalf("legacy fallback did not initialize: ready=%d initialized=%v", readyCalls, execution.sessionInitialized)
+			}
+			select {
+			case <-promptDispatched:
+			case <-time.After(3 * time.Second):
+				t.Fatal("successful positive-control startup did not dispatch a nonempty prompt")
+			}
+			if tc.profileModel == "" && tc.runtimeModel == "" {
+				for _, action := range mock.getActionLog() {
+					if action == "agent.session.set_model" {
+						t.Fatal("empty model selection must retain provider default without issuing set_model")
+					}
+				}
+			}
+		})
 	}
 }
 

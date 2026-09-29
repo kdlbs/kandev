@@ -3964,6 +3964,233 @@ func TestPersistSessionModel(t *testing.T) {
 	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
 }
 
+func TestProviderRestoredSessionReportsPreserveSavedSelections(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{
+		"agent_id": "auggie",
+		"model":    "saved-model",
+		"mode":     "saved-mode",
+		"config_options": map[string]string{
+			"reasoning_effort": "saved-effort",
+		},
+	}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeySessionMode, "saved-mode"))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfigOverrides, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPConfigBaseline, map[string]string{
+		"model": "saved-model", "reasoning_effort": "saved-effort",
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOriginalEffectiveConfig, models.SessionOriginalEffectiveConfiguration{
+		Model: "saved-model", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}))
+
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+	recoveryPayload := func(data *lifecycle.AgentStreamEventData) *lifecycle.AgentStreamEventPayload {
+		data.SessionSettingsPolicy = streams.SessionSettingsPolicyProviderRestored
+		return &lifecycle.AgentStreamEventPayload{
+			Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-recovery-1",
+			TaskID: "t1", SessionID: "s1",
+			Data: data,
+		}
+	}
+	providerMode := recoveryPayload(&lifecycle.AgentStreamEventData{
+		CurrentModeID:             "provider-mode",
+		SessionSettingsGeneration: 1,
+		AvailableModes:            []streams.SessionModeInfo{{ID: "provider-mode", Name: "Provider mode"}},
+	})
+	providerModels := recoveryPayload(&lifecycle.AgentStreamEventData{
+		CurrentModelID:            "provider-model",
+		SessionSettingsGeneration: 2,
+		SessionModels:             []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "provider-model"},
+			{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "provider-effort"},
+		},
+		Data: map[string]any{"config_options_settled": true},
+	})
+	// First process the host-stamped initial load reports. They update effective
+	// ACP state while the configured and session override layers remain intact.
+	svc.handleSessionModeEvent(ctx, providerMode)
+	svc.handleSessionModelsEvent(ctx, providerModels)
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "saved-model", updated.AgentProfileSnapshot["model"])
+	require.Equal(t, "saved-mode", updated.Metadata[models.SessionMetaKeySessionMode])
+	runtimeConfig, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}, runtimeConfig)
+
+	// Lifecycle startup can republish the provider-derived snapshot without an
+	// ACP source generation. It must preserve the last source generation so the
+	// provider's next real selector event remains admissible.
+	lifecycleReport := recoveryPayload(&lifecycle.AgentStreamEventData{
+		CurrentModelID: "provider-model",
+		SessionModels:  []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+		Data:           map[string]any{"config_options_settled": true},
+	})
+	svc.handleSessionModelsEvent(ctx, lifecycleReport)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	effective, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, uint64(2), effective.CurrentModelGeneration, "an unsequenced lifecycle snapshot must not consume an ACP source generation")
+
+	// A later explicit selector outcome remains an ordinary persisted change.
+	explicitMode := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "resume-1",
+		Data: &lifecycle.AgentStreamEventData{CurrentModeID: "explicit-mode", SessionSettingsGeneration: 3},
+	}
+	explicitModels := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "resume-1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID:            "explicit-model",
+			SessionSettingsGeneration: 4,
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "explicit-model", Name: "Explicit model"}},
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "explicit-model"},
+				{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "explicit-effort"},
+			},
+		},
+	}
+	svc.handleSessionModeEvent(ctx, explicitMode)
+	svc.handleSessionModelsEvent(ctx, explicitModels)
+	// Notifications from the initial load can arrive after its request returns.
+	// Their source marker keeps this delayed delivery from replacing a newer
+	// saved choice.
+	svc.handleSessionModeEvent(ctx, providerMode)
+	svc.handleSessionModelsEvent(ctx, providerModels)
+
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "explicit-model", updated.AgentProfileSnapshot["model"], "a delayed provider observation must not replace the later saved model selection")
+	require.Equal(t, "explicit-mode", updated.Metadata[models.SessionMetaKeySessionMode], "a delayed provider observation must not replace the later saved mode selection")
+	config, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.SessionRuntimeConfig{
+		Model: "explicit-model", Mode: "explicit-mode", ConfigOptions: map[string]string{"model": "explicit-model", "reasoning_effort": "explicit-effort"},
+	}, config, "delayed provider observations must not rewrite runtime settings used by a later launch")
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}, overrides)
+	effective, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "explicit-model", effective.CurrentModelID, "a delayed load report must not regress the effective selector snapshot")
+	require.Equal(t, "explicit-effort", effective.ConfigOptions[1].CurrentValue)
+	require.Len(t, eb.events, 5, "stale settings reports must not be broadcast after a newer selector outcome")
+	require.Equal(t, "explicit-mode", eb.events[3].event.Data.(lifecycle.SessionModeEventPayload).CurrentModeID)
+	require.Equal(t, "explicit-model", eb.events[4].event.Data.(lifecycle.SessionModelsEventPayload).CurrentModelID)
+	for _, index := range []int{0, 1, 2, 3, 4} {
+		if index == 0 || index == 3 {
+			require.Equal(t, streams.SessionSettingsPolicyProviderRestored, eb.events[index].event.Data.(lifecycle.SessionModeEventPayload).SessionSettingsPolicy)
+			continue
+		}
+		require.Equal(t, streams.SessionSettingsPolicyProviderRestored, eb.events[index].event.Data.(lifecycle.SessionModelsEventPayload).SessionSettingsPolicy)
+	}
+
+	// A later ordinary execution owns a strict projection, even though the
+	// preceding attempt used provider-restored settings.
+	ordinaryMode := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "ordinary-next",
+		Data: &lifecycle.AgentStreamEventData{CurrentModeID: "ordinary-mode", SessionSettingsGeneration: 1},
+	}
+	ordinaryModels := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "ordinary-next",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID:            "ordinary-model",
+			SessionSettingsGeneration: 2,
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "ordinary-model", Name: "Ordinary model"}},
+		},
+	}
+	svc.handleSessionModeEvent(ctx, ordinaryMode)
+	svc.handleSessionModelsEvent(ctx, ordinaryModels)
+	require.Len(t, eb.events, 7)
+	require.Equal(t, streams.SessionSettingsPolicyStrict, eb.events[5].event.Data.(lifecycle.SessionModeEventPayload).SessionSettingsPolicy)
+	require.Equal(t, streams.SessionSettingsPolicyStrict, eb.events[6].event.Data.(lifecycle.SessionModelsEventPayload).SessionSettingsPolicy)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	effective, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "ordinary-next", effective.SettingsAttemptID)
+	require.Empty(t, effective.SettingsPolicy, "strict is the default projection, not stored recovery provenance")
+}
+
+func TestProviderRestoredSnapshotIsAttemptScopedAndPartialUpdatesPreserveMode(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_id": "auggie", "model": "saved-model", "mode": "saved-mode"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID:         "previous-effective-model",
+		CurrentModeID:          "previous-effective-mode",
+		SettingsAttemptID:      "resume-old",
+		CurrentModelGeneration: 8,
+		CurrentModeGeneration:  7,
+		Models:                 []streams.SessionModelInfo{{ModelID: "previous-effective-model", Name: "Previous model"}},
+		ConfigOptions:          []streams.ConfigOption{{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "previous-effort"}},
+		ConfigOptionsSettled:   true,
+	}))
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: &recordingEventBus{}}
+	providerEvent := func(generation uint64, data *lifecycle.AgentStreamEventData) *lifecycle.AgentStreamEventPayload {
+		data.SessionSettingsPolicy = streams.SessionSettingsPolicyProviderRestored
+		data.SessionSettingsGeneration = generation
+		return &lifecycle.AgentStreamEventPayload{
+			Type: "agent/event", AttemptID: "resume-new", ExecutionID: "execution-recovery-new",
+			TaskID: "t1", SessionID: "s1", Data: data,
+		}
+	}
+	// A new recovery attempt that reports unknown effective settings clears the
+	// prior execution's projection without reading the saved requested values.
+	svc.handleSessionModeEvent(ctx, providerEvent(1, &lifecycle.AgentStreamEventData{}))
+	svc.handleSessionModelsEvent(ctx, providerEvent(2, &lifecycle.AgentStreamEventData{}))
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "resume-new", snapshot.SettingsAttemptID)
+	require.Empty(t, snapshot.CurrentModelID)
+	require.Empty(t, snapshot.CurrentModeID)
+	require.Empty(t, snapshot.Models)
+	require.Empty(t, snapshot.ConfigOptions)
+	require.False(t, snapshot.ConfigOptionsSettled)
+	require.Equal(t, streams.SessionSettingsPolicyProviderRestored, snapshot.SettingsPolicy)
+	require.Equal(t, "saved-model", updated.AgentProfileSnapshot["model"])
+	require.Equal(t, "saved-mode", updated.AgentProfileSnapshot["mode"])
+
+	// A later model-only report in that same attempt must retain the effective
+	// mode learned independently from the provider.
+	svc.handleSessionModeEvent(ctx, providerEvent(3, &lifecycle.AgentStreamEventData{CurrentModeID: "effective-mode"}))
+	svc.handleSessionModelsEvent(ctx, providerEvent(4, &lifecycle.AgentStreamEventData{
+		CurrentModelID: "effective-model", SessionModels: []streams.SessionModelInfo{{ModelID: "effective-model", Name: "Effective model"}},
+	}))
+	svc.handleSessionModelsEvent(ctx, providerEvent(5, &lifecycle.AgentStreamEventData{
+		CurrentModelID: "refreshed-model", SessionModels: []streams.SessionModelInfo{{ModelID: "refreshed-model", Name: "Refreshed model"}},
+	}))
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "refreshed-model", snapshot.CurrentModelID)
+	require.Equal(t, "effective-mode", snapshot.CurrentModeID)
+	require.Equal(t, uint64(3), snapshot.CurrentModeGeneration)
+}
+
 func TestPersistSessionModelDoesNotRestoreStaleActiveStateAfterCancellation(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -4124,6 +4351,61 @@ func TestHandleSessionModelsEventDefersUnsettledStartupState(t *testing.T) {
 	runtimeConfig, ok = models.LoadSessionRuntimeConfig(updated.Metadata)
 	require.True(t, ok)
 	require.Equal(t, "gpt-5.6-luna", runtimeConfig.Model)
+}
+
+func TestHandleProviderRestoredModelsEventPublishesUnsettledStartupModel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		SettingsAttemptID: "resume-1",
+		SettingsPolicy:    streams.SessionSettingsPolicyProviderRestored,
+	}))
+
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+	publish := func(generation uint64, modelID string, modelOptions []streams.SessionModelInfo, settled bool) {
+		svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-resume-1",
+			TaskID: "t1", SessionID: "s1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModelID:            modelID,
+				SessionModels:             modelOptions,
+				SessionSettingsGeneration: generation,
+				SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+				Data:                      map[string]any{"config_options_settled": settled},
+			},
+		})
+	}
+
+	// The initial lifecycle snapshot has no model. The subsequent provider load
+	// report is authoritative even though this recovery attempt has not settled
+	// profile config options.
+	publish(1, "", nil, true)
+	modelsReported := []streams.SessionModelInfo{
+		{ModelID: "gemini-3-7-flash", Name: "Gemini 3.7 Flash"},
+		{ModelID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro"},
+		{ModelID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash"},
+		{ModelID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash"},
+		{ModelID: "gemini-2.0-flash-lite", Name: "Gemini 2.0 Flash Lite"},
+		{ModelID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro"},
+		{ModelID: "gemini-1.5-flash", Name: "Gemini 1.5 Flash"},
+		{ModelID: "gemini-1.5-flash-8b", Name: "Gemini 1.5 Flash 8B"},
+	}
+	publish(2, "gemini-3-7-flash", modelsReported, false)
+
+	require.Len(t, eventBus.events, 2, "the provider-restored model report must not be deferred until config settlement")
+	lastPublished := eventBus.events[1].event.Data.(lifecycle.SessionModelsEventPayload)
+	require.Equal(t, "gemini-3-7-flash", lastPublished.CurrentModelID)
+	require.Len(t, lastPublished.Models, 8)
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gemini-3-7-flash", snapshot.CurrentModelID)
+	require.Len(t, snapshot.Models, 8)
+	require.Equal(t, streams.SessionSettingsPolicyProviderRestored, snapshot.SettingsPolicy)
 }
 
 func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t *testing.T) {

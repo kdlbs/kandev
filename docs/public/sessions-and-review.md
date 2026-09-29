@@ -68,6 +68,11 @@ When startup or resume fails:
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
 
+For eligible failed Auggie ACP task sessions, the recovery card explains that
+**Resume** keeps the same conversation and skips saved mode and model overrides
+for that attempt. A successful recovery leaves a notice in chat, and the model
+and mode selectors show the provider-reported values when known.
+
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 
 The recovery card places the recommended action first and shows every available alternative as an individual button, including **Restore read-only workspace** and **Start fresh session** when eligible. Buttons wrap on desktop and stack at touch size on phones. Runtime installation failures offer **Retry**; provider quota failures show reset guidance, while Archive and Delete remain in the task menu. Restoring the workspace does not restart the agent. Expand **Technical details** for wrapped, bounded diagnostics; **Copy details** copies the same redacted text you see. When a workspace pane can identify the same failure and its visible recovery entry, **View recovery** opens Chat and focuses the recovery card. Independent workspace failures retain their own retry.

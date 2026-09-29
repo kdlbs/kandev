@@ -110,6 +110,92 @@ func TestLoadSessionPrefersAdvertisedResume(t *testing.T) {
 	}
 }
 
+func TestProviderRestoredLoadSettingsProvenanceSurvivesDelayedNotifications(t *testing.T) {
+	a, _ := newSessionResumeAdapter(t, true, true)
+	ctx := streams.WithSessionSettingsPolicy(t.Context(), streams.SessionSettingsPolicyProviderRestored)
+	if err := a.LoadSession(ctx, "saved-session", nil); err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	initial := drainEvents(a)
+	var initialMode, initialModels *streams.AgentEvent
+	for i := range initial {
+		event := &initial[i]
+		switch event.Type {
+		case streams.EventTypeSessionMode:
+			initialMode = event
+		case streams.EventTypeSessionModels:
+			initialModels = event
+		}
+	}
+	if initialMode == nil || initialModels == nil {
+		t.Fatalf("load settings reports missing: %+v", initial)
+	}
+	for _, event := range []*streams.AgentEvent{initialMode, initialModels} {
+		if event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored || event.SessionSettingsGeneration == 0 {
+			t.Fatalf("initial load report lacks host provenance: %+v", event)
+		}
+	}
+
+	// A load notification can remain queued until after LoadSession returns.
+	a.handleACPUpdate(makeNotification("saved-session", acpsdk.SessionUpdate{
+		CurrentModeUpdate: &acpsdk.SessionCurrentModeUpdate{
+			SessionUpdate: "current_mode_update", CurrentModeId: "provider-update",
+		},
+	}), 0)
+	delayed := drainEvents(a)
+	if len(delayed) != 1 || delayed[0].Type != streams.EventTypeSessionMode {
+		t.Fatalf("delayed mode report = %+v", delayed)
+	}
+	if delayed[0].SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored ||
+		delayed[0].SessionSettingsGeneration <= initialMode.SessionSettingsGeneration {
+		t.Fatalf("delayed load report lost immutable provenance: %+v initial=%+v", delayed[0], initialMode)
+	}
+
+	// Explicit selector outcomes are host-created events with a later source
+	// generation and no provider-restored marker.
+	a.emitSetModelEvent("saved-session", "explicit-model", nil, nil)
+	explicit := drainEvents(a)
+	if len(explicit) != 1 || explicit[0].SessionSettingsPolicy != "" ||
+		explicit[0].SessionSettingsGeneration <= delayed[0].SessionSettingsGeneration {
+		t.Fatalf("explicit model outcome was not distinguished from load reports: %+v delayed=%+v", explicit, delayed[0])
+	}
+}
+
+func TestProviderRestoredLoadWithoutSettingsEmitsEmptySnapshots(t *testing.T) {
+	a, fake := newSessionResumeAdapter(t, true, true)
+	fake.resumeResponse = &acpsdk.ResumeSessionResponse{}
+	ctx := streams.WithSessionSettingsPolicy(t.Context(), streams.SessionSettingsPolicyProviderRestored)
+	if err := a.LoadSession(ctx, "saved-session", nil); err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+
+	events := drainEvents(a)
+	var mode, models *streams.AgentEvent
+	for i := range events {
+		switch events[i].Type {
+		case streams.EventTypeSessionMode:
+			mode = &events[i]
+		case streams.EventTypeSessionModels:
+			models = &events[i]
+		}
+	}
+	if mode == nil || models == nil {
+		t.Fatalf("provider-restored load omitted empty settings snapshots: %+v", events)
+	}
+	for _, event := range []*streams.AgentEvent{mode, models} {
+		if event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored || event.SessionSettingsGeneration == 0 {
+			t.Errorf("empty load report lacks host provenance: %+v", event)
+		}
+	}
+	if mode.CurrentModeID != "" || models.CurrentModelID != "" || len(models.SessionModels) != 0 || len(models.ConfigOptions) != 0 {
+		t.Fatalf("empty provider report contains settings: mode=%+v models=%+v", mode, models)
+	}
+	settled, _ := models.Data["config_options_settled"].(bool)
+	if !settled {
+		t.Fatal("empty provider model snapshot must be marked settled so it clears prior effective state")
+	}
+}
+
 func TestLoadSessionFallsBackToReplayOnlyWhenResumeUnsupported(t *testing.T) {
 	for _, advertised := range []bool{true, false} {
 		t.Run(fmt.Sprintf("resume_advertised_%t", advertised), func(t *testing.T) {

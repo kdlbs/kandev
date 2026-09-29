@@ -48,6 +48,13 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 		_ = reg.Register(agents.NewMockAgent())
 		_ = reg.Register(agents.NewCodexAppServer(false))
 		configureMockAgent(reg, "mock-agent", log)
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_AUGGIE"), "true") {
+			// Explicit recovery E2E needs Auggie's provider identity and native ACP
+			// resume capability, while still using the deterministic mock ACP peer.
+			_ = reg.Register(agents.NewMockAgentWithID("auggie", "Auggie", "Auggie"))
+			configureMockAgent(reg, "auggie", log)
+		}
 		registerExtraMockProviders(reg, log, mockProviders)
 		validateMockProviders(reg, mockProviders, log)
 	} else {

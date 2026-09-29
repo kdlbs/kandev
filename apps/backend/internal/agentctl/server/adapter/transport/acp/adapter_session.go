@@ -214,6 +214,8 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.sessionSettingsPolicy = ""
+	a.sessionSettingsGeneration = 0
 	a.configGeneration++
 	clear(a.contextSamples)
 	// Reset session-scoped model caches before computing the new session's
@@ -237,16 +239,16 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
-		a.emitInitialModeState(sessionID, resp.Modes)
+		a.emitInitialModeState(sessionID, resp.Modes, "")
 	} else {
-		a.emitInitialModeConfigState(sessionID, initialConfigOptions)
+		a.emitInitialModeConfigState(sessionID, initialConfigOptions, "")
 	}
 
 	// Emit session models when the session exposes a model-shaped config option.
 	if initialModels != nil {
-		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
+		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions, "")
 	} else if len(initialConfigOptions) > 0 {
-		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions)
+		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions, "")
 	}
 
 	// Emit session status event to normalize with other adapters.
@@ -525,6 +527,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	settingsPolicy := streams.SessionSettingsPolicyFromContext(ctx)
 
 	a.mu.Lock()
 	conn := a.acpConn
@@ -627,6 +630,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
+	a.sessionSettingsGeneration = 0
 	a.configGeneration++
 	clear(a.contextSamples)
 	a.consumeUsageBaselineLocked(sessionID)
@@ -653,17 +658,21 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
-		a.emitInitialModeState(sessionID, resp.Modes)
-	} else {
-		a.emitInitialModeConfigState(sessionID, initialConfigOptions)
+		a.emitInitialModeState(sessionID, resp.Modes, settingsPolicy)
+	} else if _, hasModeOption := modeConfigOption(initialConfigOptions); hasModeOption {
+		a.emitInitialModeConfigState(sessionID, initialConfigOptions, settingsPolicy)
+	} else if providerRestoredPolicy(settingsPolicy) == streams.SessionSettingsPolicyProviderRestored {
+		a.emitEmptyInitialModeState(sessionID, settingsPolicy)
 	}
 
 	// Emit session models if the agent returned model state, or if it exposes
 	// model selection only through configOptions.
 	if initialModels != nil {
-		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
+		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions, settingsPolicy)
 	} else if len(initialConfigOptions) > 0 {
-		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions)
+		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions, settingsPolicy)
+	} else if providerRestoredPolicy(settingsPolicy) == streams.SessionSettingsPolicyProviderRestored {
+		a.emitEmptyInitialModelsState(sessionID, settingsPolicy)
 	}
 
 	// Any Monitor still tracked at this point was running in pre-restart history
@@ -811,7 +820,17 @@ func (a *Adapter) emitReplayPlan(sessionID string, replayPlan *acp.SessionUpdate
 
 // emitInitialModeState emits a session_mode event from the session response's Modes field.
 // Called after session/new and session/load to provide the initial mode state.
-func (a *Adapter) emitInitialModeState(sessionID string, modes *acp.SessionModeState) {
+func (a *Adapter) nextSessionSettingsGeneration(sessionID string) uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionID != sessionID || a.closed {
+		return 0
+	}
+	a.sessionSettingsGeneration++
+	return a.sessionSettingsGeneration
+}
+
+func (a *Adapter) emitInitialModeState(sessionID string, modes *acp.SessionModeState, settingsPolicies ...streams.SessionSettingsPolicy) {
 	availModes := make([]streams.SessionModeInfo, 0, len(modes.AvailableModes))
 	for _, m := range modes.AvailableModes {
 		availModes = append(availModes, streams.SessionModeInfo{
@@ -827,14 +846,16 @@ func (a *Adapter) emitInitialModeState(sessionID string, modes *acp.SessionModeS
 	a.noteCurrentMode(sessionID, string(modes.CurrentModeId))
 
 	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionMode,
-		SessionID:      sessionID,
-		CurrentModeID:  string(modes.CurrentModeId),
-		AvailableModes: availModes,
+		Type:                      streams.EventTypeSessionMode,
+		SessionID:                 sessionID,
+		CurrentModeID:             string(modes.CurrentModeId),
+		AvailableModes:            availModes,
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
 	})
 }
 
-func (a *Adapter) emitInitialModeConfigState(sessionID string, configOptions []streams.ConfigOption) {
+func (a *Adapter) emitInitialModeConfigState(sessionID string, configOptions []streams.ConfigOption, settingsPolicies ...streams.SessionSettingsPolicy) {
 	modeOption, ok := modeConfigOption(configOptions)
 	if !ok {
 		return
@@ -851,10 +872,31 @@ func (a *Adapter) emitInitialModeConfigState(sessionID string, configOptions []s
 		a.noteCurrentMode(sessionID, modeOption.CurrentValue)
 	}
 	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionMode,
-		SessionID:      sessionID,
-		CurrentModeID:  modeOption.CurrentValue,
-		AvailableModes: availableModes,
+		Type:                      streams.EventTypeSessionMode,
+		SessionID:                 sessionID,
+		CurrentModeID:             modeOption.CurrentValue,
+		AvailableModes:            availableModes,
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
+	})
+}
+
+func (a *Adapter) emitEmptyInitialModeState(sessionID string, settingsPolicies ...streams.SessionSettingsPolicy) {
+	a.sendUpdate(AgentEvent{
+		Type:                      streams.EventTypeSessionMode,
+		SessionID:                 sessionID,
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
+	})
+}
+
+func (a *Adapter) emitEmptyInitialModelsState(sessionID string, settingsPolicies ...streams.SessionSettingsPolicy) {
+	a.sendUpdate(AgentEvent{
+		Type:                      streams.EventTypeSessionModels,
+		SessionID:                 sessionID,
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
+		Data:                      map[string]any{"config_options_settled": true},
 	})
 }
 
@@ -879,7 +921,7 @@ func sessionModesFromConfigOption(option streams.ConfigOption) []streams.Session
 }
 
 // emitSessionModels emits a session_models event from the session response.
-func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
+func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption, settingsPolicies ...streams.SessionSettingsPolicy) {
 	currentModelID := models.CurrentModelId
 	configOptions := a.dialect.sessionConfigOptions(
 		meta, acpConfigOptions, models.AvailableModels, currentModelID,
@@ -908,20 +950,31 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 		zap.Int("available_models", len(models.AvailableModels)),
 	)
 	a.sendUpdate(AgentEvent{
-		Type:           streams.EventTypeSessionModels,
-		SessionID:      sessionID,
-		CurrentModelID: currentModelID,
-		SessionModels:  convertSessionModels(models.AvailableModels),
-		ConfigOptions:  configOptions,
+		Type:                      streams.EventTypeSessionModels,
+		SessionID:                 sessionID,
+		CurrentModelID:            currentModelID,
+		SessionModels:             convertSessionModels(models.AvailableModels),
+		ConfigOptions:             configOptions,
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
 	})
 }
 
-func (a *Adapter) emitSessionConfigOptionsState(sessionID string, configOptions []streams.ConfigOption) {
+func (a *Adapter) emitSessionConfigOptionsState(sessionID string, configOptions []streams.ConfigOption, settingsPolicies ...streams.SessionSettingsPolicy) {
 	a.sendUpdate(AgentEvent{
-		Type:          streams.EventTypeSessionModels,
-		SessionID:     sessionID,
-		ConfigOptions: cloneConfigOptions(configOptions),
+		Type:                      streams.EventTypeSessionModels,
+		SessionID:                 sessionID,
+		ConfigOptions:             cloneConfigOptions(configOptions),
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
 	})
+}
+
+func providerRestoredPolicy(policies ...streams.SessionSettingsPolicy) streams.SessionSettingsPolicy {
+	if len(policies) > 0 && policies[0] == streams.SessionSettingsPolicyProviderRestored {
+		return policies[0]
+	}
+	return ""
 }
 
 // emitSetModelEvent emits a session_models convergence event after SetModel
@@ -975,12 +1028,14 @@ func (a *Adapter) emitSetModelEvent(
 		tracker.maxSize = 0
 	}
 	delete(a.contextSamples, sessionID)
+	a.sessionSettingsGeneration++
 	event := AgentEvent{
-		Type:           streams.EventTypeSessionModels,
-		SessionID:      sessionID,
-		CurrentModelID: modelID,
-		SessionModels:  convertSessionModels(cachedModels),
-		ConfigOptions:  outConfig,
+		Type:                      streams.EventTypeSessionModels,
+		SessionID:                 sessionID,
+		CurrentModelID:            modelID,
+		SessionModels:             convertSessionModels(cachedModels),
+		ConfigOptions:             outConfig,
+		SessionSettingsGeneration: a.sessionSettingsGeneration,
 	}
 	a.mu.Unlock()
 
@@ -1092,10 +1147,11 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 
 	reported, requested := sessionModeEventFields(modeID, result)
 	event := AgentEvent{
-		Type:           streams.EventTypeSessionMode,
-		SessionID:      sessionID,
-		CurrentModeID:  reported,
-		AvailableModes: cachedModes,
+		Type:                      streams.EventTypeSessionMode,
+		SessionID:                 sessionID,
+		CurrentModeID:             reported,
+		AvailableModes:            cachedModes,
+		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
 	}
 	event.RequestedModeID = requested
 	a.sendUpdate(event)
@@ -1422,6 +1478,7 @@ func (a *Adapter) maybeEmitAuthRequired(err error) bool {
 // equivalent event; downstream persistence is idempotent so duplicates are
 // harmless.
 func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) error {
+	settingsPolicy := streams.SessionSettingsPolicyFromContext(ctx)
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
@@ -1499,7 +1556,7 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 				generation,
 			)
 		} else {
-			a.emitSetConfigOptionEvent(sessionID, configID, value, cachedModels, cachedConfig, generation)
+			a.emitSetConfigOptionEventWithPolicy(sessionID, configID, value, cachedModels, cachedConfig, settingsPolicy, generation)
 		}
 		return nil
 	}
@@ -1527,13 +1584,13 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 		return nil
 	}
 	if len(resp.ConfigOptions) > 0 {
-		a.emitAuthoritativeConfigOptions(sessionID, configID, resp.ConfigOptions, cachedModels, false, generation)
+		a.emitAuthoritativeConfigOptionsWithPolicy(sessionID, configID, resp.ConfigOptions, cachedModels, false, settingsPolicy, generation)
 		return nil
 	}
 	if isModelConfigID(configID, cachedConfig) {
 		a.emitSetModelEvent(sessionID, value, cachedModels, cachedConfig, generation)
 	} else {
-		a.emitSetConfigOptionEvent(sessionID, configID, value, cachedModels, cachedConfig, generation)
+		a.emitSetConfigOptionEventWithPolicy(sessionID, configID, value, cachedModels, cachedConfig, settingsPolicy, generation)
 	}
 	return nil
 }
@@ -1546,13 +1603,28 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 	correlatedModeResponse bool,
 	expectedGeneration ...uint64,
 ) {
+	a.emitAuthoritativeConfigOptionsWithPolicy(
+		sessionID, configID, options, cachedModels, correlatedModeResponse, streams.SessionSettingsPolicyStrict, expectedGeneration...,
+	)
+}
+
+func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
+	sessionID string,
+	configID string,
+	options []acp.SessionConfigOption,
+	cachedModels []modelInfo,
+	correlatedModeResponse bool,
+	settingsPolicy streams.SessionSettingsPolicy,
+	expectedGeneration ...uint64,
+) {
 	configOptions := convertACPConfigOptions(options)
 	event := AgentEvent{
-		Type:           streams.EventTypeSessionModels,
-		SessionID:      sessionID,
-		CurrentModelID: currentModelFromConfig(configOptions),
-		SessionModels:  convertSessionModels(cachedModels),
-		ConfigOptions:  configOptions,
+		Type:                  streams.EventTypeSessionModels,
+		SessionID:             sessionID,
+		SessionSettingsPolicy: providerRestoredPolicy(settingsPolicy),
+		CurrentModelID:        currentModelFromConfig(configOptions),
+		SessionModels:         convertSessionModels(cachedModels),
+		ConfigOptions:         configOptions,
 		Data: map[string]any{
 			"config_options_source":    "provider_response",
 			"config_options_config_id": configID,
@@ -1578,12 +1650,18 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 		}
 		if !correlatedModeResponse {
 			modeEvent = &AgentEvent{
-				Type:           streams.EventTypeSessionMode,
-				SessionID:      sessionID,
-				CurrentModeID:  currentModeFromConfig(configOptions),
-				AvailableModes: append([]streams.SessionModeInfo(nil), a.availableModes...),
+				Type:                  streams.EventTypeSessionMode,
+				SessionID:             sessionID,
+				SessionSettingsPolicy: providerRestoredPolicy(settingsPolicy),
+				CurrentModeID:         currentModeFromConfig(configOptions),
+				AvailableModes:        append([]streams.SessionModeInfo(nil), a.availableModes...),
 			}
 		}
+	}
+	a.sessionSettingsGeneration++
+	event.SessionSettingsGeneration = a.sessionSettingsGeneration
+	if modeEvent != nil {
+		modeEvent.SessionSettingsGeneration = a.sessionSettingsGeneration
 	}
 	if isModelConfigID(configID, configOptions) {
 		if tracker := a.usageBySession[sessionID]; tracker != nil {
@@ -1611,6 +1689,20 @@ func (a *Adapter) emitSetConfigOptionEvent(
 	value string,
 	cachedModels []modelInfo,
 	cachedConfig []streams.ConfigOption,
+	expectedGeneration ...uint64,
+) {
+	a.emitSetConfigOptionEventWithPolicy(
+		sessionID, configID, value, cachedModels, cachedConfig, streams.SessionSettingsPolicyStrict, expectedGeneration...,
+	)
+}
+
+func (a *Adapter) emitSetConfigOptionEventWithPolicy(
+	sessionID string,
+	configID string,
+	value string,
+	cachedModels []modelInfo,
+	cachedConfig []streams.ConfigOption,
+	settingsPolicy streams.SessionSettingsPolicy,
 	expectedGeneration ...uint64,
 ) {
 	if len(cachedConfig) == 0 {
@@ -1657,12 +1749,15 @@ func (a *Adapter) emitSetConfigOptionEvent(
 		return
 	}
 	a.availableConfigOptions = outConfig
+	a.sessionSettingsGeneration++
 	event := AgentEvent{
-		Type:           streams.EventTypeSessionModels,
-		SessionID:      sessionID,
-		CurrentModelID: currentModelFromConfig(outConfig),
-		SessionModels:  convertSessionModels(cachedModels),
-		ConfigOptions:  outConfig,
+		Type:                      streams.EventTypeSessionModels,
+		SessionID:                 sessionID,
+		CurrentModelID:            currentModelFromConfig(outConfig),
+		SessionModels:             convertSessionModels(cachedModels),
+		ConfigOptions:             outConfig,
+		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicy),
+		SessionSettingsGeneration: a.sessionSettingsGeneration,
 	}
 	a.mu.Unlock()
 

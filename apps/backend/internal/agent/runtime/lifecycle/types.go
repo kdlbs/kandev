@@ -44,11 +44,13 @@ type AgentExecution struct {
 	Owner        ExecutionOwner
 	// OwnerAdmission is retained with the execution so the registration gate
 	// uses the same durable owner authority as the pre-allocation gate.
-	OwnerAdmission    OwnerAdmission
-	TaskID            string
-	SessionID         string
-	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
-	WorkspaceID       string
+	OwnerAdmission        OwnerAdmission
+	TaskScope             TaskLaunchScope
+	SessionSettingsPolicy SessionSettingsPolicy
+	TaskID                string
+	SessionID             string
+	TaskEnvironmentID     string // Env owning this execution; sessions in the same task share one env
+	WorkspaceID           string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
 	ExecutorType string
@@ -357,6 +359,28 @@ type AgentExecution struct {
 	// validation lock is released.
 	startupCallbackMu sync.RWMutex
 }
+
+// SessionSettingsPolicy controls whether startup restores the saved mode/model
+// settings or uses settings already held by the provider conversation.
+type SessionSettingsPolicy uint8
+
+const (
+	// SessionSettingsPolicyStrict reapplies saved selections during startup.
+	SessionSettingsPolicyStrict SessionSettingsPolicy = iota
+	// SessionSettingsPolicyProviderRestored keeps the existing provider
+	// conversation and refuses to create a replacement if it cannot be loaded.
+	SessionSettingsPolicyProviderRestored
+)
+
+// TaskLaunchScope records the canonical owner of a task session at launch.
+// Unknown is retained for legacy callers and never opts into task-only policy.
+type TaskLaunchScope string
+
+const (
+	TaskLaunchScopeUnknown TaskLaunchScope = ""
+	TaskLaunchScopeTask    TaskLaunchScope = "task"
+	TaskLaunchScopeOffice  TaskLaunchScope = "office"
+)
 
 // OwnerSnapshot returns the immutable durable owner carried by this
 // execution. The value is copied so restart reconciliation cannot mutate the
@@ -1228,10 +1252,12 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID            string
-	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID         string
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskID                string
+	TaskScope             TaskLaunchScope
+	SessionSettingsPolicy SessionSettingsPolicy
+	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID             string
+	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.

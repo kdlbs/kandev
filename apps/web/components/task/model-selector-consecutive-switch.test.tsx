@@ -3,7 +3,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelSelector } from "@/components/task/model-selector";
-import { setSessionConfigOption } from "@/lib/api/domains/session-api";
+import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
 
 const mocks = vi.hoisted(() => {
   const SESSION_ID = "session-1";
@@ -138,6 +138,7 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 afterEach(() => {
   cleanup();
   vi.mocked(setSessionConfigOption).mockClear();
+  vi.mocked(setSessionModel).mockClear();
 });
 
 function pickModel(label: string) {
@@ -183,5 +184,28 @@ describe("consecutive session model switches", () => {
 
     pickModel("Opus 1M");
     expect(setSessionConfigOption).toHaveBeenNthCalledWith(2, SESSION_ID, "model", OPUS);
+  });
+
+  it("keeps an unknown restored model selectable without showing a saved selection", () => {
+    mocks.appState.activeModel.bySessionId[SESSION_ID] = "saved-model";
+    mocks.appState.sessionModels.bySessionId[SESSION_ID] = {
+      currentModelId: "",
+      models: mocks.modelOptions.map((option) => ({ modelId: option.value, name: option.name })),
+      configOptions: [],
+      configOptionsSettled: true,
+      settingsPolicy: "provider_restored",
+    };
+
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId={SESSION_ID} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Session model settings" }).textContent).toContain(
+      "Unknown",
+    );
+    pickModel("Fable 1M");
+    expect(setSessionModel).toHaveBeenCalledWith(SESSION_ID, FABLE);
   });
 });
