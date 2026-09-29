@@ -243,6 +243,8 @@
   "sectionStandingOrdersHelp": "コーディネーターがすべての会話で従うルール。",
   "sectionGoal": "目標",
   "sectionGoalHelp": "このコーディネーターのリストの順位付けに使うマイルストーン。",
+  "sectionAutonomy": "自律動作",
+  "sectionAutonomyHelp": "支出上限の範囲内で、コーディネーターが自ら動けるようにします。",
   "standingOrdersEmpty": "常設指示はまだありません。",
   "standingOrderNumber": "常設指示 {{number}}",
   "standingOrderAdded": "{{date}} に追加",

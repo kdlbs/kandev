@@ -243,6 +243,8 @@
   "sectionStandingOrdersHelp": "Ŕũĺēś ţĥē ćōōŕďĩńàţōŕ ƒōĺĺōŵś ĩń ēvēŕŷ ćōńvēŕśàţĩōń.",
   "sectionGoal": "Ĝōàĺ",
   "sectionGoalHelp": "Ţĥē ḿĩĺēśţōńē ţĥĩś ćōōŕďĩńàţōŕ'ś ĺĩśţ ĩś ŕàńķēď àĝàĩńśţ.",
+  "sectionAutonomy": "Àũţōńōḿŷ",
+  "sectionAutonomyHelp": "Ĺēţ ţĥē ćōōŕďĩńàţōŕ àćţ ōń ĩţś ōŵń ŵĩţĥĩń à śƥēńďĩńĝ ćēĩĺĩńĝ.",
   "standingOrdersEmpty": "Ţĥēŕē àŕē ńō śţàńďĩńĝ ōŕďēŕś ŷēţ.",
   "standingOrderNumber": "Śţàńďĩńĝ ōŕďēŕ {{number}}",
   "standingOrderAdded": "Àďďēď {{date}}",

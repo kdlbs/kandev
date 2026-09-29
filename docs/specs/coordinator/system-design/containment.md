@@ -136,6 +136,18 @@ does not approve pending for a person, and no person is present
 A request whose turn id is not the unattended turn's reaches the panel as in
 phase 1. `coordinator_unattended_denials` rows are deleted with their turn row.
 
+`coordinator_unattended_denials` columns (created by task 01):
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `turn_id` | text not null | `coordinator_unattended_turns.id`, no foreign key |
+| `pending_id` | text not null | the permission request's pending id |
+| `created_at` | timestamp not null | UTC, set at insert |
+
+Primary key `(turn_id, pending_id)`; no other index. The table has no
+`coordinator_id` and no `workspace_id`: it is deleted through its turn
+([wake](wake.md#store)).
+
 A request that arrives after the turn settles is an attended-mode request and
 waits for a person. The phase 1 forcing of the profile and environment
 auto-approve settings off applies to every coordinator session, so unattended

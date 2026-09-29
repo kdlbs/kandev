@@ -185,3 +185,43 @@ test.describe("Coordinator page with the phase-2 flag off", () => {
     }
   });
 });
+
+test.describe("Coordinator page Autonomy section (phase 3)", () => {
+  test("shows an Autonomy tab while phase 3 is effective", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await seed(apiClient, seedData);
+    const base = linkToCoordinatorSettings(seedData.workspaceId, coordinator.id);
+    await testPage.goto(`${base}?section=autonomy`);
+    const row = testPage.getByRole("tablist", { name: "Coordinator sections" });
+    await expect(row.getByRole("tab", { name: "Autonomy" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(testPage.getByTestId("coordinator-section-help")).toContainText("spending");
+  });
+
+  test("hides the Autonomy tab and falls back to Identity with the phase-3 flag off", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const release = await backend.useEnv({ KANDEV_FEATURES_COORDINATOR_PHASE3: "false" });
+    try {
+      const coordinator = await seed(apiClient, seedData);
+      const base = linkToCoordinatorSettings(seedData.workspaceId, coordinator.id);
+      await testPage.goto(`${base}?section=autonomy`);
+      const row = testPage.getByRole("tablist", { name: "Coordinator sections" });
+      await expect(row.getByRole("tab", { name: "Identity" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await expect(row.getByRole("tab", { name: "Autonomy" })).toHaveCount(0);
+    } finally {
+      await release();
+    }
+  });
+});

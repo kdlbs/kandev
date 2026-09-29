@@ -39,7 +39,7 @@ type StoreState = {
   agentProfiles: { items: AgentProfileOption[] };
   executors: { items: Executor[] };
   workspaces: { items: Array<{ id: string; scopes?: string[] }> };
-  features: { coordinatorPhase2: boolean };
+  features: { coordinator?: boolean; coordinatorPhase2: boolean; coordinatorPhase3?: boolean };
 };
 
 let storeState: StoreState;
@@ -102,6 +102,7 @@ function setup(
     remove?: ReturnType<typeof vi.fn>;
     refresh?: ReturnType<typeof vi.fn>;
     phase2?: boolean;
+    phase3?: boolean;
   } = {},
 ) {
   storeState = {
@@ -118,7 +119,11 @@ function setup(
     },
     executors: { items: [mkExecutor()] },
     workspaces: { items: [{ id: "w1", scopes: options.scopes ?? ["workspace.manage"] }] },
-    features: { coordinatorPhase2: options.phase2 ?? false },
+    features: {
+      coordinator: true,
+      coordinatorPhase2: options.phase2 ?? false,
+      coordinatorPhase3: options.phase3 ?? false,
+    },
   };
   const status = options.status ?? "ready";
   const coordinatorValue = options.coordinator === undefined ? coordinator() : options.coordinator;
@@ -348,5 +353,14 @@ describe("CoordinatorEditorPage: phase 2 sections", () => {
       "Goal",
     ]);
     expect(screen.getByLabelText("Name")).toBeTruthy();
+  });
+
+  it("adds an Autonomy entry only while phase 3 is effective", () => {
+    setup({ phase2: true, phase3: true });
+    const labels = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(labels[labels.length - 1]).toBe("Autonomy");
+    cleanup();
+    setup({ phase2: true, phase3: false });
+    expect(screen.queryByRole("tab", { name: "Autonomy" })).toBeNull();
   });
 });

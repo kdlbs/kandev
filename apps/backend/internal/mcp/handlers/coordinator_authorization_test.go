@@ -360,3 +360,27 @@ func TestAuthorizeCoordinatorRequest_NonCoordinatorPrincipalUnaffected(t *testin
 		require.Same(t, msg, replacement)
 	})
 }
+
+// TestAuthorizeCoordinatorRequest_NoAutonomySettingAction proves a coordinator
+// session cannot change its own autonomy or ceiling: no registered or
+// allowlisted action can patch a coordinator, and the guard refuses the
+// candidate names.
+func TestAuthorizeCoordinatorRequest_NoAutonomySettingAction(t *testing.T) {
+	h, _ := newCoordinatorGuardTestHandlers(t)
+	dispatcher := ws.NewDispatcher()
+	h.RegisterHandlers(dispatcher)
+	ctx := context.Background()
+	workspaces, err := h.taskSvc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	principalCtx := mcpscope.WithPrincipal(ctx, coordinatorTestPrincipal(workspaces[0].ID))
+
+	for _, action := range []string{"patch_coordinator", "update_coordinator", "set_autonomy", "set_cost_ceiling"} {
+		require.NotContains(t, dispatcher.Actions(), action)
+		require.NotContains(t, coordinatorSurfaceActions, action)
+		msg := makeWSMessage(t, action, map[string]interface{}{"autonomy_enabled": true})
+		guarded, _, err := h.authorizeCoordinatorRequest(principalCtx, msg)
+		require.NoError(t, err)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	}
+}

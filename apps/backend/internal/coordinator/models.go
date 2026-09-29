@@ -56,6 +56,11 @@ type Coordinator struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
+	// AutonomyEnabled and CostCeilingSubcents are the phase 3 settings; the
+	// ceiling is in hundredths of a cent, nil when unset.
+	AutonomyEnabled     bool
+	CostCeilingSubcents *int64
+
 	// PolicyJSON is the stored permission map, nil for a phase-1 coordinator.
 	PolicyJSON     *string
 	PolicyRevision int

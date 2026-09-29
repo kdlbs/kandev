@@ -124,6 +124,12 @@ type Service struct {
 	// unreadable stored policy has been logged.
 	policyErrLogged sync.Map
 
+	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
+	// and phase 3 all on). It gates the autonomy settings.
+	phase3 bool
+	// kick asks the wake ticker to re-evaluate one coordinator; nil means no call.
+	kick func(ctx context.Context, coordinatorID string) error
+
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
 	afterApproveRecheck func()
@@ -135,6 +141,20 @@ type ServiceOption func(*Service)
 // WithPhase2 turns the phase-2 control surface on or off. Off is the default.
 func WithPhase2(on bool) ServiceOption {
 	return func(s *Service) { s.phase2 = on }
+}
+
+// WithPhase3 turns the phase 3 autonomy surface on or off. Off is the default;
+// callers pass the effective condition, never the raw flag.
+func WithPhase3(on bool) ServiceOption {
+	return func(s *Service) { s.phase3 = on }
+}
+
+// Phase3Enabled reports whether the phase 3 autonomy surface is effective.
+func (s *Service) Phase3Enabled() bool { return s.phase3 }
+
+// SetKick registers the post-commit Kick the autonomy PATCH calls; nil clears it.
+func (s *Service) SetKick(kick func(ctx context.Context, coordinatorID string) error) {
+	s.kick = kick
 }
 
 // Phase2Enabled reports whether the phase-2 control surface is on.
@@ -186,6 +206,12 @@ func (s *Service) SetUndoDeps(tasks UndoTaskService) { s.undoTasks = tasks }
 // this a no-op; a count read failure is logged at warn and swallowed, since
 // a stale badge count is not worth failing the caller's write over.
 func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, coordinatorID string) {
+	s.publishCoordinatorUpdatedWith(ctx, workspaceID, coordinatorID, false)
+}
+
+// publishCoordinatorUpdatedWith is publishCoordinatorUpdated with the
+// autonomy_changed field set as given.
+func (s *Service) publishCoordinatorUpdatedWith(ctx context.Context, workspaceID, coordinatorID string, autonomyChanged bool) {
 	if s.eventBus == nil {
 		return
 	}
@@ -196,6 +222,7 @@ func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, co
 		return
 	}
 	payload := NewCoordinatorUpdatedPayload(workspaceID, coordinatorID, open)
+	payload.AutonomyChanged = autonomyChanged
 	event := bus.NewEvent(events.CoordinatorUpdated, "coordinator-service", payload)
 	if err := s.eventBus.Publish(ctx, events.CoordinatorUpdated, event); err != nil {
 		s.logger.Warn("failed to publish coordinator.updated",
@@ -296,11 +323,18 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 		if err := s.validator.ValidateAgentProfile(ctx, workspaceID, merged.AgentProfileID); err != nil {
 			return err
 		}
-		return s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID)
+		if err := s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID); err != nil {
+			return err
+		}
+		return checkAutonomyInterlock(patch, merged)
 	}
-	updated, clearedConversationTaskID, err := s.store.PatchCoordinator(ctx, workspaceID, id, patch, validate)
+	result, err := s.store.PatchCoordinatorResult(ctx, workspaceID, id, patch, validate)
 	if err != nil {
 		return nil, err
+	}
+	updated, clearedConversationTaskID := result.Coordinator, result.ClearedConversationTaskID
+	if result.AutonomyChanged {
+		s.afterAutonomyChange(ctx, workspaceID, id)
 	}
 	if clearedConversationTaskID != nil && s.onConversationCleared != nil {
 		s.onConversationCleared(ctx, id, *clearedConversationTaskID)
@@ -309,6 +343,25 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", id),
 		zap.Bool("context_changed", clearedConversationTaskID != nil))
 	return updated, nil
+}
+
+// afterAutonomyChange runs after a PATCH that changed autonomy or the ceiling
+// committed: it publishes coordinator.updated with autonomy_changed and calls
+// Kick. Both are best effort; a failure or a Kick panic never changes the
+// PATCH result.
+func (s *Service) afterAutonomyChange(ctx context.Context, workspaceID, id string) {
+	s.publishCoordinatorUpdatedWith(ctx, workspaceID, id, true)
+	if s.kick == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("coordinator kick panicked", zap.String("coordinator_id", id), zap.Any("panic", r))
+		}
+	}()
+	if err := s.kick(ctx, id); err != nil {
+		s.logger.Warn("coordinator kick failed", zap.String("coordinator_id", id), zap.Error(err))
+	}
 }
 
 // buildCoordinatorPatch parses req's four known fields into a
@@ -359,6 +412,11 @@ func (s *Service) buildCoordinatorPatch(req PatchCoordinatorRequest) (Coordinato
 		patch.ExecutorProfileID = executorProfileID
 	}
 
+	if s.phase3 {
+		if err := applyAutonomyFields(req, &patch); err != nil {
+			return patch, err
+		}
+	}
 	return patch, nil
 }
 
@@ -462,6 +520,12 @@ func (s *Service) GetStall(ctx context.Context, workspaceID, taskID string) (*St
 // workspace-scoped request.
 func (s *Service) PruneStalls(ctx context.Context, now time.Time) (int64, error) {
 	return s.store.PruneStalls(ctx, now)
+}
+
+// PruneWakeState is the phase 3 retention pass, returning the turn and wake
+// rows deleted. Unauthorized: only the coordinator startup pass calls it.
+func (s *Service) PruneWakeState(ctx context.Context, now time.Time) (turns, wakes int64, err error) {
+	return s.store.PruneWakeState(ctx, now)
 }
 
 // DeleteWorkspaceState deletes a workspace's coordinators, proposals and

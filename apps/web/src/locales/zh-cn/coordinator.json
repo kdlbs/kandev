@@ -243,6 +243,8 @@
   "sectionStandingOrdersHelp": "协调器在每次对话中遵循的规则。",
   "sectionGoal": "目标",
   "sectionGoalHelp": "该协调器的列表所依据的里程碑。",
+  "sectionAutonomy": "自主运行",
+  "sectionAutonomyHelp": "允许协调器在支出上限内自行行动。",
   "standingOrdersEmpty": "还没有常设指令。",
   "standingOrderNumber": "常设指令 {{number}}",
   "standingOrderAdded": "添加于 {{date}}",

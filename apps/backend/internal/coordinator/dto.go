@@ -59,6 +59,25 @@ type CoordinatorDTO struct {
 	Summary               *SummaryDTO    `json:"summary,omitempty"`
 
 	*CoordinatorPhase2
+	*CoordinatorPhase3
+}
+
+// CoordinatorPhase3 carries the phase 3 read fields; nil (and so absent from
+// the JSON) while phase 3 is not effective.
+type CoordinatorPhase3 struct {
+	AutonomyEnabled bool    `json:"autonomy_enabled"`
+	CostCeilingUSD  *string `json:"cost_ceiling_usd"`
+}
+
+// WithAutonomy attaches the phase 3 fields and returns the receiver.
+func (d *CoordinatorDTO) WithAutonomy(c *Coordinator) *CoordinatorDTO {
+	p3 := &CoordinatorPhase3{AutonomyEnabled: c.AutonomyEnabled}
+	if c.CostCeilingSubcents != nil {
+		usd := FormatCostCeilingUSD(*c.CostCeilingSubcents)
+		p3.CostCeilingUSD = &usd
+	}
+	d.CoordinatorPhase3 = p3
+	return d
 }
 
 // CoordinatorPhase2 carries the phase-2 read fields; nil (and so absent from

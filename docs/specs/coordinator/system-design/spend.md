@@ -46,7 +46,10 @@ the whole part times 10,000 plus the fractional digits scaled to subcents, so
 no float rounding occurs. The autonomy interlock of
 `AC-COORDINATOR-SPEND-001.2` is enforced in the same PATCH transaction
 ([wake](wake.md#flag-and-settings)). Changing the ceiling calls `Kick` so a
-raised ceiling releases held wakes at once.
+raised ceiling releases held wakes at once. That call, and the
+`autonomy_changed` publish, follow the post-commit,
+best-effort, change-only rule of
+[integration](integration.md#autonomy-patch-and-deletion).
 
 ## Measurement
 
