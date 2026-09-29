@@ -71,6 +71,16 @@ phase-2 routes):
 `created_at`, `updated_at`). `last_met` is the most recent met goal by
 `met_at DESC, id DESC` whether or not an active goal exists.
 
+**Request bodies.** A body that is empty, is not valid JSON or is not a JSON
+object is 400 with no field named. A field of the wrong JSON type is 400
+naming that field: `goal_id` (not a string, `null` or absent), `name` and
+`due_on` (not a string, `due_on` also allowing `null`), `criteria` (not an
+array), a `criteria` element that is not an object, `criteria[i].text` and
+`criteria[i].id` (not a string, `id` also allowing `null`), and `done` (not a
+boolean). A `goal_id` of the wrong type is checked at step 0, before every
+other field. Unknown fields are ignored. On met, an empty body is valid and
+means no `goal_id`.
+
 **PUT** runs in the per-coordinator locked transaction. Authorization (403)
 and the coordinator lookup (404) come first, in the order the other
 phase-2 routes use. Then the `goal_id` precondition (step 0), then
@@ -107,8 +117,9 @@ same transaction (`001.5`, `003.1`).
 Two PUTs for one coordinator serialize on the lock. The second sees the goal
 the first created and applies as an update of it (its ids are then checked
 against that goal); it is never refused for a second active goal. The partial
-unique index is only a backstop, and a unique violation that still surfaces is
-retried once as an update.
+unique index is only a backstop: a unique violation that still surfaces
+aborts the transaction (on PostgreSQL it cannot be retried inside it), is not
+retried, and the route returns 500 with nothing stored.
 
 *Changed* means the trimmed name, the `due_on` value (`null` and absent are
 equal) or the ordered list of criterion ids and texts differs from the stored
@@ -150,10 +161,11 @@ authorization, coordinator lookup, then the `goal_id` precondition.
 
 **Events.** After the transaction commits, a PUT that changed or created, a
 toggle that changed `done`, and a met that changed the goal each publish
-`coordinator.updated` and archive the old conversation task through the path
-a context change uses (a failure there is a logged warning repaired by the
-startup pass and never changes the route's result); a toggle archives nothing.
-Writes that changed nothing publish nothing.
+`coordinator.updated`. Only a PUT that changed or created and a met that
+changed the goal also archive the old conversation task, through the path a
+context change uses (a failure there is a logged warning repaired by the
+startup pass and never changes the route's result); a toggle only publishes
+and archives nothing. Writes that changed nothing publish nothing.
 
 A reader's write is 403 (`001.8`); a reader's `GET` is 200. When any read of
 `GET goal` fails, including a measure, the route is 500 with no partial body.
@@ -173,7 +185,9 @@ clock at that moment:
 
 - `open_tasks`: `Store.CountOpenWatchedTasks(ctx, exec, workspaceID, watch)`
   in `measures.go`, one `SELECT COUNT(*) FROM tasks` (the store already reads
-  the `tasks` table directly in `store_prune.go`): `workspace_id` is the
+  the `tasks` table directly in `store_prune.go`; unlike `PruneStalls`, which
+  guards for isolated stores, this count requires the `tasks` table, and a
+  missing table is a 500, so store tests create a minimal `tasks` table): `workspace_id` is the
   coordinator's, `archived_at IS NULL`, `state != 'COMPLETED'` (`FAILED` and
   `CANCELLED` tasks count as open), `is_ephemeral = 0`,
   `COALESCE(origin,'') NOT IN ('coordinator', 'automation_run')` (the board reads exclude `automation_run` the same way, so the count matches what a manager sees), and `workflow_id` non-empty and in

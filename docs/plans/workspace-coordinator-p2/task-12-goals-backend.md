@@ -72,7 +72,7 @@ Tests: the instruction builder output with a met, active or absent goal
 (golden text); baseline with a coordinator 6 and 8 days old; direction at
 deltas 1, 2 and -2; open_tasks excludes automation_run tasks; a stale `goal_id` with old criterion ids is 409 not 400; met with a stale `goal_id` is 409; a goal read failure omits only the goal section; two concurrent creates serialize on the
 lock and the second applies as an update of the first (the unique index is a
-backstop); a stale `goal_id` is 409.
+backstop, a violation is 500 and never retried); wrong JSON types and undecodable bodies are 400; the open-task count needs a `tasks` table; a stale `goal_id` is 409.
 
 ## Likely files
 

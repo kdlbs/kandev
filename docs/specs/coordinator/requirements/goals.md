@@ -79,7 +79,9 @@ criteria, so that the coordinator's advice points at it.
 - **AC-COORDINATOR-GOALS-001.6:** When a coordinator conversation opens, its
   standing instructions shall include the active goal's name, due date and
   criteria with their done state as of that moment; with no active goal they
-  shall say that no goal is set.
+  shall say that no goal is set. Where the goal cannot be read, the standing
+  instructions shall omit the goal section, log a warning and otherwise be
+  unchanged, and the conversation shall proceed.
 - **AC-COORDINATOR-GOALS-001.7:** When a manager changes the active goal's
   name, due date or criteria, or marks it met, or sets a new goal, the system
   shall archive the current conversation task and clear its reference.
