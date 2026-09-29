@@ -12,7 +12,7 @@ import {
   retryAgentMcpConnection,
 } from "@/lib/api/domains/session-api";
 import { fetchTerminals, type TerminalInfo } from "@/lib/api/domains/user-shell-api";
-import type { PrepareStepInfo } from "@/lib/state/slices/session-runtime/types";
+import type { PrepareStepInfo, UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 
 const FAILURE_LABEL_KEYS: Record<string, string> = {
   authentication_required: "task:agentMcpAuthenticationRequired",
@@ -25,21 +25,47 @@ const FAILURE_LABEL_KEYS: Record<string, string> = {
   stale: "task:agentMcpSelectionChanged",
 };
 
-function userShellFromTerminalInfo(terminal: TerminalInfo, label: string) {
+function userShellFromTerminalInfo(terminal: TerminalInfo, label: string): UserShellInfo | null {
   const terminalId = terminal.id ?? terminal.terminal_id;
-  if (!terminalId || terminal.kind !== "ordinary") return null;
+  if (!terminalId || (terminal.kind && terminal.kind !== "ordinary")) return null;
   return {
     terminalId,
-    kind: terminal.kind,
+    kind: terminal.kind ?? "ordinary",
     seq: terminal.seq,
     customName: terminal.custom_name,
     displayName: label,
-    state: terminal.state,
-    ptyStatus: terminal.pty_status,
+    state: terminal.state ?? "open",
+    ptyStatus: terminal.pty_status ?? (terminal.running ? "running" : "stopped"),
     label,
-    running: terminal.pty_status === "running",
+    running: terminal.running ?? terminal.pty_status === "running",
     closable: true,
-  } as const;
+  };
+}
+
+async function resolveRecoveryShell(
+  taskId: string,
+  result: { terminal_id: string; task_environment_id: string; label: string },
+): Promise<UserShellInfo> {
+  try {
+    const terminals = await fetchTerminals(taskId, result.task_environment_id);
+    const terminal = terminals.find(
+      (candidate) => (candidate.id ?? candidate.terminal_id) === result.terminal_id,
+    );
+    const shell = terminal ? userShellFromTerminalInfo(terminal, result.label) : null;
+    if (shell) return shell;
+  } catch {
+    // Fall back to direct result shell
+  }
+  return {
+    terminalId: result.terminal_id,
+    kind: "ordinary",
+    displayName: result.label,
+    label: result.label,
+    state: "open",
+    ptyStatus: "stopped",
+    running: false,
+    closable: true,
+  };
 }
 
 export function agentMcpFailureLabelKey(failureCode?: string): string {
@@ -128,12 +154,7 @@ export function AgentMcpPrepareActions({
     setFeedback("");
     try {
       const result = await authenticateAgentMcp(sessionId, serverId);
-      const terminals = await fetchTerminals(taskId, result.task_environment_id);
-      const terminal = terminals.find(
-        (candidate) => (candidate.id ?? candidate.terminal_id) === result.terminal_id,
-      );
-      const shell = terminal ? userShellFromTerminalInfo(terminal, result.label) : null;
-      if (!shell) throw new Error();
+      const shell = await resolveRecoveryShell(taskId, result);
       store.getState().addUserShell(result.task_environment_id, shell);
       if (usesDesktopWorkbench) {
         addTerminalPanel(
