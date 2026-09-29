@@ -79,18 +79,17 @@ func TestResumeTodosPersistOutOfTurnClear(t *testing.T) {
 func TestResumeTodosPreservePromptTurn(t *testing.T) {
 	entries := []streams.PlanEntry{{Description: "Keep this list", Status: "in_progress"}}
 	tests := []struct {
-		name             string
-		entries          []streams.PlanEntry
-		workerTurn       bool
-		reserved         bool
-		failLookup       bool
-		wantLifecycle    bool
-		wantPersisted    bool
-		wantEmptyEntries bool
+		name          string
+		entries       []streams.PlanEntry
+		workerTurn    bool
+		reserved      bool
+		failLookup    bool
+		wantLifecycle bool
+		wantPersisted bool
 	}{
 		{name: "active turn", entries: entries, workerTurn: true, wantPersisted: true},
 		{name: "reserved prompt turn wins before lookup", entries: entries, workerTurn: true, reserved: true, failLookup: true, wantPersisted: true},
-		{name: "empty list clears active turn", entries: []streams.PlanEntry{}, workerTurn: true, wantPersisted: true, wantEmptyEntries: true},
+		{name: "empty list clears active turn", entries: []streams.PlanEntry{}, workerTurn: true, wantPersisted: true},
 		{name: "completed only", entries: entries, wantLifecycle: true, wantPersisted: true},
 		{name: "failed active lookup", entries: entries, failLookup: true},
 	}
@@ -152,9 +151,6 @@ func TestResumeTodosPreservePromptTurn(t *testing.T) {
 					lookup := fixture.svc.turnService.(*failingActiveTurnLookup)
 					require.Zero(t, lookup.startCalls, "lookup failure must not fall back to turn creation")
 				}
-			}
-			if tc.wantEmptyEntries {
-				require.Empty(t, tc.entries)
 			}
 			require.Len(t, fixture.eventBus.events, 1,
 				"the active reviewer sibling must not suppress or substitute for the worker's todo state")
