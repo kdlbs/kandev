@@ -19,6 +19,9 @@ is an ordinary Kandev session on an ephemeral task.
 Phase 1 is attended: only a manager's message starts a turn. The coordinator's
 Kandev tools can read the workspace and propose tasks, and nothing else.
 
+How the panel shows the coordinator's work is in
+[copilot activity display](copilot-activity.md).
+
 Kandev enforces the coordinator's Kandev surface. It does not control the agent
 CLI's own tools (a shell on its executor, its MCP servers, its
 permission settings); in phase 1 a coordinator is as capable through those as
@@ -267,36 +270,6 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-004.13:** The board's task preview panel shall
   behave as before: the same layout rule, resize bounds, persisted width,
   Escape and backdrop close, and maximize action.
-
-### REQ-COORDINATOR-COPILOT-006: Activity display
-
-**Intent:** The manager sees that the coordinator is working, not how Kandev
-runs it.
-
-This requirement changes mockup `p1-05`, which shows each Kandev tool call as
-its own row. It follows the pattern of assistant chats aimed at non-developers:
-calm by default, detail on demand.
-
-#### Acceptance criteria
-
-- **AC-COORDINATOR-COPILOT-006.1:** While a turn is running, the panel shall
-  show one status line above the composer that updates in place with a plain
-  verb for the current tool (for example "Reading tasks", "Checking
-  workflows", "Drafting a proposal") and the elapsed seconds. Tool calls shall
-  not render as one row each while the turn runs.
-- **AC-COORDINATOR-COPILOT-006.2:** When a turn ends, its tool calls shall
-  collapse into one chip naming how many were made and how long the turn took,
-  collapsed by default; expanding it shows one row per tool call with its
-  existing detail.
-- **AC-COORDINATOR-COPILOT-006.3:** A `propose_task_kandev` call shall never be
-  collapsed: its proposal card always renders in full.
-- **AC-COORDINATOR-COPILOT-006.4:** Once the agent has started successfully, the
-  session start-up rows (environment preparation and agent start) shall be
-  hidden; while the agent is still starting, or when it failed to start, they
-  shall stay visible.
-- **AC-COORDINATOR-COPILOT-006.5:** The activity display applies to the
-  coordinator panel only; Settings configuration chat, Quick Chat and the
-  task page shall render as before.
 
 ### REQ-COORDINATOR-COPILOT-005: Ask about this
 
