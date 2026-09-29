@@ -38,6 +38,7 @@ export function useCoordinatorList(workspaceId: string | null): UseCoordinatorLi
   }, []);
 
   useEffect(() => {
+    seqRef.current += 1;
     setCoordinators(undefined);
     setError(false);
     if (!workspaceId) return;

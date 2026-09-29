@@ -150,5 +150,12 @@
   "toastForbidden": "提案を決定する権限がなくなりました。",
   "toastNotFound": "この提案はもう存在しません。",
   "toastNetworkError": "Kandev に接続できませんでした。何も決定されていません。再試行してください。",
-  "toastProposalNoLongerWaiting": "この提案はもう決定待ちではありません。"
+  "toastProposalNoLongerWaiting": "この提案はもう決定待ちではありません。",
+  "copilotWorkspaceLauncher": "コーディネーターに質問",
+  "copilotPageChipTask": "このタスク: {{label}}",
+  "copilotPageChipBoard": "このボード: {{label}}",
+  "copilotPageChipTooltip": "ID のみ送信されます。残りはコーディネーター自身が読み取ります。",
+  "copilotNotWatched": "このコーディネーターは監視していません",
+  "copilotSwitcherLabel": "コーディネーター",
+  "copilotOpenCoordinatorPage": "コーディネーターのページを開く"
 }

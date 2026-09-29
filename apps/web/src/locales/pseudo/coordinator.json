@@ -150,5 +150,12 @@
   "toastForbidden": "Ŷōũ ńō ĺōńĝēŕ ĥàvē ƥēŕḿĩśśĩōń ţō ďēćĩďē ƥŕōƥōśàĺś.",
   "toastNotFound": "Ţĥĩś ƥŕōƥōśàĺ ńō ĺōńĝēŕ ēxĩśţś.",
   "toastNetworkError": "Ćōũĺď ńōţ ŕēàćĥ Ķàńďēv. Ńōţĥĩńĝ ŵàś ďēćĩďēď. Ţŕŷ àĝàĩń.",
-  "toastProposalNoLongerWaiting": "Ţĥĩś ƥŕōƥōśàĺ ĩś ńō ĺōńĝēŕ ŵàĩţĩńĝ ƒōŕ à ďēćĩśĩōń."
+  "toastProposalNoLongerWaiting": "Ţĥĩś ƥŕōƥōśàĺ ĩś ńō ĺōńĝēŕ ŵàĩţĩńĝ ƒōŕ à ďēćĩśĩōń.",
+  "copilotWorkspaceLauncher": "Àśķ ŷōũŕ ćōōŕďĩńàţōŕ",
+  "copilotPageChipTask": "Ţĥĩś ţàśķ: {{label}}",
+  "copilotPageChipBoard": "Ţĥĩś ƀōàŕď: {{label}}",
+  "copilotPageChipTooltip": "Śēńţ àś àń ĩď; ĩţ ŕēàďś ţĥē ŕēśţ ĩţśēĺƒ.",
+  "copilotNotWatched": "Ńōţ ŵàţćĥēď ƀŷ ţĥĩś ćōōŕďĩńàţōŕ",
+  "copilotSwitcherLabel": "Ćōōŕďĩńàţōŕ",
+  "copilotOpenCoordinatorPage": "Ōƥēń ţĥē ćōōŕďĩńàţōŕ ƥàĝē"
 }

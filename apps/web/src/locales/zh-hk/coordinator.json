@@ -150,5 +150,12 @@
   "toastForbidden": "您不再有權決定提案。",
   "toastNotFound": "此提案已不存在。",
   "toastNetworkError": "無法連接到 Kandev。未做出任何決定。請重試。",
-  "toastProposalNoLongerWaiting": "此提案已不再等待決定。"
+  "toastProposalNoLongerWaiting": "此提案已不再等待決定。",
+  "copilotWorkspaceLauncher": "詢問您的協調器",
+  "copilotPageChipTask": "此任務：{{label}}",
+  "copilotPageChipBoard": "此看板：{{label}}",
+  "copilotPageChipTooltip": "僅以 ID 傳送，其餘內容由協調器自行讀取。",
+  "copilotNotWatched": "此協調器未關注",
+  "copilotSwitcherLabel": "協調器",
+  "copilotOpenCoordinatorPage": "開啟協調器頁面"
 }

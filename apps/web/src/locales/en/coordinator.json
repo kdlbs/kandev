@@ -150,5 +150,12 @@
   "toastForbidden": "You no longer have permission to decide proposals.",
   "toastNotFound": "This proposal no longer exists.",
   "toastNetworkError": "Could not reach Kandev. Nothing was decided. Try again.",
-  "toastProposalNoLongerWaiting": "This proposal is no longer waiting for a decision."
+  "toastProposalNoLongerWaiting": "This proposal is no longer waiting for a decision.",
+  "copilotWorkspaceLauncher": "Ask your coordinator",
+  "copilotPageChipTask": "This task: {{label}}",
+  "copilotPageChipBoard": "This board: {{label}}",
+  "copilotPageChipTooltip": "Sent as an id; it reads the rest itself.",
+  "copilotNotWatched": "Not watched by this coordinator",
+  "copilotSwitcherLabel": "Coordinator",
+  "copilotOpenCoordinatorPage": "Open the coordinator page"
 }

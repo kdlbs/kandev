@@ -150,5 +150,12 @@
   "toastForbidden": "Já não tem permissão para decidir propostas.",
   "toastNotFound": "Esta proposta já não existe.",
   "toastNetworkError": "Não foi possível contactar o Kandev. Nada foi decidido. Tente novamente.",
-  "toastProposalNoLongerWaiting": "Esta proposta já não está à espera de uma decisão."
+  "toastProposalNoLongerWaiting": "Esta proposta já não está à espera de uma decisão.",
+  "copilotWorkspaceLauncher": "Pergunte ao seu coordenador",
+  "copilotPageChipTask": "Esta tarefa: {{label}}",
+  "copilotPageChipBoard": "Este quadro: {{label}}",
+  "copilotPageChipTooltip": "Enviado como um id; o coordenador lê o resto por si.",
+  "copilotNotWatched": "Não vigiado por este coordenador",
+  "copilotSwitcherLabel": "Coordenador",
+  "copilotOpenCoordinatorPage": "Abrir a página do coordenador"
 }
