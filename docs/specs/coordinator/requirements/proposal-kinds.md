@@ -201,9 +201,10 @@ and merging stays human.
   flight its button shall be disabled with a spinner and a second click shall
   send nothing. On a successful answer the button shall stay disabled with the
   label "Resuming" (or "Resume queued" when the answer says the activation was
-  queued) until the stall leaves Needs you, and shall re-enable and show the
-  error inline if the answer says it failed or was suppressed, or the request
-  is rejected or times out. **Open task** and **Show the evidence** shall stay
+  queued) until the stall leaves Needs you, through any refetch, and shall
+  re-enable and show the error inline if the answer says it failed or was suppressed, or the request
+  is rejected or times out. A stall that leaves Needs you mid-request shall
+  show nothing. **Open task** and **Show the evidence** shall stay
   on the stall card. **Resume** shall be
   shown for a stall whose task's primary session exists and is neither
   `COMPLETED` nor `CREATED`, and no other; a session the server then refuses
@@ -215,8 +216,12 @@ and merging stays human.
   send nothing. On success the note shall close and clear and a toast shall
   say "Sent to `<task identifier>`"; on failure the note shall stay open with
   its text and show the error inline. The row shall stay in Ready to merge
-  either way. Sends from one open form shall share one client queue id, so a
-  retry after an uncertain transport error queues the note once, and a
+  either way. Sends shall share one client queue id only while the trimmed
+  note is unchanged since the last attempt, so a retry after an uncertain
+  transport error queues the note once and an edited note gets a new id. A
+  failed send shall show the queue-full copy, or the task page composer's
+  message for the admission error, or "Could not send. Try again.", never a
+  raw error code. A row that leaves Ready to merge closes its form. A
   session read that fails when the form opens shall show an inline error with
   Send disabled.
 - **AC-COORDINATOR-PROPOSAL-KINDS-005.7:** **Open the PR** shall open the
