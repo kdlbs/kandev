@@ -39,10 +39,9 @@ export async function createMcpRecoveryFixture(
   if (!taskEnvironmentId) throw new Error("MCP recovery session has no task environment");
 
   await apiClient.seedTaskSession(task.id, {
-    state: "COMPLETED",
+    state: "WAITING_FOR_INPUT",
     sessionId,
     agentProfileId: seedData.agentProfileId,
-    completedAt: new Date().toISOString(),
     metadata: {
       prepare_result: {
         status: "completed",
