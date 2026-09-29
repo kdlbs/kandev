@@ -43,7 +43,7 @@ test.describe("Mobile task loading state", () => {
     }
   });
 
-  test("shows route loading, then recovers the destination task when optional hydration fails", async ({
+  test("shows the destination task while its optional session refresh is pending or fails", async ({
     testPage,
     apiClient,
     seedData,
@@ -98,7 +98,8 @@ test.describe("Mobile task loading state", () => {
       await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
       await requestObserved;
       const routeLoading = testPage.getByRole("status").filter({ hasText: "Loading task…" });
-      await expect(routeLoading).toBeVisible();
+      await expect(routeLoading).toHaveCount(0);
+      await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
       releaseRequest();
       await handlerSettled;

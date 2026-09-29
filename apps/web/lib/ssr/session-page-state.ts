@@ -1,3 +1,4 @@
+import { resolveTaskRoute } from "@/lib/routing/resolve-task-route";
 import {
   fetchWorkflowSnapshot,
   fetchTask,
@@ -466,31 +467,14 @@ export async function fetchSessionDataForTask(
   taskId: string,
   requestedSessionId?: string,
 ): Promise<FetchedSessionData> {
-  const [task, allSessionsResponse] = await Promise.all([
-    fetchTask(taskId, { cache: "no-store" }),
-    listTaskSessions(taskId, { cache: "no-store" }),
-  ]);
-  const sessions = allSessionsResponse.sessions ?? [];
-
-  const ownedSessions = sessions.filter((session) => session.task_id === taskId);
-  const requestedSession = requestedSessionId
-    ? ownedSessions.find((session) => session.id === requestedSessionId)
-    : undefined;
-  const primarySession = task.primary_session_id
-    ? ownedSessions.find((session) => session.id === task.primary_session_id)
-    : undefined;
-  const sessionId = requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id;
+  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
+    taskId,
+    requestedSessionId,
+  );
   if (!sessionId) {
-    // No sessions yet — fetch task/workspace data so the store is seeded and
-    // the auto-start hook can fire immediately without a client-side crash.
     return fetchTaskDataOnly(task, allSessionsResponse);
   }
 
-  // Refetch the active session via the single-session endpoint to get
-  // agent_profile_snapshot, which the list endpoint strips. See
-  // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
-  // All remaining enrichment shares this deadline so no optional request can
-  // extend route loading beyond the configured bound.
   const optionalHydration = beginOptionalHydration();
   const { fetchTaskSession } = await import("@/lib/api");
   const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
@@ -503,6 +487,28 @@ export async function fetchSessionDataForTask(
     activeSessionResponse,
     optionalHydration,
   );
+}
+
+/** Client navigation leaves optional enrichment to the mounted domain hooks. */
+export async function fetchTaskNavigationData(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<FetchedSessionData> {
+  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
+    taskId,
+    requestedSessionId,
+  );
+  return {
+    task,
+    sessionId: sessionId ?? null,
+    initialState: buildSessionPageState({
+      task,
+      sessionId: sessionId ?? null,
+      allSessions: allSessionsResponse.sessions,
+      activeSession: null,
+    }),
+    initialTerminals: [],
+  };
 }
 
 /**

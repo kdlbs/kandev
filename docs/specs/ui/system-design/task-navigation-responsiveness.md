@@ -28,6 +28,7 @@ Do not replace the virtualizer or increase mounted-row counts to conceal delays.
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4` | Progressive restoration |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` | Scope and stale-response protection |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.6` | Responsive presentation |
+| `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7` | Task route presentation and essential hydration |
 
 ## Components and responsibilities
 
@@ -244,3 +245,35 @@ the bounded local cache choice and its alternatives are preserved here.
 Per-hook ownership cannot coordinate multiple consumers, while a global cache
 would weaken scope isolation. A framework migration would expand the repair
 without resolving the resource-specific readiness and invalidation contracts.
+
+## Task route presentation and essential hydration
+
+The SPA task route uses the current workspace's existing task projection and
+validated session records to render available content during navigation. Do
+not retain or replay complete hydration bundles: messages, runtime state,
+settings, and session epochs remain owned by their existing store slices.
+Unknown or cross-workspace projections and unknown requested sessions follow
+normal authoritative loading. Task removal/recovery boundaries remain in place.
+
+Client route resolution fetches only the task and its owned session list, then
+hydrates those essential slices. The full boot/SSR enrichment entry points
+remain unchanged. Existing mounted domain hooks own message/turn backfill,
+profile reconciliation, repositories, workflow snapshots, settings, and shells;
+one slow optional resource must not delay other content. Omitted messages/turns
+must remain unloaded, never become fabricated empty histories.
+
+Read-cursor capture remains gated until the fresh session list is hydrated.
+Readiness belongs to the exact hydration snapshot, not just the task/session
+route key: returning to the same route requires its fresh snapshot to hydrate.
+Automatic session creation also waits for authoritative task/session hydration;
+a lightweight projection is presentation data, not permission to launch.
+Task details supplied by route resolution must not trigger a duplicate details
+request. Reconnect/foreground refresh and route-error recovery remain available.
+
+Task/session ownership is checked before cached presentation. The task projection
+preserves workspace, repository, status, and recovery metadata. Route request
+cancellation and session hydration epochs reject obsolete navigation and live
+session overwrites. There is no new persistent cache or backend API.
+
+This section implements `.7` and applies the `.5`/`.6` isolation and responsive
+contracts to whole-task presentation.
