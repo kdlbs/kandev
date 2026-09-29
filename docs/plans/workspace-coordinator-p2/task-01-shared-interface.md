@@ -78,9 +78,20 @@ screen.
   lock and the `unknown` class (`001.3`); rows are only ever marked undone
   or counted (`001.4`)
   ([design](../../specs/coordinator/system-design/activity-log.md#refusals)).
-- Store methods (no routes) for activity insert, standing-order reads
-  (`ActiveStandingOrders`) and goal reads, so later work orders share one
-  store surface.
+- Store methods (no routes) for activity insert, `MarkUndone`, standing-order
+  reads (`ActiveStandingOrders`) and goal reads (`ActiveGoal`, `LastMetGoal`),
+  so later work orders share one store surface. The exact Go signatures,
+  the `coordinatorExec` transaction handle, `PolicyView`, `WatchSet`, the
+  `NewService` option and the wire field names are fixed in the
+  [shared interface](../../specs/coordinator/system-design/coordinators.md#shared-interface)
+  section; implement them as written.
+- The `phase2` kind predicate on every store read a flag-off phase-1 path
+  makes (list, by-id, decision-route read, startup pass, stale-claim sweep,
+  `get_coordinator_item_kandev` by-id read), and `CountOpenProposals` with
+  `phase2` so the cap and `open_proposals` agree. Task 04 extends the sweep
+  for the other kinds and keeps the parameter.
+- Deletion order: children before the coordinator, with the per-coordinator
+  lock first on PostgreSQL, and `coordinator_activity(workspace_id)`.
 - Typed client `lib/api/domains/coordinator-api.ts`: types and functions for
   settings, activity, summary, undo, standing orders, goal and setup routes
   as the designs define them; with `phase2` off they are never called.
@@ -105,10 +116,8 @@ screen.
 ## Verification
 
 ```bash
-make -C apps/backend test PKG=./internal/coordinator/...
-make -C apps/backend test PKG=./internal/persistence/...
-make -C apps/backend test PKG=./internal/runtimeflags/...
-cd apps/web && pnpm test -- lib/api/domains/coordinator-api.test.ts
+cd apps/backend && go test ./internal/coordinator/... ./internal/persistence/... ./internal/runtimeflags/... ./internal/mcp/...
+cd apps/web && pnpm exec vitest run lib/api/domains/coordinator-api.test.ts
 cd apps/web && pnpm run typecheck
 ```
 
@@ -118,14 +127,34 @@ NULL, a partial map and garbage; the flag-off list filter hides a stored
 (`AC-COORDINATOR-COORDINATORS-007.3`); the registry completeness test for
 the new flag (`007.1`); a fault-injected row insert fails the caller's
 transaction (`001.6`); 10 concurrent refusals give one row with count 10
-and an unnamed action records as `unknown` (`001.3`); the store exposes no
-update other than the undo marker and the count (`001.4`).
+and an unnamed action records as `unknown` (`001.3`); a scan of the
+package sources finds every `UPDATE coordinator_activity` setting only the
+undo-marker or count columns (`001.4`).
+
+Added tests: `ParsePolicy` on every row of its result table; `Allows` on an
+unknown action; `Service.Policy` with `phase2` on and off and for a missing
+coordinator; `LoadWatchSet` order, empty `selected`, missing coordinator and
+a failed query; `resetConversation` clears, increments and returns the old
+task id, the after-commit archive runs once and never with an empty id, a
+rolled-back transaction changes nothing, and it matches the phase-1 PATCH
+end state; coordinator GET and list carry `policy`, `policy_revision` and
+`watches` with `phase2` on and none with it off, and read an unreadable stored
+policy as all `denied`; the flag-off cap and `open_proposals` cases and the
+flag-off sweep, startup-pass and by-id cases of the design; the four-case
+flag dependency and its client derivation; 25-vs-26 open counts on both
+sides; a refusal coordinator deleted mid-write writes nothing; refusal
+cutoff at 59 and 61 seconds; a 1,001-rune detail stored as 1,000; delete
+ordering and concurrent `Record` against `DeleteCoordinator` on both
+dialects; a phase-1 statement set run against the phase-2 schema; the upgrade
+test from both starting schemas of the design; `ActiveStandingOrders` and goal
+reads with none, several and a failed query; the client test covers only the
+routes whose bodies the designs define.
 
 ## Likely files
 
 - `apps/backend/internal/runtimeflags/registry.go`, `profiles.yaml`
 - `apps/backend/internal/coordinator/store.go`, `policy.go`, `watches.go`,
-  `service.go`, `types.go`
+  `activity.go`, `toolprofile.go`, `service.go`, `models.go`, `dto.go`
 - `apps/backend/internal/persistence/requiredstores/catalog.go` and upgrade
   testdata
 - `apps/web/lib/api/domains/coordinator-api.ts`, `apps/web/lib/types/`

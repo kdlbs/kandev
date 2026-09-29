@@ -65,12 +65,20 @@ writes. Refusals come from the guard of [permissions](permissions.md#guard).
 
 Indexes: `(coordinator_id, created_at DESC, id DESC)` for the list and
 summary, `(coordinator_id, action_class, created_at)` for the filtered list,
-`(created_at)` for retention. Coordinator delete and the workspace deletion
+`(created_at)` for retention, `(workspace_id)` for the workspace-deletion
+delete. Coordinator delete and the workspace deletion
 transaction delete the coordinator's rows (`005.1`).
 
 `internal/coordinator/activity.go` is the only writer. Rows are never
-updated except `undone_at`, `undone_by`, `updated_at` by undo and
-`refusal_count`, `updated_at` by coalescing (`001.4`).
+updated except `undone_at`, `undone_by`, `updated_at` by `MarkUndone` and
+`refusal_count`, `updated_at` by coalescing (`001.4`). A test scans the
+package's non-test sources for every string literal containing `UPDATE
+coordinator_activity` and fails unless its SET columns are exactly one of
+those two sets, and for every `DELETE FROM coordinator_activity` outside
+retention and the two deletion transactions. `Detail` is truncated on write
+to 1,000 runes (code points), without an ellipsis. `Service.Record` and
+`RecordRefusal` write nothing when `phase2` is false, and their signatures
+are in [coordinators](coordinators.md#shared-interface).
 
 ## Writes
 
@@ -97,18 +105,23 @@ A proposal's action class is its kind's action: `create_task`, `resume`,
 
 ## Refusals
 
-`RecordRefusal(ctx, coordinatorID, workspaceID, actionClass, reasonCode)`
-runs in its own transaction after the guard refuses:
+`Service.RecordRefusal(ctx, coordinatorID, workspaceID, actionClass,
+reasonCode)` runs in its own transaction after the guard refuses:
 
 1. `UPDATE coordinator_activity SET refusal_count = refusal_count + 1,
    updated_at = now WHERE id = (SELECT id FROM coordinator_activity WHERE
    coordinator_id = ? AND action_class = ? AND reason_code = ? AND outcome =
-   'refused' AND created_at >= now - 60s ORDER BY created_at DESC, id DESC
+   'refused' AND created_at >= ? ORDER BY created_at DESC, id DESC
    LIMIT 1)`.
 2. No row matched: insert a `refused`, `denied` row.
 
-Both run under the per-coordinator lock, so two concurrent refusals produce
-one row with count 2. The action class of an unknown tool name is `unknown`
+`?` is a cutoff computed in Go as `now.UTC().Add(-60 * time.Second)` and
+bound in the same time encoding `created_at` is written with, so the SQLite
+text comparison and the PostgreSQL timestamp comparison agree. Both run
+under the per-coordinator lock, so two concurrent refusals produce one row
+with count 2; a coordinator missing under the lock (deleted meanwhile)
+writes nothing and is not an error. The action class of an unknown tool
+name is `unknown`, assigned by the guard through `ActionForTool`
 (`001.3`). A failure here is logged at warn; the refusal already happened.
 
 ## Routes
@@ -297,7 +310,9 @@ Phase 3 may rely on, and phase 2 will not change without a new ADR:
 
 Undo logs at info with the row, coordinator and task ids and the result.
 Retention logs the deleted count. `coordinator_activity_rows_total` (expvar,
-labelled by `outcome`) counts inserted rows; no identifier is a label.
+labelled by `outcome`) is incremented by `InsertActivity` after a successful
+insert statement. It counts insert statements that succeeded, so a caller's
+later rollback is not subtracted; no identifier is a label.
 
 ## Related decisions
 

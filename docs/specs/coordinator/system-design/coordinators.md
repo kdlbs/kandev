@@ -227,7 +227,8 @@ agent or executor `missing` message of its field.
 ## Workspace deletion
 
 The `workspace.deleted` subscriber runs one transaction deleting the
-workspace's coordinators, proposals and stall rows. Conversation tasks,
+workspace's coordinators, proposals and stall rows and, children first,
+the phase-2 rows ([Shared interface](#shared-interface)). Conversation tasks,
 current and archived, go with the workspace's tasks through the task system. Deleting zero rows is success,
 so a redelivered event is harmless.
 
@@ -263,6 +264,14 @@ so a redelivered event is harmless.
   once at startup and passes it to the coordinator service, the MCP server's
   coordinator registration, the guard and the executor's coordinator branch.
   The client derives the same value from both flags.
+  The registry entry's `Label` is "Coordinator control", its `Description`
+  says it adds permissions, standing orders, goals, the activity log and
+  more proposal kinds to the Coordinator, and takes effect only while
+  "Coordinator" is on, and its `Risk` is the same tier as `features.coordinator`.
+  Tests: the backend `phase2` value is false for every combination other than
+  both flags on (four cases), the client derivation returns the same four
+  results, and turning `coordinatorPhase2` on with `coordinator` off registers
+  no phase-2 route (`007.1`).
 - With `phase2` false (`007.2`, `007.4`): the phase-2 routes (settings,
   standing orders, goal, activity, setup) are not registered and return
   404; the phase-2 propose tools and `list_coordinator_activity_kandev` are
@@ -288,6 +297,224 @@ so a redelivered event is harmless.
   restart with it off, the binding is ignored and the phase-1 profile
   applies. A conversation opened while it was off has no binding and gets the
   phase-1 profile when it is turned on, until a change archives it.
+
+## Shared interface
+
+Owned by phase-2 [task 01](../../../plans/workspace-coordinator-p2/task-01-shared-interface.md).
+Every later work order builds on these signatures. The package is
+`internal/coordinator` unless a path is given.
+
+### Transactions
+
+`coordinatorExec` (the store's existing interface in `store.go`) is the
+transaction handle. The per-dialect lock helper
+`Store.withCoordinatorLock(ctx, coordinatorID, fn func(tx coordinatorExec) error) error`
+hands its callback a SQLite `*sql.Conn` opened with `BEGIN IMMEDIATE`, or a
+PostgreSQL `*sqlx.Tx` that first ran `SELECT id FROM coordinators WHERE id
+= ? FOR UPDATE`; both satisfy `coordinatorExec`, and the store's `rebind`
+converts placeholders. No second abstraction exists. When the coordinator
+row is missing under the lock the helper returns `ErrNotFound` and `fn` does
+not run.
+
+### Open-proposal counting and the flag-off kind predicate
+
+`Store.countOpenProposals(ctx, exec, coordinatorID, phase2 bool)` is the one
+count behind both the propose-time cap of 25 and the `open_proposals` field.
+With `phase2` false it adds `AND kind = 'create_task'`, so stored resume,
+message and move proposals neither count toward the cap nor appear in
+`open_proposals`; with `phase2` true it counts every kind. The cap and the
+field can therefore never disagree.
+
+Task 01 owns the `kind` predicate on every read a flag-off phase-1 path
+makes: `ListProposals`, `GetProposal`, the decision routes' row read,
+`ListApprovingClaimedBefore` (startup pass), `ReclaimStale` (stale-claim
+sweep) and the by-id read of `get_coordinator_item_kandev`. Each store
+method takes `phase2 bool`. With it false, a non-create id is the phase-1
+not-found result, nothing is claimed, and no row changes. Task 04 extends the
+sweep for the other kinds and keeps the parameter. Tests: 25 stored open
+`resume` rows with `phase2` false do not block a `create_task` propose and
+`open_proposals` is 0; 25 open `create_task` rows refuse the 26th; with
+`phase2` true 24 create plus 1 resume rows count 25; a stored `approving`
+resume row is neither reclaimed nor listed by the flag-off sweep and startup
+pass; the by-id tool read of a resume id is not found.
+
+### Signatures
+
+```go
+type Store struct{ /* existing */ }
+func (s *Store) CountOpenProposals(ctx context.Context, exec coordinatorExec, coordinatorID string, phase2 bool) (int, error)
+func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordinatorID string) (WatchSet, error)
+func (s *Store) ActiveStandingOrders(ctx context.Context, coordinatorID string) ([]StandingOrder, error)
+func (s *Store) ActiveGoal(ctx context.Context, coordinatorID string) (*Goal, error)
+func (s *Store) LastMetGoal(ctx context.Context, coordinatorID string) (*Goal, error)
+func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row ActivityRow) error
+func (s *Store) MarkUndone(ctx context.Context, exec coordinatorExec, rowID, undoneBy string, at time.Time) (bool, error)
+
+func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView, error)
+func (s *Service) Record(ctx context.Context, exec coordinatorExec, row ActivityRow) error
+func (s *Service) RecordRefusal(ctx context.Context, coordinatorID, workspaceID string, actionClass Action, reasonCode string) error
+func (s *Service) resetConversation(ctx context.Context, exec coordinatorExec, coordinatorID string) (archiveTaskID string, err error)
+func (s *Service) archiveConversation(ctx context.Context, coordinatorID, taskID string)
+func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthorizer, log *logger.Logger, opts ...ServiceOption) *Service
+func WithPhase2(on bool) ServiceOption
+```
+
+- `NewService` gains only a trailing variadic option, so every phase-1 call
+  site and test compiles unchanged; `phase2` defaults to false.
+- `Service.Record` and `Service.RecordRefusal` return nil and write nothing
+  when `phase2` is false; the store methods are ungated. Every writer goes
+  through the service.
+- `RecordRefusal` lives in the `coordinator` package. The guard in
+  `internal/mcp/handlers` reaches it through an interface
+  `RefusalRecorder { RecordRefusal(ctx, coordinatorID, workspaceID string, actionClass Action, reasonCode string) error }`
+  that `*Service` satisfies. Five parameters including `ctx`; the earlier
+  four-argument form in the permissions design is retired.
+- `resetConversation` runs inside the caller's locked transaction: sets
+  `conversation_task_id` NULL, sets `config_revision = config_revision + 1`,
+  returns the previous `conversation_task_id` (empty when none). The caller
+  invokes `archiveConversation(ctx, coordinatorID, taskID)` after commit;
+  that function is the archive step of the phase-1 context-change path
+  extracted unchanged, including the warn-and-startup-pass handling of an
+  archive failure. It is never called with an empty id. The phase-1 PATCH
+  keeps its inline clear at `store.go` and is deliberately not moved, so
+  phase-1 tests are untouched; a parity test asserts both paths leave the
+  same row state.
+- `MarkUndone` runs `UPDATE coordinator_activity SET undone_at = ?, undone_by
+  = ?, updated_at = ? WHERE id = ? AND undone_at IS NULL` and reports whether
+  a row changed. Task 01 owns it; the undo route's work order calls it.
+
+### Policy
+
+`ParsePolicy(raw *string) (Policy, error)` is pure and never logs. Result
+table (a returned error is `ErrPolicyUnreadable`, wrapped):
+
+| Stored value | Policy | Error |
+| --- | --- | --- |
+| NULL | `PhaseOnePolicy()` | nil |
+| empty or whitespace, invalid JSON, `actions` null or not an object | all six `denied` | yes |
+| `version` other than 1 | all six `denied` | yes |
+| valid, an action absent | that action `denied` | nil |
+| valid, an unknown action key | key dropped | nil |
+| valid, a setting that is null or outside the three | that action `denied` | nil |
+
+`Allows` on an `Action` outside the six (including `ActionUnknown`) is
+false. `ActionUnknown Action = "unknown"` is not in the ordered `AllActions`
+list that `Validate` and the activity classes iterate. `ActionForTool(name
+string) Action` in `toolprofile.go` maps a propose tool to its action and
+returns `ActionUnknown` for every other name, read tools included; the
+guard uses it to assign the `unknown` class.
+
+The once-per-coordinator error log lives in `Service.policyFor`, which knows
+the coordinator id: a `sync.Map` keyed `coordinatorID:policy_revision`, so a
+save that changes the revision logs again. `ParsePolicy` callers other than
+`Service` do not log.
+
+`PolicyView` is the ADR "What phase 3 reads" shape:
+
+```go
+type PolicyView struct {
+    CoordinatorID  string             `json:"coordinator_id"`
+    WorkspaceID    string             `json:"workspace_id"`
+    PolicyRevision int                `json:"policy_revision"`
+    Actions        map[Action]Setting `json:"actions"` // always all six keys
+    WatchScope     string             `json:"watch_scope"`
+    WorkflowIDs    []string           `json:"workflow_ids"` // sorted ascending, never nil
+}
+```
+
+`Service.Policy` returns `ErrNotFound` for a missing coordinator. With
+`phase2` false it returns `PhaseOnePolicy()` actions, scope `all` and empty
+workflow ids regardless of stored data. A coordinator GET or list of an
+unreadable stored policy reports all six `denied` with the stored revision;
+the next PUT replaces it.
+
+### Watches
+
+```go
+type WatchSet struct {
+    All         bool
+    WorkflowIDs []string // sorted ascending; non-nil, empty when All
+}
+func (w WatchSet) Contains(workflowID string) bool // "" is never contained
+```
+
+`LoadWatchSet` reads `watch_scope`, then when `selected`
+`SELECT workflow_id FROM coordinator_watches WHERE coordinator_id = ? ORDER
+BY workflow_id ASC`. A missing coordinator is `ErrNotFound`. A `selected`
+scope with zero rows is `WatchSet{All: false, WorkflowIDs: []}` and contains
+nothing. A failed query returns the error; the guard treats it as refuse
+with the phase-1 not-found error, logs at error, and writes no activity row.
+The settings `workflow_ids` and `PolicyView.WorkflowIDs` use the same order.
+A save with scope `all` deletes every watch row and inserts none.
+
+### Standing-order and goal reads
+
+- `ActiveStandingOrders`: `WHERE coordinator_id = ? AND retired_at IS NULL
+  ORDER BY created_at ASC, id ASC`; an empty non-nil slice for none or for a
+  missing coordinator; a query error is returned.
+- `ActiveGoal`: the row with `status = 'active'`, or `nil, nil`. `LastMetGoal`:
+  `status = 'met' ORDER BY met_at DESC, id DESC LIMIT 1`, or `nil, nil`.
+  Both return an error on a failed query.
+- Defaults: `coordinator_goals.status` default `'active'`, `baseline_json`
+  default `'{}'`, `criteria_json` default `'[]'`; index `(coordinator_id,
+  created_at, id)` beside the partial unique active index.
+
+`Goal` JSON: `{id, coordinator_id, name, due_on, status, criteria:
+[{id, text, done}], baseline, set_at, met_at, met_by, created_at,
+updated_at}`, `due_on`, `met_at` and `met_by` null when unset, `criteria`
+always an array. `StandingOrder` JSON: `{id, coordinator_id, text,
+created_by, created_at, retired_at, retired_by, source_proposal_id,
+last_applied_at}` (`order` number added by the routes). The guided setup
+201 body is the coordinator DTO of `POST .../coordinators`; setup adds no
+other body. The typed client covers only routes whose bodies the designs
+define.
+
+### Proposal wire fields
+
+`ProposalDTO` gains `kind` (string), `target_task_id` (string or null),
+`standing_order_ids` (string array, `[]` when none), `starts_agent`
+(boolean) and `outcome` (the parsed `outcome_json` object, null when NULL).
+`spec` stays `ProposalSpec` for `create_task`; for other kinds it is the
+kind's JSON of [proposal kinds](proposal-kinds.md#store). The TypeScript
+`Proposal` is a discriminated union on `kind` with one `spec` type per kind.
+
+### Enumerations
+
+No enumeration is a database CHECK constraint (SQLite cannot add one with
+an additive `ALTER`, and both dialects must match). Policy settings and
+actions, proposal `kind`, `status`, `outcome`, activity `action_class`,
+`outcome`, `authorization`, and `watch_scope` are validated by the writer
+before the row is written. Readers pass a stored unknown string through
+unchanged; nothing writes one.
+
+### Deletion and locking
+
+`DeleteCoordinator` and the workspace-deletion transaction delete children
+before the parent: watches, activity, standing orders, goals, proposals,
+stall rows, then the coordinator. On PostgreSQL `DeleteCoordinator` first
+takes the per-coordinator lock (`SELECT ... FOR UPDATE` on the coordinator
+row), so a concurrent `Record` either commits before the delete and is
+removed with it, or blocks and then finds the coordinator missing
+(`ErrNotFound`, nothing written). On SQLite `BEGIN IMMEDIATE` serialises the
+same way. Workspace deletion removes activity by `workspace_id` (index
+`coordinator_activity(workspace_id)`) and the other tables by `coordinator_id
+IN (SELECT id FROM coordinators WHERE workspace_id = ?)`. Orphan rows left by
+a phase-1 binary deleting a coordinator are unreachable (every read is scoped
+by coordinator) and are removed by activity retention or workspace deletion.
+
+### Downgrade and upgrade
+
+All new columns are nullable or defaulted and no constraint restricts a
+`create_task` row, so a phase-1 binary against the phase-2 schema inserts and
+reads proposals and coordinators without change. The upgrade test builds the
+phase-1 schema from hand-written DDL in the test (the `v0.93.0` fixture lists
+`coordinator` as known-missing, so it cannot seed it), seeds a coordinator and
+a proposal, and runs from two starting points: with `config_revision` and
+without it; both end with identical schemas. Migration order: phase-1
+migrations, then the phase-2 `ADD COLUMN`s, then `CREATE TABLE`s, then indexes
+on the new columns (never in `createTablesSQL`). The PostgreSQL leg runs under
+the same environment gate as the existing PostgreSQL store tests. A test runs
+phase-1 statements (insert, list, decide) against the migrated schema.
 
 ## Guided setup
 
