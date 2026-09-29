@@ -9,7 +9,11 @@ import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { linkToCoordinatorQueue } from "../../../lib/coordinator/links";
-import { setupMoveProposal, setupReadyToMergeTask } from "./proposal-kinds-fixture";
+import {
+  MESSAGE_PROPOSAL_TEXT,
+  setupMoveProposal,
+  setupReadyToMergeTask,
+} from "./proposal-kinds-fixture";
 
 const PROPOSAL_REJECT = /\/proposals\/[^/]+\/reject$/;
 const PROPOSAL_APPROVE = /\/proposals\/[^/]+\/approve$/;
@@ -133,6 +137,46 @@ test.describe("Coordinator proposal kinds", () => {
               (message) => message.author_type === "user" && message.content.includes(note),
             ),
           { timeout: 30_000, message: "the note should reach the task's session" },
+        )
+        .toBe(true);
+    } finally {
+      await release();
+    }
+  });
+
+  test("a message card is edited, approved, and the edited text reaches the task", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { release, task, proposalId } = await setupMoveProposal(
+      submitWithShortcut,
+      { testPage, apiClient, backend, seedData },
+      "message",
+    );
+    try {
+      const card = testPage.getByTestId(`needs-you-item-${proposalId}`);
+      await expect(card).toBeVisible();
+      await expect(card.getByText(MESSAGE_PROPOSAL_TEXT).first()).toBeVisible();
+
+      await card.getByRole("button", { name: "Edit" }).click();
+      const edited = "Please run the linter and the tests before you finish.";
+      await card.getByRole("textbox").fill(edited);
+      const approved = waitForHttp(testPage, "POST", PROPOSAL_APPROVE);
+      await card.getByRole("button", { name: /Approve/ }).click();
+      await approved;
+      await expect(card).toBeHidden();
+
+      const sessionId = task.session_id!;
+      await expect
+        .poll(
+          async () =>
+            (await apiClient.listSessionMessages(sessionId)).messages.some(
+              (message) => message.author_type === "user" && message.content.includes(edited),
+            ),
+          { timeout: 30_000, message: "the edited text should reach the task's conversation" },
         )
         .toBe(true);
     } finally {

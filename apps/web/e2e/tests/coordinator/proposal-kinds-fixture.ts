@@ -22,12 +22,17 @@ const POLICY_ALLOWING_MOVE = {
   },
 };
 
+export type ProposalKindUnderTest = "move" | "message";
+
+export const MESSAGE_PROPOSAL_TEXT = "Please run the tests before you finish.";
+
 export async function setupMoveProposal(
   submit: (popover: Locator, editor: Locator) => Promise<void>,
   ctx: Pick<
     Parameters<Parameters<typeof test>[2]>[0],
     "testPage" | "apiClient" | "backend" | "seedData"
   >,
+  kind: ProposalKindUnderTest = "move",
 ) {
   const { testPage, apiClient, backend, seedData } = ctx;
   const nodes: EligibleStepNode[] = seedData.steps.map((step) => ({
@@ -52,13 +57,42 @@ export async function setupMoveProposal(
   });
   const workspacePath = `/api/v1/workspaces/${seedData.workspaceId}/coordinators/${coordinator.id}`;
   const saved = await apiClient.rawRequest("PUT", `${workspacePath}/settings`, {
-    policy: POLICY_ALLOWING_MOVE,
+    policy:
+      kind === "message"
+        ? {
+            ...POLICY_ALLOWING_MOVE,
+            actions: { ...POLICY_ALLOWING_MOVE.actions, message: "requires_approval" },
+          }
+        : POLICY_ALLOWING_MOVE,
   });
   expect(saved.status).toBe(200);
-  const task = await apiClient.createTask(seedData.workspaceId, "Task to move", {
-    workflow_id: seedData.workflowId,
-    workflow_step_id: fromStep.id,
-  });
+  const task =
+    kind === "message"
+      ? await apiClient.createTaskWithAgent(
+          seedData.workspaceId,
+          "Task to message",
+          seedData.agentProfileId,
+          {
+            description: "/e2e:simple-message",
+            workflow_id: seedData.workflowId,
+            workflow_step_id: seedData.startStepId,
+            repository_ids: [seedData.repositoryId],
+          },
+        )
+      : await apiClient.createTask(seedData.workspaceId, "Task to move", {
+          workflow_id: seedData.workflowId,
+          workflow_step_id: fromStep.id,
+        });
+  if (kind === "message") {
+    if (!task.session_id) throw new Error("expected an active session for the message task");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the task's agent is idle before the message is proposed",
+      timeout: 30_000,
+    });
+  }
 
   await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
   const conversationOpened = waitForHttp(testPage, "POST", /\/coordinators\/[^/]+\/conversation$/);
@@ -70,8 +104,12 @@ export async function setupMoveProposal(
   const popover = testPage.getByTestId("coordinator-copilot-popover");
   const editor = popover.getByTestId("chat-input-editor");
   await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
-  const args = { task_id: task.id, step_id: toStep.id, rationale: "It is ready for review." };
-  await editor.fill(`e2e:mcp:kandev:propose_move_kandev(${JSON.stringify(args)})`);
+  const rationale = "It is ready for review.";
+  const line =
+    kind === "message"
+      ? `e2e:mcp:kandev:propose_message_kandev(${JSON.stringify({ task_id: task.id, text: MESSAGE_PROPOSAL_TEXT, rationale })})`
+      : `e2e:mcp:kandev:propose_move_kandev(${JSON.stringify({ task_id: task.id, step_id: toStep.id, rationale })})`;
+  await editor.fill(line);
   await submit(popover, editor);
   await waitForSessionState(apiClient, {
     taskId: opened.task_id,
@@ -89,10 +127,10 @@ export async function setupMoveProposal(
         const body = (await listed.json()) as {
           proposals: Array<{ id: string; kind: string }>;
         };
-        proposalId = body.proposals.find((p) => p.kind === "move")?.id ?? "";
+        proposalId = body.proposals.find((p) => p.kind === kind)?.id ?? "";
         return proposalId;
       },
-      { timeout: 30_000, message: "the move proposal should be stored" },
+      { timeout: 30_000, message: "the proposal should be stored" },
     )
     .not.toBe("");
 
