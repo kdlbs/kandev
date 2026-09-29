@@ -38,8 +38,9 @@ backstop re-check.
   ([Measurement](../../specs/coordinator/system-design/spend.md#measurement)).
 - `TurnCost(ctx, TurnKey) (subcents, known, err)` keyed on the turn's
   `session_turn_id` through a new task repository `SumUsageForTurn`, and the
-  idempotent recompute the backstop runs for turns settled in the last 10
-  minutes ([Per-turn cost](../../specs/coordinator/system-design/spend.md#per-turn-cost)).
+  idempotent recompute the backstop runs for turns settled in the last 11
+  minutes, `SumUsageForTurn(ctx, sessionID, turnID, notAfter)` counting rows
+  whose `occurred_at` is no later than `FinishedAt + 10 minutes` ([Per-turn cost](../../specs/coordinator/system-design/spend.md#per-turn-cost)).
 - Task repository `SumUsageForTasks` (at most 500 ids per call) and the
   `Spend` error and unmeasurable contract, `CheckSpendMeasurable` and
   `CheckCeilingNotReached`
@@ -62,8 +63,12 @@ backstop re-check.
   `cancellationIdentity.turnID` inside the cancel-in-flight guard, returns
   `ErrTurnNotActive` without cancelling on a mismatch, `ErrCancelInFlight`
   when another cancellation of the session holds the claim; built on the
-  existing silent turn-fenced cancellation with `cancellationKindInternal`, no
-  authorization, message or workflow completion; `ErrTurnNotActive` and
+  existing silent reconciliation (`finishSilentCancelledAgentTurn`) with
+  `cancellationKindInternal`, no authorization, message or workflow
+  completion, the agent-level cancel prompt-fenced through
+  `GetPromptActivityForSession` and `cancelAgentWhileUnlockedForPrompt` as the
+  stuck-signal watchdog does, a `lifecycle.ErrCancelEscalated` result counted as
+  a confirmed cancel, and a pre-claim active-turn check; `ErrTurnNotActive` and
   `ErrCancelInFlight` are exported by the `orchestrator` package), count each failed
   cancel in `coordinator_ceiling_cancel_failed_total`, and only after a
   confirmed cancel settle
@@ -83,7 +88,8 @@ backstop re-check.
 
 Every check below calls `CheckCeiling`, `CheckCeilingForSession`, `Spend`,
 `TurnCost`, `CancelTurn` or the writer directly, with fakes for the orchestrator
-cancel and the clock. The turn-end subscriber, the backstop tick and the
+cancel and the clock. The usage writer has no clock: tests set `occurred_at`
+and `FinishedAt` directly on the rows they insert. The turn-end subscriber, the backstop tick and the
 delivery path belong to task 05, and permission containment to task 02, so
 their behaviour is asserted there (`synctest` tick tests in task 05's
 acceptance), not here.
@@ -110,6 +116,9 @@ acceptance), not here.
   the outcome counter, the publish and the `Kick` happen once; (3) the turn
   ending before step 7: `CancelTurn` returns `ErrTurnNotActive`, nothing is
   cancelled, and `CheckCeiling` returns nil and leaves the marked row open.
+  Race 2 is driven by a stand-in that settles the row between the confirmed
+  cancel and the step 8 update, since the real turn-end subscriber belongs to
+  task 05.
 - A session with no open unattended turn row is never cancelled, whatever the
   spend: an attended turn over the ceiling is not cancelled. A manager's queued
   message that became the session's active turn while the turn row is still
@@ -120,13 +129,16 @@ acceptance), not here.
   running, and the row is not settled by `CheckCeiling`
   (`AC-COORDINATOR-SPEND-003.3`). An orchestrator test covers `CancelTurn`'s
   match, mismatch, no-active-turn and `ErrCancelInFlight` cases and the
-  caller's context ending while the detached operation continues.
+  caller's context ending while the detached operation continues, a cancel
+  reported as escalated (treated as confirmed), and a new prompt starting
+  after the capture (`ErrPromptActivityNotOwned`, treated as a failed cancel).
 - Each failed cancel, including `ErrCancelInFlight`, increments
   `coordinator_ceiling_cancel_failed_total`; `ErrTurnNotActive` does not. The
   stop counter and info log fire once per turn at the mark with `reason`
   `ceiling` or `unmeasurable`, and the unmeasurable log carries no amounts.
 - Per-turn cost is keyed on the turn id: `TurnCost` counts a usage row
-  recorded after the settle and not a manager turn drained onto the same
+  recorded after the settle with `occurred_at` up to ten minutes past
+  `FinishedAt` inclusive, excludes one past that, and not a manager turn drained onto the same
   session, and is `known=false` for an empty session or turn id. The recompute
   function fills a NULL cost and never lowers it. A failed 7-day read leaves
   spend measurable.

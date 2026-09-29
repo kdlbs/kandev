@@ -74,8 +74,9 @@ same usage ledger the task cost display uses.
   7-day mean shall not make spend unmeasurable.
 - **AC-COORDINATOR-SPEND-002.3:** Each unattended turn shall record its own
   cost, the sum of the priced usage events the conversation session recorded
-  for that turn, including events recorded up to ten minutes after the turn
-  was settled, and no event of another turn on the same session.
+  for that turn, including every event whose `occurred_at` is no later than
+  ten minutes after the turn was settled, and no event of another turn on the
+  same session.
 
 ### REQ-COORDINATOR-SPEND-003: Stopping at the ceiling
 

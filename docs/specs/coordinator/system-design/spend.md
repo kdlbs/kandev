@@ -71,9 +71,17 @@ workspace for an empty workspace id. It is not a failed read, so it is not
 counted in `coordinator_spend_read_failed_total`; it is logged at warn.
 Callers (admission checks 3 and 4, `CheckCeiling`, the autonomy read) treat
 "error non-nil or `Measurable` false" as one condition, unmeasurable, which
-includes `ErrSpendScope`; they never inspect the amounts of an unmeasurable
-reading. Unmeasurable is the fail-closed reading: a failed read, a task list
-that cannot be read, or an unpriced row is never treated as zero spend.
+includes `ErrSpendScope`; no decision (admit, hold, stop) ever inspects the
+amounts of an unmeasurable reading. Unmeasurable is the fail-closed reading: a
+failed read, a task list that cannot be read, or an unpriced row is never
+treated as zero spend. The values of a degraded reading (nil error,
+`Measurable` false) are defined, because the autonomy read displays them:
+`WindowSubcents` is the sum of the priced rows in the 24-hour window (a lower
+bound, shown to no decision), `Degraded` is true, and `Mean7dSubcents` and
+`Mean7dKnown` are computed exactly as for a measurable reading, so the
+seven-day mean stays visible while the window holds an unpriced row. A reading
+with a non-nil error has every amount zero and `Mean7dKnown` false, and the
+seven-day read is not attempted.
 
 1. **Conversation tasks.** `ListCoordinatorOriginTasks(ctx, workspaceID)`
    (phase 1, [copilot](copilot.md#conversation-cleanup)) filtered in Go to
@@ -118,12 +126,16 @@ that cannot be read, or an unpriced row is never treated as zero spend.
    `Degraded` alone reports the last case to the UI.
 
 A usage row's `occurred_at` is stamped by the usage writer when it processes
-the event, before the row is inserted and before the observer of
-[Stopping](#stopping) is notified, and the stored value is never later than
-that instant. A check that runs from that notification and passes its own
-clock reading as `now` therefore always finds the triggering row inside
-`[now - 24h, now)`; a test that freezes the clock must advance it by at least
-one millisecond between the insert and the check.
+the event (`processEvent` in `internal/task/usage/writer.go`, `time.Now().UTC()`),
+before the row is inserted and before the observer of [Stopping](#stopping) is
+notified. The writer has no clock seam and this work adds none. A check that
+runs from that notification reads its own `now` after the insert, so it finds
+the triggering row inside `[now - 24h, now)` unless the two readings are equal
+to the clock's resolution; that case is harmless, because the row is then
+picked up by the next notice or backstop tick. Tests that need exact windows
+insert rows through the repository with a chosen `occurred_at` and pass `Spend`
+a controlled `now`; a test through the real writer takes `now` from inside the
+observer callback, after the insert.
 
 Each failed read (task list, window chunk, seven-day chunk) increments
 `coordinator_spend_read_failed_total` with a `read` label from the closed set
@@ -146,11 +158,17 @@ applies check 3 before check 4.
 ## Per-turn cost
 
 `TurnCost(ctx, turn TurnKey) (subcents int64, known bool, err error)`, with
-`TurnKey{SessionID, SessionTurnID string}` taken from the turn row, sums
+`TurnKey{SessionID, SessionTurnID string; FinishedAt time.Time}` taken from
+the turn row (at the settle itself, the settle's own `finished_at`), sums
 priced `cost_subcents` over `task_usage_events` where `session_id` is the
 turn's session and `turn_id` equals the turn's `session_turn_id` and
-`cost_source <> 'unpriced'`, through a new task repository method
-`SumUsageForTurn(ctx, sessionID, turnID)`. The turn is identified by its
+`cost_source <> 'unpriced'` and `occurred_at <= FinishedAt + 10 minutes`,
+through a new task repository method `SumUsageForTurn(ctx, sessionID,
+turnID, notAfter time.Time)` with `notAfter` that instant. The upper bound
+makes the cost a function of the ledger: a row counts exactly when it belongs
+to the turn and was recorded no later than ten minutes after the settle, so
+`AC-COORDINATOR-SPEND-002.3` is observable and does not depend on which tick
+happened to run. The turn is identified by its
 turn id, not by a time window, for two reasons: the usage writer stamps
 `occurred_at` when it processes an event, so a row that lands after the turn
 settles has an `occurred_at` later than the turn's `finished_at`, which a time
@@ -158,7 +176,8 @@ window would exclude; and `finished_at` is the settle time, which can trail
 the turn's real end by up to one backstop period, so a time window could
 absorb a manager's turn drained onto the same session. A turn id names one
 turn, so there is no boundary case between adjacent turns. The unpriced count
-is ignored for this display value.
+is ignored for this display value, and the sum saturates at `math.MaxInt64`
+like the window sum.
 
 Results: `known` is false, with no query, when `session_turn_id` or `SessionID`
 is empty (the send outcome was never learned, or the row has no session), and
@@ -172,18 +191,24 @@ When [wake](wake.md#turn-end) or [Stopping](#stopping) settles a turn, a
 `TurnCost` error never blocks the settle: the row settles with the outcome
 and `cost_subcents` NULL, and the recompute below fills it. The usage writer
 is asynchronous, so a turn's last usage row can land after the settle. The
-backstop, on every tick for each turn whose `finished_at` is within the last
-10 minutes and whose `session_turn_id` is set, recomputes the cost and writes
+backstop, on every tick for each turn whose `finished_at` is within the
+last 11 minutes (the ten-minute count window plus one 60-second backstop period,
+so at least one tick runs at or after `finished_at + 10 minutes`) and whose
+`session_turn_id` is set, recomputes the cost and writes
 it with `UPDATE ... SET cost_subcents = ? WHERE id = ? AND outcome IS
 NOT NULL AND (cost_subcents IS NULL OR cost_subcents < ?)`. Rows are only
 ever added to a turn, so the sum only grows; the conditional update makes a
 stale concurrent recompute unable to lower a newer value, and repeating it
-is idempotent. The value is final once the turn leaves the 10-minute window,
-and no marker is stored: a usage row recorded more than 10 minutes after the
-settle is counted in [spend](#measurement) and never in the turn's cost, which
-is a display value only. The writer records an event when its single worker dequeues it,
-so the window bounds that queue lag, not a routine loss.
-A turn whose reads keep failing for those 10 minutes keeps `cost_subcents`
+is idempotent. The value is final once the turn leaves the 11-minute selection window,
+and no marker is stored: a usage row with `occurred_at` more than 10 minutes
+after the settle is counted in [spend](#measurement) and never in the turn's
+cost, which is a display value only. A row inserted within the count window is
+counted by the first tick that runs after its insert; the only row that can
+miss is one whose insert commits after the final selecting tick, which the
+writer's per-event latency (milliseconds) does not reach. The writer stamps a
+row when its single worker dequeues it, so the window bounds that queue lag,
+not a routine loss.
+A turn whose reads keep failing for those 11 minutes keeps `cost_subcents`
 NULL, which the screens show as unknown.
 
 ## Stopping
@@ -215,12 +240,21 @@ at warn while the consumer continues. Each call receives a context that is a
 child of one writer-owned observer context, with a 45-second timeout: longer
 than the 30-second cancellation operation TTL, so a cancel in progress is not
 cut short by the observer's own deadline (`CancelTurn`'s detached operation
-outlives its caller's context in any case). `Stop` closes the channel, cancels
-the observer context at once (so a running `fn` returns promptly and the join
-cannot hang on it), discards notices still queued, and joins the consumer; the
-[backstop](wake.md#backstop) covers what was discarded. A notice offered after
-`Stop` began is not offered: the event worker has exited. Registering an
-observer after `Stop` has no effect and returns no error. A slow `fn` fills
+outlives its caller's context in any case). `Stop` runs in this order. It first
+does what it does today: mark the writer draining, close the event channel,
+and wait up to `drainDeadline` (5 s) for the event worker (`Writer.Stop` in
+`usage/writer.go`). The worker keeps inserting the events already buffered
+during that drain, and each successful insert still offers a notice, so the
+notice channel is open until the worker has exited. Only then does `Stop`
+close the notice channel (the worker is its only sender, so the close cannot
+race an offer), cancel the observer context at once (so a running `fn`
+returns promptly and the join cannot hang on it), discard notices still queued
+without a metric, and join the consumer, which has its own wait group so the
+worker's wait does not depend on it. The [backstop](wake.md#backstop) covers
+every discarded notice. A usage event that arrives after `Stop` began is
+refused by the writer's existing `dropped:shutdown` path and never reaches the
+worker. Registering an observer after `Stop` has no effect and returns no
+error. A slow `fn` fills
 the channel and drops notices; that is the same bound as any other missed
 notice.
 
@@ -258,8 +292,12 @@ and sessions were deleted with it, so nothing is running to stop):
 3. **Marked row.** A row with `stop_requested_at` set skips steps 4 and 5 and
    goes to step 7: it is retried whatever the spend now reads and without
    consulting the ceiling.
-4. **Active-turn filter.** Otherwise `GetActiveTurnBySessionID` is read. A read
-   error returns that error with nothing marked. No active turn, or an active
+4. **Active-turn filter.** Otherwise `GetActiveTurnBySessionID` is read (the
+   task repository's method, `task/repository/sqlite/session.go`). It returns
+   `sql.ErrNoRows` when the session has no active turn, which is the "no active
+   turn" outcome below and not a read error, as `isNoActiveTurnError` in
+   `orchestrator/service.go` already treats it. Any other error returns that
+   error with nothing marked. No active turn, or an active
    turn whose id is not the row's `session_turn_id`, returns nil: the session
    is running another (attended) turn or the turn ended, and
    [turn end](wake.md#turn-end) settles the row. The check is a cheap filter;
@@ -323,10 +361,12 @@ when the captured `cancellationIdentity.turnID` differs. It differs from
 `CancelAgent` (the path a manager's Stop uses) in what surrounds the agent
 cancel: it does no `authorizeSessionControl` (the caller is internal and has
 no principal), posts no cancellation message, evaluates no workflow
-completion, and does not invalidate resume attempts. The agent-level cancel
-and the reconciliation of the session to `WAITING_FOR_INPUT` are the same,
-which is what "as a manager's Stop would" in `AC-COORDINATOR-SPEND-003.2`
-means. Its contract:
+completion, and does not invalidate resume attempts. The reconciliation of
+the session to `WAITING_FOR_INPUT` (`finishSilentCancelledAgentTurn`) is the
+same, and the agent-level cancel is the same agentctl cancel narrowed to the
+captured prompt (below), which is what "as a manager's Stop would" in
+`AC-COORDINATOR-SPEND-003.2` means.
+Its contract:
 
 - An empty `sessionID` or `expectedTurnID` is an error, not
   `ErrTurnNotActive`; `CheckCeiling` never passes one.
@@ -340,18 +380,53 @@ means. Its contract:
   without joining it: joining would skip the fence, and the in-flight
   operation may belong to a different turn. `CheckCeiling` counts it as a
   failed cancel and retries.
+- Before it claims anything it reads the active turn id (`peekActiveTurnID`,
+  `orchestrator/service.go`); a value different from `expectedTurnID` (empty
+  when the session has no active turn) returns `ErrTurnNotActive` with no
+  claim, no projection scope and no effect at all. This shrinks the window
+  below to a race between two reads.
 - Inside the cancel-in-flight guard it captures the identity and compares
-  `identity.turnID` (empty when the session has no active turn) with
-  `expectedTurnID`. A difference returns `ErrTurnNotActive` (the existing
-  `ErrSendNowTurnChanged` is mapped to it) before the lifecycle cancel, so the
-  only effects of a mismatch are the claim and the projection scope, both
-  released on return; no persisted change, no runtime call and no state
-  transition. A failure to capture the identity is returned as an error.
-- On a match it runs the existing agent cancel fenced to the captured prompt
-  generation, so a prompt dispatched after the capture is never cancelled,
-  then the silent reconciliation. Returning nil means the lifecycle cancel and
-  the reconciliation completed, including the existing reconcile-when-no-live-
-  execution outcome (nothing is running, so nothing is spending). Any error
+  `identity.turnID` with `expectedTurnID` again. A difference returns
+  `ErrTurnNotActive` (the existing `ErrSendNowTurnChanged` is mapped to it)
+  before the lifecycle cancel, so the only effects of a mismatch are the claim
+  and the projection scope, both released on return; no persisted change, no
+  runtime call and no state transition. A failure to capture the identity is
+  returned as an error. One consequence is accepted and stated: while the
+  internal claim is held, a manager's Stop (`CancelAgent`, which joins any
+  claim that is not a send-now, `claimExplicitCancellation` in
+  `orchestrator/task_operations.go`) joins it and returns the operation's
+  error, so a Stop that lands inside this window on a mismatch returns
+  `ErrTurnNotActive`, cancels nothing and changes nothing; the panel still
+  shows the turn running and the manager can press Stop again. The window is
+  one identity capture and one comparison, and the same shape already exists
+  for the clarification pause (`runSilentCancellationOwned`).
+- On a match it fences the agent cancel to the captured prompt, which is the
+  guarantee that a prompt dispatched after the capture is never cancelled.
+  `captureCancellationIdentity` alone records only the execution id and prompt
+  generation, and `runSilentCancellationOwned` cancels with the unfenced
+  `cancelAgentWhileUnlocked`, so `CancelTurn` does not reuse that call. It
+  does what the stuck-signal watchdog does (`prepareStuckSignalCancellation`
+  in `orchestrator/stuck_signal_watchdog.go`): read `GetPromptActivityForSession`
+  through the `promptActivitySessionReader` the lifecycle adapter implements,
+  put its execution id, generation and activity epoch into the identity, and
+  cancel through `cancelAgentWhileUnlockedForPrompt`, which calls
+  `CancelAgentForPrompt(sessionID, executionID, generation, activityEpoch)`. The
+  execution store claims the execution only while those three values still
+  match. Outcomes: an activity read that finds no execution
+  (`ErrNoExecutionForSession`) leaves the execution id empty, and the call falls
+  back to the plain cancel, which reconciles a session with no live process;
+  `lifecycle.ErrPromptActivityNotOwned` from the claim means the execution's
+  prompt is no longer the captured one, nothing was cancelled, and it is
+  returned as `ErrTurnNotActive`; a manager without the reader, or a generation
+  or epoch of zero with an execution present, is an error return and a failed
+  cancel (fail closed). The silent reconciliation follows. Returning nil means
+  the lifecycle cancel and the reconciliation completed, including the existing
+  reconcile-when-no-live-execution outcome (nothing is running, so nothing is
+  spending) and the existing `lifecycle.ErrCancelEscalated` outcome: when the
+  agent does not acknowledge the cancel, the lifecycle manager unblocks the
+  prompt and marks the execution ready itself and the call returns nil, so an
+  escalated cancel counts as confirmed and the row settles
+  `stopped_at_ceiling`. Any other error
   from them, including the caller's context ending while the detached
   operation continues, is an error return and a failed cancel. The operation
   runs on a context detached from the caller with the 30-second
@@ -380,9 +455,14 @@ The overshoot is bounded by one usage report, or by one backstop period when
 an observer notice is dropped or one cancel fails: the ceiling is compared after
 each recorded usage event, not before a model request, since Kandev does not
 mediate the agent CLI's model calls. The bound holds only while a cancel
-eventually succeeds. When cancels keep failing (the agent process ignores
-them), the turn keeps spending until it ends by itself; Kandev has no second
-stop below the agent cancel. That residual is made visible, not hidden: each
+eventually succeeds. A cancel the agent does not acknowledge is not a failure
+here: the lifecycle manager escalates it locally and `CancelTurn` returns nil
+(see [CancelTurn](#cancelturn)), so what Kandev cannot see is a process that
+keeps spending after its prompt was released; new unattended turns stay held
+by admission while spend is at the ceiling. When cancels keep returning errors
+(for example the agentctl client is unreachable), the turn keeps spending until
+it ends by itself; Kandev has no second stop below the agent cancel. That
+residual is made visible, not hidden: each
 failed cancel increments `coordinator_ceiling_cancel_failed_total`, and once
 a row has `stop_requested_at` older than five minutes and is still open, the
 autonomy read reports `last_turn.stop_state: "stop_failing"` and the autonomy strip
@@ -416,7 +496,7 @@ failing turn is the only one spending.
 | Cancel fails, or another cancellation of the session is in flight | Row stays open with `stop_requested_at`; each failure is counted; the next observer call or tick cancels again |
 | Cancel keeps failing for 5 minutes | Metric per failure; autonomy read and strip show `stop_failing` until the turn ends |
 | Unattended turn ended before the cancel | `ErrTurnNotActive`; nothing is cancelled; turn end settles the row |
-| Late usage row after settle | Per-turn cost, keyed by turn id, corrected by the backstop each tick for 10 minutes |
+| Late usage row after settle | Per-turn cost, keyed by turn id, corrected by the backstop each tick for 11 minutes, counting rows recorded up to 10 minutes after the settle |
 | Turn cost read fails at settle | Row settles with `cost_subcents` NULL; the recompute fills it |
 
 ## Security
