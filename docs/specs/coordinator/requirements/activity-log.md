@@ -152,6 +152,21 @@ Mockup:
   server sent an identifier and nothing otherwise. A row whose task the
   snapshots hold but that has no `target_task_identifier` links to it with the
   text "Open task".
+- **AC-COORDINATOR-ACTIVITY-LOG-002.10:** A refresh of the list (a
+  `coordinator.updated` event, a WebSocket reconnect, or an undo outcome of
+  200, `already_undone`, `not_undoable` or 404) shall re-read every page the
+  section has loaded, replace the rows and the next cursor with what the
+  server returned in the order of `AC-COORDINATOR-ACTIVITY-LOG-002.2`, and
+  keep at most one refresh in flight (one trailing refresh may queue). A
+  response for a filter or coordinator that is no longer selected shall be
+  dropped and change nothing. A filter change shall write `?class=` to the
+  address by replacing the current history entry, and remove `class` for All.
+- **AC-COORDINATOR-ACTIVITY-LOG-002.11:** While the first page is loading the
+  section shall say so and not show the empty text; when the first page
+  fails to load it shall say "What it did could not be loaded." with a
+  **Retry** button and not show the empty text; when Load more fails the
+  loaded rows and the Load more button stay and "More could not be loaded.
+  Try again." shows. A failed refresh keeps the rows already shown.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.5:** With no row, the section shall say "It
   has not done anything yet."; with no row for the chosen filter, it shall
   say that nothing matches the filter.
@@ -220,8 +235,9 @@ Mockup:
   proposal is gone or whose outcome does not parse, shall list `undoable`
   false and answer undo with 409 `not_undoable`.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.10:** Undo shall first open a dialog
-  titled "Undo this?" with **Undo** and **Cancel**, Cancel focused on open;
-  Cancel or Escape closes it and sends nothing; Undo closes it and sends one
+  titled "Undo this?" with **Undo** and **Cancel**, Cancel focused on open, so that Enter
+  activates Cancel and never Undo; Cancel, Escape or a click outside closes it
+  and sends nothing; Undo closes it and sends one
   request. Its text is one whole sentence chosen by the row, never a noun
   phrase inserted into a sentence: for a created task "The task <identifier>
   will be archived. Any agent working on it will be stopped." or, when the
@@ -256,7 +272,7 @@ Mockup:
 - **AC-COORDINATOR-ACTIVITY-LOG-003.6:** An undone row shall show "Undone by
   <name>, <relative time>" in place of Undo, or "Undone, <relative time>"
   when no person is recorded (authentication is off) and "Undone by a former
-  member, <relative time>" when the recorded person no longer exists; the row's outcome text follows
+  member, <relative time>" when the recorded person is not in the loaded member list (`AC-COORDINATOR-ACTIVITY-LOG-002.8`); the row's outcome text follows
   `AC-COORDINATOR-ACTIVITY-LOG-002.4`.
 
 ### REQ-COORDINATOR-ACTIVITY-LOG-004: The coordinator reads its log
