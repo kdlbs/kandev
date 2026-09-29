@@ -18,6 +18,8 @@ vi.mock("@/lib/api/domains/coordinator-api", async () => {
 });
 
 import { useProposalDecision } from "./use-proposal-decision";
+
+const LATER_TS = "2026-09-28T00:00:00Z";
 import { useProposalsStore } from "./use-proposals";
 
 const WORKSPACE_ID = "w-1";
@@ -95,7 +97,7 @@ describe("useProposalDecision - busy state", () => {
     });
     expect(result.current.busy).toBe(true);
 
-    resolveApprove(proposal({ status: "approved", updated_at: "2026-09-28T00:00:00Z" }));
+    resolveApprove(proposal({ status: "approved", updated_at: LATER_TS }));
     await act(async () => {
       await outcomePromise;
     });
@@ -105,7 +107,7 @@ describe("useProposalDecision - busy state", () => {
 
 describe("useProposalDecision - decided outcomes", () => {
   it("merges the decided row into the store and returns a decided outcome", async () => {
-    const decided = proposal({ status: "approved", updated_at: "2026-09-28T00:00:00Z" });
+    const decided = proposal({ status: "approved", updated_at: LATER_TS });
     approveProposalMock.mockResolvedValue(decided);
     const { result } = renderHook(() =>
       useProposalDecision(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID),
@@ -191,7 +193,7 @@ describe("useProposalDecision - validation outcomes", () => {
 
 describe("useProposalDecision - conflict outcomes", () => {
   it("merges the embedded row and returns a conflict outcome for a 409 proposal_conflict", async () => {
-    const embedded = proposal({ status: "approving", updated_at: "2026-09-28T00:00:00Z" });
+    const embedded = proposal({ status: "approving", updated_at: LATER_TS });
     approveProposalMock.mockRejectedValue(
       new ApiError("conflict", 409, {
         error: "proposal_conflict",
@@ -228,6 +230,72 @@ describe("useProposalDecision - conflict outcomes", () => {
     });
 
     expect(outcome).toEqual({ kind: "network" });
+  });
+});
+
+describe("useProposalDecision - resume, message and move rows", () => {
+  function kindRow(overrides: Record<string, unknown> = {}): Proposal {
+    return {
+      ...proposal(),
+      kind: "message",
+      spec: { task_id: "t-1", text: "hi", rationale: "r" },
+      ...overrides,
+    } as unknown as Proposal;
+  }
+
+  it("returns policy_denied for a 409 whose body error is policy_denied, leaving the store alone", async () => {
+    const row = kindRow();
+    seedProposal(COORDINATOR_ID, row);
+    approveProposalMock.mockRejectedValue(
+      new ApiError("denied", 409, { error: "policy_denied", action: "message" }),
+    );
+    const { result } = renderHook(() =>
+      useProposalDecision(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID),
+    );
+
+    let outcome!: Awaited<ReturnType<typeof result.current.approve>>;
+    await act(async () => {
+      outcome = await result.current.approve();
+    });
+
+    expect(outcome).toEqual({ kind: "policy_denied" });
+    expect(useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId[PROPOSAL_ID]).toEqual(
+      row,
+    );
+  });
+
+  it("merges the embedded row of a proposal_conflict on a non-create kind", async () => {
+    const embedded = kindRow({ status: "approving", updated_at: LATER_TS });
+    approveProposalMock.mockRejectedValue(
+      new ApiError("conflict", 409, {
+        error: "proposal_conflict",
+        error_code: "proposal_conflict",
+        proposal: embedded,
+      }),
+    );
+    const { result } = renderHook(() =>
+      useProposalDecision(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID),
+    );
+
+    let outcome!: Awaited<ReturnType<typeof result.current.approve>>;
+    await act(async () => {
+      outcome = await result.current.approve();
+    });
+
+    expect(outcome).toEqual({ kind: "conflict", proposal: embedded });
+  });
+
+  it("sends the trimmed message text as the only edit", async () => {
+    approveProposalMock.mockResolvedValue(kindRow({ status: "approved" }));
+    const { result } = renderHook(() =>
+      useProposalDecision(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID),
+    );
+    await act(async () => {
+      await result.current.approve({ text: "new" });
+    });
+    expect(approveProposalMock).toHaveBeenCalledWith(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID, {
+      text: "new",
+    });
   });
 });
 

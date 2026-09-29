@@ -3,7 +3,11 @@
 import { useCallback, useMemo } from "react";
 import type { TaskPR } from "@/lib/types/github";
 import { classify, type AttentionTask, type ClassifyResult } from "@/lib/coordinator/attention";
-import { isOpenProposal, useProposalsStore } from "@/hooks/domains/coordinator/use-proposals";
+import {
+  isOpenProposal,
+  isVisibleProposal,
+  useProposalsStore,
+} from "@/hooks/domains/coordinator/use-proposals";
 import { useCoordinatorInputs } from "./use-coordinator-inputs";
 import { useCoordinatorPRs } from "./use-coordinator-prs";
 import { useCoordinatorTasks } from "./use-coordinator-tasks";
@@ -70,13 +74,13 @@ export function useCoordinatorAttention(
 ): UseCoordinatorAttentionResult {
   const tasksInput = useCoordinatorTasks(workspaceId);
   const prsByTaskId = useCoordinatorPRs(workspaceId);
+  const phase2 = useFeature("coordinatorPhase2");
   const {
     stalls,
     proposals,
     retryFailed: retryStallsAndProposals,
-  } = useCoordinatorInputs(workspaceId, coordinatorId);
+  } = useCoordinatorInputs(workspaceId, coordinatorId, phase2);
   const now = useNowTick();
-  const phase2 = useFeature("coordinatorPhase2");
   const watchSet = useCoordinatorWatchSet(workspaceId, coordinatorId, phase2);
   const watchValue = watchSet.input.value;
   const watchSetUnavailable = phase2 && watchValue === undefined;
@@ -125,11 +129,13 @@ export function useCoordinatorAttention(
     if (!coordinatorId) return classification.needsYou.length;
     const coordinatorProposals = useProposalsStore.getState().byCoordinator[coordinatorId];
     const freshProposals = coordinatorProposals
-      ? Object.values(coordinatorProposals.byId).filter(isOpenProposal)
+      ? Object.values(coordinatorProposals.byId).filter(
+          (proposal) => isOpenProposal(proposal) && isVisibleProposal(proposal, phase2),
+        )
       : [];
     return classify(tasks, stallValues ?? [], freshProposals, Date.now()).needsYou.length;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- classification.needsYou.length is only the no-coordinator fallback, not a dependency of the fresh read
-  }, [coordinatorId, tasks, stallValues]);
+  }, [coordinatorId, tasks, stallValues, phase2]);
 
   return {
     classification,

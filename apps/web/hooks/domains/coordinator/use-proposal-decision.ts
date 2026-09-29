@@ -5,18 +5,19 @@ import { ApiError } from "@/lib/api/client";
 import {
   approveProposal,
   getProposalConflict,
-  isCreateTaskProposal,
+  isStoredProposal,
   rejectProposal,
   type ApproveProposalEdits,
-  type Proposal,
+  type StoredProposal,
   type WireProposal,
 } from "@/lib/api/domains/coordinator-api";
 import { useProposalsStore, type ProposalApplyResult } from "./use-proposals";
 
 export type ProposalDecisionOutcome =
-  | { kind: "decided"; proposal: Proposal }
+  | { kind: "decided"; proposal: StoredProposal }
   | { kind: "validation"; message: string; field: string | null }
-  | { kind: "conflict"; proposal: Proposal }
+  | { kind: "conflict"; proposal: StoredProposal }
+  | { kind: "policy_denied" }
   | { kind: "forbidden" }
   | { kind: "not_found" }
   | { kind: "network" };
@@ -37,14 +38,22 @@ function fieldErrorBody(body: unknown): { message: string; field: string | null 
   };
 }
 
+// The 409 body carries `error` "policy_denied" and no `error_code`.
+function isPolicyDeniedBody(body: unknown): boolean {
+  return (
+    !!body && typeof body === "object" && (body as { error?: unknown }).error === "policy_denied"
+  );
+}
+
 function outcomeFromError(
   error: unknown,
   apply: (result: ProposalApplyResult) => void,
 ): ProposalDecisionOutcome {
   if (!(error instanceof ApiError)) return { kind: "network" };
   if (error.status === 409) {
+    if (isPolicyDeniedBody(error.body)) return { kind: "policy_denied" };
     const conflict = getProposalConflict(error);
-    if (conflict && isCreateTaskProposal(conflict)) {
+    if (conflict && isStoredProposal(conflict)) {
       apply({ kind: "success", proposal: conflict });
       return { kind: "conflict", proposal: conflict };
     }
@@ -95,7 +104,7 @@ export function useProposalDecision(
       setBusy(true);
       try {
         const proposal = await action();
-        if (!isCreateTaskProposal(proposal)) {
+        if (!isStoredProposal(proposal)) {
           apply({ kind: "not_found" });
           return { kind: "not_found" };
         }

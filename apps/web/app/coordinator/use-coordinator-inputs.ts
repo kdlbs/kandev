@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useWebSocketClient } from "@/lib/ws/connection";
 import {
   listCoordinatorStalls,
-  type Proposal,
+  type StoredProposal,
   type Stall,
 } from "@/lib/api/domains/coordinator-api";
 import { useProposals } from "@/hooks/domains/coordinator/use-proposals";
@@ -28,7 +28,7 @@ function initialEntry<T>(): CoordinatorInputEntry<T> {
 
 export type UseCoordinatorInputsResult = {
   stalls: CoordinatorInputEntry<Stall[]>;
-  proposals: CoordinatorInputEntry<Proposal[]>;
+  proposals: CoordinatorInputEntry<StoredProposal[]>;
   /** Re-issues only the reads currently in an error state, in parallel. */
   retryFailed: () => void;
 };
@@ -50,6 +50,7 @@ export type UseCoordinatorInputsResult = {
 export function useCoordinatorInputs(
   workspaceId: string | null,
   coordinatorId: string | null,
+  phase2 = false,
 ): UseCoordinatorInputsResult {
   const [stalls, setStalls] = useState<CoordinatorInputEntry<Stall[]>>(initialEntry);
   const stallsSeqRef = useRef(0);
@@ -83,7 +84,11 @@ export function useCoordinatorInputs(
     });
   }, [wsClient, workspaceId, coordinatorId, readStalls]);
 
-  const { proposals, retryFailed: retryProposals } = useProposals(workspaceId, coordinatorId);
+  const { proposals, retryFailed: retryProposals } = useProposals(
+    workspaceId,
+    coordinatorId,
+    phase2,
+  );
 
   const retryFailed = useCallback(() => {
     if (!workspaceId || !coordinatorId) return;

@@ -152,12 +152,28 @@ a pull request or moves a task to Done.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.2:** Every card shall show "Policy:
   <action> requires approval" and, for each cited order, the Shaped by label
   of [standing orders](standing-orders.md#req-coordinator-standing-orders-003-shaped-by-and-last-applied).
+  "Every card" is the Needs-you card; the compact chat card omits the Policy
+  line and the Shaped by labels and otherwise follows 004.3 to 004.6.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.3:** A create or move card with
   `starts_agent` true shall say "Approving this starts an agent" next to
   Approve. The warning shall come from the stored proposal, not from the
   step's current settings.
 - **AC-COORDINATOR-PROPOSAL-KINDS-004.4:** A message card shall offer Edit for
   the text; resume and move cards shall offer no Edit.
+- **AC-COORDINATOR-PROPOSAL-KINDS-004.5:** A `failed` resume, message or move
+  card shall show the sentence the
+  [design's outcome table](../system-design/proposal-kinds.md#card-outcome-copy)
+  names for its failure code, and an approved one shall show that table's
+  approve toast for its outcome; a code the table does not name shall show
+  "Could not do this: `<error>`. Check the task." A 409 `policy_denied` shall
+  show "Its May do settings no longer allow this" and leave Reject as the only
+  action on that card.
+- **AC-COORDINATOR-PROPOSAL-KINDS-004.6:** When the target task is not among
+  the loaded tasks, the card shall show the task's id in place of its
+  identifier and no task link; when a move's step name does not resolve, the
+  card shall show the raw step id. Neither shall hide Approve or Reject. A
+  proposal of a kind this client does not know shall render no card and shall
+  not count toward the Needs you total.
 
 ### REQ-COORDINATOR-PROPOSAL-KINDS-005: Stall Resume and PR-ready actions
 
@@ -181,6 +197,41 @@ and merging stays human.
 - **AC-COORDINATOR-PROPOSAL-KINDS-005.4:** The Ready to merge group shall say
   "Merging a pull request is always human." and no card, row or approval
   shall merge a pull request.
+- **AC-COORDINATOR-PROPOSAL-KINDS-005.5:** While a **Resume** request is in
+  flight its button shall be disabled with a spinner and a second click shall
+  send nothing. On a successful answer the button shall stay disabled with the
+  label "Resuming" (or "Resume queued" when the answer says the activation was
+  queued) until the stall leaves Needs you, through any refetch, and shall
+  re-enable and show the error inline if the answer says it failed or was suppressed, or the request
+  is rejected or times out. A stall that leaves Needs you mid-request shall
+  show nothing. **Open task** and **Show the evidence** shall stay
+  on the stall card. **Resume** shall be
+  shown for a stall whose task's primary session exists and is neither
+  `COMPLETED` nor `CREATED`, and no other; a session the server then refuses
+  shall show the server's error inline.
+- **AC-COORDINATOR-PROPOSAL-KINDS-005.6:** The **Send it back** note shall
+  be trimmed before it is counted; a note that is empty after trimming, or
+  longer than 4000 code points, shall disable Send. While the send is in
+  flight the note and Send shall be disabled and a second activation shall
+  send nothing. On success the note shall close and clear and a toast shall
+  say "Sent to `<task identifier>`"; on failure the note shall stay open with
+  its text and show the error inline. The row shall stay in Ready to merge
+  either way. Sends shall share one client queue id only while the trimmed
+  note is unchanged since the last attempt, so a retry after an uncertain
+  transport error queues the note once and an edited note gets a new id. A
+  failed send shall show the queue-full copy, or the task page composer's
+  message for the admission error, or "Could not send. Try again.", never a
+  raw error code. A row that leaves Ready to merge closes its form. A
+  session read that fails when the form opens shall show an inline error with
+  Send disabled.
+- **AC-COORDINATOR-PROPOSAL-KINDS-005.7:** **Open the PR** shall open the
+  `pr_url` of the task's first pull request in the shared `taskPRs` list
+  (the one Ready to merge already reads) with an `http` or `https` scheme; a
+  row with no such URL shall show no **Open the PR** and no error. The
+  "Or send it back with a note" line and **Send it back** shall be hidden,
+  not disabled, for a reader and for a row whose primary session does not
+  accept a message; **Open the PR** shall be shown to readers too. With the
+  flag on this supersedes `NEEDS-YOU-004.5` for Ready to merge rows only.
 
 ## Out of scope
 
