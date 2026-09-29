@@ -63,13 +63,17 @@ coordinator service clock; tests pass a controlled clock). The result follows
 one rule: the error is non-nil exactly when `Measurable` is false because a
 read failed, and then every amount is zero (no partial total from chunks that
 succeeded is ever returned). `Measurable` is false with a nil error only when
-the 24-hour window holds an unpriced row (`Degraded` is then true). Callers
-(admission checks 3 and 4, `CheckCeiling`, the autonomy read) treat "error
-non-nil or `Measurable` false" as one condition, unmeasurable; they never
-inspect the amounts of an unmeasurable reading. An empty coordinator id or an
-empty workspace id returns `ErrSpendScope` with `Measurable` false and issues
-no query, because `ListCoordinatorOriginTasks` reads every workspace for an
-empty workspace id.
+the 24-hour window holds an unpriced row (`Degraded` is then true). The one
+exception is a caller scope error: an empty coordinator id or an empty
+workspace id returns `ErrSpendScope` with `Measurable` false and every amount
+zero, and issues no query, because `ListCoordinatorOriginTasks` reads every
+workspace for an empty workspace id. It is not a failed read, so it is not
+counted in `coordinator_spend_read_failed_total`; it is logged at warn.
+Callers (admission checks 3 and 4, `CheckCeiling`, the autonomy read) treat
+"error non-nil or `Measurable` false" as one condition, unmeasurable, which
+includes `ErrSpendScope`; they never inspect the amounts of an unmeasurable
+reading. Unmeasurable is the fail-closed reading: a failed read, a task list
+that cannot be read, or an unpriced row is never treated as zero spend.
 
 1. **Conversation tasks.** `ListCoordinatorOriginTasks(ctx, workspaceID)`
    (phase 1, [copilot](copilot.md#conversation-cleanup)) filtered in Go to
@@ -156,8 +160,9 @@ absorb a manager's turn drained onto the same session. A turn id names one
 turn, so there is no boundary case between adjacent turns. The unpriced count
 is ignored for this display value.
 
-Results: `known` is false, with no query, when `session_turn_id` is empty (the
-send outcome was never learned), and the caller stores `cost_subcents` NULL.
+Results: `known` is false, with no query, when `session_turn_id` or `SessionID`
+is empty (the send outcome was never learned, or the row has no session), and
+the caller stores `cost_subcents` NULL.
 A turn with the id and no matching rows is `(0, true, nil)`. Usage rows whose
 `turn_id` is empty belong to no turn, so they are counted in
 [spend](#measurement) and in no turn's cost. A read error returns
@@ -174,35 +179,59 @@ NOT NULL AND (cost_subcents IS NULL OR cost_subcents < ?)`. Rows are only
 ever added to a turn, so the sum only grows; the conditional update makes a
 stale concurrent recompute unable to lower a newer value, and repeating it
 is idempotent. The value is final once the turn leaves the 10-minute window,
-and no marker is stored. A turn whose reads keep failing for those 10 minutes
-keeps `cost_subcents` NULL, which the screens show as unknown.
+and no marker is stored: a usage row recorded more than 10 minutes after the
+settle is counted in [spend](#measurement) and never in the turn's cost, which
+is a display value only. The writer records an event when its single worker dequeues it,
+so the window bounds that queue lag, not a routine loss.
+A turn whose reads keep failing for those 10 minutes keeps `cost_subcents`
+NULL, which the screens show as unknown.
 
 ## Stopping
 
 ### Observer
 
-`internal/task/usage`'s `Writer` gains `SetRecordedObserver(fn func(taskID,
-sessionID string))`, callable before or after `Start`, guarded by the writer's
-mutex; it replaces any earlier observer and `nil` clears it (one observer, not
-a list). The writer owns a bounded channel of 256 notices and one consumer
-goroutine, started with `Start` and joined in `Stop` after the event worker
-has drained; notices still queued at `Stop` are discarded, because the
-[backstop](wake.md#backstop) covers them. After each successful insert the
-event worker, with an observer set, offers `(event.TaskID, event.SessionID)`
-of the persisted row (a session id the repository cleared is empty) to the
-channel without blocking; when the channel is full the notice is dropped and
+`internal/task/usage`'s `Writer` gains `SetRecordedObserver(fn func(ctx
+context.Context, taskID, sessionID string))`, callable before or after
+`Start`, guarded by the writer's mutex; it replaces any earlier observer and
+`nil` clears it (one observer, not a list). The writer owns a bounded channel
+of 256 notices and one consumer goroutine, started by the first `Start` (a
+repeated `Start` starts nothing more) and joined in `Stop` after the event
+worker has drained. After each successful insert the event worker, with an
+observer set, offers `(event.TaskID, event.SessionID)` to the channel without
+blocking. The pair is the row as the writer built it and submitted to the
+repository: the repository may clear a session id it finds owned by another
+task, and that cleared value never reaches the writer, so a notice can name a
+session the stored row does not carry. That is harmless, because the check it
+triggers reads the ledger and decides on spend, never on the notice. When the
+channel is full the notice is dropped and
 `coordinator_usage_observer_dropped_total` is incremented. With no observer
-set nothing is offered and there is no behaviour change. The consumer calls
-`fn` serially in arrival order, with no coalescing, recovers a panic in `fn`
-and logs it at warn, and continues. A slow `fn` fills the channel and drops
-notices; that is the same bound as any other missed notice.
+set nothing is offered and there is no behaviour change.
+
+The consumer reads the current observer under the mutex when it dequeues a
+notice, so a notice queued before a replacement runs the new observer, and one
+dequeued after a clear is discarded without a metric. It calls `fn` serially in
+arrival order, with no coalescing, and a panic in `fn` is recovered and logged
+at warn while the consumer continues. Each call receives a context that is a
+child of one writer-owned observer context, with a 45-second timeout: longer
+than the 30-second cancellation operation TTL, so a cancel in progress is not
+cut short by the observer's own deadline (`CancelTurn`'s detached operation
+outlives its caller's context in any case). `Stop` closes the channel, cancels
+the observer context at once (so a running `fn` returns promptly and the join
+cannot hang on it), discards notices still queued, and joins the consumer; the
+[backstop](wake.md#backstop) covers what was discarded. A notice offered after
+`Stop` began is not offered: the event worker has exited. Registering an
+observer after `Stop` has no effect and returns no error. A slow `fn` fills
+the channel and drops notices; that is the same bound as any other missed
+notice.
 
 The coordinator registers its observer in `registerCoordinatorSpend` at
 startup only when phase 3 is effective, and the observer re-checks the
 effective flag on each call and returns at once when it is off. It ignores an
 empty task id or session id, then reads the task by primary key and ignores
 it unless the task's metadata names a coordinator (the one read per usage row
-that ordinary tasks cost), then calls `CheckCeilingForSession`.
+that ordinary tasks cost). A failed task read logs at warn, changes no metric
+and ends the call: the backstop's `CheckCeiling` needs no task read and stops
+the turn within its period. Otherwise it calls `CheckCeilingForSession`.
 
 ### CheckCeiling
 
@@ -215,7 +244,9 @@ and returns nil when there is none or when the row's `session_id` is not
 to do", "the turn already ended" and `ErrTurnNotActive`, and return an error
 only for a failed read, write or cancel, which the caller logs at warn (the
 backstop also counts it in `coordinator_backstop_skipped_total`). The
-procedure, with the open turn row and the coordinator re-read at the start:
+procedure, with the open turn row and the coordinator re-read at the start
+(a coordinator row that is gone by the re-read returns nil: its conversation
+and sessions were deleted with it, so nothing is running to stop):
 
 1. **One check per coordinator.** A per-coordinator in-process `TryLock`
    guards the procedure; a call that finds it held returns nil at once, since
@@ -236,16 +267,22 @@ procedure, with the open turn row and the coordinator re-read at the start:
 5. **Decision.** The ceiling is the coordinator's current
    `cost_ceiling_subcents`, or the row's `start_ceiling_subcents` when that is
    null (a manager turned autonomy off and then cleared the ceiling while the
-   turn was open). It runs `Spend`. An unmeasurable reading, or
+   turn was open). `start_ceiling_subcents` is `NOT NULL`
+   (`store_phase2_schema.go`, [wake](wake.md)), so the two are never both
+   absent. It runs `Spend`. An unmeasurable reading, or
    `WindowSubcents` at or above the ceiling, is a stop decision; anything else
    returns nil. The decision is not re-read after step 6: a ceiling raised
    after step 5 still stops this turn, and a ceiling lowered after it is
    caught by the next notice or tick.
 6. **Mark.** `UPDATE ... SET stop_requested_at = ? WHERE id = ? AND outcome IS
    NULL AND stop_requested_at IS NULL`, the retry marker. When it affected
-   one row it increments `coordinator_ceiling_stop_total` and logs at info the
-   coordinator id, window and ceiling; this is the only place either happens,
-   so a stop is counted once whichever path later settles the row. An
+   one row it increments `coordinator_ceiling_stop_total{reason}` and logs at
+   info, with `reason` `ceiling` (the reading was measurable and at or above
+   the ceiling; the log carries the coordinator id, window and ceiling) or
+   `unmeasurable` (the log carries the coordinator id and no amounts, because
+   an unmeasurable reading's amounts are never inspected). This is the only
+   place either happens, so a stop is counted once whichever path later settles
+   the row. An
    unmeasurable reading stops the same way, because the ceiling can no longer
    be shown to hold. When it affected no row the row is re-read: settled
    returns nil; open and already marked (another process won the mark)
@@ -264,14 +301,21 @@ procedure, with the open turn row and the coordinator re-read at the start:
    outcome = 'stopped_at_ceiling', finished_at = ?, cost_subcents = ? WHERE id
    = ? AND outcome IS NULL`, with the cost from [TurnCost](#per-turn-cost)
    (NULL when `TurnCost` is unknown or errors; the recompute fills it). Only
-   when it affected one row, it publishes `coordinator.updated` with
-   `autonomy_changed`; when it affected none, [turn end](wake.md#turn-end)
-   settled first and owns the publish. The settle changes no metric.
+   when it affected one row, it increments
+   `coordinator_unattended_turn_total{outcome="stopped_at_ceiling"}`, publishes
+   `coordinator.updated` with `autonomy_changed`, and, after the update commits,
+   calls `Kick(coordinatorID)` best effort as [turn end](wake.md#turn-end)
+   does, so a wake recorded during the turn is delivered after the cooldown;
+   when it affected none, turn end settled first and owns all three. Exactly one
+   of the two settles changes the row, so the outcome is counted once. The
+   stop counter of step 6 is separate: it counts the request, this counts the
+   settled outcome.
 
 ### CancelTurn
 
-`orchestrator.Service.CancelTurn(ctx, sessionID, expectedTurnID string) error`
-is a new turn-fenced variant of the existing silent cancellation
+`orchestrator.Service.CancelTurn(ctx, sessionID, expectedTurnID string) error`,
+with the new exported errors `ErrTurnNotActive` and `ErrCancelInFlight` beside
+`ErrSendNowTurnChanged` in the `orchestrator` package, is a new turn-fenced variant of the existing silent cancellation
 (`cancelAgentSilentActionWithKindExclusiveConflict` and
 `runSilentCancellationOwned` in `orchestrator/event_handlers_clarification.go`),
 which already carries an expected turn id and returns `ErrSendNowTurnChanged`
@@ -286,7 +330,11 @@ means. Its contract:
 
 - An empty `sessionID` or `expectedTurnID` is an error, not
   `ErrTurnNotActive`; `CheckCeiling` never passes one.
-- It takes the exclusive cancellation claim for the session. If another
+- It takes the exclusive cancellation claim for the session with
+  `cancellationKindInternal` (the kind the stuck-signal watchdog and context
+  reset use). `cancellationKindSilent` is not used, because
+  `clarificationRecoveryOwnsStreamEvent` treats that kind as clarification
+  recovery and would swallow the cancellation's stream frames. If another
   cancellation of that session is in flight (a manager's Stop, a send-now, a
   reset), the claim is refused and `CancelTurn` returns `ErrCancelInFlight`
   without joining it: joining would skip the fence, and the in-flight
@@ -305,7 +353,13 @@ means. Its contract:
   the reconciliation completed, including the existing reconcile-when-no-live-
   execution outcome (nothing is running, so nothing is spending). Any error
   from them, including the caller's context ending while the detached
-  operation continues, is an error return and a failed cancel.
+  operation continues, is an error return and a failed cancel. The operation
+  runs on a context detached from the caller with the 30-second
+  `cancellationOperationTTL`, so a caller whose context ended still leaves it
+  running and it releases its own claim when it finishes. A repeated cancel is
+  safe: the next call either finds the claim held (`ErrCancelInFlight`, counted
+  and retried) or finds the turn no longer active (`ErrTurnNotActive`, nil), and
+  the fence means it can never cancel another turn.
 
 A test pins the drain race: with the pre-check seeing the unattended turn
 active and a manager's queued message becoming the active turn before the
@@ -357,7 +411,7 @@ failing turn is the only one spending.
 | --- | --- |
 | Task list or 24-hour usage read error | Not measurable: admission holds with `spend_unmeasured`; an open unattended turn is stopped; `coordinator_spend_read_failed_total` |
 | Seven-day mean read error | The mean shows unavailable; nothing is held or stopped |
-| Unpriced usage in the window | Same, until the row leaves the window |
+| Unpriced usage in the window | Not measurable: admission holds with `spend_unmeasured`; an open unattended turn is stopped; until the row leaves the window |
 | Observer queue full | Metric; the backstop applies the stop within 60 s |
 | Cancel fails, or another cancellation of the session is in flight | Row stays open with `stop_requested_at`; each failure is counted; the next observer call or tick cancels again |
 | Cancel keeps failing for 5 minutes | Metric per failure; autonomy read and strip show `stop_failing` until the turn ends |
@@ -373,12 +427,14 @@ never per-message usage.
 
 ## Observability
 
-`coordinator_ceiling_stop_total` (stops requested, counted at the mark),
+`coordinator_ceiling_stop_total` (label `reason`: `ceiling`, `unmeasurable`; stops requested, counted at the mark),
 `coordinator_ceiling_cancel_failed_total`,
 `coordinator_spend_read_failed_total` (label `read`: `tasks`, `window`,
 `mean`) and `coordinator_usage_observer_dropped_total` counters, plus a
-structured zap log at info for each ceiling stop request with the coordinator
-id, window and ceiling.
+structured zap log at info for each ceiling stop request: the coordinator id,
+window and ceiling for `reason` `ceiling`, the coordinator id alone for
+`unmeasurable`. A `stopped_at_ceiling` settle also increments wake's
+`coordinator_unattended_turn_total{outcome}`.
 
 ## Related decisions
 
