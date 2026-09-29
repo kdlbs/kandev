@@ -792,6 +792,11 @@ On phones, use the bottom navigation to open **Chat**, **Files**, or
 **Terminal** as a full-screen surface. Phone navigation keeps its existing
 layout and does not change the wider task-panel choice.
 
+When switching tasks, available task details and cached conversations appear
+while the selected task refreshes. Loading settings or another panel does not
+cover the conversation. A task or conversation that has not loaded yet still
+needs to be fetched.
+
 In **Files**, you can open available files while other expanded folders finish
 loading. If a folder refresh fails, available rows remain usable and **Retry**
 appears below the tree.

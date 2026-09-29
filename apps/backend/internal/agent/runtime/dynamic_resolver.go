@@ -30,6 +30,7 @@ const dynamicRouteStatusRetrying = "retrying"
 type ProfileExecution struct {
 	LogicalProfileID   string
 	ExecutionProfileID string
+	AgentName          string
 	RouteSessionID     string
 	Generation         int64
 	ProfileVersion     int64
@@ -151,7 +152,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 		return ProfileExecution{}, fmt.Errorf("resolve profile family %s: %w", profileID, err)
 	}
 	if agent.Name != agents.DynamicAgentID {
-		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, Profile: profile}, nil
+		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, AgentName: agent.Name, Profile: profile}, nil
 	}
 	if !r.enabled.Load() {
 		return ProfileExecution{}, ErrDynamicRoutingDisabled
@@ -191,7 +192,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 		return ProfileExecution{}, err
 	}
 	if agent.Name != agents.DynamicAgentID {
-		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, Profile: profile}, nil
+		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, AgentName: agent.Name, Profile: profile}, nil
 	}
 	if sessionID == "" {
 		sessionID = "utility:" + uuid.NewString()
@@ -208,11 +209,82 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve execution profile %s: %w", decision.ExecutionProfileID, err)
 	}
+	concreteAgentName, err := r.agentNameForProfile(ctx, concrete)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
 	return ProfileExecution{
 		LogicalProfileID: profileID, ExecutionProfileID: decision.ExecutionProfileID,
+		AgentName:      concreteAgentName,
 		RouteSessionID: sessionID, Generation: decision.Generation,
 		ProfileVersion: decision.ProfileVersion, Profile: concrete, Decision: decision,
 	}, nil
+}
+
+// RouteAfterUnclassifiedFailure validates the logical profile and applies the
+// narrow repeated-failure policy only with evidence built by a trusted task
+// runtime boundary.
+func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence dynamic.UnclassifiedFailureEvidence,
+) (dynamic.RouteDecision, error) {
+	if r.engine == nil || sessionID == "" {
+		return dynamic.RouteDecision{}, errors.New("dynamic profile execution is not configured")
+	}
+	if err := r.ValidateProfile(ctx, profileID); err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	profile, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	return r.engine.ApplyUnclassifiedFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, evidence,
+	)
+}
+
+// ClaimUnclassifiedFallbackLaunch performs the final contextual fence before
+// a detached automatic successor begins launch work.
+func (r *ProfileExecutionResolver) ClaimUnclassifiedFallbackLaunch(
+	ctx context.Context,
+	decision dynamic.RouteDecision,
+	evidence dynamic.UnclassifiedFailureEvidence,
+) error {
+	if r == nil || r.engine == nil {
+		return dynamic.ErrUnclassifiedWorkflowContextUnavailable
+	}
+	return r.engine.ClaimUnclassifiedFallbackLaunch(ctx, decision, evidence)
+}
+
+// ClearUnclassifiedStreak removes the session-owned count after a current
+// successful output/effect/turn event has been validated by the orchestrator.
+func (r *ProfileExecutionResolver) ClearUnclassifiedStreak(
+	ctx context.Context,
+	sessionID string,
+	generation int64,
+	candidateID string,
+) error {
+	if r == nil || r.engine == nil {
+		return errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.ClearUnclassifiedStreak(ctx, sessionID, generation, candidateID)
+}
+
+// ClearUnclassifiedStartupStreak removes a startup count only after the
+// lifecycle confirms that the agent session is initialized and ready.
+func (r *ProfileExecutionResolver) ClearUnclassifiedStartupStreak(
+	ctx context.Context,
+	sessionID string,
+	generation int64,
+	candidateID string,
+) error {
+	if r == nil || r.engine == nil {
+		return errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.ClearUnclassifiedStartupStreak(ctx, sessionID, generation, candidateID)
 }
 
 // ResolveExisting returns the persisted concrete execution for a logical
@@ -237,7 +309,7 @@ func (r *ProfileExecutionResolver) ResolveExisting(
 		return ProfileExecution{}, err
 	}
 	if agent.Name != agents.DynamicAgentID {
-		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profileID, Profile: profile}, nil
+		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profileID, AgentName: agent.Name, Profile: profile}, nil
 	}
 	if executionProfileID == "" || generation <= 0 {
 		return ProfileExecution{}, errors.New("dynamic session has no persisted execution profile")
@@ -249,8 +321,13 @@ func (r *ProfileExecutionResolver) ResolveExisting(
 	if concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled {
 		return ProfileExecution{}, fmt.Errorf("existing execution profile %s is unavailable", executionProfileID)
 	}
+	concreteAgentName, err := r.agentNameForProfile(ctx, concrete)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
 	return ProfileExecution{
 		LogicalProfileID: profileID, ExecutionProfileID: executionProfileID,
+		AgentName:  concreteAgentName,
 		Generation: generation, ProfileVersion: profileVersion, Profile: concrete,
 		Decision: dynamic.RouteDecision{
 			SessionID: sessionID, LogicalProfileID: profileID,
@@ -299,7 +376,7 @@ func (r *ProfileExecutionResolver) ResolveRouteAction(
 		return ProfileExecution{}, fmt.Errorf("resolve profile family %s: %w", profileID, err)
 	}
 	if agent.Name != agents.DynamicAgentID {
-		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, Profile: profile}, nil
+		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, AgentName: agent.Name, Profile: profile}, nil
 	}
 	if !r.enabled.Load() {
 		return ProfileExecution{}, ErrDynamicRoutingDisabled
@@ -559,8 +636,13 @@ func (r *ProfileExecutionResolver) resolve(
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve execution profile %s: %w", decision.ExecutionProfileID, err)
 	}
+	concreteAgentName, err := r.agentNameForProfile(ctx, concrete)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
 	return ProfileExecution{
 		LogicalProfileID: profileID, ExecutionProfileID: decision.ExecutionProfileID,
+		AgentName:      concreteAgentName,
 		RouteSessionID: sessionID,
 		Generation:     decision.Generation, ProfileVersion: decision.ProfileVersion,
 		Profile:  concrete,
@@ -580,11 +662,33 @@ func (r *ProfileExecutionResolver) executionFromDecision(
 	if concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled {
 		return ProfileExecution{}, fmt.Errorf("execution profile %s is unavailable", decision.ExecutionProfileID)
 	}
+	concreteAgentName, err := r.agentNameForProfile(ctx, concrete)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
 	return ProfileExecution{
 		LogicalProfileID: profileID, ExecutionProfileID: decision.ExecutionProfileID,
+		AgentName:      concreteAgentName,
 		RouteSessionID: sessionID, Generation: decision.Generation,
 		ProfileVersion: decision.ProfileVersion, Profile: concrete, Decision: decision,
 	}, nil
+}
+
+func (r *ProfileExecutionResolver) agentNameForProfile(
+	ctx context.Context,
+	profile *agentsettingsmodels.AgentProfile,
+) (string, error) {
+	if profile == nil {
+		return "", errors.New("cannot resolve agent name for a nil profile")
+	}
+	if profile.AgentID == "" {
+		return "", nil
+	}
+	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		return "", fmt.Errorf("resolve agent for execution profile %s: %w", profile.ID, err)
+	}
+	return agent.Name, nil
 }
 
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {

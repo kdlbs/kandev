@@ -119,6 +119,21 @@ func (f *facade) Stop(ctx context.Context, executionID string, reason string) er
 	return err
 }
 
+// SuspendIdle delegates to the lifecycle backend's conditional suspension
+// operation without widening the legacy backend contract used by test fakes.
+func (f *facade) SuspendIdle(ctx context.Context, identity IdleSuspensionIdentity) error {
+	if identity.ExecutionID == "" || identity.SessionID == "" {
+		return fmt.Errorf("runtime: idle suspension identity is required")
+	}
+	backend, ok := f.backend.(interface {
+		SuspendIdle(context.Context, lifecycle.IdleSuspensionIdentity) error
+	})
+	if !ok {
+		return ErrUnsupported
+	}
+	return backend.SuspendIdle(ctx, identity)
+}
+
 // GetExecution returns a snapshot view of an execution.
 func (f *facade) GetExecution(_ context.Context, executionID string) (*Execution, error) {
 	if executionID == "" {

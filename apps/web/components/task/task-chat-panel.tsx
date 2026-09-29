@@ -64,6 +64,7 @@ import { LaunchQueueStatus } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { JumpToLatestButton } from "./chat/jump-to-latest-button";
+import { ConversationUsageDisplay } from "./chat/conversation-usage-display";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -1554,9 +1555,18 @@ function ChatFooter({
   const { t } = useTranslation();
   if (isArchived) {
     return (
-      <div className="bg-muted/50 flex flex-shrink-0 items-center border-t px-4 py-2 text-sm text-muted-foreground">
+      <div
+        data-testid="archived-chat-footer"
+        className="bg-muted/50 flex flex-shrink-0 flex-wrap items-center gap-1.5 border-t px-4 py-2 text-sm text-muted-foreground"
+      >
         <span className="flex-1 text-center">{t("task:thisTaskIsArchivedAndRead")}</span>
-        <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <ConversationUsageDisplay
+            taskId={panelState.taskId ?? statusTaskId}
+            sessionId={panelState.resolvedSessionId}
+          />
+          <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
+        </div>
       </div>
     );
   }

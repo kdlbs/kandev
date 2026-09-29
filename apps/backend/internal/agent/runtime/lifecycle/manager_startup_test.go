@@ -111,6 +111,31 @@ func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
 	}
 }
 
+func TestStartAgentProcessFailureAbortsInitialPromptDispatchHold(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: false}
+	execution := &AgentExecution{
+		ID:             "exec-initial-prompt-start-failure",
+		SessionID:      "session-initial-prompt-start-failure",
+		AgentProfileID: "profile-initial-prompt-start-failure",
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+	failureCalled := false
+	if err := mgr.RegisterInitialPromptDispatchCallbacks(execution.ID, nil, func() {
+		failureCalled = true
+	}); err != nil {
+		t.Fatalf("register initial prompt callbacks: %v", err)
+	}
+	if err := mgr.StartAgentProcess(context.Background(), execution.ID); err == nil {
+		t.Fatal("StartAgentProcess() succeeded without an agentctl client")
+	}
+	if !failureCalled {
+		t.Fatal("initial prompt failure callback was not called when agent startup failed")
+	}
+}
+
 func TestStartAgentProcess_RunsContributionPreflightBeforeAgentStart(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
