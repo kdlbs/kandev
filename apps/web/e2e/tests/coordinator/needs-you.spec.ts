@@ -59,7 +59,9 @@ test.describe("Coordinator Needs you and Queue", () => {
     await expect(card).toContainText(title);
     await expect(card.getByText("Decide now")).toBeVisible();
     await expect(card.getByText("The agent is waiting for your answer")).toBeVisible();
-    await expect(card.getByText("Your answer, on the task")).toBeVisible();
+    // AC-COORDINATOR-RELAY-001.1: with phase 3 effective (the e2e profile), Answer here
+    // replaces the phase 1 "Your answer, on the task" text for an answerable question.
+    await expect(card.getByRole("button", { name: "Answer here" })).toBeVisible();
 
     const askAboutThis = card.getByRole("button", { name: "Ask about this" });
     await expect(askAboutThis).toBeVisible();
