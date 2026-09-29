@@ -561,6 +561,11 @@ type FeaturesConfig struct {
 	// tasks for a human to approve. Off in prod/dev until the feature is
 	// user-ready; on in e2e so tests exercise it.
 	Coordinator bool `mapstructure:"coordinator" json:"coordinator"`
+
+	// CoordinatorPhase2 gates the coordinator control surface (policy,
+	// watches, standing orders, goals, activity log and the new proposal
+	// kinds). It only takes effect together with Coordinator.
+	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
 }
 
 // LoggingConfig holds logging configuration.

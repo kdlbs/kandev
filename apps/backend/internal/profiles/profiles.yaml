@@ -126,6 +126,14 @@ features:
     dev:  "false"
     e2e:  "true"
 
+  # Coordinator control (phase 2): permissions, watches, standing orders,
+  # goals and the activity log. Only effective together with
+  # KANDEV_FEATURES_COORDINATOR.
+  KANDEV_FEATURES_COORDINATOR_PHASE2:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
