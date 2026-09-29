@@ -101,6 +101,10 @@ func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
+	t.Cleanup(func() {
+		svc.StopWakeRecorder()
+		svc.StopWakeBackstop()
+	})
 	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
