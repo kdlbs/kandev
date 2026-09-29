@@ -110,7 +110,7 @@ and its button is full width.
 ## Verification
 
 ```bash
-cd apps/web && pnpm test -- app/settings/workspace app/coordinator/components/goal-note
+cd apps/web && pnpm test -- components/coordinators hooks/domains/coordinator lib/api/domains app/coordinator/components/goal-note
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/configure-sections.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/configure-sections.spec.ts

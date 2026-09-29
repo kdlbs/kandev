@@ -361,7 +361,9 @@ Add coordinator
   ignored; choosing a section replaces the `section` parameter, keeps every
   other query parameter and adds a history entry, so back and forward move
   between sections. With the flag off the parameter is ignored and the
-  phase-1 page renders. Help lines (one line each, in `coordinator.json`):
+  phase-1 page renders. The row is `components/settings/settings-tabs.tsx`
+  with the slugs as tab ids, so a visited section stays mounted and an unsaved
+  draft survives a switch ([goals](goals.md#goal-ui)). Help lines (one line each, in `coordinator.json`):
   Identity "Name, description and context.", Watches "Which boards this
   coordinator watches.", May do "What this coordinator may do, and what needs
   your approval.", Standing orders "Rules the coordinator follows in every

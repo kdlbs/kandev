@@ -285,7 +285,7 @@ instructions were built with; the next conversation reads the new ones.
 
 ## Goal UI
 
-`sections/goal.tsx` on the coordinator page:
+`components/coordinators/sections/goal-section.tsx` on the coordinator page:
 
 ```text
 Goal
@@ -296,14 +296,27 @@ Goal
     [ ] Stripe webhooks retried                  [remove]
     + Add criterion
   [Mark milestone met]
-  Since this goal was set (2026-09-20)
+  Since this goal was set (20 Sep)
     Open tasks         23 -> 19   down
     Approved (7 days)  No baseline
     Rejected (7 days)  No baseline
 ```
 
-- Name, due date and criteria edits save through the settings save bar with
-  one PUT. A criterion toggle on a saved criterion (one with an id) saves
+- The Sections row is built on `components/settings/settings-tabs.tsx`, which
+  keeps every visited section mounted, so an unsaved Goal or Identity draft
+  survives switching sections and Back/Forward; the settings save bar shows
+  one dirty state and saves each dirty section that uses it (Identity, Goal,
+  and task 06's sections) through its own request, and a failure in one
+  keeps that section's draft and names it. Standing orders has no draft. The
+  due date is an ISO calendar date input: clearing it sends `due_on: null`
+  (never `""`), and there is no separate clear control. The "Due" value and
+  the "Since this goal was set" date are calendar dates shown as stored, in
+  the locale's short day-and-month form (`20 Sep`), never shifted by the
+  viewer's time zone; only the overdue comparison uses today in that zone.
+  Name, due date and criteria edits save through the settings save bar with
+  one PUT. The save bar is disabled while that PUT is in flight and the
+  empty-form **Set goal** button likewise, so one click sends one request;
+  the response of the last request sent wins and the form reloads from it. A criterion toggle on a saved criterion (one with an id) saves
   immediately through the criteria route; the checkbox of a criterion added in
   the form and not yet saved is disabled until the save. A toggle response or
   a `coordinator.updated` refetch never replaces unsaved name, due-date or
@@ -343,8 +356,12 @@ measures ([coordinators](coordinators.md#guided-setup)).
 
 ## Goal note
 
-`components/goal-note.tsx` sits above the Needs you list while the phase-2
-flag is on, fed by `GET goal` and refreshed on `coordinator.updated`:
+`components/goal-note.tsx` sits above the Needs you body while the phase-2
+flag is on and stays visible whichever body Needs you shows: the list, the
+empty state, its loading skeleton or its list-error state (so a new
+coordinator with nothing pending still sees "No goal is set"). It is hidden
+only when there is no coordinator or the coordinator is unknown (those states
+replace the page). It is fed by `GET goal` and refreshed on `coordinator.updated`:
 
 | State | Note |
 | --- | --- |
