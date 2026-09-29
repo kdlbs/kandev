@@ -22,8 +22,8 @@ This design stores D17's per-action settings and the Watches scope on each
 coordinator, derives the coordinator's tool profile from them, binds that
 profile to the conversation, and makes the MCP guard and agentctl
 auto-approval read the policy instead of the phase-1 constants
-(ADR decisions D18, D19, D13 and D25). It owns the May do and Watches
-sections of the coordinator page.
+(ADR decisions D18, D19, D13 and D25). The May do and Watches sections of the
+coordinator page are in [permissions UI](permissions-ui.md).
 
 Proposal execution per kind is in [proposal kinds](proposal-kinds.md), the
 refused rows in [activity log](activity-log.md), and the flag and Configure
@@ -35,9 +35,9 @@ the guard, registration and fail-closed checks is in
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-COORDINATOR-PERMISSIONS-001` | [Store](#store), [Policy value](#policy-value), [Settings routes](#settings-routes), [May do UI](#may-do-ui) |
+| `REQ-COORDINATOR-PERMISSIONS-001` | [Store](#store), [Policy value](#policy-value), [Settings routes](#settings-routes), [May do UI](permissions-ui.md#may-do-ui) |
 | `REQ-COORDINATOR-PERMISSIONS-002` | [Tool profile](#tool-profile), [Binding](#binding), [Registration](#registration), [Guard](#guard), [Interleavings](#interleavings), [Auto-approval](#auto-approval), [Approve re-check](#approve-re-check) |
-| `REQ-COORDINATOR-PERMISSIONS-003` | [Store](#store), [Watch filter](#watch-filter), [Workflow deletion](#workflow-deletion), [Watches UI](#watches-ui) |
+| `REQ-COORDINATOR-PERMISSIONS-003` | [Store](#store), [Watch filter](#watch-filter), [Workflow deletion](#workflow-deletion), [Client watch filter](permissions-ui.md#client-watch-filter), [Watches UI](permissions-ui.md#watches-ui) |
 | `REQ-COORDINATOR-PERMISSIONS-004` | [Settings routes](#settings-routes), [Conversation reset](#conversation-reset) |
 
 ## Store
@@ -438,11 +438,9 @@ a stale id matches no task, so the guard needs no check. A `selected` scope
 with an empty effective set watches nothing: list reads return empty results
 and the "watches no board" state shows (`003.5`).
 
-Needs you, the Queue and the count strip apply the same set in the
-classification input query of [needs-you](needs-you.md#inputs): tasks and
-stall rows are joined to the watched workflow ids when not `All`; the
-coordinator's own proposals are not filtered (`003.4`). The count the
-sidebar badge shows is recomputed through the same query.
+Needs you, Queue and the count strip apply the same set in the client, as
+[permissions UI](permissions-ui.md#client-watch-filter) specifies (`003.4`,
+`003.7`).
 
 ## Workflow deletion
 
@@ -503,43 +501,6 @@ executor from the same resolver output. Comparison stays by full qualified
 name, never by prefix (`002.4`). An instance built by the lifecycle alone
 (workspace-only restore) receives an empty list, so it auto-approves
 nothing; the agent start that follows goes through the resolvers.
-
-## May do UI
-
-`apps/web/app/settings/workspace/[id]/coordinators/sections/may-do.tsx`:
-
-```text
-May do
-  Create a task     (o) Denied  (*) Requires approval  ( ) Automatic
-                    Last 30 days: 12 approved, 2 rejected  Review the last 30 days
-  Start an agent    (*) Denied  ( ) Requires approval  ( ) Automatic
-  ...
-  Stop a task       (*) Denied   Stopping is not available yet.
-  Merge a pull request      Always human
-  Move a task to Done       Always human
-```
-
-- Automatic is a disabled radio with the note of
-  `AC-COORDINATOR-PERMISSIONS-001.6`.
-- The per-row line reads the activity summary for 30 days
-  ([activity log](activity-log.md#summary)); zero approved and zero
-  rejected shows "Nothing yet". The link routes to the Queue What it did
-  section with `?class=<action>`.
-- When Start an agent is not Denied, the note of `001.9` shows under its
-  row.
-- Readers see the radios disabled.
-- The section registers with `useSettingsSaveContributor`; the page note
-  says saving starts the next conversation fresh (`004.3`).
-
-## Watches UI
-
-`sections/watches.tsx` shows the switch "Watch every board, including new
-ones". Off lists the workspace's workflows from the workflows store in its
-existing order, each with its state and **Put this board in scope** /
-**Take this board out of scope**. Taking the last board out shows an inline
-error and leaves it in scope (`003.6`). A coordinator watching nothing
-shows the "watches no board" notice with a link to this section for
-managers.
 
 ## Security
 
