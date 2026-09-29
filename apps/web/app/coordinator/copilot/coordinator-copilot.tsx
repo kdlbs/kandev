@@ -8,8 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RightSidePanel } from "@/components/right-side-panel";
 import { useCoordinatorCopilot } from "./use-coordinator-copilot";
 import { useCopilotPanelWidth } from "./use-copilot-panel-width";
-import { CoordinatorCopilotBody } from "./coordinator-copilot-body";
-import { CoordinatorCopilotHeader } from "./coordinator-copilot-header";
+import { CoordinatorCopilotPanelContent } from "./coordinator-copilot-panel-content";
 
 export type CoordinatorCopilotProps = {
   workspaceId: string;
@@ -75,26 +74,14 @@ export function CoordinatorCopilot({
         panelTestId="coordinator-copilot-popover"
         main={children}
       >
-        <div className="flex h-full min-h-0 flex-col">
-          <CoordinatorCopilotHeader
-            coordinatorName={coordinatorName}
-            busy={copilot.launcher.busy}
-            onClose={closeAndReturnFocus}
-          />
-          <CoordinatorCopilotBody
-            workspaceId={workspaceId}
-            coordinatorId={coordinatorId}
-            state={copilot.openSequence.state}
-            routeSession={copilot.routeSession}
-            chip={copilot.chip}
-            pendingDraft={copilot.pendingDraft}
-            askKey={copilot.askKey}
-            onRetry={copilot.openSequence.retry}
-            onRemoveChip={copilot.removeChip}
-            onSuggest={copilot.suggest}
-            onClosePopover={() => copilot.handleOpenChange(false)}
-          />
-        </div>
+        <CoordinatorCopilotPanelContent
+          copilot={copilot}
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          coordinatorName={coordinatorName}
+          onClose={closeAndReturnFocus}
+          onClosePopover={() => copilot.handleOpenChange(false)}
+        />
       </RightSidePanel>
       {copilot.enabled && !copilot.open && (
         <Tooltip>

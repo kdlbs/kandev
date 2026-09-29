@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -6,6 +7,7 @@ import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error"
 import { MessageTaskOriginProvider } from "@/components/task/chat/messages/message-task-origin-context";
 import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 import { CoordinatorProposalProvider } from "@/components/task/chat/messages/kandev/coordinator-proposal-context";
+import { normalizeCopilotItemId } from "@/lib/coordinator/copilot-id";
 import type { CopilotChip } from "@/hooks/domains/coordinator/copilot-store";
 import type { OpenSequenceState } from "@/hooks/domains/coordinator/use-copilot-open-sequence";
 import type { ConversationResponse } from "@/lib/api/domains/coordinator-api";
@@ -68,6 +70,7 @@ function ReadyBody({
   workspaceId,
   coordinatorId,
   chip,
+  chipRow,
   pendingDraft,
   askKey,
   onRemoveChip,
@@ -80,6 +83,7 @@ function ReadyBody({
   workspaceId: string;
   coordinatorId: string;
   chip: CopilotChip | null;
+  chipRow?: ReactNode;
   pendingDraft: string | undefined;
   askKey: number;
   onRemoveChip: () => void;
@@ -107,11 +111,12 @@ function ReadyBody({
   };
   // i18n-exempt: wire prefix parsed back by parseCoordinatorAboutPrefix (user-message-body.tsx); never translated.
   const transformOutgoing = chip
-    ? (message: string) => `About ${chip.id} [${chip.ref.kind}:${chip.ref.id}]: ${message}`
+    ? (message: string) =>
+        `About ${normalizeCopilotItemId(chip.label)} [${chip.ref.kind}:${chip.ref.id}]: ${message}`
     : undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {chip && <CoordinatorCopilotChipRow chip={chip} onRemove={onRemoveChip} />}
+      {chipRow ?? (chip && <CoordinatorCopilotChipRow chip={chip} onRemove={onRemoveChip} />)}
       {ended && (
         <SessionRecoveryFeedback
           error={errorMessage?.trim() || t("task:backendRejectedSessionRequest")}
@@ -149,6 +154,8 @@ export type CoordinatorCopilotBodyProps = {
   state: OpenSequenceState;
   routeSession: ConversationResponse | null;
   chip: CopilotChip | null;
+  /** Replaces the default "about `<id>`" chip row. */
+  chipRow?: ReactNode;
   pendingDraft: string | undefined;
   askKey: number;
   onRetry: () => void;
@@ -170,6 +177,7 @@ export function CoordinatorCopilotBody({
   state,
   routeSession,
   chip,
+  chipRow,
   pendingDraft,
   askKey,
   onRetry,
@@ -193,6 +201,7 @@ export function CoordinatorCopilotBody({
         workspaceId={workspaceId}
         coordinatorId={coordinatorId}
         chip={chip}
+        chipRow={chipRow}
         pendingDraft={pendingDraft}
         askKey={askKey}
         onRemoveChip={onRemoveChip}

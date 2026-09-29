@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { create, type StoreApi, type UseBoundStore } from "zustand";
+import { create, useStore, type StoreApi, type UseBoundStore } from "zustand";
 import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 
 export type { CopilotItemRef, CopilotItemRefKind } from "@/lib/coordinator/copilot-id";
@@ -115,16 +115,29 @@ export function createCopilotStore(): CopilotStore {
  */
 export const useCopilotStore = createCopilotStore();
 
+/** What the copilot hooks read from a store: the singleton, a fresh
+ *  `createCopilotStore()` instance or the workspace host's store. */
+export type CopilotSlotStore = Pick<
+  StoreApi<CopilotStoreState>,
+  "getState" | "subscribe" | "getInitialState"
+>;
+
 /** Reactive entry read for `coordinatorId`, for components; `getEntry` above
  *  reads a snapshot outside React. */
-export function useCopilotEntry(coordinatorId: string): CopilotEntry {
-  const owned = useCopilotStore((state) => state.coordinatorId === coordinatorId);
-  const open = useCopilotStore((state) => owned && state.open);
-  const chip = useCopilotStore((state) => (owned ? state.chip : null));
-  const draft = useCopilotStore((state) => (owned ? state.draft : ""));
+export function useCopilotEntry(
+  coordinatorId: string,
+  store: CopilotSlotStore = useCopilotStore,
+): CopilotEntry {
+  const owned = useStore(store, (state) => state.coordinatorId === coordinatorId);
+  const open = useStore(store, (state) => owned && state.open);
+  const chip = useStore(store, (state) => (owned ? state.chip : null));
+  const draft = useStore(store, (state) => (owned ? state.draft : ""));
   return useMemo(() => ({ open, chip, draft }), [open, chip, draft]);
 }
 
-export function useCopilotDraftsSwept(coordinatorId: string): boolean {
-  return useCopilotStore((state) => state.coordinatorId === coordinatorId && state.draftsSwept);
+export function useCopilotDraftsSwept(
+  coordinatorId: string,
+  store: CopilotSlotStore = useCopilotStore,
+): boolean {
+  return useStore(store, (state) => state.coordinatorId === coordinatorId && state.draftsSwept);
 }

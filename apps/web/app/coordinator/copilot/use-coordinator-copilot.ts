@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useStore } from "zustand";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
   useCopilotDraftsSwept,
   useCopilotEntry,
   useCopilotStore,
   type CopilotChip,
+  type CopilotSlotStore,
 } from "@/hooks/domains/coordinator/copilot-store";
 import {
   useCoordinatorLauncher,
@@ -130,19 +132,20 @@ export function useCoordinatorCopilot(
   workspaceId: string,
   coordinatorId: string,
   canManage: boolean,
+  store: CopilotSlotStore = useCopilotStore,
 ): UseCoordinatorCopilotResult {
   const featureOn = useFeature("coordinator");
   const enabled = featureOn && canManage;
   const effectiveId = enabled ? coordinatorId : null;
 
-  const entry = useCopilotEntry(coordinatorId);
-  const setOpen = useCopilotStore((s) => s.setOpen);
-  const clearDraft = useCopilotStore((s) => s.clearDraft);
-  const removeChipAction = useCopilotStore((s) => s.removeChip);
-  const removeEntry = useCopilotStore((s) => s.removeEntry);
-  const clearChipAndDraft = useCopilotStore((s) => s.clearChipAndDraft);
-  const markDraftsSwept = useCopilotStore((s) => s.markDraftsSwept);
-  const draftsSwept = useCopilotDraftsSwept(coordinatorId);
+  const entry = useCopilotEntry(coordinatorId, store);
+  const setOpen = useStore(store, (s) => s.setOpen);
+  const clearDraft = useStore(store, (s) => s.clearDraft);
+  const removeChipAction = useStore(store, (s) => s.removeChip);
+  const removeEntry = useStore(store, (s) => s.removeEntry);
+  const clearChipAndDraft = useStore(store, (s) => s.clearChipAndDraft);
+  const markDraftsSwept = useStore(store, (s) => s.markDraftsSwept);
+  const draftsSwept = useCopilotDraftsSwept(coordinatorId, store);
 
   const [pendingDraft, setPendingDraft] = useState<string | undefined>(undefined);
   const [askKey, setAskKey] = useState(0);
