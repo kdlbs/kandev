@@ -169,4 +169,43 @@ test.describe.serial("Coordinators settings tab reader gating", () => {
       expect.objectContaining({ id: coordinatorId, name: COORDINATOR_NAME }),
     );
   });
+  test("a reader sees Standing orders and Goal with no write control, the goal note without a button, and 403 on writes", async ({
+    backend,
+  }) => {
+    const admin = adminContext.request;
+    const base = `${backend.baseUrl}/api/v1/workspaces/${workspaceId}/coordinators/${coordinatorId}`;
+    const order = await admin.post(`${base}/standing-orders`, {
+      data: { text: "Reader visible order" },
+    });
+    expect(order.ok(), await order.text()).toBeTruthy();
+    const goal = await admin.put(`${base}/goal`, {
+      data: { name: "Reader visible goal", criteria: [{ text: "One" }] },
+    });
+    expect(goal.ok(), await goal.text()).toBeTruthy();
+
+    const page = await readerContext.newPage();
+    const settings = `/settings/workspaces/${workspaceId}/coordinators/${coordinatorId}`;
+    await page.goto(`${settings}?section=standing-orders`);
+    await expect(page.getByTestId("standing-order-row")).toContainText("Reader visible order");
+    await expect(page.getByTestId("standing-order-add")).toHaveCount(0);
+    await expect(page.getByTestId("standing-order-retire")).toHaveCount(0);
+
+    await page.goto(`${settings}?section=goal`);
+    await expect(page.getByTestId("goal-name")).toHaveValue("Reader visible goal");
+    await expect(page.getByTestId("goal-name")).toBeDisabled();
+    await expect(page.getByTestId("goal-mark-met")).toHaveCount(0);
+    await expect(page.getByTestId("goal-add-criterion")).toHaveCount(0);
+    await expect(page.getByLabel("Exit criterion 1 done")).toBeDisabled();
+
+    await page.goto(`/workspaces/${workspaceId}/coordinator/${coordinatorId}`);
+    await expect(page.getByTestId("goal-note")).toContainText("Reader visible goal");
+    await expect(page.getByTestId("goal-note-action")).toHaveCount(0);
+
+    const api = readerContext.request;
+    const addedByReader = await api.post(`${base}/standing-orders`, { data: { text: "nope" } });
+    expect(addedByReader.status()).toBe(403);
+    const putByReader = await api.put(`${base}/goal`, { data: { name: "nope", criteria: [] } });
+    expect(putByReader.status()).toBe(403);
+    await page.close();
+  });
 });

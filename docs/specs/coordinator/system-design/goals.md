@@ -285,7 +285,7 @@ instructions were built with; the next conversation reads the new ones.
 
 ## Goal UI
 
-`sections/goal.tsx` on the coordinator page:
+`components/coordinators/sections/goal-section.tsx` on the coordinator page:
 
 ```text
 Goal
@@ -296,37 +296,82 @@ Goal
     [ ] Stripe webhooks retried                  [remove]
     + Add criterion
   [Mark milestone met]
-  Since this goal was set (2026-09-20)
+  Since this goal was set (20 Sep)
     Open tasks         23 -> 19   down
     Approved (7 days)  No baseline
     Rejected (7 days)  No baseline
 ```
 
-- Name, due date and criteria save through the settings save bar; a
-  checkbox toggle saves immediately through the criteria route.
-- **Mark milestone met** asks for confirmation, then posts.
-- Readers see the values without controls (`001.9`).
-- With no active goal the form is empty with **Set goal**.
+- The Sections row is built on `components/settings/settings-tabs.tsx`, which
+  keeps every visited section mounted, so an unsaved Goal or Identity draft
+  survives switching sections and Back/Forward; the settings save bar shows
+  one dirty state and saves each dirty section that uses it (Identity, Goal,
+  and task 06's sections) through its own request, and a failure in one
+  keeps that section's draft and names it. Standing orders has no draft. The
+  due date is an ISO calendar date input: clearing it sends `due_on: null`
+  (never `""`), and there is no separate clear control. The "Due" value and
+  the "Since this goal was set" date are calendar dates shown as stored, in
+  the locale's short day-and-month form (`20 Sep`), never shifted by the
+  viewer's time zone; only the overdue comparison uses today in that zone.
+  Name, due date and criteria edits save through the settings save bar with
+  one PUT. The save bar is disabled while that PUT is in flight and the
+  empty-form **Set goal** button likewise, so one click sends one request;
+  the response of the last request sent wins and the form reloads from it. A criterion toggle on a saved criterion (one with an id) saves
+  immediately through the criteria route; the checkbox of a criterion added in
+  the form and not yet saved is disabled until the save. A toggle response or
+  a `coordinator.updated` refetch never replaces unsaved name, due-date or
+  criteria edits: it updates only the done state of saved criteria and the
+  measures. Toggles on one criterion are sent one at a time; a toggle made
+  while one is in flight for the same criterion is queued, and the last
+  response wins.
+- **Mark milestone met** asks for confirmation (the dialog names the goal and
+  says the coordinator will have no active goal), then posts once; the button
+  is disabled while the request is in flight. Unsaved edits are discarded when
+  the goal is met, and the confirmation says so when the form is dirty.
+- Readers see the values without controls (`001.9`). A reader with no active
+  goal sees the text "No goal is set." and no form.
+- With no active goal a manager sees an empty form: an empty name, no due date
+  and no criteria rows (Add criterion is available), and its own **Set goal**
+  button that posts the PUT with no `goal_id` and is disabled until the name is
+  non-empty; it does not use the save bar. A validation 400 names the field
+  and shows the message under it; the typed values stay on any failure.
 - **Mark milestone met** sends the shown goal's id as `goal_id`.
 - Saving an existing goal sends its id as `goal_id`, so a save from a stale
-  form after the goal was marked met is refused with 409 and the form reloads
-  (`001.10`).
+  form after the goal was marked met is refused with 409, and so is a mark met
+  from a stale form; on 409 the form reloads and an inline message says the
+  goal changed and shows the current one (`001.10`). A mark-met that returns
+  200 for the most recent met goal is a success. A 403 shows a permission
+  error and a 404 or 500 a generic error; the confirmation stays closed and no
+  optimistic change is kept.
+- Two managers saving the same active goal from stale forms both succeed
+  (`001.10` conflicts only on a goal id); the later PUT wins and the form
+  reloads after every save.
+- A failed goal load (`GET goal` 500 is all or nothing) shows the page's
+  error state with a retry; a loading goal shows the page skeleton. Each
+  measure shows its direction, "No direction yet" or "No baseline" as
+  `GOALS-003.4` says.
 
 The setup's What it is for step reuses the same form component without the
 measures ([coordinators](coordinators.md#guided-setup)).
 
 ## Goal note
 
-`components/goal-note.tsx` sits above the Needs you list while the phase-2
-flag is on, fed by `GET goal` and refreshed on `coordinator.updated`:
+`components/goal-note.tsx` sits above the Needs you body while the phase-2
+flag is on and stays visible whichever body Needs you shows: the list, the
+empty state, its loading skeleton or its list-error state (so a new
+coordinator with nothing pending still sees "No goal is set"). It is hidden
+only when there is no coordinator or the coordinator is unknown (those states
+replace the page). It is fed by `GET goal` and refreshed on `coordinator.updated`:
 
 | State | Note |
 | --- | --- |
 | no active goal, no met goal | "No goal is set, so this list is ordered by urgency alone." + **Set a goal** (managers) |
-| active | "<name>" + "Due <date>" (or "Overdue since <date>" when `due_on` is before today in the viewer's time zone) + "N of M criteria met" (omitted when the goal has no criteria) |
-| no active, last met | "<name> was met on <date>." + **Set the next goal** (managers) |
+| active | "<name>" + "Due <date>" (or "Overdue since <date>" when `due_on` is before today in the viewer's time zone; omitted when the goal has no `due_on`) + "N of M criteria met" (always shown, "0 of 0 criteria met" when the goal has no criteria) |
+| no active, last met | "<name> was met on <date>." (`met_at` shown as a date in the viewer's time zone) + **Set the next goal** (managers) |
 
-**Set a goal** and **Set the next goal** open the coordinator page at the
+While `GET goal` is loading the note area is empty; if it fails the note is
+hidden and nothing else on Needs you changes (the note never falls back to
+"No goal is set" on an error). **Set a goal** and **Set the next goal** open the coordinator page at the
 Goal section (`002.1` to `002.3`). The ordering of Needs you is unchanged.
 
 ## Security
