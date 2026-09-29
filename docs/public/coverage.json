@@ -80,10 +80,6 @@
         "/settings/workspaces"
       ],
       "mcpTools": [
-      {
-        "tool": "list_coordinator_activity_kandev",
-        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
-      },
         "list_repositories_kandev",
         "list_workspaces_kandev"
       ]
@@ -1000,6 +996,10 @@
       }
     ],
     "mcpTools": [
+      {
+        "tool": "list_coordinator_activity_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
       {
         "tool": "get_coordinator_item_kandev",
         "reason": "Workspace coordinator tool behind features.coordinator, off in prod and dev; documented when the feature is promoted."
