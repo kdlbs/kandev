@@ -122,7 +122,7 @@ second calls; `starts_agent` create approved after `start_agent` flips to
 `denied` is 409; a move whose destination turned agent-starting after
 propose settles `failed` with `step_starts_agent` and does not move; a move
 onto the task's current step settles `approved` with `noop: true` and no
-`MoveTask` call. A task moved by hand onto a destination that
+move call. A task moved by hand onto a destination that
 has since become a Done step settles `approved` with `noop: true`, not
 `step_is_done`. A second identical propose after the target was archived
 returns the open proposal. A retire committed before a citing propose makes
@@ -146,9 +146,9 @@ create two proposals, and a create call citing six ids, or one id twice, is
 refused naming `standing_order_ids` before any transaction. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.
 Execute classification tests: a move whose fenced `from_step_id` write matches
-zero rows makes no `MoveTask` call and returns the current row; a `MoveTask`
+zero rows makes no move call and returns the current row; a move-seam
 `ErrWIPLimitExceeded` fails `step_full`, `ErrMoveConflict` fails `moved`, a
-`WIPAdmitted` false result settles `approved` with `queued: true`, and a task
+`admitted` false result settles `approved` with `queued: true`, a task moved to another workflow after check 2 fails `moved` (the call carries `ExpectedWorkflowID`), and a task
 with a RUNNING session fails `agent_running`; a resume that returns `(nil,
 nil)` settles `approved` with `deferred: true`, one that joins a concurrent
 attempt settles `approved`, and `ErrResumeAttemptCancelled` fails; a message

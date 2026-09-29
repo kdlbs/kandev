@@ -120,11 +120,15 @@ a pull request or moves a task to Done.
   proposal, the system shall record the step the task is in, move the task to
   the proposed step and settle `approved`. When the task is archived, has
   left its workflow, or the step is gone or has become a Done step, it shall
-  settle `failed` with the reason. When the step has become agent-starting
-  since a proposal stored with `starts_agent` false, it shall settle
-  `failed` with `step_starts_agent` and move nothing. When the task is
-  already in the proposed step, it shall move nothing and settle `approved`
-  with a row that is not undoable.
+  settle `failed` with the reason; the same applies when a session of the task
+  is starting or running (`agent_running`), the step is at its work-in-progress
+  limit (`step_full`), or the task moved to another workflow meanwhile
+  (`moved`). When the step has become agent-starting since a proposal stored
+  with `starts_agent` false, it shall settle `failed` with
+  `step_starts_agent` and move nothing. When the task is already in the
+  proposed step, it shall move nothing and settle `approved` with a row that is
+  not undoable, and that outcome wins over the step having since become a Done
+  step or agent-starting.
 - **AC-COORDINATOR-PROPOSAL-KINDS-003.4:** Approving a resume, message or move
   proposal shall accept an edit only of the message text; any other edit
   shall be refused with 400 `not_editable`.
