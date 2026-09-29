@@ -319,12 +319,12 @@ describe("NeedsYouItemCard - actions by kind", () => {
     fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
     expect(useCopilotStore.getState().entries["co-1"]).toEqual({
       open: true,
-      chip: { id: "KAN-1", label: "KAN-1" },
+      chip: { id: "KAN-1", label: "KAN-1", ref: { kind: "task", id: "t-1" } },
       draft: "Why is KAN-1 here?",
     });
   });
 
-  it("derives the id from the proposal's own title when it has no source task", () => {
+  it("derives the id from the proposal's own title when it has no source task, and refs the proposal id", () => {
     const withoutSource = proposalItem();
     withoutSource.proposal.spec.source_task_id = "";
     withoutSource.proposal.spec.title = "New feature";
@@ -333,6 +333,16 @@ describe("NeedsYouItemCard - actions by kind", () => {
     expect(useCopilotStore.getState().entries["co-1"]?.chip).toEqual({
       id: "New feature",
       label: "New feature",
+      ref: { kind: "proposal", id: "p-1" },
+    });
+  });
+
+  it("refs the task id, as kind stall, for a stall item", () => {
+    render(<NeedsYouItemCard item={stallItem()} {...NO_OP_MAPS} coordinatorName="Planner" />);
+    fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
+    expect(useCopilotStore.getState().entries["co-1"]?.chip?.ref).toEqual({
+      kind: "stall",
+      id: "t-2",
     });
   });
 });

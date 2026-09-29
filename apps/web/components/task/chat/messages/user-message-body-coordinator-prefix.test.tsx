@@ -35,7 +35,7 @@ describe("coordinator About-prefix tag", () => {
     expect(tag.textContent).toBe("about KAN-418");
   });
 
-  it("renders the tag alone when the remainder is empty", () => {
+  it("renders unchanged with no tag when the matched remainder is empty (legacy form)", () => {
     render(
       <>
         {renderUserMessageBody({
@@ -49,8 +49,8 @@ describe("coordinator About-prefix tag", () => {
       </>,
     );
 
-    expect(screen.getByTestId(TAG_TESTID)).toBeTruthy();
-    expect(screen.queryByTestId("bounded-message-preview")).toBeNull();
+    expect(screen.queryByTestId(TAG_TESTID)).toBeNull();
+    expect(screen.getByText(/About KAN-418:/)).toBeTruthy();
   });
 
   it("renders verbatim when the task origin is not coordinator", () => {
@@ -112,6 +112,97 @@ describe("coordinator About-prefix tag", () => {
       content,
       isBinary: false,
     });
+  });
+});
+
+describe("coordinator About-prefix tag: referenced form", () => {
+  it("renders the remainder and the id-only tag for the referenced form", () => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content: "About KAN-418 [task:task-9]: why is this here?",
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+
+    expect(screen.getByText("why is this here?")).toBeTruthy();
+    expect(screen.getByTestId(TAG_TESTID).textContent).toBe("about KAN-418");
+  });
+
+  it("matches the shortest id even when the title contains ': ', '[' and ']'", () => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content: "About Fix: login [task:x]: message here",
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+
+    expect(screen.getByTestId(TAG_TESTID).textContent).toBe("about Fix: login");
+    expect(screen.getByText("message here")).toBeTruthy();
+  });
+
+  it("is unaffected by a second bracketed reference inside the message body", () => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content: "About KAN-418 [task:t-1]: message with [task:x]: embedded",
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+
+    expect(screen.getByTestId(TAG_TESTID).textContent).toBe("about KAN-418");
+    expect(screen.getByText("message with [task:x]: embedded")).toBeTruthy();
+  });
+
+  it("renders unchanged with no tag when the referenced-form matched remainder is empty", () => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content: "About KAN-418 [task:t-1]: ",
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+
+    expect(screen.queryByTestId(TAG_TESTID)).toBeNull();
+    expect(screen.getByText(/About KAN-418 \[task:t-1\]:/)).toBeTruthy();
+  });
+
+  it("recognizes the proposal and stall kinds", () => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content: "About New feature [proposal:p-1]: why propose this?",
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+    expect(screen.getByTestId(TAG_TESTID).textContent).toBe("about New feature");
+    expect(screen.getByText("why propose this?")).toBeTruthy();
   });
 });
 
