@@ -101,3 +101,71 @@ export async function setupMoveProposal(
   await expect(popover).toBeHidden();
   return { release, task, toStep, fromStep, proposalId, workspacePath };
 }
+
+const PR_OWNER = "coordinator-e2e-org";
+const PR_REPO = "coordinator-e2e-repo";
+
+// Seeds a coordinator and a task whose primary session is idle and whose PR
+// aggregates to "ready" (approved, checks passing, clean merge), so the Queue
+// lists it under Ready to merge with the phase-2 row actions.
+export async function setupReadyToMergeTask(
+  ctx: Pick<Parameters<Parameters<typeof test>[2]>[0], "apiClient" | "backend" | "seedData">,
+) {
+  const { apiClient, backend, seedData } = ctx;
+  const release = await backend.useEnv({
+    KANDEV_FEATURES_COORDINATOR: "true",
+    KANDEV_FEATURES_COORDINATOR_PHASE2: "true",
+  });
+  const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+    name: "Send Back Coordinator",
+    agent_profile_id: seedData.agentProfileId,
+    executor_profile_id: seedData.worktreeExecutorProfileId,
+  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Ready To Merge Send Back",
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("expected an active session for the ready task");
+  await waitForSessionState(apiClient, {
+    taskId: task.id,
+    sessionId: task.session_id,
+    expectedState: "WAITING_FOR_INPUT",
+    message: "the mock agent's turn ends after the simple message",
+    timeout: 30_000,
+  });
+  await apiClient.mockGitHubAssociateTaskPR({
+    workspace_id: seedData.workspaceId,
+    task_id: task.id,
+    repository_id: seedData.repositoryId,
+    owner: PR_OWNER,
+    repo: PR_REPO,
+    pr_number: 601,
+    pr_url: `https://github.com/${PR_OWNER}/${PR_REPO}/pull/601`,
+    pr_title: "Ready to merge fixture",
+    head_branch: "feature/ready-send-back",
+    base_branch: "main",
+    author_login: "coordinator-e2e",
+    state: "open",
+    review_state: "approved",
+    checks_state: "success",
+    mergeable_state: "clean",
+    unresolved_review_threads: 0,
+  });
+  await expect
+    .poll(async () => (await apiClient.listTaskPRs(task.id)).length, { timeout: 15_000 })
+    .toBe(1);
+  return {
+    release,
+    task,
+    sessionId: task.session_id,
+    coordinatorId: coordinator.id,
+    prUrl: `https://github.com/${PR_OWNER}/${PR_REPO}/pull/601`,
+  };
+}

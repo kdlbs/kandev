@@ -8,7 +8,8 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { setupMoveProposal } from "./proposal-kinds-fixture";
+import { linkToCoordinatorQueue } from "../../../lib/coordinator/links";
+import { setupMoveProposal, setupReadyToMergeTask } from "./proposal-kinds-fixture";
 
 const PROPOSAL_REJECT = /\/proposals\/[^/]+\/reject$/;
 const PROPOSAL_APPROVE = /\/proposals\/[^/]+\/approve$/;
@@ -92,6 +93,48 @@ test.describe("Coordinator proposal kinds", () => {
           expect.objectContaining({ text: "Never move tasks out of triage." }),
         ]),
       );
+    } finally {
+      await release();
+    }
+  });
+
+  test("a Ready to merge row opens the PR in a new tab and sends a note back to the task", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { release, task, sessionId, coordinatorId, prUrl } = await setupReadyToMergeTask({
+      apiClient,
+      backend,
+      seedData,
+    });
+    try {
+      await testPage.goto(linkToCoordinatorQueue(seedData.workspaceId, coordinatorId));
+      const row = testPage.getByTestId(`queue-ready-row-${task.id}`);
+      await expect(row).toBeVisible();
+      await expect(testPage.getByText("Merging a pull request is always human.")).toBeVisible();
+      const openPr = row.getByRole("link", { name: "Open the PR" });
+      await expect(openPr).toHaveAttribute("href", prUrl);
+      await expect(openPr).toHaveAttribute("target", "_blank");
+
+      await row.getByRole("button", { name: "Send it back" }).click();
+      const note = "Please add a regression test before merging.";
+      await row.getByRole("textbox").fill(note);
+      await row.getByRole("button", { name: "Send", exact: true }).click();
+
+      await expect(testPage.getByText(/^Sent to /)).toBeVisible();
+      await expect(row.getByRole("textbox")).toBeHidden();
+      await expect
+        .poll(
+          async () =>
+            (await apiClient.listSessionMessages(sessionId)).messages.some(
+              (message) => message.author_type === "user" && message.content.includes(note),
+            ),
+          { timeout: 30_000, message: "the note should reach the task's session" },
+        )
+        .toBe(true);
     } finally {
       await release();
     }
