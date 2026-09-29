@@ -1,5 +1,10 @@
 package coordinator
 
+import (
+	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
+	ws "github.com/kandev/kandev/pkg/websocket"
+)
+
 // activityTool is the phase-2 read tool over the coordinator's own activity.
 const activityTool = "list_coordinator_activity_kandev"
 
@@ -45,4 +50,29 @@ func ActionForTool(name string) Action {
 		}
 	}
 	return ActionUnknown
+}
+
+// actionTools maps each coordinator-surface WebSocket action to the MCP tool
+// that exposes it. An action absent from the table has no tool.
+var actionTools = map[string]string{
+	ws.ActionMCPListTasks:           "list_tasks_kandev",
+	ws.ActionMCPGetTaskConversation: "get_task_conversation_kandev",
+	ws.ActionMCPListWorkflows:       "list_workflows_kandev",
+	ws.ActionMCPListWorkflowSteps:   "list_workflow_steps_kandev",
+	ws.ActionMCPListRepositories:    "list_repositories_kandev",
+	mcpcontract.ActionGetItem:       "get_coordinator_item_kandev",
+	mcpcontract.ActionProposeTask:   "propose_task_kandev",
+}
+
+// ToolForAction returns the MCP tool name that exposes a WebSocket action.
+func ToolForAction(action string) (string, bool) {
+	name, ok := actionTools[action]
+	return name, ok
+}
+
+// ProposeActionFor returns the policy action a propose tool exercises, and
+// false for every tool that proposes nothing.
+func ProposeActionFor(toolName string) (Action, bool) {
+	a := ActionForTool(toolName)
+	return a, a != ActionUnknown
 }

@@ -231,3 +231,16 @@ func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView,
 		Actions: s.policyFor(c).Actions, WatchScope: scope, WorkflowIDs: set.WorkflowIDs,
 	}, nil
 }
+
+// Phase2 reports whether the phase-2 control surface is on.
+func (s *Service) Phase2() bool { return s.phase2 }
+
+// ActionAllowed reports whether the coordinator's live policy permits the
+// action to be proposed. An unreadable policy allows nothing.
+func (s *Service) ActionAllowed(ctx context.Context, coordinatorID string, action Action) (bool, error) {
+	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return false, err
+	}
+	return s.policyFor(c).Allows(action), nil
+}
