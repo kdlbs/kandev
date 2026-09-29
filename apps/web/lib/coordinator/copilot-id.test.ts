@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { deriveCopilotItemId, normalizeCopilotItemId } from "./copilot-id";
+import { deriveCopilotItemId, deriveCopilotItemRef, normalizeCopilotItemId } from "./copilot-id";
 import type {
   AttentionProposal,
   AttentionTask,
+  NeedsYouErrorItem,
   NeedsYouProposalItem,
+  NeedsYouQuestionItem,
   NeedsYouStallItem,
   QueueItem,
 } from "./attention";
@@ -137,5 +139,66 @@ describe("deriveCopilotItemId", () => {
       ageMs: undefined,
     };
     expect(deriveCopilotItemId(item, new Map())).toBe("KAN-418");
+  });
+});
+
+describe("deriveCopilotItemRef", () => {
+  it("references the proposal id for a proposal item, not its display id", () => {
+    const item: NeedsYouProposalItem = {
+      id: PROPOSAL_ID,
+      kind: "proposal",
+      referenceTimeMs: undefined,
+      ageMs: undefined,
+      proposal: proposal({ id: "proposal-42" }),
+    };
+    expect(deriveCopilotItemRef(item)).toEqual({ kind: "proposal", id: "proposal-42" });
+  });
+
+  it("references the task id for a stall item", () => {
+    const item: NeedsYouStallItem = {
+      id: "stall-1",
+      kind: "stall",
+      referenceTimeMs: undefined,
+      ageMs: undefined,
+      task: task({ id: "task-7", identifier: "KAN-7" }),
+      stall: { task_id: "task-7", stalled_for_ms: 0, last_event_at: "", detected_at: "" },
+    };
+    expect(deriveCopilotItemRef(item)).toEqual({ kind: "stall", id: "task-7" });
+  });
+
+  it("references the task id, as kind task, for a question item", () => {
+    const item: NeedsYouQuestionItem = {
+      id: "t-1",
+      kind: "question",
+      referenceTimeMs: undefined,
+      ageMs: undefined,
+      task: task({ id: "task-1" }),
+      pendingAction: "clarification",
+    };
+    expect(deriveCopilotItemRef(item)).toEqual({ kind: "task", id: "task-1" });
+  });
+
+  it("references the task id, as kind task, for an error item", () => {
+    const item: NeedsYouErrorItem = {
+      id: "t-1",
+      kind: "error",
+      referenceTimeMs: undefined,
+      ageMs: undefined,
+      task: task({ id: "task-1" }),
+      activeError: null,
+      taskError: null,
+    };
+    expect(deriveCopilotItemRef(item)).toEqual({ kind: "task", id: "task-1" });
+  });
+
+  it("references the task id, as kind task, for a queue item", () => {
+    const item: QueueItem = {
+      group: "working",
+      id: "task-1",
+      task: task({ id: "task-1" }),
+      lastActivityAtMs: undefined,
+      ageMs: undefined,
+    };
+    expect(deriveCopilotItemRef(item)).toEqual({ kind: "task", id: "task-1" });
   });
 });

@@ -196,3 +196,39 @@ func TestListStalls_EmptyIsEmptySliceNotNil(t *testing.T) {
 		t.Fatalf("ListStalls returned %d rows, want 0", len(list))
 	}
 }
+
+func TestGetStall_ReturnsRowScopedToWorkspace(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := store.UpsertStall(ctx, sampleStall("task-1", "ws-1", now)); err != nil {
+		t.Fatalf("UpsertStall: %v", err)
+	}
+
+	got, err := store.GetStall(ctx, "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("GetStall: %v", err)
+	}
+	if got.TaskID != "task-1" || got.WorkspaceID != "ws-1" || got.StalledForMs != 60_000 {
+		t.Fatalf("GetStall = %+v", got)
+	}
+}
+
+func TestGetStall_WrongWorkspaceIsNotFound(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.UpsertStall(ctx, sampleStall("task-1", "ws-1", time.Now().UTC())); err != nil {
+		t.Fatalf("UpsertStall: %v", err)
+	}
+
+	if _, err := store.GetStall(ctx, "ws-2", "task-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetStall(wrong workspace): err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGetStall_MissingTaskIsNotFound(t *testing.T) {
+	store := newTestStore(t)
+	if _, err := store.GetStall(context.Background(), "ws-1", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetStall(missing): err = %v, want ErrNotFound", err)
+	}
+}

@@ -1,6 +1,9 @@
 import { create } from "zustand";
+import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 
-export type CopilotChip = { id: string; label: string };
+export type { CopilotItemRef, CopilotItemRefKind } from "@/lib/coordinator/copilot-id";
+
+export type CopilotChip = { id: string; label: string; ref: CopilotItemRef };
 
 export type CopilotEntry = {
   open: boolean;
@@ -15,7 +18,7 @@ type CopilotStoreState = {
   getEntry: (coordinatorId: string) => CopilotEntry;
   setOpen: (coordinatorId: string, open: boolean) => void;
   /** `label` always equals `id` in phase 1. */
-  askAboutThis: (coordinatorId: string, id: string, draft: string) => void;
+  askAboutThis: (coordinatorId: string, id: string, ref: CopilotItemRef, draft: string) => void;
   /** The draft is a one-shot seed: the consumer applies it once, then clears it. */
   clearDraft: (coordinatorId: string) => void;
   /** Removes the chip only; the composer's typed text is left as-is. */
@@ -30,7 +33,7 @@ type CopilotStoreState = {
 /**
  * Client-memory store for **Ask about this**, one entry per coordinator id:
  * `{open, chip, draft}` (`docs/specs/coordinator/system-design/
- * copilot-popover.md#ask-about-this`). Deliberately not persisted (no
+ * copilot-panel.md#ask-about-this`). Deliberately not persisted (no
  * `zustand/middleware persist`): a reload starts every entry from the
  * initial value, and navigating between Needs you and Queue for one
  * coordinator keeps its entry because both routes read this same
@@ -46,11 +49,11 @@ export const useCopilotStore = create<CopilotStoreState>()((set, get) => ({
         [coordinatorId]: { ...(state.entries[coordinatorId] ?? INITIAL_COPILOT_ENTRY), open },
       },
     })),
-  askAboutThis: (coordinatorId, id, draft) =>
+  askAboutThis: (coordinatorId, id, ref, draft) =>
     set((state) => ({
       entries: {
         ...state.entries,
-        [coordinatorId]: { open: true, chip: { id, label: id }, draft },
+        [coordinatorId]: { open: true, chip: { id, label: id, ref }, draft },
       },
     })),
   clearDraft: (coordinatorId) =>

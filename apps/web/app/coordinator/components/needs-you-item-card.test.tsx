@@ -142,6 +142,16 @@ function renderCard(ui: ReactElement) {
   );
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 afterEach(() => {
   useCopilotStore.setState({ entries: {} });
   useProposalsStore.setState({ byCoordinator: {} });
@@ -319,12 +329,12 @@ describe("NeedsYouItemCard - actions by kind", () => {
     fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
     expect(useCopilotStore.getState().entries["co-1"]).toEqual({
       open: true,
-      chip: { id: "KAN-1", label: "KAN-1" },
+      chip: { id: "KAN-1", label: "KAN-1", ref: { kind: "task", id: "t-1" } },
       draft: "Why is KAN-1 here?",
     });
   });
 
-  it("derives the id from the proposal's own title when it has no source task", () => {
+  it("derives the id from the proposal's own title when it has no source task, and refs the proposal id", () => {
     const withoutSource = proposalItem();
     withoutSource.proposal.spec.source_task_id = "";
     withoutSource.proposal.spec.title = "New feature";
@@ -333,6 +343,16 @@ describe("NeedsYouItemCard - actions by kind", () => {
     expect(useCopilotStore.getState().entries["co-1"]?.chip).toEqual({
       id: "New feature",
       label: "New feature",
+      ref: { kind: "proposal", id: "p-1" },
+    });
+  });
+
+  it("refs the task id, as kind stall, for a stall item", () => {
+    render(<NeedsYouItemCard item={stallItem()} {...NO_OP_MAPS} coordinatorName="Planner" />);
+    fireEvent.click(screen.getByRole("button", { name: ASK_ABOUT_THIS }));
+    expect(useCopilotStore.getState().entries["co-1"]?.chip?.ref).toEqual({
+      kind: "stall",
+      id: "t-2",
     });
   });
 });
@@ -367,7 +387,7 @@ describe("NeedsYouItemCard - proposal card", () => {
   });
 
   it("reads its full row from the store and renders the title, description, workflow/step, attribution and policy line", () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposalRow());
+    seedProposal(COORDINATOR_ID, proposalRow());
     renderCard(
       <NeedsYouItemCard
         item={proposalItem()}
@@ -387,7 +407,7 @@ describe("NeedsYouItemCard - proposal card", () => {
   });
 
   it("renders Approve, Edit and Reject for a manager", () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposalRow());
+    seedProposal(COORDINATOR_ID, proposalRow());
     renderCard(
       <NeedsYouItemCard
         item={proposalItem()}
@@ -402,7 +422,7 @@ describe("NeedsYouItemCard - proposal card", () => {
   });
 
   it("renders no decision actions for a reader", () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposalRow());
+    seedProposal(COORDINATOR_ID, proposalRow());
     renderCard(
       <NeedsYouItemCard
         item={proposalItem()}

@@ -205,16 +205,31 @@ func TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister(t *testing.T) 
 		originalRegister(router, s, log)
 	}
 
-	originalPass := runCoordinatorBackgroundPass
-	t.Cleanup(func() { runCoordinatorBackgroundPass = originalPass })
+	// Runs hooks synchronously (instead of delegating to the real
+	// startCoordinatorBackgroundPass, which dispatches them on a detached
+	// goroutine) so that by the time registerCoordinatorRoutes returns, the
+	// decisions hook has already called StartApprovalSweep and registered on
+	// svc.sweepWG — letting the cleanup below join it deterministically
+	// instead of racing an async dispatch. T0-vs-registration ordering,
+	// which is what this test checks, does not depend on that dispatch being
+	// synchronous or not.
+	t.Cleanup(func() { runCoordinatorBackgroundPass = startCoordinatorBackgroundPass })
 	var gotT0 time.Time
 	runCoordinatorBackgroundPass = func(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
 		gotT0 = t0
-		originalPass(ctx, t0, hooks)
+		for _, hook := range hooks {
+			hook(ctx, t0)
+		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		svc.WaitApprovalSweepStopped()
+	})
+
 	registerCoordinatorRoutes(routeParams{
-		ctx:      context.Background(),
+		ctx:      ctx,
 		router:   gin.New(),
 		services: &Services{Coordinator: svc},
 		log:      newTestLogger(),
@@ -374,7 +389,7 @@ func TestRegisterCoordinatorSubscribers_WiresStallSubscriptionAndPruneHook(t *te
 func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	harness := newBootStateTestHarness(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
 	if err != nil || len(workspaces) == 0 {
@@ -402,6 +417,12 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
+	t.Cleanup(func() {
+		cancel()
+		if svc != nil {
+			svc.WaitApprovalSweepStopped()
+		}
+	})
 	if svc == nil {
 		t.Fatal("expected a non-nil service when features.coordinator is enabled")
 	}

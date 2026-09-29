@@ -9,20 +9,32 @@ depends_on:
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-COPILOT-001
+  - REQ-COORDINATOR-COPILOT-003
+  - REQ-COORDINATOR-COPILOT-004
   - REQ-COORDINATOR-COPILOT-005
+  - REQ-COORDINATOR-COORDINATORS-004
   - REQ-COORDINATOR-PROPOSALS-002
   - REQ-COORDINATOR-PROPOSALS-005
 acceptance_criteria:
   - AC-COORDINATOR-COPILOT-001.11
+  - AC-COORDINATOR-COPILOT-003.1
+  - AC-COORDINATOR-COPILOT-004.4
+  - AC-COORDINATOR-COPILOT-005.1
+  - AC-COORDINATOR-COPILOT-005.2
+  - AC-COORDINATOR-COPILOT-005.3
   - AC-COORDINATOR-COPILOT-005.6
+  - AC-COORDINATOR-COORDINATORS-004.7
   - AC-COORDINATOR-PROPOSALS-002.14
   - AC-COORDINATOR-PROPOSALS-002.15
   - AC-COORDINATOR-PROPOSALS-005.10
 system_design:
   - ../../specs/coordinator/system-design/copilot.md
+  - ../../specs/coordinator/system-design/copilot-panel.md
+  - ../../specs/coordinator/system-design/copilot-tools.md
   - ../../specs/coordinator/system-design/coordinators.md
   - ../../specs/coordinator/system-design/proposals.md
   - ../../specs/coordinator/system-design/proposal-cards.md
+  - ../../specs/coordinator/system-design/proposal-recovery.md
 ---
 
 # Task 12: Maintainer Review Follow-ups (WP-4f)
@@ -56,8 +68,9 @@ these land as one follow-up instead of reopening them.
   `AC-COORDINATOR-COPILOT-004.4` (intro copy), and
   `AC-COORDINATOR-COPILOT-005.1` to `005.3` (the chip's `ref` and the
   `About <id> [<kind>:<ref>]: ` prefix, task 06). Copy goes through `t()` in
-  every shipped locale; the settings intro reads "propose work that waits for
-  your decision".
+  every shipped locale; the settings list intro (`coordinator:listDescription`)
+  reads "propose work that waits for your decision"
+  (`AC-COORDINATOR-COORDINATORS-004.7`, owned here).
 
 ## Out of scope
 

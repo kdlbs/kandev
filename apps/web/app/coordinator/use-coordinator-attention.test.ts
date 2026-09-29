@@ -73,6 +73,16 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
   };
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 afterEach(() => {
   useProposalsStore.setState({ byCoordinator: {} });
 });
@@ -214,7 +224,7 @@ describe("useCoordinatorAttention - computeNeedsYouCount", () => {
 
     expect(result.current.computeNeedsYouCount()).toBe(0);
 
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposal({ status: "pending" }));
+    seedProposal(COORDINATOR_ID, proposal({ status: "pending" }));
 
     expect(result.current.computeNeedsYouCount()).toBe(1);
   });
@@ -222,12 +232,8 @@ describe("useCoordinatorAttention - computeNeedsYouCount", () => {
   it("counts only open-status proposals from the fresh store read", () => {
     const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
 
-    useProposalsStore
-      .getState()
-      .mergeOne(COORDINATOR_ID, proposal({ id: "p-1", status: "pending" }));
-    useProposalsStore
-      .getState()
-      .mergeOne(COORDINATOR_ID, proposal({ id: "p-2", status: "approved" }));
+    seedProposal(COORDINATOR_ID, proposal({ id: "p-1", status: "pending" }));
+    seedProposal(COORDINATOR_ID, proposal({ id: "p-2", status: "approved" }));
 
     expect(result.current.computeNeedsYouCount()).toBe(1);
   });

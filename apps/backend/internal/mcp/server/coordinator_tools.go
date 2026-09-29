@@ -9,13 +9,13 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// registerCoordinatorTools composes the fixed six-tool coordinator surface
-// (docs/specs/coordinator/system-design/copilot.md#tool-surface,
+// registerCoordinatorTools composes the fixed seven-tool coordinator surface
+// (docs/specs/coordinator/system-design/copilot-tools.md#tool-surface,
 // AC-COORDINATOR-COPILOT-003.1): the five existing read tools, reused
 // unchanged from the kanban/configuration registrations, plus
-// propose_task_kandev. Additive rather than subtractive (unlike
-// registerAutomationTools), since the coordinator surface does not start
-// from the ~30-tool kanban bundle.
+// propose_task_kandev and get_coordinator_item_kandev. Additive rather than
+// subtractive (unlike registerAutomationTools), since the coordinator
+// surface does not start from the ~30-tool kanban bundle.
 func (s *Server) registerCoordinatorTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflows_kandev",
@@ -59,6 +59,7 @@ func (s *Server) registerCoordinatorTools() {
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
 	s.registerProposeTaskTool()
+	s.registerGetCoordinatorItemTool()
 }
 
 func (s *Server) registerProposeTaskTool() {
@@ -106,6 +107,42 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// registerGetCoordinatorItemTool registers get_coordinator_item_kandev
+// (docs/specs/coordinator/system-design/copilot-tools.md#item-read): the
+// read behind an Ask about this bracketed reference. task references are
+// deliberately not a kind here; the tool description points callers at
+// list_tasks_kandev and get_task_conversation_kandev instead.
+func (s *Server) registerGetCoordinatorItemTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_coordinator_item_kandev",
+			mcp.WithDescription("Read the record behind a bracketed Ask about this reference. kind \"proposal\" returns the coordinator's own proposal (spec, status, error, timestamps); kind \"stall\" returns the stall record of a task in this workspace. A \"task\" reference is read with list_tasks_kandev and get_task_conversation_kandev instead, not with this tool."),
+			mcp.WithString("kind", mcp.Required(), mcp.Description(`Either "proposal" or "stall"`)),
+			mcp.WithString("id", mcp.Required(), mcp.Description("The referenced id: a proposal id for kind \"proposal\", a task id for kind \"stall\"")),
+		),
+		s.wrapHandler("get_coordinator_item_kandev", s.getCoordinatorItemHandler()),
+	)
+}
+
+func (s *Server) getCoordinatorItemHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		kind, err := req.RequireString("kind")
+		if err != nil {
+			return mcp.NewToolResultError("kind is required"), nil
+		}
+		id, err := req.RequireString("id")
+		if err != nil {
+			return mcp.NewToolResultError("id is required"), nil
+		}
+		payload := map[string]string{"kind": kind, "id": id}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionGetItem, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

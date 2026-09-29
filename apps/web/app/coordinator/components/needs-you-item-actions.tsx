@@ -7,6 +7,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import { cn } from "@/lib/utils";
 import type { AttentionStall, AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 import { StallEvidenceContent } from "./stall-evidence-content";
 
 function OpenTaskAction({ task }: { task: AttentionTask }) {
@@ -62,16 +63,25 @@ export type AskAboutThisButtonProps = {
   coordinatorId: string;
   /** The card's derived `<id>` (`lib/coordinator/copilot-id.ts`). */
   id: string;
+  /** The wire reference for `<id>` (`lib/coordinator/copilot-id.ts`). Named
+   *  `itemRef`, not `ref`: `ref` is a reserved JSX prop that React would
+   *  intercept instead of forwarding it as a normal prop. */
+  itemRef: CopilotItemRef;
   canManage: boolean;
 };
 
 /**
  * Opens the copilot with a chip and a pre-filled question for this item's
- * `<id>` (docs/specs/coordinator/system-design/copilot-popover.md#ask-about-this).
+ * `<id>` (docs/specs/coordinator/system-design/copilot-panel.md#ask-about-this).
  * A reader sees the same disabled button with a tooltip and no handler
  * (AC-COORDINATOR-COPILOT-004.8).
  */
-export function AskAboutThisButton({ coordinatorId, id, canManage }: AskAboutThisButtonProps) {
+export function AskAboutThisButton({
+  coordinatorId,
+  id,
+  itemRef,
+  canManage,
+}: AskAboutThisButtonProps) {
   const { t } = useTranslation();
   const askAboutThis = useCopilotStore((s) => s.askAboutThis);
 
@@ -96,7 +106,7 @@ export function AskAboutThisButton({ coordinatorId, id, canManage }: AskAboutThi
       size="sm"
       className="cursor-pointer"
       onClick={() =>
-        askAboutThis(coordinatorId, id, t("coordinator:copilotQuestionForItem", { id }))
+        askAboutThis(coordinatorId, id, itemRef, t("coordinator:copilotQuestionForItem", { id }))
       }
     >
       {t("coordinator:askAboutThis")}

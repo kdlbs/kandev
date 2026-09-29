@@ -215,6 +215,40 @@ func (s *Store) CountOpenProposals(ctx context.Context, coordinatorID string) (i
 	return countOpenProposals(ctx, s.ro, s.ro.Rebind, coordinatorID)
 }
 
+// CountOpenProposalsByWorkspace is the batch counterpart to
+// CountOpenProposals: it returns every coordinator's open (pending+approving+
+// failed) proposal count in workspaceID with a single grouped query, so
+// ListCoordinators pairs a workspace's coordinators with their counts
+// without issuing one query per coordinator. A coordinator with no open
+// proposals is absent from the returned map; callers read a missing key as
+// its Go zero value, 0.
+func (s *Store) CountOpenProposalsByWorkspace(ctx context.Context, workspaceID string) (map[string]int, error) {
+	placeholders := make([]string, len(openProposalStatuses))
+	args := make([]any, 0, len(openProposalStatuses)+1)
+	args = append(args, workspaceID)
+	for i, status := range openProposalStatuses {
+		placeholders[i] = "?"
+		args = append(args, string(status))
+	}
+	query := s.ro.Rebind(`
+		SELECT coordinator_id, COUNT(*) AS open_count FROM coordinator_proposals
+		WHERE workspace_id = ? AND status IN (` + strings.Join(placeholders, ",") + `)
+		GROUP BY coordinator_id`)
+
+	var rows []struct {
+		CoordinatorID string `db:"coordinator_id"`
+		OpenCount     int    `db:"open_count"`
+	}
+	if err := s.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, fmt.Errorf("count open proposals by workspace: %w", err)
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.CoordinatorID] = row.OpenCount
+	}
+	return counts, nil
+}
+
 // GetProposal returns a proposal scoped to both workspaceID and
 // coordinatorID; ErrNotFound if absent or scoped elsewhere.
 func (s *Store) GetProposal(ctx context.Context, workspaceID, coordinatorID, id string) (*Proposal, error) {

@@ -60,6 +60,16 @@ function proposal(id: string): Proposal {
   };
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 type UpdatedHandler = (message: { payload: Record<string, unknown> }) => void;
 
 function makeWsClient() {
@@ -128,7 +138,7 @@ describe("useCoordinatorInputs - initial load", () => {
     listCoordinatorStallsMock.mockResolvedValue({ stalls: [] });
     // Seed the shared store directly, as another consumer (e.g. the chat
     // card's useProposalById) would, before this hook ever mounts.
-    useProposalsStore.getState().mergePendingList(COORDINATOR_ID, [proposal("p-seeded")]);
+    seedProposal(COORDINATOR_ID, proposal("p-seeded"));
 
     listProposalsMock.mockResolvedValue({ proposals: [proposal("p-seeded")] });
     const { result } = renderHook(() => useCoordinatorInputs(WORKSPACE_ID, COORDINATOR_ID));

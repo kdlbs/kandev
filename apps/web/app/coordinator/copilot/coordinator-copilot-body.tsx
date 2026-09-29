@@ -106,7 +106,9 @@ function ReadyBody({
     taskId: routeSession.task_id,
   };
   // i18n-exempt: wire prefix parsed back by parseCoordinatorAboutPrefix (user-message-body.tsx); never translated.
-  const transformOutgoing = chip ? (message: string) => `About ${chip.id}: ${message}` : undefined;
+  const transformOutgoing = chip
+    ? (message: string) => `About ${chip.id} [${chip.ref.kind}:${chip.ref.id}]: ${message}`
+    : undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {chip && <CoordinatorCopilotChipRow chip={chip} onRemove={onRemoveChip} />}

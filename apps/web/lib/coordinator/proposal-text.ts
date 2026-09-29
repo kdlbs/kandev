@@ -32,6 +32,18 @@ export function resolveStepName(
   return stepNameByWorkflowStep.get(`${spec.workflow_id}:${spec.step_id}`) ?? spec.step_id;
 }
 
+/** The client-side stale threshold for an `approving` claim, matching the backend's two-minute window (proposals.md#recovery, approval_sweep.go). */
+export const PROPOSAL_APPROVAL_STALE_MS = 2 * 60 * 1000;
+
+/**
+ * Whether an `approving` claim is stale, per the browser's clock with no
+ * server time offset (`AC-COORDINATOR-PROPOSALS-005.10`).
+ */
+export function isApprovalClaimStale(claimedAt: string | null, nowMs: number): boolean {
+  if (!claimedAt) return false;
+  return nowMs >= new Date(claimedAt).getTime() + PROPOSAL_APPROVAL_STALE_MS;
+}
+
 /**
  * The status line for `pending`, `approving`, `failed` and `rejected`
  * (proposal-cards.md#cards "Content by state"). `approved` is not handled
@@ -39,14 +51,17 @@ export function resolveStepName(
  * {@link approvedStatusLine}.
  */
 export function proposalStatusLine(
-  proposal: Pick<Proposal, "status" | "error" | "reject_reason">,
+  proposal: Pick<Proposal, "status" | "error" | "reject_reason" | "claimed_at">,
   t: TFunction,
+  nowMs: number,
 ): string {
   switch (proposal.status) {
     case "pending":
       return t("coordinator:proposalStatusPending");
     case "approving":
-      return t("coordinator:proposalStatusApproving");
+      return isApprovalClaimStale(proposal.claimed_at, nowMs)
+        ? t("coordinator:proposalStatusApprovingStale")
+        : t("coordinator:proposalStatusApproving");
     case "failed":
       return proposal.error
         ? t("coordinator:proposalStatusFailedWithError", { error: proposal.error })

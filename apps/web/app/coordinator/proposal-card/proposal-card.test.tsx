@@ -7,6 +7,7 @@ import type {
   UseProposalDecisionResult,
 } from "@/hooks/domains/coordinator/use-proposal-decision";
 import type { UseProposalEditOptionsResult } from "@/hooks/domains/coordinator/use-proposal-edit-options";
+import { PROPOSAL_APPROVAL_STALE_MS } from "@/lib/coordinator/proposal-text";
 
 const decisionState = vi.hoisted(() => ({
   current: {
@@ -32,6 +33,13 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
   fetchTask: (...args: unknown[]) => fetchTaskMock(...args),
 }));
 
+const NOW = new Date("2026-09-27T00:10:00Z").getTime();
+const mockUseNowTick = vi.fn(() => NOW);
+
+vi.mock("../use-now-tick", () => ({
+  useNowTick: () => mockUseNowTick(),
+}));
+
 import { ProposalCard, type ProposalCardProps } from "./proposal-card";
 
 afterEach(() => {
@@ -39,6 +47,7 @@ afterEach(() => {
   fetchTaskMock.mockReset();
   decisionState.current = { busy: false, approve: vi.fn(), reject: vi.fn() };
   editOptions.current = undefined;
+  mockUseNowTick.mockReturnValue(NOW);
 });
 
 function spec(overrides: Partial<ProposalSpec> = {}): ProposalSpec {
@@ -194,6 +203,12 @@ describe("ProposalCard - actions gating", () => {
       expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     },
   );
+
+  it("shows no actions for a not-yet-stale approving claim", () => {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS + 1000).toISOString();
+    renderCard({ proposal: proposal({ status: "approving", claimed_at: claimedAt }) });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
 
   it.each(["pending", "failed"] as const)(
     "shows actions for status %s when canManage is true",
@@ -484,6 +499,43 @@ describe("ProposalCard - remote changes while a form is open", () => {
     );
 
     expect(onFormForceClosed).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProposalCard - stale approving retry", () => {
+  function staleProposal(overrides: Partial<Proposal> = {}) {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS).toISOString();
+    return proposal({ status: "approving", claimed_at: claimedAt, ...overrides });
+  }
+
+  it("shows the approval-did-not-finish line and a Retry button for managers", () => {
+    renderCard({ proposal: staleProposal() });
+    expect(statusText(CARD_TEST_ID)).toBe("Approval did not finish.");
+    expect(screen.getByRole("button", { name: "Retry" })).not.toBeNull();
+  });
+
+  it("shows no Retry button when canManage is false", () => {
+    renderCard({ canManage: false, proposal: staleProposal() });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("retries by approving with no edits", async () => {
+    withOutcome({ kind: "decided", proposal: proposal({ status: "approved" }) });
+    renderCard({ proposal: staleProposal() });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(decisionState.current.approve).toHaveBeenCalledWith(undefined);
+  });
+
+  it("disables Retry while busy", () => {
+    decisionState.current = {
+      busy: true,
+      approve: vi.fn(() => new Promise<ProposalDecisionOutcome>(() => {})),
+      reject: vi.fn(),
+    };
+    renderCard({ proposal: staleProposal() });
+    expect((screen.getByRole("button", { name: "Retry" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 });
 
