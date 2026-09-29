@@ -153,6 +153,23 @@ describe("useProposals - initial load", () => {
     expect(listProposalsMock).toHaveBeenCalledWith(WORKSPACE_ID, COORDINATOR_ID, "pending");
   });
 
+  it("exposes pending, approving and failed rows from an empty store with no by-id fetch", async () => {
+    const rows = [
+      proposal({ id: "p-pending", status: "pending" }),
+      proposal({ id: "p-approving", status: "approving" }),
+      proposal({ id: "p-failed", status: "failed" }),
+    ];
+    listProposalsMock.mockResolvedValue({ proposals: rows });
+    expect(useProposalsStore.getState().byCoordinator).toEqual({});
+
+    const { result } = renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID));
+
+    await waitFor(() => expect(result.current.proposals.value).toBeDefined());
+    expect(result.current.proposals.value).toEqual(rows);
+    expect(listProposalsMock).toHaveBeenCalledTimes(1);
+    expect(getProposalMock).not.toHaveBeenCalled();
+  });
+
   it("does not fetch when workspaceId or coordinatorId is null", () => {
     renderHook(() => useProposals(null, null));
     expect(listProposalsMock).not.toHaveBeenCalled();
