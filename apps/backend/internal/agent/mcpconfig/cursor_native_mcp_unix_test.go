@@ -3,10 +3,13 @@
 package mcpconfig
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -52,8 +55,38 @@ func TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner remained blocked by descendant inheriting stdout")
 	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("descendant process %d survived command cancellation (kill error: %v)", pid, err)
+	waitForNativeMCPProcessGone(t, pid)
+}
+
+func isNativeMCPProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	if runtime.GOOS == "linux" {
+		if raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+			if end := bytes.LastIndexByte(raw, ')'); end >= 0 && end+2 < len(raw) {
+				return raw[end+2] != 'Z'
+			}
+		}
+	}
+	return true
+}
+
+func waitForNativeMCPProcessGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for isNativeMCPProcessAlive(pid) {
+		select {
+		case <-deadline.C:
+			t.Fatalf("descendant process %d survived command cancellation", pid)
+		case <-ticker.C:
+		}
 	}
 }
 

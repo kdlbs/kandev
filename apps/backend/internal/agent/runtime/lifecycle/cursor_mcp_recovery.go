@@ -366,8 +366,7 @@ func (m *Manager) reloadCursorMCPACPSession(ctx context.Context, target *cursorM
 	if err := client.Stop(ctx); err != nil {
 		return ErrCursorMCPRecoveryUnavailable
 	}
-	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, target.execution)
-	if _, err := m.configureAndStartAgent(ctx, target.execution, approvalPolicy); err != nil {
+	if _, err := m.configureAndStartAgent(ctx, target.execution); err != nil {
 		return ErrCursorMCPRecoveryUnavailable
 	}
 	if err := client.WaitForReady(ctx, 30*time.Second); err != nil {

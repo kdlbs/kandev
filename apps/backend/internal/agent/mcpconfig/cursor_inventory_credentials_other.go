@@ -8,5 +8,5 @@ import (
 )
 
 func readNativeCursorAccessToken(context.Context) (string, error) {
-	return "", errors.New("Cursor account credential store unsupported")
+	return "", errors.New("cursor account credential store unsupported")
 }

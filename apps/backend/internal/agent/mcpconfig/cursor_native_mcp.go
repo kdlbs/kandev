@@ -117,6 +117,11 @@ func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
 			return current.Terminate(cancelCtx)
 		}
 		if cmd.Process != nil {
+			if fallbackGuard, err := attachNativeMCPCommand(cmd); err == nil {
+				cancelCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				return fallbackGuard.Terminate(cancelCtx)
+			}
 			return cmd.Process.Kill()
 		}
 		return os.ErrProcessDone

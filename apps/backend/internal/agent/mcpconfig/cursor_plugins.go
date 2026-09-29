@@ -439,7 +439,7 @@ func parseNetworkCandidate(
 	pluginName, pluginRoot string,
 ) (DiscoveredServerCandidate, bool) {
 	rawType := strings.ToLower(strings.TrimSpace(entry.Type))
-	if rawType == "stdio" {
+	if rawType == string(ServerTypeStdio) {
 		return DiscoveredServerCandidate{}, false
 	}
 	transport, ok := parseNetworkTransport(rawType)
@@ -485,7 +485,7 @@ func parseStdioCandidate(
 	pluginName, pluginRoot string,
 ) (DiscoveredServerCandidate, bool) {
 	rawType := strings.ToLower(strings.TrimSpace(entry.Type))
-	if rawType != "" && rawType != "stdio" {
+	if rawType != "" && rawType != string(ServerTypeStdio) {
 		return DiscoveredServerCandidate{}, false
 	}
 	expandedCmd, ok := expandPluginVariables(entry.Command, pluginRoot)
@@ -523,11 +523,11 @@ func parseStdioCandidate(
 
 func parseNetworkTransport(rawType string) (ServerType, bool) {
 	switch strings.ToLower(strings.TrimSpace(rawType)) {
-	case "sse":
+	case string(ServerTypeSSE):
 		return ServerTypeSSE, true
-	case "streamable_http", "streamable-http":
+	case string(ServerTypeStreamableHTTP), claudeStreamableHTTPType:
 		return ServerTypeStreamableHTTP, true
-	case "http", "":
+	case string(ServerTypeHTTP), "":
 		return ServerTypeHTTP, true
 	default:
 		return "", false
