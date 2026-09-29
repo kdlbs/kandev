@@ -130,21 +130,18 @@ Mockup:
   "Undone by <name>". With no person recorded (authentication off) the
   outcome line has no "by <name>" ("Approved", "Rejected", "Undone"); when the
   recorded person is not a member any more it reads "by a former member"; a
-  proposed or refused row has no second line. The full texts and their forms
-  are the copy table of the system design.
+  proposed or refused row has no second line. Full texts: the design's copy table.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.8:** The server sends user ids and no
   display names. The client shall resolve each `actor_user_id` and
-  `undone_by` to a name from the workspace member list, read once when the section mounts and at most once more when a row's person is absent and the last read was more than 30 seconds ago (the member state stays loaded during the second read). While the member list has
+  `undone_by` to a name from the workspace member list, read when the section mounts and at most once more per mount, when a list arrival leaves a row's person absent (or the first read failed) and the first read started more than 30 seconds ago (stays loaded during the second read; a failed one sets it failed). While the member list has
   not loaded, or when reading it failed, a row whose person is recorded shall
   show the no-person form of its outcome, so a transient failure never reads
   "a former member"; only a member list that loaded and does not hold the id
-  shall show "a former member", which therefore means "not in the workspace member list" (inherited-role managers have no row). Two members with the same display name show
-  the same name.
+  shall show "a former member", which therefore means "not in the workspace member list" (inherited-role managers have no row). Two members with the same display name show the same name.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.9:** The text "Task no longer available"
   shall show, with no link, only on a row that has a `target_task_id` whose
-  task cannot be found: the workspace's task snapshots have loaded without error at least once (a later failure does not withdraw it) and do not hold that id, and the row has no `target_task_identifier`.
-  A row with no `target_task_id` (a proposed, rejected or failed create, a
-  refusal, an `unknown` class row) shows nothing in its place, and a row
+  task cannot be found: the workspace's task snapshots have loaded without error at least once and do not hold that id, and the row has no `target_task_identifier`.
+  A row with no `target_task_id` shows nothing in its place, and a row
   whose snapshots have not loaded or failed to load shows the link when the
   server sent an identifier and nothing otherwise. A row whose task the
   snapshots hold but that has no `target_task_identifier` links to it with the
@@ -165,7 +162,7 @@ Mockup:
   Try again." shows. A failed refresh keeps the rows already shown.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.5:** With no row, the section shall say "It
   has not done anything yet."; with no row for the chosen filter, it shall
-  say that nothing matches the filter. The empty text shows only once the first load has succeeded with no rows: "It has not done anything yet." when the filter is All, the filtered text otherwise. The client sends no `limit`.
+  say that nothing matches the filter. The empty text shows only once the first load has succeeded with no rows. The client sends no `limit`.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.7:** The list route shall take `limit`
   as an integer from 1 to 50, default 50 when absent, and refuse any other
   value (0, negative, above 50, empty, not an integer) with 400 naming
@@ -231,8 +228,8 @@ Mockup:
   proposal is gone or whose outcome does not parse, shall list `undoable`
   false and answer undo with 409 `not_undoable`.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.10:** Undo shall first open a dialog
-  titled "Undo this?" with **Undo** and **Cancel**, Cancel focused on open, so that Enter with that initial focus activates Cancel (the dialog has no default confirm action); Cancel, Escape or a click outside closes it
-  and sends nothing; Undo closes it and sends one
+  titled "Undo this?" with **Undo** and **Cancel**, Cancel focused on open, so that Enter with that initial focus activates Cancel (the dialog has no default confirm action); Cancel or Escape closes it
+  and sends nothing (a click outside does nothing); Undo closes it and sends one
   request. Its text is one whole sentence chosen by the row, never a noun
   phrase inserted into a sentence: for a created task "The task <identifier>
   will be archived. Any agent working on it will be stopped." or, when the
@@ -249,7 +246,7 @@ Mockup:
   its Undo cell below the Undo button, which stays clickable. Any other
   failure (`not_undoable`, 500, network, 404) shows its own text the same way
   except 404, which shows "This action is no longer listed." in a section
-  notice above the list. The message clears when the next re-read completes with success (a `coordinator.updated` event, a reconnect, a successful retry of that row's undo), when the filter or coordinator changes, or when the row's Undo is confirmed again; a failed re-read and Load more do not clear it. A `not_undoable` or 404 re-reads at once and its message survives the first re-read that starts after the refusal settles, clearing on the next. A
+  notice above the list. The message clears when a re-read that started after the message was set completes with success (a `coordinator.updated` event, a reconnect, a successful retry of that row's undo), when the filter or coordinator changes, or when the row's Undo is confirmed again; a failed re-read and Load more do not clear it. A `not_undoable` or 404 re-reads at once and its message survives the first re-read that starts after the refusal settles (one already in flight neither clears nor consumes it), clearing on the next later-started success. A
   `409 already_undone` shows no message. Two rows can each hold a message at
   once; a second failure on one row replaces its message.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.4:** Undoing a row that is already undone,

@@ -347,17 +347,14 @@ page's `next_cursor`, a request generation, the message map and a status
 - **Reads.** The first page loads on mount. **Load more** appends the page
   after the last loaded row's cursor and is ignored while a Load more is in
   flight. Every other refresh is a **re-read**: it fetches page 1, then follows
-  `next_cursor` once for each further page that was loaded (so a list of three
-  pages is re-read as three pages), and replaces the loaded rows and the cursor
+  `next_cursor` once for each further page that was loaded, and replaces the loaded rows and the cursor
   only when the last page has arrived. A re-read therefore never merges: rows
   are exactly what the server returned, in server order (`created_at DESC, id
-  DESC`), the cursor is the last re-read page's, and a row that moved beyond
-  the re-read span simply drops off the end. A failed re-read keeps the rows shown and sets no banner; only the
-  first load and Load more have a failure state (below). The client sends no `limit` on any page (the route's 50). A re-read
-  stops at a null cursor. A re-read that starts supersedes an in-flight Load more (its
-  response is dropped) and Load more is disabled while a re-read is in flight,
-  so rows gain no gap or duplicate. An event or reconnect during or after a failed first load is
-  ignored; Retry decides.
+  DESC`), the cursor is the last re-read page's, and a row beyond the re-read span drops off the end. A failed re-read keeps the rows shown and sets no banner; only the
+  first load and Load more have a failure state (below). The client sends no `limit` on any page. A re-read that starts supersedes an in-flight Load more (its
+  response is dropped) and Load more is disabled while a re-read is in flight.
+  An event or reconnect while the first load is in flight or after it failed
+  is ignored; Retry decides.
 - **Triggers.** A `coordinator.updated` event for the coordinator, a
   reconnect of the WebSocket, and every undo outcome that says the row's state
   may have changed (200, `already_undone`, `not_undoable`, 404) trigger a
@@ -366,22 +363,24 @@ page's `next_cursor`, a request generation, the message map and a status
   the list and message map and starts a first load.
 - **Stale responses.** Each first load, re-read and Load more carries the
   generation current when it started; the generation increments on a filter
-  or coordinator change and on unmount. A response of an older generation is
-  dropped whole, and an undo response for a row no longer listed, or under a
+  or coordinator change and on unmount. An older generation's response is
+  dropped, and an undo response for a row no longer listed, or under a
   newer generation, sets no message.
 
 - `?class=` preselects the filter (May do's link uses it); an unrecognised
   value selects All and is left in the address until the filter changes. A
   filter change replaces the current history entry (no new entry) with
   `?class=<class>`, and removes `class` when All is chosen. The filter offers All, the six classes and "Unknown action".
-- Names: the workspace member list (`listWorkspaceMembers`), read once per
-  section mount and again once when a row's person is absent from the loaded
-  list and the last read was more than 30 seconds ago (a member added after
-  mount; the second read keeps the loaded state), gives `user_id` to `display_name`.
+- Names: the workspace member list (`listWorkspaceMembers`), read on mount
+  and at most once more per mount, gives `user_id` to `display_name`.
   The member list is the only name source: a person who holds access through
   an inherited role has no member row, and "a former member" therefore means
-  "not in the workspace member list", an accepted limit. State is `loading | failed |
-  loaded`; `loading` and `failed` render the no-person outcome forms in both
+  "not in the workspace member list", an accepted limit. The second read runs when a
+  list arrival (first load, re-read or Load more) leaves a row's person absent
+  from a loaded list, or the first read failed, and the first read started more
+  than 30 seconds ago; one member read is in flight at a time, and the list
+  stays `loaded` while it runs. State is `loading | failed |
+  loaded` (a failed second read sets `failed`); `loading` and `failed` render the no-person outcome forms in both
   the outcome line and the Undo cell ("Undone, <time>"), and `loaded` with the
   id absent renders "a former member" (`002.8`). A member with an empty or
   missing `display_name`, and a null `actor_user_id`, render the no-person
@@ -389,12 +388,11 @@ page's `next_cursor`, a request generation, the message map and a status
 - Step names and task availability come from `useCoordinatorTasks` through
   the Queue's `useCoordinatorAttention` result, which is extended to also
   return `tasks`, `loadedAt` and `error`; the Queue passes them to the section
-  as props, so the section calls no hook of its own for them (a second instance would call `useAllWorkflowSnapshots`):
-  `stepNameByWorkflowStep` (keyed `${workflowId}:${stepId}`) is flattened once
-  into a step-id to title map (step ids are unique across workflows);  a
+  as props, so the section calls no hook of its own for them:
+  `stepNameByWorkflowStep` (keyed `${workflowId}:${stepId}`) is flattened
+  into a step-id to title map (ids are unique across workflows); a
   `from_step_id` absent from the map is unknown. A `target_task_id` in `tasks` is available. The set becomes trusted the first time a result arrives with `loadedAt` set
-  and `error` false, held in a section-level flag that a later failure does not clear; the hook sets `loadedAt` together with `error` true on a
-  partial failure, so `loadedAt` alone never trusts the set (`002.9`).
+  and `error` false, held in a section-level flag that a later failure does not clear; `loadedAt` alone never trusts the set, as the hook sets it with `error` true on a partial failure (`002.9`).
 - **List states.** While the first load is in flight the section shows
   `activityLoading` and no empty text. A failed first load (any error, including 403 and 404) shows
   `activityLoadFailed` with a **Retry** button (`activityRetry`) and never the
@@ -411,13 +409,12 @@ shows `created_at` (for a coalesced refusal too, so the column agrees with the
 list order) as `formatRelative` (`lib/i18n/formats.ts`); its exact time is `formatDateTime` in the viewer's
 locale and time zone, shown in a tooltip that opens on hover and on keyboard
 focus (the cell is focusable); a refusal with `refusal_count` above 1
-adds `activityLastRepeat` with the `updated_at` time. An empty or unparsable timestamp shows nothing. The Action cell text is chosen in this order: a refused row shows its
+adds `activityLastRepeat` to that tooltip, its time `formatDateTime` of `updated_at`. An empty or unparsable timestamp shows nothing. The Action cell text is chosen in this order: a refused row shows its
 reason text; a rejected or failed row shows `detail` with its prefix
 (`activityRejectedDetail` / `activityFailedDetail`), or `activityRejected` /
 `activityFailed` alone when the detail is empty; any other row shows `detail`,
 or the class label when it is empty. The text (line-clamped to two lines, the full text as the title
-attribute, rendered as text) with the identifier link after it, separated by a single space (the link wraps
-to its own line when the detail fills the clamp): the
+attribute, rendered as text) with the identifier link after it, separated by a single space: the
 identifier links to the task when `target_task_identifier` is set, "Open
 task" when only the snapshots hold it, "Task no longer available" as plain
 text under `002.9`, nothing when the row has no `target_task_id` (an identifier without an id is not shown). Phone width
@@ -429,7 +426,7 @@ set (`003.6`); **Undo** for a manager when `undoable` is true; "No undo" on
 every row of class `message` or `resume` whatever its outcome and for readers
 too; nothing otherwise, including the `undone` outcome row, whose undoer shows
 in How it was authorised. A row's failure message (`003.11`) renders below the
-Undo button in a `role="status"` region, and renders even when the cell
+Undo button in a `role="status"` region, even when the cell
 would otherwise be empty.
 
 ### Copy table
@@ -437,11 +434,9 @@ would otherwise be empty.
 All keys are in the `coordinator` namespace, six locales, each a whole
 sentence with interpolation only for names, times, counts and codes (never a
 noun phrase spliced into a sentence). The one exception is `activityFormerMember`,
-which is a name value substituted for `{{name}}` in the outcome keys, translated
-per locale as a short noun phrase that reads correctly after "by" in
-`activityApprovedBy`, `activityRejectedBy`, `activityUndoneBy` and
-`activityUndoneByAt`; a locale whose grammar cannot do that translates those
-keys so they read correctly with it. "x" is the ASCII letter. No em dash.
+a name value for `{{name}}` in the "by" outcome keys, translated as a short noun
+phrase that reads correctly after "by"; a locale whose grammar cannot do that
+translates those keys to read correctly with it. "x" is the ASCII letter. No em dash.
 
 | Key | English |
 | --- | --- |
@@ -490,9 +485,9 @@ Traditional Chinese comes from `pnpm run i18n:zh-hant`.
 ### Undo flow
 
 Undo opens the dialog (`003.10`). The dialog is built on the base
-`AlertDialog` with `enterConfirms` false: Enter activates whichever button has
-focus (Cancel on open), so the dialog has no default confirm, Escape, a backdrop click and Cancel
-close it and send nothing, and focus returns to the row's Undo button (or to
+`AlertDialog` whose content sets `enterConfirms` false: Enter activates whichever button has
+focus (Cancel on open), so the dialog has no default confirm; Escape and Cancel
+close it and send nothing (a click outside does nothing, as AlertDialog blocks it), and focus returns to the row's Undo button (or to
 the section heading when the row is gone or its Undo became text). Confirming closes the dialog and
 sends `POST activity/:rid/undo`, marking that row's Undo `aria-disabled` (it
 keeps focus and ignores activation) until the response settles and, after a
@@ -500,8 +495,8 @@ keeps focus and ignores activation) until the response settles and, after a
 run at the same time. Results:
 
 - 200: re-read; the returned original row is not used (the re-read supplies
-  it); no message. If that re-read fails, Undo is clickable again (a second Undo
-  answers 409 `already_undone`).
+  it); no message. If that re-read fails, Undo is clickable again, the row unchanged, with
+  no message (a second Undo answers 409 `already_undone` and re-reads).
 - 409 `already_undone`: re-read, no message.
 - 409 `undo_conflict`: the text by `reason`; an unknown or absent reason (a code the client predates, or no `reason`) reads
   `activityConflictMoved`. No re-read, so the row stays and Undo stays
@@ -511,17 +506,16 @@ run at the same time. Results:
 - Anything else, including a network error, a 403 and a 409 with an
   unrecognised `code`: `activityUndoFailed`, no re-read, Undo stays clickable.
 
-The message map is `Map<rowId, {text, survives}>` plus the section notice (one more entry, same lifecycle, no row). `not_undoable` and
-404 set `survives` true. `survives` is consumed only by the first re-read that starts after the
-refusal settles (an in-flight one that began earlier, and a trailing one
-already queued, count: the trailing one is that re-read), when it settles
-(success, failure or superseded by a newer generation): the message stays
-through it and `survives` becomes false. A re-read triggered by anything else (an event, a
-reconnect) neither clears nor consumes it while `survives` is true. Any
-message with `survives` false is cleared by the next re-read that completes
-with success (a failed one leaves it), a
-filter or coordinator change, or a new confirmed Undo of that row (`003.11`);
-Load more clears nothing. A second failure on one row replaces its message.
+The message map is `Map<rowId, {text, survives, setAt}>` plus the section notice (one more entry, same lifecycle, no row); `setAt` is the re-read sequence number when the message was set. `not_undoable` and
+404 set `survives` true. A re-read starting after `setAt` is the only kind that can clear a message, and only on success. `survives` is consumed by the first re-read that starts after the
+refusal settles (the refusal's own at-once re-read; a queued trailing one is it), when it settles
+(success, failure or superseded): the message stays
+through it and `survives` becomes false. A re-read already in flight when the
+refusal settled neither clears nor consumes. An event or reconnect
+re-read starting later coalesces into that trailing one. A later successful re-read that started after `setAt`
+clears a message with `survives` false, as do a
+filter or coordinator change and a new confirmed Undo of that row (`003.11`);
+a failed re-read and Load more clear nothing. A second failure on one row replaces its message.
 
 ## Phase 3 contract
 
