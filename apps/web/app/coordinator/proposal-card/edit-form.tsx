@@ -14,6 +14,7 @@ import {
   useProposalEditOptions,
   type OptionsField,
 } from "@/hooks/domains/coordinator/use-proposal-edit-options";
+import { LONG_TEXT_FIELD_CLASS } from "@/components/coordinators/long-text-field";
 
 export type EditFormServerError = { message: string; field: string | null };
 
@@ -383,6 +384,7 @@ export function EditForm({
           </FieldLabel>
           <Textarea
             id={fieldElementIds.description}
+            className={LONG_TEXT_FIELD_CLASS}
             value={description}
             disabled={busy}
             onChange={(e) => setDescription(e.target.value)}

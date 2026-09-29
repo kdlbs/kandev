@@ -15,6 +15,7 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { ApiError } from "@/lib/api/client";
 import { addStandingOrder, type StandingOrder } from "@/lib/api/domains/coordinator-api";
+import { LONG_TEXT_FIELD_CLASS } from "@/components/coordinators/long-text-field";
 
 const MAX_ORDER_CODE_POINTS = 500;
 const LIMIT_ERROR_CODE = "standing_order_limit";
@@ -76,6 +77,7 @@ export function AddStandingOrderDialog(props: AddStandingOrderDialogProps) {
           <Label htmlFor="standing-order-text">{t("coordinator:standingOrderTextLabel")}</Label>
           <Textarea
             id="standing-order-text"
+            className={LONG_TEXT_FIELD_CLASS}
             data-testid="standing-order-text"
             rows={4}
             value={text}
