@@ -72,6 +72,10 @@ var rejectAndAllow = []streams.PermissionChoice{
 
 func TestResolveUnattendedPermissionRejectsWithLiveRequestIDAndAudit(t *testing.T) {
 	f := newUnattendedFixture(t, rejectAndAllow)
+	f.svc.setSessionWaitingForInput(context.Background(), "task-1", "session-1")
+	if f.sessionState(t) != models.TaskSessionStateWaitingForInput {
+		t.Fatal("precondition: session must be waiting")
+	}
 
 	if err := f.svc.ResolveUnattendedPermission(context.Background(), "task-1", "session-1", "pending-1", "turn-row-1"); err != nil {
 		t.Fatal(err)

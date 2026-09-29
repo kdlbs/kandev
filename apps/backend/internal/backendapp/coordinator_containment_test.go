@@ -97,10 +97,17 @@ type fakeContainmentTasks struct {
 	repos    map[string]*taskmodels.Repository
 	session  *taskmodels.TaskSession
 	sessions error
+	listErr  error
 }
 
-func (f fakeContainmentTasks) GetTask(context.Context, string) (*taskmodels.Task, error) {
-	return f.task, nil
+func (f fakeContainmentTasks) ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.task == nil {
+		return nil, nil
+	}
+	return f.task.Repositories, nil
 }
 func (f fakeContainmentTasks) GetRepository(_ context.Context, id string) (*taskmodels.Repository, error) {
 	return f.repos[id], nil
@@ -128,6 +135,13 @@ func TestContainmentRepositories_BindingDetection(t *testing.T) {
 				t.Fatalf("got %v err=%v, want %v", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestContainmentRepositories_ListErrorIsNotAbsence(t *testing.T) {
+	_, err := containmentRepositories{tasks: fakeContainmentTasks{task: &taskmodels.Task{}, listErr: errors.New("db busy")}}.HasRepositoryBinding(context.Background(), "t")
+	if err == nil {
+		t.Fatal("a failed repository list read must surface as an error, not as no binding")
 	}
 }
 

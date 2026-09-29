@@ -32,7 +32,7 @@ type containmentDeps struct {
 
 type containmentTaskReader interface {
 	coordinator.ContainmentExecutorReader
-	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*taskmodels.TaskRepository, error)
 	GetRepository(ctx context.Context, id string) (*taskmodels.Repository, error)
 	GetPrimarySession(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 }
@@ -136,11 +136,11 @@ func (r containmentRepositories) HasRepositoryBinding(ctx context.Context, taskI
 	if r.tasks == nil {
 		return false, errContainmentReaderUnwired
 	}
-	task, err := r.tasks.GetTask(ctx, taskID)
+	links, err := r.tasks.ListTaskRepositories(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	for _, tr := range task.Repositories {
+	for _, tr := range links {
 		repo, err := r.tasks.GetRepository(ctx, tr.RepositoryID)
 		if err != nil {
 			return false, err
