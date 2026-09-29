@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,7 +75,7 @@ func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Pr
 	claim := Claim{
 		ProposalID: proposal.ID, Token: token, WorkspaceID: proposal.WorkspaceID, Coordinator: coordinator,
 		Spec: final, StartsAgent: proposal.StartsAgent, ApprovedBy: decidedBy,
-		TextEdited: string(final) != string(base),
+		TextEdited: !sameSpec(final, json.RawMessage(proposal.RawSpec)),
 	}
 	if proposal.TargetTaskID != nil {
 		claim.TargetTaskID = *proposal.TargetTaskID
@@ -173,7 +174,11 @@ func (s *Service) settleStaleKind(ctx context.Context, current *Proposal, exec K
 		return nil, err
 	}
 	if !matched {
-		return s.claimRaceResult(ctx, current.WorkspaceID, current.CoordinatorID, current.ID)
+		latest, err := s.store.GetProposal(ctx, current.WorkspaceID, current.CoordinatorID, current.ID, true)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &ProposalConflictError{Proposal: latest}
 	}
 	s.publishCoordinatorUpdated(ctx, current.WorkspaceID, current.CoordinatorID)
 	s.logger.Info("stale claim settled outcome_unknown", zap.String("proposal_id", current.ID), zap.String("kind", current.Kind))
@@ -182,4 +187,14 @@ func (s *Service) settleStaleKind(ctx context.Context, current *Proposal, exec K
 
 func errUnknownStatus(p *Proposal) error {
 	return fmt.Errorf("coordinator: proposal %s has unknown status %q", p.ID, p.Status)
+}
+
+// sameSpec reports whether two spec documents hold the same fields, ignoring
+// key order.
+func sameSpec(a, b json.RawMessage) bool {
+	var x, y map[string]any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return string(a) == string(b)
+	}
+	return reflect.DeepEqual(x, y)
 }

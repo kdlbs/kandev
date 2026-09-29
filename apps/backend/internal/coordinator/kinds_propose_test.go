@@ -251,3 +251,111 @@ func TestProposeKind_StandingOrderCitations(t *testing.T) {
 		t.Fatalf("last_applied_at = %v, want the proposal's created_at %v", applied, p.CreatedAt)
 	}
 }
+
+func TestProposeKind_MoveStepMustBelongToTaskWorkflow(t *testing.T) {
+	for name, setup := range map[string]func(*kindsFixture){
+		"unknown step":        func(*kindsFixture) {},
+		"other workflow step": func(f *kindsFixture) { f.undo.steps["elsewhere"] = &UndoStep{WorkflowID: "wf-other"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := proposeFixture(t)
+			setup(f)
+			stepID := "missing"
+			if name == "other workflow step" {
+				stepID = "elsewhere"
+			}
+			p, _, err := f.propose(ProposalKindMove, `{"task_id":"task-0","step_id":"`+stepID+`"}`)
+			wantField(t, err, "step_id")
+			if p != nil {
+				t.Fatalf("stored %+v, want no proposal", p)
+			}
+		})
+	}
+}
+
+func TestProposeKind_CaseVariantTaskIDKeyStoresTheValidatedTarget(t *testing.T) {
+	cases := map[string]struct{ kind, args string }{
+		"resume":  {ProposalKindResume, `{"task_id":"foreign","Task_ID":"task-0"}`},
+		"message": {ProposalKindMessage, `{"task_id":"foreign","Task_ID":"task-0","text":"hi"}`},
+		"move":    {ProposalKindMove, `{"task_id":"foreign","Task_ID":"task-0","step_id":"manual-step"}`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := proposeFixture(t)
+			f.undo.steps["manual-step"].WorkflowID = "wf-1"
+			p, _, err := f.propose(tc.kind, tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var spec struct {
+				TaskID string `json:"task_id"`
+			}
+			if err := json.Unmarshal([]byte(p.RawSpec), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if p.TargetTaskID == nil || *p.TargetTaskID != "task-0" || spec.TaskID != "task-0" {
+				t.Fatalf("target=%v spec task=%q, want both the validated task-0", p.TargetTaskID, spec.TaskID)
+			}
+		})
+	}
+}
+
+func TestKindExecute_RefusesTargetThatNoLongerMatches(t *testing.T) {
+	now := time.Now()
+	cases := map[string]func(*TargetTask){
+		"other workspace": func(x *TargetTask) { x.WorkspaceID = "ws-2" },
+		"conversation":    func(x *TargetTask) { x.Origin = "coordinator" },
+		"archived":        func(x *TargetTask) { x.ArchivedAt = &now },
+	}
+	specs := map[string]string{
+		ProposalKindResume:  `{"task_id":"task-0"}`,
+		ProposalKindMessage: `{"task_id":"task-0","text":"x"}`,
+		ProposalKindMove:    `{"task_id":"task-0","workflow_id":"wf-1","to_step_id":"manual-step"}`,
+	}
+	for kind, spec := range specs {
+		for name, mutate := range cases {
+			t.Run(kind+"/"+name, func(t *testing.T) {
+				f := newKindsFixture(t)
+				tt := idleSession()
+				mutate(tt)
+				res, msg := &fakeResumer{started: true}, &fakeMessenger{}
+				f.svc.SetKindDeps(KindDeps{Tasks: &fakeKindTasks{target: tt}, Resumer: res, Messenger: msg})
+				p := f.insertKind(t, kind, spec)
+				got, err := f.approve(p, nil)
+				if err != nil || got.Status != ProposalStatusFailed || f.errorOf(t, p.ID) != failTaskArchived {
+					t.Fatalf("got=%+v err=%v error=%q, want failed %q", got, err, f.errorOf(t, p.ID), failTaskArchived)
+				}
+				if res.calls != 0 || len(msg.prompts) != 0 || len(f.undo.moves) != 0 {
+					t.Fatalf("dispatched: resume=%d prompts=%d moves=%d", res.calls, len(msg.prompts), len(f.undo.moves))
+				}
+			})
+		}
+	}
+}
+
+func TestKindExecute_RefusesSpecNamingAnotherTask(t *testing.T) {
+	for kind, spec := range map[string]string{
+		ProposalKindResume:  `{"task_id":"other"}`,
+		ProposalKindMessage: `{"task_id":"other","text":"x"}`,
+		ProposalKindMove:    `{"task_id":"other","workflow_id":"wf-1","to_step_id":"manual-step"}`,
+	} {
+		t.Run(kind, func(t *testing.T) {
+			f := newKindsFixture(t)
+			res, msg := &fakeResumer{started: true}, &fakeMessenger{}
+			f.svc.SetKindDeps(KindDeps{Tasks: &fakeKindTasks{target: idleSession()}, Resumer: res, Messenger: msg})
+			f.seq++
+			target := "task-0"
+			p := &Proposal{CoordinatorID: f.c.ID, WorkspaceID: f.c.WorkspaceID, Kind: kind, TargetTaskID: &target, RawSpec: spec}
+			if err := f.store.InsertProposal(context.Background(), p, true); err != nil {
+				t.Fatal(err)
+			}
+			got, err := f.approve(p, nil)
+			if err != nil || got.Status != ProposalStatusFailed || f.errorOf(t, p.ID) != failTaskArchived {
+				t.Fatalf("got=%+v err=%v, want failed %q", got, err, failTaskArchived)
+			}
+			if res.calls != 0 || len(msg.prompts) != 0 || len(f.undo.moves) != 0 {
+				t.Fatalf("dispatched: resume=%d prompts=%d moves=%d", res.calls, len(msg.prompts), len(f.undo.moves))
+			}
+		})
+	}
+}

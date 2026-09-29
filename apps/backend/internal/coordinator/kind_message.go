@@ -115,6 +115,9 @@ func (k *messageKind) Execute(ctx context.Context, claim Claim) (Outcome, error)
 	if target.ArchivedAt != nil {
 		return Outcome{}, failWith(failTaskArchived)
 	}
+	if err := checkExecuteTarget(target, claim, spec.TaskID); err != nil {
+		return Outcome{}, err
+	}
 	if target.Primary == nil || !messageAcceptsSession(target.Primary.State) {
 		return Outcome{}, failWith(failNotAccepting)
 	}

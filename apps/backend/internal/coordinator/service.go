@@ -108,6 +108,9 @@ type Service struct {
 	sweepStarted bool
 	sweepWG      sync.WaitGroup
 
+	// launchWG tracks resume launches that may outlive their Execute deadline.
+	launchWG sync.WaitGroup
+
 	// afterSweepPass is a test-only hook invoked once at the end of every
 	// approval-sweep pass (including a pass with nothing to recover). nil in
 	// production; only tests in this package set it, to join on a pass

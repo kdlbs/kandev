@@ -45,6 +45,20 @@ func (k *moveKind) Execute(ctx context.Context, claim Claim) (Outcome, error) {
 		return Outcome{}, failWith("task moves are not wired")
 	}
 	taskID := claim.TargetTaskID
+	if deps := k.svc.kindDeps; deps.Tasks != nil {
+		target, err := deps.Tasks.GetTarget(ctx, taskID)
+		if errors.Is(err, ErrTaskNotFound) {
+			return Outcome{}, failWith(failTaskArchived)
+		}
+		if err != nil {
+			return Outcome{}, failWith(err.Error())
+		}
+		if err := checkExecuteTarget(target, claim, spec.TaskID); err != nil {
+			return Outcome{}, err
+		}
+	} else if spec.TaskID != taskID {
+		return Outcome{}, failWith(failTaskArchived)
+	}
 	task, err := u.GetTask(ctx, taskID)
 	if errors.Is(err, ErrTaskNotFound) {
 		return Outcome{}, failWith(failTaskArchived)

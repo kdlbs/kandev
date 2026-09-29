@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -132,5 +133,45 @@ func TestProposeKind_OpenCapCountsNewKinds(t *testing.T) {
 	_, _, err := f.propose(ProposalKindMessage, `{"task_id":"task-0","text":"one more"}`)
 	if !errors.Is(err, ErrCoordinatorProposalCapReached) {
 		t.Fatalf("err = %v, want ErrCoordinatorProposalCapReached at %d open new-kind rows", err, maxOpenProposals)
+	}
+}
+
+func TestMessageApprove_RetryAfterFailureKeepsEditedFlag(t *testing.T) {
+	f := newKindsFixture(t)
+	msg := &fakeMessenger{err: ErrMessageQueueFull}
+	f.svc.SetKindDeps(KindDeps{Tasks: &fakeKindTasks{target: idleSession()}, Resumer: &fakeResumer{}, Messenger: msg})
+	p := f.insertKind(t, ProposalKindMessage, `{"task_id":"task-0","text":"A"}`)
+	if got, err := f.approve(p, ApproveProposalRequest{"text": []byte(`"B"`)}); err != nil || got.Status != ProposalStatusFailed {
+		t.Fatalf("first approve: got=%+v err=%v, want failed", got, err)
+	}
+	msg.err = nil
+	if got, err := f.approve(p, nil); err != nil || got.Status != ProposalStatusApproved {
+		t.Fatalf("retry: got=%+v err=%v, want approved", got, err)
+	}
+	var approved []ActivityRow
+	for _, r := range listActivity(t, f.store, f.c.ID) {
+		if r.Outcome == ActivityApproved {
+			approved = append(approved, r)
+		}
+	}
+	if len(approved) != 1 || !approved[0].Edited {
+		t.Fatalf("approved rows = %+v, want one with edited=true", approved)
+	}
+}
+
+func TestSettleStaleKind_LostRaceIsAConflictWithPhaseTwoOff(t *testing.T) {
+	f := newKindsFixture(t)
+	p := f.insertMove(t)
+	f.forceApproving(t, p, time.Now().Add(-time.Hour))
+	snapshot, err := f.store.GetProposal(context.Background(), "ws-1", f.c.ID, p.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.svc.runApprovalSweepPass(context.Background(), time.Now().Add(time.Hour))
+	f.svc.phase2 = false
+	_, err = f.svc.settleStaleKind(context.Background(), snapshot, f.svc.kindExecutor(ProposalKindMove), time.Now())
+	var conflict *ProposalConflictError
+	if !errors.As(err, &conflict) || conflict.Proposal.Status != ProposalStatusFailed {
+		t.Fatalf("err = %v, want a conflict carrying the failed row", err)
 	}
 }

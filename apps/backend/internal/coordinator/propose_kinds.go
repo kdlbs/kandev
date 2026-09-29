@@ -65,19 +65,11 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 	} else if open != nil {
 		return open, true, nil
 	}
-	spec, err := exec.ValidatePropose(ctx, c, args)
+	p, err := s.buildKindProposal(ctx, exec, c, args, taskID, orderIDs)
 	if err != nil {
 		return nil, false, err
 	}
-	p := &Proposal{
-		CoordinatorID: coordinatorID, WorkspaceID: c.WorkspaceID, Kind: kind, TargetTaskID: &taskID,
-		RawSpec: string(spec), StandingOrderIDs: append([]string{}, orderIDs...),
-	}
-	if r, ok := exec.(startsAgentReporter); ok {
-		if p.StartsAgent, err = r.ProposeStartsAgent(ctx, spec); err != nil {
-			return nil, false, err
-		}
-	}
+	spec := json.RawMessage(p.RawSpec)
 	deduped := false
 	pre := func(ctx context.Context, tx coordinatorExec) (*Proposal, error) {
 		open, err := s.store.OpenTargetProposal(ctx, tx, coordinatorID, kind, taskID)
@@ -105,6 +97,28 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 		s.publishCoordinatorUpdated(ctx, c.WorkspaceID, coordinatorID)
 	}
 	return p, deduped, nil
+}
+
+// buildKindProposal validates args and returns the unsaved proposal. The stored
+// target is the task the validated spec names.
+func (s *Service) buildKindProposal(ctx context.Context, exec KindExecutor, c *Coordinator, args json.RawMessage, taskID string, orderIDs []string) (*Proposal, error) {
+	spec, err := exec.ValidatePropose(ctx, c, args)
+	if err != nil {
+		return nil, err
+	}
+	if specID, err := proposeTaskID(spec); err != nil || specID != taskID {
+		return nil, notFoundTarget()
+	}
+	p := &Proposal{
+		CoordinatorID: c.ID, WorkspaceID: c.WorkspaceID, Kind: exec.Kind(), TargetTaskID: &taskID,
+		RawSpec: string(spec), StandingOrderIDs: append([]string{}, orderIDs...),
+	}
+	if r, ok := exec.(startsAgentReporter); ok {
+		if p.StartsAgent, err = r.ProposeStartsAgent(ctx, spec); err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
 }
 
 func (s *Service) recordKindProposed(ctx context.Context, tx coordinatorExec, exec KindExecutor, p *Proposal, spec string) error {
@@ -162,15 +176,13 @@ func (s *Store) OpenTargetProposal(ctx context.Context, exec coordinatorExec, co
 }
 
 func proposeTaskID(args json.RawMessage) (string, error) {
-	var body map[string]json.RawMessage
-	if err := json.Unmarshal(args, &body); err != nil {
+	var in struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil || strings.TrimSpace(in.TaskID) == "" {
 		return "", &FieldError{Field: fieldTaskID, Message: "task_id is required"}
 	}
-	var id string
-	if err := json.Unmarshal(body[fieldTaskID], &id); err != nil || strings.TrimSpace(id) == "" {
-		return "", &FieldError{Field: fieldTaskID, Message: "task_id is required"}
-	}
-	return strings.TrimSpace(id), nil
+	return strings.TrimSpace(in.TaskID), nil
 }
 
 func checkRationale(r string) error {

@@ -48,6 +48,10 @@ type resumeResult struct {
 }
 
 func (k *resumeKind) Execute(ctx context.Context, claim Claim) (Outcome, error) {
+	var spec resumeSpec
+	if err := json.Unmarshal(claim.Spec, &spec); err != nil {
+		return Outcome{}, failWith("stored resume spec is unreadable")
+	}
 	deps := k.svc.kindDeps
 	if deps.Tasks == nil || deps.Resumer == nil {
 		return Outcome{}, failWith("session resume is not wired")
@@ -61,6 +65,9 @@ func (k *resumeKind) Execute(ctx context.Context, claim Claim) (Outcome, error) 
 	}
 	if target.ArchivedAt != nil {
 		return Outcome{}, failWith(failTaskArchived)
+	}
+	if err := checkExecuteTarget(target, claim, spec.TaskID); err != nil {
+		return Outcome{}, err
 	}
 	if target.Primary == nil || !sessionResumable(target.Primary, deps.Tasks.HasLiveExecution(ctx, target.Primary.ID)) {
 		return Outcome{}, failWith(failNotResumable)
@@ -87,7 +94,9 @@ func (k *resumeKind) launch(ctx context.Context, claim Claim, sessionID string) 
 	done := make(chan resumeResult, 1)
 	var abandoned atomic.Bool
 	launchCtx := context.WithoutCancel(ctx)
+	k.svc.launchWG.Add(1)
 	go func() {
+		defer k.svc.launchWG.Done()
 		started, err := k.svc.kindDeps.Resumer.ResumeTaskSession(launchCtx, claim.TargetTaskID, sessionID)
 		if abandoned.Load() {
 			k.svc.logger.Warn("execute_settle_fenced",
@@ -103,3 +112,7 @@ func (k *resumeKind) launch(ctx context.Context, claim Claim, sessionID string) 
 		return resumeResult{}, ctx.Err()
 	}
 }
+
+// WaitResumeLaunchesStopped blocks until every resume launch goroutine has
+// returned, so a graceful shutdown or a test can join them.
+func (s *Service) WaitResumeLaunchesStopped() { s.launchWG.Wait() }

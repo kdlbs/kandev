@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"time"
 )
 
@@ -115,3 +116,14 @@ const (
 	fieldRationale        = "rationale"
 	fieldStepID           = "step_id"
 )
+
+// checkExecuteTarget refuses a target that no longer belongs where the proposal
+// was validated: another workspace, a coordinator conversation, or a task other
+// than the one the stored spec names.
+func checkExecuteTarget(target *TargetTask, claim Claim, specTaskID string) error {
+	if target.WorkspaceID != claim.WorkspaceID || target.Origin == string(taskmodels.TaskOriginCoordinator) ||
+		specTaskID != claim.TargetTaskID {
+		return failWith(failTaskArchived)
+	}
+	return nil
+}

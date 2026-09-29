@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -56,6 +57,14 @@ func (f *kindsFixture) insertKind(t *testing.T, kind, spec string) *Proposal {
 	t.Helper()
 	f.seq++
 	target := fmt.Sprintf("task-%d", f.seq)
+	var body map[string]json.RawMessage
+	if json.Unmarshal([]byte(spec), &body) == nil {
+		if _, ok := body["task_id"]; ok {
+			body["task_id"], _ = json.Marshal(target)
+			raw, _ := json.Marshal(body)
+			spec = string(raw)
+		}
+	}
 	p := &Proposal{CoordinatorID: f.c.ID, WorkspaceID: f.c.WorkspaceID, Kind: kind, TargetTaskID: &target, RawSpec: spec}
 	if err := f.store.InsertProposal(context.Background(), p, true); err != nil {
 		t.Fatal(err)
@@ -148,10 +157,14 @@ func TestMoveExecute_RecordsFromStepBeforeMove(t *testing.T) {
 func TestMoveExecute_FromStepWriteFencedNoMove(t *testing.T) {
 	f := newKindsFixture(t)
 	p := f.insertMove(t)
+	fenced, _ := f.watchFenced(t)
 	f.undo.onGetStep = func() { f.svc.runApprovalSweepPass(context.Background(), time.Now().Add(time.Hour)) }
 	got, err := f.approve(p, nil)
 	if err != nil || got.Status != ProposalStatusFailed || len(f.undo.moves) != 0 || f.errorOf(t, p.ID) != "outcome_unknown" {
 		t.Fatalf("got=%+v err=%v moves=%d error=%q, want failed outcome_unknown and no move call", got, err, len(f.undo.moves), f.errorOf(t, p.ID))
+	}
+	if fenced.Load() != 1 {
+		t.Fatalf("execute_settle_fenced warnings = %d, want 1", fenced.Load())
 	}
 }
 

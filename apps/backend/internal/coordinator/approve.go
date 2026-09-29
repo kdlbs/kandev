@@ -326,6 +326,9 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 			s.logger.Error("unknown_kind", zap.String("proposal_id", proposalID), zap.String("kind", row.Kind))
 			return nil, fmt.Errorf("%w: %q", ErrUnknownProposalKind, row.Kind)
 		}
+		if exec.ReRunsOnStaleClaim() {
+			return nil, fmt.Errorf("coordinator: kind %q cannot re-run on a stale claim", row.Kind)
+		}
 		return s.settleStaleKind(ctx, row, exec, cutoff)
 	}
 	token := uuid.New().String()
