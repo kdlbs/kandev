@@ -61,8 +61,11 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
-	proposal, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	proposal, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkApprovable(proposal); err != nil {
 		return nil, err
 	}
 	carriesEdits := carriesApproveEdits(edits)
@@ -291,7 +294,7 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
 	token := uuid.New().String()
 	now := time.Now().UTC()
-	matched, err := s.store.ReclaimStale(ctx, proposalID, token, now, cutoff)
+	matched, err := s.store.ReclaimStale(ctx, proposalID, token, now, cutoff, s.phase2)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +305,7 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 	s.logger.Info("proposal re-claimed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
 
-	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +424,7 @@ func (s *Service) completeCreatedOutcome(ctx context.Context, workspaceID, coord
 // completeApproval runs step 5's success fence and its zero-row race
 // handling (proposals.md#approve step 5).
 func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinatorID, proposalID, token, taskID string) (*Proposal, error) {
-	matched, err := s.store.CompleteProposal(ctx, proposalID, token, taskID, time.Now())
+	matched, err := s.completeProposalStore(ctx, workspaceID, coordinatorID, proposalID, token, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -432,13 +435,13 @@ func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinator
 	s.logger.Info("proposal approved",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
 		zap.String("workspace_id", workspaceID), zap.String("task_id", taskID))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 }
 
 // failApproval runs step 5's failure fence (the same fence completeApproval
 // uses) and its zero-row race handling.
 func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, proposalID, token, errMsg string) (*Proposal, error) {
-	matched, err := s.store.FailProposal(ctx, proposalID, token, errMsg, time.Now())
+	matched, err := s.failProposalStore(ctx, workspaceID, coordinatorID, proposalID, token, errMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -449,14 +452,14 @@ func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, 
 	s.logger.Info("proposal approval failed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
 		zap.String("workspace_id", workspaceID), zap.String("error", errMsg))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 }
 
 // claimRaceResult handles a zero-row race on a claim, re-claim or reject
 // UPDATE: a row that is gone is 404, any other row is a 409 conflict with
 // that row (proposals.md#approve step 3, #stale-re-claim, #reject).
 func (s *Service) claimRaceResult(ctx context.Context, workspaceID, coordinatorID, proposalID string) (*Proposal, error) {
-	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if errors.Is(err, ErrNotFound) {
 		return nil, ErrNotFound
 	}
@@ -473,7 +476,7 @@ func (s *Service) claimRaceResult(ctx context.Context, workspaceID, coordinatorI
 // outcome, when any, logged at warn to flag the task it leaves orphaned on
 // its board; empty for a fail-fence race, logged at info.
 func (s *Service) settleWriteRace(ctx context.Context, workspaceID, coordinatorID, proposalID, createdTaskID string) (*Proposal, error) {
-	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if errors.Is(err, ErrNotFound) {
 		s.logger.Info("proposal deleted during approval completion", zap.String("proposal_id", proposalID))
 		return nil, ErrNotFound

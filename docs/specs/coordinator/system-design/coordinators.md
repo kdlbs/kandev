@@ -227,7 +227,8 @@ agent or executor `missing` message of its field.
 ## Workspace deletion
 
 The `workspace.deleted` subscriber runs one transaction deleting the
-workspace's coordinators, proposals and stall rows. Conversation tasks,
+workspace's coordinators, proposals and stall rows and, children first,
+the phase-2 rows ([Shared interface](#shared-interface)). Conversation tasks,
 current and archived, go with the workspace's tasks through the task system. Deleting zero rows is success,
 so a redelivered event is harmless.
 
@@ -263,6 +264,14 @@ so a redelivered event is harmless.
   once at startup and passes it to the coordinator service, the MCP server's
   coordinator registration, the guard and the executor's coordinator branch.
   The client derives the same value from both flags.
+  The registry entry's `Label` is "Coordinator control", its `Description`
+  says it adds permissions, standing orders, goals, the activity log and
+  more proposal kinds to the Coordinator, and takes effect only while
+  "Coordinator" is on, and its `Risk` is the same tier as `features.coordinator`.
+  Tests: the backend `phase2` value is false for every combination other than
+  both flags on (four cases), the client derivation returns the same four
+  results, and turning `coordinatorPhase2` on with `coordinator` off registers
+  no phase-2 route (`007.1`).
 - With `phase2` false (`007.2`, `007.4`): the phase-2 routes (settings,
   standing orders, goal, activity, setup) are not registered and return
   404; the phase-2 propose tools and `list_coordinator_activity_kandev` are
@@ -288,6 +297,13 @@ so a redelivered event is harmless.
   restart with it off, the binding is ignored and the phase-1 profile
   applies. A conversation opened while it was off has no binding and gets the
   phase-1 profile when it is turned on, until a change archives it.
+
+## Shared interface
+
+The Go signatures, transaction handle, policy and watch types, activity
+writer surface, proposal wire fields, deletion order and downgrade rules
+every phase-2 work order builds on are in
+[shared interface](shared-interface.md#shared-interface).
 
 ## Guided setup
 

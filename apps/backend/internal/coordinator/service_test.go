@@ -245,7 +245,7 @@ func TestServiceListCoordinators(t *testing.T) {
 		if err := svc.store.InsertProposal(ctx, &Proposal{
 			CoordinatorID: created.ID, WorkspaceID: workspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
-		}); err != nil {
+		}, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 
@@ -294,7 +294,7 @@ func TestServiceListCoordinators(t *testing.T) {
 			if err := svc.store.InsertProposal(ctx, &Proposal{
 				CoordinatorID: busy.ID, WorkspaceID: workspaceID,
 				Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
-			}); err != nil {
+			}, false); err != nil {
 				t.Fatalf("InsertProposal() unexpected error: %v", err)
 			}
 		}
@@ -523,7 +523,7 @@ func TestServiceProposalReads(t *testing.T) {
 			CoordinatorID: created.ID, WorkspaceID: workspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
 		}
-		if err := svc.store.InsertProposal(ctx, proposal); err != nil {
+		if err := svc.store.InsertProposal(ctx, proposal, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 
@@ -563,7 +563,7 @@ func TestServiceProposalReads(t *testing.T) {
 			CoordinatorID: a.ID, WorkspaceID: workspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
 		}
-		if err := svc.store.InsertProposal(ctx, proposal); err != nil {
+		if err := svc.store.InsertProposal(ctx, proposal, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 		_, err = svc.GetProposal(ctx, workspaceID, b.ID, proposal.ID)

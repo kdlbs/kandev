@@ -94,10 +94,10 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 		WorkspaceID:   found.WorkspaceID,
 		Spec:          spec,
 	}
-	if err := s.store.InsertProposal(ctx, proposal); err != nil {
+	if err := s.store.InsertProposalWith(ctx, proposal, s.phase2, nil, s.recordProposed); err != nil {
 		return nil, 0, err
 	}
-	openCount, err := s.store.CountOpenProposals(ctx, coordinatorID)
+	openCount, err := s.store.CountOpenProposals(ctx, coordinatorID, s.phase2)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count open proposals: %w", err)
 	}
@@ -105,6 +105,21 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 		zap.String("coordinator_id", coordinatorID), zap.String("proposal_id", proposal.ID),
 		zap.String("workflow_id", spec.WorkflowID), zap.String("step_id", spec.StepID))
 	return proposal, openCount, nil
+}
+
+// recordProposed appends the proposed / requires_approval activity row for a
+// freshly inserted proposal, in the insert's own transaction.
+func (s *Service) recordProposed(ctx context.Context, tx coordinatorExec, p *Proposal) error {
+	id := p.ID
+	return s.Record(ctx, tx, ActivityRow{
+		CoordinatorID: p.CoordinatorID,
+		WorkspaceID:   p.WorkspaceID,
+		ActionClass:   ActionCreateTask,
+		Outcome:       ActivityProposed,
+		Authorization: AuthRequiresApproval,
+		ProposalID:    &id,
+		Detail:        p.Spec.Title,
+	})
 }
 
 // buildProposalSpec validates req's fields per

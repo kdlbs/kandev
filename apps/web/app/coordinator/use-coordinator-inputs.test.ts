@@ -6,7 +6,8 @@ const listCoordinatorStallsMock = vi.fn();
 const listProposalsMock = vi.fn();
 const getProposalMock = vi.fn();
 
-vi.mock("@/lib/api/domains/coordinator-api", () => ({
+vi.mock("@/lib/api/domains/coordinator-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/coordinator-api")>()),
   listCoordinatorStalls: (...args: unknown[]) => listCoordinatorStallsMock(...args),
   listProposals: (...args: unknown[]) => listProposalsMock(...args),
   getProposal: (...args: unknown[]) => getProposalMock(...args),
@@ -125,6 +126,17 @@ describe("useCoordinatorInputs - initial load", () => {
     expect(result.current.proposals.error).toBe(false);
     expect(listCoordinatorStallsMock).toHaveBeenCalledWith(WORKSPACE_ID);
     expect(listProposalsMock).toHaveBeenCalledWith(WORKSPACE_ID, COORDINATOR_ID, "pending");
+  });
+
+  it("drops proposals of a kind other than create_task", async () => {
+    listCoordinatorStallsMock.mockResolvedValue({ stalls: [] });
+    const other = { ...proposal("p-move"), kind: "move" };
+    listProposalsMock.mockResolvedValue({ proposals: [proposal("p-1"), other] });
+
+    const { result } = renderHook(() => useCoordinatorInputs(WORKSPACE_ID, COORDINATOR_ID));
+
+    await waitFor(() => expect(result.current.proposals.value).toBeDefined());
+    expect(result.current.proposals.value).toEqual([proposal("p-1")]);
   });
 
   it("does not fetch when workspaceId or coordinatorId is null", () => {

@@ -33,6 +33,10 @@ export type Coordinator = {
   open_proposals?: number;
   agent_profile_status?: ProfileStatus;
   executor_profile_status?: ProfileStatus;
+  // Present only while features.coordinatorPhase2 is on.
+  policy?: { actions: Record<string, string> };
+  policy_revision?: number;
+  watches?: { scope: "all" | "selected"; workflow_ids: string[] };
 };
 
 export type CoordinatorListResponse = {
@@ -59,15 +63,17 @@ export type PatchCoordinatorRequest = {
   context?: string;
 };
 
+// Mirrors internal/coordinator/models.go's ProposalKind* constants.
+export type OtherProposalKind = "message" | "move" | "resume";
+
 // Mirrors internal/coordinator/dto.go's ProposalDTO (Build decision 10).
 // claim_token is never serialized by the backend and has no field here.
-export type Proposal = {
+// The phase-2 fields are present only while features.coordinatorPhase2 is on.
+type ProposalBase = {
   id: string;
   coordinator_id: string;
   workspace_id: string;
   status: ProposalStatus;
-  spec: ProposalSpec;
-  final_spec: ProposalSpec | null;
   claimed_at: string | null;
   task_id: string | null;
   error: string | null;
@@ -75,10 +81,41 @@ export type Proposal = {
   decided_by: string | null;
   created_at: string;
   updated_at: string;
+  target_task_id?: string | null;
+  standing_order_ids?: string[];
+  starts_agent?: boolean;
+  // Parsed outcome_json; null until the proposal has an outcome.
+  outcome?: unknown;
 };
 
+export type CreateTaskProposal = ProposalBase & {
+  kind?: "create_task";
+  spec: ProposalSpec;
+  final_spec: ProposalSpec | null;
+};
+
+// A proposal of a phase-2 kind, or of a kind this client does not know (a
+// newer backend). The spec is the raw stored JSON; it is never edited here.
+export type OtherKindProposal = ProposalBase & {
+  kind: OtherProposalKind | (string & {});
+  spec: Record<string, unknown>;
+  final_spec: Record<string, unknown> | null;
+};
+
+// Every proposal shape the wire can carry while phase 2 is on. Phase-1
+// surfaces keep reading Proposal, which is the create_task shape.
+export type WireProposal = CreateTaskProposal | OtherKindProposal;
+
+export type Proposal = CreateTaskProposal;
+
+// isCreateTaskProposal narrows to the create_task kind; phase-1 rows carry
+// no kind and count as create_task.
+export function isCreateTaskProposal(p: WireProposal): p is CreateTaskProposal {
+  return p.kind === undefined || p.kind === "create_task";
+}
+
 export type ProposalListResponse = {
-  proposals: Proposal[];
+  proposals: WireProposal[];
 };
 
 // Build decision 3: omit this parameter for the default ("pending"); never
@@ -117,7 +154,7 @@ export type ApproveProposalEdits = {
 export type ProposalConflictBody = {
   error: "proposal_conflict";
   error_code: "proposal_conflict";
-  proposal: Proposal;
+  proposal: WireProposal;
 };
 
 // Mirrors internal/coordinator/events.go's CoordinatorUpdatedPayload
@@ -235,8 +272,8 @@ export function getProposal(
   coordinatorId: string,
   proposalId: string,
   options?: ApiRequestOptions,
-): Promise<Proposal> {
-  return fetchJson<Proposal>(proposalPath(workspaceId, coordinatorId, proposalId), options);
+): Promise<WireProposal> {
+  return fetchJson<WireProposal>(proposalPath(workspaceId, coordinatorId, proposalId), options);
 }
 
 export function listCoordinatorStalls(
@@ -257,8 +294,8 @@ export function approveProposal(
   proposalId: string,
   edits?: ApproveProposalEdits,
   options?: ApiRequestOptions,
-): Promise<Proposal> {
-  return mutate<Proposal>(
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
     proposalPath(workspaceId, coordinatorId, proposalId, "/approve"),
     "POST",
     edits,
@@ -275,8 +312,8 @@ export function rejectProposal(
   proposalId: string,
   reason?: string,
   options?: ApiRequestOptions,
-): Promise<Proposal> {
-  return mutate<Proposal>(
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
     proposalPath(workspaceId, coordinatorId, proposalId, "/reject"),
     "POST",
     reason === undefined ? {} : { reason },
@@ -288,7 +325,7 @@ export function rejectProposal(
 // proposal_conflict error thrown by approveProposal or rejectProposal, or
 // null for any other error (including a 409 with a different error_code,
 // such as the conversation route's coordinator_profile_unavailable).
-export function getProposalConflict(error: unknown): Proposal | null {
+export function getProposalConflict(error: unknown): WireProposal | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
   if (!error.body || typeof error.body !== "object") return null;
   const body = error.body as Partial<ProposalConflictBody>;

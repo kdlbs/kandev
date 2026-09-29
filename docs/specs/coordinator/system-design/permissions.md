@@ -89,7 +89,10 @@ func ParsePolicy(raw *string) (Policy, error) // NULL -> PhaseOnePolicy
 `ParsePolicy` fills any action absent from a stored map with `denied`, so a
 map written by an older build never grants more. A stored value that fails
 to parse is treated as all `denied` and logged at error once per
-coordinator; the settings GET returns it as all `denied`.
+coordinator and revision; the settings GET returns it as all `denied`. The
+full result table, the `Allows` behaviour on an unknown action, where the
+log state lives and the `Service.Policy` return shape are in
+[coordinators](shared-interface.md#shared-interface).
 
 `Validate(p Policy) error` returns a field error naming the action when an
 action is outside the six, a value is outside the three,
@@ -139,8 +142,9 @@ exactly once and the last committed save sets every member it sent
 
 ## Conversation reset
 
-`resetConversation(tx, coordinatorID)` in `internal/coordinator/service.go`
-clears `conversation_task_id` and increments the phase-1 `config_revision`
+`resetConversation(ctx, exec, coordinatorID)` in `internal/coordinator/service.go`
+(exact signature and after-commit archive in
+[coordinators](shared-interface.md#shared-interface)) clears `conversation_task_id` and increments the phase-1 `config_revision`
 in the caller's transaction, and after commit archives the old conversation
 task through the same path a context change uses
 ([coordinators](coordinators.md#routes)), including its
@@ -270,8 +274,8 @@ Each check has one result shape:
 | phase-1 reference checks | unchanged phase-1 result | none |
 
 The phase-1 unknown-action error is "tool is not available on the
-coordinator MCP surface". Rows go through `activity.RecordRefusal(ctx,
-coordinatorID, actionClass, reasonCode)` ([activity log](activity-log.md#refusals)).
+coordinator MCP surface". Rows go through `Service.RecordRefusal(ctx, coordinatorID, workspaceID,
+actionClass, reasonCode)` ([activity log](activity-log.md#refusals)).
 Only the first three are refusals of an action (`002.2`); the Watches
 filter narrows what exists for the coordinator, as a missing id does, so
 it writes no row, which also keeps a chip's unwatched id
@@ -284,8 +288,10 @@ standing-order or goal action, so the allowlist refuses any such attempt
 
 ## Watch filter
 
-`WatchSet` (`internal/coordinator/watches.go`) is loaded once per guard call:
-`All bool` or a set of workflow ids.
+`WatchSet` (`internal/coordinator/watches.go`) is loaded once per guard call
+(shape, order and error behaviour in
+[coordinators](shared-interface.md#shared-interface)): `All bool` or a sorted set
+of workflow ids.
 
 | Call | Rule when not `All` |
 | --- | --- |

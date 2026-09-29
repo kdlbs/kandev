@@ -395,3 +395,19 @@ func conversationTaskCoordinatorID(task *taskmodels.Task) string {
 	id, _ := task.Metadata[taskmodels.MetaKeyCoordinatorID].(string)
 	return id
 }
+
+// archiveConversation archives the conversation task a committed
+// resetConversation cleared. An empty id names no task and does nothing.
+func (s *Service) archiveConversation(ctx context.Context, coordinatorID, taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.archiveClearedConversationTask(ctx, coordinatorID, taskID)
+}
+
+// resetConversation runs inside the caller's coordinator lock: it clears the
+// conversation task, increments config_revision and returns the previous task
+// id, which the caller archives after commit through archiveConversation.
+func (s *Service) resetConversation(ctx context.Context, exec coordinatorExec, coordinatorID string) (string, error) {
+	return s.store.resetConversation(ctx, exec, coordinatorID)
+}

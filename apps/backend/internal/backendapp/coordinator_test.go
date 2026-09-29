@@ -50,7 +50,7 @@ func TestInitCoordinatorWiring_DisabledBuildsStoreOnly(t *testing.T) {
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestInitCoordinatorWiring_EnabledBuildsService(t *testing.T) {
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestInitCoordinatorWiring_StoreErrorPropagates(t *testing.T) {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, false, newTestLogger())
 	if err == nil {
 		t.Fatal("expected an error when the coordinator store fails to initialize")
 	}
@@ -189,7 +189,7 @@ func TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister(t *testing.T) 
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows(t *testing
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestRegisterCoordinatorSubscribers_WiresStallSubscriptionAndPruneHook(t *te
 	pool := newCoordinatorTestPool(t)
 	log := newTestLogger()
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, log)
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, false, log)
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
-	svc, err := initCoordinatorWiring(ctx, pool, tracker, harness.taskSvc, harness.workflowSvc, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(ctx, pool, tracker, harness.taskSvc, harness.workflowSvc, nil, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 		CoordinatorID: coord.ID,
 		Spec:          coordinator.ProposalSpec{Title: "Proposed task", WorkflowID: workflowID, StepID: stepID},
 	}
-	if err := store.InsertProposal(ctx, proposal); err != nil {
+	if err := store.InsertProposal(ctx, proposal, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	staleClaimedAt := now.Add(-10 * time.Minute)
@@ -452,7 +452,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 	hook := registerCoordinatorDecisions(gin.New(), nil, svc, harness.taskSvc, harness.workflowSvc, newTestLogger())
 	hook(ctx, now)
 
-	got, err := store.GetProposal(ctx, workspaceID, coord.ID, proposal.ID)
+	got, err := store.GetProposal(ctx, workspaceID, coord.ID, proposal.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -468,5 +468,25 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 	}
 	if task.Title != "Proposed task" {
 		t.Errorf("Task.Title = %q, want %q", task.Title, "Proposed task")
+	}
+}
+
+func TestInitCoordinatorWiring_Phase2FollowsBothFlags(t *testing.T) {
+	cases := []struct {
+		enabled, phase2, wantSvc bool
+	}{{false, false, false}, {false, true, false}, {true, false, true}, {true, true, true}}
+	for _, tc := range cases {
+		tracker := newCoordinatorTestTracker(t)
+		pool := newCoordinatorTestPool(t)
+		svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, tc.enabled, tc.phase2, newTestLogger())
+		if err != nil {
+			t.Fatalf("initCoordinatorWiring: %v", err)
+		}
+		if (svc != nil) != tc.wantSvc {
+			t.Fatalf("enabled=%v phase2=%v: service present = %v", tc.enabled, tc.phase2, svc != nil)
+		}
+		if svc != nil && svc.Phase2Enabled() != tc.phase2 {
+			t.Fatalf("enabled=%v phase2=%v: Phase2Enabled = %v", tc.enabled, tc.phase2, svc.Phase2Enabled())
+		}
 	}
 }

@@ -55,6 +55,41 @@ type CoordinatorDTO struct {
 	OpenProposals         *int           `json:"open_proposals,omitempty"`
 	AgentProfileStatus    *ProfileStatus `json:"agent_profile_status,omitempty"`
 	ExecutorProfileStatus *ProfileStatus `json:"executor_profile_status,omitempty"`
+
+	*CoordinatorPhase2
+}
+
+// CoordinatorPhase2 carries the phase-2 read fields; nil (and so absent from
+// the JSON) while phase 2 is off.
+type CoordinatorPhase2 struct {
+	Policy         CoordinatorPolicyDTO `json:"policy"`
+	PolicyRevision int                  `json:"policy_revision"`
+	Watches        CoordinatorWatchDTO  `json:"watches"`
+}
+
+// CoordinatorPolicyDTO is the effective permission map.
+type CoordinatorPolicyDTO struct {
+	Actions map[Action]Setting `json:"actions"`
+}
+
+// CoordinatorWatchDTO is the watch scope; workflow_ids is [] unless selected.
+type CoordinatorWatchDTO struct {
+	Scope       string   `json:"scope"`
+	WorkflowIDs []string `json:"workflow_ids"`
+}
+
+// WithPolicyView attaches the phase-2 fields and returns the receiver.
+func (d *CoordinatorDTO) WithPolicyView(v PolicyView) *CoordinatorDTO {
+	ids := v.WorkflowIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	d.CoordinatorPhase2 = &CoordinatorPhase2{
+		Policy:         CoordinatorPolicyDTO{Actions: v.Actions},
+		PolicyRevision: v.PolicyRevision,
+		Watches:        CoordinatorWatchDTO{Scope: v.WatchScope, WorkflowIDs: ids},
+	}
+	return d
 }
 
 // NewCoordinatorDTO builds the base DTO shape shared by every coordinator
@@ -168,7 +203,7 @@ type ProposalDTO struct {
 	CoordinatorID string         `json:"coordinator_id"`
 	WorkspaceID   string         `json:"workspace_id"`
 	Status        ProposalStatus `json:"status"`
-	Spec          ProposalSpec   `json:"spec"`
+	Spec          any            `json:"spec"`
 	FinalSpec     *ProposalSpec  `json:"final_spec"`
 	ClaimedAt     *time.Time     `json:"claimed_at"`
 	TaskID        *string        `json:"task_id"`
@@ -177,24 +212,72 @@ type ProposalDTO struct {
 	DecidedBy     *string        `json:"decided_by"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
+
+	// ProposalPhase2 is nil, and its fields are absent from the body, while
+	// the phase-2 flag is off.
+	*ProposalPhase2
 }
 
-// NewProposalDTO builds a ProposalDTO from the domain type.
+// ProposalPhase2 holds the proposal wire fields added by phase 2.
+type ProposalPhase2 struct {
+	Kind             string          `json:"kind"`
+	TargetTaskID     *string         `json:"target_task_id"`
+	StandingOrderIDs []string        `json:"standing_order_ids"`
+	StartsAgent      bool            `json:"starts_agent"`
+	Outcome          json.RawMessage `json:"outcome"`
+}
+
+// NewProposalDTO builds the phase-1 ProposalDTO from the domain type.
 func NewProposalDTO(p *Proposal) *ProposalDTO {
+	return newProposalDTO(p, false)
+}
+
+// NewProposalDTOFor builds a ProposalDTO carrying the phase-2 fields when
+// phase2 is true. Spec is the ProposalSpec of a create_task proposal and the
+// raw stored JSON of any other kind.
+func NewProposalDTOFor(p *Proposal, phase2 bool) *ProposalDTO {
+	return newProposalDTO(p, phase2)
+}
+
+func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
+	var spec any = p.Spec
+	if p.RawSpec != "" {
+		spec = json.RawMessage(p.RawSpec)
+	}
+	kind := p.Kind
+	if kind == "" {
+		kind = ProposalKindCreateTask
+	}
+	ids := p.StandingOrderIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	outcome := json.RawMessage("null")
+	if p.OutcomeJSON != nil && json.Valid([]byte(*p.OutcomeJSON)) {
+		outcome = json.RawMessage(*p.OutcomeJSON)
+	}
+	var extra *ProposalPhase2
+	if phase2 {
+		extra = &ProposalPhase2{
+			Kind: kind, TargetTaskID: p.TargetTaskID, StandingOrderIDs: ids,
+			StartsAgent: p.StartsAgent, Outcome: outcome,
+		}
+	}
 	return &ProposalDTO{
-		ID:            p.ID,
-		CoordinatorID: p.CoordinatorID,
-		WorkspaceID:   p.WorkspaceID,
-		Status:        p.Status,
-		Spec:          p.Spec,
-		FinalSpec:     p.FinalSpec,
-		ClaimedAt:     p.ClaimedAt,
-		TaskID:        p.TaskID,
-		Error:         p.Error,
-		RejectReason:  p.RejectReason,
-		DecidedBy:     p.DecidedBy,
-		CreatedAt:     p.CreatedAt,
-		UpdatedAt:     p.UpdatedAt,
+		ProposalPhase2: extra,
+		ID:             p.ID,
+		CoordinatorID:  p.CoordinatorID,
+		WorkspaceID:    p.WorkspaceID,
+		Status:         p.Status,
+		Spec:           spec,
+		FinalSpec:      p.FinalSpec,
+		ClaimedAt:      p.ClaimedAt,
+		TaskID:         p.TaskID,
+		Error:          p.Error,
+		RejectReason:   p.RejectReason,
+		DecidedBy:      p.DecidedBy,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 }
 
@@ -223,11 +306,11 @@ type ProposalConflictResponse struct {
 
 // NewProposalConflictResponse builds the 409 body from the proposal row, as
 // re-read after the conflict.
-func NewProposalConflictResponse(p *Proposal) *ProposalConflictResponse {
+func NewProposalConflictResponse(p *Proposal, phase2 bool) *ProposalConflictResponse {
 	return &ProposalConflictResponse{
 		Error:     ErrorCodeProposalConflict,
 		ErrorCode: ErrorCodeProposalConflict,
-		Proposal:  *NewProposalDTO(p),
+		Proposal:  *NewProposalDTOFor(p, phase2),
 	}
 }
 
