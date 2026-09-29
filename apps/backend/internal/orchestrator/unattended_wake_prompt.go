@@ -54,6 +54,7 @@ func (s *Service) PromptUnattendedWake(ctx context.Context, in UnattendedWakePro
 	_, err := s.promptTask(ctx, in.TaskID, in.SessionID, in.Content, "", false, nil, true, launchOriginManual,
 		promptTaskOptions{
 			reserveTurnUntilDispatch: true,
+			disableDispatchRetry:     true,
 			afterDispatchAdmission:   store,
 			onAccepted:               in.OnAccepted,
 		})
