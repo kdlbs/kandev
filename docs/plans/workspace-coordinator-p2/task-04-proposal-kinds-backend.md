@@ -45,7 +45,7 @@ creates, and `standing_order_ids` on every propose tool.
 
 ## In scope
 
-- `kinds.go`: `KindExecutor` (`Validate`, `Execute`, `Editable`) with
+- `kinds.go`: `KindExecutor` (six methods per the design: `Kind`, `Action`, `ValidatePropose`, `ValidateEdits`, `Execute`, `ReRunsOnStaleClaim`) with
   `create_task` wrapping the phase-1 path, and `resume`, `message`, `move`
   ([design](../../specs/coordinator/system-design/proposal-kinds.md#executors)).
 - `propose_resume_kandev`, `propose_message_kandev`, `propose_move_kandev`
@@ -58,7 +58,7 @@ creates, and `standing_order_ids` on every propose tool.
   returns it even after the target stopped validating, and repeated under
   the lock (`001.5`).
 - The end-state catalog test that the registered coordinator tools equal
-  `ToolNames(policy, true)` for every policy, and the `001.4` walk of the
+  `ToolNames(policy, true)` for every policy, and the PERMISSIONS-001.4 walk of the
   `KindExecutor` registry asserting no kind merges or targets a
   `CompleteTaskOnEnter` step. The three propose tools' `ToolForAction` rows
   and handlers are registered here.
@@ -132,7 +132,16 @@ is refused 409 `policy_denied` after `start_agent` flips to `denied`, with
 no claim and no `MoveTask` call. A `starts_agent` true move proposal
 approved while both `move` and `start_agent` are `denied` returns 409 with
 `action` `move`; with only `start_agent` `denied` it returns `action`
-`start_agent`. Two identical `propose_task_kandev` calls
+`start_agent`. A resume propose refuses CREATED, COMPLETED and live-execution sessions
+and an IDLE session with no executor record, and accepts a FAILED one
+without a record. A move into a step that only disallows manual moves stores
+`starts_agent` false. A second identical propose returns the open proposal
+with `deduplicated: true`, and a `failed` proposal still blocks it. Approve
+of an archived resume or move target settles `failed` (not 400); a `resume`
+or `move` body carrying `text` or `title` is 400 `not_editable` after the
+status decision; `text: null` is 400 naming `text`. An `Execute` that hits its
+60-second deadline settles `outcome_unknown`; a late completion after a sweep
+matches zero rows and writes nothing. Two identical `propose_task_kandev` calls
 create two proposals, and a create call citing six ids, or one id twice, is
 refused naming `standing_order_ids` before any transaction. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.

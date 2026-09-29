@@ -25,8 +25,14 @@ a pull request or moves a task to Done.
 - **Target task:** the existing task a resume, message or move acts on.
 - **Open proposal:** a proposal in `pending`, `approving` or `failed`.
 - **Done step:** a workflow step that completes the task on entry.
-- **Resumable session:** the task's primary session exists, is not
-  `COMPLETED`, and has no running execution (the case a stall reports).
+- **Resumable session:** the task's primary session exists, is neither
+  `COMPLETED` nor `CREATED`, has no live agent execution (the case a stall
+  reports), and is one the orchestrator's resume accepts: it has an executor
+  record, or its state is `FAILED` or `CANCELLED`, or an interrupted recovery
+  is pending on it.
+- **Agent-starting step:** a step whose `on_enter` actions include
+  `auto_start_agent`, or that feeds, through `pull_from_step_id` links, a step
+  that does.
 - **Session that accepts a message:** the task's primary session is
   `STARTING`, `RUNNING`, `IDLE`, `WAITING_FOR_INPUT` or `COMPLETED`. A
   session that never started (`CREATED`), a `FAILED` or `CANCELLED` session,
@@ -67,7 +73,9 @@ a pull request or moves a task to Done.
   without a session that accepts a message, naming `task_id`.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.5:** When the coordinator already has an
   open proposal of the same kind for the same target task, the tool shall
-  return that proposal and create nothing; concurrent calls shall leave one.
+  return that proposal, marked as already open, and create nothing;
+  concurrent calls shall leave one. A `failed` proposal is open until a manager
+  rejects it or approves it again.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.6:** A stored proposal shall have its
   kind; a phase-1 proposal and one created by `propose_task_kandev` shall be
   `create_task`. Resume, message and move proposals shall count toward the
@@ -121,7 +129,8 @@ a pull request or moves a task to Done.
   shall run at most once. When its claim goes stale, the system shall settle
   it `failed` with "It may or may not have run; check the task" and shall not
   run it again; Approve on the failed card shall run it again only as a new
-  explicit approval.
+  explicit approval. An execution that outlives its claim shall not change the
+  settled row.
 
 ### REQ-COORDINATOR-PROPOSAL-KINDS-004: Cards
 
