@@ -24,6 +24,21 @@ export function linkToCoordinatorQueue(
   return group ? `${base}?group=${group}` : base;
 }
 
+/**
+ * The Needs-you screen with `?proposal=<id>&form=edit|reject`
+ * (proposal-cards.md#cards "Forms and navigation"), used by the chat card's
+ * Edit/Reject to deep-link into the same card's inline form there.
+ */
+export function linkToCoordinatorNeedsYouForm(
+  workspaceId: string,
+  coordinatorId: string,
+  proposalId: string,
+  form: "edit" | "reject",
+): string {
+  const base = linkToCoordinatorNeedsYou(workspaceId, coordinatorId);
+  return `${base}?proposal=${encodeURIComponent(proposalId)}&form=${form}`;
+}
+
 /** `/settings/workspaces/:id/coordinators`, the workspace's coordinator list in settings. */
 export function linkToCoordinatorSettingsList(workspaceId: string): string {
   return `/settings/workspaces/${encodeURIComponent(workspaceId)}/coordinators`;

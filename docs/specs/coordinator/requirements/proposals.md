@@ -240,7 +240,8 @@ Mockup:
   shall say "Approval in progress. Edits are locked." with no actions.
 - **AC-COORDINATOR-PROPOSALS-005.3:** A `failed` proposal shall say "Could not
   create the task: <error>. Nothing was created." and keep Approve, Edit and
-  Reject.
+  Reject. When the proposal carries no error text, it shall say "Could not
+  create the task. Nothing was created."
 - **AC-COORDINATOR-PROPOSALS-005.4:** **Edit** on the Needs-you card shall open
   title, description, workflow, step (eligible steps only) and repository in
   place with **Approve with edits** and **Cancel**; an empty title shall be
@@ -256,7 +257,8 @@ Mockup:
   created". Either toast is followed by "Next: <n> items still need you" or
   "Next: nothing needs you. That is the working state."
 - **AC-COORDINATOR-PROPOSALS-005.8:** A chat card shall show the settled state
-  "Approved: <card>" or "Rejected: <reason>".
+  "Approved: <card>" or "Rejected: <reason>". A reject that stored no reason
+  (`AC-COORDINATOR-PROPOSALS-003.1`) shall show "Rejected" with no reason.
 - **AC-COORDINATOR-PROPOSALS-005.9:** At a 390px-wide viewport the card actions
   and forms shall stack with touch targets of at least 44px and no horizontal
   scroll.
@@ -274,3 +276,18 @@ Mockup:
 - Any `automatic` write class (decision D13, gate G2 and phase 3).
 - Expiry of pending proposals: they stay until decided or their coordinator is
   deleted.
+- The agent profile and executor of the task an approval creates. **Decided
+  (D1), no backend change:** an approved task carries no profile of its own
+  and resolves like any task on its target workflow. The approve path
+  (`createApprovedTask`, `apps/backend/internal/coordinator/approve.go:367`)
+  sets neither `AgentProfileID` nor `AssigneeAgentProfileID` on the created
+  task. That is already Kandev's behavior for any task: at session start,
+  `resolveTaskAgentProfile`
+  (`apps/backend/internal/orchestrator/session_ensure.go:432`) resolves a
+  step-pinned profile, then the workflow's default, then `task.metadata`, then
+  the workspace default (`apps/backend/internal/orchestrator/session_ensure.go:439-448`),
+  the same chain a manually created task on that step follows; a task with no
+  workflow default and no workspace default still cannot start. Executor
+  resolution falls back the same way to the workspace's default executor
+  (`defaultExecutorID`, `apps/backend/internal/orchestrator/executor/executor_state.go:99`).
+  No phase 1 proposal-UI change follows from this.

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageChatbot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -31,6 +32,14 @@ export function CoordinatorCopilot({
 }: CoordinatorCopilotProps) {
   const { t } = useTranslation();
   const copilot = useCoordinatorCopilot(workspaceId, coordinatorId, canManage);
+  // Set right before closing the popover to navigate a chat card's Edit/Reject
+  // to its Needs-you deep link (proposal-cards.md#cards "Forms and
+  // navigation"): Radix's default `onCloseAutoFocus` would otherwise return
+  // focus to the launcher button once the popover unmounts, racing with (and
+  // sometimes winning against) the deep-linked form's own auto-focus. Escape
+  // and the header Close button call `handleOpenChange` directly and never
+  // set this, so they keep the default return-to-launcher focus (AC .004.7).
+  const suppressCloseAutoFocusRef = useRef(false);
 
   if (!copilot.enabled) return null;
 
@@ -46,6 +55,11 @@ export function CoordinatorCopilot({
       icon={<IconMessageChatbot className="h-4 w-4 shrink-0 text-muted-foreground" />}
       title={t("coordinator:copilotTitle", { name: coordinatorName })}
       closeLabel={t("coordinator:copilotClose")}
+      onCloseAutoFocus={(event) => {
+        if (!suppressCloseAutoFocusRef.current) return;
+        suppressCloseAutoFocusRef.current = false;
+        event.preventDefault();
+      }}
       trigger={
         <Tooltip open={copilot.open ? false : undefined}>
           <TooltipTrigger asChild>
@@ -67,6 +81,7 @@ export function CoordinatorCopilot({
     >
       <CoordinatorCopilotBody
         workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
         state={copilot.openSequence.state}
         routeSession={copilot.routeSession}
         chip={copilot.chip}
@@ -75,6 +90,10 @@ export function CoordinatorCopilot({
         onRetry={copilot.openSequence.retry}
         onRemoveChip={copilot.removeChip}
         onSuggest={copilot.suggest}
+        onClosePopover={() => {
+          suppressCloseAutoFocusRef.current = true;
+          copilot.handleOpenChange(false);
+        }}
       />
     </ChatPopoverShell>
   );

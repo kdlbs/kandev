@@ -1,7 +1,8 @@
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { AttentionTask } from "@/lib/coordinator/attention";
-import type { Stall } from "@/lib/api/domains/coordinator-api";
+import type { Proposal, Stall } from "@/lib/api/domains/coordinator-api";
+import { useProposalsStore } from "@/hooks/domains/coordinator/use-proposals";
 
 const mockUseCoordinatorTasks = vi.fn();
 const mockUseCoordinatorPRs = vi.fn();
@@ -44,6 +45,37 @@ function stall(taskId: string): Stall {
     detected_at: "2026-09-27T00:01:00Z",
   };
 }
+
+function proposal(overrides: Partial<Proposal> = {}): Proposal {
+  return {
+    id: "p-1",
+    coordinator_id: COORDINATOR_ID,
+    workspace_id: WORKSPACE_ID,
+    status: "pending",
+    spec: {
+      title: "Add tests",
+      description: "desc",
+      rationale: "rationale",
+      workflow_id: "wf-1",
+      step_id: "step-1",
+      repository_id: "repo-1",
+      source_task_id: "t-1",
+    },
+    final_spec: null,
+    claimed_at: null,
+    task_id: null,
+    error: null,
+    reject_reason: null,
+    decided_by: null,
+    created_at: "2026-09-27T00:00:00Z",
+    updated_at: "2026-09-27T00:00:00Z",
+    ...overrides,
+  };
+}
+
+afterEach(() => {
+  useProposalsStore.setState({ byCoordinator: {} });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -173,5 +205,36 @@ describe("useCoordinatorAttention - retryFailed", () => {
     result.current.retryFailed();
     expect(retryTasksMock).toHaveBeenCalledTimes(1);
     expect(retryFailedMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useCoordinatorAttention - computeNeedsYouCount", () => {
+  it("reads a fresh store merge made after this render, not the render's own classification", () => {
+    const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
+
+    expect(result.current.computeNeedsYouCount()).toBe(0);
+
+    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposal({ status: "pending" }));
+
+    expect(result.current.computeNeedsYouCount()).toBe(1);
+  });
+
+  it("counts only open-status proposals from the fresh store read", () => {
+    const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
+
+    useProposalsStore
+      .getState()
+      .mergeOne(COORDINATOR_ID, proposal({ id: "p-1", status: "pending" }));
+    useProposalsStore
+      .getState()
+      .mergeOne(COORDINATOR_ID, proposal({ id: "p-2", status: "approved" }));
+
+    expect(result.current.computeNeedsYouCount()).toBe(1);
+  });
+
+  it("returns 0 with no coordinator id", () => {
+    const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, null));
+
+    expect(result.current.computeNeedsYouCount()).toBe(0);
   });
 });
