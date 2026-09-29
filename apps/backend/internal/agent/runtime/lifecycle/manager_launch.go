@@ -368,6 +368,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[k] = v
 			continue
 		}
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
+			continue
+		}
 		if _, exists := metadata[k]; !exists {
 			metadata[k] = v
 		}

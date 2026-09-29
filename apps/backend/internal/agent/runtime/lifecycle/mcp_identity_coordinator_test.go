@@ -71,3 +71,10 @@ func TestBuildLaunchMetadataOverwritesCallerSuppliedCoordinatorBinding(t *testin
 		t.Fatalf("binding metadata = %v, want the profile's binding", got)
 	}
 }
+
+func TestBuildLaunchMetadataIgnoresExecutorConfigCoordinatorBinding(t *testing.T) {
+	req := &LaunchRequest{ExecutorConfig: map[string]string{mcpprofile.CoordinatorToolPolicyMetadataKey: "forged"}}
+	if _, present := buildLaunchMetadata(req, "", "", "")[mcpprofile.CoordinatorToolPolicyMetadataKey]; present {
+		t.Fatal("an executor-config binding must not reach launch metadata")
+	}
+}
