@@ -157,7 +157,11 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if _, cErr := e.resolveCoordinatorSessionStart(ctx, taskID); cErr != nil {
 			return mcpprofile.Context{}, cErr
 		}
-		return e.withCanvasCapability(mcpprofile.NewCoordinator()), nil
+		profile := mcpprofile.NewCoordinator()
+		if err := bindCoordinatorToolPolicy(&profile, task); err != nil {
+			return mcpprofile.Context{}, err
+		}
+		return e.withCanvasCapability(profile), nil
 	}
 	if noRow {
 		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
