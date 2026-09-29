@@ -1,16 +1,19 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@kandev/ui/card";
 import { cn } from "@/lib/utils";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import { useProposalRow } from "@/hooks/domains/coordinator/use-proposals";
 import { deriveCopilotItemId } from "@/lib/coordinator/copilot-id";
 import { formatAge } from "@/lib/coordinator/format";
 import { resolveProposalSourceTask, severityFor, whyClearsText } from "@/lib/coordinator/item-text";
+import { ProposalCard, type ProposalCardForm } from "../proposal-card/proposal-card";
 import { AskAboutThisButton, NeedsYouItemPrimaryActions } from "./needs-you-item-actions";
-import { ProposalDetails } from "./proposal-details";
 
 export type NeedsYouItemCardProps = {
   item: NeedsYouItem;
+  workspaceId: string;
   stepNameByTaskId: Map<string, string>;
   workflowNameById: Map<string, string>;
   stepNameByWorkflowStep: Map<string, string>;
@@ -18,7 +21,17 @@ export type NeedsYouItemCardProps = {
   coordinatorName: string;
   coordinatorId: string;
   canManage: boolean;
+  /** Opens the proposal's form immediately, from the chat card's "Forms and navigation" deep link. */
+  autoOpenForm?: ProposalCardForm | null;
+  onAutoFormOpened?: () => void;
+  /** "full" variant's "Next" toast line (proposal-cards.md#cards "Toast counts"). */
+  computeNeedsYouCount?: () => number;
 };
+
+/** `needs-you-item-heading-<id>`, the focusable heading id `proposal-cards.md#cards "Focus after a decision"` moves focus to. */
+export function needsYouItemHeadingId(itemId: string): string {
+  return `needs-you-item-heading-${itemId}`;
+}
 
 function headFor(
   item: NeedsYouItem,
@@ -48,6 +61,7 @@ function headFor(
  */
 export function NeedsYouItemCard({
   item,
+  workspaceId,
   stepNameByTaskId,
   workflowNameById,
   stepNameByWorkflowStep,
@@ -55,12 +69,18 @@ export function NeedsYouItemCard({
   coordinatorName,
   coordinatorId,
   canManage,
+  autoOpenForm,
+  onAutoFormOpened,
+  computeNeedsYouCount,
 }: NeedsYouItemCardProps) {
   const { t } = useTranslation();
   const head = headFor(item, stepNameByTaskId, openTasksById, t("coordinator:newTask"));
   const severity = severityFor(item);
   const { why, clears } = whyClearsText(item, t);
   const copilotId = deriveCopilotItemId(item, openTasksById);
+  const headingRef = useRef<HTMLDivElement>(null);
+  const proposalId = item.kind === "proposal" ? item.proposal.id : null;
+  const proposalRow = useProposalRow(coordinatorId, proposalId);
 
   return (
     // The severity is the stripe down the left edge, so the list can be
@@ -76,7 +96,12 @@ export function NeedsYouItemCard({
       <CardHeader>
         {/* pr-2: the age ends this cell and Ask about this begins the next, so
             without it the two sit 4px apart (mockup v2.1 `.itemhead` gap: 8px). */}
-        <CardTitle className="flex flex-wrap items-center gap-2 pr-2">
+        <CardTitle
+          ref={headingRef}
+          id={needsYouItemHeadingId(item.id)}
+          tabIndex={-1}
+          className="flex flex-wrap items-center gap-2 pr-2"
+        >
           <span>{head.identifier}</span>
           {head.stepName && (
             <span className="text-muted-foreground font-normal">{head.stepName}</span>
@@ -93,12 +118,20 @@ export function NeedsYouItemCard({
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-2">
-        {item.kind === "proposal" && (
-          <ProposalDetails
-            proposal={item.proposal}
+        {item.kind === "proposal" && proposalRow && (
+          <ProposalCard
+            variant="full"
+            proposal={proposalRow}
+            canManage={canManage}
+            workspaceId={workspaceId}
+            coordinatorId={coordinatorId}
             workflowNameById={workflowNameById}
             stepNameByWorkflowStep={stepNameByWorkflowStep}
             coordinatorName={coordinatorName}
+            autoOpenForm={autoOpenForm}
+            onAutoFormOpened={onAutoFormOpened}
+            onFormForceClosed={() => headingRef.current?.focus()}
+            computeNeedsYouCount={computeNeedsYouCount}
           />
         )}
         {/* Label beside its text, not above it: two stacked pairs turned a

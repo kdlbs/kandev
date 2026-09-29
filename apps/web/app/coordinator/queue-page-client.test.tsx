@@ -77,6 +77,7 @@ function readyContextWith(classification: ClassifyResult): CoordinatorReadyConte
         { kind: "proposals", error: false, loadedAt: 1 },
       ],
       retryFailed: vi.fn(),
+      computeNeedsYouCount: vi.fn(() => 0),
     },
   };
 }

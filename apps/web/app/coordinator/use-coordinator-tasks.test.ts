@@ -101,7 +101,9 @@ describe("useCoordinatorTasks - active workspace (live cache)", () => {
     expect(result.current.stepNameByWorkflowStep.get("wf-b:step-2")).toBe("Review");
     expect(result.current.stepNameByWorkflowStep.has("wf-other:step-3")).toBe(false);
   });
+});
 
+describe("useCoordinatorTasks - active workspace (live cache): loadedAt and error tracking", () => {
   it("reports no error and no load time before the first success", () => {
     mockState = baseState({
       workspaceContextRead: {
@@ -140,6 +142,28 @@ describe("useCoordinatorTasks - active workspace (live cache)", () => {
         snapshotPending: false,
         snapshotError: null,
         snapshotRequestId: "req-1",
+      },
+    });
+
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+
+    expect(result.current.loadedAt).toBeDefined();
+  });
+
+  // The shared kanban slice nulls `snapshotRequestId` back out once a read
+  // settles (`nextWorkspaceContextRequestId`), and a boot-hydrated snapshot
+  // resolves without ever going through `snapshotPending`/
+  // `snapshotRequestId` at all (`useAllWorkflowSnapshots` skips the fetch
+  // when every workflow's snapshot is already boot-hydrated) — so a
+  // completed, error-free read can be observed with `snapshotRequestId:
+  // null` on the very first render. `loadedAt` must still resolve.
+  it("records a load time for a completed read even when snapshotRequestId is null", () => {
+    mockState = baseState({
+      workspaceContextRead: {
+        workspaceId: WORKSPACE_ID,
+        snapshotPending: false,
+        snapshotError: null,
+        snapshotRequestId: null,
       },
     });
 

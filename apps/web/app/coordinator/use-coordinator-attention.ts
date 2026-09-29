@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { TaskPR } from "@/lib/types/github";
 import { classify, type AttentionTask, type ClassifyResult } from "@/lib/coordinator/attention";
+import { isOpenProposal, useProposalsStore } from "@/hooks/domains/coordinator/use-proposals";
 import { useCoordinatorInputs } from "./use-coordinator-inputs";
 import { useCoordinatorPRs } from "./use-coordinator-prs";
 import { useCoordinatorTasks } from "./use-coordinator-tasks";
@@ -34,6 +35,14 @@ export type UseCoordinatorAttentionResult = {
   inputs: CoordinatorInputStatus[];
   /** Re-issues only the reads currently in an error state, in parallel. */
   retryFailed: () => void;
+  /**
+   * The Needs-you item count a decision toast's "Next" line reads
+   * (proposal-cards.md#cards "Toast counts"), computed from a fresh
+   * `useProposalsStore` read rather than this render's `classification` so
+   * it reflects the store merge a decision just made, not last render's
+   * snapshot.
+   */
+  computeNeedsYouCount: () => number;
 };
 
 /**
@@ -77,6 +86,18 @@ export function useCoordinatorAttention(
     retryStallsAndProposals();
   };
 
+  const tasks = tasksInput.tasks;
+  const stallValues = stalls.value;
+  const computeNeedsYouCount = useCallback((): number => {
+    if (!coordinatorId) return classification.needsYou.length;
+    const coordinatorProposals = useProposalsStore.getState().byCoordinator[coordinatorId];
+    const freshProposals = coordinatorProposals
+      ? Object.values(coordinatorProposals.byId).filter(isOpenProposal)
+      : [];
+    return classify(tasks, stallValues ?? [], freshProposals, Date.now()).needsYou.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- classification.needsYou.length is only the no-coordinator fallback, not a dependency of the fresh read
+  }, [coordinatorId, tasks, stallValues]);
+
   return {
     classification,
     stepNameByTaskId: tasksInput.stepNameByTaskId,
@@ -87,5 +108,6 @@ export function useCoordinatorAttention(
     tasksNeverLoaded: tasksInput.loadedAt === undefined,
     inputs,
     retryFailed,
+    computeNeedsYouCount,
   };
 }

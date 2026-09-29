@@ -12,7 +12,6 @@ requirements:
   - REQ-COORDINATOR-PROPOSALS-002
   - REQ-COORDINATOR-PROPOSALS-003
   - REQ-COORDINATOR-PROPOSALS-004
-  - REQ-COORDINATOR-PROPOSALS-005
 ---
 
 # Task proposals System Design
@@ -31,8 +30,7 @@ owns task creation; this design only calls it.
 | `REQ-COORDINATOR-PROPOSALS-001` | [Store](#store), [Propose](#propose) |
 | `REQ-COORDINATOR-PROPOSALS-002` | [Approve](#approve), [Edits](#edits), [Recovery](#recovery), [Reserved prefix](#reserved-prefix) |
 | `REQ-COORDINATOR-PROPOSALS-003` | [Reject](#reject) |
-| `REQ-COORDINATOR-PROPOSALS-004` | [Routes](#routes), [Events](#events), [Client store](#client-store) |
-| `REQ-COORDINATOR-PROPOSALS-005` | [Cards](#cards) |
+| `REQ-COORDINATOR-PROPOSALS-004` | [Routes](#routes), [Events](#events); client side in [proposal-cards.md](proposal-cards.md#client-store) |
 
 ## Store
 
@@ -484,52 +482,10 @@ same log-and-continue rule as the task service's own event publishing. The forwa
 `gateway/websocket/coordinator_notifications.go` sends it to clients
 subscribed to the workspace, as other workspace notifications do.
 
-## Client store
+## Client store and cards
 
-`hooks/domains/coordinator/use-proposals.ts` keeps proposals keyed by id per
-coordinator. It loads `status=pending` on mount and refetches on
-`coordinator.updated`. A merge never replaces a settled status (`approved`,
-`rejected`) with an unsettled one, so a late list response cannot revive a
-decided card.
-
-A `status=pending` refetch alone cannot satisfy
-`AC-COORDINATOR-PROPOSALS-004.4` for a proposal this client already knows
-about: once it settles, the pending list simply stops containing it, so a
-browser that had it cached as `pending`/`approving` would otherwise keep
-showing that stale state forever instead of the settled one. On each
-`coordinator.updated`, after merging the fresh `status=pending` response, the
-hook also fetches by id (`GET .../proposals/:pid`) every locally cached id
-that response no longer contains, and merges each result the same way (never
-un-settling a settled card). This is bounded by how many ids the client has
-ever locally held for its coordinator, not by the 25-open cap. A Needs-you
-item that settles and was never cached beyond the list is not affected: it is
-correct for it to simply stop being a Needs-you item.
-
-The chat transcript's `ProposalCard` (see [Cards](#cards)) is attached to a
-specific `proposal_id` that can outlive the pending window entirely: a
-reloaded second browser may never have fetched the pending list at the
-moment a proposal it is displaying was still open. It therefore does not rely
-on `use-proposals.ts`'s list-keyed cache: it fetches its own `proposal_id` by
-id on mount and again on every `coordinator.updated` for its coordinator,
-independent of whether that id is in the current pending list, which is what
-lets it show "Approved: <card>" or "Rejected: <reason>"
-(`AC-COORDINATOR-PROPOSALS-005.8`) after a reload with no other proposal
-ever having been listed.
-
-## Cards
-
-- One `ProposalCard` renders pending, approving, failed and settled states; it
-  is used on Needs you and inside the copilot transcript.
-- In the transcript the card is attached to the tool-call message of
-  `propose_task_kandev` by the returned `proposal_id`.
-- Edit and Reject forms render in place on the Needs-you card; from the chat
-  card they navigate to Needs you and open the same form, focus moving to it.
-- The decision toast reads the item count from the classification of
-  [needs-you](needs-you.md#classification) after the store update.
-- Readers get the card without actions.
-- An `approving` card compares `claimed_at` with the two-minute threshold: not
-  stale shows "Approval in progress. Edits are locked."; stale shows
-  "Approval did not finish." with **Retry** for managers.
+The client proposal store and the proposal cards (both surfaces) are in
+[proposal-cards.md](proposal-cards.md).
 
 ## Security
 
@@ -544,7 +500,7 @@ ever having been listed.
   and no user-facing copy claims more than the guard enforces.
 - A proposal read never writes, so no request, from any site, can trigger
   recovery or otherwise mutate a proposal through a read route.
-- Spec strings are untrusted and rendered as text.
+- Spec strings are untrusted; the cards render them as text.
 - The created task is ordinary; the coordinator gains no authority over it.
 
 ## Observability

@@ -4,10 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useWebSocketClient } from "@/lib/ws/connection";
 import {
   listCoordinatorStalls,
-  listProposals,
   type Proposal,
   type Stall,
 } from "@/lib/api/domains/coordinator-api";
+import { useProposals } from "@/hooks/domains/coordinator/use-proposals";
 
 /**
  * One screen input's last-known state (docs/specs/coordinator/system-design/
@@ -35,23 +35,24 @@ export type UseCoordinatorInputsResult = {
 
 /**
  * Holds the two coordinator-owned screen inputs (stall records and the
- * viewed coordinator's pending proposals) for the Needs you / Queue screens.
+ * viewed coordinator's open proposals) for the Needs you / Queue screens.
  * Never holds tasks — those come from `useAllWorkflowSnapshots` via
  * `workspaceContextRead` (needs-you.md#inputs).
  *
- * One latest-request-wins sequence per input is shared across mount,
- * `retryFailed`, and `coordinator.updated` (Build decision 8): a newer read
- * for an input always wins over an older, still in-flight one for the same
- * input, and concurrent re-reads are never deduped or cancelled.
+ * Proposals come from the shared `use-proposals.ts` store
+ * (docs/specs/coordinator/system-design/proposal-cards.md#client-store), so
+ * Needs you, Queue and the toast count read one cache instead of each
+ * issuing their own `listProposals` call. Stalls keep their own
+ * one-latest-request-wins sequence (Build decision 8): a newer read always
+ * wins over an older, still in-flight one, and concurrent re-reads are never
+ * deduped or cancelled.
  */
 export function useCoordinatorInputs(
   workspaceId: string | null,
   coordinatorId: string | null,
 ): UseCoordinatorInputsResult {
   const [stalls, setStalls] = useState<CoordinatorInputEntry<Stall[]>>(initialEntry);
-  const [proposals, setProposals] = useState<CoordinatorInputEntry<Proposal[]>>(initialEntry);
   const stallsSeqRef = useRef(0);
-  const proposalsSeqRef = useRef(0);
   const wsClient = useWebSocketClient();
 
   const readStalls = useCallback((ws: string) => {
@@ -67,26 +68,11 @@ export function useCoordinatorInputs(
       });
   }, []);
 
-  const readProposals = useCallback((ws: string, coordinator: string) => {
-    const seq = ++proposalsSeqRef.current;
-    listProposals(ws, coordinator, "pending")
-      .then((res) => {
-        if (proposalsSeqRef.current !== seq) return;
-        setProposals({ value: res.proposals, loadedAt: Date.now(), error: false });
-      })
-      .catch(() => {
-        if (proposalsSeqRef.current !== seq) return;
-        setProposals((prev) => ({ ...prev, error: true }));
-      });
-  }, []);
-
   useEffect(() => {
     setStalls(initialEntry);
-    setProposals(initialEntry);
     if (!workspaceId || !coordinatorId) return;
     readStalls(workspaceId);
-    readProposals(workspaceId, coordinatorId);
-  }, [workspaceId, coordinatorId, readStalls, readProposals]);
+  }, [workspaceId, coordinatorId, readStalls]);
 
   useEffect(() => {
     if (!wsClient || !workspaceId || !coordinatorId) return;
@@ -94,15 +80,16 @@ export function useCoordinatorInputs(
       const payload = message.payload;
       if (payload.workspace_id !== workspaceId || payload.coordinator_id !== coordinatorId) return;
       readStalls(workspaceId);
-      readProposals(workspaceId, coordinatorId);
     });
-  }, [wsClient, workspaceId, coordinatorId, readStalls, readProposals]);
+  }, [wsClient, workspaceId, coordinatorId, readStalls]);
+
+  const { proposals, retryFailed: retryProposals } = useProposals(workspaceId, coordinatorId);
 
   const retryFailed = useCallback(() => {
     if (!workspaceId || !coordinatorId) return;
     if (stalls.error) readStalls(workspaceId);
-    if (proposals.error) readProposals(workspaceId, coordinatorId);
-  }, [workspaceId, coordinatorId, stalls.error, proposals.error, readStalls, readProposals]);
+    retryProposals();
+  }, [workspaceId, coordinatorId, stalls.error, readStalls, retryProposals]);
 
   return { stalls, proposals, retryFailed };
 }
