@@ -14,6 +14,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -614,7 +616,7 @@ func TestMarkGoalMet(t *testing.T) {
 	}
 }
 
-func TestMarkGoalMet_RecordsIdentityAndRollsBackOnResetError(t *testing.T) {
+func TestMarkGoalMet_RollsBackOnResetError(t *testing.T) {
 	f := newGoalFixture(t)
 	f.createTasksTable()
 	g := f.mustPut(`{"name":"g","criteria":[]}`)
@@ -742,5 +744,86 @@ func TestRegisterRoutes_GoalRoutesOnlyWithPhase2(t *testing.T) {
 				t.Fatalf("phase2=%v %s %s = %d, want %d", on, route.method, route.path, rec.Code, want)
 			}
 		}
+	}
+}
+
+func TestMarkGoalMet_RecordsMetBy(t *testing.T) {
+	f := newGoalFixture(t)
+	f.createTasksTable()
+	g := f.mustPut(`{"name":"g","criteria":[]}`)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "u1"})
+	met, err := f.svc.MarkGoalMet(ctx, f.c.WorkspaceID, f.c.ID, nil)
+	if err != nil || met.ID != g.ID || met.MetBy == nil || *met.MetBy != "u1" {
+		t.Fatalf("met = %+v, %v", met, err)
+	}
+	stored, err := f.store.LastMetGoal(context.Background(), f.c.ID)
+	if err != nil || stored == nil || stored.MetBy == nil || *stored.MetBy != "u1" {
+		t.Fatalf("stored met_by = %+v, %v", stored, err)
+	}
+
+	f2 := newGoalFixture(t)
+	f2.createTasksTable()
+	f2.mustPut(`{"name":"g","criteria":[]}`)
+	synthetic := authn.WithIdentity(context.Background(), authn.Identity{UserID: "sys", Synthetic: true})
+	met, err = f2.svc.MarkGoalMet(synthetic, f2.c.WorkspaceID, f2.c.ID, nil)
+	if err != nil || met.MetBy != nil {
+		t.Fatalf("synthetic met = %+v, %v", met, err)
+	}
+}
+
+type readOnlyAuthorizer struct{}
+
+func (readOnlyAuthorizer) AuthorizeWorkspaceScope(_ context.Context, _ string, scope authz.Scope) error {
+	if scope == authz.ScopeWorkspaceRead {
+		return nil
+	}
+	return service.ErrForbidden
+}
+
+func TestGoal_ReaderReadsButCannotWrite(t *testing.T) {
+	f := newGoalFixture(t)
+	f.createTasksTable()
+	g := f.mustPut(`{"name":"g","criteria":[{"text":"a"}]}`)
+	reader := &Handlers{service: NewService(f.store, NewValidator(nil, nil), readOnlyAuthorizer{}, newTestLogger(t), WithPhase2(true)), logger: newTestLogger(t)}
+	p := workspaceParams(f.c.ID)
+	rec := runHandler(reader.httpGetGoal, http.MethodGet, "/x", "", p)
+	var view GoalView
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reader get = %d", rec.Code)
+	}
+	decodeBody(t, rec, &view)
+	if view.Active == nil || view.Active.ID != g.ID || view.Measures == nil {
+		t.Fatalf("reader view = %+v", view)
+	}
+	crit := append(gin.Params{}, p...)
+	crit = append(crit, gin.Param{Key: "crid", Value: g.Criteria[0].ID})
+	for name, got := range map[string]int{
+		"put":    runHandler(reader.httpPutGoal, http.MethodPut, "/x", `{"name":"h","criteria":[]}`, p).Code,
+		"toggle": runHandler(reader.httpSetGoalCriterion, http.MethodPost, "/x", `{"done":true}`, crit).Code,
+		"met":    runHandler(reader.httpMarkGoalMet, http.MethodPost, "/x", "", p).Code,
+	} {
+		if got != http.StatusForbidden {
+			t.Fatalf("reader %s = %d, want 403", name, got)
+		}
+	}
+	stored, _ := f.store.ActiveGoal(context.Background(), f.c.ID)
+	if stored == nil || stored.Name != "g" || stored.Criteria[0].Done {
+		t.Fatalf("reader changed state: %+v", stored)
+	}
+}
+
+func TestHTTPGoal_OversizeBodyIs413BeforeAuthorization(t *testing.T) {
+	f := newGoalFixture(t)
+	f.createTasksTable()
+	huge := `{"name":"` + strings.Repeat("a", maxGoalBodyBytes) + `"}`
+	if got := runHandler(f.h.httpPutGoal, http.MethodPut, "/x", huge, workspaceParams(f.c.ID)).Code; got != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize put = %d", got)
+	}
+	if got := runHandler(f.h.httpPutGoal, http.MethodPut, "/x", huge, workspaceParams("missing")).Code; got != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize put to unknown coordinator = %d", got)
+	}
+	under := `{"name":"g","criteria":[],"goal_id":"` + strings.Repeat("a", 2000) + `"}`
+	if got := runHandler(f.h.httpPutGoal, http.MethodPut, "/x", under, workspaceParams(f.c.ID)).Code; got == http.StatusRequestEntityTooLarge {
+		t.Fatal("body under the cap was rejected as too large")
 	}
 }

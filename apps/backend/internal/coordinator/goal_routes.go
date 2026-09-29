@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"errors"
 	"io"
 	"net/http"
 
@@ -18,10 +19,20 @@ func registerGoalRoutes(workspace *gin.RouterGroup, h *Handlers) {
 	goal.POST("/met", h.httpMarkGoalMet)
 }
 
-// readBody returns the raw request body; a read failure is a 400 with no
-// field.
+// maxGoalBodyBytes bounds a goal request body: the field caps (120-char name,
+// 10 criteria of 200 chars, ids) fit well inside it.
+const maxGoalBodyBytes = 16 << 10
+
+// readBody returns the raw request body, read before the caller is
+// authorized and therefore bounded. An oversize body is a 413; any other read
+// failure is a 400 with no field.
 func (h *Handlers) readBody(c *gin.Context) ([]byte, bool) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxGoalBodyBytes))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+		return nil, false
+	}
 	if err != nil {
 		h.respondError(c, &FieldError{Message: "request body could not be read"})
 		return nil, false
