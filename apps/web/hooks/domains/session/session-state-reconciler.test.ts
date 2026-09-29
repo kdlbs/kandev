@@ -32,7 +32,11 @@ it("backfills persisted model configuration while reconciling a session summary"
   const session = sessionWithSavedModel();
   const store = createAppStore();
   store.getState().setTaskSession({ ...session, metadata: {}, agent_profile_snapshot: undefined });
-  vi.spyOn(api, "fetchTaskSession").mockResolvedValue({ session });
+  vi.spyOn(api, "fetchTaskSessionConditional").mockResolvedValue({
+    status: "ok",
+    data: { session },
+    etag: '"session-v1"',
+  });
   const release = acquireSessionStateReconciliation(store, session.id);
   try {
     await vi.waitFor(() =>
@@ -56,8 +60,8 @@ it("keeps a live model event that arrives before background reconciliation", asy
   const session = sessionWithSavedModel();
   const store = createAppStore();
   store.getState().setTaskSession({ ...session, metadata: {} });
-  let finish!: (value: { session: TaskSession }) => void;
-  vi.spyOn(api, "fetchTaskSession").mockReturnValue(
+  let finish!: (value: Awaited<ReturnType<typeof api.fetchTaskSessionConditional>>) => void;
+  vi.spyOn(api, "fetchTaskSessionConditional").mockReturnValue(
     new Promise((resolve) => {
       finish = resolve;
     }),
@@ -69,7 +73,7 @@ it("keeps a live model event that arrives before background reconciliation", asy
       models: [],
       configOptions: [],
     });
-    finish({ session });
+    finish({ status: "ok", data: { session }, etag: '"session-v1"' });
     await vi.waitFor(() =>
       expect(store.getState().taskSessions.items[session.id].metadata).toEqual(session.metadata),
     );

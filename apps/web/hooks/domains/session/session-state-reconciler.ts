@@ -1,8 +1,8 @@
 import type { StoreApi } from "zustand";
-import { fetchTaskSession } from "@/lib/api";
+import { fetchTaskSessionConditional } from "@/lib/api";
+import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/model-hydration";
 import type { AppState } from "@/lib/state/store";
 import { captureTaskSessionHydrationEpoch } from "@/lib/state/slices/session/hydration-epochs";
-import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/model-hydration";
 import { isStaleSessionStateEvent } from "@/lib/ws/handlers/agent-session";
 
 const BUSY_SESSION_STATES = new Set(["STARTING", "RUNNING", "CREATED"]);
@@ -13,6 +13,7 @@ type Reconciliation = {
   consumers: number;
   inFlight: boolean;
   startedAt: number;
+  etag: string | null;
   timer?: ReturnType<typeof setTimeout>;
 };
 
@@ -55,6 +56,7 @@ export function acquireSessionStateReconciliation(
     consumers: 1,
     inFlight: false,
     startedAt: Date.now(),
+    etag: null,
   };
   reconciliations.set(sessionId, reconciliation);
 
@@ -77,30 +79,66 @@ export function acquireSessionStateReconciliation(
       store.getState(),
       sessionId,
     );
-    fetchTaskSession(sessionId)
-      .then((res) => {
-        if (
-          !res.session ||
-          reconciliation.consumers === 0 ||
-          !stillOwnsReconciliation(reconciliations, sessionId, reconciliation)
-        ) {
-          return;
-        }
-        const current = store.getState().taskSessions.items[sessionId];
-        if (isStaleSessionStateEvent(current, res.session.updated_at)) return;
-        store.getState().setTaskSession(res.session, hydrationEpochAtRequestStart);
-        const modelState = buildSessionModelsState(res.session);
-        // Runtime events remain authoritative after the selector has initialized.
-        if (modelState.sessionModels && !store.getState().sessionModels.bySessionId[sessionId]) {
-          store.getState().hydrate(modelState);
-        }
-      })
+    readAndReconcile(
+      store,
+      sessionId,
+      reconciliation,
+      reconciliations,
+      hydrationEpochAtRequestStart,
+    )
       .catch(() => {})
       .finally(scheduleNext);
   }
 
   reconcile();
   return () => releaseReconciliation(reconciliations, sessionId, reconciliation);
+}
+
+async function readAndReconcile(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  reconciliation: Reconciliation,
+  reconciliations: Map<string, Reconciliation>,
+  hydrationEpochAtRequestStart: ReturnType<typeof captureTaskSessionHydrationEpoch>,
+): Promise<void> {
+  const owns = () =>
+    reconciliation.consumers > 0 &&
+    stillOwnsReconciliation(reconciliations, sessionId, reconciliation);
+  if (!owns()) return;
+
+  let result = reconciliation.etag
+    ? await fetchTaskSessionConditional(sessionId, reconciliation.etag)
+    : await fetchTaskSessionConditional(sessionId);
+  if (!owns()) return;
+
+  if (result.status === "not-modified") {
+    if (store.getState().taskSessions.items[sessionId]) return;
+
+    // A 304 can only reuse a full representation held by this owner. If the
+    // store entry disappeared while the request was in flight, clear the
+    // validator and immediately recover with an unconditional snapshot.
+    reconciliation.etag = null;
+    result = await fetchTaskSessionConditional(sessionId);
+    if (!owns() || result.status === "not-modified") return;
+  }
+
+  const session = result.data.session;
+  if (!session) return;
+
+  const current = store.getState().taskSessions.items[sessionId];
+  if (isStaleSessionStateEvent(current, session.updated_at)) {
+    if (result.etag !== reconciliation.etag) reconciliation.etag = null;
+    return;
+  }
+
+  if (result.etag && result.etag === reconciliation.etag) return;
+
+  store.getState().setTaskSession(session, hydrationEpochAtRequestStart);
+  const modelState = buildSessionModelsState(session);
+  if (modelState.sessionModels && !store.getState().sessionModels.bySessionId[sessionId]) {
+    store.getState().hydrate(modelState);
+  }
+  reconciliation.etag = result.etag;
 }
 
 function releaseReconciliation(
@@ -111,6 +149,7 @@ function releaseReconciliation(
   if (!stillOwnsReconciliation(reconciliations, sessionId, reconciliation)) return;
   reconciliation.consumers -= 1;
   if (reconciliation.consumers > 0) return;
+  reconciliation.etag = null;
   if (reconciliation.timer) clearTimeout(reconciliation.timer);
   // Keep an in-flight owner registered until its request settles. React can
   // replace one useSession consumer with another during the same navigation;

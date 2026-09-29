@@ -1,20 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getPRFeedback } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
 import { useMinVisibleDuration } from "@/hooks/use-min-visible-duration";
 import type { PRFeedback, TaskPR } from "@/lib/types/github";
+import { usePRFeedbackResourceScope, usePRFeedbackResourceSnapshot } from "./pr-feedback-resource";
 
 /**
  * How long the "Updating…" footer stays up once a refresh starts. Long enough
  * to read, short enough that it never feels like the popover is stuck.
  */
 export const PR_REFRESH_INDICATOR_MIN_MS = 450;
-
-export function prFeedbackKey(pr: { owner: string; repo: string; pr_number: number }): string {
-  return `${pr.owner}/${pr.repo}#${pr.pr_number}`;
-}
 
 type Result = {
   /** Last cached PRFeedback (may be stale while a refetch is in flight). */
@@ -40,27 +36,41 @@ type Result = {
  * dedup is preserved across both call sites.
  */
 function useFeedbackFetch(workspaceId: string | null, pr: TaskPR | null) {
-  const setEntry = useAppStore((state) => state.setPRFeedbackCacheEntry);
-  const [isFetching, setIsFetching] = useState(false);
-  const requestRef = useRef(0);
+  const scope = usePRFeedbackResourceScope();
+  const owner = pr?.owner;
+  const repo = pr?.repo;
+  const prNumber = pr?.pr_number;
+  const key =
+    workspaceId && owner && repo && prNumber
+      ? scope.key({ workspaceId, owner, repo, prNumber })
+      : null;
+  const snapshot = usePRFeedbackResourceSnapshot(scope, key);
+  const fetch = useCallback(() => {
+    if (!workspaceId || !owner || !repo || !prNumber) return Promise.reject();
+    return getPRFeedback(workspaceId, owner, repo, prNumber, { cache: "no-store" });
+  }, [owner, prNumber, repo, workspaceId]);
   const refetch = useCallback(() => {
-    if (!workspaceId || !pr) return;
-    const requestId = ++requestRef.current;
-    setIsFetching(true);
-    getPRFeedback(workspaceId, pr.owner, pr.repo, pr.pr_number, { cache: "no-store" })
-      .then((response) => {
-        if (requestRef.current !== requestId) return;
-        if (response) setEntry(prFeedbackKey(pr), response);
-      })
-      .catch(() => {
-        // Swallow errors — the popover keeps showing the stale cached value
-        // (stale-while-revalidate). A future refetch may succeed.
-      })
-      .finally(() => {
-        if (requestRef.current === requestId) setIsFetching(false);
-      });
-  }, [workspaceId, pr, setEntry]);
-  return { refetch, isFetching };
+    if (key) void scope.invalidate(key, fetch);
+  }, [fetch, key, scope]);
+  const refreshToken = key ? `${key}@${pr?.updated_at ?? ""}` : null;
+  const requestRef = useRef({ key, fetch, refreshToken });
+  useLayoutEffect(() => {
+    requestRef.current = { key, fetch, refreshToken };
+  }, [fetch, key, refreshToken]);
+  const ensureForRefresh = useCallback(() => {
+    const request = requestRef.current;
+    if (request.key && request.refreshToken !== null) {
+      void scope.ensure(request.key, request.fetch, request.refreshToken);
+    }
+  }, [scope]);
+  return {
+    refetch,
+    ensureForRefresh,
+    refreshToken,
+    isFetching: snapshot.loading,
+    feedback: snapshot.feedback,
+    lastUpdatedAt: snapshot.lastUpdatedAt,
+  };
 }
 
 /**
@@ -74,19 +84,19 @@ function useFeedbackFetch(workspaceId: string | null, pr: TaskPR | null) {
  * + network latency.
  */
 export function usePRFeedbackBackgroundSync(workspaceId: string | null, pr: TaskPR | null): void {
-  const { refetch } = useFeedbackFetch(workspaceId, pr);
+  const { ensureForRefresh, refreshToken } = useFeedbackFetch(workspaceId, pr);
   // Compound the cache key with the timestamp so that switching the active
   // task to a different PR (different key) always refetches even when the
   // two PRs happen to share the same updated_at string. Tracking
   // updated_at alone would silently skip the new PR's first fetch.
-  const syncKey = pr ? `${prFeedbackKey(pr)}@${pr.updated_at}` : null;
+  const syncKey = refreshToken;
   const lastSyncedRef = useRef<string | null>(null);
   useEffect(() => {
     if (syncKey == null) return;
     if (lastSyncedRef.current === syncKey) return;
     lastSyncedRef.current = syncKey;
-    queueMicrotask(refetch);
-  }, [syncKey, refetch]);
+    queueMicrotask(ensureForRefresh);
+  }, [ensureForRefresh, syncKey]);
 }
 
 /**
@@ -101,9 +111,10 @@ export function usePRCIPopover(
   enabled: boolean,
   refreshTaskPR?: () => void | Promise<void>,
 ): Result {
-  const key = pr ? prFeedbackKey(pr) : null;
-  const cached = useAppStore((state) => (key ? (state.prFeedbackCache.byKey[key] ?? null) : null));
-  const { refetch, isFetching } = useFeedbackFetch(workspaceId, pr);
+  const { refetch, ensureForRefresh, isFetching, feedback, lastUpdatedAt } = useFeedbackFetch(
+    workspaceId,
+    pr,
+  );
   const { isSyncing, trackSync } = useTaskPRSyncTracker();
   const isRefreshing = useMinVisibleDuration(isFetching || isSyncing, PR_REFRESH_INDICATOR_MIN_MS);
 
@@ -116,18 +127,18 @@ export function usePRCIPopover(
       const sync = refreshTaskPR?.();
       trackSync(sync);
       if (sync) {
-        void sync.then(refetch, refetch);
+        void sync.then(ensureForRefresh, ensureForRefresh);
       } else {
-        refetch();
+        ensureForRefresh();
       }
     });
-  }, [enabled, refetch, refreshTaskPR, trackSync]);
+  }, [enabled, ensureForRefresh, refreshTaskPR, trackSync]);
 
   return {
-    feedback: cached?.feedback ?? null,
+    feedback,
     isFetching,
     isRefreshing,
-    lastUpdatedAt: cached?.lastUpdatedAt ?? null,
+    lastUpdatedAt,
     refetch,
   };
 }

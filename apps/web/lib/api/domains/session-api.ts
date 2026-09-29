@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { fetchConditionalJson, fetchJson, type ApiRequestOptions } from "../client";
 import type {
   TaskSessionsResponse,
   TaskSessionResponse,
@@ -69,6 +69,13 @@ export async function listTaskSessions(taskId: string, options?: ApiRequestOptio
 
 export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
+}
+
+export function fetchTaskSessionConditional(taskSessionId: string, etag?: string) {
+  return fetchConditionalJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, {
+    cache: "no-store",
+    ...(etag ? { init: { headers: { "If-None-Match": etag } } } : {}),
+  });
 }
 
 export async function dismissLastAgentError(

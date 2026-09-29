@@ -24,6 +24,7 @@ vi.mock("@/lib/toast/sonner", () => ({
 }));
 
 import { useTaskEnvironment } from "./use-task-environment";
+import { useExecutorEnvironmentAvailability } from "./use-executor-environment-availability";
 
 const TASK_ONE = "task-1";
 const SESSION_ONE = "session-1";
@@ -77,6 +78,28 @@ afterEach(() => {
 });
 
 describe("useTaskEnvironment Kubernetes status", () => {
+  it("shares the task environment read across mounted status consumers", async () => {
+    const pending = deferred<{ environment: TaskEnvironment }>();
+    mocks.fetchTaskEnvironmentLive.mockImplementation(() => pending.promise);
+    mocks.getKubernetesTaskSession.mockResolvedValue(KUBERNETES_SESSION);
+
+    const first = renderHook(() => useEnvironmentWithSession(TASK_ONE, SESSION_ONE, false));
+    const second = renderHook(() => useExecutorEnvironmentAvailability(TASK_ONE, true));
+
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve({ environment: ENVIRONMENT });
+      await pending.promise;
+    });
+    await waitFor(() => {
+      expect(first.result.current.env?.id).toBe(ENVIRONMENT.id);
+      expect(second.result.current.status?.tone).toBe("running");
+    });
+    first.unmount();
+    second.unmount();
+  });
+
   it("loads the exact active task session and publishes its live status", async () => {
     mocks.fetchTaskEnvironmentLive.mockResolvedValue({ environment: ENVIRONMENT });
     mocks.getKubernetesTaskSession.mockResolvedValue(KUBERNETES_SESSION);
