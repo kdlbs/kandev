@@ -131,7 +131,8 @@ acceptance), not here.
   match, mismatch, no-active-turn and `ErrCancelInFlight` cases and the
   caller's context ending while the detached operation continues, a cancel
   reported as escalated (treated as confirmed), and a new prompt starting
-  after the capture (`ErrPromptActivityNotOwned`, treated as a failed cancel).
+  after the capture (`ErrPromptActivityNotOwned`, returned as `ErrTurnNotActive`:
+  nothing cancelled, nothing counted).
 - Each failed cancel, including `ErrCancelInFlight`, increments
   `coordinator_ceiling_cancel_failed_total`; `ErrTurnNotActive` does not. The
   stop counter and info log fire once per turn at the mark with `reason`
