@@ -203,7 +203,7 @@ func TestSetConversationTaskID_CAS(t *testing.T) {
 			t.Fatalf("CreateCoordinator: %v", err)
 		}
 
-		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", "")
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", "", c.ConfigRevision)
 		if err != nil {
 			t.Fatalf("SetConversationTaskID: %v", err)
 		}
@@ -220,7 +220,7 @@ func TestSetConversationTaskID_CAS(t *testing.T) {
 			t.Fatalf("CreateCoordinator: %v", err)
 		}
 
-		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID)
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID, c.ConfigRevision)
 		if err != nil {
 			t.Fatalf("SetConversationTaskID: %v", err)
 		}
@@ -244,7 +244,7 @@ func TestSetConversationTaskID_CAS(t *testing.T) {
 			t.Fatalf("simulate concurrent clear: %v", err)
 		}
 
-		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID)
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID, c.ConfigRevision)
 		if err != nil {
 			t.Fatalf("SetConversationTaskID: %v", err)
 		}
@@ -269,12 +269,37 @@ func TestSetConversationTaskID_CAS(t *testing.T) {
 			t.Fatalf("CreateCoordinator: %v", err)
 		}
 
-		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", "task-other")
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", "task-other", c.ConfigRevision)
 		if err != nil {
 			t.Fatalf("SetConversationTaskID: %v", err)
 		}
 		if ok {
 			t.Fatal("SetConversationTaskID with a mismatched non-empty staleTaskID = true, want false")
+		}
+	})
+
+	t.Run("mismatched config_revision never matches even with a matching staleTaskID", func(t *testing.T) {
+		store := newTestStore(t)
+		taskID := "task-current"
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+		if err := store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID, c.ConfigRevision+1)
+		if err != nil {
+			t.Fatalf("SetConversationTaskID: %v", err)
+		}
+		if ok {
+			t.Fatal("SetConversationTaskID with a stale expectedConfigRevision = true, want false")
+		}
+
+		got, err := store.GetCoordinator(ctx, "ws-1", c.ID)
+		if err != nil {
+			t.Fatalf("GetCoordinator: %v", err)
+		}
+		if got.ConversationTaskID == nil || *got.ConversationTaskID != taskID {
+			t.Fatalf("ConversationTaskID after refused CAS = %v, want %q (unchanged)", got.ConversationTaskID, taskID)
 		}
 	})
 }

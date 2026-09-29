@@ -25,6 +25,7 @@ type Coordinator struct {
 	ExecutorProfileID  string
 	Context            string
 	ConversationTaskID *string
+	ConfigRevision     int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

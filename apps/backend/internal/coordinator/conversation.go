@@ -152,12 +152,12 @@ func (s *Service) OpenConversation(ctx context.Context, workspaceID, coordinator
 	newTaskID := created.Task.ID
 
 	// Step 4: commit the new task as current, or resolve the race.
-	ok, err := s.store.SetConversationTaskID(ctx, coordinatorID, newTaskID, staleTaskID)
+	ok, err := s.store.SetConversationTaskID(ctx, coordinatorID, newTaskID, staleTaskID, found.ConfigRevision)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return s.resolveConversationCreateRace(ctx, coordinatorID, newTaskID)
+		return s.resolveConversationCreateRace(ctx, coordinatorID, newTaskID, found.ConfigRevision)
 	}
 	return s.finishConversationOpen(ctx, coordinatorID, newTaskID)
 }
@@ -211,7 +211,7 @@ func isTerminalSessionState(state string) bool {
 // resolveConversationCreateRace implements step 4's zero-rows-updated branch:
 // re-read the coordinator, delete the task this call just created, and
 // converge on whichever task actually won.
-func (s *Service) resolveConversationCreateRace(ctx context.Context, coordinatorID, createdTaskID string) (*ConversationResult, error) {
+func (s *Service) resolveConversationCreateRace(ctx context.Context, coordinatorID, createdTaskID string, expectedConfigRevision int64) (*ConversationResult, error) {
 	reread, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
 	if errors.Is(err, ErrNotFound) {
 		// Step 5: the coordinator was deleted between steps 1 and 4.
@@ -222,6 +222,12 @@ func (s *Service) resolveConversationCreateRace(ctx context.Context, coordinator
 		return nil, err
 	}
 	s.deleteConversationTaskBestEffort(ctx, createdTaskID)
+	if reread.ConfigRevision != expectedConfigRevision {
+		// A context/profile change was saved while this open created its task
+		// under the earlier configuration, even if the reference is NULL on
+		// both sides: no task from that stale configuration to converge on.
+		return nil, ErrConversationConflict
+	}
 	if reread.ConversationTaskID == nil {
 		// A concurrent context/profile change cleared the reference after our
 		// stale read: no task exists to converge on.
