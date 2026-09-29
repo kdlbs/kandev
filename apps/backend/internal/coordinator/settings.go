@@ -37,6 +37,8 @@ type SettingsError struct {
 	Code    string
 	Field   string
 	Message string
+	// Step names the guided-setup step that owns the value; empty elsewhere.
+	Step string
 }
 
 func (e *SettingsError) Error() string { return e.Message }

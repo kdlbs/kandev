@@ -51,6 +51,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	if svc.phase2 {
 		registerStandingOrderRoutes(workspace, h)
 		registerGoalRoutes(workspace, h)
+		workspace.POST("/coordinators/setup", h.httpSetupCoordinator)
 		workspace.GET("/coordinators/:cid/activity", h.httpListActivity)
 		workspace.GET("/coordinators/:cid/activity/summary", h.httpActivitySummary)
 		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
@@ -301,7 +302,7 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	case errors.As(err, &undoErr):
 		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
 	case errors.As(err, &settingsErr):
-		c.JSON(http.StatusBadRequest, gin.H{"error": settingsErr.Message, "field": settingsErr.Field, "code": settingsErr.Code})
+		c.JSON(http.StatusBadRequest, settingsErrorBody(settingsErr))
 	case errors.As(err, &deniedErr):
 		c.JSON(http.StatusConflict, gin.H{"error": "policy_denied", "action": deniedErr.Action})
 	case errors.As(err, &fieldErr):
@@ -320,4 +321,17 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		h.logger.Error("coordinator route failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("internal error"))
 	}
+}
+
+// settingsErrorBody is the 400 body of a settings or setup error: the message
+// and field, plus the closed code and the setup step when the error has them.
+func settingsErrorBody(e *SettingsError) gin.H {
+	body := gin.H{"error": e.Message, "field": e.Field}
+	if e.Code != "" {
+		body["code"] = e.Code
+	}
+	if e.Step != "" {
+		body["step"] = e.Step
+	}
+	return body
 }

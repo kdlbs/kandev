@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import type { ControlFieldError } from "@/hooks/domains/coordinator/use-control-draft";
 
-const CODE_KEYS: Record<string, string> = {
+export const CODE_KEYS: Record<string, string> = {
   invalid_setting: "coordinator:controlErrorInvalidSetting",
   stop_denied_only: "coordinator:controlErrorInvalidSetting",
   automatic_not_available: "coordinator:controlErrorAutomatic",
@@ -12,6 +12,10 @@ const CODE_KEYS: Record<string, string> = {
   watches_too_many: "coordinator:watchesAtMost",
   policy_denied: "coordinator:controlErrorPolicyDenied",
   invalid_body: "coordinator:controlErrorInvalidBody",
+  invalid_scope: "coordinator:controlErrorInvalidScope",
+  action_missing: "coordinator:controlErrorActionMissing",
+  watches_duplicate: "coordinator:controlErrorDuplicateBoard",
+  unknown_action: "coordinator:controlErrorUnknownAction",
 };
 
 /** One inline message for a rejected save, above the save bar. */
