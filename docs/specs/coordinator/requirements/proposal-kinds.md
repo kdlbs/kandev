@@ -60,20 +60,22 @@ a pull request or moves a task to Done.
   `propose_move_kandev(task_id, step_id, rationale)`, each also accepting
   `standing_order_ids`. `rationale` shall follow the phase-1 create rule and
   `text` shall be 1 to 4000 characters after trimming.
-- **AC-COORDINATOR-PROPOSAL-KINDS-001.2:** Each tool shall refuse, naming the
-  field, a target task that is not a watched, unarchived task of the
+- **AC-COORDINATOR-PROPOSAL-KINDS-001.2:** Unless AC 001.5 returns an open
+  proposal, each tool shall refuse, naming the field, a target task that is not a watched, unarchived task of the
   coordinator's workspace or that is a coordinator conversation task.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.3:** `propose_move_kandev` shall refuse,
   naming `step_id`, a step that is not in the task's workflow, the step the
   task is in, a Done step, and an agent-starting step while `start_agent` is
   `denied`. It shall store the proposal with `starts_agent` true when the
   step is agent-starting at propose, and false otherwise.
-- **AC-COORDINATOR-PROPOSAL-KINDS-001.4:** `propose_resume_kandev` shall refuse
+- **AC-COORDINATOR-PROPOSAL-KINDS-001.4:** Unless AC 001.5 returns an open
+  proposal, `propose_resume_kandev` shall refuse
   a task without a resumable session, and `propose_message_kandev` a task
   without a session that accepts a message, naming `task_id`.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.5:** When the coordinator already has an
   open proposal of the same kind for the same target task, the tool shall
-  return that proposal, marked as already open, and create nothing;
+  return that proposal, marked as already open, and create nothing, whether or
+  not the target or the other arguments would now be refused;
   concurrent calls shall leave one. A `failed` proposal is open until a manager
   rejects it or approves it again.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.6:** A stored proposal shall have its
@@ -96,7 +98,7 @@ a pull request or moves a task to Done.
   true.
 - **AC-COORDINATOR-PROPOSAL-KINDS-002.3:** When a manager approves a proposal
   with `starts_agent` true while `start_agent` is `denied`, the approval
-  shall be refused with 409 `policy_denied`.
+  shall be refused with 409 `policy_denied`, whatever the task's current step.
 
 ### REQ-COORDINATOR-PROPOSAL-KINDS-003: Approving other kinds
 
@@ -113,7 +115,8 @@ a pull request or moves a task to Done.
   task's primary session as a queued message and settle `approved`. It shall
   never create a session or start one that never ran; a task without a
   session that accepts a message at approval shall settle `failed`.
-- **AC-COORDINATOR-PROPOSAL-KINDS-003.3:** When a manager approves a move
+- **AC-COORDINATOR-PROPOSAL-KINDS-003.3:** Unless AC 002.3 refuses the
+  approval, when a manager approves a move
   proposal, the system shall record the step the task is in, move the task to
   the proposed step and settle `approved`. When the task is archived, has
   left its workflow, or the step is gone or has become a Done step, it shall

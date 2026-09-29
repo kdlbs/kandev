@@ -84,7 +84,8 @@ type KindExecutor interface {
 `Claim` carries the proposal id, claim token, frozen spec and coordinator;
 `Outcome` carries `task_id` and `outcome_json`. A registry maps kind to
 executor; an unknown stored kind is treated as a failed read (500, no
-write). The phase-1 approve steps 3 to 6 call `Execute` in place of the
+write) by approve and is skipped, with an error log, by the startup pass and
+the sweep ([At most once](#at-most-once)). The phase-1 approve steps 3 to 6 call `Execute` in place of the
 direct create call; everything before the claim and the fenced completion
 after it stay as [proposals](proposals.md#approve) specifies. This
 per-kind `Execute` is the seam phase 3 reuses.
@@ -222,9 +223,9 @@ After the claim commits, `Execute` runs:
 
 | Kind | Execute |
 | --- | --- |
-| `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not a resumable session as in [Propose](#propose), including a session that gained a live execution: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)`; its error fails with the error text, including "already owned by another caller" (a concurrent manual resume), which is a failure, not a success. Outcome `{session_id}`. |
-| `message` | Re-read the task and session (archived or not accepting: fail). Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
-| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. `StartsAgentOnEnter` true while the proposal's `starts_agent` is false: fail `step_starts_agent`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`, before the claim, so that refusal wins over check 4: a proposal stored with `starts_agent` true whose task has since reached the destination is refused 409 `policy_denied` while `start_agent` is `denied`, and the card offers Reject only ([permissions](permissions.md#approve-re-check)). Otherwise record `from_step_id` = the task's current step (a fenced write of `outcome_json`, see [At most once](#at-most-once)), then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
+| `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not a resumable session as in [Propose](#propose), including a session that gained a live execution: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)` and classify its result: a returned execution settles `approved`, outcome `{session_id}`, including when the call joined a concurrent manual resume of the same session (the orchestrator returns that attempt's execution, and the session is resuming, which is what the manager asked for); `(nil, nil)`, which the orchestrator returns when admission defers the resume, settles `approved` with outcome `{session_id, deferred: true}` and the row detail "It will resume when there is room"; any error, including `ErrResumeAttemptCancelled`, fails with the error text. The "already owned by another caller" error exists only for a call with a continuation and cannot occur here. |
+| `message` | Re-read the task and session: archived fails `task_archived`; no primary session, or one that is `CREATED`, `FAILED` or `CANCELLED`, fails `not_accepting`; a full queue fails `queue_full`; any other delivery error fails with its text. Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
+| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. `StartsAgentOnEnter` true while the proposal's `starts_agent` is false: fail `step_starts_agent`; 7. any session of the task `STARTING` or `RUNNING` (the seam and states the [undo](activity-log.md#undo) move uses, the two states the task service blocks moves on): fail `agent_running`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`, before the claim, so that refusal wins over check 4: a proposal stored with `starts_agent` true whose task has since reached the destination is refused 409 `policy_denied` while `start_agent` is `denied`, and the card offers Reject only ([permissions](permissions.md#approve-re-check)). Otherwise record `from_step_id` = the task's current step (a fenced write of `outcome_json`, see [At most once](#at-most-once)), then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. If the fenced write matches zero rows the claim was already settled: `MoveTask` is not called, the request logs at warn `execute_settle_fenced` and returns 200 with the current row; a write error settles `failed` with the error text and does not call `MoveTask`. Results of `MoveTask`: `ErrWIPLimitExceeded` fails `step_full`; `ErrWorkflowResolutionConflict` or `ErrMoveConflict` fails `moved`; any other error, including a session-blocked refusal for a session that started after check 7, fails with the error text; a move accepted with `WIPAdmitted` false (the task queued behind the step's limit) settles `approved` with outcome `{from_step_id, to_step_id, queued: true}` and the row detail "It is queued behind the step's limit"; otherwise outcome `{from_step_id, to_step_id}`. `from_step_id` is the step read by check 1 to 7; a person moving the task between that read and `MoveTask` is not fenced (the task service exposes no compare-and-move), the window is one request, and Execute logs at info the step it found, as undo does. |
 
 A move whose task already sits on the destination (check 4) makes no call,
 because it moves nothing and starts nothing, even when the step has since
@@ -272,7 +273,21 @@ with the `failed` activity row in the same transaction, and never calls
 `Execute`. The card renders `outcome_unknown` as "It may or may not have
 run; check the task" (`003.5`). A later Approve on that `failed` card is a
 new claim by a person and runs `Execute` once more. An approve of a stale
-non-create claim therefore returns the failed row, not a re-run.
+non-create claim therefore returns 200 with the failed row, as phase 1 returns
+the current row after a re-claim, not a re-run.
+
+Recovery of a non-create claim runs whether or not `features.coordinatorPhase2`
+is on: settling `failed` is a safety action and calls no `Execute`. A row whose
+stored kind has no registered executor (a row written by a newer binary) is
+left untouched by the startup pass and the sweep, which log it at error
+`unknown_kind` each pass; only an approve request reads it, as a 500 with no
+write ([Executors](#executors)).
+
+Resume and message have no write to fence before their call. Their protection
+is the deadline: `Execute` starts immediately after the claim commits and is
+bounded at 60 seconds, so the 2-minute stale window cannot pass before the call
+returns unless the callee ignores its context, which is the sweep-during-
+execution row above.
 
 `Execute` of a non-create kind runs under a context deadline of 60 seconds,
 below the 2-minute stale window, so a sweep can only beat a live `Execute`
@@ -281,7 +296,7 @@ that ignores its context. The interleavings and their results:
 | Interleaving | Result |
 | --- | --- |
 | `Execute` returns before the deadline | Fenced completion settles `approved` or `failed` with the error text. |
-| The deadline fires first (`context.DeadlineExceeded`, including one wrapped in the callee's error) | The call may have run: fenced settle `failed` with `outcome_unknown`, the same code and card copy as a stale claim. |
+| The deadline fires first | A nil error from `Execute` settles `approved` even when the deadline fired (the action reported success). An error settles `failed` with `outcome_unknown`, the same code and card copy as a stale claim, when `errors.Is(err, context.DeadlineExceeded)` or when the Execute context's `Err()` is `DeadlineExceeded` at return; any other error settles `failed` with its text. The settle runs on a context detached from the Execute deadline (`context.WithoutCancel` with its own 5-second bound), so an expired Execute context cannot fail the settle and leave the row to the sweep. |
 | The sweep settles `outcome_unknown` while `Execute` is still running | The row is `failed`. The late fenced completion matches zero rows, writes nothing, logs at warn `execute_settle_fenced`, and its caller returns 200 with the current `failed` row. The action ran once; a manager who approves again starts a new claim and may repeat it, which the card copy "check the task" warns about. |
 | Crash after `Execute` and before the settle | The startup pass settles `failed` with `outcome_unknown`; no `Execute` runs. |
 | Reject while `approving` | 409 with the row (reject takes only `pending` or `failed`); the claim fence decides between two approves and between approve and reject. |

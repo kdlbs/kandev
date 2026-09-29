@@ -145,6 +145,20 @@ matches zero rows and writes nothing. Two identical `propose_task_kandev` calls
 create two proposals, and a create call citing six ids, or one id twice, is
 refused naming `standing_order_ids` before any transaction. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.
+Execute classification tests: a move whose fenced `from_step_id` write matches
+zero rows makes no `MoveTask` call and returns the current row; a `MoveTask`
+`ErrWIPLimitExceeded` fails `step_full`, `ErrMoveConflict` fails `moved`, a
+`WIPAdmitted` false result settles `approved` with `queued: true`, and a task
+with a RUNNING session fails `agent_running`; a resume that returns `(nil,
+nil)` settles `approved` with `deferred: true`, one that joins a concurrent
+attempt settles `approved`, and `ErrResumeAttemptCancelled` fails; a message
+fails `task_archived`, `not_accepting` or `queue_full` per cause; an Execute
+that returns nil after its deadline fired settles `approved`, one that returns
+an unwrapped error with the deadline fired settles `outcome_unknown`, and the
+settle succeeds after the Execute context expired; approve of a stale
+non-create claim returns 200 with the `failed` row; the sweep and startup pass
+leave an unknown-kind `approving` row untouched and settle a non-create
+`approving` row `outcome_unknown` with `features.coordinatorPhase2` off.
 
 ## Likely files
 
