@@ -87,7 +87,7 @@ Mockup:
   is none (including when the task has no primary session or the session is
   completed, failed or cancelled); at most one bundle, the oldest by creation time then pending id;
   at most one permission, the newest of the session's current turn, and `null`
-  when that permission has no `request_id` or no options; a bundle is
+  when that permission has no `request_id`, no `pending_id` or no options; a bundle is
   returned only for the session's current turn. A task
   outside the workspace, or a coordinator outside the workspace, shall get 404;
   a read error shall get 500 and the card shall treat any non-200 as no answer
@@ -110,9 +110,12 @@ Mockup:
   `AC-COORDINATOR-NEEDS-YOU-002.5` for permissions while phase 3 is
   effective.
 - **AC-COORDINATOR-RELAY-002.2:** **Answer here** shall show the request's
-  title, action details and one button per option, and choosing one shall
-  resolve the request through the same permission response path the task chat
-  uses, recorded with source `web` and the manager as actor.
+  title, action details and the same decision buttons the task chat shows for
+  that request (Deny, Approve and, when offered, Always allow; or, for a
+  request whose options carry Codex decisions, one button per such option), so
+  a request offering two reject options shows one Deny button. Choosing one
+  shall resolve the request through the same permission response path the task
+  chat uses, recorded with source `web` and the manager as actor.
 - **AC-COORDINATOR-RELAY-002.3:** When the request was already resolved or is
   no longer pending, the item shall close with a notice; any other failure
   shall keep the item expanded with Try again, which sends the same option
@@ -127,7 +130,9 @@ Mockup:
   response fields the task chat sends for the chosen option: `rejected` for a
   reject option, `cancelled` with no option id for the cancel decision, and
   the option id otherwise. A permission with no options offered shall show the phase 1
-  text and **Open task** only, without **Answer here**.
+  text and **Open task** only, without **Answer here**. When a non-Codex
+  request offers no allow option, the Approve button shall be shown disabled
+  and send nothing.
 
 ### REQ-COORDINATOR-RELAY-003: Replying with a condition
 
