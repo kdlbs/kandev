@@ -42,8 +42,8 @@ computed at read time.
   their done state by id; an unknown or repeated id is 400 naming
   `criteria[i].id`; an omitted criterion is removed), `POST
   goal/criteria/:crid` done toggle under the per-coordinator lock,
-  `POST goal/met` idempotent, 403 for readers (`001.1` to `001.5`,
-  `001.8`, `001.10`: an optional `goal_id` that is not the active goal is 409).
+  `POST goal/met` (optional `goal_id`, 409 like `PUT`; a retry naming the last met goal returns it), 403 for readers (`001.1` to `001.5`,
+  `001.8`, `001.10`: an optional `goal_id` on `PUT` and `met` that is not the active goal is 409, checked before criterion ids).
 - Goal instruction section with done states, or "No goal is set"
   (`001.6`); `resetConversation` on name, due, criteria, met and new goal,
   not on a done toggle (`001.7`).
@@ -70,14 +70,14 @@ make -C apps/backend test PKG=./internal/coordinator/...
 
 Tests: the instruction builder output with a met, active or absent goal
 (golden text); baseline with a coordinator 6 and 8 days old; direction at
-deltas 1, 2 and -2; two concurrent creates serialize on the
+deltas 1, 2 and -2; open_tasks excludes automation_run tasks; a stale `goal_id` with old criterion ids is 409 not 400; met with a stale `goal_id` is 409; a goal read failure omits only the goal section; two concurrent creates serialize on the
 lock and the second applies as an update of the first (the unique index is a
 backstop); a stale `goal_id` is 409.
 
 ## Likely files
 
 - `apps/backend/internal/coordinator/goals.go`, `goal_routes.go`,
-  `measures.go`, `instructions.go`
+  `measures.go` (goal section is `GoalInstructionSection` in `goals.go`, wired in `apps/backend/internal/backendapp/coordinator.go`)
 
 ## Dependencies
 

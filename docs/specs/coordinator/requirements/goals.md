@@ -57,7 +57,8 @@ criteria, so that the coordinator's advice points at it.
 - **AC-COORDINATOR-GOALS-001.2:** When the coordinator already has an active
   goal, setting a goal shall update that goal's name, due date and criteria,
   keep its baseline, and keep each criterion's done state when the criterion
-  keeps its id. A criterion id that is not one of the active goal's
+  keeps its id. Where the request names a goal that is not the active goal,
+  `AC-COORDINATOR-GOALS-001.10` applies first. A criterion id that is not one of the active goal's
   criteria, or that is repeated, shall be refused with 400 naming the field;
   a criterion left out shall be removed.
 - **AC-COORDINATOR-GOALS-001.3:** When a manager checks or unchecks an exit
@@ -69,7 +70,9 @@ criteria, so that the coordinator's advice points at it.
   coordinator shall then have no active goal. Marking met acts only on the
   active goal: when there is none, the request shall return the most recent
   met goal unchanged with 200 and change nothing, and when the coordinator
-  has never had a met goal it shall return 404 and change nothing.
+  has never had a met goal it shall return 404 and change nothing. Where the
+  request names the goal it was made from and that goal is not the active
+  goal, `AC-COORDINATOR-GOALS-001.10` applies.
 - **AC-COORDINATOR-GOALS-001.5:** When a manager sets a goal while the
   coordinator has no active goal, the system shall create a new goal with a
   new baseline (`AC-COORDINATOR-GOALS-003.1`); earlier met goals stay stored.
@@ -90,11 +93,15 @@ criteria, so that the coordinator's advice points at it.
   met** and the baseline measures; with no active goal it shall show an empty
   form with **Set goal**.
 
-- **AC-COORDINATOR-GOALS-001.10:** Where a set-goal request names the goal it
-  was edited from, and that goal is not the coordinator's active goal, the
-  system shall refuse it with 409 and change nothing. A request that names no
-  goal is applied as in `AC-COORDINATOR-GOALS-001.2` and
-  `AC-COORDINATOR-GOALS-001.5`.
+- **AC-COORDINATOR-GOALS-001.10:** Where a set-goal or mark-met request names
+  the goal it was made from, and that goal is not the coordinator's active
+  goal, the system shall refuse it with 409 and change nothing; the one
+  exception is a mark-met request that names the coordinator's most recent
+  met goal while there is no active goal, which returns that goal with 200
+  and changes nothing. A set-goal request that
+  names no goal is applied as in `AC-COORDINATOR-GOALS-001.2` and
+  `AC-COORDINATOR-GOALS-001.5`; a mark-met request that names none, as in
+  `AC-COORDINATOR-GOALS-001.4`.
 
 ### REQ-COORDINATOR-GOALS-002: Goal note on Needs you
 
@@ -123,8 +130,9 @@ without a false trend.
 
 - **AC-COORDINATOR-GOALS-003.1:** When a goal becomes active, the system shall
   record its baseline in the same transaction: Open tasks (watched tasks that
-  are not archived, not completed, not ephemeral and not created by a
-  coordinator, which excludes coordinator conversation tasks), and the coordinator's Approved and Rejected proposals of the 7 days
+  are not archived, not completed, not ephemeral, not created by a
+  coordinator and not created by an automation run, which excludes
+  coordinator conversation tasks and hidden automation-run tasks), and the coordinator's Approved and Rejected proposals of the 7 days
   before, from the activity log.
 - **AC-COORDINATOR-GOALS-003.2:** When the coordinator was created less than 7
   days before the goal became active, the baseline of the two proposal
