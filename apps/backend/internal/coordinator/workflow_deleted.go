@@ -3,6 +3,12 @@ package coordinator
 import (
 	"context"
 	"fmt"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // WorkflowDeleted removes the deleted workflow's watch rows and publishes
@@ -58,4 +64,22 @@ func (s *Store) withWriteTx(ctx context.Context, fn func(tx coordinatorExec) err
 		return fmt.Errorf("commit write tx: %w", err)
 	}
 	return nil
+}
+
+// SubscribeWorkflowDeleted subscribes svc to workflow.deleted events so the
+// watch rows naming the workflow are tidied. It is best effort: the effective
+// watch set already omits a deleted workflow, so a failure is logged and the
+// stale row stays harmless.
+func SubscribeWorkflowDeleted(eventBus bus.EventBus, svc *Service, log *logger.Logger) (bus.Subscription, error) {
+	l := log.WithFields(zap.String("component", "coordinator-workflow-deleted-subscriber"))
+	return eventBus.Subscribe(events.WorkflowDeleted, func(ctx context.Context, event *bus.Event) error {
+		workflowID := workspaceIDFromDeletedEvent(event)
+		if workflowID == "" {
+			return nil
+		}
+		if err := svc.WorkflowDeleted(ctx, workflowID); err != nil {
+			l.Warn("tidy coordinator watches failed", zap.String("workflow_id", workflowID), zap.Error(err))
+		}
+		return nil
+	})
 }
