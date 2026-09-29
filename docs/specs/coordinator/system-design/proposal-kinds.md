@@ -325,9 +325,11 @@ These are not proposals and write no activity row.
   phase-2 flag is on and the viewer is a manager, shows **Resume** as the
   primary button when the stall's task has a resumable session, computed by
   the classification input from the session state and executor record. It
-  calls the task page's existing manual resume
+  sends the same resume request the task page's manual resume sends
   (`useManualResumeSession` in
-  `apps/web/hooks/domains/session/use-session-resumption.ts`), which goes
+  `apps/web/hooks/domains/session/use-session-resumption.ts` is private to
+  the active-session hook, so the request builder and launch call it uses,
+  `buildResumeRequest` and `launchSession`, are the shared seam), which goes
   through the orchestrator's resume with the user's own authority. The stall
   clears through the phase-1 stall rules when the session changes state.
 - **Open the PR** (`005.2`). A link to the pull request URL the Queue row

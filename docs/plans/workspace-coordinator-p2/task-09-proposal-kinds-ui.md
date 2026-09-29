@@ -39,7 +39,7 @@ Shaped by labels, and offer to turn a reject reason into a standing order.
 
 ## In scope
 
-- Card per kind in `components/proposal-details.tsx`: titles, task link,
+- Card per kind in `app/coordinator/proposal-card/proposal-card.tsx` (the phase-1 card; there is no `proposal-details.tsx`): titles, task link,
   rationale, "Policy: <action> requires approval", Shaped by labels (active
   or "a retired standing order", text on hover or tap), "Approving this
   starts an agent", Edit only for message text, the failed text for
@@ -85,7 +85,7 @@ Toast: "Rejected. Keep the reason as a standing order?"  [Make it a standing ord
 - [`assets/p2-01-queue-what-it-did.png`](assets/p2-01-queue-what-it-did.png)
   (Ready to merge).
 - Scenario `05-rule-on-a-proposal` (reject with a reason) maps to
-  `tests/coordinator/proposal-kinds.spec.ts`.
+  `e2e/tests/coordinator/proposal-kinds.spec.ts`.
 
 ## Acceptance
 
@@ -98,8 +98,8 @@ Toast: "Rejected. Keep the reason as a standing order?"  [Make it a standing ord
 ```bash
 cd apps/web && pnpm test -- app/coordinator/components
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
-cd apps/web && pnpm e2e:run tests/coordinator/proposal-kinds.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/proposal-kinds.spec.ts
+cd apps/web && pnpm e2e:run e2e/tests/coordinator/proposal-kinds.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/coordinator/proposal-kinds.spec.ts
 ```
 
 E2E: the mock agent proposes a message; Edit, approve, and assert the task's
