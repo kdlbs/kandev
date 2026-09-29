@@ -57,9 +57,6 @@ func TestDispatchInitialPromptReportsDeliveryFailure(t *testing.T) {
 	}
 }
 
-// TestDispatchInitialPromptAcceptanceKeepsTurnInFlight proves agentctl's
-// acknowledgement is not an idle transition. The mock accepts the first prompt
-// but deliberately never completes it.
 func TestDispatchInitialPromptAcceptanceKeepsTurnInFlight(t *testing.T) {
 	agentConfig, ok := newTestRegistry().Get("claude-acp")
 	if !ok {
@@ -87,7 +84,7 @@ func TestDispatchInitialPromptAcceptanceKeepsTurnInFlight(t *testing.T) {
 	releaseClient()
 	dispatched := make(chan struct{})
 	releaseDispatch := make(chan struct{})
-	execution.setInitialPromptDispatchCallbacks(func() {
+	execution.setInitialPromptDispatchCallbacks(nil, func() {
 		close(dispatched)
 		<-releaseDispatch
 	}, nil)
@@ -165,6 +162,81 @@ func TestDispatchInitialPromptWithoutWorkMarksReadyOnce(t *testing.T) {
 	case id := <-ready:
 		t.Fatalf("no-prompt startup marked ready twice: %q", id)
 	default:
+	}
+}
+
+func TestDispatchInitialPromptAdmissionRejectionDoesNotFailExecutionOrPersistPrompt(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	history, err := NewSessionHistoryManager(t.TempDir(), "", logger.Default())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	sm := NewSessionManager(logger.Default(), make(chan struct{}))
+	sm.SetDependencies(nil, nil, nil, history)
+	agentConfig, ok := newTestRegistry().Get("claude-acp")
+	if !ok {
+		t.Fatal("claude-acp test agent is not registered")
+	}
+	execution := &AgentExecution{
+		ID:             "execution-admission-rejected",
+		TaskID:         "task-admission-rejected",
+		SessionID:      "session-admission-rejected",
+		Status:         v1.AgentStatusReady,
+		agentctl:       createTestClient(t, mock.server.URL),
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		historyEnabled: true,
+	}
+	t.Cleanup(execution.agentctl.Close)
+	execution.assistantHistoryBuffer.WriteString("previous partial response")
+
+	rejection := errors.New("pause superseded initial prompt")
+	admissionCleanup := make(chan struct{}, 1)
+	deliveryFailure := make(chan InitialPromptFailure, 1)
+	sm.SetInitialPromptFailureHandler(func(failure InitialPromptFailure) {
+		deliveryFailure <- failure
+	})
+	execution.setInitialPromptDispatchCallbacks(
+		func() error { return rejection },
+		nil,
+		func() { admissionCleanup <- struct{}{} },
+	)
+	markReadyCalled := false
+	sm.dispatchInitialPrompt(
+		context.Background(),
+		execution,
+		agentConfig,
+		"unsent replacement prompt",
+		nil,
+		func(string) error { markReadyCalled = true; return nil },
+	)
+	select {
+	case <-admissionCleanup:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial-prompt admission cleanup")
+	}
+	select {
+	case failure := <-deliveryFailure:
+		t.Fatalf("admission rejection was reported as provider delivery failure: %v", failure.Err)
+	default:
+	}
+	if markReadyCalled {
+		t.Fatal("admission rejection marked the execution ready")
+	}
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("execution status after admission rejection = %q, want READY", execution.Status)
+	}
+	if got := sm.activePromptGeneration(execution); got != 0 {
+		t.Fatalf("prompt generation = %d, want no generation admitted", got)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != "agent_message" || entries[0].Content != "previous partial response" {
+		t.Fatalf("history after rejected prompt = %+v, want only the preceding assistant response", entries)
 	}
 }
 

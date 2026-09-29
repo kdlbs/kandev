@@ -400,7 +400,7 @@ func (s *Service) processOnTurnStartAdmissionWithGuard(
 	ctx context.Context,
 	taskID, sessionID string,
 	strict bool,
-	lock *sync.Mutex,
+	lock *cancelInFlightMutex,
 	waitForCancellation bool,
 ) (ProcessOnTurnStartResult, error) {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
@@ -941,6 +941,11 @@ func (s *Service) loadQueuePromotedTaskAndTargetStep(ctx context.Context, taskID
 		// A manual move has not finished its lifecycle yet.
 		// Keep the promotion token durable; source-exit completion will trigger
 		// queue reconciliation and retry destination entry.
+		return nil, nil, false
+	}
+	if s.workflowStepGetter == nil {
+		s.logger.Warn("task.queue_promoted: workflow step lookup unavailable",
+			zap.String("task_id", task.ID), zap.String("step_id", task.WorkflowStepID))
 		return nil, nil, false
 	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
@@ -7070,7 +7075,7 @@ func (s *Service) quiesceActiveResetTurn(
 		turnID = ""
 	}
 	operation, _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
-		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
+		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relockWithContext,
 		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
 	)
 	if err != nil {
@@ -7275,9 +7280,13 @@ func (s *Service) applyStepSessionMode(ctx context.Context, session *models.Task
 	// auto-starts the agent fresh), this is a no-op and the profile default
 	// governs the new session — the declared mode stays persisted.
 	if err := s.agentManager.SetSessionModeBySessionID(ctx, session.ID, mode); err != nil {
-		s.logger.Debug("set_session_mode: could not apply mode to a live agent (persisted for next launch/reset)",
+		// Warn, not Debug: a step that declared a mode and failed to apply it
+		// leaves the session running under a different one, and the default
+		// log level would hide that entirely.
+		s.logger.Warn("set_session_mode: could not apply mode to a live agent (persisted for next launch/reset)",
 			zap.String("session_id", session.ID),
 			zap.String("mode", mode),
+			zap.String("mode_source", "workflow_step"),
 			zap.Error(err))
 	}
 }

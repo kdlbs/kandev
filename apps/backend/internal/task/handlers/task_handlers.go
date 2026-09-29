@@ -47,7 +47,16 @@ type TaskHandlers struct {
 	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
 	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	backgroundWorkEnabled         bool
 	logger                        *logger.Logger
+}
+
+func (h *TaskHandlers) SetBackgroundWorkEnabled(enabled bool) {
+	h.backgroundWorkEnabled = enabled
+}
+
+func (h *TaskHandlers) isBackgroundWorkEnabled() bool {
+	return h.backgroundWorkEnabled
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
@@ -242,6 +251,8 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// AC-18): per-task and per-session usage/cost totals.
 	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
 	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns", h.httpGetTaskSessionUsageTurns)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns/:turnId", h.httpGetTaskSessionUsageTurn)
 
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single
@@ -261,6 +272,12 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
+
+	// Background workload endpoints
+	api.GET("/task-sessions/:id/background-work", h.httpListBackgroundWorkloads)
+	api.GET("/task-sessions/:id/background-work/:workId", h.httpGetBackgroundWorkload)
+	api.POST("/task-sessions/:id/background-work/:workId/action", h.httpExecuteBackgroundAction)
+	api.GET("/task-sessions/:id/background-work/:workId/usage", h.httpGetBackgroundWorkloadUsage)
 
 	// Quick chat endpoints - create ephemeral task with prepared session, and
 	// resync the tab strip so clients that missed WS events converge.
@@ -283,6 +300,9 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkList, h.wsListBackgroundWorkloads)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkGet, h.wsGetBackgroundWorkload)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkAction, h.wsExecuteBackgroundAction)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
 	// Session file review handlers

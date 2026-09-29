@@ -186,7 +186,7 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
@@ -228,13 +228,23 @@ build-acpdbg:
 	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
+## Build and run codexdbg — usage: make codexdbg ARGS="probe"
+codexdbg: build-codexdbg
+	@$(BUILD_DIR)/codexdbg$(EXE) $(ARGS)
+
+## Build the codexdbg binary — native Codex app-server diagnostics.
+build-codexdbg:
+	@echo "Building codexdbg..."
+	@$(call MKDIR,$(BUILD_DIR))
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/codexdbg$(EXE) ./cmd/codexdbg
+
 ## Build the complete development binary set.
-build: build-runtime build-mock-agent build-acpdbg build-winjob
+build: build-runtime build-mock-agent build-acpdbg build-codexdbg build-winjob
 
 ## Build the lean development binary set. Unlike `build`, this does not build
 ## every cross-platform remote helper; dev needs the host helper and, for a
 ## host other than Linux/amd64, one linux/amd64 helper.
-build-dev: build-kandev build-agentctl-dev build-mock-agent build-acpdbg build-winjob
+build-dev: build-kandev build-agentctl-dev build-mock-agent build-acpdbg build-codexdbg build-winjob
 
 ## Build only the binaries shipped in a runtime bundle. Always includes remote
 ## agentctl helpers because SSH/Docker/Sprites executors upload or bind-mount
@@ -328,6 +338,7 @@ e2e-plugin-package: e2e-plugin-ui
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
 	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
+	$(GO) build $(GOFLAGS) -o .build/plugin-package-verify$(EXE) ./cmd/plugin-package-verify
 	cd ../web && node scripts/write-e2e-plugin-identity.mjs \
 		e2e/fixtures/plugins/prompt-history-plugin/bundle.js \
 		../backend/cmd/plugin-fixture/fixture-package/ui/bundle.js \

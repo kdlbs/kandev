@@ -54,6 +54,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "pr-detail",
   "mr-detail",
   "todos",
+  "background-work",
   DEV_SERVER_PANEL_ID,
   PROMPT_HISTORY_PANEL_ID,
 ]);
@@ -70,6 +71,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "vscode",
   "pr-detail",
   "mr-detail",
+  "background-work",
   // Every plugin-contributed task panel shares this one generic component
   // name (see lib/state/layout-manager/plugin-panels.ts) — structural
   // regardless of which plugin registered it.
@@ -145,6 +147,11 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
     titleKey: "task:panelMergeRequest",
   },
   todos: { component: "todos", title: "Todos", titleKey: "common:todos" },
+  "background-work": {
+    component: "background-work",
+    title: "Background Work",
+    titleKey: "task:panelBackgroundWork",
+  },
   [PROMPT_HISTORY_PANEL_ID]: {
     component: PROMPT_HISTORY_PANEL_ID,
     title: "Prompt History",

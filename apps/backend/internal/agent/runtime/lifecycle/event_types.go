@@ -168,8 +168,11 @@ func (p PrepareCompletedEventPayload) GetSessionID() string {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type                        string                 `json:"type"`
-	ACPSessionID                string                 `json:"acp_session_id,omitempty"`
+	Type         string `json:"type"`
+	ACPSessionID string `json:"acp_session_id,omitempty"`
+	// OperationID carries a provider operation identity when the protocol
+	// emits one. Native Codex turn IDs use it at turn boundaries.
+	OperationID                 string                 `json:"operation_id,omitempty"`
 	Text                        string                 `json:"text,omitempty"`
 	ProviderDiagnosticCandidate bool                   `json:"provider_diagnostic_candidate,omitempty"`
 	ToolCallID                  string                 `json:"tool_call_id,omitempty"`
@@ -186,6 +189,10 @@ type AgentStreamEventData struct {
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
+
+	// RequestedModeID is set on a session_mode event when the session is not in
+	// the mode Kandev asked for.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
 
 	// PendingID identifies a permission request (for "permission_cancelled" events).
 	PendingID string `json:"pending_id,omitempty"`
@@ -269,7 +276,8 @@ type AgentStreamEventData struct {
 	SessionMeta      map[string]any `json:"session_meta,omitempty"`
 
 	// Usage (attached to "complete" event)
-	Usage *streams.PromptUsage `json:"usage,omitempty"`
+	Usage            *streams.PromptUsage            `json:"usage,omitempty"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
 
 	// Plan entries (from "plan" event — ACP/Codex agent todos)
 	PlanEntries []streams.PlanEntry `json:"plan_entries,omitempty"`
@@ -282,6 +290,12 @@ type AgentStreamEventData struct {
 
 	// MCPAttachmentAttempt starts a new backend-owned MCP evidence timeline.
 	MCPAttachmentAttempt *streams.MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
+
+	// BackgroundWork contains background workload observation data.
+	BackgroundWork *streams.WorkloadRunObservation `json:"background_work,omitempty"`
+
+	// BackgroundWorkOutput contains background workload output chunk data.
+	BackgroundWorkOutput *streams.WorkloadOutputChunk `json:"background_work_output,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).
@@ -467,18 +481,25 @@ type PermissionOption struct {
 
 // PermissionRequestEventPayload is the payload when an agent requests permission.
 type PermissionRequestEventPayload struct {
-	Type          string                 `json:"type"` // Always "permission_request"
-	Timestamp     string                 `json:"timestamp"`
-	AgentID       string                 `json:"agent_id"`
-	TaskID        string                 `json:"task_id"`
-	SessionID     string                 `json:"session_id"`
-	RequestID     string                 `json:"request_id"`
-	PendingID     string                 `json:"pending_id"`
-	ToolCallID    string                 `json:"tool_call_id"`
-	Title         string                 `json:"title"`
-	Options       []PermissionOption     `json:"options"`
-	ActionType    string                 `json:"action_type"`
-	ActionDetails map[string]interface{} `json:"action_details,omitempty"`
+	Type       string             `json:"type"` // Always "permission_request"
+	Timestamp  string             `json:"timestamp"`
+	AgentID    string             `json:"agent_id"`
+	TaskID     string             `json:"task_id"`
+	SessionID  string             `json:"session_id"`
+	RequestID  string             `json:"request_id"`
+	PendingID  string             `json:"pending_id"`
+	ToolCallID string             `json:"tool_call_id"`
+	Title      string             `json:"title"`
+	Options    []PermissionOption `json:"options"`
+	ActionType string             `json:"action_type"`
+	// AutoApprovedOptionID names the option agentctl already selected. A
+	// nonempty value makes this payload an audit record of an answered
+	// request rather than a prompt awaiting a person.
+	AutoApprovedOptionID   string                 `json:"auto_approved_option_id,omitempty"`
+	AutoApprovalPending    bool                   `json:"auto_approval_pending,omitempty"`
+	AutoApprovedOptionKind string                 `json:"auto_approved_option_kind,omitempty"`
+	AutoApprovalSource     string                 `json:"auto_approval_source,omitempty"`
+	ActionDetails          map[string]interface{} `json:"action_details,omitempty"`
 }
 
 // ShellOutputEventPayload is the payload for shell output events.
@@ -583,7 +604,11 @@ type SessionModeEventPayload struct {
 	AgentID        string                    `json:"agent_id"`
 	CurrentModeID  string                    `json:"current_mode_id"`
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
-	Timestamp      string                    `json:"timestamp"`
+	// RequestedModeID is set only when the session is not in the mode Kandev
+	// asked for. It lets the UI say which mode was requested instead of
+	// silently showing a different one.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+	Timestamp       string `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
@@ -772,16 +797,17 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // Both are empty when unavailable (e.g. no active turn), never a synthesized
 // placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID         string               `json:"task_id"`
-	SessionID      string               `json:"session_id"`
-	AgentID        string               `json:"agent_id"`
-	AgentProfileID string               `json:"agent_profile_id,omitempty"`
-	AgentType      string               `json:"agent_type,omitempty"`
-	Model          string               `json:"model,omitempty"`
-	Usage          *streams.PromptUsage `json:"usage"`
-	Timestamp      string               `json:"timestamp"`
-	TurnID         string               `json:"turn_id,omitempty"`
-	UsageEventID   string               `json:"usage_event_id,omitempty"`
+	TaskID           string                          `json:"task_id"`
+	SessionID        string                          `json:"session_id"`
+	AgentID          string                          `json:"agent_id"`
+	AgentProfileID   string                          `json:"agent_profile_id,omitempty"`
+	AgentType        string                          `json:"agent_type,omitempty"`
+	Model            string                          `json:"model,omitempty"`
+	Usage            *streams.PromptUsage            `json:"usage"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
+	Timestamp        string                          `json:"timestamp"`
+	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

@@ -3,6 +3,8 @@ package streams
 import "time"
 
 const (
+	PermissionDecisionSourceAutoApprove = "auto_approve"
+
 	PermissionStatusPending   = "pending"
 	PermissionStatusResolving = "resolving"
 

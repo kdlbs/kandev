@@ -208,18 +208,35 @@ func resetStreamingStateWithHistory(
 	historyManager *SessionHistoryManager,
 	log *logger.Logger,
 ) {
-	execution.streamMu.Lock()
-	stream := execution.stream
-	execution.streamMu.Unlock()
-	if stream != nil {
-		stream.flushBoundary()
-	}
+	flushStreamBoundary(execution)
 	execution.messageMu.Lock()
 	content := execution.detachAssistantHistoryLocked()
 	execution.resetStreamingStateLocked()
 	execution.messageMu.Unlock()
 
 	persistAssistantHistory(content, execution, historyManager, log)
+}
+
+func flushStreamingStateWithHistory(
+	execution *AgentExecution,
+	historyManager *SessionHistoryManager,
+	log *logger.Logger,
+) {
+	flushStreamBoundary(execution)
+	execution.messageMu.Lock()
+	content := execution.detachAssistantHistoryLocked()
+	execution.messageMu.Unlock()
+
+	persistAssistantHistory(content, execution, historyManager, log)
+}
+
+func flushStreamBoundary(execution *AgentExecution) {
+	execution.streamMu.Lock()
+	stream := execution.stream
+	execution.streamMu.Unlock()
+	if stream != nil {
+		stream.flushBoundary()
+	}
 }
 
 func (e *AgentExecution) detachAssistantHistoryLocked() string {

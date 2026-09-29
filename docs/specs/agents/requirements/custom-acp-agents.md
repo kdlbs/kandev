@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-09-22
-updated: 2026-09-22
+updated: 2026-09-28
 owners:
   - jnmanso
 ---
@@ -46,3 +46,39 @@ keeping registry changes visible without a restart.
 - **AC-AGENTS-CUSTOM-ACP-001.7:** When the capability probe spawns an operator-registered command, it
   shall accept that command even though no compiled-in literal can cover it, while a command that
   claims to be built-in shall still resolve against the allow-list.
+
+### REQ-AGENTS-CUSTOM-ACP-002: Operator-Registered ACP Agents Keep Their Conversation Across Reconnects
+
+**Intent:** When the process of an operator-registered ACP agent is replaced (backend restart, agent
+crash, runtime recovery, or Resume), the agent continues the provider conversation it already had,
+exactly as a built-in ACP agent does, instead of silently starting a new one under the same Kandev
+session.
+
+As an operator running my own ACP agent, I want a reconnect to reopen the agent's own session, so
+that the agent still remembers the conversation after its process is replaced.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-CUSTOM-ACP-002.1:** When an execution of an operator-registered ACP agent starts with a
+  stored provider session ID, and the agent's `initialize` response advertises
+  `agentCapabilities.loadSession` or `agentCapabilities.sessionCapabilities.resume`, the system shall
+  restore that exact session ID with `session/resume` when advertised, otherwise with
+  `session/load`, and shall not send `session/new`.
+- **AC-AGENTS-CUSTOM-ACP-002.2:** When the agent advertises neither capability, the system shall start
+  the execution with `session/new` and shall not fail the launch, so a definition whose CLI cannot
+  restore keeps working as it does today.
+- **AC-AGENTS-CUSTOM-ACP-002.3:** When a restore request fails, the system shall classify the failure
+  exactly as it does for built-in ACP agents: a recognized compatibility failure creates a
+  replacement session, and any other failure keeps the stored session ID for a later retry.
+- **AC-AGENTS-CUSTOM-ACP-002.4:** The behavior shall apply to every definition that declares the ACP
+  protocol, including definitions stored before this requirement, without a migration or a new
+  operator setting.
+
+#### Exclusions
+
+- Terminal (passthrough) definitions. Their CLI owns its own resume flags.
+- Recognizing additional provider-specific "unknown session" error shapes. A provider whose
+  unknown-session error is not already recognized keeps its stored session ID and surfaces the
+  recovery failure (AC-AGENTS-CUSTOM-ACP-002.3), which is the existing contract of
+  REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.
+- Any change to the working directory sent with the restore request.

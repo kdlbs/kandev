@@ -185,6 +185,22 @@ func (a *Adapter) handleACPUpdate(
 				PromptGeneration: promptGeneration,
 			}
 		}
+		if event != nil && event.Type == streams.EventTypeSessionModels && n.Update.ConfigOptionUpdate != nil {
+			if _, hasModeOption := modeConfigOption(event.ConfigOptions); hasModeOption {
+				a.mu.RLock()
+				availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
+				activeSession := a.sessionID == sessionID && !a.closed
+				a.mu.RUnlock()
+				if activeSession {
+					leadingEvent = &AgentEvent{
+						Type:           streams.EventTypeSessionMode,
+						SessionID:      sessionID,
+						CurrentModeID:  currentModeFromConfig(event.ConfigOptions),
+						AvailableModes: availableModes,
+					}
+				}
+			}
+		}
 		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
 			a.observeCursorRetriableEvidence(promptGeneration, event)) {
 			// Suppress provider control/evidence chunks. The adapter emits one
@@ -425,6 +441,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
 
 	case u.CurrentModeUpdate != nil:
+		if !a.noteCurrentMode(sessionID, string(u.CurrentModeUpdate.CurrentModeId)) {
+			return nil
+		}
 		return &AgentEvent{
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,
@@ -439,9 +458,19 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			// session/new. Include the cached available models so the event
 			// doesn't overwrite the model list set during session init.
 			a.mu.Lock()
+			if a.sessionID != sessionID || a.closed {
+				a.mu.Unlock()
+				return nil
+			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
+			if modes, found := sessionModesFromConfig(configOptions); found {
+				a.availableModes = modes
+			}
 			a.mu.Unlock()
+			if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
+				a.noteCurrentMode(sessionID, currentMode)
+			}
 			return &AgentEvent{
 				Type:           streams.EventTypeSessionModels,
 				SessionID:      sessionID,

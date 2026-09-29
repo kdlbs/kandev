@@ -250,6 +250,19 @@ func NewWithDBContext(ctx context.Context, writer, reader *sqlx.DB, log *logger.
 	return newRepositoryContext(ctx, writer, reader, log, false)
 }
 
+// NewWithInitializedDB binds a repository to a database whose complete task
+// schema has already been initialized. It does not run startup migrations.
+// Callers own the database connection and must guarantee the schema version.
+func NewWithInitializedDB(writer, reader *sqlx.DB, log *logger.Logger) *Repository {
+	return &Repository{
+		db:      writer,
+		ro:      reader,
+		ownsDB:  false,
+		log:     log,
+		migrate: db.NewRequiredMigrateLogger(writer, log),
+	}
+}
+
 // NewReadOnlyWithDB creates a repository over an existing read-only connection
 // without initializing or migrating its schema. Write methods remain guarded by
 // the connection's SQLite read-only mode.

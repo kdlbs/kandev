@@ -18,6 +18,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	agenttypes "github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -636,6 +637,7 @@ type ExecutorCreateRequest struct {
 	WorkspacePath          string
 	WorkspaceSourceRoots   []string
 	Protocol               string
+	CodexAppServerEnabled  bool
 	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
@@ -684,6 +686,21 @@ type ExecutorCreateRequest struct {
 	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
 	// values are transient and must never be copied to runtime metadata.
 	PluginExecutor *PluginExecutorLaunch
+}
+
+func codexAppServerEnabledForAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || !agentConfig.Enabled() {
+		return false
+	}
+	runtime := agentConfig.Runtime()
+	return runtime != nil && runtime.Protocol == agenttypes.ProtocolCodexAppServer
+}
+
+func protocolForAgent(agentConfig agents.Agent) string {
+	if agentConfig == nil || agentConfig.Runtime() == nil {
+		return ""
+	}
+	return string(agentConfig.Runtime().Protocol)
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.

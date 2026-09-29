@@ -67,6 +67,11 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertTrue(marker)
         self.assertIn("timeout-minutes: 40", windows_job)
 
+    def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
+        test_step = step_block(self.workflow, "Run tests")
+        self.assertIn("go test \\", test_step)
+        self.assertNotIn("-timeout", test_step)
+
     def test_base_image_mirrors_postgres_18_at_the_same_digest(self) -> None:
         self.assertIn("POSTGRES_18_DIGEST: " + POSTGRES_18_DIGEST, self.base_image_workflow)
         self.assertIn("POSTGRES_18_SOURCE: docker.io/library/postgres:18@" + POSTGRES_18_DIGEST, self.base_image_workflow)

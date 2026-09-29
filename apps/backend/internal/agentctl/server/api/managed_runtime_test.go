@@ -10,13 +10,29 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 )
 
 func TestManagedRuntimeCacheRepairUsesProbeEnvironmentAndExactTree(t *testing.T) {
-	server := newTestServer(t)
-	instanceCacheRoot := t.TempDir()
-	probeCacheRoot := t.TempDir()
-	server.cfg.AgentEnv = []string{"NPM_CONFIG_CACHE=" + instanceCacheRoot}
+	log := newTestLogger()
+	instanceCacheRoot, _ := filepath.EvalSymlinks(t.TempDir())
+	probeCacheRoot, _ := filepath.EvalSymlinks(t.TempDir())
+	binDir, _ := filepath.EvalSymlinks(t.TempDir())
+	npmPath := filepath.Join(binDir, "npm")
+	fixture := "#!/bin/sh\nprintf '%s\\n' \"$NPM_CONFIG_CACHE\"\n"
+	if err := os.WriteFile(npmPath, []byte(fixture), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := &config.InstanceConfig{
+		Port:     45321,
+		WorkDir:  t.TempDir(),
+		AgentEnv: []string{"NPM_CONFIG_CACHE=" + instanceCacheRoot, "PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH")},
+	}
+	procMgr := process.NewManager(cfg, log)
+	server := NewServer(cfg, procMgr, nil, nil, log)
 
 	packageSpec := "@scope/managed-acp@1.2.3"
 	probeNpxRoot := filepath.Join(probeCacheRoot, "_npx")
@@ -37,7 +53,7 @@ func TestManagedRuntimeCacheRepairUsesProbeEnvironmentAndExactTree(t *testing.T)
 
 	body, err := json.Marshal(map[string]any{
 		"package_spec": packageSpec,
-		"env":          map[string]string{"NPM_CONFIG_CACHE": probeCacheRoot},
+		"env":          map[string]string{"NPM_CONFIG_CACHE": probeCacheRoot, "PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH")},
 	})
 	if err != nil {
 		t.Fatal(err)

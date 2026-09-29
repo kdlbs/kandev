@@ -230,20 +230,21 @@ func exactRunSessionEvent(data *AgentLifecycleData) bool {
 }
 
 type PromptUsageData struct {
-	AgentExecutionID string      `json:"agent_execution_id,omitempty"`
-	TaskID           string      `json:"task_id"`
-	SessionID        string      `json:"session_id"`
-	RunSessionID     string      `json:"run_session_id,omitempty"`
-	RunAttempt       int         `json:"run_attempt,omitempty"`
-	WorkspaceID      string      `json:"workspace_id,omitempty"`
-	AgentID          string      `json:"agent_id"`
-	AgentProfileID   string      `json:"agent_profile_id,omitempty"`
-	AgentType        string      `json:"agent_type"`
-	Model            string      `json:"model"`
-	Provider         string      `json:"provider"`
-	Usage            UsageTokens `json:"usage"`
-	TurnID           string      `json:"turn_id,omitempty"`
-	UsageEventID     string      `json:"usage_event_id,omitempty"`
+	AgentExecutionID string                          `json:"agent_execution_id,omitempty"`
+	TaskID           string                          `json:"task_id"`
+	SessionID        string                          `json:"session_id"`
+	RunSessionID     string                          `json:"run_session_id,omitempty"`
+	RunAttempt       int                             `json:"run_attempt,omitempty"`
+	WorkspaceID      string                          `json:"workspace_id,omitempty"`
+	AgentID          string                          `json:"agent_id"`
+	AgentProfileID   string                          `json:"agent_profile_id,omitempty"`
+	AgentType        string                          `json:"agent_type"`
+	Model            string                          `json:"model"`
+	Provider         string                          `json:"provider"`
+	Usage            UsageTokens                     `json:"usage"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
+	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -271,6 +272,7 @@ type UsageTokens struct {
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
 	ProviderReportedCostPresent  bool  `json:"provider_reported_cost_present,omitempty"`
 	Estimated                    bool  `json:"estimated,omitempty"`
+	PriceSuppressed              bool  `json:"price_suppressed,omitempty"`
 }
 
 // RegisterEventSubscribers subscribes to system events and queues runs.

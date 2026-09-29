@@ -117,6 +117,7 @@ type AgentExecution struct {
 	// AgentReady is published, so a queued successor cannot overwrite the
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
+	promptTurnIDs     map[uint64]string
 	promptLifecycleMu sync.Mutex
 
 	// recoveryAppliedControlTurnID is the control-server-assigned turn
@@ -298,6 +299,7 @@ type AgentExecution struct {
 	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
 	// so they must be captured before startup begins and consumed once that
 	// prompt is accepted or fails before acceptance.
+	initialPromptAdmissionCallback  func() error
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
 	initialPromptDispatchCallbackMu sync.Mutex
@@ -411,21 +413,27 @@ func (e *AgentExecution) setSessionInitialized(value bool) {
 	e.sessionInitializedMu.Unlock()
 }
 
-func (e *AgentExecution) setInitialPromptDispatchCallbacks(onDispatched, onFailure func()) {
+func (e *AgentExecution) setInitialPromptDispatchCallbacks(
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) {
 	e.initialPromptDispatchCallbackMu.Lock()
+	e.initialPromptAdmissionCallback = beforeAdmission
 	e.initialPromptDispatchCallback = onDispatched
 	e.initialPromptFailureCallback = onFailure
 	e.initialPromptDispatchCallbackMu.Unlock()
 }
 
-func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
+func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func() error, func(), func()) {
 	e.initialPromptDispatchCallbackMu.Lock()
+	beforeAdmission := e.initialPromptAdmissionCallback
 	onDispatched := e.initialPromptDispatchCallback
 	onFailure := e.initialPromptFailureCallback
+	e.initialPromptAdmissionCallback = nil
 	e.initialPromptDispatchCallback = nil
 	e.initialPromptFailureCallback = nil
 	e.initialPromptDispatchCallbackMu.Unlock()
-	return onDispatched, onFailure
+	return beforeAdmission, onDispatched, onFailure
 }
 
 func cloneExactProfileLaunchAttempt(binding *models.ExactProfileLaunchAttemptBinding, executionID string) (*models.ExactProfileLaunchAttemptBinding, error) {
@@ -803,6 +811,15 @@ func (e *AgentExecution) promptTurnIDSnapshot() string {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptTurnID
+}
+
+func (e *AgentExecution) promptTurnIDForGeneration(generation uint64) string {
+	if e == nil || generation == 0 {
+		return ""
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptTurnIDs[generation]
 }
 
 func (e *AgentExecution) setPromptTurnID(turnID string) {

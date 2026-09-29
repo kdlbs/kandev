@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -21,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	eventbus "github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -30,8 +27,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
@@ -308,6 +305,7 @@ type mockAgentManager struct {
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
 	exactProfileAttemptBindings     []*models.ExactProfileLaunchAttemptBinding
+	initialPromptAdmissionCallback  func() error
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -399,10 +397,11 @@ type mockAgentManager struct {
 	cancelAgentForPromptFunc  func(context.Context, string, string, uint64, uint64) error
 	cancelAgentForPromptCalls atomic.Int32
 
-	currentPromptGeneration     atomic.Uint64
-	currentPromptActivityEpoch  atomic.Uint64
-	currentPromptExecutionID    string
-	currentPromptLastActivityAt time.Time
+	currentPromptGeneration            atomic.Uint64
+	currentPromptActivityEpoch         atomic.Uint64
+	currentPromptExecutionID           string
+	currentPromptLastActivityAt        time.Time
+	advancePromptGenerationOnAdmission bool
 
 	// getPromptActivityForSessionFunc, when set, overrides
 	// GetPromptActivityForSession's default (report the current*
@@ -420,6 +419,7 @@ type mockAgentManager struct {
 	setSessionModelCalls              []sessionModelCall
 	setSessionModelSupported          bool
 	setSessionModelErr                error
+	setSessionModelFunc               func(context.Context, string, string) error
 	setSessionConfigCalls             []sessionConfigCall
 	setSessionConfigSupported         bool
 	setSessionConfigErr               error
@@ -479,7 +479,16 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 }
 
 func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks("", nil, onDispatched, onFailure)
+}
+
+func (m *mockAgentManager) RegisterInitialPromptAdmissionCallbacks(
+	_ string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	m.mu.Lock()
+	m.initialPromptAdmissionCallback = beforeAdmission
 	m.initialPromptDispatchCallback = onDispatched
 	m.initialPromptFailureCallback = onFailure
 	m.mu.Unlock()
@@ -560,6 +569,25 @@ func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, 
 		onDispatched()
 	}
 	return result, err
+}
+
+func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	if m.advancePromptGenerationOnAdmission {
+		m.currentPromptGeneration.Add(1)
+	}
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 }
 
 func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
@@ -756,7 +784,10 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, executionI
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
 	return nil
 }
-func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, sessionID, modelID string) error {
+func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error {
+	if m.setSessionModelFunc != nil {
+		return m.setSessionModelFunc(ctx, sessionID, modelID)
+	}
 	if !m.setSessionModelSupported {
 		return fmt.Errorf("not supported")
 	}
@@ -941,24 +972,16 @@ func newAuthoritativeMemoryQueue(repo *sqliterepo.Repository, log *logger.Logger
 
 func strPtr(s string) *string { return &s }
 
-// setupTestRepo creates a real in-memory SQLite repository for testing.
+var orchestratorTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *sqlx.DB) error {
+	_, err := sqliterepo.NewWithDB(database, database, nil)
+	return err
+})
+
+// setupTestRepo creates a separate disk-backed SQLite repository for testing.
 func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	t.Cleanup(func() { _ = sqlxDB.Close() })
-
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
-	t.Cleanup(func() { _ = cleanup() })
-
-	return repo
+	database, _ := orchestratorTestSQLiteTemplate.Open(t)
+	return sqliterepo.NewWithInitializedDB(database, database, nil)
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.

@@ -1,6 +1,6 @@
 ---
 title: "Add an Agent CLI"
-description: "Register a local TUI agent or ship a tested built-in passthrough or ACP agent integration."
+description: "Register a local TUI agent or ship a tested built-in passthrough, ACP, or native Codex app-server integration."
 ---
 
 # Add an Agent CLI
@@ -12,17 +12,18 @@ Choose the smallest integration that matches the CLI:
 | Use a local CLI without changing Kandev source | Add a custom agent in Settings |
 | Ship a passthrough-only CLI as a built-in | Add a declarative `TUIAgent` and registry entry |
 | Show structured chat, tool calls, modes, and resume | Implement a built-in ACP agent |
+| Integrate Codex's native app-server | Extend the dedicated Codex app-server transport |
 
-ACP, REST, and MCP are different boundaries. ACP is the only structured agent protocol accepted by the current agentctl adapter factory. REST/WebSocket control agentctl and Kandev. MCP supplies tools to an agent; it is not a runtime adapter.
+ACP, the native Codex app-server protocol, REST, and MCP are different boundaries. The native app-server adapter is specific to Codex and experimental; it is not a general custom-agent protocol. REST/WebSocket control agentctl and Kandev. MCP supplies tools to an agent; it is not a runtime adapter.
 
 ## Quick path
 
 1. Use **Add custom agent** for a local CLI, and pick its protocol there.
 2. Add a built-in `TUIAgent` only when every Kandev install needs it.
-3. Use a full ACP integration for structured chat, tools, models, modes, or resume.
+3. Use a full ACP integration for structured chat, tools, models, modes, or resume. Codex app-server support uses its dedicated native transport.
 4. Validate the path you chose:
    - local TUI: installation discovery and exact command-token construction;
-   - built-in or ACP: declared permissions, credentials, resume, and MCP delivery.
+   - built-in, ACP, or native Codex: declared permissions, credentials, resume, and MCP delivery.
 
 ## Register a local agent
 
@@ -105,6 +106,10 @@ Optional interfaces add specific capabilities:
 `Runtime()` describes working directory, environment, resource limits, required/stripped variables, mounts, session recovery, and the command used outside the host. Set `RuntimeConfig.Protocol` to `agent.ProtocolACP`. The factory in [`internal/agentctl/server/adapter/factory.go`](../../apps/backend/internal/agentctl/server/adapter/factory.go) rejects other structured protocols.
 
 If the upstream CLI has no ACP server, add or reuse a bridge that speaks ACP, or keep the integration passthrough-only. Adding a protocol constant alone does not create an adapter.
+
+## Extend the native Codex app-server integration
+
+The native Codex transport is a separate, experimental integration behind `features.codexAppServer` / `KANDEV_FEATURES_CODEX_APP_SERVER`. It keeps the `codex-app-server` identity separate from `codex-acp`. Do not generalize its provider-specific wire types for another agent. Update the pinned schema fixtures under `pkg/codexappserver/schema/`, the semantic adapter under `internal/agentctl/server/adapter/transport/codexappserver/`, and the normalization contract together. The feature toggle is off by default and restart-required.
 
 ### Detect installation and authentication
 
