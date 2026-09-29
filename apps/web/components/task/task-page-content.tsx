@@ -12,11 +12,12 @@ import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskRouteSessionHydrated } from "@/components/task/task-route-session-hydration";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
-import { fetchTask } from "@/lib/api";
 import { linkToTaskOverview } from "@/lib/links";
+import { readTaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 import { useWorkflowSnapshotById } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -35,7 +36,6 @@ import {
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
 import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
-import { useTaskRouteSessionHydrated } from "@/components/task/task-route-session-hydration";
 import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
@@ -185,6 +185,7 @@ export function TaskLoadErrorState() {
 }
 
 export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
+  const store = useAppStoreApi();
   const routeDataReady = useTaskRouteSessionHydrated();
   const [taskDetails, setTaskDetails] = useState<Task | null>(null);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
@@ -209,20 +210,23 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     activeTaskIdRef.current = activeTaskId;
   }, [activeTaskId]);
 
-  const loadTaskDetails = useCallback(async () => {
-    if (!activeTaskId) return;
-    const requestedTaskId = activeTaskId;
-    try {
-      const response = await fetchTask(requestedTaskId, { cache: "no-store" });
-      if (activeTaskIdRef.current !== requestedTaskId) return;
-      setTaskDetails(response);
-      setTaskLoadError(null);
-    } catch (error) {
-      if (activeTaskIdRef.current !== requestedTaskId) return;
-      console.error("[TaskPageContent] Failed to load task details:", error);
-      setTaskLoadError(error);
-    }
-  }, [activeTaskId]);
+  const loadTaskDetails = useCallback(
+    async (refresh = true) => {
+      if (!activeTaskId) return;
+      const requestedTaskId = activeTaskId;
+      try {
+        const response = await readTaskNavigationIdentity(store, requestedTaskId, { refresh });
+        if (activeTaskIdRef.current !== requestedTaskId) return;
+        setTaskDetails(response.task);
+        setTaskLoadError(null);
+      } catch (error) {
+        if (activeTaskIdRef.current !== requestedTaskId) return;
+        console.error("[TaskPageContent] Failed to load task details:", error);
+        setTaskLoadError(error);
+      }
+    },
+    [activeTaskId, store],
+  );
 
   useEffect(() => {
     if (
@@ -235,7 +239,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
       return;
     }
     setTaskLoadError(null);
-    void loadTaskDetails();
+    void loadTaskDetails(false);
   }, [routeDataReady, activeTaskId, taskDetails?.id, initialTask?.id, loadTaskDetails]);
 
   useEffect(() => {
@@ -245,7 +249,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     if (reconnected) reconnectRefreshPending.current = true;
     if (connectionStatus === "connected" && routeDataReady && reconnectRefreshPending.current) {
       reconnectRefreshPending.current = false;
-      void loadTaskDetails();
+      void loadTaskDetails(true);
     }
   }, [connectionStatus, routeDataReady, loadTaskDetails]);
 
@@ -254,7 +258,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   const onTaskUnarchived = useCallback(
     (taskId: string) => {
       if (activeTaskId !== taskId) return;
-      void loadTaskDetails();
+      void loadTaskDetails(true);
     },
     [activeTaskId, loadTaskDetails],
   );
@@ -274,7 +278,6 @@ function useTaskPageData(
   sessionId: string | null,
   initialRepositories: Repository[],
 ) {
-  const routeDataReady = useTaskRouteSessionHydrated();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
@@ -300,16 +303,13 @@ function useTaskPageData(
   );
 
   const agent = useSessionAgent(task);
-  const ensureSession = useEnsureTaskSession(
-    {
-      id: task?.id,
-      isArchived: task?.archived_at != null,
-      archiveStateKnown: task !== null,
-      workflowStepId: task?.workflow_step_id,
-      workflowId: task?.workflow_id,
-    },
-    { enabled: routeDataReady },
-  );
+  const ensureSession = useEnsureTaskSession({
+    id: task?.id,
+    isArchived: task?.archived_at != null,
+    archiveStateKnown: task !== null,
+    workflowStepId: task?.workflow_step_id,
+    workflowId: task?.workflow_id,
+  });
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 

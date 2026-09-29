@@ -647,6 +647,8 @@ type Service struct {
 	pendingActionProjectionMu       sync.Mutex
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
+	pendingActionProjectionObserved map[string]pendingActionProjectionState
+	pendingActionSnapshotValues     map[string]pendingActionProjectionState
 	lastPendingActionProjections    map[string]pendingActionProjectionState
 }
 
@@ -827,8 +829,10 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		managementClaimLocks:          parentMutex{locks: make(map[string]*sync.Mutex)},
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
-		pendingActionProjectionEpoch: "1",
-		lastPendingActionProjections: make(map[string]pendingActionProjectionState),
+		pendingActionProjectionEpoch:    "1",
+		pendingActionProjectionObserved: make(map[string]pendingActionProjectionState),
+		pendingActionSnapshotValues:     make(map[string]pendingActionProjectionState),
+		lastPendingActionProjections:    make(map[string]pendingActionProjectionState),
 	}
 }
 
