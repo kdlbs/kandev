@@ -175,3 +175,12 @@ capture evidence are recorded in the plan.
 
 Review follow-up adds initial-loading status coverage and removes the redundant
 pagination guard. The final expanded frontend/consumer run passes 105 tests.
+
+CI follow-up: the context-menu drag regression compared absolute row coordinates
+while the background query indicator disappeared. Both rows shifted upward by
+40 px without changing order or entering a drag. Reproduced the exact assertion
+with retries disabled on a fresh managed production build. The test now compares
+stable task-ID order, retaining the no-drop-zone and no-drag-opacity assertions.
+All six subtask drag/drop scenarios pass with one worker and retries disabled;
+actual nesting and sibling reorder remain covered. This is a test-contract fix;
+no product behavior or public documentation changes are needed.

@@ -277,10 +277,13 @@ test.describe("Subtask re-parenting by drag and drop", () => {
 
     const taskBlock = (taskId: string) =>
       session.sidebar.locator(`[data-testid="sortable-task-block"][data-task-id="${taskId}"]`);
-    const before = {
-      parentY: (await taskBlock(parent.id).boundingBox())?.y ?? 0,
-      childY: (await taskBlock(child.id).boundingBox())?.y ?? 0,
-    };
+    await expect(taskBlock(parent.id)).toBeVisible();
+    await expect(taskBlock(child.id)).toBeVisible();
+    const rowOrder = () =>
+      session.sidebar
+        .getByTestId("sortable-task-block")
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-task-id")));
+    const before = await rowOrder();
 
     // Right-click opens the context menu; the MouseSensor ignores right
     // buttons, so opening the menu alone must not start a drag.
@@ -306,14 +309,7 @@ test.describe("Subtask re-parenting by drag and drop", () => {
     await expect(taskBlock(child.id)).not.toHaveCSS("opacity", "0.5");
     await testPage.mouse.up();
 
-    // The row never moved: both rows keep their vertical order.
-    await expect
-      .poll(async () => {
-        return {
-          parentY: (await taskBlock(parent.id).boundingBox())?.y ?? 0,
-          childY: (await taskBlock(child.id).boundingBox())?.y ?? 0,
-        };
-      })
-      .toEqual(before);
+    // Background query status can change the list's offset without reordering rows.
+    await expect.poll(rowOrder).toEqual(before);
   });
 });
