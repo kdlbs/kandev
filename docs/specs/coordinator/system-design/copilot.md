@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 requirements:
   - REQ-COORDINATOR-COPILOT-001
   - REQ-COORDINATOR-COPILOT-002
@@ -206,7 +206,11 @@ The first prompt of each session carries a system block built by
 `internal/coordinator/prompt.go`: the coordinator's job (explain what needs the
 manager and why; propose tasks), the workspace name and id, the context text
 between explicit delimiters marked as operator-provided, and the rule that its
-only write is `propose_task_kandev`, decided by a person. The block is attached
+only write is `propose_task_kandev`, decided by a person. It also explains
+the reference a manager's message may start with: the prefix
+`About <id> [<kind>:<ref>]: ` names the item the question is about; for `proposal` and `stall`,
+`get_coordinator_item_kandev` with that `kind` and `ref` as `id` reads its
+record, and for `task` the task tools read it with `ref` as the task id. The block is attached
 through the existing system-prompt path used for task sessions, not by
 editing the stored user message.
 
@@ -277,7 +281,7 @@ editing the stored user message.
   profile whatever the session's `config_mode` metadata says, then the
   automation and office branches follow as today. The conversation route never
   sets `config_mode`; a test sets it on a conversation session and asserts the
-  coordinator mode and six-tool profile still resolve. Because the task is now
+  coordinator mode and the seven-tool profile of [Tool surface](#tool-surface) still resolve. Because the task is now
   read before the `config_mode` check, the order in both resolvers is exactly
   as follows. "No row" is either form a missing task takes: an error with
   `errors.Is(err, repoerrors.ErrTaskNotFound)` (what the SQL `GetTask`
@@ -367,39 +371,9 @@ editing the stored user message.
 
 ## Tool surface
 
-`registerCoordinatorTools` in `internal/mcp/server` registers exactly these
-seven tools, the phase-1 tool profile, reusing the existing handlers
-unchanged except for the new two:
-
-| Tool | Why |
-| --- | --- |
-| `list_tasks_kandev` | positions of the workspace's tasks |
-| `get_task_conversation_kandev` | what a task's agent last said or asked |
-| `list_workflows_kandev` | target workflow of a proposal |
-| `list_workflow_steps_kandev` | target step of a proposal |
-| `list_repositories_kandev` | repository of a proposal |
-| `get_coordinator_item_kandev` | new; the record behind an Ask about this reference: `{kind: "proposal", id}` returns the coordinator's own proposal row (spec, status, error, timestamps), `{kind: "stall", id}` the stall record of that task ([needs-you](needs-you.md#stall-records)) |
-| `propose_task_kandev` | new; sends the `coordinator.propose_task` action |
-
-It registers no other tool: in particular no `list_related_tasks_kandev`, no
-`get_task_plan_kandev`, no plan,
-document or session reads, and no user-question, title, plugin, create, move,
-message, archive or delete tool. The backend guard in
-`internal/mcp/handlers/coordinator_authorization.go` runs for every action from
-a coordinator principal: an allowlist of action names (anything else is
-refused with an error naming it), and a workspace check over four categories
-of id: workspace, task, workflow and step, and repository. A `workspace_id`
-argument must equal `principal.WorkspaceID`; `list_workflows_kandev` and
-`list_repositories_kandev` take a client-supplied `workspace_id` as their only
-scope (`internal/mcp/server/config_handlers.go`), so without this check they
-would enumerate any workspace. Every task, workflow, step and repository id
-must resolve inside the coordinator's workspace, and a proposal id must belong
-to the calling coordinator. A call failing either check is
-refused with an error naming the argument, before the handler runs, and
-returns no data.
-`coordinator.propose_task` from a principal that is not a coordinator is
-refused. The guard is tested by a table over every registered MCP action, so a
-newly added action is refused unless listed.
+The phase-1 tool profile (`AC-COORDINATOR-COPILOT-003.1`: seven tools), the
+MCP guard and the `get_coordinator_item_kandev` item read are specified in
+[coordinator tool surface](copilot-tools.md#tool-surface).
 
 ## Fail closed
 
@@ -493,7 +467,10 @@ the messages built from them.
   (`internal/agentctl/types/permission_identity.go`, the
   `mcp__<server>__<tool>` form ACP clients send, for example
   `mcp__kandev__list_tasks_kandev`) to server `kandev` and a tool that is one
-  of the six names above, each compared as the full string, never by prefix.
+  of the seven tool names of [Tool surface](#tool-surface)
+  (`AC-COORDINATOR-COPILOT-003.1`), each compared as the full string, never
+  by prefix. A test enumerates the seven and asserts each is auto-approved and
+  that `get_task_plan_kandev` is not.
   A name that does not parse is not auto-approved.
 - Every other request reaches the panel through the existing permission
   message flow with Approve and Deny.

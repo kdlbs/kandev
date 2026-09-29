@@ -173,6 +173,12 @@ Mockup:
 - **AC-COORDINATOR-COORDINATORS-004.6:** When the viewer is a reader, the list
   shall have no **+ Add coordinator** and the coordinator's page shall show its
   fields disabled with no Save or Delete.
+- **AC-COORDINATOR-COORDINATORS-004.7:** The Coordinators list shall be
+  introduced by "Coordinators read this workspace's boards, tell you what
+  needs you and why, and propose work that waits for your decision." It
+  shall not say or imply that a manager approves every action a coordinator
+  takes, because the MCP guard enforces only the Kandev surface
+  (`AC-COORDINATOR-PROPOSALS-002.15`).
 
 ### REQ-COORDINATOR-COORDINATORS-005: Missing profile
 

@@ -156,12 +156,31 @@ the same pattern as `hideSessionSelectors`, so every other chat is unchanged
   panel and focuses the composer; a second call replaces both.
 - `transformOutgoing` prefixes `About <id> [<kind>:<ref>]: ` while the chip is
   set; the hint under the composer shows the readable form `About <id>: ...`.
+  Before it is written into the prefix, `<id>` has every run of CR and LF
+  characters replaced by one space and is trimmed, so the prefix is always on
+  the message's first line; nothing else in `<id>` is escaped, and a title may
+  contain `: `, `[` or `]`. `<ref>` is an opaque id (a UUID today) and
+  contains no whitespace and no `]`.
   The standing instructions tell the agent that a bracketed reference names
   the item and that `get_coordinator_item_kandev` (for `proposal` and
   `stall`) or the task tools (for `task`) read its evidence. Context ids on
   the wire as structured data stay phase 2 (decision D12); phase 1 carries
   the reference in the message text.
-- `user-message-body.tsx` gains a coordinator branch: when the task origin is
-  `coordinator` and the text starts with `About `, up to the first `: `, it
-  renders the remainder plus an `about <id>` tag, dropping a trailing
-  `[<kind>:<ref>]` from the tag. The stored text is unchanged.
+- `user-message-body.tsx` gains a coordinator branch, used only when the task
+  origin is `coordinator`. It tries two patterns against the start of the
+  stored text, in this order, and uses the first that matches:
+  1. the referenced form, `^About (.+?) \[(task|proposal|stall):([^\]\s]+)\]: `
+     (`.` does not match a newline; the id is the shortest run that is
+     followed by a bracketed reference and `: `), so a title such as
+     `Fix: login` gives the tag `about Fix: login`;
+  2. the legacy form of earlier messages, `^About ([^\n]+?): `, the id ending
+     at the first `: `.
+  On a match it renders the text after the match (which may span lines) plus
+  an `about <id>` tag; the bracket never appears in the tag or the text. A
+  text matching neither pattern, or a matched remainder that is empty,
+  renders unchanged with no tag. The stored text is never rewritten. A
+  message whose own body happens to contain ` [task:x]: ` after a prefix is
+  unaffected, because the shortest match ends at the prefix's bracket. Unit
+  tests cover a plain id, a title containing `: `, `[` and `]`, the legacy
+  form, a title that contained a newline, and text beginning `About` that
+  matches neither.
