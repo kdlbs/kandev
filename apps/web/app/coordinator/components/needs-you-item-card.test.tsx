@@ -142,6 +142,16 @@ function renderCard(ui: ReactElement) {
   );
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 afterEach(() => {
   useCopilotStore.setState({ entries: {} });
   useProposalsStore.setState({ byCoordinator: {} });
@@ -377,7 +387,7 @@ describe("NeedsYouItemCard - proposal card", () => {
   });
 
   it("reads its full row from the store and renders the title, description, workflow/step, attribution and policy line", () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposalRow());
+    seedProposal(COORDINATOR_ID, proposalRow());
     renderCard(
       <NeedsYouItemCard
         item={proposalItem()}
@@ -397,7 +407,7 @@ describe("NeedsYouItemCard - proposal card", () => {
   });
 
   it("renders Approve, Edit and Reject for a manager", () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposalRow());
+    seedProposal(COORDINATOR_ID, proposalRow());
     renderCard(
       <NeedsYouItemCard
         item={proposalItem()}
@@ -412,7 +422,7 @@ describe("NeedsYouItemCard - proposal card", () => {
   });
 
   it("renders no decision actions for a reader", () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposalRow());
+    seedProposal(COORDINATOR_ID, proposalRow());
     renderCard(
       <NeedsYouItemCard
         item={proposalItem()}

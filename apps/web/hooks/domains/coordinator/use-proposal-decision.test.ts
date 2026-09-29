@@ -56,6 +56,16 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
   };
 }
 
+/** Seeds the store as a real caller would: through a ticket, not a shortcut around it. */
+function seedProposal(coordinatorId: string, incoming: Proposal): void {
+  const store = useProposalsStore.getState();
+  const seq = store.takeProposalTicket(coordinatorId);
+  store.applyProposalResult(coordinatorId, incoming.id, seq, {
+    kind: "success",
+    proposal: incoming,
+  });
+}
+
 beforeEach(() => {
   useProposalsStore.setState({ byCoordinator: {} });
   approveProposalMock.mockReset();
@@ -238,7 +248,7 @@ describe("useProposalDecision - forbidden and not_found outcomes", () => {
   });
 
   it("evicts the id from the store and returns a not_found outcome for a 404", async () => {
-    useProposalsStore.getState().mergeOne(COORDINATOR_ID, proposal());
+    seedProposal(COORDINATOR_ID, proposal());
     rejectProposalMock.mockRejectedValue(new ApiError("gone", 404, { error: "no" }));
     const { result } = renderHook(() =>
       useProposalDecision(WORKSPACE_ID, COORDINATOR_ID, PROPOSAL_ID),
