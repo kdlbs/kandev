@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-29
+last_updated: 2026-09-30
 requirements:
   - REQ-COORDINATOR-WAKE-001
   - REQ-COORDINATOR-WAKE-002
@@ -265,8 +265,11 @@ Each tick:
       open turn, if any, including a row with `stop_requested_at` set;
    4. the lower-on-undo retry of [automatic](automatic.md#lowering).
    5. the re-resolution of recorded unattended denials,
-      `ReresolveRecordedDenials` of
-      [containment](containment.md#unattended-permissions).
+      `ReresolveRecordedDenials(ctx, coordinatorID)` of
+      [containment](containment.md#unattended-permissions), called for this
+      coordinator only, whatever `autonomy_enabled` reads. A denial whose turn
+      has settled stays as recorded and is never re-resolved; a coordinator
+      that leaves the visit set is picked up on its next visit.
 
    A read or write error in one duty logs at warn, increments
    `coordinator_backstop_skipped_total`, and does not skip the later duties

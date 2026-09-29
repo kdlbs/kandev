@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-29
+last_updated: 2026-09-30
 requirements:
   - REQ-COORDINATOR-CONTAINMENT-001
   - REQ-COORDINATOR-CONTAINMENT-002
@@ -67,27 +67,36 @@ in this order, and `Contained` is true only when all four are met:
    executor cannot be loaded.
 2. **`auth_enabled`.** Met when `auth.Service.Mode()` is `ModeEnabled`.
    `ModeDisabled` and `ModeSetup` fail with detail `disabled` or `setup`.
-3. **`no_kandev_credential`.** Resolve the launch environment through the
-   lifecycle manager's own resolver (`executorProfileEnvironmentDefinitions`
-   and `resolveEnvironmentDefinition`, reached through a narrow exported
-   interface, never a copy), so the definition set is exactly what a
-   coordinator session would launch with: the executor profile's `EnvVars`,
-   the agent profile's environment, and every other definition that resolver
-   merges (repository secret bindings, managed credentials, managed runtime
-   values, `ProviderAPIKeySecretID`), each `SecretID` resolved through the
-   secrets store. Every definition is evaluated on its own, so a token that a
-   later definition overrides still fails. A key matches only when it equals
-   `KANDEV_API_KEY` or `KANDEV_RUN_TOKEN` exactly (case-sensitive); a value
-   matches when the whole resolved value begins with `kandev_pat_`. Detail is
-   `KANDEV_API_KEY`, `KANDEV_RUN_TOKEN` or `pat_value`; when several
-   definitions match, the first in the resolver's order names the detail. A
-   secret that cannot be resolved, a resolver `ConflictError` or any other
-   read error fails with detail `unreadable`; an empty definition set is met.
-   The resolved values are compared and discarded; they are never logged or
-   returned.
+3. **`no_kandev_credential`.** Resolve the environment a coordinator session
+   would launch with through one exported, read-only function in the lifecycle
+   package, `ResolveLaunchEnvironmentDefinitions(ctx, executorProfileID,
+   agentProfile, taskID)`. It returns the resolved definitions in resolver order
+   (executor-profile `EnvVars`, agent-profile environment, the standard
+   definitions, required credentials and repository secret bindings). The launch
+   path calls this same function: it is a behaviour-preserving extraction of the
+   definition assembly that `resolveStrictEnvironment` performs today, existing
+   launch tests pass unchanged, and one new lifecycle test asserts that launch
+   and `Check` see the same set. Nothing else in the launch path is refactored.
+   `Check` passes the coordinator's own conversation task id, the one its
+   session launches with; with no conversation task the repository-binding
+   source is empty. The check also resolves the agent profile's
+   `ProviderAPIKeySecretID` and applies the same key and value test to it.
+   `Check` reaches the function through a narrow interface. Each `SecretID` is
+   revealed through the secrets store (`revealGlobalSecret`, or the workspace
+   reveal for a workspace secret). Every definition is evaluated on its own, so
+   a token that a later definition overrides still fails. A key matches only
+   when it equals `KANDEV_API_KEY` or `KANDEV_RUN_TOKEN` exactly
+   (case-sensitive); a value matches when the whole resolved value begins with
+   `kandev_pat_`. Detail is `KANDEV_API_KEY`, `KANDEV_RUN_TOKEN` or `pat_value`;
+   when several definitions match, the first in resolver order names the
+   detail. A secret that cannot be resolved, a `runtimeenv` `ConflictError` or
+   any other read error fails with detail `unreadable`; an empty definition set
+   is met. The resolved values are compared and discarded; they are never logged
+   or returned.
 4. **`no_extra_tools`.** Load the agent profile's MCP configuration
    (`AgentProfileMcpConfig`). A profile with no MCP row (`sql.ErrNoRows`) has
-   no configured servers and is met; only another read error is `unreadable`.
+   no configured servers and is met, and its currency source is the agent
+   profile's `updated_at`; only another read error is `unreadable`.
    Met when the configuration is disabled or its `servers` map is empty. Kandev's own
    server is injected by the session, not configured there, so any entry in
    `servers`, including one named `kandev`, fails: the requirement's "no MCP
@@ -98,11 +107,22 @@ in this order, and `Contained` is true only when all four are met:
 environment and MCP servers were fixed when it launched, and editing a
 profile's contents does not end the conversation. When the coordinator has a
 conversation task with a session, conditions 3 and 4 also fail, with detail
-`changed_since_launch`, if the executor profile's, agent profile's or MCP
-configuration's `updated_at` is later than that session's `started_at`. Without
-a session there is nothing launched and the rule does not apply. The fix is the
-phase 1 way to start a new conversation, which launches from the current
-profiles. A missing `updated_at` or `started_at` is `unreadable`.
+`changed_since_launch`, if the `updated_at` of any source that feeds the
+condition is later than that session's `started_at`:
+
+- condition 3: the executor profile, the agent profile, every secret revealed
+  for condition 3 (`secrets.Secret.UpdatedAt`) and every repository secret
+  binding in the resolved set (`RepositorySecretBinding.UpdatedAt`);
+- condition 4: the agent profile's MCP configuration `updated_at`. A missing
+  MCP row uses the agent profile's `updated_at`. A deleted or disabled
+  configuration is compared by the agent profile's `updated_at` against
+  `started_at`.
+
+Without a session there is nothing launched and the rule does not apply. The
+fix is the phase 1 way to start a new conversation, which launches from the
+current settings. A missing `updated_at` on a source that has the field, or a
+missing `started_at`, is `unreadable`. Sources with no timestamp are residuals
+([Out of scope](#out-of-scope)).
 
 Reads are not held in one snapshot: each condition reads current state, so a
 concurrent edit can be seen by some conditions and not others. Every admission
@@ -161,20 +181,36 @@ receives the `watcher.PermissionRequestData` and the active turn id, and:
   running; when it offers none, it cancels through `cancelAgentPermission`, and
   the handler then restores the session to running itself
   (`markSessionRunningAfterPermission`). Either way the audit is
-  `PermissionResolutionAudit` of actor kind `coordinator_unattended`, source
-  `coordinator_wake` and the unattended turn row's id. "Let the turn continue"
+  `PermissionResolutionAudit` of actor kind
+  `models.PermissionActorCoordinatorUnattended` (`coordinator_unattended`),
+  source `models.PermissionSourceCoordinatorWake` (`coordinator_wake`) and the
+  unattended turn row's id. Both constants are new. `ResolveAgentPermissionRequest`
+  gains two optional fields, `ActorKind` and `UnattendedTurnID`; when `ActorKind`
+  is set, `claimAgentPermission` uses it in place of the kind
+  `permissionAuditActor` derives from the context, and `UnattendedTurnID` is
+  stored in the new optional `PermissionResolutionAudit.UnattendedTurnID`
+  (`json:"unattended_turn_id,omitempty"`). The audit is stored as message
+  metadata JSON, so no schema column is added. "Let the turn continue"
   is observable as: the permission message finalized `rejected` and the session
   not left in `WAITING_FOR_INPUT` by this request. An already-resolved or
   claim-in-progress result is success. Any other failure is logged at warn,
   leaves the recorded denial in place, and is retried by
-  `Service.ReresolveRecordedDenials(ctx)`. That method resolves again every
-  permission message still pending whose `(turn_id, pending_id)` is in
-  `coordinator_unattended_denials`, through the same resolver and audit and
-  without counting again. It is exported by the coordinator package for the
-  [backstop](wake.md#backstop), where it is a turn and setting duty that runs
-  for every coordinator in the visit set whatever `autonomy_enabled` reads,
-  as its last duty; wiring it into the tick is task 04's, and this
-  design's tests call the method directly.
+  `Service.ReresolveRecordedDenials(ctx, coordinatorID)`.
+
+`ReresolveRecordedDenials` is scoped to one coordinator and is exported by the
+coordinator package. It selects the recorded denials whose turn row belongs to
+`coordinatorID` (a join through `coordinator_unattended_turns.coordinator_id`,
+since the denials table has no coordinator column) and whose turn row is still
+open, reads each denial's permission message, and re-resolves every one still
+pending through the same resolver and audit, without counting again. The
+resolver and the message reader are injected once when the service is wired,
+never per request. A denial whose turn has settled stays as recorded and is
+never re-resolved: its request is an attended-mode request. An empty selection,
+a message already finalized, and an already-resolved result are success. The
+[backstop](wake.md#backstop) calls it once per coordinator it visits, as its
+last turn and setting duty, whatever `autonomy_enabled` reads; a coordinator
+that leaves the visit set is picked up again on its next visit. Wiring it into
+the tick is task 04's, and this design's tests call the method directly.
 
 The handler is registered once at startup and only while phase 3 is
 effective; that condition cannot change while the process runs (the flag needs
@@ -223,6 +259,12 @@ Not met and a fix line:
 | `no_kandev_credential` | "Remove Kandev tokens from this coordinator's executor and agent profile environment." |
 | `no_extra_tools` | "Remove extra MCP servers from this coordinator's agent profile." |
 
+A condition whose detail is `changed_since_launch` shows the fix "Restart the
+coordinator session so it launches with the current settings." A condition
+whose detail is `unreadable` shows "Kandev could not read this setting. Check
+the profile and try again." Both replace the condition's own fix line while the
+detail holds, and both are added in all six locales.
+
 A read failure of the autonomy route shows "Containment unavailable" with
 Check again. Copy goes through `t()` in six locales; `features.auth` is a
 verbatim config key.
@@ -237,13 +279,29 @@ verbatim config key.
 
 ## Observability
 
+`containment.go` exports a helper, `CheckForAdmission(ctx, coordinator,
+recorder)`, that runs `Check`, counts and logs, and returns the `Result`.
+Admission (task 05) calls only the helper; this card owns and tests the
+counter and log with a fake caller. The autonomy read and the settings display
+call `Check` directly, without counting, so opening settings never moves the
+counter.
+
 `coordinator_containment_failed_total{condition}` counts each unmet condition
-of a `Check` that `Deliver`'s admission runs; the autonomy read and the
-settings display run `Check` without counting, so opening settings never moves
-it. A structured zap log at info records the coordinator id and the failing
-condition name when a coordinator's containment state changes between
-admissions. The previous state is kept in memory only, so the first admission
-after a restart logs no change.
+of a `Check` the helper runs. A structured zap log at info records the
+coordinator id and the failing condition name when the containment state
+changes between helper calls. The comparison key is `(Contained, name of the
+first unmet condition)`; a change in either logs, and a change only in a later
+unmet condition or in a detail does not. The previous key is kept in memory per
+coordinator id, guarded by a mutex; the first call after a restart logs no
+change.
+
+## Out of scope
+
+Launch currency reads only sources that carry an `updated_at`. These
+contribute to condition 3 and have none, so an edit to them after launch is not
+detected: agent-runtime default definitions (`appendAgentRuntimeDefaults`) and
+required-credential values from the credentials manager. They are named
+residuals, not silent gaps; the fix is a new conversation, as for any edit.
 
 ## Related decisions
 
