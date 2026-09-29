@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
@@ -50,18 +51,27 @@ func TestServerSurfaceCoordinatorRegistersBoundActivityTool(t *testing.T) {
 	assert.ElementsMatch(t, []string{"list_tasks_kandev", "list_coordinator_activity_kandev"}, getRegisteredToolNames(s))
 }
 
-func TestServerSurfaceCoordinatorRegistersOnlyBoundToolsWithHandlers(t *testing.T) {
+func TestServerSurfaceCoordinatorRegistersEveryBoundToolForEveryPolicy(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	profile := mcpprofile.NewCoordinator()
-	profile.CoordinatorToolPolicy = &mcpprofile.CoordinatorToolPolicy{
-		Version: 1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t",
-		// propose_move_kandev is bound but has no handler yet: skipped, not stubbed.
-		ToolNames: []string{"list_tasks_kandev", "propose_move_kandev", "get_coordinator_item_kandev"},
+	actions := []coordinator.Action{coordinator.ActionCreateTask, coordinator.ActionMessage, coordinator.ActionMove, coordinator.ActionResume}
+	for mask := 0; mask < 1<<len(actions); mask++ {
+		policy := coordinator.PhaseOnePolicy()
+		for i, a := range actions {
+			setting := coordinator.SettingDenied
+			if mask&(1<<i) != 0 {
+				setting = coordinator.SettingRequiresApproval
+			}
+			policy.Actions[a] = setting
+		}
+		want := coordinator.ToolNames(policy, true)
+		profile := mcpprofile.NewCoordinator()
+		profile.CoordinatorToolPolicy = &mcpprofile.CoordinatorToolPolicy{
+			Version: 1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t", ToolNames: want,
+		}
+		s := NewWithProfile(backend, "s", "t", 10005, log, "", false, profile)
+		assert.ElementsMatch(t, want, getRegisteredToolNames(s), "mask %d", mask)
 	}
-	s := NewWithProfile(backend, "s", "t", 10005, log, "", false, profile)
-
-	assert.ElementsMatch(t, []string{"list_tasks_kandev", "get_coordinator_item_kandev"}, getRegisteredToolNames(s))
 }

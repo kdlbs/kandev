@@ -45,7 +45,7 @@ creates, and `standing_order_ids` on every propose tool.
 
 ## In scope
 
-- `kinds.go`: `KindExecutor` (`Validate`, `Execute`, `Editable`) with
+- `kinds.go`: `KindExecutor` (six methods per the design: `Kind`, `Action`, `ValidatePropose`, `ValidateEdits`, `Execute`, `ReRunsOnStaleClaim`) with
   `create_task` wrapping the phase-1 path, and `resume`, `message`, `move`
   ([design](../../specs/coordinator/system-design/proposal-kinds.md#executors)).
 - `propose_resume_kandev`, `propose_message_kandev`, `propose_move_kandev`
@@ -58,7 +58,7 @@ creates, and `standing_order_ids` on every propose tool.
   returns it even after the target stopped validating, and repeated under
   the lock (`001.5`).
 - The end-state catalog test that the registered coordinator tools equal
-  `ToolNames(policy, true)` for every policy, and the `001.4` walk of the
+  `ToolNames(policy, true)` for every policy, and the PERMISSIONS-001.4 walk of the
   `KindExecutor` registry asserting no kind merges or targets a
   `CompleteTaskOnEnter` step. The three propose tools' `ToolForAction` rows
   and handlers are registered here.
@@ -101,10 +101,37 @@ creates, and `standing_order_ids` on every propose tool.
 
 ## Verification
 
-Write the interleaving table first, before code: two concurrent approves of
-one proposal; the stale-claim sweep during an execution; a crash after the
-execution and before the settle; a reject racing an approve. Each row names
-the order of the operations and the expected result: one execution at most.
+Interleaving table (written before code; each row is a test in
+`interleavings_kinds_test.go`). Expected result for every row: `Execute` runs
+at most once and the row settles exactly once.
+
+| # | Order of operations | Expected result |
+|---|---|---|
+| 1 | Approve A and approve B of one pending non-create proposal run concurrently | One claim wins and runs `Execute` once; the loser gets 409 (row `approving`) or 200 with the settled row; executor stub records one call |
+| 2 | Approve claims, `Execute` runs past the stale window, the sweep runs, then `Execute` returns | Sweep settles `failed` `outcome_unknown` without calling `Execute`; the late fenced completion matches zero rows, writes nothing, logs warn `execute_settle_fenced`; caller returns 200 with the failed row |
+| 3 | Approve claims and `Execute` runs; the process stops before the settle; startup pass runs | Startup pass settles `failed` `outcome_unknown` without calling `Execute`; the executor stub records no second call |
+| 4 | Approve claims; reject arrives while `approving` | Reject returns 409 (reject takes only pending or failed); the approve settles normally |
+| 5 | Reject settles a `failed` row; a stale approve read of the same row claims afterwards | The claim is conditional on the status, so it matches zero rows and `Execute` does not run |
+| 6 | `Execute` reaches its 60 s deadline | Settle runs on a detached context: `approved` if `Execute` returned nil, `failed` `outcome_unknown` if it returned a deadline error |
+| 7 | Deadline fires, the row settles `outcome_unknown`, then the resume launch finishes | The launch goroutine owned by the resume attempt registry writes nothing and logs warn `execute_settle_fenced` |
+| 8 | Move: the sweep settles the claim between the claim and the fenced `from_step_id` write | The fenced write matches zero rows, no move call is made, warn `execute_settle_fenced` |
+| 9 | Approve of a stale non-create claim | Returns 200 with the `failed` `outcome_unknown` row; no `Execute` call; works with `features.coordinatorPhase2` off |
+
+Conductor rulings that override the design prose:
+
+- R4-1: `Execute` returns at the 60 s deadline. The resume launch runs in a
+  goroutine owned by the resume attempt registry (tracked, never unowned), so
+  approve never blocks for a cold launch. At the deadline the row settles
+  `outcome_unknown`; the late launch result writes nothing (the fenced
+  completion matches zero rows and logs warn `execute_settle_fenced`). The
+  stale-claim sweep stays the backstop; there is no second sweep.
+- R4-2: move check 6 reads every step of the target workflow through the seam
+  (a list-steps read) and calls `StartsAgentOnEnter(steps, stepID)`.
+- R4-3: `outcome_unknown` only means the side effect may have happened. A
+  `from_step_id` pre-write error, before any move call, settles `failed` even
+  when the deadline has fired.
+- R4-4: a deleted target task (`ErrTaskNotFound`) maps to `task_archived`, the
+  code undo uses.
 
 ```bash
 make -C apps/backend test PKG=./internal/coordinator/...
@@ -122,7 +149,7 @@ second calls; `starts_agent` create approved after `start_agent` flips to
 `denied` is 409; a move whose destination turned agent-starting after
 propose settles `failed` with `step_starts_agent` and does not move; a move
 onto the task's current step settles `approved` with `noop: true` and no
-`MoveTask` call. A task moved by hand onto a destination that
+move call. A task moved by hand onto a destination that
 has since become a Done step settles `approved` with `noop: true`, not
 `step_is_done`. A second identical propose after the target was archived
 returns the open proposal. A retire committed before a citing propose makes
@@ -132,10 +159,33 @@ is refused 409 `policy_denied` after `start_agent` flips to `denied`, with
 no claim and no `MoveTask` call. A `starts_agent` true move proposal
 approved while both `move` and `start_agent` are `denied` returns 409 with
 `action` `move`; with only `start_agent` `denied` it returns `action`
-`start_agent`. Two identical `propose_task_kandev` calls
+`start_agent`. A resume propose refuses CREATED, COMPLETED and live-execution sessions
+and an IDLE session with no executor record, and accepts a FAILED one
+without a record. A move into a step that only disallows manual moves stores
+`starts_agent` false. A second identical propose returns the open proposal
+with `deduplicated: true`, and a `failed` proposal still blocks it. Approve
+of an archived resume or move target settles `failed` (not 400); a `resume`
+or `move` body carrying `text` or `title` is 400 `not_editable` after the
+status decision; `text: null` is 400 naming `text`. An `Execute` that hits its
+60-second deadline settles `outcome_unknown`; a late completion after a sweep
+matches zero rows and writes nothing. Two identical `propose_task_kandev` calls
 create two proposals, and a create call citing six ids, or one id twice, is
 refused naming `standing_order_ids` before any transaction. The E2E spec drives the mock agent to propose a move and
 asserts the task's step after approval through the task API.
+Execute classification tests: a move whose fenced `from_step_id` write matches
+zero rows makes no move call and returns the current row; a move-seam
+`ErrWIPLimitExceeded` fails `step_full`, `ErrMoveConflict` fails `moved`, a
+`admitted` false result settles `approved` with `queued: true`, a task moved to another workflow after check 2 fails `moved` (the call carries `ExpectedWorkflowID`), and a task
+with a RUNNING session fails `agent_running`; a resume that returns `(nil,
+nil)` settles `approved` with `deferred: true`, one that joins a concurrent
+attempt settles `approved`, and `ErrResumeAttemptCancelled` fails; a message
+fails `task_archived`, `not_accepting` or `queue_full` per cause; an Execute
+that returns nil after its deadline fired settles `approved`, one that returns
+an unwrapped error with the deadline fired settles `outcome_unknown`, and the
+settle succeeds after the Execute context expired; approve of a stale
+non-create claim returns 200 with the `failed` row; the sweep and startup pass
+leave an unknown-kind `approving` row untouched and settle a non-create
+`approving` row `outcome_unknown` with `features.coordinatorPhase2` off.
 
 ## Likely files
 

@@ -21,14 +21,17 @@ import (
 // alone is not an authorization boundary because an agent can still send a
 // raw WebSocket action.
 var coordinatorSurfaceActions = map[string]struct{}{
-	ws.ActionMCPListTasks:           {},
-	ws.ActionMCPGetTaskConversation: {},
-	ws.ActionMCPListWorkflows:       {},
-	ws.ActionMCPListWorkflowSteps:   {},
-	ws.ActionMCPListRepositories:    {},
-	coordinator.ActionProposeTask:   {},
-	coordinator.ActionGetItem:       {},
-	coordinator.ActionListActivity:  {},
+	ws.ActionMCPListTasks:            {},
+	ws.ActionMCPGetTaskConversation:  {},
+	ws.ActionMCPListWorkflows:        {},
+	ws.ActionMCPListWorkflowSteps:    {},
+	ws.ActionMCPListRepositories:     {},
+	coordinator.ActionProposeTask:    {},
+	coordinator.ActionProposeResume:  {},
+	coordinator.ActionProposeMessage: {},
+	coordinator.ActionProposeMove:    {},
+	coordinator.ActionGetItem:        {},
+	coordinator.ActionListActivity:   {},
 }
 
 // coordinatorPrincipalOnlyActions are registered coordinator-surface actions
@@ -38,9 +41,12 @@ var coordinatorSurfaceActions = map[string]struct{}{
 // own WorkspaceID/CoordinatorID rather than any payload field
 // (copilot-tools.md#tool-surface).
 var coordinatorPrincipalOnlyActions = map[string]struct{}{
-	coordinator.ActionProposeTask:  {},
-	coordinator.ActionGetItem:      {},
-	coordinator.ActionListActivity: {},
+	coordinator.ActionProposeTask:    {},
+	coordinator.ActionProposeResume:  {},
+	coordinator.ActionProposeMessage: {},
+	coordinator.ActionProposeMove:    {},
+	coordinator.ActionGetItem:        {},
+	coordinator.ActionListActivity:   {},
 }
 
 // authorizeCoordinatorRequest is the one execution-time boundary for the
@@ -204,7 +210,7 @@ func (h *Handlers) refuseCoordinator(
 func (h *Handlers) coordinatorWatchesFields(
 	ctx context.Context, principal mcpscope.Principal, action string, fields map[string]json.RawMessage,
 ) bool {
-	if action == coordinator.ActionProposeTask {
+	if isCoordinatorProposeAction(action) {
 		return true
 	}
 	workflowID := jsonStringField(fields, "workflow_id")
@@ -264,7 +270,7 @@ func (h *Handlers) authorizeCoordinatorReferenceFields(
 	action string,
 	fields map[string]json.RawMessage,
 ) bool {
-	if action == coordinator.ActionProposeTask {
+	if isCoordinatorProposeAction(action) {
 		return true
 	}
 	if workspaceID := jsonStringField(fields, "workspace_id"); workspaceID != "" && workspaceID != principal.WorkspaceID {
@@ -294,4 +300,16 @@ func coordinatorUnknownAction(msg *ws.Message) (*ws.Message, *ws.Message, error)
 func coordinatorNotFound(msg *ws.Message) (*ws.Message, *ws.Message, error) {
 	response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target not found", nil)
 	return response, nil, err
+}
+
+// isCoordinatorProposeAction reports whether the action is one of the four
+// propose tools, whose own field and target validation runs in the coordinator
+// service and names the offending field.
+func isCoordinatorProposeAction(action string) bool {
+	tool, ok := coordinator.ToolForAction(action)
+	if !ok {
+		return false
+	}
+	_, isPropose := coordinator.ProposeActionFor(tool)
+	return isPropose
 }

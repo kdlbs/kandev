@@ -23,6 +23,7 @@ type undoTaskAPI interface {
 // undoStepAPI is the part of the workflow service the undo seam adapts.
 type undoStepAPI interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error)
 }
 
 // coordinatorUndoSeam adapts the task and workflow services to
@@ -95,6 +96,10 @@ func (a *coordinatorUndoSeam) GetStep(ctx context.Context, stepID string) (*coor
 		AutoStart:        step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent),
 		CompletesOnEnter: step.CompleteTaskOnEnter,
 	}, nil
+}
+
+func (a *coordinatorUndoSeam) ListSteps(ctx context.Context, workflowID string) ([]coordinator.StepNode, error) {
+	return coordinator.LoadStepGraph(ctx, a.steps, workflowID)
 }
 
 // HasActiveSession reports whether any session of the task is starting or

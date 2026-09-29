@@ -21,10 +21,9 @@ func knownProposalKind(kind string) bool {
 	return false
 }
 
-// checkApprovable rejects a proposal this build cannot approve. Only
-// create_task proposals have an executor here.
+// checkApprovable rejects a proposal whose kind has no executor.
 func (s *Service) checkApprovable(p *Proposal) error {
-	if !s.phase2 || p.Kind == "" || p.Kind == ProposalKindCreateTask {
+	if !s.phase2 || p.Kind == "" || p.Kind == ProposalKindCreateTask || s.kindExecutor(p.Kind) != nil {
 		return nil
 	}
 	return fmt.Errorf("%w: %q cannot be approved", ErrUnknownProposalKind, p.Kind)

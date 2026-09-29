@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -131,7 +132,7 @@ func TestGuardInterleaving3_LoosenedSettingDoesNotWidenBoundNames(t *testing.T) 
 	require.NoError(t, err)
 	guarded := f.call(t, f.ctxFor(f.binding(phase1Names...), true), "coordinator.propose_message")
 	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
-	require.Equal(t, []struct{ Class, Reason string }{{"unknown", "not_in_profile"}}, f.refusals(t))
+	require.Equal(t, []struct{ Class, Reason string }{{"message", "not_in_profile"}}, f.refusals(t))
 }
 
 // Row 4: the guard reads denied, S loosens afterwards; the call stays refused.
@@ -171,4 +172,39 @@ func TestGuard_NoBindingIsPhaseOneSeven(t *testing.T) {
 	f := newPhase2GuardFixture(t)
 	require.Nil(t, f.call(t, f.ctxFor(nil, false), ws.ActionMCPListRepositories))
 	require.Empty(t, f.refusals(t))
+}
+
+func (f *guardFixture) savePolicy(t *testing.T, overrides map[string]string) {
+	t.Helper()
+	actions := map[string]string{"create_task": "requires_approval", "start_agent": "denied", "message": "denied", "move": "denied", "resume": "denied", "stop": "denied"}
+	for k, v := range overrides {
+		actions[k] = v
+	}
+	body, err := json.Marshal(map[string]any{"policy": map[string]any{"actions": actions}})
+	require.NoError(t, err)
+	_, err = f.svc.SaveSettings(context.Background(), f.c.WorkspaceID, f.c.ID, body)
+	require.NoError(t, err)
+}
+
+func TestGuard_ProposeKindActionsPassWhenBoundAndAllowed(t *testing.T) {
+	f := newPhase2GuardFixture(t)
+	f.savePolicy(t, map[string]string{"move": "requires_approval", "message": "requires_approval", "resume": "requires_approval"})
+	names := append(append([]string{}, phase1Names...), "propose_move_kandev", "propose_message_kandev", "propose_resume_kandev")
+	ctx := f.ctxFor(f.binding(names...), true)
+	for _, action := range []string{coordinator.ActionProposeMove, coordinator.ActionProposeMessage, coordinator.ActionProposeResume} {
+		msg := makeWSMessage(t, action, map[string]interface{}{"task_id": "task-not-in-this-workspace"})
+		guarded, replacement, err := f.h.authorizeCoordinatorRequest(ctx, msg)
+		require.NoError(t, err)
+		require.Nil(t, guarded, "%s must reach the service, which names the field", action)
+		require.NotNil(t, replacement)
+	}
+	require.Empty(t, f.refusals(t))
+}
+
+func TestGuard_ProposeKindDeniedByPolicyRecordsItsOwnClass(t *testing.T) {
+	f := newPhase2GuardFixture(t)
+	names := append(append([]string{}, phase1Names...), "propose_move_kandev")
+	guarded := f.call(t, f.ctxFor(f.binding(names...), true), coordinator.ActionProposeMove)
+	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	require.Equal(t, []struct{ Class, Reason string }{{"move", "policy_denied"}}, f.refusals(t))
 }

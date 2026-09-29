@@ -61,12 +61,15 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
-	proposal, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	proposal, err := s.readForApprove(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.checkApprovable(proposal); err != nil {
 		return nil, err
+	}
+	if exec := s.kindExecutor(proposal.Kind); exec != nil {
+		return s.approveKind(ctx, exec, proposal, edits)
 	}
 	carriesEdits := carriesApproveEdits(edits)
 	decidedBy := decidingUserID(ctx)
@@ -86,6 +89,21 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	default:
 		return nil, fmt.Errorf("coordinator: proposal %s has unknown status %q", proposalID, proposal.Status)
 	}
+}
+
+// readForApprove reads the proposal an approve targets. With phase 2 off only
+// create_task rows are visible, except an approving row of another kind: its
+// claim may be stale and must settle whatever the flag says.
+func (s *Service) readForApprove(ctx context.Context, workspaceID, coordinatorID, proposalID string) (*Proposal, error) {
+	p, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if s.phase2 || !errors.Is(err, ErrNotFound) {
+		return p, err
+	}
+	p, err = s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	if err != nil || p.Status != ProposalStatusApproving || p.Kind == "" || p.Kind == ProposalKindCreateTask {
+		return nil, ErrNotFound
+	}
+	return p, nil
 }
 
 // carriesApproveEdits reports whether edits has at least one of the five
@@ -123,11 +141,11 @@ func (s *Service) approvePending(ctx context.Context, workspaceID, coordinatorID
 	if err != nil {
 		return nil, err
 	}
-	validated, err := s.validateProposalSpec(ctx, workspaceID, candidate)
+	validated, err := s.validateProposalSpecFor(ctx, workspaceID, candidate, proposal.StartsAgent)
 	if err != nil {
 		return nil, err
 	}
-	return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, validated, nil)
+	return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, validated, proposal.StartsAgent, nil)
 }
 
 // approveFailed handles an approve request against a failed row
@@ -145,7 +163,7 @@ func (s *Service) approveFailed(ctx context.Context, workspaceID, coordinatorID,
 		if proposal.FinalSpec != nil {
 			base = *proposal.FinalSpec
 		}
-		return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, base, foundTask)
+		return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, base, proposal.StartsAgent, foundTask)
 	case errors.Is(err, repoerrors.ErrTaskNotFound):
 		if err := s.recheckPolicy(ctx, coordinatorID, proposal); err != nil {
 			return nil, err
@@ -158,11 +176,11 @@ func (s *Service) approveFailed(ctx context.Context, workspaceID, coordinatorID,
 		if verr != nil {
 			return nil, verr
 		}
-		validated, verr := s.validateProposalSpec(ctx, workspaceID, candidate)
+		validated, verr := s.validateProposalSpecFor(ctx, workspaceID, candidate, proposal.StartsAgent)
 		if verr != nil {
 			return nil, verr
 		}
-		return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, validated, nil)
+		return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, validated, proposal.StartsAgent, nil)
 	default:
 		return nil, err
 	}
@@ -276,7 +294,7 @@ func (s *Service) resolveStepEdit(ctx context.Context, candidate ProposalSpec, w
 // (proposals.md#approve steps 3-6). A nil foundTask means the original
 // claimer path; a non-nil foundTask means the failed-row-with-existing-task
 // short circuit, which skips eligibility and create entirely.
-func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID, decidedBy string, spec ProposalSpec, foundTask *taskmodels.Task) (*Proposal, error) {
+func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID, decidedBy string, spec ProposalSpec, startsAgent bool, foundTask *taskmodels.Task) (*Proposal, error) {
 	token := uuid.New().String()
 	now := time.Now().UTC()
 	matched, err := s.store.ClaimProposal(ctx, proposalID, token, spec, decidedBy, now)
@@ -289,7 +307,7 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal claimed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
-	return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, spec, foundTask)
+	return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, spec, startsAgent, foundTask)
 }
 
 // reclaimStaleAndProceed re-issues an approving row's claim (with a fresh
@@ -298,6 +316,21 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 // request's inline stale re-claim (cutoff = now - 2 minutes) and the startup
 // recovery pass (cutoff = T0, task 08).
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
+	row, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	if err != nil {
+		return nil, err
+	}
+	if row.Kind != "" && row.Kind != ProposalKindCreateTask {
+		exec := s.kindExecutor(row.Kind)
+		if exec == nil {
+			s.logger.Error("unknown_kind", zap.String("proposal_id", proposalID), zap.String("kind", row.Kind))
+			return nil, fmt.Errorf("%w: %q", ErrUnknownProposalKind, row.Kind)
+		}
+		if exec.ReRunsOnStaleClaim() {
+			return nil, fmt.Errorf("coordinator: kind %q cannot re-run on a stale claim", row.Kind)
+		}
+		return s.settleStaleKind(ctx, row, exec, cutoff)
+	}
 	token := uuid.New().String()
 	now := time.Now().UTC()
 	matched, err := s.store.ReclaimStale(ctx, proposalID, token, now, cutoff, s.phase2)
@@ -323,9 +356,9 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 	foundTask, err := s.decisionTasks.GetTaskByExternalID(ctx, workspaceID, proposalExternalID(proposalID))
 	switch {
 	case err == nil:
-		return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, frozen, foundTask)
+		return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, frozen, current.StartsAgent, foundTask)
 	case errors.Is(err, repoerrors.ErrTaskNotFound):
-		return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, frozen, nil)
+		return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, frozen, current.StartsAgent, nil)
 	default:
 		s.logger.Warn("stale re-claim lookup failed", zap.String("proposal_id", proposalID), zap.Error(err))
 		return nil, err
@@ -336,12 +369,12 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 // row: a found task short-circuits straight to completion; otherwise it
 // re-checks step eligibility immediately before creating
 // (proposals.md#no-agent-starts), then branches on the create outcome.
-func (s *Service) completeClaimedApproval(ctx context.Context, workspaceID, coordinatorID, proposalID, token string, spec ProposalSpec, foundTask *taskmodels.Task) (*Proposal, error) {
+func (s *Service) completeClaimedApproval(ctx context.Context, workspaceID, coordinatorID, proposalID, token string, spec ProposalSpec, startsAgent bool, foundTask *taskmodels.Task) (*Proposal, error) {
 	if foundTask != nil {
 		return s.completeApproval(ctx, workspaceID, coordinatorID, proposalID, token, foundTask.ID)
 	}
 
-	eligible, err := s.stepStillEligible(ctx, spec)
+	eligible, err := s.stepStillEligible(ctx, spec, startsAgent)
 	if err != nil {
 		s.logger.Warn("step-graph read failed before proposal create",
 			zap.String("proposal_id", proposalID), zap.Error(err))
@@ -351,7 +384,7 @@ func (s *Service) completeClaimedApproval(ctx context.Context, workspaceID, coor
 		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, "the target step is no longer eligible")
 	}
 
-	result, err := s.createApprovedTask(ctx, workspaceID, proposalID, spec)
+	result, err := s.createApprovedTask(ctx, workspaceID, proposalID, spec, startsAgent)
 	if err != nil {
 		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, err.Error())
 	}
@@ -361,10 +394,13 @@ func (s *Service) completeClaimedApproval(ctx context.Context, workspaceID, coor
 // stepStillEligible loads the frozen spec's workflow step graph and runs
 // EligibleStep against it, for the pre-create check every create call repeats
 // (proposals.md#no-agent-starts).
-func (s *Service) stepStillEligible(ctx context.Context, spec ProposalSpec) (bool, error) {
+func (s *Service) stepStillEligible(ctx context.Context, spec ProposalSpec, startsAgent bool) (bool, error) {
 	nodes, err := LoadStepGraph(ctx, s.decisionSteps, spec.WorkflowID)
 	if err != nil {
 		return false, err
+	}
+	if startsAgent {
+		return EligibleStartingStep(nodes, spec.StepID), nil
 	}
 	return EligibleStep(nodes, spec.StepID), nil
 }
@@ -373,7 +409,7 @@ func (s *Service) stepStillEligible(ctx context.Context, spec ProposalSpec) (boo
 // proposal: the frozen spec's fields, the reserved external id, the regular
 // board origin, and no session/auto-start intent
 // (proposals.md#no-agent-starts).
-func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalID string, spec ProposalSpec) (taskservice.CreateTaskResult, error) {
+func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalID string, spec ProposalSpec, startsAgent bool) (taskservice.CreateTaskResult, error) {
 	req := &taskservice.CreateTaskRequest{
 		WorkspaceID:             workspaceID,
 		WorkflowID:              spec.WorkflowID,
@@ -383,6 +419,9 @@ func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalI
 		Origin:                  taskmodels.TaskOriginManual,
 		ExternalID:              proposalExternalID(proposalID),
 		AllowReservedExternalID: true,
+	}
+	if startsAgent {
+		req.Metadata = map[string]interface{}{taskmodels.MetaKeyAutoStartOnCreate: true}
 	}
 	if spec.RepositoryID != "" {
 		req.Repositories = []taskservice.TaskRepositoryInput{{RepositoryID: spec.RepositoryID}}

@@ -84,7 +84,9 @@ func (r *proposalRow) toProposal() (*Proposal, error) {
 	if r.OutcomeJSON.Valid {
 		p.OutcomeJSON = &r.OutcomeJSON.String
 	}
-	if r.FinalSpecJSON.Valid {
+	if r.FinalSpecJSON.Valid && rawSpec != "" {
+		p.RawFinalSpec = r.FinalSpecJSON.String
+	} else if r.FinalSpecJSON.Valid {
 		var final ProposalSpec
 		if err := json.Unmarshal([]byte(r.FinalSpecJSON.String), &final); err != nil {
 			return nil, fmt.Errorf("unmarshal proposal final spec: %w", err)
@@ -384,12 +386,18 @@ func (s *Store) ClaimProposal(ctx context.Context, id, token string, finalSpec P
 	if err != nil {
 		return false, fmt.Errorf("marshal final spec: %w", err)
 	}
+	return s.ClaimProposalRaw(ctx, id, token, string(finalJSON), decidedBy, now)
+}
+
+// ClaimProposalRaw is ClaimProposal for a frozen spec already encoded as JSON,
+// the form every non-create_task kind stores.
+func (s *Store) ClaimProposalRaw(ctx context.Context, id, token, finalJSON, decidedBy string, now time.Time) (bool, error) {
 	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?
 		WHERE id = ? AND status IN (?, ?)`),
-		string(ProposalStatusApproving), now, token, string(finalJSON), decidedBy, now,
+		string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now,
 		id, string(ProposalStatusPending), string(ProposalStatusFailed))
 	if err != nil {
 		return false, fmt.Errorf("claim proposal: %w", err)

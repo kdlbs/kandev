@@ -84,7 +84,8 @@ type KindExecutor interface {
 `Claim` carries the proposal id, claim token, frozen spec and coordinator;
 `Outcome` carries `task_id` and `outcome_json`. A registry maps kind to
 executor; an unknown stored kind is treated as a failed read (500, no
-write). The phase-1 approve steps 3 to 6 call `Execute` in place of the
+write) by approve and is skipped, with an error log, by the startup pass and
+the sweep ([At most once](#at-most-once)). The phase-1 approve steps 3 to 6 call `Execute` in place of the
 direct create call; everything before the claim and the fenced completion
 after it stay as [proposals](proposals.md#approve) specifies. This
 per-kind `Execute` is the seam phase 3 reuses.
@@ -104,21 +105,42 @@ coordinator from the principal, passes the guard of
    proposed step, still returns the open proposal; its approval settles it
    as [Approve](#approve) says). This is what `001.5` means by "return that
    proposal"; step 2 repeats the lookup under the lock for concurrent calls.
+   A returned existing proposal is the same result shape as a new one plus
+   `deduplicated: true`, so the coordinator can tell it did not create a
+   proposal; its `status` shows whether it is `pending`, `approving` or
+   `failed`. A `failed` proposal is open, so it blocks a new proposal for the
+   same target until a manager rejects it or approves it again; this is
+   intended, because two cards for one target would let two approvals run.
 1. `ValidatePropose`, which reads through the task, session and workflow
    services:
    - target task: exists, not archived, `workspace_id` equals the
      coordinator's, origin not `coordinator`, workflow watched (`001.2`);
-   - resume: primary session exists, state not `COMPLETED`, and no
-     running executor record (`GetExecutorRunningBySessionID` returns none)
+   - resume: the primary session is a resumable session
+     ([requirements](../requirements/proposal-kinds.md#terminology)), read as:
+     state neither `COMPLETED` nor `CREATED`; `HasLiveExecution(sessionID)`
+     false (the liveness check the task-level stall detection uses); and one
+     of an executor record present (`GetExecutorRunningBySessionID` returns a
+     row), state `FAILED` or `CANCELLED`, or
+     `models.HasInterruptedRecoveryPending(session.Metadata)` true. These are
+     exactly the sessions `orchestrator.ResumeTaskSession` accepts without an
+     error, so a proposal Execute would always refuse is never stored
      (`001.4`);
    - message: primary session state in `STARTING`, `RUNNING`, `IDLE`,
      `WAITING_FOR_INPUT`, `COMPLETED`; `text` trimmed, 1 to 4,000 code
      points (`001.1`, `001.4`);
    - move: `step_id` in the task's workflow, not the task's current step, the
      step's `CompleteTaskOnEnter` false, and, while `start_agent` is `denied`,
-     `EligibleStep` true (`001.3`). The row stores `starts_agent =
-     !EligibleStep(step)`, so a move into an agent-starting step (allowed
-     only with `start_agent` `requires_approval`) is flagged like a create;
+     `StartsAgentOnEnter` false (`001.3`). The row stores `starts_agent =
+     StartsAgentOnEnter(step)`, so a move into an agent-starting step (allowed
+     only with `start_agent` `requires_approval`) is flagged like a create.
+     `StartsAgentOnEnter(steps, stepID)` is new in `eligibility.go`: true when
+     the step has `AutoStartOnEnter` or feeds, through `pull_from_step_id`
+     links, a step with `AutoStartOnEnter` (the two
+     agent-starting clauses `EligibleStep` already holds, moved into it so
+     `EligibleStep` calls it and cannot drift). A move does not apply the
+     `IsStart`/`AllowManualMove` placement clause of `EligibleStep`: a manager
+     approves the destination by name, and Review-style steps that refuse
+     drops are exactly what a move targets;
    - `rationale` per the phase-1 rule, and the shape of
      `standing_order_ids` (a JSON array of strings, at most 5, no
      duplicate). Whether each cited order is active is not checked here.
@@ -147,34 +169,63 @@ and a repeated call with malformed citations is refused naming
 
 ## Create with a start
 
-With `start_agent` `requires_approval`, the create validator accepts a step
-where `EligibleStep` is false, provided `CompleteTaskOnEnter` is false, and
-stores `starts_agent = true` (`002.2`). With `start_agent` `denied` the
-phase-1 rule applies (`002.1`).
+With `start_agent` `requires_approval`, the create validator relaxes only the
+agent-starting clauses of `EligibleStep`: it accepts a step that exists, is
+the workflow's start step or allows manual moves, and has `CompleteTaskOnEnter`
+false, whether or not `StartsAgentOnEnter` is true, and stores
+`starts_agent = StartsAgentOnEnter(step)` (`002.2`). A step that fails the
+placement clause, or is unknown, is refused as in phase 1. With `start_agent`
+`denied` the phase-1 rule applies unchanged (`002.1`).
 
 Approving a `starts_agent` proposal is the start decision: the create
 request carries the `auto_start_on_create` marker, so `handleTaskCreated`
 evaluates the step's `on_enter` `auto_start_agent` as it does for a person's
-create. The pre-create `EligibleStep` check of phase 1 is skipped for such a
-proposal, and the approve re-check of [permissions](permissions.md#approve-re-check)
+create. For such a proposal the pre-create `EligibleStep` check of phase 1
+becomes the same relaxed check (step exists, placement clause, not a Done
+step), and the approve re-check of [permissions](permissions.md#approve-re-check)
 requires `start_agent` not `denied` at approval (`002.3`). A proposal stored
 with `starts_agent = false` keeps the phase-1 pre-create check, so a step
 that became agent-starting still fails it.
 
 ## Approve
 
-Edits (`003.4`): for `message`, the body may carry `text` (validated as in
-propose); for `resume` and `move`, a body carrying any edit field is 400
-`not_editable` before the claim. A `failed` message proposal takes edits on
-top of `final_spec_json` as phase 1 does.
+Steps 1 to 6 of [proposals](proposals.md#approve) run for every kind, with
+these differences for a kind other than `create_task`:
+
+- Step 1's status decision is unchanged and comes first, so an `approved` or
+  `rejected` row is 409 whatever the body carries, and an `approving` row with
+  a body that carries edits is 409. "Carries edits" for these kinds means at
+  least one of the six names `title`, `description`, `workflow_id`, `step_id`,
+  `repository_id`, `text` is present, whatever its value, `null` included.
+- Step 1's `failed` external-id lookup runs only for `create_task`; a
+  `failed` resume, message or move row goes straight to step 2, and its
+  Approve is a new claim with a new `Execute`.
+- Step 2 is the kind's `ValidateEdits` and nothing else. It does not re-run
+  `ValidatePropose`: the target, session and step checks are `Execute`'s
+  job, so an archived target settles `failed` (`003.1`) and a task already on
+  the destination settles `approved` with `noop` (`003.3`) instead of a 400.
+- Step 4's pre-create `EligibleStep` check is create-only; the kind's
+  `Execute` is what runs after the claim. The policy re-check and the claim
+  are unchanged.
+
+Edits (`003.4`), checked in step 2 on a `pending` or `failed` row: for
+`message`, the body may carry `text`; a body carrying any of the other five
+names is 400 `not_editable`. `text` is trimmed with `strings.TrimSpace`,
+counted in code points, and refused naming `text` when `null` or empty after
+trimming or over 4000; the trimmed text replaces the stored text and is what
+is delivered. For `resume` and `move` a body carrying any of the six names is
+400 `not_editable`; an empty body or `{}` carries none. A 400 leaves the row
+unchanged. For `create_task`, `text` is an unknown field and is ignored, as
+in phase 1. A `failed` message proposal takes edits on top of
+`final_spec_json` as phase 1 does.
 
 After the claim commits, `Execute` runs:
 
 | Kind | Execute |
 | --- | --- |
-| `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not resumable: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)`; its error fails with the error text. Outcome `{session_id}`. |
-| `message` | Re-read the task and session (archived or not accepting: fail). Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
-| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. agent-starting (`EligibleStep` false) while the proposal's `starts_agent` is false: fail `step_starts_agent`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`, before the claim, so that refusal wins over check 4: a proposal stored with `starts_agent` true whose task has since reached the destination is refused 409 `policy_denied` while `start_agent` is `denied`, and the card offers Reject only ([permissions](permissions.md#approve-re-check)). Otherwise record `from_step_id` = the task's current step, then `taskSvc.MoveTask(ctx, taskID, workflowID, toStepID, 0)`. Outcome `{from_step_id, to_step_id}`. |
+| `resume` | Re-read the task (archived: fail `task_archived`) and its primary session (not a resumable session as in [Propose](#propose), including a session that gained a live execution: fail `not_resumable`). Call `orchestrator.ResumeTaskSession(ctx, taskID, sessionID)` and classify its result: a returned execution settles `approved`, outcome `{session_id}`, including when the call joined a concurrent manual resume of the same session (the orchestrator returns that attempt's execution, and the session is resuming, which is what the manager asked for); `(nil, nil)`, which the orchestrator returns when admission defers the resume, settles `approved` with outcome `{session_id, deferred: true}` and the row detail "It will resume when there is room"; any error, including `ErrResumeAttemptCancelled`, fails with the error text. The "already owned by another caller" error exists only for a call with a continuation and cannot occur here. |
+| `message` | Re-read the task and session: archived fails `task_archived`; no primary session, or one that is `CREATED`, `FAILED` or `CANCELLED`, fails `not_accepting`; a full queue fails `queue_full`; any other delivery error fails with its text. Deliver through `TaskMessenger.DeliverQueued` ([Message delivery](#message-delivery)). Outcome `{session_id}`. |
+| `move` | Re-read the task and check, in this order, stopping at the first that applies: 1. archived: fail `task_archived`; 2. workflow changed: fail `task_left_workflow`; 3. destination step missing: fail `step_missing`; 4. task already on the destination: the no-op below, whatever the step's settings now are; 5. `CompleteTaskOnEnter` now true: fail `step_is_done`; 6. `StartsAgentOnEnter` true while the proposal's `starts_agent` is false: fail `step_starts_agent`; 7. any session of the task `STARTING` or `RUNNING` (the seam and states the [undo](activity-log.md#undo) move uses, the two states the task service blocks moves on): fail `agent_running`. The approve re-check has already refused `starts_agent` true with `start_agent` `denied`, before the claim, so that refusal wins over check 4: a proposal stored with `starts_agent` true whose task has since reached the destination is refused 409 `policy_denied` while `start_agent` is `denied`, and the card offers Reject only ([permissions](permissions.md#approve-re-check)). Otherwise record `from_step_id` = the task's current step (a fenced write of `outcome_json`, see [At most once](#at-most-once)), then `UndoTaskService.MoveTaskWithOptions(ctx, taskID, workflowID, toStepID, 0, UndoMoveOptions{ExpectedWorkflowID: workflowID})` (the seam undo uses, `undo_seam.go`, with `SkipStepPrompt` false because check 6 already refused an agent-starting step the proposal did not disclose), so a person moving the task to another workflow after check 2 is refused rather than dragged back. If the fenced write matches zero rows the claim was already settled: the move call is not made, the request logs at warn `execute_settle_fenced` and returns 200 with the current row; a write error settles `failed` with the error text and does not make the move call. Results of the seam call, which returns `admitted` and the coordinator sentinels (the adapter maps the task service's `ErrWorkflowResolutionConflict` and the workflow `ErrMoveConflict` to `ErrMoveConflict`): `ErrWIPLimitExceeded` fails `step_full`; `ErrMoveConflict` fails `moved`; any other error, including a session-blocked refusal for a session that started after check 7, fails with the error text; a move accepted with `admitted` false (the task queued behind the step's limit) settles `approved` with outcome `{from_step_id, to_step_id, queued: true}` and the row detail "It is queued behind the step's limit"; otherwise outcome `{from_step_id, to_step_id}`. `from_step_id` is the step read by check 1 to 7; a person moving the task within its workflow between that read and the move call is not fenced (the workflow fence covers a change of workflow only), the window is one request, and Execute logs at info the step it found, as undo does. |
 
 A move whose task already sits on the destination (check 4) makes no call,
 because it moves nothing and starts nothing, even when the step has since
@@ -196,7 +247,12 @@ session read in `Execute`. The prompt is wrapped in a `<kandev-system>`
 attribution block naming the coordinator and the approving manager, instead
 of a sender task. `Execute` refuses before calling when the session is
 `CREATED`, `FAILED`, `CANCELLED` or missing, so delivery never creates a
-session or starts one that never ran (`003.2`). A full message queue
+session or starts one that never ran (`003.2`). Delivery to an `IDLE`,
+`WAITING_FOR_INPUT` or `COMPLETED` session goes through the same queued path
+as `message_task_kandev`, which may relaunch the agent to process the
+message. That relaunch is part of what the manager approves when approving
+the message; it is not a `start_agent` decision and the `start_agent` policy
+is not consulted for a message. A full message queue
 (`messagequeue.QueueFullErrorCode`) fails with `queue_full`.
 
 ## At most once
@@ -217,7 +273,49 @@ with the `failed` activity row in the same transaction, and never calls
 `Execute`. The card renders `outcome_unknown` as "It may or may not have
 run; check the task" (`003.5`). A later Approve on that `failed` card is a
 new claim by a person and runs `Execute` once more. An approve of a stale
-non-create claim therefore returns the failed row, not a re-run.
+non-create claim therefore returns 200 with the failed row, as phase 1 returns
+the current row after a re-claim, not a re-run.
+
+Recovery of a non-create claim runs whether or not `features.coordinatorPhase2`
+is on: settling `failed` is a safety action and calls no `Execute`. A row whose
+stored kind has no registered executor (a row written by a newer binary) is
+left untouched by the startup pass and the sweep, which log it at error
+`unknown_kind` each pass; only an approve request reads it, as a 500 with no
+write ([Executors](#executors)).
+
+Resume and message have no write to fence before their call. Their protection
+is the deadline: `Execute` starts immediately after the claim commits and is
+bounded at 60 seconds, so the 2-minute stale window cannot pass before the call
+returns unless the callee ignores its context, which is the sweep-during-
+execution row below.
+
+Resume is such a callee for its launch: `ResumeTaskSession` runs the launch on
+an attempt context detached from the caller's (`context.WithoutCancel`), so the
+60-second deadline bounds only the wait for the result. A launch slower than
+the 2-minute window (a cold container or pod start) can finish after the sweep
+settled the row, or after the deadline settled it `outcome_unknown`. This is
+accepted: the session is then resuming, the card says "It may or may not have
+run; check the task", and the late result writes nothing. Resume gets no longer
+claim window, because a window that outlasts every launch would leave a crashed
+approval `approving` for as long.
+
+`Execute` of a non-create kind runs under a context deadline of 60 seconds,
+below the 2-minute stale window, so a sweep can only beat a live `Execute`
+that ignores its context. The interleavings and their results:
+
+| Interleaving | Result |
+| --- | --- |
+| `Execute` returns before the deadline | Fenced completion settles `approved` or `failed` with the error text. |
+| The deadline fires first | A nil error from `Execute` settles `approved` even when the deadline fired (the action reported success). An error settles `failed` with `outcome_unknown`, the same code and card copy as a stale claim, when `errors.Is(err, context.DeadlineExceeded)` or when the Execute context's `Err()` is `DeadlineExceeded` at return; any other error settles `failed` with its text. The settle runs on a context detached from the Execute deadline (`context.WithoutCancel` with its own 5-second bound), so an expired Execute context cannot fail the settle and leave the row to the sweep. |
+| The sweep settles `outcome_unknown` while `Execute` is still running | The row is `failed`. The late fenced completion matches zero rows, writes nothing, logs at warn `execute_settle_fenced`, and its caller returns 200 with the current `failed` row. The action ran once; a manager who approves again starts a new claim and may repeat it, which the card copy "check the task" warns about. |
+| Crash after `Execute` and before the settle | The startup pass settles `failed` with `outcome_unknown`; no `Execute` runs. |
+| Reject while `approving` | 409 with the row (reject takes only `pending` or `failed`); the claim fence decides between two approves and between approve and reject. |
+
+The move's `from_step_id` is written to `outcome_json` by a claim-token-fenced
+update before the move call is made, and the settle statements of the sweep
+never touch `outcome_json`, so a move that ran under a swept claim still
+records where the task came from. The row is `failed`, not `approved`, so it
+offers no undo.
 
 ## Direct manager actions
 
@@ -244,7 +342,7 @@ These are not proposals and write no activity row.
 
 ## Cards
 
-`ProposalCard` (`apps/web/app/coordinator/needs-you/proposal-card.tsx`)
+`ProposalCard` (`apps/web/app/coordinator/proposal-card/proposal-card.tsx`)
 switches on `kind` for its title and body; state handling (pending,
 approving, failed, settled, stale Retry) is shared:
 

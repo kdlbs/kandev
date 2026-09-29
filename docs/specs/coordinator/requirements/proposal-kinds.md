@@ -25,8 +25,14 @@ a pull request or moves a task to Done.
 - **Target task:** the existing task a resume, message or move acts on.
 - **Open proposal:** a proposal in `pending`, `approving` or `failed`.
 - **Done step:** a workflow step that completes the task on entry.
-- **Resumable session:** the task's primary session exists, is not
-  `COMPLETED`, and has no running execution (the case a stall reports).
+- **Resumable session:** the task's primary session exists, is neither
+  `COMPLETED` nor `CREATED`, has no live agent execution (the case a stall
+  reports), and is one the orchestrator's resume accepts: it has an executor
+  record, or its state is `FAILED` or `CANCELLED`, or an interrupted recovery
+  is pending on it.
+- **Agent-starting step:** a step whose `on_enter` actions include
+  `auto_start_agent`, or that feeds, through `pull_from_step_id` links, a step
+  that does.
 - **Session that accepts a message:** the task's primary session is
   `STARTING`, `RUNNING`, `IDLE`, `WAITING_FOR_INPUT` or `COMPLETED`. A
   session that never started (`CREATED`), a `FAILED` or `CANCELLED` session,
@@ -54,20 +60,24 @@ a pull request or moves a task to Done.
   `propose_move_kandev(task_id, step_id, rationale)`, each also accepting
   `standing_order_ids`. `rationale` shall follow the phase-1 create rule and
   `text` shall be 1 to 4000 characters after trimming.
-- **AC-COORDINATOR-PROPOSAL-KINDS-001.2:** Each tool shall refuse, naming the
-  field, a target task that is not a watched, unarchived task of the
+- **AC-COORDINATOR-PROPOSAL-KINDS-001.2:** Unless AC 001.5 returns an open
+  proposal, each tool shall refuse, naming the field, a target task that is not a watched, unarchived task of the
   coordinator's workspace or that is a coordinator conversation task.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.3:** `propose_move_kandev` shall refuse,
   naming `step_id`, a step that is not in the task's workflow, the step the
   task is in, a Done step, and an agent-starting step while `start_agent` is
   `denied`. It shall store the proposal with `starts_agent` true when the
   step is agent-starting at propose, and false otherwise.
-- **AC-COORDINATOR-PROPOSAL-KINDS-001.4:** `propose_resume_kandev` shall refuse
+- **AC-COORDINATOR-PROPOSAL-KINDS-001.4:** Unless AC 001.5 returns an open
+  proposal, `propose_resume_kandev` shall refuse
   a task without a resumable session, and `propose_message_kandev` a task
   without a session that accepts a message, naming `task_id`.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.5:** When the coordinator already has an
   open proposal of the same kind for the same target task, the tool shall
-  return that proposal and create nothing; concurrent calls shall leave one.
+  return that proposal, marked as already open, and create nothing, whether or
+  not the target or the other arguments would now be refused;
+  concurrent calls shall leave one. A `failed` proposal is open until a manager
+  rejects it or approves it again.
 - **AC-COORDINATOR-PROPOSAL-KINDS-001.6:** A stored proposal shall have its
   kind; a phase-1 proposal and one created by `propose_task_kandev` shall be
   `create_task`. Resume, message and move proposals shall count toward the
@@ -88,7 +98,7 @@ a pull request or moves a task to Done.
   true.
 - **AC-COORDINATOR-PROPOSAL-KINDS-002.3:** When a manager approves a proposal
   with `starts_agent` true while `start_agent` is `denied`, the approval
-  shall be refused with 409 `policy_denied`.
+  shall be refused with 409 `policy_denied`, whatever the task's current step.
 
 ### REQ-COORDINATOR-PROPOSAL-KINDS-003: Approving other kinds
 
@@ -105,15 +115,20 @@ a pull request or moves a task to Done.
   task's primary session as a queued message and settle `approved`. It shall
   never create a session or start one that never ran; a task without a
   session that accepts a message at approval shall settle `failed`.
-- **AC-COORDINATOR-PROPOSAL-KINDS-003.3:** When a manager approves a move
+- **AC-COORDINATOR-PROPOSAL-KINDS-003.3:** Unless AC 002.3 refuses the
+  approval, when a manager approves a move
   proposal, the system shall record the step the task is in, move the task to
   the proposed step and settle `approved`. When the task is archived, has
   left its workflow, or the step is gone or has become a Done step, it shall
-  settle `failed` with the reason. When the step has become agent-starting
-  since a proposal stored with `starts_agent` false, it shall settle
-  `failed` with `step_starts_agent` and move nothing. When the task is
-  already in the proposed step, it shall move nothing and settle `approved`
-  with a row that is not undoable.
+  settle `failed` with the reason; the same applies when a session of the task
+  is starting or running (`agent_running`), the step is at its work-in-progress
+  limit (`step_full`), or the task moved to another workflow meanwhile
+  (`moved`). When the step has become agent-starting since a proposal stored
+  with `starts_agent` false, it shall settle `failed` with
+  `step_starts_agent` and move nothing. When the task is already in the
+  proposed step, it shall move nothing and settle `approved` with a row that is
+  not undoable, and that outcome wins over the step having since become a Done
+  step or agent-starting.
 - **AC-COORDINATOR-PROPOSAL-KINDS-003.4:** Approving a resume, message or move
   proposal shall accept an edit only of the message text; any other edit
   shall be refused with 400 `not_editable`.
@@ -121,7 +136,8 @@ a pull request or moves a task to Done.
   shall run at most once. When its claim goes stale, the system shall settle
   it `failed` with "It may or may not have run; check the task" and shall not
   run it again; Approve on the failed card shall run it again only as a new
-  explicit approval.
+  explicit approval. An execution that outlives its claim shall not change the
+  settled row.
 
 ### REQ-COORDINATOR-PROPOSAL-KINDS-004: Cards
 

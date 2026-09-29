@@ -65,10 +65,14 @@ type CoordinatorWithOpenProposals struct {
 // conversation, approve/reject, and subscriber routes are added by later work
 // packages on the same Store.
 type Service struct {
-	store     *Store
-	validator *Validator
-	authz     WorkspaceAuthorizer
-	logger    *logger.Logger
+	// kinds is the registry of non-create proposal kinds; executeTimeout bounds one Execute.
+	kinds          map[string]KindExecutor
+	kindDeps       KindDeps
+	executeTimeout time.Duration
+	store          *Store
+	validator      *Validator
+	authz          WorkspaceAuthorizer
+	logger         *logger.Logger
 
 	onConversationCleared ConversationClearedHook
 	onCoordinatorDeleted  CoordinatorDeletedHook
@@ -103,6 +107,9 @@ type Service struct {
 	sweepMu      sync.Mutex
 	sweepStarted bool
 	sweepWG      sync.WaitGroup
+
+	// launchWG tracks resume launches that may outlive their Execute deadline.
+	launchWG sync.WaitGroup
 
 	// afterSweepPass is a test-only hook invoked once at the end of every
 	// approval-sweep pass (including a pass with nothing to recover). nil in
@@ -142,6 +149,8 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 		authz:     authorizer,
 		logger:    log.WithFields(zap.String("component", "coordinator-service")),
 	}
+	s.registerKinds()
+	s.executeTimeout = executeDeadline
 	for _, opt := range opts {
 		opt(s)
 	}

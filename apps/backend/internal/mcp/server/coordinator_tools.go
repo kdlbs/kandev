@@ -78,6 +78,9 @@ func (s *Server) coordinatorToolCatalog() map[string]func() {
 			)
 		},
 		"propose_task_kandev":              s.registerProposeTaskTool,
+		"propose_resume_kandev":            s.registerProposeResumeTool,
+		"propose_message_kandev":           s.registerProposeMessageTool,
+		"propose_move_kandev":              s.registerProposeMoveTool,
 		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
 		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
 	}
@@ -94,6 +97,7 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString(mcpcontract.FieldStepID, mcp.Description("Optional workflow step the task would be created in. Defaults to the workflow's start step")),
 			mcp.WithString(mcpKeyRepositoryID, mcp.Description("Optional repository the task would target")),
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
+			standingOrderIDsOption(),
 		),
 		s.wrapHandler("propose_task_kandev", s.proposeTaskHandler()),
 	)
@@ -117,7 +121,7 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
-		payload := map[string]string{
+		payload := map[string]interface{}{
 			canvasTitleArg:              title,
 			descriptionArg:              description,
 			"rationale":                 rationale,
@@ -125,6 +129,7 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 			mcpcontract.FieldStepID:     req.GetString(mcpcontract.FieldStepID, ""),
 			mcpKeyRepositoryID:          req.GetString(mcpKeyRepositoryID, ""),
 			"source_task_id":            req.GetString("source_task_id", ""),
+			standingOrderIDsArg:         req.GetStringSlice(standingOrderIDsArg, nil),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeTask, payload, &result); err != nil {
@@ -199,6 +204,70 @@ func (s *Server) listCoordinatorActivityHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionListActivity, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+const standingOrderIDsArg = "standing_order_ids"
+
+func standingOrderIDsOption() mcp.ToolOption {
+	return mcp.WithArray(standingOrderIDsArg,
+		mcp.Description("Optional ids of the standing orders that shaped this proposal, at most 5, no duplicates. Each must be one of your active standing orders."),
+		mcp.Items(map[string]any{typeKey: stringType}))
+}
+
+func (s *Server) registerProposeResumeTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_resume_kandev",
+			mcp.WithDescription("Propose resuming a stopped or interrupted task session for a human to approve. Nothing is resumed until a workspace manager approves. The task must be in a workflow you watch, not archived, and its primary session must be in a resumable state. A repeat call for the same task returns the open proposal with deduplicated true."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose session would be resumed")),
+			mcp.WithString("rationale", mcp.Description("Why the session should be resumed, at most 10,000 characters")),
+			standingOrderIDsOption(),
+		),
+		s.wrapHandler("propose_resume_kandev", s.proposeKindHandler(mcpcontract.ActionProposeResume, "task_id", "rationale")),
+	)
+}
+
+func (s *Server) registerProposeMessageTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_message_kandev",
+			mcp.WithDescription("Propose sending a message to a task's agent for a human to approve. Nothing is sent until a workspace manager approves. The text is 1 to 4,000 characters. A repeat call for the same task returns the open proposal with deduplicated true."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose agent would receive the message")),
+			mcp.WithString("text", mcp.Required(), mcp.Description("The message, 1 to 4,000 characters after trimming")),
+			mcp.WithString("rationale", mcp.Description("Why the message should be sent, at most 10,000 characters")),
+			standingOrderIDsOption(),
+		),
+		s.wrapHandler("propose_message_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMessage, "task_id", "text", "rationale")),
+	)
+}
+
+func (s *Server) registerProposeMoveTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_move_kandev",
+			mcp.WithDescription("Propose moving a task to another step of its workflow for a human to approve. Nothing moves until a workspace manager approves. The destination is never a Done step. A repeat call for the same task returns the open proposal with deduplicated true."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task to move")),
+			mcp.WithString(mcpcontract.FieldStepID, mcp.Required(), mcp.Description("The destination step in the task's current workflow")),
+			mcp.WithString("rationale", mcp.Description("Why the task should move, at most 10,000 characters")),
+			standingOrderIDsOption(),
+		),
+		s.wrapHandler("propose_move_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMove, "task_id", mcpcontract.FieldStepID, "rationale")),
+	)
+}
+
+// proposeKindHandler forwards the named string arguments and the standing
+// order citations to the propose action. Required-argument and value checks
+// belong to the coordinator service, which names the offending field.
+func (s *Server) proposeKindHandler(action string, fields ...string) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{standingOrderIDsArg: req.GetStringSlice(standingOrderIDsArg, nil)}
+		for _, name := range fields {
+			payload[name] = req.GetString(name, "")
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

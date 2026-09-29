@@ -136,7 +136,7 @@ func TestActivityWriters_OnlyProposalPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"decision_phase2.go": true, "proposals.go": true, "activity.go": true, "undo.go": true, "activity_store.go": true}
+	allowed := map[string]bool{"decision_phase2.go": true, "proposals.go": true, "propose_kinds.go": true, "activity.go": true, "undo.go": true, "activity_store.go": true}
 	for _, e := range entries {
 		n := e.Name()
 		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") || allowed[n] {
