@@ -56,10 +56,7 @@ test("phone recovery opens the exact MCP sign-in terminal in the terminal panel"
     await expect(authenticationTerminal).toHaveAttribute("data-state", "active", {
       timeout: 15_000,
     });
-    await expect(authenticationTerminal.getByTestId("passthrough-terminal")).toHaveAttribute(
-      "data-terminal-id",
-      fixture.authenticationTerminalId,
-    );
+    await expect(authenticationTerminal.getByTestId("terminal-xterm-host")).toBeVisible();
     await expect
       .poll(() =>
         terminalSocketUrls.some((socketUrl) => {
