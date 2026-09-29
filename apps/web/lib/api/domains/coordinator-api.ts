@@ -4,7 +4,13 @@ import { ApiError, fetchJson, type ApiRequestOptions } from "@/lib/api/client";
 export type ProfileStatus = "ok" | "missing" | "passthrough";
 
 // Mirrors internal/coordinator/models.go's ProposalStatus.
-export type ProposalStatus = "pending" | "approving" | "approved" | "rejected" | "failed";
+export type ProposalStatus =
+  | "pending"
+  | "approving"
+  | "approved"
+  | "rejected"
+  | "failed"
+  | "returned";
 
 // Mirrors internal/coordinator/models.go's ProposalSpec.
 export type ProposalSpec = {
@@ -115,6 +121,10 @@ type ProposalBase = {
   starts_agent?: boolean;
   // Parsed outcome_json; null until the proposal has an outcome.
   outcome?: unknown;
+  // Present only while features.coordinatorPhase3 is effective.
+  reply_text?: string | null;
+  reply_delivered_at?: string | null;
+  in_reply_to?: string | null;
 };
 
 export type CreateTaskProposal = ProposalBase & {
@@ -454,6 +464,38 @@ export function rejectProposal(
     proposalPath(workspaceId, coordinatorId, proposalId, "/reject"),
     "POST",
     reason === undefined ? {} : { reason },
+    options,
+  );
+}
+
+// replyToProposal resolves to the returned Proposal on 200, delivered or not,
+// and throws an ApiError on any non-2xx status.
+export function replyToProposal(
+  workspaceId: string,
+  coordinatorId: string,
+  proposalId: string,
+  text: string,
+  options?: ApiRequestOptions,
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
+    proposalPath(workspaceId, coordinatorId, proposalId, "/reply"),
+    "POST",
+    { text },
+    options,
+  );
+}
+
+// deliverProposalReply re-runs delivery of a returned proposal's reply.
+export function deliverProposalReply(
+  workspaceId: string,
+  coordinatorId: string,
+  proposalId: string,
+  options?: ApiRequestOptions,
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
+    proposalPath(workspaceId, coordinatorId, proposalId, "/reply/deliver"),
+    "POST",
+    {},
     options,
   );
 }

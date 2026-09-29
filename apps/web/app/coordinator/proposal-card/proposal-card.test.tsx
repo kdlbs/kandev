@@ -27,6 +27,12 @@ vi.mock("@/hooks/domains/coordinator/use-proposal-edit-options", () => ({
   useProposalEditOptions: () => editOptions.current,
 }));
 
+const phase3 = vi.hoisted(() => ({ effective: true }));
+
+vi.mock("@/hooks/domains/settings/use-coordinator-phase3-effective", () => ({
+  useCoordinatorPhase3Effective: () => phase3.effective,
+}));
+
 const fetchTaskMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({

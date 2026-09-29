@@ -262,6 +262,9 @@ func (s *Service) sendReply(ctx context.Context, p *Proposal) error {
 	key := replyDeliveryKey(p.ID)
 	content := build(p, replyTitle(p), *p.ReplyText)
 	metadata := map[string]interface{}{MetaKeyReplyProposalID: p.ID}
+	// The message is the replying manager's, whoever presses Send again;
+	// CreateQueuedMessageOnce keeps the author as given. Only a row with no
+	// recorded decider leaves it empty, and the message is then unattributed.
 	author := ""
 	if p.DecidedBy != nil {
 		author = *p.DecidedBy

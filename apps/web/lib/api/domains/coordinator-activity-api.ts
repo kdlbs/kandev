@@ -31,7 +31,8 @@ export type ActivityOutcome =
   | "rejected"
   | "failed"
   | "refused"
-  | "undone";
+  | "undone"
+  | "returned";
 
 // Mirrors internal/coordinator/activity.go's ActivityAuthorization values.
 export type ActivityAuthorization = "requires_approval" | "denied";
@@ -61,6 +62,8 @@ export type ActivityItem = {
   undoable: boolean;
   target_task_identifier: string | null;
   from_step_id: string | null;
+  // Present only while features.coordinatorPhase3 is effective.
+  unattended_turn_id?: string | null;
 };
 
 export type ActivityPage = {

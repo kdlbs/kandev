@@ -45,7 +45,7 @@ function isPolicyDeniedBody(body: unknown): boolean {
   );
 }
 
-function outcomeFromError(
+export function outcomeFromError(
   error: unknown,
   apply: (result: ProposalApplyResult) => void,
 ): ProposalDecisionOutcome {

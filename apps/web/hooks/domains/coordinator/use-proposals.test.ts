@@ -99,6 +99,36 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("mergeProposal - returned rows", () => {
+  it("never unsettles a returned row with a pending one", () => {
+    const cached = proposal({ id: "p-1", status: "returned", updated_at: T0 });
+    const incoming = proposal({ id: "p-1", status: "pending", updated_at: T5 });
+    expect(mergeProposal(cached, incoming)).toBe(cached);
+  });
+
+  it("takes an equal-time returned row that records the delivery", () => {
+    const cached = proposal({ id: "p-1", status: "returned", updated_at: T5 });
+    const incoming = proposal({
+      id: "p-1",
+      status: "returned",
+      updated_at: T5,
+      reply_delivered_at: T10,
+    });
+    expect(mergeProposal(cached, incoming)).toBe(incoming);
+  });
+
+  it("keeps a delivered returned row against an equal-time undelivered one", () => {
+    const cached = proposal({
+      id: "p-1",
+      status: "returned",
+      updated_at: T5,
+      reply_delivered_at: T10,
+    });
+    const incoming = proposal({ id: "p-1", status: "returned", updated_at: T5 });
+    expect(mergeProposal(cached, incoming)).toBe(cached);
+  });
+});
+
 describe("mergeProposal", () => {
   it("stores the incoming row when nothing is cached", () => {
     const incoming = proposal({ id: "p-1" });

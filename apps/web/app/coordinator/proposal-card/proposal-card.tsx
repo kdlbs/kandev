@@ -36,6 +36,8 @@ import { MessageEditForm } from "./message-edit-form";
 import { kindApprovedToast, kindFailureText, policyLineText } from "./outcome-copy";
 import { usePhase2CardContext } from "./phase2-context";
 import { RejectForm } from "./reject-form";
+import { ReplySection } from "./reply-section";
+import { RevisedNote } from "./revised-note";
 import { ShapedBy } from "./shaped-by";
 import { useApprovedCardLabel } from "./use-approved-card-label";
 import { useTargetTask } from "./use-target-task";
@@ -65,6 +67,8 @@ export type ProposalCardProps = {
   onFormForceClosed?: () => void;
   /** "full" variant only: the Needs-you item count to show in the decision toast's "Next" line. */
   computeNeedsYouCount?: () => number;
+  /** "full" variant only: a reply request started, so the Needs you list keeps this item. */
+  onReplyStarted?: () => void;
 };
 
 type TFn = ReturnType<typeof useTranslation>["t"];
@@ -428,6 +432,7 @@ export function ProposalCard({
   onNavigateToForm,
   onFormForceClosed,
   computeNeedsYouCount,
+  onReplyStarted,
 }: ProposalCardProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -556,6 +561,13 @@ export function ProposalCard({
         policyDenied={policyDenied}
         serverError={openForm === null ? serverError : null}
       />
+      {proposal.in_reply_to && (
+        <RevisedNote
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          inReplyTo={proposal.in_reply_to}
+        />
+      )}
       <ProposalCardActions
         showActions={showActions}
         openForm={openForm}
@@ -579,6 +591,15 @@ export function ProposalCard({
         onCancelEdit={() => closeForm("edit")}
         onCancelReject={() => closeForm("reject")}
       />
+      {openForm === null && !isStaleApproving && (
+        <ReplySection
+          proposal={proposal}
+          canManage={canManage}
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          onReplyStarted={onReplyStarted}
+        />
+      )}
     </div>
   );
 }

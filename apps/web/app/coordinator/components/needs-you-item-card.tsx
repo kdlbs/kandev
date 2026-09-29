@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -115,9 +115,12 @@ export function NeedsYouItemCard({
   const proposalRow = useProposalRow(coordinatorId, proposalId);
   const relay = useItemRelay(item, workspaceId, coordinatorId, canManage);
   const cardRef = useRef<HTMLDivElement>(null);
+  // A started reply holds the item until the card remounts (navigation).
+  const [replyHeld, setReplyHeld] = useState(false);
+  const held = relay.expanded || replyHeld;
   useEffect(() => {
-    onExpandedChange?.(item, relay.expanded);
-  }, [item, relay.expanded, onExpandedChange]);
+    onExpandedChange?.(item, held);
+  }, [item, held, onExpandedChange]);
   const answerable = relay.offered || relay.expanded;
 
   return (
@@ -177,6 +180,7 @@ export function NeedsYouItemCard({
             onAutoFormOpened={onAutoFormOpened}
             onFormForceClosed={() => headingRef.current?.focus()}
             computeNeedsYouCount={computeNeedsYouCount}
+            onReplyStarted={() => setReplyHeld(true)}
           />
         )}
         {/* Label beside its text, not above it: two stacked pairs turned a

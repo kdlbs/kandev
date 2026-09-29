@@ -49,6 +49,11 @@ export function actionText(item: ActivityItem, t: TFunction): string {
       ? t("coordinator:activityRejectedDetail", { detail })
       : t("coordinator:activityRejected");
   }
+  if (item.outcome === "returned") {
+    return detail
+      ? t("coordinator:activityReturnedDetail", { detail })
+      : t("coordinator:activityReturned");
+  }
   if (item.outcome === "failed") {
     return detail
       ? t("coordinator:activityFailedDetail", { detail })
@@ -88,6 +93,10 @@ export function outcomeLine(item: ActivityItem, person: PersonName, t: TFunction
       return name
         ? t("coordinator:activityRejectedBy", { name })
         : t("coordinator:activityRejected");
+    case "returned":
+      return name
+        ? t("coordinator:activityReturnedBy", { name })
+        : t("coordinator:activityReturned");
     case "failed":
       return t("coordinator:activityFailed");
     case "undone":
