@@ -27,9 +27,16 @@ func TestKindRegistry_NoKindMergesOrReachesADoneStep(t *testing.T) {
 			t.Fatalf("kind %q maps to action %q, which is not resume, message or move", e.Kind(), e.Action())
 		}
 		args, _ := json.Marshal(map[string]string{"task_id": "task-0", "step_id": "manual-step", "text": "hi"})
-		_, _, err := f.svc.ProposeKind(context.Background(), f.c.ID, e.Kind(), args, nil)
+		got, _, err := f.svc.ProposeKind(context.Background(), f.c.ID, e.Kind(), args, nil)
 		if e.Kind() == ProposalKindMove {
 			wantField(t, err, "step_id")
+			continue
+		}
+		if err != nil || got.Status != ProposalStatusPending || got.Kind != e.Kind() {
+			t.Fatalf("%s propose: got=%+v err=%v, want a pending proposal of its own kind", e.Kind(), got, err)
+		}
+		if len(f.undo.moves) != 0 || f.undo.tasks["task-0"].WorkflowStepID != "step-1" {
+			t.Fatalf("%s propose touched the task: moves=%d step=%q", e.Kind(), len(f.undo.moves), f.undo.tasks["task-0"].WorkflowStepID)
 		}
 	}
 
