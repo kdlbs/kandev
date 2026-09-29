@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type fastPathTaskReadRetryRepo struct {
@@ -244,7 +246,18 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 	if err := repo.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-fastpath-admitted")
+	promptCalled := make(chan struct{})
+	manager := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptAgentFunc: func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+			close(promptCalled)
+			return nil, errors.New("test prompt delivery failure")
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
 
 	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "admitted-task", "", false, nil, map[string]interface{}{}, true); err != nil {
 		t.Fatalf("QueueUserPrompt: %v", err)
@@ -254,4 +267,12 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
 		t.Fatalf("post-enqueue queue count = %d, want 0 (T2 fast-path drained admitted task)", got)
 	}
+	select {
+	case <-promptCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fast-path queue drain did not reach the mock provider")
+	}
+	require.Eventually(t, func() bool {
+		return !svc.isQueuedDispatchInFlight("s1")
+	}, 5*time.Second, 10*time.Millisecond, "fast-path dispatch did not settle before test cleanup")
 }

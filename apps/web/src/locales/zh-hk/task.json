@@ -1218,7 +1218,7 @@
   "remoteHelperDownloadCompleted": "已下載遠端輔助程序（{{platform}}）",
   "remoteHelperDownloadTimedOut": "下載遠端輔助程序超時（{{platform}}）",
   "remoteHelperDownloadFailed": "無法下載遠端輔助程序（{{platform}}）",
-  "remoteHelperDownloadRecovery": "請使用完整的離線執行包，或設定輔助程序的明確指定的路徑。",
+  "remoteHelperDownloadRecovery": "請使用完整的離線執行包，或明確指定輔助程序的路徑。",
   "preparingWorkspace": "正在準備工作區…",
   "preparingWorkspace2": "正在準備工作區…",
   "presets": "預設",

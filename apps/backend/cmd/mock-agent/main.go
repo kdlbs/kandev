@@ -368,8 +368,9 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
+	acceptanceMarker, cancelHoldPrompt := cancelHoldAcceptanceMarker(prompt)
 	var cancelHold chan struct{}
-	if isCancelHoldPrompt(prompt) {
+	if cancelHoldPrompt {
 		cancelHold = make(chan struct{})
 	}
 	a.mu.Lock()
@@ -394,6 +395,10 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
 	if cancelHold != nil {
+		if acceptanceMarker != "" {
+			// The newline flushes the acceptance marker through lifecycle message buffering before the hold.
+			(&emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}).text(acceptanceMarker + "\n")
+		}
 		<-cancelHold
 		time.Sleep(mockCancelHoldDuration())
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
@@ -808,10 +813,17 @@ func parseMCPConfigFromArgs(args []string) string {
 	return ""
 }
 
-// isCancelHoldPrompt identifies the E2E-only fixture that holds an acknowledged
-// cancellation long enough to exercise remount and hydration projections.
-func isCancelHoldPrompt(prompt string) bool {
-	return strings.EqualFold(strings.TrimSpace(stripKandevSystem(prompt)), "/e2e:cancel-hold")
+// cancelHoldAcceptanceMarker identifies the E2E-only fixture and its optional
+// prompt-correlated provider acceptance marker.
+func cancelHoldAcceptanceMarker(prompt string) (string, bool) {
+	command, marker, hasMarker := strings.Cut(strings.TrimSpace(stripKandevSystem(prompt)), " ")
+	if !strings.EqualFold(command, "/e2e:cancel-hold") {
+		return "", false
+	}
+	if !hasMarker {
+		return "", true
+	}
+	return strings.TrimSpace(marker), true
 }
 
 func mockCancelHoldDuration() time.Duration {

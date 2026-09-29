@@ -31,6 +31,7 @@ func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const sessionID = acp.SessionId("cancel-hold-session")
 		t.Setenv("KANDEV_E2E_CANCEL_HOLD_DURATION", "30ms")
+		const acceptanceMarker = "queued-pause-provider-accepted-test-token"
 		updater := newCapturingUpdater()
 		agent := &mockAgent{
 			model:             "mock-fast",
@@ -48,7 +49,7 @@ func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 		go func() {
 			response, err := agent.Prompt(context.Background(), acp.PromptRequest{
 				SessionId: sessionID,
-				Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:cancel-hold")},
+				Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:cancel-hold " + acceptanceMarker)},
 			})
 			result <- struct {
 				response acp.PromptResponse
@@ -61,6 +62,9 @@ func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 		case <-updater.anySeen:
 		default:
 			t.Fatal("hold prompt did not start")
+		}
+		if texts := updater.textMessages(); len(texts) != 1 || strings.TrimSpace(texts[0]) != acceptanceMarker {
+			t.Fatalf("provider acceptance text before cancellation = %v, want [%q]", texts, acceptanceMarker)
 		}
 		if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
 			t.Fatalf("cancel prompt: %v", err)
@@ -89,8 +93,8 @@ func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 		if outcome.response.StopReason != acp.StopReasonCancelled {
 			t.Fatalf("stop reason = %q, want cancelled", outcome.response.StopReason)
 		}
-		if texts := updater.textMessages(); len(texts) != 0 {
-			t.Fatalf("cancel-hold emitted assistant text: %v", texts)
+		if texts := updater.textMessages(); len(texts) != 1 || strings.TrimSpace(texts[0]) != acceptanceMarker {
+			t.Fatalf("provider acceptance text after cancellation = %v, want [%q]", texts, acceptanceMarker)
 		}
 	})
 }

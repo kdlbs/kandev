@@ -802,6 +802,46 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}, nil
 }
 
+// RegisterInitialPromptAdmissionCallbacks forwards the restart prompt's final
+// ownership check and acceptance callbacks to the lifecycle execution.
+func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
+	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
+		executionID, beforeAdmission, onDispatched, onFailure,
+	)
+}
+
+func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(
+	executionID string,
+	onDispatched, onFailure func(),
+) error {
+	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
+func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	agentInstanceID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithAdmissionCallback(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
 // Compile-time guard for the steer capability. The executor selects the steer
 // path by asserting the agent manager to its unexported
 // steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
@@ -810,6 +850,11 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 // error, not a runtime regression.
 var _ interface {
 	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
+var _ interface {
+	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 } = (*lifecycleAdapter)(nil)
 
 // SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle

@@ -68,7 +68,7 @@ func (s *Service) sendQueuedNow(ctx context.Context, identity *messagequeue.Queu
 }
 
 type sendNowGuard struct {
-	lock    *sync.Mutex
+	lock    *cancelInFlightMutex
 	release func()
 	locked  bool
 }
@@ -93,6 +93,17 @@ func (guard *sendNowGuard) relock() {
 	}
 	guard.lock.Lock()
 	guard.locked = true
+}
+
+func (guard *sendNowGuard) relockWithContext(ctx context.Context) error {
+	if guard.locked {
+		return nil
+	}
+	if err := lockMutexWithContext(ctx, guard.lock); err != nil {
+		return err
+	}
+	guard.locked = true
+	return nil
 }
 
 func (guard *sendNowGuard) close() {
@@ -132,7 +143,7 @@ func (s *Service) sendQueuedNowAfterCapture(
 		entries,
 		turnBefore,
 		guard.unlock,
-		guard.relock,
+		guard.relockWithContext,
 	)
 }
 
@@ -274,7 +285,8 @@ func (s *Service) dispatchSendNowSelection(
 	scope string,
 	entries []messagequeue.QueuedMessage,
 	turnBefore string,
-	unlockGuard, relockGuard func(),
+	unlockGuard func(),
+	relockGuard func(context.Context) error,
 ) (int, error) {
 	promptabilityErr := s.checkSessionPromptable(taskID, sessionID, sessionState)
 	if promptabilityErr == nil {
