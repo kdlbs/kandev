@@ -88,6 +88,10 @@ func (a *CustomACPAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, err
 
 func (a *CustomACPAgent) BuildCommand(_ CommandOptions) Command { return a.cmd }
 
+// Runtime declares native session restore for every definition. The ACP
+// adapter still restores only what this CLI's initialize response advertises,
+// and a CLI that advertises neither session/resume nor session/load gets
+// session/new.
 func (a *CustomACPAgent) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Cmd:            a.cmd,
@@ -95,6 +99,7 @@ func (a *CustomACPAgent) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: DefaultResourceLimits,
 		Protocol:       agent.ProtocolACP,
+		SessionConfig:  SessionConfig{NativeSessionResume: true},
 	}
 }
 

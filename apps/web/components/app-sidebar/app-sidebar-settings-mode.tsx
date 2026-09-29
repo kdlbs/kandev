@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconSettings } from "@tabler/icons-react";
+import { TaskSidebarScrollArea } from "@/components/task/task-sidebar-scroll-area";
 import { CollapseAllButton } from "./sections/settings/collapse-all-button";
 import { SettingsTree } from "./sections/settings/settings-tree";
 
@@ -32,9 +33,12 @@ export function AppSidebarSettingsMode() {
         </span>
         <CollapseAllButton />
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5">
+      <TaskSidebarScrollArea
+        contentClassName="flex flex-col gap-0.5"
+        testId="app-sidebar-settings-scroll"
+      >
         <SettingsTree pathname={pathname} />
-      </div>
+      </TaskSidebarScrollArea>
     </div>
   );
 }

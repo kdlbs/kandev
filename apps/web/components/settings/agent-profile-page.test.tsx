@@ -1,10 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useState } from "react";
-import {
-  preserveNewerProfileDraft,
-  ProfileEnvVarsEditor,
-} from "@/components/settings/agent-profile-page";
+import { preserveNewerProfileDraft } from "@/components/settings/agent-profile-page-state";
+import { ProfileEnvVarsEditor } from "@/components/settings/profile-edit/profile-env-vars-section";
 import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { AgentProfile, ProfileEnvVar } from "@/lib/types/http";
 

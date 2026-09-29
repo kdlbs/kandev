@@ -7,16 +7,24 @@ export function routePanelMouseDown(
   event: MouseEvent<HTMLDivElement>,
   ref: RefObject<HTMLDivElement | null>,
 ): void {
-  const target = event.target as HTMLElement | null;
-  if (!target || target.closest(interactiveSelector)) return;
-  ref.current?.focus({ preventScroll: true });
+  focusRoutePanel(event, ref, false);
 }
 
 export function routePanelClick(
   event: MouseEvent<HTMLDivElement>,
   ref: RefObject<HTMLDivElement | null>,
 ): void {
+  focusRoutePanel(event, ref, true);
+}
+
+function focusRoutePanel(
+  event: MouseEvent<HTMLDivElement>,
+  ref: RefObject<HTMLDivElement | null>,
+  defer: boolean,
+): void {
   const target = event.target as HTMLElement | null;
   if (!target || target.closest(interactiveSelector)) return;
-  requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
+  const focus = () => ref.current?.focus({ preventScroll: true });
+  if (defer) requestAnimationFrame(focus);
+  else focus();
 }

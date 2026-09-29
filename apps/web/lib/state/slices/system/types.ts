@@ -34,6 +34,7 @@ export type SystemSliceState = {
       overview: StorageOverviewResponse | null;
       analysisRevision: number;
       disk: StorageDiskCapacityResponse | null;
+      diskIdentity: string | null;
       runs: StorageMaintenanceRun[];
       quarantine: StorageQuarantineEntry[];
     };
@@ -52,7 +53,7 @@ export type SystemSliceActions = {
   setSystemStoragePolicy: (policy: StoragePolicyResponse) => void;
   setSystemStorageOverview: (overview: StorageOverviewResponse) => void;
   bumpSystemStorageAnalysisRevision: () => void;
-  setSystemStorageDisk: (disk: StorageDiskCapacityResponse) => void;
+  setSystemStorageDisk: (disk: StorageDiskCapacityResponse | null, identity: string | null) => void;
   setSystemStorageRuns: (runs: StorageMaintenanceRun[]) => void;
   setSystemStorageQuarantine: (entries: StorageQuarantineEntry[]) => void;
 };

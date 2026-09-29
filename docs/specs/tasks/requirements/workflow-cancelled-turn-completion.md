@@ -28,6 +28,10 @@ change workflow movement or the cancellation setting.
 The [task reconciliation design](../system-design/queued-session-ownership.md#replay-and-reconciliation-locking)
 defines concurrency at this boundary.
 
+The [dispatch and stream coordination design](../system-design/workflow-cancelled-turn-completion.md)
+repairs pre-dispatch lock ordering and cancellation guard deadlines under the existing criteria.
+Delivery is tracked in the [queued-prompt pause fix package](../../../plans/queued-prompt-pause-deadlock/plan.md).
+
 ## Migrated source detail
 
 Decision: [ADR-2026-08-02-explicit-user-cancel-completion](../../../decisions/2026-08-02-explicit-user-cancel-completion.md)

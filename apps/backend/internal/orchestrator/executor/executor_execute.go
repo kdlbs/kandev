@@ -2747,31 +2747,6 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	return execution, nil
 }
 
-func (e *Executor) registerInitialPromptDispatchCallbacks(
-	executionID string,
-	onAccepted func(string),
-	onFailure func(),
-) error {
-	if onAccepted == nil && onFailure == nil {
-		return nil
-	}
-	registrar, ok := e.agentManager.(interface {
-		RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
-	})
-	if !ok {
-		return errors.New("agent manager cannot register initial prompt dispatch callbacks")
-	}
-	return registrar.RegisterInitialPromptDispatchCallbacks(
-		executionID,
-		func() {
-			if onAccepted != nil {
-				onAccepted(executionID)
-			}
-		},
-		onFailure,
-	)
-}
-
 func executorRunningStatusMayOwnAgent(status string) bool {
 	switch status {
 	case models.ExecutorRunningStatusStarting,

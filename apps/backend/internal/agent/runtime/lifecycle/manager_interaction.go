@@ -104,11 +104,22 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 // that prompt asynchronously, so callers that own startup cancellation must
 // wait for either provider acceptance or a pre-acceptance delivery failure.
 func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks(executionID, nil, onDispatched, onFailure)
+}
+
+// RegisterInitialPromptAdmissionCallbacks installs a final admission check and
+// one-shot acceptance/failure callbacks for the initial prompt sent during
+// StartAgentProcess.
+func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	execution.setInitialPromptDispatchCallbacks(beforeAdmission, onDispatched, onFailure)
 	return nil
 }
 
@@ -134,6 +145,48 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	}
 	defer operationRelease()
 	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
+	}
+	return result, err
+}
+
+// PromptAgentWithAdmissionCallback lets the orchestrator revalidate its
+// dispatch reservation after lifecycle stream preparation and before a new
+// prompt generation is allocated.
+func (m *Manager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
+	if err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
+	defer operationRelease()
+	result, err := m.sessionManager.SendPromptWithAdmissionCallback(
+		ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {
@@ -417,6 +470,25 @@ func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, mode
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 	return m.SetSessionMode(ctx, execution.ID, execution.ACPSessionID, modeID)
+}
+
+// ForkSessionBySessionID forks a completed provider turn in the live native
+// session. The native thread is bound to the execution, so the caller cannot
+// select a different provider identity.
+func (m *Manager) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return "", fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
+		return "", fmt.Errorf("execution %q session is not ready", execution.ID)
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
+		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	return client.ForkSession(ctx, execution.ACPSessionID, providerTurnID)
 }
 
 // SetSessionModel changes the session model for a running agent. ACP agents

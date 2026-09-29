@@ -321,11 +321,20 @@ Do not enable those rules on a daemon shared with unrelated workloads.
 
 ![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
+The Host tab reports capacity for the filesystem containing Kandev home and for the service's
+effective temporary folder. On Unix, it also reports `/tmp` when it resolves to a separate root.
+Capacity loads independently of the folder analysis and refreshes every 30 seconds while the Host
+tab is visible. A warning starts at 80% used; a critical warning starts at 90% used or when no space
+is available. Temporary-file operations can fail when this filesystem is full, even if task
+workspaces have free space. When Kandev can identify a shared filesystem, the page shows the
+relationship and does not add its capacity twice. These measurements do not change temporary
+directory or tool-cache settings.
+
 The Storage page also reports **System temporary folders** as a read-only footprint. It measures the
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path. The analysis rows use the measured byte
+no direct cleanup action. The analysis rows use the measured byte
 values to order categories from largest to smallest. A decorative bar compares each displayed
 measurement with the largest displayed measurement; zero measurements have an empty bar, and
 unknown or unavailable measurements have no bar. These bars compare footprints and do not change
@@ -336,6 +345,21 @@ A temporary-folder scan that reaches its deadline keeps the sampled bytes, parti
 skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
 other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
 is a final folder total.
+
+The expanded **System temporary folders** row can show up to 20 largest direct entries for each
+selected root. These sizes are apparent regular-file bytes, not allocated filesystem blocks. Sparse
+files, hard links, metadata, deleted open files, and reserved blocks can make them differ from the
+capacity measurement. Partial entries keep only their observed bytes; unreadable or unvisited usage
+is unknown and is not added to the displayed remainder. Names and sizes identify large paths, but
+do not identify a task or process. Temporary folders can also contain tool caches, browser profiles,
+archives, and test data.
+
+An entry is marked as registered only when its exact path matches this installation's artifact
+registry and its owner-only marker validates. Registration alone does not make a file eligible for
+cleanup. **Review Kandev cleanup** opens the existing registered-artifact row, where the current
+eligibility and confirmation rules remain in effect. It does not start cleanup or pass the selected
+entry to a delete action. Reported candidate bytes do not predict how much filesystem capacity
+cleanup will free.
 
 The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
 directory under the host temporary root. Each current file is registered in the Kandev database

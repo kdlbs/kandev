@@ -170,6 +170,10 @@ After the adapter forwarding fix and prompt-setup refactor, backendapp tests, th
 
 Session-open recovery also rejects a dynamic session while its route is pending or action-required, and generic session resume serializes against manual route actions. The tagged orchestrator suite passed with `TestResumeTaskSession_DynamicRouteActionOwnsRecovery` and the route-state eligibility cases. Final desktop and mobile browser reruns passed. One additional desktop run timed out waiting for the successor message; the unchanged immediate rerun passed in 36 seconds.
 
+After merging base `cb9a530`, reconciliation preserved the cancellation revision fence and the route action's own prompt exception. The base's final prompt-ownership check also needed the same scoped exception as the earlier claim gate; otherwise the route action rejected its own successor prompt. `TestRouteActionPromptDispatchOwnershipAllowsOwnRouteLock` verifies that the owned prompt passes and an unrelated prompt remains blocked. The merged callback API was consolidated to one dispatch-registration method, and startup now consumes the base's three callback values while retaining its failure callback.
+
+Post-merge checks passed: `(cd apps/backend && go test ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp -count=1)` and the focused route-action, successor-identity, and cancellation-fence regressions; `python3 scripts/lint-spec-files.py --all`; and `python3 scripts/list-docs.py validate` (328 decisions, 1244 specifications). The managed desktop command `(cd apps/web && pnpm e2e:run --project chromium tests/session/dynamic-unclassified-fallback.spec.ts -- --grep 'uses repeated safe failures')` passed after rebuilding backend, web assets, and the fixture. A mobile rerun is pending until other local E2E runs finish. No requirements or design update is needed because this merge fix preserves the existing internal route-action prompt ownership contract and does not change public behavior.
+
 ## Risks
 
 - Existing safety and semantic flags are coupled. Changing them globally could widen unrelated retry paths.

@@ -91,7 +91,7 @@ const gitEventHandlers: GitEventHandlers = {
       });
     }
     if (changed) {
-      invalidateCumulativeDiffCache(taskEnvironmentId);
+      invalidateCumulativeDiffCache(store, taskEnvironmentId);
     }
   },
 
@@ -121,7 +121,7 @@ const gitEventHandlers: GitEventHandlers = {
       repository_name: event.commit.repository_name,
     });
     // Invalidate cumulative diff cache when new commit is created
-    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    invalidateCumulativeDiffCache(store, resolveEnvKey(store, event.session_id));
   },
 
   commits_reset: (store, event) => {
@@ -140,7 +140,7 @@ const gitEventHandlers: GitEventHandlers = {
       .getState()
       .bumpSessionGitCheckoutGeneration(event.session_id, event.reset.repository_name);
     // Invalidate cumulative diff cache when commits are reset
-    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    invalidateCumulativeDiffCache(store, resolveEnvKey(store, event.session_id));
   },
 
   branch_switched: (store, event) => {
@@ -156,7 +156,7 @@ const gitEventHandlers: GitEventHandlers = {
       .getState()
       .bumpSessionGitCheckoutGeneration(event.session_id, event.branch_switch.repository_name);
     // Invalidate cumulative diff cache when branch switches
-    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    invalidateCumulativeDiffCache(store, resolveEnvKey(store, event.session_id));
   },
 };
 

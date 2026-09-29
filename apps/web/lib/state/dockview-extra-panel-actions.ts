@@ -149,6 +149,31 @@ function buildSidePanelActions(get: StoreGet) {
         opts,
       );
     },
+    addBackgroundWorkPanel: (
+      opts?: SidePanelOpts & { sessionId?: string; workId?: string; title?: string },
+    ) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const sId = opts?.sessionId || "";
+      let id = "background-work";
+      if (opts?.workId) {
+        id = sId ? `background-work:${sId}:${opts.workId}` : `background-work:${opts.workId}`;
+      } else if (sId) {
+        id = `background-work:${sId}`;
+      }
+      const title = opts?.title || panelTitle("background-work");
+      addSidePanel(
+        api,
+        centerGroupId,
+        {
+          id,
+          component: "background-work",
+          title,
+          params: { sessionId: sId, workId: opts?.workId },
+        },
+        opts,
+      );
+    },
   };
 }
 

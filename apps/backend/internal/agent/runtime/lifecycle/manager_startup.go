@@ -112,7 +112,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		if retErr == nil {
 			return
 		}
-		_, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
 		if onInitialPromptFailure != nil {
 			onInitialPromptFailure()
 		}
