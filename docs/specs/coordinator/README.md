@@ -22,6 +22,9 @@ manager sends. The coordinator's Kandev tool surface can only read and propose.
 Phase 2 (Control) keeps both rules and gives managers the controls: per-action
 settings, Watches, standing orders, a goal, a log of what the coordinator did
 with Undo, and the copilot on every workspace page.
+Phase 3 (autonomy, behind `features.coordinatorPhase3`) lets a manager turn on
+unattended turns for one coordinator: it is woken by episodes on its own tasks,
+within a containment check and a cost ceiling.
 
 ## Terms
 
@@ -50,6 +53,16 @@ with Undo, and the copilot on every workspace page.
   observation for a coordinated workspace.
 - **Copilot:** the chat panel on the right side of the Coordinator screens,
   backed by the coordinator's conversation session.
+- **Autonomy:** a per-coordinator setting that allows unattended turns.
+- **Wake:** a durable record of one episode on one of the coordinator's own
+  tasks (a question, permission, stall, error or completion) waiting to be
+  delivered.
+- **Unattended turn:** a coordinator turn started by a wake delivery, not by a
+  person.
+- **Containment:** the check that must pass before an unattended turn starts.
+- **Cost ceiling:** the coordinator's declared spend limit per rolling 24 hours.
+- **Improvement proposal:** a proposal to replace the coordinator's context,
+  applied only by a manager.
 
 ## Ownership
 
@@ -64,7 +77,8 @@ This system owns:
   the `coordinator.updated` event;
 - coordinator policy, Watches, standing orders, goals and the activity log;
 - the workspace-wide copilot launcher and its page context chip;
-- the `features.coordinator` and `features.coordinatorPhase2` release toggles.
+- wakes, unattended turn records, class reviews and pending changes;
+- the `features.coordinator`, `features.coordinatorPhase2` and `features.coordinatorPhase3` release toggles.
 
 ## Exclusions
 
@@ -111,3 +125,5 @@ The system is new and has no legacy sources.
 - [Workspace coordinator implementation plan](../../plans/workspace-coordinator/plan.md)
 - [Coordinator phase 2, a person approves everything](../../decisions/2026-09-29-coordinator-phase-2-control.md)
 - [Coordinator phase 2 implementation plan](../../plans/workspace-coordinator-p2/plan.md)
+- [Coordinator phase 3: autonomy](../../decisions/2026-09-29-coordinator-phase-3-autonomy.md)
+- [Coordinator phase 3 implementation plan](../../plans/workspace-coordinator-p3/plan.md)

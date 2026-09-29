@@ -13,8 +13,9 @@ last_updated: 2026-09-29
 
 ## Overview
 
-A manager talks to a coordinator through a chat panel on the right side of
-the Coordinator screens, laid out like the board's task preview panel. The conversation is an ordinary Kandev session on an ephemeral task.
+A manager talks to a coordinator through a chat panel on the right of the
+Coordinator screens, laid out like the board's task preview. The conversation
+is an ordinary Kandev session on an ephemeral task.
 Phase 1 is attended: only a manager's message starts a turn. The coordinator's
 Kandev tools can read the workspace and propose tasks, and nothing else.
 
@@ -22,7 +23,7 @@ How the panel shows the coordinator's work is in
 [copilot activity display](copilot-activity.md).
 
 Kandev enforces the coordinator's Kandev surface. It does not control the agent
-CLI's own tools (a shell on its executor, its own MCP servers, its own
+CLI's own tools (a shell on its executor, its MCP servers, its
 permission settings); in phase 1 a coordinator is as capable through those as
 any Kandev chat on the same profile, and no more.
 
@@ -43,12 +44,11 @@ a screenshot and an acceptance criterion differ, the criterion governs. The
 prototype banner, the demo controls and the `P1` and `WC-` labels are mockup
 chrome, not product; the data is seeded fiction.
 
-The mockup draws the copilot as a floating popover. The copilot is a
-right-side panel instead (PR #3981), so
-the screenshots are the reference for the copilot's content (header,
-transcript, context chip, composer and proposal card), not for its frame, size
-or position; [REQ-COORDINATOR-COPILOT-004](#req-coordinator-copilot-004-copilot-panel)
-governs those.
+The mockup draws the copilot as a floating popover; it is a right-side panel
+instead, so the screenshots govern its content (header, transcript, context
+chip, composer and proposal card), not its frame, size or position, which
+[REQ-COORDINATOR-COPILOT-004](#req-coordinator-copilot-004-copilot-panel)
+governs.
 
 - [`docs/plans/workspace-coordinator/assets/p1-02-ask-about-this.png`](../../../plans/workspace-coordinator/assets/p1-02-ask-about-this.png)
 - [`docs/plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png`](../../../plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png)
@@ -124,8 +124,9 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-COPILOT-002.1:** The only way to start a coordinator turn
-  shall be a message a manager sends to its conversation task.
+- **AC-COORDINATOR-COPILOT-002.1:** The only ways to start a coordinator turn
+  shall be a manager's message to its conversation task and a wake delivery
+  admitted by `REQ-COORDINATOR-WAKE-004`.
 - **AC-COORDINATOR-COPILOT-002.2:** Opening, closing or reloading the copilot,
   creating the conversation, a stall event, a workspace deletion event, a
   proposal decision, startup recovery and session recovery after a restart
