@@ -349,9 +349,8 @@ ceiling-releasing turn end, and each backstop tick.
    readers the backstop uses; mark every one whose episode ended
    `superseded`, and keep the first 20 that still hold. With none, return.
    This read is the evaluation point of "still holds"
-   (`AC-COORDINATOR-WAKE-005.1`): an episode that ends after it, before or
-   during the turn, is still delivered, and the turn message tells the agent
-   to read current state.
+   (`AC-COORDINATOR-WAKE-005.1`): an episode ending after it is still
+   delivered, and the turn message tells the agent to read current state.
 3. In one transaction under the [wake lock](#wake-lock): re-read the
    coordinator row and roll back if `autonomy_enabled` is not 1; insert the
    turn row (`outcome` null, `message_id` null, `start_ceiling_subcents`
@@ -373,9 +372,16 @@ ceiling-releasing turn end, and each backstop tick.
    message is never queued behind another turn: admission check 7 ran in
    step 1, and a manager message that made the session busy since then makes
    this send fail with `ErrAgentPromptInProgress` or
-   `ErrSessionNotPromptable`.
-5. On success, set `message_id` and `session_turn_id` from the stored
-   message. On a send error, [find the turn's message](#finding-the-turns-message):
+   `ErrSessionNotPromptable`. The options also carry the `onAccepted(turnID)`
+   hook of `promptTaskOptions` (`orchestrator/task_operations.go`), run at the
+   agentctl acceptance boundary before the prompt runs. It sets
+   `session_turn_id` with `UPDATE ... SET session_turn_id = ? WHERE id = ? AND
+   outcome IS NULL AND session_turn_id IS NULL`, so the column is bound before
+   the agent can raise a permission request. A failure is logged at warn and
+   leaves it empty, which [containment](containment.md#unattended-permissions)
+   treats as deny-closed.
+5. On success, set `message_id` from the stored message and, if `onAccepted`
+   did not, `session_turn_id` with the same conditional update. On a send error, [find the turn's message](#finding-the-turns-message):
    when found, record it as on success, because the prompt was sent. When it
    is not found and the error is a refusal before dispatch
    (`ErrAgentPromptInProgress`, `ErrSessionNotPromptable`, or an invalid
@@ -415,7 +421,7 @@ exists. Delivery never queues, so stored messages are the only place to look.
 
 The startup pass, and each backstop tick, examine turn rows with `outcome IS
 NULL` and `message_id` null. When the lookup finds the message, they record
-`message_id` and `session_turn_id` and leave the row to [Turn end](#turn-end).
+`message_id` and `session_turn_id` (conditional, as in Delivery) and leave the row to [Turn end](#turn-end).
 When it does not, the startup pass settles the row `interrupted`, and a
 backstop tick settles it `send_failed` once two minutes have passed since
 `started_at` and the session is not `RUNNING` or `STARTING`; either way its
@@ -493,7 +499,10 @@ returns:
 }
 ```
 
-It runs `Admit` read-only; `admission` is present only when autonomy is on.
+It runs `Admit` read-only through a no-count path: step 2 calls
+`containment.Check` directly, not `CheckForAdmission`, so a read never moves the
+counter, the state-change log or its previous key
+([containment](containment.md#observability)). `admission` is present only when autonomy is on.
 When `admission.reason` is `cooldown`, `admission` also carries `until`, the
 newest settled turn row's `finished_at` plus 5 minutes (RFC 3339 UTC); it is
 absent for every other reason.
