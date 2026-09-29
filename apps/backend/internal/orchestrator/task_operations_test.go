@@ -6011,6 +6011,7 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 // without turning it into a fresh session or provider conversation. Worktree
 // materialization itself is covered by the lifecycle tests; this boundary test
 // verifies the request that reaches that materializer.
+// @covers AC-TASKS-WORKTREE-METADATA-RECOVERY-004.9
 func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -6064,6 +6065,20 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}))
+	const recoveryEnvironmentID = "environment-recover-new-branch"
+	worktreePath := filepath.Join(t.TempDir(), "tasks", "task-recover-new-branch", "backend")
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: recoveryEnvironmentID, TaskID: "task-recover-new-branch",
+		ExecutorType: string(models.ExecutorTypeWorktree), ExecutorID: models.ExecutorIDWorktree,
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: filepath.Dir(worktreePath),
+		TaskDirName: "task-recover-new-branch", OwnershipGeneration: 1,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-recover-new-branch", TaskEnvironmentID: recoveryEnvironmentID,
+			RepositoryID: "repo-recover-new-branch",
+			BranchSlug:   "main", WorktreeID: "worktree-recover-new-branch", WorktreePath: worktreePath,
+			WorktreeBranch: "main", Status: "active", Position: 0,
+		}}, CreatedAt: now, UpdatedAt: now,
+	}))
 
 	session, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
 	require.NoError(t, err)
@@ -6071,6 +6086,7 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 	session.ExecutorID = "executor-recover-new-branch"
 	session.RepositoryID = "repo-recover-new-branch"
 	session.BaseBranch = "main"
+	session.TaskEnvironmentID = recoveryEnvironmentID
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
 		ID:               "running-recover-new-branch",
@@ -6083,6 +6099,11 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 		UpdatedAt:        now,
 	}))
 
+	var preflightRequests []worktree.RecoveryAdmissionRequest
+	svc.executor.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		preflightRequests = append(preflightRequests, req)
+		return nil, nil
+	})
 	response, err := svc.RecoverSession(ctx, "task-recover-new-branch", "session-recover-new-branch", "resume_new_branch")
 	require.NoError(t, err)
 	require.NotNil(t, response)
@@ -6092,6 +6113,11 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 	require.Equal(t, "session-recover-new-branch", captured.SessionID)
 	require.Equal(t, "acp-session-recover-new-branch", captured.ACPSessionID)
 	require.True(t, captured.AllowBranchReplacement)
+	require.NotEmpty(t, preflightRequests, "explicit recovery action must reach selected-environment preflight")
+	for _, request := range preflightRequests {
+		require.True(t, request.AllowBranchReplacement, "resume_new_branch preflight must retain its explicit authorization")
+		require.Equal(t, recoveryEnvironmentID, request.TaskEnvironmentID)
+	}
 	require.True(t, captured.UseWorktree)
 	require.Equal(t, "main", captured.Branch)
 	require.Equal(t, "main", captured.BaseBranch)

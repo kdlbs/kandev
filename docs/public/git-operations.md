@@ -183,19 +183,42 @@ missing, and the recorded branch still resolves in the source repository. Local,
 container, SSH, Sprites, Kubernetes, and other remote executor workspaces keep
 their own recovery behavior. A remote Git origin does not make an executor remote.
 
-Kandev checks every selected repository slot before it changes any slot. It keeps
-the original checkout and creates a sibling recovery worktree with a branch named
+For this metadata failure, Kandev checks every selected repository slot before
+it changes any slot. It keeps the original checkout and creates a sibling
+recovery worktree with a branch named
 `{recorded-branch}-recovered-{operation-prefix}`. It copies tracked, untracked,
 and ignored files, deletions, modes, and symbolic links. It does not restore the
 old index, staging choices, or commits that are no longer available.
 
+If the checkout directory itself is missing, Kandev uses a separate guarded
+recovery path. It requires the selected environment's active worktree record and
+the exact recorded branch identity to still resolve in the source repository.
+It recreates the original checkout path and branch from that local branch, its
+recorded recovery commit, or the matching remote-tracking branch. It does not
+substitute the task base branch, fetch a different branch tip, or create a
+replacement during attach-only workspace reuse.
+
+If both the local branch and its remote-tracking ref are absent, Kandev checks
+the configured origin for the exact recorded branch. It fetches only the
+advertised commit and verifies the head before it creates the checkout. A failed
+origin check blocks automatic recovery. Confirmed branch loss still requires
+the explicit **Resume on a new branch** recovery action.
+
+Before restoring a missing checkout, Kandev verifies every selected repository
+slot, confirms the Worktree environment still has exclusive ownership, and
+checks that no session or runtime is using it. A live requester, sibling session,
+or borrower makes recovery fail before startup. The checkout path and worktree
+record stay the same after recovery. Files that existed only in the deleted
+directory, including uncommitted, untracked, and ignored content, cannot be
+recovered by this process.
+
 Kandev refuses automatic recovery when metadata is ambiguous, the recorded branch
-is unavailable, the environment is busy, the environment owner changed, or the
-recovery claim is not current. It does not substitute the task base branch. A
-multi-repository recovery can retain an earlier completed slot when a later slot
-fails, but Kandev does not start an agent with an incomplete inventory. Recovery
-records and snapshots remain beside the original checkout for inspection and can
-contain ignored files, including sensitive data.
+is confirmed unavailable, the environment is busy, the environment owner changed,
+or the recovery claim is not current. A multi-repository recovery can retain an earlier
+completed slot when a later slot fails, but Kandev does not start an agent with
+an incomplete inventory. Recovery records and snapshots remain beside the
+original checkout for inspection and can contain ignored files, including
+sensitive data.
 
 ### Named branch policies
 

@@ -128,6 +128,10 @@ does not read file contents or alter the index, HEAD, branch, tracked files, or
 untracked files. Remote executors validate through their executor-owned
 inventory contract rather than host filesystem inspection.
 
+The [worktree recovery](worktree-metadata-recovery.md) operation can restore a
+missing canonical checkout before attachment under its exclusive recovery claim.
+Attach-only preparation remains read-only.
+
 The [managed clone relocation](managed-clone-relocation.md) operation can
 establish a new canonical worktree before this admission check. It holds its own
 environment claim and leaves admission read-only. A failed relocation cannot

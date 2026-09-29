@@ -28,6 +28,7 @@ type RecoverySlot struct {
 	RepositoryPath  string
 	Worktree        *Worktree
 	CloneRelocation *ManagedCloneRelocationProof
+	missingCheckout *missingCheckoutInspection
 }
 
 // ManagedRepositoryIdentity is the provider identity selected by the
@@ -58,24 +59,26 @@ type ManagedCloneRelocationProof struct {
 // its complete canonical repository inventory. An empty inventory is a
 // deliberate no-op and never triggers filesystem or Git inspection.
 type RecoveryAdmissionRequest struct {
-	TaskID              string
-	SessionID           string
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	ExecutorType        string
-	OperationID         string
-	RelocateDirty       bool
-	Slots               []RecoverySlot
+	TaskID                 string
+	SessionID              string
+	TaskEnvironmentID      string
+	OwnerTaskID            string
+	OwnershipGeneration    int64
+	ExecutorType           string
+	OperationID            string
+	AllowBranchReplacement bool
+	RelocateDirty          bool
+	Slots                  []RecoverySlot
 }
 
 // RecoveryAdmission retains the environment authority and per-worktree locks
 // until the caller crosses the external workspace-start boundary.
 type RecoveryAdmission struct {
-	claim       *models.TaskEnvironmentRecoveryClaim
-	releaseFunc func(context.Context) error
-	once        sync.Once
-	releaseErr  error
+	claim          *models.TaskEnvironmentRecoveryClaim
+	operationLocks []*recoveryLock
+	releaseFunc    func(context.Context) error
+	once           sync.Once
+	releaseErr     error
 }
 
 type recoveryAdmissionContextKey struct{}
@@ -191,10 +194,12 @@ type recoveryClaimStore interface {
 }
 
 type recoverySlotInspection struct {
-	needsRecovery   bool
-	needsRelocation bool
-	dirty           bool
-	relocation      managedCloneRelocationInspection
+	needsRecovery          bool
+	needsRelocation        bool
+	needsMissingCheckout   bool
+	needsBranchReplacement bool
+	dirty                  bool
+	relocation             managedCloneRelocationInspection
 }
 
 // AdmitRecovery inspects only the selected environment's slots. It returns a
@@ -335,6 +340,10 @@ func (m *Manager) admitRecoverySlots(
 		if reconciled {
 			*outcome = managedCloneRelocationOutcomeReconciled
 		}
+		if _, err := m.reconcileCompletedMissingCheckoutClaim(ctx, req, indices); err != nil {
+			releaseLocks()
+			return nil, err
+		}
 		releaseLocks()
 		return nil, nil
 	}
@@ -344,12 +353,35 @@ func (m *Manager) admitRecoverySlots(
 			return nil, err
 		}
 	}
+	var operationLocks []*recoveryLock
+	if inspection.needsMissingCheckout || inspection.needsBranchReplacement {
+		operationID, operationErr := m.recoveryOperationID(ctx, req, indices)
+		if operationErr != nil {
+			releaseLocks()
+			return nil, operationErr
+		}
+		req.OperationID = operationID
+		operationSlots := make([]RecoverySlot, 0, len(indices))
+		for _, index := range indices {
+			missing := req.Slots[index].missingCheckout
+			if missing != nil && (missing.needsRecovery ||
+				(missing.record != nil && missing.record.OperationID == req.OperationID)) {
+				operationSlots = append(operationSlots, req.Slots[index])
+			}
+		}
+		operationLocks, err = m.acquireMissingCheckoutOperationLocks(ctx, operationSlots)
+		if err != nil {
+			releaseLocks()
+			return nil, recoveryAdmissionError(*req, err.Error())
+		}
+	}
 	claim, err := m.acquireRecoveryClaim(ctx, req, indices)
 	if err != nil {
+		releaseMissingCheckoutOperationLocks(operationLocks)
 		releaseLocks()
 		return nil, err
 	}
-	return m.admitClaimedRecovery(ctx, req, indices, claim, releaseLocks, outcome)
+	return m.admitClaimedRecovery(ctx, req, indices, claim, releaseLocks, operationLocks, outcome)
 }
 
 func (m *Manager) acquireRecoveryClaim(
@@ -361,7 +393,7 @@ func (m *Manager) acquireRecoveryClaim(
 	if !ok {
 		return nil, recoveryAdmissionError(*req, "durable recovery claim is unavailable")
 	}
-	operationID, err := m.recoveryOperationID(req, indices)
+	operationID, err := m.recoveryOperationID(ctx, req, indices)
 	if err != nil {
 		return nil, err
 	}
@@ -388,10 +420,12 @@ func (m *Manager) admitClaimedRecovery(
 	indices []int,
 	claim *models.TaskEnvironmentRecoveryClaim,
 	releaseLocks func(),
+	operationLocks []*recoveryLock,
 	outcome *string,
 ) (*RecoveryAdmission, error) {
 	fail := func(err error) (*RecoveryAdmission, error) {
 		_ = m.releaseRecoveryClaim(ctx, claim)
+		releaseMissingCheckoutOperationLocks(operationLocks)
 		releaseLocks()
 		return nil, err
 	}
@@ -405,6 +439,7 @@ func (m *Manager) admitClaimedRecovery(
 	}
 	if !inspection.needsRecovery {
 		_ = m.releaseRecoveryClaim(ctx, claim)
+		releaseMissingCheckoutOperationLocks(operationLocks)
 		releaseLocks()
 		return nil, nil
 	}
@@ -417,9 +452,10 @@ func (m *Manager) admitClaimedRecovery(
 		return fail(err)
 	}
 	return &RecoveryAdmission{
-		claim: claim,
+		claim: claim, operationLocks: operationLocks,
 		releaseFunc: func(releaseCtx context.Context) error {
 			releaseErr := m.releaseRecoveryClaim(releaseCtx, claim)
+			releaseMissingCheckoutOperationLocks(operationLocks)
 			releaseLocks()
 			return releaseErr
 		},
@@ -433,7 +469,11 @@ func (m *Manager) recoverClaimedRecoverySlots(
 	claim *models.TaskEnvironmentRecoveryClaim,
 	outcome *string,
 ) error {
-	for _, index := range indices {
+	ordered := append([]int(nil), indices...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return recoverySlotKey(req.Slots[ordered[i]]) < recoverySlotKey(req.Slots[ordered[j]])
+	})
+	for _, index := range ordered {
 		if err := m.recoverClaimedRecoverySlot(ctx, req, &req.Slots[index], claim, outcome); err != nil {
 			return err
 		}
@@ -451,7 +491,9 @@ func (m *Manager) recoverClaimedRecoverySlot(
 	if slot.Worktree == nil || slot.Worktree.Path == "" {
 		return nil
 	}
-	inspection, err := m.inspectRecoverySlot(ctx, req.OwnerTaskID, slot)
+	inspection, err := m.inspectRecoverySlot(
+		ctx, req.OwnerTaskID, req.OwnershipGeneration, slot, req.AllowBranchReplacement,
+	)
 	if err != nil {
 		return err
 	}
@@ -460,6 +502,12 @@ func (m *Manager) recoverClaimedRecoverySlot(
 			return err
 		}
 		*outcome = managedCloneRelocationOutcomeCompleted
+		return nil
+	}
+	if inspection.needsMissingCheckout {
+		return m.restoreMissingCheckout(ctx, req, slot, claim)
+	}
+	if inspection.needsBranchReplacement {
 		return nil
 	}
 	if inspectLinkedWorktree(slot.Worktree.Path).class != linkedWorktreeMissingAdmin {
@@ -531,6 +579,9 @@ func (m *Manager) resolveRecoverySlots(ctx context.Context, req *RecoveryAdmissi
 			// A row without a materialized path is created by normal workspace
 			// materialization and must not cause host filesystem inspection.
 			continue
+		}
+		if slot.Worktree.DeletedAt != nil || (slot.Worktree.Status != "" && slot.Worktree.Status != StatusActive) {
+			return nil, recoveryAdmissionError(*req, fmt.Sprintf("selected worktree %q is not active", slot.Worktree.ID))
 		}
 		if slot.Worktree.ID == "" {
 			return nil, recoveryAdmissionError(*req, fmt.Sprintf("selected worktree for repository %q has no durable identity", slot.RepositoryID))
@@ -624,28 +675,84 @@ func (m *Manager) inspectRecoverySlots(ctx context.Context, req *RecoveryAdmissi
 	var all recoverySlotInspection
 	for _, index := range indices {
 		slot := &req.Slots[index]
-		inspection, err := m.inspectRecoverySlot(ctx, req.OwnerTaskID, slot)
+		inspection, err := m.inspectRecoverySlot(
+			ctx, req.OwnerTaskID, req.OwnershipGeneration, slot, req.AllowBranchReplacement,
+		)
 		if err != nil {
 			return recoverySlotInspection{}, err
 		}
 		all.needsRecovery = all.needsRecovery || inspection.needsRecovery
 		all.needsRelocation = all.needsRelocation || inspection.needsRelocation
+		all.needsMissingCheckout = all.needsMissingCheckout || inspection.needsMissingCheckout
+		all.needsBranchReplacement = all.needsBranchReplacement || inspection.needsBranchReplacement
 		all.dirty = all.dirty || inspection.dirty
 	}
 	return all, nil
 }
 
-func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *RecoverySlot) (recoverySlotInspection, error) {
+func (m *Manager) inspectRecoverySlot(
+	ctx context.Context,
+	taskID string,
+	ownershipGeneration int64,
+	slot *RecoverySlot,
+	allowBranchReplacement bool,
+) (recoverySlotInspection, error) {
 	wt := slot.Worktree
 	if wt == nil || wt.Path == "" {
 		return recoverySlotInspection{}, nil
 	}
-	if _, err := os.Lstat(wt.Path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return recoverySlotInspection{}, nil
-		}
+	if _, err := os.Lstat(wt.Path); errors.Is(err, os.ErrNotExist) {
+		return m.inspectMissingCheckoutSlot(ctx, taskID, ownershipGeneration, slot, allowBranchReplacement)
+	} else if err != nil {
 		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, fmt.Sprintf("cannot inspect persisted checkout: %v", err))
 	}
+	missing, inspectErr := m.inspectMissingCheckout(
+		ctx, taskID, ownershipGeneration, slot, true, allowBranchReplacement,
+	)
+	if inspectErr != nil {
+		return recoverySlotInspection{}, inspectErr
+	}
+	if missing.needsRecovery {
+		slot.missingCheckout = &missing
+		return missingCheckoutRecoverySlotInspection(missing), nil
+	}
+	if missing.record != nil && missing.record.State == missingCheckoutRecordComplete {
+		slot.missingCheckout = &missing
+	} else {
+		slot.missingCheckout = nil
+	}
+	return m.inspectExistingWorktreeRecoverySlot(ctx, taskID, slot)
+}
+
+func (m *Manager) inspectMissingCheckoutSlot(
+	ctx context.Context,
+	taskID string,
+	ownershipGeneration int64,
+	slot *RecoverySlot,
+	allowBranchReplacement bool,
+) (recoverySlotInspection, error) {
+	missing, err := m.inspectMissingCheckout(ctx, taskID, ownershipGeneration, slot, false, allowBranchReplacement)
+	if err != nil {
+		return recoverySlotInspection{}, err
+	}
+	slot.missingCheckout = &missing
+	return missingCheckoutRecoverySlotInspection(missing), nil
+}
+
+func missingCheckoutRecoverySlotInspection(missing missingCheckoutInspection) recoverySlotInspection {
+	return recoverySlotInspection{
+		needsRecovery:          missing.needsRecovery,
+		needsMissingCheckout:   missing.needsRecovery && !missing.needsBranchReplacement,
+		needsBranchReplacement: missing.needsBranchReplacement,
+	}
+}
+
+func (m *Manager) inspectExistingWorktreeRecoverySlot(
+	ctx context.Context,
+	taskID string,
+	slot *RecoverySlot,
+) (recoverySlotInspection, error) {
+	wt := slot.Worktree
 	handle, err := m.validateWorktreePathSafe(wt.Path)
 	if err != nil || handle == nil {
 		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, fmt.Sprintf("cannot pin persisted checkout: %v", err))
@@ -699,7 +806,7 @@ func (m *Manager) inspectRecoverySlot(ctx context.Context, taskID string, slot *
 	return recoverySlotInspection{needsRecovery: true}, nil
 }
 
-func (m *Manager) recoveryOperationID(req *RecoveryAdmissionRequest, indices []int) (string, error) {
+func (m *Manager) recoveryOperationID(ctx context.Context, req *RecoveryAdmissionRequest, indices []int) (string, error) {
 	if strings.TrimSpace(req.OperationID) != "" {
 		operationID := strings.TrimSpace(req.OperationID)
 		if _, err := uuid.Parse(operationID); err != nil {
@@ -707,47 +814,112 @@ func (m *Manager) recoveryOperationID(req *RecoveryAdmissionRequest, indices []i
 		}
 		return operationID, nil
 	}
+	operationID, err := recoveryOperationIDFromSlots(req, indices)
+	if err != nil {
+		return "", err
+	}
+	if operationID != "" {
+		return operationID, nil
+	}
+	operationID, err = m.recoveryOperationIDFromClaim(ctx, req, indices)
+	if err != nil {
+		return "", err
+	}
+	if operationID != "" {
+		return operationID, nil
+	}
+	return uuid.NewString(), nil
+}
+
+func recoveryOperationIDFromSlots(req *RecoveryAdmissionRequest, indices []int) (string, error) {
 	operationID := ""
 	for _, index := range indices {
 		slot := req.Slots[index]
 		if slot.Worktree == nil || slot.Worktree.Path == "" {
 			continue
 		}
-		relocationOperationID, relocationErr := pendingManagedCloneRelocationOperationID(
-			slot.Worktree.Path + ".kandev-clone-relocation.json",
-		)
-		if relocationErr != nil {
-			return "", recoveryAdmissionError(*req, "managed-clone relocation record is unreadable")
-		}
-		if relocationOperationID != "" {
-			if operationID != "" && operationID != relocationOperationID {
-				return "", recoveryAdmissionError(*req, "selected recovery records use different operation identities")
-			}
-			operationID = relocationOperationID
-		}
-		record, err := readRecoveryRecord(slot.Worktree.Path + ".kandev-recovery.json")
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
+		candidates, err := recoveryOperationIDsForSlot(*req, slot)
 		if err != nil {
-			return "", recoveryAdmissionError(*req, fmt.Sprintf("read recovery record for %q: %v", slot.Worktree.Path, err))
+			return "", err
 		}
-		if record.State != RecoveryStateSnapshotting && record.State != RecoveryStateRematerializing {
-			return "", recoveryAdmissionError(*req, fmt.Sprintf("recovery record for %q is already %s", slot.Worktree.Path, record.State))
+		for _, candidate := range candidates {
+			operationID, err = mergeRecoveryOperationID(*req, operationID, candidate)
+			if err != nil {
+				return "", err
+			}
 		}
-		if _, err := uuid.Parse(record.OperationID); err != nil {
-			return "", recoveryAdmissionError(*req, fmt.Sprintf("recovery record for %q has an invalid operation identity", slot.Worktree.Path))
-		}
-		if operationID == "" {
-			operationID = record.OperationID
-		} else if operationID != record.OperationID {
-			return "", recoveryAdmissionError(*req, "selected recovery records use different operation identities")
-		}
-	}
-	if operationID == "" {
-		return uuid.NewString(), nil
 	}
 	return operationID, nil
+}
+
+func recoveryOperationIDsForSlot(req RecoveryAdmissionRequest, slot RecoverySlot) ([]string, error) {
+	ids := make([]string, 0, 3)
+	relocationID, err := pendingManagedCloneRelocationOperationID(slot.Worktree.Path + ".kandev-clone-relocation.json")
+	if err != nil {
+		return nil, recoveryAdmissionError(req, "managed-clone relocation record is unreadable")
+	}
+	if relocationID != "" {
+		ids = append(ids, relocationID)
+	}
+	if missing := slot.missingCheckout; missing != nil && missing.record != nil && missing.record.State == missingCheckoutRecordInProgress {
+		ids = append(ids, missing.record.OperationID)
+	}
+	record, err := readRecoveryRecord(slot.Worktree.Path + ".kandev-recovery.json")
+	if errors.Is(err, os.ErrNotExist) {
+		return ids, nil
+	}
+	if err != nil {
+		return nil, recoveryAdmissionError(req, fmt.Sprintf("read recovery record for %q: %v", slot.Worktree.Path, err))
+	}
+	if record.State != RecoveryStateSnapshotting && record.State != RecoveryStateRematerializing {
+		return nil, recoveryAdmissionError(req, fmt.Sprintf("recovery record for %q is already %s", slot.Worktree.Path, record.State))
+	}
+	if _, err := uuid.Parse(record.OperationID); err != nil {
+		return nil, recoveryAdmissionError(req, fmt.Sprintf("recovery record for %q has an invalid operation identity", slot.Worktree.Path))
+	}
+	return append(ids, record.OperationID), nil
+}
+
+func mergeRecoveryOperationID(
+	req RecoveryAdmissionRequest,
+	current, candidate string,
+) (string, error) {
+	if candidate == "" || current == candidate {
+		return current, nil
+	}
+	if current != "" {
+		return "", recoveryAdmissionError(req, "selected recovery records use different operation identities")
+	}
+	return candidate, nil
+}
+
+func (m *Manager) recoveryOperationIDFromClaim(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	indices []int,
+) (string, error) {
+	claimReader, ok := m.store.(recoveryClaimReader)
+	if !ok {
+		return "", nil
+	}
+	claim, err := claimReader.GetTaskEnvironmentRecoveryClaim(ctx, req.TaskEnvironmentID)
+	if err != nil {
+		return "", recoveryAdmissionError(*req, fmt.Sprintf("read interrupted recovery claim: %v", err))
+	}
+	if claim == nil {
+		return "", nil
+	}
+	for _, index := range indices {
+		missing := req.Slots[index].missingCheckout
+		if missing == nil || missing.record == nil || missing.record.OperationID != claim.OperationID {
+			continue
+		}
+		if !missingCheckoutClaimMatchesRequest(claim, *req) {
+			return "", recoveryAdmissionError(*req, "interrupted missing-checkout claim does not match the selected environment")
+		}
+		return claim.OperationID, nil
+	}
+	return "", nil
 }
 
 func pendingManagedCloneRelocationOperationID(path string) (string, error) {
