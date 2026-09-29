@@ -31,8 +31,8 @@ func affectedProcessPath(path string, roots []string) bool {
 	return false
 }
 
-// Host worktree agents run as the backend user. Inspect every such process,
-// including inherited shells and processes absent from runtime inventory.
+// Inspect host processes regardless of the installation owner's UID, including
+// inherited shells and processes absent from runtime inventory.
 func checkProcesses(ctx context.Context, p Plan) error {
 	owner, err := os.Stat(p.Home)
 	if err != nil {
@@ -71,14 +71,11 @@ func inspectHostProcesses(ctx context.Context, p Plan, uid uint32) error {
 		if !ok {
 			return errors.New("cannot determine host process owner")
 		}
-		if stat.Uid != uid {
-			continue
-		}
 		if err = inspectProcess(path, roots, p); err != nil {
 			if _, statErr = os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
 				continue
 			}
-			return fmt.Errorf("host process %d prevents repair: %w", pid, err)
+			return fmt.Errorf("host process %d (uid %d; installation uid %d) prevents repair: %w", pid, stat.Uid, uid, err)
 		}
 	}
 	return nil
@@ -89,7 +86,7 @@ func inspectProcess(path string, roots []string, p Plan) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(string(status), "State:\tZ") {
+	if inactiveProcess(status) {
 		return nil
 	}
 	cwd, err := os.Readlink(filepath.Join(path, "cwd"))
@@ -127,4 +124,22 @@ func inspectProcess(path string, roots []string, p Plan) error {
 		}
 	}
 	return nil
+}
+
+func inactiveProcess(status []byte) bool {
+	for _, line := range strings.Split(string(status), "\n") {
+		key, value, _ := strings.Cut(line, ":")
+		switch key {
+		case "State":
+			fields := strings.Fields(value)
+			if len(fields) > 0 && fields[0] == "Z" {
+				return true
+			}
+		case "Kthread":
+			if strings.TrimSpace(value) == "1" {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -207,8 +207,9 @@ cleanup attempts do not repair inconsistent inventory.
 
 The source maintenance command `cmd/worktree-inventory-repair` supports explicit
 repairs for local SQLite installations using the host **Worktree** executor.
-Application and rollback require Linux and permission to inspect the installation
-owner's processes through `/proc`. Preview and verification only read state.
+Application and rollback require Linux and permission to inspect host processes
+across all users through `/proc`. An inaccessible process blocks repair; this can
+require a privileged operator. Preview and verification only read state.
 Use a backend build containing the repair startup guard before applying a repair.
 The utility ignores inherited `GIT_*` environment settings; its plan selects the
 repository and checkout paths.

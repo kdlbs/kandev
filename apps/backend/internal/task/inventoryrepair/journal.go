@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/persistence"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
@@ -39,11 +39,26 @@ func fencePaths(home, database string) []string {
 
 // CheckPending runs under backend ownership locks, before migrations or recovery.
 func CheckPending(home, driver, database string) error {
-	paths := []string{filepath.Join(home, ".kandev-inventory-repair.json")}
-	if strings.EqualFold(driver, "sqlite") && database != "" {
-		paths = append(paths, database+".inventory-repair.json")
+	targets, err := ownershiplock.Targets(home, driver, database)
+	if err != nil {
+		return err
 	}
-	for _, path := range paths {
+	return CheckPendingTargets(targets)
+}
+
+// CheckPendingTargets checks the canonical resources already locked by startup.
+// The home fence covers its in-home database, just as the home ownership lock does.
+func CheckPendingTargets(targets []ownershiplock.Target) error {
+	for _, target := range targets {
+		var path string
+		switch target.Kind {
+		case ownershiplock.TargetHome:
+			path = filepath.Join(target.ResourcePath, ".kandev-inventory-repair.json")
+		case ownershiplock.TargetDatabase:
+			path = target.ResourcePath + ".inventory-repair.json"
+		default:
+			return fmt.Errorf("unknown repair ownership target: %q", target.Kind)
+		}
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("%w at %s; use the repair plan with --apply or --rollback before starting the backend", ErrRepairPending, path)
 		}

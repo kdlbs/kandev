@@ -91,3 +91,16 @@ Implementation validation on 2026-09-28:
 
 All three implementation work orders are complete. Live installation repair
 is a separate operator action and was not performed as part of this change.
+
+Review validation on 2026-09-29:
+
+- Reproduced database-file aliases bypassing startup fences and a different
+  installation UID hiding a live checkout consumer before correcting both.
+- Startup uses its already locked canonical paths for fence checks. Process
+  inspection covers every UID, refuses unknown liveness, and parses exact
+  status fields when excluding zombies and kernel threads.
+- Repair, CLI, ownership-lock, and focused startup race tests passed; regressions
+  cover database and parent-directory aliases, lock release, foreign-owner
+  process census, and misleading process names. Specification lint passed.
+- Current-head CI, final review disposition, and merge validation remain external
+  PR gates; earlier validation does not substitute for those checks.

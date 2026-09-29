@@ -327,7 +327,7 @@ func acquireRuntimeStateOwnership(cfg *config.Config) (*ownershiplock.Owner, err
 	if err != nil {
 		return nil, err
 	}
-	if err := inventoryrepair.CheckPending(cfg.ResolvedHomeDir(), cfg.Database.Driver, cfg.Database.Path); err != nil {
+	if err := inventoryrepair.CheckPendingTargets(targets); err != nil {
 		return nil, errors.Join(err, owner.Close())
 	}
 	return owner, nil

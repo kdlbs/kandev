@@ -37,7 +37,7 @@ Add a bounded standalone Go maintenance command at
 `internal/task/inventoryrepair`. This is an operator utility, not a startup
 migration or an automatic retry fallback. It supports the local SQLite
 installation and host Worktree executor only. Application and rollback require
-Linux and visibility into the installation owner's host processes; other platforms
+Linux and visibility into host processes across all UIDs; other platforms
 retain read-only preview/verification. Other stores and executors refuse
 application before host path inspection.
 
@@ -53,6 +53,10 @@ Before application, acquire the same home and database locks produced by
 A live backend is a refusal, not something the helper stops. Verify that no
 affected agentctl, shell, or agent process can access the source or destination;
 a stopped database row alone does not establish this. Unknown liveness refuses.
+Inspect processes from every UID; inaccessible processes refuse repair. Confirmed
+kernel threads and zombies have no live checkout consumers and can be excluded.
+Startup checks repair fences against the same canonical paths used for ownership
+locks, including external databases configured through file symlinks.
 Use existing classified Git subprocess helpers and finite inspection deadlines.
 
 ## Validation and repository repair

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/task/inventoryrepair"
 )
 
 func TestInventoryRepairStartupExplainsRecovery(t *testing.T) {
@@ -60,6 +61,50 @@ func TestInventoryRepairBlocksStartupAndReleasesOwnership(t *testing.T) {
 			owner, err = ownershiplock.Acquire(targets)
 			if err != nil {
 				t.Fatal("failed startup leaked lock: ", err)
+			}
+			_ = owner.Close()
+		})
+	}
+}
+
+func TestInventoryRepairBlocksDatabaseAliases(t *testing.T) {
+	for _, parentAlias := range []bool{false, true} {
+		t.Run(map[bool]string{false: "database symlink", true: "parent symlink"}[parentAlias], func(t *testing.T) {
+			database := filepath.Join(t.TempDir(), "kandev.db")
+			if err := os.WriteFile(database, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(database+".inventory-repair.json", []byte("pending repair"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(t.TempDir(), "alias")
+			target := database
+			if parentAlias {
+				target = filepath.Dir(database)
+			}
+			if err := os.Symlink(target, alias); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			if parentAlias {
+				alias = filepath.Join(alias, filepath.Base(database))
+			}
+			// A different home has no home fence and must find the database fence.
+			cfg := &config.Config{HomeDir: t.TempDir()}
+			cfg.Database.Driver, cfg.Database.Path = "sqlite", alias
+			owner, err := acquireRuntimeStateOwnership(cfg)
+			if owner != nil {
+				_ = owner.Close()
+			}
+			if !errors.Is(err, inventoryrepair.ErrRepairPending) {
+				t.Fatalf("database alias bypassed repair fence: %v", err)
+			}
+			targets, err := ownershiplock.Targets(cfg.HomeDir, "sqlite", database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err = ownershiplock.Acquire(targets)
+			if err != nil {
+				t.Fatal("failed startup leaked canonical lock: ", err)
 			}
 			_ = owner.Close()
 		})
