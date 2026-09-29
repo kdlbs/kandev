@@ -36,17 +36,33 @@ backstop re-check.
   filtered), the window SQL with chunked `IN` lists, the 7-day mean, and
   `Measurable`/`Degraded`
   ([Measurement](../../specs/coordinator/system-design/spend.md#measurement)).
-- `TurnCost(ctx, turn)` ([Per-turn cost](../../specs/coordinator/system-design/spend.md#per-turn-cost)).
-- `internal/task/usage`: an optional `OnRecorded(taskID, sessionID)` observer
-  on a bounded channel of 256 with a drop metric; no behaviour change when
-  nothing registers.
-- `CheckCeiling(ctx, coordinatorID)`: for an open turn whose
+- `TurnCost(ctx, TurnKey) (subcents, known, err)` keyed on the turn's
+  `session_turn_id` through a new task repository `SumUsageForTurn`, and the
+  idempotent recompute the backstop runs for turns settled in the last 10
+  minutes ([Per-turn cost](../../specs/coordinator/system-design/spend.md#per-turn-cost)).
+- Task repository `SumUsageForTasks` (at most 500 ids per call) and the
+  `Spend` error and unmeasurable contract, `CheckSpendMeasurable` and
+  `CheckCeilingNotReached`
+  ([Measurement](../../specs/coordinator/system-design/spend.md#measurement)).
+- `internal/task/usage`: `Writer.SetRecordedObserver`, one replaceable
+  observer fed by a writer-owned bounded channel of 256 and one consumer
+  goroutine joined at `Stop`, with the
+  `coordinator_usage_observer_dropped_total` metric and panic recovery; no
+  behaviour change when nothing registers
+  ([Observer](../../specs/coordinator/system-design/spend.md#observer)).
+- `CheckCeiling(ctx, coordinatorID) error` and
+  `CheckCeilingForSession(ctx, taskID, sessionID) error` (procedure steps 1-8
+  of [CheckCeiling](../../specs/coordinator/system-design/spend.md#checkceiling)):
+  for an open turn whose
   `session_turn_id` is the session's active turn, when not measurable or at
   or over the ceiling (or already marked), set `stop_requested_at`, cancel
   through the new turn-fenced `orchestrator.Service.CancelTurn(ctx,
   sessionID, expectedTurnID)` (compares the captured
   `cancellationIdentity.turnID` inside the cancel-in-flight guard, returns
-  `ErrTurnNotActive` without cancelling on a mismatch), count each failed
+  `ErrTurnNotActive` without cancelling on a mismatch, `ErrCancelInFlight`
+  when another cancellation of the session holds the claim; built on the
+  existing silent turn-fenced cancellation, no authorization, message or
+  workflow completion), count each failed
   cancel in `coordinator_ceiling_cancel_failed_total`, and only after a
   confirmed cancel settle
   it `stopped_at_ceiling` with cost in one conditional update and publish
@@ -84,7 +100,16 @@ backstop re-check.
   running, and the row is not settled by `CheckCeiling`
   (`AC-COORDINATOR-SPEND-003.3`). An orchestrator test covers `CancelTurn`'s
   match, mismatch and no-active-turn cases.
-- Each failed cancel increments `coordinator_ceiling_cancel_failed_total`.
+- Each failed cancel, including `ErrCancelInFlight`, increments
+  `coordinator_ceiling_cancel_failed_total`; `ErrTurnNotActive` does not.
+- Per-turn cost is keyed on the turn id: a usage row recorded after the settle
+  and a manager turn drained onto the same session are handled (the first is
+  counted by the recompute, the second is not counted). A failed 7-day read
+  leaves spend measurable. Two concurrent `CheckCeiling` calls on one
+  coordinator cancel once; the stop counter and info log fire once per turn;
+  `autonomy_changed` publishes only from the settle that changed a row.
+- A row with `session_turn_id` NULL is never marked or cancelled. A failed
+  `GetActiveTurnBySessionID` read marks nothing.
 
 ## Verification
 
