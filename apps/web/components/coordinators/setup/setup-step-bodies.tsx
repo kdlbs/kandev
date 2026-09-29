@@ -136,7 +136,11 @@ export function GoalStep({ state, messages, edit }: BodyProps) {
       "goal.name",
       "goal.due_on",
       "goal.criteria",
-      ...goal.criteria.map((_, i) => `goal.criteria[${i}].text`),
+      ...goal.criteria.flatMap((c, i) =>
+        c.text !== state.goal.criteria[i]?.text && state.goal.criteria[i]
+          ? [`goal.criteria[${i}].text`]
+          : [],
+      ),
     ]);
   return (
     <div className="space-y-4">

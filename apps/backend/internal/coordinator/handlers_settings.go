@@ -1,10 +1,12 @@
 package coordinator
 
 import (
+	"context"
 	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // maxSettingsBodyBytes bounds a settings request body.
@@ -59,10 +61,16 @@ func (h *Handlers) httpSetupCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
+	c.JSON(http.StatusCreated, h.setupResponse(ctx, created))
+}
+
+// setupResponse renders a committed setup. The rows already exist, so a failed
+// policy read degrades to the base coordinator shape instead of an error status.
+func (h *Handlers) setupResponse(ctx context.Context, created *Coordinator) *CoordinatorDTO {
 	dto, err := h.coordinatorDTO(ctx, created)
 	if err != nil {
-		h.respondError(c, err)
-		return
+		h.logger.Warn("setup committed but policy read failed", zap.String("coordinator_id", created.ID), zap.Error(err))
+		return NewCoordinatorDTO(created)
 	}
-	c.JSON(http.StatusCreated, dto)
+	return dto
 }

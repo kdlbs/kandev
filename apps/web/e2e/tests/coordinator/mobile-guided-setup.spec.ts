@@ -12,7 +12,9 @@ test.describe("Guided setup on a phone viewport", () => {
   }) => {
     await testPage.goto(linkToCoordinatorAdd(seedData.workspaceId));
 
-    await expect(testPage.getByTestId("setup-step-compact")).toContainText("Step 1 of 6");
+    await expect(testPage.getByTestId("setup-step-compact")).toContainText(
+      "Step 1 of 6: Who runs it",
+    );
     await expect(testPage.getByTestId("setup-step-list")).toBeHidden();
     const box = await testPage.getByTestId("setup-next").boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
@@ -24,9 +26,16 @@ test.describe("Guided setup on a phone viewport", () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
 
     await testPage.getByLabel("Name").fill("Phone Planner");
-    if (await testPage.getByTestId("setup-next").isEnabled()) {
-      await testPage.getByTestId("setup-next").click();
-      await expect(testPage.getByTestId("setup-step-compact")).toContainText("Step 2 of 6");
+    if (await testPage.getByTestId("setup-next").isDisabled()) {
+      await testPage.getByTestId("coordinator-agent-profile-picker").click();
+      await testPage.getByRole("option").first().click();
+      await testPage.getByRole("combobox").last().click();
+      await testPage.getByRole("option").first().click();
     }
+    await expect(testPage.getByTestId("setup-next")).toBeEnabled();
+    await testPage.getByTestId("setup-next").click();
+    await expect(testPage.getByTestId("setup-step-compact")).toContainText(
+      "Step 2 of 6: What it watches",
+    );
   });
 });

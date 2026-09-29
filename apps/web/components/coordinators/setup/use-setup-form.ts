@@ -37,6 +37,11 @@ export function useSetupForm(initial: SetupState) {
     );
   };
 
+  const skip = (step: SetupStepId, next: SetupState) => {
+    setState(next);
+    setIssue((prev) => (prev?.step === step ? null : prev));
+  };
+
   const leave = (path: string) => setTouched((prev) => new Set([...prev, path]));
 
   const reject = (error: SetupServerError) => {
@@ -57,5 +62,5 @@ export function useSetupForm(initial: SetupState) {
 
   const valid = (step: SetupStepId) => isStepValid(step, state) && issue?.step !== step;
 
-  return { state, setState, edit, leave, reject, messages, valid };
+  return { state, setState, skip, edit, leave, reject, messages, valid };
 }

@@ -106,12 +106,7 @@ test.describe("Guided setup", () => {
     await expect(testPage.getByTestId(`watches-board-${second.id}`)).toContainText("In scope");
   });
 
-  test("a 400 returns to its step with values kept and nothing is created", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const before = (await apiClient.listCoordinators(seedData.workspaceId)).coordinators.length;
+  test("a 400 returns to its step with values kept", async ({ testPage, seedData }) => {
     await testPage.route(SETUP_PATH, (route) =>
       route.fulfill({
         status: 400,
@@ -130,8 +125,6 @@ test.describe("Guided setup", () => {
     );
     await expect(testPage.getByLabel("Name")).toHaveValue(NAME);
     await expect(testPage.getByTestId("setup-next")).toBeDisabled();
-    const after = (await apiClient.listCoordinators(seedData.workspaceId)).coordinators.length;
-    expect(after).toBe(before);
   });
 
   test("a dropped response says it could not confirm and stays on Review", async ({
@@ -151,7 +144,12 @@ test.describe("Guided setup", () => {
     const before = (await apiClient.listCoordinators(seedData.workspaceId)).coordinators.length;
     await testPage.goto(linkToCoordinatorAdd(seedData.workspaceId));
     await testPage.getByLabel("Name").fill("Never Created");
+    let posted = false;
+    testPage.on("request", (req) => {
+      if (req.method() === "POST" && SETUP_PATH.test(req.url())) posted = true;
+    });
     await testPage.goto(linkToCoordinatorSettingsList(seedData.workspaceId));
+    expect(posted).toBe(false);
     const after = (await apiClient.listCoordinators(seedData.workspaceId)).coordinators.length;
     expect(after).toBe(before);
   });

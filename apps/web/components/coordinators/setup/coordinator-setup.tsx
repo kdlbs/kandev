@@ -53,6 +53,7 @@ function useSetupFinish({ workspaceId, state, onRefused }: FinishArgs) {
     setBanner(null);
     try {
       const created = await setupCoordinator(workspaceId, buildSetupRequest(state));
+      if (!created?.id) throw new Error("setup response has no coordinator");
       addCoordinator(created);
       router.replace(`/settings/workspaces/${workspaceId}/coordinators/${created.id}`);
     } catch (error) {
@@ -187,7 +188,7 @@ export function CoordinatorSetup({ workspaceId }: Props) {
     setStep(toReview ? "review" : SETUP_STEPS[index + 1]);
   };
   const skip = () => {
-    form.setState(skipStep(step, state));
+    form.skip(step, skipStep(step, state));
     leave(step);
   };
   const back = () => {

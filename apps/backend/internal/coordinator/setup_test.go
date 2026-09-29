@@ -354,3 +354,13 @@ func TestHTTPSetupRouteAbsentWithoutPhase2(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestSetupResponseDegradesWhenPolicyReadFails(t *testing.T) {
+	svc, _ := setupService(t)
+	h := NewHandlers(svc, newTestLogger(t))
+	ghost := &Coordinator{ID: "missing-coordinator", WorkspaceID: testWorkspaceID, Name: "ghost"}
+	dto := h.setupResponse(context.Background(), ghost)
+	if dto == nil || dto.ID != ghost.ID || dto.Name != "ghost" {
+		t.Fatalf("dto = %+v, want the base shape of the committed coordinator", dto)
+	}
+}

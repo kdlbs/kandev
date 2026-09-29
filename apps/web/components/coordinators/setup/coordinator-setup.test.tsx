@@ -68,6 +68,9 @@ const NEXT_ID = "setup-next";
 const BACK_ID = "setup-back";
 const SKIP_ID = "setup-skip";
 const FINISH_ID = "setup-finish";
+const CRITERION_ERROR = "Enter 1 to 200 characters or remove this criterion.";
+const ADD_CRITERION_ID = "goal-add-criterion";
+const CRITERION_LABEL = "Exit criterion 1";
 
 const click = (id: string) => fireEvent.click(screen.getByTestId(id));
 const next = () => click(NEXT_ID);
@@ -145,13 +148,16 @@ describe("CoordinatorSetup navigation", () => {
     typeName(PLANNER);
     next();
     next();
-    fireEvent.click(screen.getByTestId("goal-add-criterion"));
+    fireEvent.click(screen.getByTestId(ADD_CRITERION_ID));
     expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Enter a milestone of 1 to 120 characters.")).toBeDefined();
     fireEvent.change(screen.getByTestId("goal-name"), { target: { value: "Ship" } });
     expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Enter 1 to 200 characters or remove this criterion.")).toBeDefined();
-    fireEvent.change(screen.getByLabelText("Exit criterion 1"), { target: { value: "Done" } });
+    expect(screen.queryByText(CRITERION_ERROR)).toBeNull();
+    fireEvent.change(screen.getByLabelText(CRITERION_LABEL), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText(CRITERION_LABEL), { target: { value: "" } });
+    expect(screen.getByText(CRITERION_ERROR)).toBeDefined();
+    fireEvent.change(screen.getByLabelText(CRITERION_LABEL), { target: { value: "Done" } });
     expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(false);
   });
 });
@@ -189,6 +195,36 @@ describe("CoordinatorSetup review", () => {
     );
   });
 
+  it("shows the column headers and the owning section of every row", () => {
+    open();
+    toReview();
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+      "Setting",
+      "Value",
+      "Owned from now on by",
+      "",
+    ]);
+    const owners: Record<string, string> = {
+      name: "Identity",
+      agent: "Identity",
+      executor: "Identity",
+      watches: "Watches",
+      goal: "Goal",
+      context: "Identity",
+      create_task: "May do",
+      start_agent: "May do",
+      message: "May do",
+      move: "May do",
+      resume: "May do",
+      stop: "May do",
+    };
+    for (const [id, owner] of Object.entries(owners)) {
+      const cells = screen.getByTestId(`setup-review-row-${id}`).querySelectorAll("td");
+      expect(cells[2].textContent).toBe(owner);
+      expect(screen.getByTestId(`setup-review-change-${id}`)).toBeDefined();
+    }
+  });
+
   it("names the chosen boards in workspace order and formats the goal", () => {
     open();
     typeName(PLANNER);
@@ -196,8 +232,8 @@ describe("CoordinatorSetup review", () => {
     fireEvent.click(screen.getByRole("switch"));
     next();
     fireEvent.change(screen.getByTestId("goal-name"), { target: { value: "Ship" } });
-    fireEvent.click(screen.getByTestId("goal-add-criterion"));
-    fireEvent.change(screen.getByLabelText("Exit criterion 1"), { target: { value: "One" } });
+    fireEvent.click(screen.getByTestId(ADD_CRITERION_ID));
+    fireEvent.change(screen.getByLabelText(CRITERION_LABEL), { target: { value: "One" } });
     next();
     fireEvent.change(screen.getByLabelText("Context"), { target: { value: "  \n " } });
     next();
@@ -288,6 +324,58 @@ describe("CoordinatorSetup finish", () => {
 });
 
 describe("CoordinatorSetup refusals", () => {
+  it("Skip clears a server refusal on the goal step so Finish is enabled again", async () => {
+    mockSetup.mockRejectedValue(
+      new ApiError("bad", 400, { step: "goal", field: "goal.name", code: "name_invalid" }),
+    );
+    open();
+    typeName(PLANNER);
+    next();
+    next();
+    fireEvent.change(screen.getByTestId("goal-name"), { target: { value: "Ship" } });
+    next();
+    click(SKIP_ID);
+    next();
+    click(FINISH_ID);
+    await waitFor(() => expect(screen.getByTestId("setup-body-goal")).toBeDefined());
+    expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(true);
+    click(SKIP_ID);
+    expect(screen.getByTestId("setup-step-done-goal")).toBeDefined();
+    next();
+    next();
+    expect((screen.getByTestId(FINISH_ID) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not flag an untouched blank criterion row when another row is added", () => {
+    open();
+    typeName(PLANNER);
+    next();
+    next();
+    fireEvent.change(screen.getByTestId("goal-name"), { target: { value: "Ship" } });
+    fireEvent.click(screen.getByTestId(ADD_CRITERION_ID));
+    fireEvent.click(screen.getByTestId(ADD_CRITERION_ID));
+    fireEvent.change(screen.getByLabelText(CRITERION_LABEL), { target: { value: "One" } });
+    expect(screen.queryByText(/Enter 1 to 200 characters/)).toBeNull();
+  });
+
+  it("keeps the store clean when a 2xx answer has no coordinator", async () => {
+    mockSetup.mockResolvedValue(undefined);
+    open();
+    toReview();
+    click(FINISH_ID);
+    await waitFor(() => expect(screen.getByTestId("setup-banner-unconfirmed")).toBeDefined());
+    expect(mockAdd).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("holds Next when a value became invalid after Change, so Review cannot be reached", () => {
+    open();
+    toReview();
+    click("setup-review-change-name");
+    typeName("   ");
+    expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("shows the fallback line for a 400 with no known code", async () => {
     mockSetup.mockRejectedValue(
       new ApiError("bad", 400, { error: "nope", step: "identity", field: "name" }),
@@ -328,6 +416,7 @@ describe("CoordinatorSetup refusals", () => {
     expect(screen.getByTestId("setup-review")).toBeDefined();
     expect((screen.getByTestId(FINISH_ID) as HTMLButtonElement).disabled).toBe(false);
     expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.getByTestId("setup-review-value-name").textContent).toContain(PLANNER);
   });
 
   it("says it could not confirm when no answer arrived", async () => {
@@ -337,5 +426,6 @@ describe("CoordinatorSetup refusals", () => {
     click(FINISH_ID);
     await waitFor(() => expect(screen.getByTestId("setup-banner-unconfirmed")).toBeDefined());
     expect((screen.getByTestId(FINISH_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId("setup-review-value-name").textContent).toContain(PLANNER);
   });
 });
