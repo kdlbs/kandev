@@ -375,11 +375,32 @@ Add coordinator
   ([permissions](permissions.md#settings-routes)); Standing orders writes
   immediately; the Goal form uses the save bar and its checkboxes write
   immediately.
-- The list response gains, per coordinator while phase 2 is on,
-  `summary: {watch_scope, watched_count, approval_actions, active_orders}`,
-  computed in the list query with grouped counts, and the card renders
-  "Every board" or "N boards", "N actions need approval" and "N standing
-  orders" in place of the later-phase note (`009.2`).
+- **List summary (`009.2`), added by task 06.** The list response gains, per
+  coordinator while phase 2 is on, `summary: {watch_scope, watched_count,
+  approval_actions, active_orders}`, computed in the list query with grouped
+  counts. `watched_count` counts the effective watch set (the stored watch
+  rows joined to existing workflows; a row of a deleted workflow is not
+  counted) and is 0 for `all`. `approval_actions` counts the actions whose
+  setting is `requires_approval` (0 to 5; `automatic` never occurs and `stop`
+  is always `denied`). `active_orders` counts the coordinator's active
+  standing orders. All three are integers, never null; a coordinator that
+  cannot be summarised is a list 500, not a partial card.
+- **Card line.** In place of the later-phase note the card renders three
+  parts in this order, separated by a middle dot: the watch part ("Every
+  board" for `all`; otherwise `_one` "1 board", `_other` "N boards"; and
+  "Watches no board" when `watched_count` is 0 for `selected`), the approvals
+  part (`_one` "1 action needs approval", `_other` "N actions need approval",
+  zero reading "0 actions need approval") and the orders part (`_one`
+  "1 standing order", `_other` "N standing orders", zero reading "0 standing
+  orders"), each through `t()` with `count` plurals in all six locales. A
+  response without `summary` (an older backend) renders no line. The
+  page-level later-phase note ("What it watches, what it may do ...") is not
+  rendered while the phase-2 flag is on; with the flag off it is unchanged.
+- **Sections entries.** Task 06 adds `watches` and `may-do` to
+  `coordinator-sections.tsx` between Identity and Standing orders in the fixed
+  order; the entries render the sections of
+  [permissions](permissions-ui.md#may-do-ui), which share the one draft and the
+  one save contributor `coordinator-control` owned by `CoordinatorSections`.
 
 ## Security
 

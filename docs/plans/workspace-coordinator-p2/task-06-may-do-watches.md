@@ -19,8 +19,10 @@ acceptance_criteria:
   - AC-COORDINATOR-PERMISSIONS-001.7
   - AC-COORDINATOR-PERMISSIONS-001.8
   - AC-COORDINATOR-PERMISSIONS-001.9
+  - AC-COORDINATOR-PERMISSIONS-001.10
   - AC-COORDINATOR-PERMISSIONS-003.4
   - AC-COORDINATOR-PERMISSIONS-003.6
+  - AC-COORDINATOR-PERMISSIONS-003.7
   - AC-COORDINATOR-PERMISSIONS-004.3
 system_design:
   - ../../specs/coordinator/system-design/coordinators.md
@@ -47,12 +49,21 @@ watched tasks. May do and Watches save with the phase-1 save bar.
   half of `003.5`).
 - Both save through the save bar with "Saving a change starts the next
   conversation fresh." (`004.3`).
-- Both sections are entries in task 11's Sections row.
+- Both sections are entries (`watches`, `may-do`) in task 11's Sections row.
 - List summary line from the list's `summary` field (`COORDINATORS-009.2`).
-- Server projections filter tasks and stalls by the `WatchSet`; proposals
-  always show; the count strip counts the same set (`PERMISSIONS-003.4`).
-  Needs you "watches no board" notice with a Watches link for managers (the
-  Needs you half of `003.5`).
+- The client watch filter: one pure module `apps/web/lib/coordinator/watch-filter.ts`
+  filters tasks and stalls for `classify` and the toast count from the
+  effective watch set of the settings GET; proposals always show, the
+  proposal source-task lookup and What it did stay unfiltered, the sidebar
+  badge (`open_proposals`) is unfiltered; the watch set input fails closed
+  with its own banner line (`PERMISSIONS-003.4`, `003.7`). Needs you shows the
+  "watches no board" notice with a Watches link for managers (the Needs you
+  half of `003.5`).
+- Backend: the list DTO's `summary` (`watch_scope`, `watched_count`,
+  `approval_actions`, `active_orders`; no other task adds it), with tests for
+  `all`, `selected` and an empty effective set.
+- One shared draft hook `useControlDraft` owned by `CoordinatorSections`, one
+  save contributor and one PUT carrying only changed members (`004.3`).
 - Readers see both sections without controls. Six locales.
 
 ## Out of scope
@@ -96,25 +107,32 @@ Phone: each May do action is a stacked group with a segmented control.
 
 ```bash
 make -C apps/backend test PKG=./internal/coordinator/...
-cd apps/web && pnpm test -- app/settings/workspace app/coordinator
+cd apps/web && pnpm test -- components/coordinators app/coordinator lib/coordinator
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/configure-sections.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/configure-sections.spec.ts
 cd apps/web && pnpm e2e:run tests/coordinator/needs-you-watches.spec.ts
 ```
 
-Backend: projection tests with `all`, `selected` and an empty list. E2E:
-set Message to Denied and save; take a board out of scope and save; reload
-and assert each value; seed two boards, watch one, assert Needs you counts;
+Backend: list `summary` tests with `all`, `selected` and an empty
+effective set; Vitest for the watch filter, the draft hook (one PUT, only
+changed members, unvisited section) and the summary line plurals. E2E:
+set Message to Requires approval and save (Message is Denied under the
+phase-1 policy, so Denied would not dirty the form); take a board out of
+scope and save; reload and assert each value; the Review link lands on
+What it did filtered by class; seed two boards, watch one, assert Needs you counts;
 a reader account (auth project) sees no controls; flag-off shows the
 phase-1 page.
 
 ## Likely files
 
-- `apps/web/app/settings/workspace/[id]/coordinators/components/`
-  `may-do-section.tsx`, `watches-section.tsx`
-- `apps/web/app/settings/workspace/[id]/coordinators/page.tsx` (summary)
-- `apps/backend/internal/coordinator/projections.go`, `counts.go`
+- `apps/web/components/coordinators/sections/` `may-do-section.tsx`,
+  `watches-section.tsx`, `control-draft.ts(x)`, `coordinator-sections.tsx`
+- `apps/web/components/coordinators/coordinators-list-page.tsx` (summary line)
+- `apps/web/lib/coordinator/watch-filter.ts`,
+  `apps/web/app/coordinator/use-coordinator-attention.ts`,
+  `use-coordinator-watch-set.ts`
+- `apps/backend/internal/coordinator/` list query and DTO (`summary`)
 - `apps/web/app/coordinator/components/watches-none-notice.tsx`
 - `apps/web/src/locales/*/coordinator.json`, `eslint.i18n.options.mjs`
 
