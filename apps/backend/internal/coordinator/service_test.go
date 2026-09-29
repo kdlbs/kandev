@@ -273,6 +273,50 @@ func TestServiceListCoordinators(t *testing.T) {
 		}
 		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
+
+	t.Run("pairs each of several coordinators with its own count, not another's", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+
+		busy, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Busy", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		idle, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Idle", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		for i := 0; i < 3; i++ {
+			if err := svc.store.InsertProposal(ctx, &Proposal{
+				CoordinatorID: busy.ID, WorkspaceID: workspaceID,
+				Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
+			}); err != nil {
+				t.Fatalf("InsertProposal() unexpected error: %v", err)
+			}
+		}
+
+		items, err := svc.ListCoordinators(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("ListCoordinators() unexpected error: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("ListCoordinators() len = %d, want 2", len(items))
+		}
+		byID := make(map[string]int, len(items))
+		for _, item := range items {
+			byID[item.Coordinator.ID] = item.OpenProposals
+		}
+		if byID[busy.ID] != 3 {
+			t.Errorf("busy coordinator's OpenProposals = %d, want 3", byID[busy.ID])
+		}
+		if byID[idle.ID] != 0 {
+			t.Errorf("idle coordinator's OpenProposals = %d, want 0", byID[idle.ID])
+		}
+	})
 }
 
 func TestServicePatchCoordinator(t *testing.T) {

@@ -209,7 +209,9 @@ func (s *Service) GetCoordinator(ctx context.Context, workspaceID, id string) (*
 }
 
 // ListCoordinators returns every coordinator of a workspace, each paired with
-// its open proposal count (Build decision 9). Never nil.
+// its open proposal count (Build decision 9). Never nil. Fetches every
+// coordinator's count with one grouped query (CountOpenProposalsByWorkspace)
+// rather than one query per coordinator.
 func (s *Service) ListCoordinators(ctx context.Context, workspaceID string) ([]CoordinatorWithOpenProposals, error) {
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
@@ -218,13 +220,13 @@ func (s *Service) ListCoordinators(ctx context.Context, workspaceID string) ([]C
 	if err != nil {
 		return nil, err
 	}
+	counts, err := s.store.CountOpenProposalsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]CoordinatorWithOpenProposals, len(found))
 	for i, c := range found {
-		count, err := s.store.CountOpenProposals(ctx, c.ID)
-		if err != nil {
-			return nil, err
-		}
-		result[i] = CoordinatorWithOpenProposals{Coordinator: c, OpenProposals: count}
+		result[i] = CoordinatorWithOpenProposals{Coordinator: c, OpenProposals: counts[c.ID]}
 	}
 	return result, nil
 }
