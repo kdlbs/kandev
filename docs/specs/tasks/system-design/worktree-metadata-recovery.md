@@ -2,19 +2,22 @@
 status: current
 system: tasks
 created: 2026-09-10
+updated: 2026-09-29
 requirements:
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-001
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-002
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-003
+  - REQ-TASKS-WORKTREE-METADATA-RECOVERY-004
 ---
 
 # Worktree metadata recovery system design
 
 ## Status and ownership
 
-This design describes the compatibility work implemented for PR #3137. The
-initial reviewed head was `22c57ef94fa24209855097cbc70ace5a5d2d09a2`.
-Runtime verification status is recorded in the linked implementation plan.
+This design describes the compatibility work implemented for PR #3137 and the
+missing-checkout extension for issue #4052. The initial reviewed head was
+`22c57ef94fa24209855097cbc70ace5a5d2d09a2`. Runtime verification status is
+recorded in the linked implementation plans.
 
 The task system owns environment selection, lifetime, and physical inventory.
 The worktree manager supplies Git inspection and file recovery. Executor providers
@@ -27,6 +30,7 @@ retain authority over their own filesystems.
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-001` | Selected environment admission |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-002` | Classification and preservation, Multiple repositories |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-003` | Recovery authority, Restart and failure, Response path |
+| `REQ-TASKS-WORKTREE-METADATA-RECOVERY-004` | Missing canonical checkout recovery |
 
 ## Implemented integration
 
@@ -110,14 +114,19 @@ The manager retains bounded Git inspection, managed-root validation, and path
 identity checks. It distinguishes healthy metadata, absent checkout, absent Git
 administrative directory, and ambiguous metadata.
 
-Only an absent administrative directory is eligible for automatic replacement.
+For a surviving checkout, only an absent administrative directory is eligible
+for automatic replacement. Absent checkouts use the separate path defined below.
 The `.git` pointer must identify the expected repository's worktree namespace.
 Existing administrative directories require valid common-directory and backlink
 relationships. Permission errors and malformed pointers are not absence.
 
-The recorded branch must resolve in the correct repository. An empty or lost
-recorded branch does not fall back to `BaseBranch`. The separate explicit
-branch-loss flow remains authoritative for unavailable code.
+The recorded branch must resolve in the correct repository. For a missing
+checkout, an absent local branch and absent tracking ref trigger an exact
+`origin` probe. A probe failure is an inspection failure; confirmed remote
+absence retains the existing explicit branch-loss action. An available remote
+branch is fetched to its advertised commit and checked against that commit
+before materialization. An empty or lost branch never falls back to
+`BaseBranch`.
 
 Recovery retains the PR's manifest-checked snapshot and deterministic sibling
 replacement. The root `.git` entry is excluded. Tracked, untracked, and ignored
@@ -209,6 +218,21 @@ remains. Cleanup workers must not interpret a recovery claim as a deletion job.
 Claim release uses the exact operation and generation. A stale release cannot
 remove another operation's authority.
 
+Missing-checkout replay also takes a nonblocking operating-system lock in the
+repository's common Git directory, keyed by the canonical worktree ID. Acquire
+locks in stable slot order before adopting an existing same-session/same-operation
+database claim. Hold them through restoration and the existing external-start
+boundary, then release them only with admission release. This distinguishes an
+active process from a restarting process even though database claim acquisition
+is idempotent for the same operation.
+
+If all operation records are complete but a process stopped before releasing its
+database claim, ordinary selected-environment admission takes the matching
+operation locks, re-reads and validates each record and checkout, confirms the
+exact owner, generation, session, executor, and operation claim, and releases
+only that claim. It does not infer staleness from claim age. A still-active
+process retains its OS lock and prevents reconciliation.
+
 ## Response path
 
 The existing frontend action reaches the orchestrator through its normal request
@@ -225,6 +249,114 @@ slot, generation, and outcome. They do not include file contents or credentials.
 Retained snapshots can contain ignored secrets and require the same protection
 as the original workspace.
 
+## Missing canonical checkout recovery
+
+`Manager.AdmitRecovery` owns restoration before attach-only validation.
+`reuseRequiredWorktree` stays read-only and continues to reject an absent path
+when called without a completed recovery. This extends the eligibility boundary
+in [the missing-checkout ADR](../../../decisions/2026-09-29-missing-worktree-checkout-recovery.md).
+
+### Classification and authority
+
+`inspectRecoverySlot` distinguishes a missing canonical checkout from metadata
+loss. An `Lstat` absence alone is insufficient. Validate the selected active
+row, environment owner and generation, repository identity, recorded branch,
+managed task-root identity, and every existing ancestor without following links.
+A missing tasks base can be rebuilt only from the persisted managed-root identity.
+Legacy paths outside managed roots remain refused by this automatic path.
+
+Preflight covers every selected active slot. It resolves each recorded branch
+and inspects conflicting registrations before mutation. Failed or deleted rows
+do not authorize a substitute. Existing complete-inventory validation still
+requires exactly one active row for every requested repository/branch slot.
+
+A missing slot sets recovery work and acquires the existing durable environment
+claim with `AllowCurrentSessionRuntime: false`. No new lock table or schema is
+needed. Re-read canonical identities and repeat preflight under the claim.
+Hold authority through the existing external-start boundary. A live consumer
+from any session or borrowing task blocks restoration, even if its agent is idle.
+
+### Exact restoration
+
+Add a focused missing-checkout operation under `internal/worktree`. Do not call
+`recreate` wholesale: that helper can remove paths, prune registrations, refresh
+branches, and perform initial-materialization work.
+
+The operation uses the repository lock and pinned no-follow directory handles.
+Resolve the recorded local branch to an exact commit first. When only the
+recorded origin branch survives but its tracking ref is absent, use a bounded
+exact-ref probe and fetch only the advertised commit to a private operation ref.
+Verify that fetched head before restoring the same local branch. For an
+interrupted remote-only operation, each retry must probe the exact origin branch
+again and persist its newly advertised head before fetching. If origin advances
+between the probe and fetch, refuse that attempt; the next retry can record and
+fetch the latest advertised head. If the local branch exists, keep its recorded
+head and do not replace it with a newer remote head. Prefer persisted compaction
+recovery identity when applicable. Probe failure is not confirmed branch loss.
+
+Atomically reserve only the recorded absent path through its pinned parent
+directory. Pass Git the pinned target identity throughout `worktree add`; do not
+resolve the target path again after validation. Never use `worktree remove`,
+`--force`, reset, `-B`, base-branch fallback, contribution setup, or copy-file
+scripts. A path that appears before reservation blocks creation. Any
+administrative-entry cleanup must target only the exact proven stale registration
+for this slot. Do not run repository-wide `worktree prune`. A branch checked out
+elsewhere, a locked registration, or an ambiguous backlink remains a refusal.
+
+Validate the result against the expected common directory, branch, and captured
+commit. Keep the environment row, worktree ID, path, branch slug, and branch name.
+Use the existing claim-aware store boundary for any necessary publication.
+Do not replace inventory ownership or update rows through an unguarded write.
+
+### Interruption and partial success
+
+Use an operation record adjacent to the checkout, protected like existing recovery
+records. Record the claim operation ID, environment generation, exact slot identity,
+branch head, and expected path before materialization. Give this operation its own
+record format, separate from the surviving-file snapshot protocol. The OS lock
+serializes active work and adoption across backend processes.
+
+Git must mutate the target through its pinned directory identity. On platforms
+where the descriptor path cannot be a worktree destination, enter the inherited
+pinned directory descriptor as the Git process working directory and add `.`
+using the repository's exact common directory. Before Git succeeds, failure
+cleanup may remove the pinned target only while it is empty. After Git succeeds,
+retain it even when later validation fails. Remote operation refs use exact
+compare-and-swap deletion; absence is already-clean, and an interrupted replay
+retries cleanup after validating the completed checkout and before marking the
+record complete.
+
+The admission path must detect an unfinished missing-checkout record before its
+healthy-path fast return. On restart, adopt only a matching operation under the
+same exclusive claim contract. Validate a completed checkout against its recorded
+identity before finishing the operation. Reconcile a completed record left before
+claim release only after acquiring its OS lock and revalidating the exact checkout
+and claim. Never accept unrelated files, expire claims by age, or discard a
+partially written checkout. Ambiguous partial results remain blocked and preserved.
+A completed record permits ordinary later attachment.
+
+For multiple slots, use one claim operation ID and stable slot ordering. Preserve
+completed slots after a later failure. Retry only unfinished eligible slots.
+Existing metadata recovery and clone relocation can share the claim, but their
+operation records and eligibility rules remain distinct.
+
+### Integration and compatibility
+
+Existing selected-environment admission covers preparation, prepared launch,
+resume, fresh-start preflight, and lifecycle workspace restoration. Reuse its
+inventory refresh and claim propagation. Verify each route with the real manager
+and a real SQLite claim, not only a recording callback. No new UI state, control,
+translation, public API, or provider conversation identity is required.
+
+Local, Docker, SSH, Sprites, Kubernetes, repo-free tasks, and executor transitions
+retain their existing behavior. Host recovery applies only to selected Worktree
+environments. A source-clone mismatch follows clone-relocation rules or refuses.
+It must not make the missing-path shortcut bypass repository identity checks.
+
+Diagnostics identify the operation, slot, and refusal category without file
+contents or credentials. Public Git guidance explains that deleted uncommitted
+content cannot be reconstructed and that another session cannot bypass a busy claim.
+
 ## Related contracts and decisions
 
 - [Additional-session reuse](additional-session-workspace-reuse.md) remains
@@ -234,4 +366,5 @@ as the original workspace.
   remains authoritative for lost branches.
 - [Proposed metadata-recovery boundary](../../../decisions/2026-09-10-worktree-metadata-recovery-boundary.md)
   records the narrower automatic-recovery case.
-- [Implementation plan](../../../plans/worktree-metadata-recovery/plan.md)
+- [Metadata implementation plan](../../../plans/worktree-metadata-recovery/plan.md)
+- [Missing-checkout fix package](../../../plans/missing-worktree-checkout-recovery/plan.md)
