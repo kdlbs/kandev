@@ -5,7 +5,7 @@ import {
   CoordinatorCopilotEmptyIntro,
 } from "./coordinator-copilot-chip";
 
-const chip = { id: "KAN-418", label: "KAN-418" };
+const chip = { id: "KAN-418", label: "KAN-418", ref: { kind: "task" as const, id: "task-418" } };
 
 afterEach(cleanup);
 

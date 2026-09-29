@@ -107,6 +107,60 @@ func TestInsertProposal_CapReachedAt25(t *testing.T) {
 // TestInsertProposal_ConcurrentCapEnforcement is Build decision 11's mandated
 // test: 30 concurrent proposes against a coordinator with 0 open proposals
 // must produce exactly 25 rows and 5 refusals.
+// TestCountOpenProposalsByWorkspace_GroupsByCoordinatorAndExcludesClosed is
+// the batch counterpart to CountOpenProposals: ListCoordinators uses it to
+// fetch every coordinator's open count in one query instead of one query per
+// coordinator. It must group by coordinator, count only the open statuses,
+// scope to the given workspace, and omit a coordinator with no open
+// proposals from the returned map (the caller reads a missing key as its Go
+// zero value, 0).
+func TestCountOpenProposalsByWorkspace_GroupsByCoordinatorAndExcludesClosed(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	busy := newTestCoordinator(t, store, "ws-1")
+	idle := newTestCoordinator(t, store, "ws-1")
+	other := newTestCoordinator(t, store, "ws-2")
+
+	// busy: two open (pending), one closed (rejected) -> count 2, closed excluded.
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	closed := &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+	if err := store.InsertProposal(ctx, closed); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+	if matched, err := store.RejectProposal(ctx, closed.ID, "", "", time.Now().UTC()); err != nil || !matched {
+		t.Fatalf("RejectProposal: matched=%v err=%v", matched, err)
+	}
+
+	// idle: no proposals at all -> absent from the map.
+
+	// other: a different workspace's open proposal must not leak into ws-1's counts.
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: other.ID, WorkspaceID: "ws-2", Spec: sampleSpec()}); err != nil {
+		t.Fatalf("InsertProposal: %v", err)
+	}
+
+	counts, err := store.CountOpenProposalsByWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("CountOpenProposalsByWorkspace: %v", err)
+	}
+	if counts[busy.ID] != 2 {
+		t.Errorf("counts[busy] = %d, want 2", counts[busy.ID])
+	}
+	if _, ok := counts[idle.ID]; ok {
+		t.Errorf("counts[idle] = %d, want absent", counts[idle.ID])
+	}
+	if _, ok := counts[other.ID]; ok {
+		t.Errorf("ws-2's coordinator leaked into ws-1's counts: %d", counts[other.ID])
+	}
+	if len(counts) != 1 {
+		t.Errorf("len(counts) = %d, want 1", len(counts))
+	}
+}
+
 func TestInsertProposal_ConcurrentCapEnforcement(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

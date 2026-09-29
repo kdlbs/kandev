@@ -1,6 +1,7 @@
 import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
+import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 import type { Coordinator, ConversationResponse } from "@/lib/api/domains/coordinator-api";
 
 const mocks = vi.hoisted(() => ({
@@ -43,6 +44,7 @@ const conversation: ConversationResponse = {
 };
 
 const WHY_KAN_1 = "Why is KAN-1 here?";
+const REF_KAN_1: CopilotItemRef = { kind: "task", id: "task-1" };
 
 function openSequenceMock(
   state: { kind: string; [key: string]: unknown } = { kind: "idle" },
@@ -111,11 +113,20 @@ describe("useCoordinatorCopilot", () => {
     mocks.useCopilotOpenSequence.mockReturnValue(sequence);
     renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     expect(sequence.open).toHaveBeenCalledTimes(1);
 
     act(() =>
-      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-2", "Why is KAN-2 here?"),
+      useCopilotStore
+        .getState()
+        .askAboutThis(
+          COORDINATOR_ID,
+          "KAN-2",
+          { kind: "task", id: "task-2" },
+          "Why is KAN-2 here?",
+        ),
     );
     expect(sequence.open).toHaveBeenCalledTimes(2);
   });
@@ -131,7 +142,9 @@ describe("useCoordinatorCopilot", () => {
 
 describe("useCoordinatorCopilot - closing and gone states", () => {
   it("a gone state clears the chip and draft but keeps open", () => {
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     mocks.useCopilotOpenSequence.mockReturnValue(openSequenceMock({ kind: "gone" }));
 
     renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
@@ -143,7 +156,9 @@ describe("useCoordinatorCopilot - closing and gone states", () => {
   });
 
   it("closing a gone popover removes the entry entirely", () => {
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     mocks.useCopilotOpenSequence.mockReturnValue(openSequenceMock({ kind: "gone" }));
     const { result } = renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
 
@@ -157,18 +172,22 @@ describe("useCoordinatorCopilot - closing and gone states", () => {
   });
 
   it("closing a normal popover keeps the chip and draft", () => {
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     const { result } = renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
 
     act(() => result.current.handleOpenChange(false));
 
     const entry = useCopilotStore.getState().getEntry(COORDINATOR_ID);
     expect(entry.open).toBe(false);
-    expect(entry.chip).toEqual({ id: "KAN-1", label: "KAN-1" });
+    expect(entry.chip).toEqual({ id: "KAN-1", label: "KAN-1", ref: REF_KAN_1 });
   });
 
   it("a launcher 404 while closed removes the entry", () => {
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, false));
     mocks.useCoordinatorLauncher.mockReturnValue({
       coordinator: null,
@@ -194,7 +213,9 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
     );
     const initialAskKey = result.current.askKey;
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
 
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
@@ -206,11 +227,15 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
     const { result, rerender } = renderHook(() =>
       useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
     );
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     const firstAskKey = result.current.askKey;
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
 
     expect(result.current.askKey).toBe(firstAskKey + 1);
@@ -236,7 +261,9 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
   });
 
   it("removeChip clears only the chip in the store", () => {
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     const { result } = renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
 
     act(() => result.current.removeChip());
@@ -268,7 +295,9 @@ describe("useCoordinatorCopilot - draft, askKey and coordinator switching", () =
       useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
     );
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
@@ -315,7 +344,9 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
     );
     expect(result.current.routeSession).toEqual(conversation);
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
@@ -363,7 +394,11 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
     expect(result.current.routeSession).toEqual(conversation);
 
     const WHY_KAN_9 = "Why is KAN-9 here?";
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-9", WHY_KAN_9));
+    act(() =>
+      useCopilotStore
+        .getState()
+        .askAboutThis(COORDINATOR_ID, "KAN-9", { kind: "task", id: "task-9" }, WHY_KAN_9),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_9);
 
@@ -389,7 +424,9 @@ describe("useCoordinatorCopilot - pendingDraft clearing on session replacement",
       useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true),
     );
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
@@ -431,7 +468,9 @@ describe("useCoordinatorCopilot - self-initiated attribution (Finding D)", () =>
     expect(result.current.routeSession).toEqual(conversation);
 
     // Attempt 1: the genuine ask.
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
@@ -469,7 +508,9 @@ describe("useCoordinatorCopilot - self-initiated attribution (Finding D)", () =>
     );
     expect(result.current.routeSession).toEqual(conversation);
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 
@@ -498,7 +539,9 @@ describe("useCoordinatorCopilot - self-initiated attribution (Finding D)", () =>
     );
     expect(result.current.routeSession).toEqual(conversation);
 
-    act(() => useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", WHY_KAN_1));
+    act(() =>
+      useCopilotStore.getState().askAboutThis(COORDINATOR_ID, "KAN-1", REF_KAN_1, WHY_KAN_1),
+    );
     rerender();
     expect(result.current.pendingDraft).toBe(WHY_KAN_1);
 

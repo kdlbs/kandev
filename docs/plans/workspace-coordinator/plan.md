@@ -35,6 +35,8 @@ system_design:
   - ../../specs/coordinator/system-design/copilot-panel.md
   - ../../specs/coordinator/system-design/proposals.md
   - ../../specs/coordinator/system-design/proposal-cards.md
+  - ../../specs/coordinator/system-design/proposal-recovery.md
+  - ../../specs/coordinator/system-design/copilot-tools.md
 legacy_specs: []
 ---
 

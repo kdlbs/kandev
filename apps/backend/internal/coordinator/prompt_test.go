@@ -18,6 +18,7 @@ func TestStandingInstructions(t *testing.T) {
 			"Acme Workspace", "ws-1", "Ops",
 			"propose_task_kandev",
 			"decided by a person",
+			"get_coordinator_item_kandev",
 			"watch the release queue",
 		} {
 			if !strings.Contains(got, want) {

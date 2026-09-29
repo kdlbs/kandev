@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -86,6 +87,19 @@ type Service struct {
 	decisionTasks DecisionTaskService
 	decisionSteps WorkflowStepReader
 	eventBus      bus.EventBus
+
+	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
+	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
+	// docs/specs/coordinator/system-design/proposal-recovery.md#recovery.
+	sweepMu      sync.Mutex
+	sweepStarted bool
+	sweepWG      sync.WaitGroup
+
+	// afterSweepPass is a test-only hook invoked once at the end of every
+	// approval-sweep pass (including a pass with nothing to recover). nil in
+	// production; only tests in this package set it, to join on a pass
+	// completing instead of sleeping.
+	afterSweepPass func()
 }
 
 // NewService builds a Service over store, validator, the workspace
@@ -195,7 +209,9 @@ func (s *Service) GetCoordinator(ctx context.Context, workspaceID, id string) (*
 }
 
 // ListCoordinators returns every coordinator of a workspace, each paired with
-// its open proposal count (Build decision 9). Never nil.
+// its open proposal count (Build decision 9). Never nil. Fetches every
+// coordinator's count with one grouped query (CountOpenProposalsByWorkspace)
+// rather than one query per coordinator.
 func (s *Service) ListCoordinators(ctx context.Context, workspaceID string) ([]CoordinatorWithOpenProposals, error) {
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
@@ -204,13 +220,13 @@ func (s *Service) ListCoordinators(ctx context.Context, workspaceID string) ([]C
 	if err != nil {
 		return nil, err
 	}
+	counts, err := s.store.CountOpenProposalsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]CoordinatorWithOpenProposals, len(found))
 	for i, c := range found {
-		count, err := s.store.CountOpenProposals(ctx, c.ID)
-		if err != nil {
-			return nil, err
-		}
-		result[i] = CoordinatorWithOpenProposals{Coordinator: c, OpenProposals: count}
+		result[i] = CoordinatorWithOpenProposals{Coordinator: c, OpenProposals: counts[c.ID]}
 	}
 	return result, nil
 }
@@ -380,6 +396,16 @@ func (s *Service) ListStalls(ctx context.Context, workspaceID string) ([]*Stall,
 		return nil, err
 	}
 	return s.store.ListStalls(ctx, workspaceID)
+}
+
+// GetStall returns the one stall record for taskID in workspaceID
+// (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
+// ErrNotFound if the task never stalled or its row was cleared.
+func (s *Service) GetStall(ctx context.Context, workspaceID, taskID string) (*Stall, error) {
+	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
+		return nil, err
+	}
+	return s.store.GetStall(ctx, workspaceID, taskID)
 }
 
 // PruneStalls deletes stall records for a missing or archived task, and

@@ -115,9 +115,15 @@ including `conversation_task_id` (JSON `null` when there is none).
 
 A coordinator whose `workspace_id` differs from `:id` is treated as absent
 (404). PATCH runs in one transaction that reads the row, validates, and writes
-it with `UPDATE ... WHERE id = ? AND workspace_id = ?`. There is no version
-column: concurrent edits apply in commit order, and the last committed edit
-determines every field it sets.
+it with `UPDATE ... WHERE id = ? AND workspace_id = ?`. PATCH has no
+optimistic-concurrency check: concurrent edits apply in commit order, and the
+last committed edit determines every field it sets. `config_revision` is not a
+PATCH version: PATCH never compares it and never takes it from the request
+body (a `config_revision` field in the body is ignored like any unknown
+field); it only increments it, and only the conversation open
+([copilot](copilot.md#conversation-task), step 4) compares it. Two concurrent
+PATCHes that both change the configuration each increment it, so it grows by
+two.
 
 PATCH body fields are `name`, `agent_profile_id`, `executor_profile_id` and
 `context`. A field that is absent is unchanged. A field sent as JSON `null` is
@@ -241,7 +247,10 @@ so a redelivered event is harmless.
   (`apps/web/hooks/domains/workspace/use-workspace-team-access.ts`, derived
   from `SCOPE.workspaceManage` in `apps/web/lib/types/team-access.ts`).
 - `lib/settings-discovery/catalog/workspaces.ts` adds the search entry.
-- All copy goes through `t()` in the six locales.
+- All copy goes through `t()` in the six locales. The list intro is
+  `coordinator:listDescription`, whose English value is the sentence of
+  `AC-COORDINATOR-COORDINATORS-004.7`; the other five locales translate that
+  sentence, not the earlier "propose work you approve".
 
 ## Phase 2
 

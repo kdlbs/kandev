@@ -74,7 +74,9 @@ test.describe("Coordinator copilot", () => {
     await expect(popover.getByTestId("session-mode-selector")).toHaveCount(0);
 
     await expect(
-      popover.getByText("Ask the coordinator about anything on this screen."),
+      popover.getByText(
+        "Ask why something is on the list. I read the same facts the list is derived from. Through Kandev I can only propose a task, and it waits for your decision.",
+      ),
     ).toBeVisible();
     const suggestion = popover.getByRole("button", { name: "What needs me first, and why?" });
     await expect(suggestion).toBeVisible();
@@ -89,7 +91,9 @@ test.describe("Coordinator copilot", () => {
     ).toBeVisible({ timeout: 30_000 });
     // The intro and suggestion only show while the transcript is empty.
     await expect(
-      popover.getByText("Ask the coordinator about anything on this screen."),
+      popover.getByText(
+        "Ask why something is on the list. I read the same facts the list is derived from. Through Kandev I can only propose a task, and it waits for your decision.",
+      ),
     ).not.toBeVisible();
   });
 
@@ -407,7 +411,9 @@ test.describe("Coordinator copilot", () => {
 
     await expect(banner).toHaveCount(0);
     await expect(
-      popover.getByText("Ask the coordinator about anything on this screen."),
+      popover.getByText(
+        "Ask why something is on the list. I read the same facts the list is derived from. Through Kandev I can only propose a task, and it waits for your decision.",
+      ),
     ).toBeVisible();
   });
 });

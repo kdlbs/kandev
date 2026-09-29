@@ -159,6 +159,62 @@ func TestPatchCoordinator_PreservesConversationTaskIDWhenFieldsUnchanged(t *test
 	}
 }
 
+// TestPatchCoordinator_IncrementsConfigRevisionOnContextOrProfileChange
+// covers the maintainer-review config_revision fix
+// (docs/specs/coordinator/system-design/coordinators.md#store): a PATCH that
+// changes context, agent_profile_id or executor_profile_id increments
+// config_revision by exactly one, in the same UPDATE that clears
+// conversation_task_id.
+func TestPatchCoordinator_IncrementsConfigRevisionOnContextOrProfileChange(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", Context: "orig"}
+	if err := store.CreateCoordinator(ctx, c); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	if c.ConfigRevision != 0 {
+		t.Fatalf("created ConfigRevision = %d, want 0", c.ConfigRevision)
+	}
+
+	newContext := "changed"
+	updated, _, err := store.PatchCoordinator(ctx, "ws-1", c.ID, CoordinatorPatch{Context: &newContext}, nil)
+	if err != nil {
+		t.Fatalf("PatchCoordinator: %v", err)
+	}
+	if updated.ConfigRevision != 1 {
+		t.Fatalf("updated.ConfigRevision = %d, want 1", updated.ConfigRevision)
+	}
+
+	got, err := store.GetCoordinator(ctx, "ws-1", c.ID)
+	if err != nil {
+		t.Fatalf("GetCoordinator: %v", err)
+	}
+	if got.ConfigRevision != 1 {
+		t.Fatalf("GetCoordinator.ConfigRevision = %d, want 1", got.ConfigRevision)
+	}
+}
+
+// TestPatchCoordinator_PreservesConfigRevisionWhenFieldsUnchanged covers the
+// same fix's negative case: a PATCH touching only name (or context/profile
+// fields sent back unchanged) never increments config_revision.
+func TestPatchCoordinator_PreservesConfigRevisionWhenFieldsUnchanged(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", Context: "orig"}
+	if err := store.CreateCoordinator(ctx, c); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	newName := "Renamed"
+	updated, _, err := store.PatchCoordinator(ctx, "ws-1", c.ID, CoordinatorPatch{Name: &newName}, nil)
+	if err != nil {
+		t.Fatalf("PatchCoordinator: %v", err)
+	}
+	if updated.ConfigRevision != 0 {
+		t.Fatalf("updated.ConfigRevision = %d, want 0 (name-only change)", updated.ConfigRevision)
+	}
+}
+
 // TestPatchCoordinator_ConcurrentDisjointFields is Build decision 7's test
 // (a): two concurrent PATCHes on one coordinator touching disjoint fields
 // must both apply, whichever order they commit in.

@@ -17,11 +17,13 @@ import {
 import {
   approvedStatusLine,
   effectiveProposalSpec,
+  isApprovalClaimStale,
   proposalStatusLine,
   resolveStepName,
   workflowStepLabel,
 } from "@/lib/coordinator/proposal-text";
 import { useToast } from "@/components/toast-provider";
+import { useNowTick } from "../use-now-tick";
 import { EditForm, type EditFormServerError } from "./edit-form";
 import { RejectForm } from "./reject-form";
 import { useApprovedCardLabel } from "./use-approved-card-label";
@@ -149,6 +151,7 @@ type ProposalCardActionsProps = {
   openForm: ProposalCardForm | null;
   variant: ProposalCardVariant;
   busy: boolean;
+  isStaleApproving: boolean;
   workspaceId: string;
   effSpec: ProposalSpec;
   serverError: EditFormServerError | null;
@@ -168,6 +171,22 @@ type ProposalCardActionsProps = {
 function ProposalCardActions(props: ProposalCardActionsProps) {
   const { t } = useTranslation();
   if (!props.showActions) return null;
+  if (props.isStaleApproving) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <Button
+          ref={props.approveButtonRef}
+          size="sm"
+          disabled={props.busy}
+          onClick={props.onApproveClick}
+          className="min-h-11 sm:min-h-0"
+        >
+          {props.busy && <Spinner aria-hidden className="mr-1.5" />}
+          {t("coordinator:retry")}
+        </Button>
+      </div>
+    );
+  }
   if (props.variant === "full" && props.openForm === "edit") {
     return (
       <EditForm
@@ -245,6 +264,7 @@ export function ProposalCard({
 }: ProposalCardProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const now = useNowTick();
   const decision = useProposalDecision(workspaceId, coordinatorId, proposal.id);
   const [openForm, setOpenForm] = useState<ProposalCardForm | null>(null);
   const [serverError, setServerError] = useState<EditFormServerError | null>(null);
@@ -327,11 +347,15 @@ export function ProposalCard({
   }
 
   const effSpec = effectiveProposalSpec(proposal);
+  const isStaleApproving =
+    proposal.status === "approving" && isApprovalClaimStale(proposal.claimed_at, now);
   const statusLine =
     proposal.status === "approved"
       ? approvedStatusLine(cardLabel, t)
-      : proposalStatusLine(proposal, t);
-  const showActions = canManage && (proposal.status === "pending" || proposal.status === "failed");
+      : proposalStatusLine(proposal, t, now);
+  const showActions =
+    canManage &&
+    (proposal.status === "pending" || proposal.status === "failed" || isStaleApproving);
   const label = workflowStepLabel(effSpec, workflowNameById, stepNameByWorkflowStep);
 
   return (
@@ -361,6 +385,7 @@ export function ProposalCard({
         openForm={openForm}
         variant={variant}
         busy={decision.busy}
+        isStaleApproving={isStaleApproving}
         workspaceId={workspaceId}
         effSpec={effSpec}
         serverError={serverError}

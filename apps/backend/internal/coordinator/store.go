@@ -61,6 +61,7 @@ const createTablesSQL = `
 		executor_profile_id TEXT NOT NULL,
 		context TEXT NOT NULL DEFAULT '',
 		conversation_task_id TEXT,
+		config_revision INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -100,6 +101,10 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)
+	if err := migrate.Apply("coordinators.config_revision",
+		`ALTER TABLE coordinators ADD COLUMN config_revision INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("required coordinator migration: %w", err)
+	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required coordinator migration: %w", err)
 	}
@@ -115,6 +120,7 @@ type coordinatorRow struct {
 	ExecutorProfileID  string         `db:"executor_profile_id"`
 	Context            string         `db:"context"`
 	ConversationTaskID sql.NullString `db:"conversation_task_id"`
+	ConfigRevision     int64          `db:"config_revision"`
 	CreatedAt          time.Time      `db:"created_at"`
 	UpdatedAt          time.Time      `db:"updated_at"`
 }
@@ -127,6 +133,7 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 		AgentProfileID:    r.AgentProfileID,
 		ExecutorProfileID: r.ExecutorProfileID,
 		Context:           r.Context,
+		ConfigRevision:    r.ConfigRevision,
 		CreatedAt:         r.CreatedAt,
 		UpdatedAt:         r.UpdatedAt,
 	}
@@ -137,10 +144,10 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 	return c
 }
 
-const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, created_at, updated_at`
+const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at`
 
 // CreateCoordinator inserts a new coordinator, assigning an id and timestamps
-// when unset.
+// when unset. config_revision always starts at 0.
 func (s *Store) CreateCoordinator(ctx context.Context, c *Coordinator) error {
 	if c.ID == "" {
 		c.ID = uuid.New().String()
@@ -148,11 +155,12 @@ func (s *Store) CreateCoordinator(ctx context.Context, c *Coordinator) error {
 	now := s.now()
 	c.CreatedAt = now
 	c.UpdatedAt = now
+	c.ConfigRevision = 0
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO coordinators (`+coordinatorColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		c.ID, c.WorkspaceID, c.Name, c.AgentProfileID, c.ExecutorProfileID, c.Context,
-		nullableString(c.ConversationTaskID), c.CreatedAt, c.UpdatedAt)
+		nullableString(c.ConversationTaskID), c.ConfigRevision, c.CreatedAt, c.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert coordinator: %w", err)
 	}
@@ -215,15 +223,17 @@ func (s *Store) CoordinatorForConversationTask(ctx context.Context, taskID strin
 // SetConversationTaskID implements copilot.md#conversation-task step 4's
 // commit: a plain compare-and-swap UPDATE, atomic on its own, needing no
 // separate lock. It sets conversation_task_id to newTaskID only when the
-// column currently holds staleTaskID (the value the caller read in step 2),
-// including the case where both are "" and the column is NULL. ok is true
-// when exactly one row was updated; false means a concurrent write already
-// changed the column and the caller must resolve the race.
-func (s *Store) SetConversationTaskID(ctx context.Context, coordinatorID, newTaskID, staleTaskID string) (bool, error) {
+// column currently holds staleTaskID (the value the caller read in step 2)
+// and config_revision still equals expectedConfigRevision (the value read in
+// step 1), including the case where both task ids are "" and the column is
+// NULL. ok is true when exactly one row was updated; false means a
+// concurrent write already changed the column, the revision, or both, and
+// the caller must resolve the race.
+func (s *Store) SetConversationTaskID(ctx context.Context, coordinatorID, newTaskID, staleTaskID string, expectedConfigRevision int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinators SET conversation_task_id = ?
-		WHERE id = ? AND ((? = '' AND conversation_task_id IS NULL) OR conversation_task_id = ?)`),
-		newTaskID, coordinatorID, staleTaskID, staleTaskID)
+		WHERE id = ? AND config_revision = ? AND ((? = '' AND conversation_task_id IS NULL) OR conversation_task_id = ?)`),
+		newTaskID, coordinatorID, expectedConfigRevision, staleTaskID, staleTaskID)
 	if err != nil {
 		return false, fmt.Errorf("set conversation task id: %w", err)
 	}
@@ -407,25 +417,28 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 
 	var clearedConversationTaskID *string
 	newConversationTaskID := merged.ConversationTaskID
+	newConfigRevision := row.ConfigRevision
 	if merged.Context != row.Context || merged.AgentProfileID != row.AgentProfileID || merged.ExecutorProfileID != row.ExecutorProfileID {
 		if row.ConversationTaskID.Valid {
 			old := row.ConversationTaskID.String
 			clearedConversationTaskID = &old
 		}
 		newConversationTaskID = nil
+		newConfigRevision = row.ConfigRevision + 1
 	}
 
 	now := s.now()
 	_, err = exec.ExecContext(ctx, rebind(`
-		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, updated_at = ?
+		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?`),
 		merged.Name, merged.AgentProfileID, merged.ExecutorProfileID, merged.Context,
-		nullableString(newConversationTaskID), now, row.ID, row.WorkspaceID)
+		nullableString(newConversationTaskID), newConfigRevision, now, row.ID, row.WorkspaceID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("update coordinator: %w", err)
 	}
 
 	merged.ConversationTaskID = newConversationTaskID
+	merged.ConfigRevision = newConfigRevision
 	merged.CreatedAt = row.CreatedAt
 	merged.UpdatedAt = now
 	return merged, clearedConversationTaskID, nil
@@ -441,7 +454,7 @@ func lockedCoordinatorRow(ctx context.Context, exec coordinatorExec, rebind func
 	var row coordinatorRow
 	err := exec.QueryRowContext(ctx, rebind(query), id, workspaceID).Scan(
 		&row.ID, &row.WorkspaceID, &row.Name, &row.AgentProfileID, &row.ExecutorProfileID,
-		&row.Context, &row.ConversationTaskID, &row.CreatedAt, &row.UpdatedAt)
+		&row.Context, &row.ConversationTaskID, &row.ConfigRevision, &row.CreatedAt, &row.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

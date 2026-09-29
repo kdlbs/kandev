@@ -130,8 +130,6 @@ type ProposalsStoreState = {
   ) => void;
   mergePendingRows: (coordinatorId: string, seq: number, proposals: Proposal[]) => void;
   setPendingSettled: (coordinatorId: string) => void;
-  mergeOne: (coordinatorId: string, incoming: Proposal) => void;
-  mergePendingList: (coordinatorId: string, proposals: Proposal[]) => void;
   setPendingError: (coordinatorId: string) => void;
   evict: (coordinatorId: string, id: string) => void;
 };
@@ -184,36 +182,6 @@ export const useProposalsStore = create<ProposalsStoreState>()((set) => ({
         byCoordinator: {
           ...state.byCoordinator,
           [coordinatorId]: { ...coordinator, pendingLoadedAt: Date.now(), pendingError: false },
-        },
-      };
-    }),
-  mergeOne: (coordinatorId, incoming) =>
-    set((state) => {
-      const coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
-      const merged = mergeProposal(coordinator.byId[incoming.id], incoming);
-      return {
-        byCoordinator: {
-          ...state.byCoordinator,
-          [coordinatorId]: { ...coordinator, byId: { ...coordinator.byId, [incoming.id]: merged } },
-        },
-      };
-    }),
-  mergePendingList: (coordinatorId, proposals) =>
-    set((state) => {
-      const coordinator = state.byCoordinator[coordinatorId] ?? INITIAL_COORDINATOR_PROPOSALS;
-      const byId = { ...coordinator.byId };
-      for (const incoming of proposals) {
-        byId[incoming.id] = mergeProposal(byId[incoming.id], incoming);
-      }
-      return {
-        byCoordinator: {
-          ...state.byCoordinator,
-          [coordinatorId]: {
-            ...coordinator,
-            byId,
-            pendingLoadedAt: Date.now(),
-            pendingError: false,
-          },
         },
       };
     }),

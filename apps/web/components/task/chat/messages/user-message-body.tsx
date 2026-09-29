@@ -35,15 +35,34 @@ type UserMessageBodyOptions = {
 // i18n-exempt: stable, coordinator-agent-facing wire marker (English, not i18n), not rendered as-is.
 const COORDINATOR_ABOUT_PREFIX = "About ";
 const COORDINATOR_ABOUT_SEPARATOR = ": ";
+// i18n-exempt: stable, coordinator-agent-facing wire marker (English, not i18n), not rendered as-is.
+const COORDINATOR_REFERENCED_PREFIX_RE = /^About (.+?) \[(task|proposal|stall):([^\]\s]+)\]: /;
 
 type CoordinatorAboutPrefix = { id: string; remainder: string };
 
-/** Parses the coordinator's "About <id>: " prefix. The id is the text between
- *  `About ` and the first `: `; an id containing its own `: ` splits at that
- *  first occurrence (a known, accepted limit). Returns `null` for content
- *  that does not start with the prefix, has no `: ` separator, or whose id
- *  is empty or spans a line break. */
-function parseCoordinatorAboutPrefix(content: string): CoordinatorAboutPrefix | null {
+/** Parses the referenced form, "About <id> [<kind>:<ref>]: ", added for
+ *  `get_coordinator_item_kandev` reads (docs/specs/coordinator/system-design/
+ *  copilot-panel.md#ask-about-this). `<id>` is the shortest run of non-newline
+ *  characters followed by a bracketed `task`/`proposal`/`stall` reference and
+ *  `: `, so an id containing its own `: `, `[` or `]` is still read back
+ *  whole, and a second bracketed-looking sequence later in the message is
+ *  never mistaken for the prefix's own. Returns `null` for content that does
+ *  not match, or whose matched remainder is empty. */
+function parseCoordinatorReferencedPrefix(content: string): CoordinatorAboutPrefix | null {
+  const match = COORDINATOR_REFERENCED_PREFIX_RE.exec(content);
+  if (!match) return null;
+  const remainder = content.slice(match[0].length);
+  if (!remainder) return null;
+  return { id: match[1], remainder };
+}
+
+/** Parses the legacy "About <id>: " prefix of earlier messages, predating the
+ *  bracketed reference. The id is the text between `About ` and the first
+ *  `: `; an id containing its own `: ` splits at that first occurrence (a
+ *  known, accepted limit). Returns `null` for content that does not start
+ *  with the prefix, has no `: ` separator, whose id is empty or spans a line
+ *  break, or whose matched remainder is empty. */
+function parseCoordinatorLegacyAboutPrefix(content: string): CoordinatorAboutPrefix | null {
   if (!content.startsWith(COORDINATOR_ABOUT_PREFIX)) return null;
   const separatorIndex = content.indexOf(
     COORDINATOR_ABOUT_SEPARATOR,
@@ -52,7 +71,17 @@ function parseCoordinatorAboutPrefix(content: string): CoordinatorAboutPrefix | 
   if (separatorIndex === -1) return null;
   const id = content.slice(COORDINATOR_ABOUT_PREFIX.length, separatorIndex);
   if (!id || /[\r\n]/.test(id)) return null;
-  return { id, remainder: content.slice(separatorIndex + COORDINATOR_ABOUT_SEPARATOR.length) };
+  const remainder = content.slice(separatorIndex + COORDINATOR_ABOUT_SEPARATOR.length);
+  if (!remainder) return null;
+  return { id, remainder };
+}
+
+/** Tries the referenced form first, then the legacy form of earlier messages
+ *  (docs/specs/coordinator/system-design/copilot-panel.md#ask-about-this). A
+ *  text matching neither, or whose matched remainder is empty, is not a
+ *  match: the caller renders it unchanged with no tag. */
+function parseCoordinatorAboutPrefix(content: string): CoordinatorAboutPrefix | null {
+  return parseCoordinatorReferencedPrefix(content) ?? parseCoordinatorLegacyAboutPrefix(content);
 }
 
 function CoordinatorAboutTag({ id }: { id: string }) {
@@ -233,16 +262,14 @@ function CoordinatorAboutMessage({
 }) {
   return (
     <div className="space-y-2">
-      {remainder && (
-        <MessageSegments
-          content={remainder}
-          downloadSource={content}
-          promptMentionComponents={promptMentionComponents}
-          taskId={taskId}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-        />
-      )}
+      <MessageSegments
+        content={remainder}
+        downloadSource={content}
+        promptMentionComponents={promptMentionComponents}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
       <CoordinatorAboutTag id={id} />
     </div>
   );

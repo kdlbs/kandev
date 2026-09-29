@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -70,6 +72,24 @@ func (r *stallRow) toStall() *Stall {
 		LastEventAt:  r.LastEventAt,
 		DetectedAt:   r.DetectedAt,
 	}
+}
+
+// GetStall returns the coordinator_stalls row for taskID scoped to
+// workspaceID (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
+// ErrNotFound if no row matches: the task never stalled, or its row was
+// cleared by a later non-stalled sweep pass.
+func (s *Store) GetStall(ctx context.Context, workspaceID, taskID string) (*Stall, error) {
+	var row stallRow
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
+		SELECT `+stallColumns+` FROM coordinator_stalls WHERE task_id = ? AND workspace_id = ?`),
+		taskID, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get stall: %w", err)
+	}
+	return row.toStall(), nil
 }
 
 // ListStalls returns every stall row of a workspace ordered by task_id, per

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 requirements:
   - REQ-COORDINATOR-PROPOSALS-001
   - REQ-COORDINATOR-PROPOSALS-002
@@ -376,66 +376,10 @@ winner's row. A racing approve and reject cannot both succeed.
 
 ## Recovery
 
-Three callers run recovery on an `approving` row: the startup pass, a sweep,
-and an approve request. A proposal read, single or list, never writes; it
-always returns rows as stored.
-
-- **Approve request.** A claim is stale after two minutes. An approve of an
-  `approving` row whose claim is stale, with no edits, takes the
-  [stale re-claim](#stale-re-claim) with `cutoff = now - 2 minutes`.
-- **Startup pass.** task-07's decisions registration function returns the
-  hook that `startCoordinatorBackgroundPass`
-  (`internal/backendapp/coordinator.go`) runs once per startup, after the
-  conversation and subscriber hooks, with `T0`, the time recorded before the
-  coordinator routes register. Every claim this process makes has
-  `claimed_at >= T0`, so an `approving` row with `claimed_at < T0` was
-  claimed by a process that has since stopped. The pass therefore uses
-  `cutoff = T0`, not the two-minute rule, and a restart within two minutes
-  of a claim still recovers it. Were a still-running process to hold that
-  claim, the claim token keeps the outcome to one task: that process's
-  completion matches no row and returns the current row (step 5).
-  - **Discovery.** task-07 adds the store method
-    `ListApprovingClaimedBefore(ctx, cutoff)`: `SELECT ... FROM
-    coordinator_proposals WHERE status='approving' AND claimed_at < ? ORDER
-    BY claimed_at ASC, id ASC`, across every workspace and coordinator, with
-    no limit (open proposals are capped at 25 per coordinator) and no new
-    index. It runs with the hook's context, which carries no principal, so
-    the task-service calls it leads to are unscoped, like other internal
-    passes.
-  - **Per row, in that order, one at a time.** Take the stale re-claim with
-    `cutoff = T0`. A re-claim that matches no row (an approve won it, or the
-    row is gone) skips the row with no action. A committed re-claim runs the
-    lookup and, when no task is found, steps 4 to 6 exactly as the stale
-    re-claim describes.
-  - **Errors.** A discovery query that errors is logged at warn and ends the
-    pass; nothing retries it until the next startup. An error on one row
-    (the re-claim `UPDATE`, a read after it, or a create or completion) is
-    logged at warn with the proposal id, and the pass continues with the
-    next row. The row is left as the stale re-claim's error rule says.
-  - The pass stops early when its context is cancelled (shutdown).
-- **Sweep.** The startup pass covers a claim left by a stopped process; a
-  claim that goes stale while the process keeps running (its approve request
-  died after the claim) has no other caller until a manager acts, and its card
-  showed no action. The proposal service therefore runs the same per-row
-  recovery once a minute while `features.coordinator` is on, with
-  `cutoff = now - 2 minutes`, so such a claim is recovered within a minute
-  with no manager action (`AC-COORDINATOR-PROPOSALS-002.14`). The card of a
-  row whose claim is stale shows **Retry**, which sends an approve without
-  edits and so takes the approve path (`AC-COORDINATOR-PROPOSALS-005.10`).
-
-All three callers use the same stale re-claim `UPDATE`, which refreshes
-`claimed_at` and sets a new `claim_token`. When two of them race on one row, exactly one wins, and a slow original claimer's completion
-no longer matches the token. The winner then follows the stale re-claim's
-order. First it looks the task up by the reserved external id; a found task
-completes the approval with it, whatever the step's eligibility is now. Only
-when no task is found does it run steps 4 to 6, whose pre-create check
-against the frozen spec's workflow and step
-([No agent starts](#no-agent-starts)) sets the proposal `failed` with a
-descriptive error and skips the create when the step is ineligible, and
-whose idempotent create otherwise returns the task an earlier attempt made,
-if any. Recovery keeps
-`final_spec_json` and `decided_by` from the first claim, and never touches a
-session.
+Three callers recover a stale `approving` claim: the startup pass, a
+once-a-minute sweep and an approve request. A proposal read never writes.
+The callers, their cutoffs, order, errors and races are specified in
+[proposal approval recovery](proposal-recovery.md#recovery).
 
 ## Reserved prefix
 
@@ -493,7 +437,32 @@ The client proposal store and the proposal cards (both surfaces) are in
   MCP action is resolved server-side.
 - Approve and reject are not on the coordinator's MCP surface, and the MCP
   guard refuses both from a coordinator principal and from a principal it
-  cannot resolve (`AC-COORDINATOR-PROPOSALS-002.15`). The REST routes cannot
+  cannot resolve (`AC-COORDINATOR-PROPOSALS-002.15`). Three layers make this
+  hold, each tested:
+  1. **No MCP path.** Approve and reject are reachable only through the two
+     REST routes of [Routes](#routes). No MCP tool is registered for them
+     and no MCP action handler calls the proposal service's approve or
+     reject; the only proposal actions on MCP are `coordinator.propose_task`
+     and the read `coordinator.get_item`.
+  2. **Reserved names in the guard.** `internal/coordinator/mcpcontract`
+     reserves `coordinator.approve_proposal` and `coordinator.reject_proposal`
+     as `DecisionActions`; they are never registered. The first check in
+     `authorizeCoordinatorRequest`, before the propose check and before the
+     allowlist, refuses either name with the unknown-action error when the
+     principal is a coordinator or when the context carries no principal,
+     and nothing changes. Other callers reach the dispatcher, which answers
+     an unregistered action as unknown. Every other action keeps today's
+     rule: a request with no principal in context passes through the guard
+     (non-session callers rely on this).
+  3. **Unresolved in-session principal.** Inside a session the dispatcher
+     (`internal/agent/runtime/lifecycle/mcp_identity.go`) already refuses
+     any action with `INTERNAL_ERROR` "failed to resolve the session
+     principal" when the principal cannot be resolved, before the guard or
+     any handler runs.
+  The guard's table test runs every registered action plus both reserved
+  names for a coordinator principal, no principal and an ordinary principal,
+  and asserts the reserved names are refused for the first two and never
+  appear in the allowlist or in the registered action set. The REST routes cannot
   tell a person's browser from an agent's shell while `features.auth` is
   off; that residual is recorded in the
   [ADR](../../../decisions/2026-09-26-workspace-coordinator.md#residual-risk-the-agents-own-tools),

@@ -5,6 +5,8 @@ import {
   approvedCardFallbackTitle,
   approvedStatusLine,
   effectiveProposalSpec,
+  isApprovalClaimStale,
+  PROPOSAL_APPROVAL_STALE_MS,
   proposalStatusLine,
   resolveStepName,
   workflowStepLabel,
@@ -87,41 +89,78 @@ describe("resolveStepName", () => {
   });
 });
 
+const NOW = new Date("2026-09-27T00:10:00Z").getTime();
+
 describe("proposalStatusLine", () => {
   it("renders pending", () => {
-    expect(proposalStatusLine(proposal({ status: "pending" }), t)).toBe(
+    expect(proposalStatusLine(proposal({ status: "pending" }), t, NOW)).toBe(
       "coordinator:proposalStatusPending",
     );
   });
 
-  it("renders approving", () => {
-    expect(proposalStatusLine(proposal({ status: "approving" }), t)).toBe(
+  it("renders approving with a null claimed_at (never stale)", () => {
+    expect(proposalStatusLine(proposal({ status: "approving", claimed_at: null }), t, NOW)).toBe(
       "coordinator:proposalStatusApproving",
     );
   });
 
+  it("renders approving when the claim is not yet stale", () => {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS + 1000).toISOString();
+    expect(
+      proposalStatusLine(proposal({ status: "approving", claimed_at: claimedAt }), t, NOW),
+    ).toBe("coordinator:proposalStatusApproving");
+  });
+
+  it("renders approval-did-not-finish when the claim is stale", () => {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS).toISOString();
+    expect(
+      proposalStatusLine(proposal({ status: "approving", claimed_at: claimedAt }), t, NOW),
+    ).toBe("coordinator:proposalStatusApprovingStale");
+  });
+
   it("renders failed with the error text", () => {
-    expect(proposalStatusLine(proposal({ status: "failed", error: "boom" }), t)).toBe(
+    expect(proposalStatusLine(proposal({ status: "failed", error: "boom" }), t, NOW)).toBe(
       "coordinator:proposalStatusFailedWithError(error=boom)",
     );
   });
 
   it("renders failed with no error text when error is null", () => {
-    expect(proposalStatusLine(proposal({ status: "failed", error: null }), t)).toBe(
+    expect(proposalStatusLine(proposal({ status: "failed", error: null }), t, NOW)).toBe(
       "coordinator:proposalStatusFailed",
     );
   });
 
   it("renders rejected with the reason", () => {
-    expect(proposalStatusLine(proposal({ status: "rejected", reject_reason: "Not now" }), t)).toBe(
-      "coordinator:proposalStatusRejectedWithReason(reason=Not now)",
-    );
+    expect(
+      proposalStatusLine(proposal({ status: "rejected", reject_reason: "Not now" }), t, NOW),
+    ).toBe("coordinator:proposalStatusRejectedWithReason(reason=Not now)");
   });
 
   it("renders rejected with no reason when reject_reason is null", () => {
-    expect(proposalStatusLine(proposal({ status: "rejected", reject_reason: null }), t)).toBe(
+    expect(proposalStatusLine(proposal({ status: "rejected", reject_reason: null }), t, NOW)).toBe(
       "coordinator:proposalStatusRejected",
     );
+  });
+});
+
+describe("isApprovalClaimStale", () => {
+  it("is never stale with a null claimed_at", () => {
+    expect(isApprovalClaimStale(null, NOW)).toBe(false);
+  });
+
+  it("is not stale just under the threshold", () => {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS + 1).toISOString();
+    expect(isApprovalClaimStale(claimedAt, NOW)).toBe(false);
+  });
+
+  it("is stale exactly at the threshold", () => {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS).toISOString();
+    expect(isApprovalClaimStale(claimedAt, NOW)).toBe(true);
+  });
+
+  it("is stale well past the threshold", () => {
+    const claimedAt = new Date(NOW - PROPOSAL_APPROVAL_STALE_MS - 60_000).toISOString();
+    expect(isApprovalClaimStale(claimedAt, NOW)).toBe(true);
   });
 });
 

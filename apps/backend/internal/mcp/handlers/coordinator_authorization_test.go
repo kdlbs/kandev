@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -218,6 +219,92 @@ func TestAuthorizeCoordinatorRequest_ProposeTaskRequiresCoordinatorPrincipal(t *
 		require.NoError(t, err)
 		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
 	})
+}
+
+// TestAuthorizeCoordinatorRequest_GetItemRequiresCoordinatorPrincipal covers
+// coordinator.get_item's other half, mirroring propose_task
+// (copilot-tools.md#tool-surface): from a principal that is not a
+// coordinator, it is refused as unknown rather than exposing that the action
+// exists at all.
+func TestAuthorizeCoordinatorRequest_GetItemRequiresCoordinatorPrincipal(t *testing.T) {
+	h, _ := newCoordinatorGuardTestHandlers(t)
+	msg := makeWSMessage(t, coordinator.ActionGetItem, map[string]interface{}{"kind": "proposal", "id": "prop-1"})
+
+	t.Run("no principal", func(t *testing.T) {
+		guarded, _, err := h.authorizeCoordinatorRequest(context.Background(), msg)
+		require.NoError(t, err)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	})
+
+	t.Run("kanban principal", func(t *testing.T) {
+		ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+			WorkspaceID:     "ws-1",
+			CallerTaskID:    "kanban-task",
+			CallerSessionID: "kanban-session",
+			Surface:         mcpprofile.SurfaceKanbanTask,
+		})
+		guarded, _, err := h.authorizeCoordinatorRequest(ctx, msg)
+		require.NoError(t, err)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	})
+}
+
+// TestAuthorizeCoordinatorRequest_ReservedDecisionNamesNeverReachable covers
+// the guard's three-layer defense over approve and reject
+// (proposals.md#security, AC-COORDINATOR-PROPOSALS-002.15): the reserved
+// names are refused by the guard itself, before the propose check and before
+// the allowlist, for a coordinator principal and for an unresolved (no)
+// principal, and never appear in the allowlist or in the registered action
+// set RegisterHandlers actually builds — nothing registers a handler for
+// them, so an ordinary principal reaching the dispatcher gets the same
+// unknown-action answer through a different path.
+func TestAuthorizeCoordinatorRequest_ReservedDecisionNamesNeverReachable(t *testing.T) {
+	h, _ := newCoordinatorGuardTestHandlers(t)
+	dispatcher := ws.NewDispatcher()
+	h.RegisterHandlers(dispatcher)
+	actions := dispatcher.Actions()
+
+	for _, reserved := range []string{coordinator.ActionApproveProposal, coordinator.ActionRejectProposal} {
+		if _, ok := coordinatorSurfaceActions[reserved]; ok {
+			t.Errorf("%q must never be in coordinatorSurfaceActions", reserved)
+		}
+		if slices.Contains(actions, reserved) {
+			t.Errorf("%q must never be a registered action", reserved)
+		}
+
+		t.Run(reserved+"/coordinator principal", func(t *testing.T) {
+			ctx := context.Background()
+			workspaces, err := h.taskSvc.ListWorkspaces(ctx)
+			require.NoError(t, err)
+			require.Len(t, workspaces, 1)
+			principalCtx := mcpscope.WithPrincipal(ctx, coordinatorTestPrincipal(workspaces[0].ID))
+			msg := makeWSMessage(t, reserved, map[string]interface{}{})
+			guarded, _, err := h.authorizeCoordinatorRequest(principalCtx, msg)
+			require.NoError(t, err)
+			assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+		})
+
+		t.Run(reserved+"/no principal", func(t *testing.T) {
+			msg := makeWSMessage(t, reserved, map[string]interface{}{})
+			guarded, _, err := h.authorizeCoordinatorRequest(context.Background(), msg)
+			require.NoError(t, err)
+			assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+		})
+
+		t.Run(reserved+"/ordinary principal passes through the guard untouched", func(t *testing.T) {
+			ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+				WorkspaceID:     "ws-1",
+				CallerTaskID:    "kanban-task",
+				CallerSessionID: "kanban-session",
+				Surface:         mcpprofile.SurfaceKanbanTask,
+			})
+			msg := makeWSMessage(t, reserved, map[string]interface{}{})
+			guarded, replacement, err := h.authorizeCoordinatorRequest(ctx, msg)
+			require.NoError(t, err)
+			require.Nil(t, guarded)
+			require.Same(t, msg, replacement)
+		})
+	}
 }
 
 // TestAuthorizeCoordinatorRequest_NonCoordinatorPrincipalUnaffected proves
