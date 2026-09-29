@@ -3,6 +3,7 @@
 import { IconBulb } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { ProposalCard, type ProposalCardForm } from "@/app/coordinator/proposal-card/proposal-card";
+import { isCreateTaskProposal, type StoredProposal } from "@/lib/api/domains/coordinator-api";
 import { useProposalById } from "@/hooks/domains/coordinator/use-proposals";
 import { useProposalWorkflowNames } from "@/hooks/domains/coordinator/use-proposal-workflow-names";
 import { linkToCoordinatorNeedsYouForm } from "@/lib/coordinator/links";
@@ -33,6 +34,12 @@ function PlainProposeTaskRow({ status }: { status: KandevStatus }) {
   );
 }
 
+function proposalWorkflowId(proposal: StoredProposal): string | undefined {
+  if (isCreateTaskProposal(proposal)) return effectiveProposalSpec(proposal).workflow_id;
+  if (proposal.kind === "move") return (proposal.final_spec ?? proposal.spec).workflow_id;
+  return undefined;
+}
+
 function ConnectedProposalCard({
   proposalId,
   ctx,
@@ -43,10 +50,8 @@ function ConnectedProposalCard({
   const { t } = useTranslation();
   const router = useRouter();
   const { proposal, notFound } = useProposalById(ctx.workspaceId, ctx.coordinatorId, proposalId);
-  const effSpec = proposal ? effectiveProposalSpec(proposal) : undefined;
-  const { workflowNameById, stepNameByWorkflowStep } = useProposalWorkflowNames(
-    effSpec?.workflow_id ?? null,
-  );
+  const workflowId = proposal ? (proposalWorkflowId(proposal) ?? null) : null;
+  const { workflowNameById, stepNameByWorkflowStep } = useProposalWorkflowNames(workflowId);
 
   if (notFound) {
     return <p className="text-xs text-muted-foreground">{t("coordinator:toastNotFound")}</p>;

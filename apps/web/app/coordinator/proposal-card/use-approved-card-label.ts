@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTask } from "@/lib/api/domains/kanban-api";
-import type { Proposal } from "@/lib/api/domains/coordinator-api";
+import { isCreateTaskProposal, type StoredProposal } from "@/lib/api/domains/coordinator-api";
 import { approvedCardFallbackTitle, effectiveProposalSpec } from "@/lib/coordinator/proposal-text";
 
 export type ApprovedCardLabel = {
   /** The label for the card's own "Approved: <card>" status line. */
   label: string;
   /** Resolves `<card>` for an approved proposal, sharing this card's single task read. */
-  resolveLabel: (proposal: Proposal) => Promise<string>;
+  resolveLabel: (proposal: StoredProposal) => Promise<string>;
 };
 
 /**
@@ -20,31 +20,36 @@ export type ApprovedCardLabel = {
  * (docs/specs/coordinator/system-design/proposal-cards.md#cards "`<card>`
  * and `<step>`"). The status line and the approve toast share that one read.
  */
-export function useApprovedCardLabel(proposal: Proposal): ApprovedCardLabel {
-  const fallback = approvedCardFallbackTitle(effectiveProposalSpec(proposal));
+export function useApprovedCardLabel(proposal: StoredProposal): ApprovedCardLabel {
+  const fallback = isCreateTaskProposal(proposal)
+    ? approvedCardFallbackTitle(effectiveProposalSpec(proposal))
+    : "";
   const [identifier, setIdentifier] = useState<string | undefined>(undefined);
   const readRef = useRef<{ proposalId: string; read: Promise<string | undefined> } | null>(null);
 
-  const readIdentifier = useCallback((p: Proposal): Promise<string | undefined> => {
+  const readIdentifier = useCallback((p: StoredProposal): Promise<string | undefined> => {
     if (readRef.current?.proposalId === p.id) return readRef.current.read;
-    const read = p.task_id
-      ? fetchTask(p.task_id)
-          .then((task) => task.identifier || undefined)
-          // Read failure or a deleted task: keep the spec-title fallback.
-          .catch(() => undefined)
-      : Promise.resolve(undefined);
+    const read =
+      isCreateTaskProposal(p) && p.task_id
+        ? fetchTask(p.task_id)
+            .then((task) => task.identifier || undefined)
+            // Read failure or a deleted task: keep the spec-title fallback.
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
     readRef.current = { proposalId: p.id, read };
     return read;
   }, []);
 
   useEffect(() => {
-    if (proposal.status !== "approved" || !proposal.task_id) return;
+    if (proposal.status !== "approved" || !proposal.task_id || !isCreateTaskProposal(proposal))
+      return;
     void readIdentifier(proposal).then(setIdentifier);
   }, [proposal, readIdentifier]);
 
   const resolveLabel = useCallback(
-    async (p: Proposal) =>
-      (await readIdentifier(p)) ?? approvedCardFallbackTitle(effectiveProposalSpec(p)),
+    async (p: StoredProposal) =>
+      (await readIdentifier(p)) ??
+      (isCreateTaskProposal(p) ? approvedCardFallbackTitle(effectiveProposalSpec(p)) : ""),
     [readIdentifier],
   );
 

@@ -6,8 +6,9 @@ import { ApiError } from "@/lib/api/client";
 import {
   getProposal,
   isCreateTaskProposal,
+  isStoredProposal,
   listProposals,
-  type Proposal,
+  type StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { useWebSocketClient } from "@/lib/ws/connection";
@@ -15,15 +16,24 @@ import { useWebSocketClient } from "@/lib/ws/connection";
 const SETTLED_STATUSES = new Set(["approved", "rejected"]);
 const OPEN_STATUSES = new Set(["pending", "approving", "failed"]);
 
-export function isSettledProposal(proposal: Pick<Proposal, "status">): boolean {
+export function isSettledProposal(proposal: Pick<StoredProposal, "status">): boolean {
   return SETTLED_STATUSES.has(proposal.status);
 }
 
-export function isOpenProposal(proposal: Pick<Proposal, "status">): boolean {
+/**
+ * Whether a cached row is shown: a create_task row always, a phase-2 kind only
+ * while the phase-2 flag is on, so the flag-off product and its counts are the
+ * phase-1 ones.
+ */
+export function isVisibleProposal(proposal: StoredProposal, phase2: boolean): boolean {
+  return phase2 || isCreateTaskProposal(proposal);
+}
+
+export function isOpenProposal(proposal: Pick<StoredProposal, "status">): boolean {
   return OPEN_STATUSES.has(proposal.status);
 }
 
-function updatedAtNs(proposal: Proposal): bigint {
+function updatedAtNs(proposal: StoredProposal): bigint {
   return parseStrictRfc3339Timestamp(proposal.updated_at) ?? BigInt(-1);
 }
 
@@ -37,7 +47,10 @@ function updatedAtNs(proposal: Proposal): bigint {
  * cached one is not. A row whose `updated_at` fails to parse sorts as older
  * than any parseable one.
  */
-export function mergeProposal(cached: Proposal | undefined, incoming: Proposal): Proposal {
+export function mergeProposal(
+  cached: StoredProposal | undefined,
+  incoming: StoredProposal,
+): StoredProposal {
   if (!cached) return incoming;
   if (isSettledProposal(cached) && !isSettledProposal(incoming)) return cached;
   const cachedNs = updatedAtNs(cached);
@@ -49,7 +62,7 @@ export function mergeProposal(cached: Proposal | undefined, incoming: Proposal):
 }
 
 type CoordinatorProposalsState = {
-  byId: Record<string, Proposal>;
+  byId: Record<string, StoredProposal>;
   /** Highest ticket applied (success or not-found) for each id, gating a stale duplicate. */
   appliedSeq: Record<string, number>;
   /** Ticket of the latest applied not-found for each id, present iff that id currently reads as not found. */
@@ -69,7 +82,9 @@ const INITIAL_COORDINATOR_PROPOSALS: CoordinatorProposalsState = {
   pendingError: false,
 };
 
-export type ProposalApplyResult = { kind: "success"; proposal: Proposal } | { kind: "not_found" };
+export type ProposalApplyResult =
+  | { kind: "success"; proposal: StoredProposal }
+  | { kind: "not_found" };
 
 /**
  * Applies one ticketed response for one proposal id
@@ -133,7 +148,7 @@ type ProposalsStoreState = {
     seq: number,
     result: ProposalApplyResult,
   ) => void;
-  mergePendingRows: (coordinatorId: string, seq: number, proposals: Proposal[]) => void;
+  mergePendingRows: (coordinatorId: string, seq: number, proposals: StoredProposal[]) => void;
   setPendingSettled: (coordinatorId: string) => void;
   setPendingError: (coordinatorId: string) => void;
   evict: (coordinatorId: string, id: string) => void;
@@ -213,7 +228,7 @@ export const useProposalsStore = create<ProposalsStoreState>()((set) => ({
 }));
 
 export type UseProposalsProposalsEntry = {
-  value: Proposal[] | undefined;
+  value: StoredProposal[] | undefined;
   loadedAt: number | undefined;
   error: boolean;
 };
@@ -239,7 +254,7 @@ function backfillDropped(workspaceId: string, coordinatorId: string, freshIds: S
     const seq = useProposalsStore.getState().takeProposalTicket(coordinatorId);
     getProposal(workspaceId, coordinatorId, id)
       .then((row) => {
-        if (!isCreateTaskProposal(row)) return;
+        if (!isStoredProposal(row)) return;
         useProposalsStore
           .getState()
           .applyProposalResult(coordinatorId, id, seq, { kind: "success", proposal: row });
@@ -263,6 +278,7 @@ function backfillDropped(workspaceId: string, coordinatorId: string, freshIds: S
 export function useProposals(
   workspaceId: string | null,
   coordinatorId: string | null,
+  phase2 = false,
 ): UseProposalsResult {
   const store = useProposalsStore((state) =>
     coordinatorId ? state.byCoordinator[coordinatorId] : undefined,
@@ -282,7 +298,7 @@ export function useProposals(
     const seq = useProposalsStore.getState().takeProposalTicket(coordinator);
     listProposals(ws, coordinator, "pending")
       .then((res) => {
-        const proposals = res.proposals.filter(isCreateTaskProposal);
+        const proposals = res.proposals.filter(isStoredProposal);
         useProposalsStore.getState().mergePendingRows(coordinator, seq, proposals);
         backfillDropped(ws, coordinator, new Set(proposals.map((p) => p.id)));
         if (listSeq < lastAppliedListSeqRef.current) return;
@@ -318,7 +334,9 @@ export function useProposals(
 
   const open =
     store?.pendingLoadedAt !== undefined
-      ? Object.values(store.byId).filter(isOpenProposal)
+      ? Object.values(store.byId).filter(
+          (proposal) => isOpenProposal(proposal) && isVisibleProposal(proposal, phase2),
+        )
       : undefined;
 
   return {
@@ -341,14 +359,14 @@ export function useProposals(
 export function useProposalRow(
   coordinatorId: string | null,
   proposalId: string | null,
-): Proposal | undefined {
+): StoredProposal | undefined {
   return useProposalsStore((state) =>
     coordinatorId && proposalId ? state.byCoordinator[coordinatorId]?.byId[proposalId] : undefined,
   );
 }
 
 export type UseProposalByIdResult = {
-  proposal: Proposal | undefined;
+  proposal: StoredProposal | undefined;
   notFound: boolean;
 };
 
@@ -381,7 +399,7 @@ export function useProposalById(
     const seq = useProposalsStore.getState().takeProposalTicket(coordinator);
     getProposal(ws, coordinator, id)
       .then((row) => {
-        if (!isCreateTaskProposal(row)) return;
+        if (!isStoredProposal(row)) return;
         useProposalsStore
           .getState()
           .applyProposalResult(coordinator, id, seq, { kind: "success", proposal: row });

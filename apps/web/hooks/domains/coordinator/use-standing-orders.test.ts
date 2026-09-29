@@ -32,7 +32,14 @@ describe("useStandingOrders", () => {
     expect(result.current.status).toBe("loading");
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.orders.map((o) => o.id)).toEqual(["o1", "o2"]);
-    expect(listMock).toHaveBeenCalledWith("ws-1", "c-1");
+    expect(listMock).toHaveBeenCalledWith("ws-1", "c-1", { includeRetired: false });
+  });
+
+  it("reads retired orders too when asked", async () => {
+    listMock.mockResolvedValueOnce({ orders: [] });
+    const { result } = renderHook(() => useStandingOrders("ws-1", "c-1", { includeRetired: true }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(listMock).toHaveBeenCalledWith("ws-1", "c-1", { includeRetired: true });
   });
 
   it("reports an error and recovers on retry", async () => {

@@ -10,7 +10,12 @@ export type StandingOrdersLoadStatus = "loading" | "ready" | "error";
  * of the last request sent wins; a failed reload keeps the list already
  * loaded, so `error` means there is nothing to show.
  */
-export function useStandingOrders(workspaceId: string, coordinatorId: string) {
+export function useStandingOrders(
+  workspaceId: string,
+  coordinatorId: string,
+  options?: { includeRetired?: boolean },
+) {
+  const includeRetired = options?.includeRetired === true;
   const [orders, setOrders] = useState<StandingOrder[]>([]);
   const [status, setStatus] = useState<StandingOrdersLoadStatus>("loading");
   const sequenceRef = useRef(0);
@@ -18,7 +23,7 @@ export function useStandingOrders(workspaceId: string, coordinatorId: string) {
 
   const reload = useCallback((): Promise<void> => {
     const sequence = ++sequenceRef.current;
-    return listStandingOrders(workspaceId, coordinatorId)
+    return listStandingOrders(workspaceId, coordinatorId, { includeRetired })
       .then((response) => {
         if (sequence !== sequenceRef.current) return;
         loadedRef.current = true;
@@ -29,7 +34,7 @@ export function useStandingOrders(workspaceId: string, coordinatorId: string) {
         if (sequence !== sequenceRef.current || loadedRef.current) return;
         setStatus("error");
       });
-  }, [workspaceId, coordinatorId]);
+  }, [workspaceId, coordinatorId, includeRetired]);
 
   const retry = useCallback(() => {
     setStatus("loading");

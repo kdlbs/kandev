@@ -102,7 +102,7 @@ Toast: "Rejected. Keep the reason as a standing order?"  [Make it a standing ord
 - [`assets/p2-01-queue-what-it-did.png`](assets/p2-01-queue-what-it-did.png)
   (Ready to merge).
 - Scenario `05-rule-on-a-proposal` (reject with a reason) maps to
-  `e2e/tests/coordinator/proposal-kinds.spec.ts`.
+  `e2e/tests/coordinator/proposal-kinds.spec.ts` (desktop) and `mobile-proposal-kinds.spec.ts` (phone; the `mobile-chrome` project matches `mobile-*` names only).
 
 ## Acceptance
 
@@ -116,7 +116,7 @@ Toast: "Rejected. Keep the reason as a standing order?"  [Make it a standing ord
 cd apps/web && pnpm test -- app/coordinator/components app/coordinator/proposal-card components/coordinators
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run e2e/tests/coordinator/proposal-kinds.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/coordinator/proposal-kinds.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/coordinator/mobile-proposal-kinds.spec.ts
 ```
 
 E2E: the mock agent proposes a message; Edit, approve, and assert the task's
@@ -142,3 +142,24 @@ assert the order in Configure.
 - Send it back and stall Resume call task and session routes directly; they
   must check the viewer is a manager on the client and rely on the server's
   existing authorisation.
+
+## Round 4 decisions
+
+Recorded here, not in the design, which is at its byte cap. Each is covered by
+a unit test in `send-back-form.test.tsx`, `use-stall-resume.test.ts` or
+`needs-you-item-actions.test.tsx`.
+
+- **R4-01 Queue id scope.** The client queue id belongs to one Send it back
+  form instance. It is reused only while the note equals the one last
+  attempted, and it resets on success and on close. A deliberate re-send after
+  either is a new send.
+- **R4-02 Failure keeps the draft.** A failed send keeps the form open with the
+  draft and a generic error. The form closes only with the row on success.
+- **R4-03 Late responses.** Resume and Send it back fence late responses with a
+  per-id sequence and tombstones (the pattern WP-5b's proposal store uses). A
+  response for a superseded or pruned Resume or Send is ignored.
+- **R4-04 No raw transport text.** Errors show generic translated copy. A
+  timeout states that the outcome is unknown and does not silently re-enable.
+- **R4-05 Announce and focus.** AC 005.2 is conditioned on the phase-2 flag.
+  The session read retries after a failure. Closing the form returns focus to
+  the Send it back trigger, matching WP-5b's card and task 08's rows.
