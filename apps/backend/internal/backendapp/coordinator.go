@@ -31,6 +31,7 @@ func initCoordinatorWiring(
 	workflowSvc *workflowservice.Service,
 	agentProfiles settingsstore.Repository,
 	enabled bool,
+	phase2 bool,
 	log *logger.Logger,
 ) (*coordinator.Service, error) {
 	store, storeErr := coordinator.NewStore(dbPool.Writer(), dbPool.Reader())
@@ -42,7 +43,7 @@ func initCoordinatorWiring(
 	}
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
-	svc := coordinator.NewService(store, validator, taskSvc, log)
+	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2))
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
 	return svc, nil
 }

@@ -100,17 +100,39 @@ type Service struct {
 	// production; only tests in this package set it, to join on a pass
 	// completing instead of sleeping.
 	afterSweepPass func()
+
+	// phase2 is true when the control surface is on. It gates every phase-2
+	// behavior of the service; false leaves the phase-1 product unchanged.
+	phase2 bool
+	// policyErrLogged holds one entry per "coordinatorID:policy_revision" whose
+	// unreadable stored policy has been logged.
+	policyErrLogged sync.Map
 }
+
+// ServiceOption configures optional Service behavior.
+type ServiceOption func(*Service)
+
+// WithPhase2 turns the phase-2 control surface on or off. Off is the default.
+func WithPhase2(on bool) ServiceOption {
+	return func(s *Service) { s.phase2 = on }
+}
+
+// Phase2Enabled reports whether the phase-2 control surface is on.
+func (s *Service) Phase2Enabled() bool { return s.phase2 }
 
 // NewService builds a Service over store, validator, the workspace
 // authorizer and a logger.
-func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthorizer, log *logger.Logger) *Service {
-	return &Service{
+func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthorizer, log *logger.Logger, opts ...ServiceOption) *Service {
+	s := &Service{
 		store:     store,
 		validator: validator,
 		authz:     authorizer,
 		logger:    log.WithFields(zap.String("component", "coordinator-service")),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // SetConversationHooks registers the conversation-lifecycle hooks a later
@@ -141,7 +163,7 @@ func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, co
 	if s.eventBus == nil {
 		return
 	}
-	open, err := s.store.CountOpenProposals(ctx, coordinatorID)
+	open, err := s.store.CountOpenProposals(ctx, coordinatorID, s.phase2)
 	if err != nil {
 		s.logger.Warn("failed to count open proposals for coordinator.updated",
 			zap.String("coordinator_id", coordinatorID), zap.Error(err))
@@ -220,7 +242,7 @@ func (s *Service) ListCoordinators(ctx context.Context, workspaceID string) ([]C
 	if err != nil {
 		return nil, err
 	}
-	counts, err := s.store.CountOpenProposalsByWorkspace(ctx, workspaceID)
+	counts, err := s.store.CountOpenProposalsByWorkspace(ctx, workspaceID, s.phase2)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +360,7 @@ func (s *Service) GetProposal(ctx context.Context, workspaceID, coordinatorID, i
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
 	}
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, id)
+	return s.store.GetProposal(ctx, workspaceID, coordinatorID, id, s.phase2)
 }
 
 // ListProposals returns a coordinator's proposals per status (Build decision
@@ -347,7 +369,7 @@ func (s *Service) ListProposals(ctx context.Context, workspaceID, coordinatorID 
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
 	}
-	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status)
+	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
 }
 
 // CoordinatorForConversationTask returns the id of the coordinator whose

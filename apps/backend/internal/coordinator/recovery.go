@@ -22,7 +22,7 @@ import (
 // approve request's own recovery uses (cutoff = t0 instead of the
 // two-minute rule). The pass stops early if ctx is cancelled (shutdown).
 func (s *Service) StartupRecoveryPass(ctx context.Context, t0 time.Time) {
-	rows, err := s.store.ListApprovingClaimedBefore(ctx, t0)
+	rows, err := s.store.ListApprovingClaimedBefore(ctx, t0, s.phase2)
 	if err != nil {
 		s.logger.Warn("startup recovery: discovery query failed", zap.Error(err))
 		return

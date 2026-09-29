@@ -94,10 +94,10 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 		WorkspaceID:   found.WorkspaceID,
 		Spec:          spec,
 	}
-	if err := s.store.InsertProposal(ctx, proposal); err != nil {
+	if err := s.store.InsertProposal(ctx, proposal, s.phase2); err != nil {
 		return nil, 0, err
 	}
-	openCount, err := s.store.CountOpenProposals(ctx, coordinatorID)
+	openCount, err := s.store.CountOpenProposals(ctx, coordinatorID, s.phase2)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count open proposals: %w", err)
 	}

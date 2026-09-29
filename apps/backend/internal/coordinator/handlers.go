@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -49,6 +50,20 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 }
 
+// coordinatorDTO builds the coordinator wire shape, adding the phase-2 policy
+// and watch fields while the flag is on.
+func (h *Handlers) coordinatorDTO(ctx context.Context, c *Coordinator) (*CoordinatorDTO, error) {
+	dto := NewCoordinatorDTO(c)
+	if !h.service.phase2 {
+		return dto, nil
+	}
+	view, err := h.service.Policy(ctx, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	return dto.WithPolicyView(view), nil
+}
+
 // httpListCoordinators backs GET /api/v1/workspaces/:id/coordinators.
 func (h *Handlers) httpListCoordinators(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -59,7 +74,12 @@ func (h *Handlers) httpListCoordinators(c *gin.Context) {
 	}
 	dtos := make([]*CoordinatorDTO, len(items))
 	for i, item := range items {
-		dtos[i] = NewCoordinatorDTO(item.Coordinator).WithOpenProposals(item.OpenProposals)
+		dto, err := h.coordinatorDTO(ctx, item.Coordinator)
+		if err != nil {
+			h.respondError(c, err)
+			return
+		}
+		dtos[i] = dto.WithOpenProposals(item.OpenProposals)
 	}
 	c.JSON(http.StatusOK, NewCoordinatorListResponse(dtos))
 }
@@ -77,7 +97,12 @@ func (h *Handlers) httpCreateCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, NewCoordinatorDTO(created))
+	dto, err := h.coordinatorDTO(ctx, created)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, dto)
 }
 
 // httpGetCoordinator backs GET /api/v1/workspaces/:id/coordinators/:cid.
@@ -88,7 +113,12 @@ func (h *Handlers) httpGetCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewCoordinatorDTO(found).WithProfileStatuses(agentStatus, executorStatus))
+	dto, err := h.coordinatorDTO(ctx, found)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, dto.WithProfileStatuses(agentStatus, executorStatus))
 }
 
 // httpPatchCoordinator backs PATCH /api/v1/workspaces/:id/coordinators/:cid.
@@ -104,7 +134,12 @@ func (h *Handlers) httpPatchCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewCoordinatorDTO(updated))
+	dto, err := h.coordinatorDTO(ctx, updated)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, dto)
 }
 
 // httpDeleteCoordinator backs DELETE /api/v1/workspaces/:id/coordinators/:cid.
@@ -133,7 +168,7 @@ func (h *Handlers) httpListProposals(c *gin.Context) {
 	}
 	dtos := make([]*ProposalDTO, len(items))
 	for i, item := range items {
-		dtos[i] = NewProposalDTO(item)
+		dtos[i] = NewProposalDTOFor(item, h.service.phase2)
 	}
 	c.JSON(http.StatusOK, NewProposalListResponse(dtos))
 }
@@ -166,7 +201,7 @@ func (h *Handlers) httpGetProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTO(found))
+	c.JSON(http.StatusOK, NewProposalDTOFor(found, h.service.phase2))
 }
 
 // httpApproveProposal backs
@@ -183,7 +218,7 @@ func (h *Handlers) httpApproveProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTO(updated))
+	c.JSON(http.StatusOK, NewProposalDTOFor(updated, h.service.phase2))
 }
 
 // httpRejectProposal backs
@@ -200,7 +235,7 @@ func (h *Handlers) httpRejectProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTO(updated))
+	c.JSON(http.StatusOK, NewProposalDTOFor(updated, h.service.phase2))
 }
 
 // decodeOptionalJSONBody reads c.Request.Body and, unless it is empty or
@@ -245,7 +280,7 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
 	case errors.As(err, &conflictErr):
-		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal))
+		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal, h.service.phase2))
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse("not found"))
 	case errors.Is(err, service.ErrForbidden):

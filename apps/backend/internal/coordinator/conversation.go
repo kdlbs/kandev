@@ -395,3 +395,12 @@ func conversationTaskCoordinatorID(task *taskmodels.Task) string {
 	id, _ := task.Metadata[taskmodels.MetaKeyCoordinatorID].(string)
 	return id
 }
+
+// archiveConversation archives the conversation task a committed
+// resetConversation cleared. An empty id names no task and does nothing.
+func (s *Service) archiveConversation(ctx context.Context, coordinatorID, taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.archiveClearedConversationTask(ctx, coordinatorID, taskID)
+}
