@@ -48,6 +48,7 @@ offer. Orders are text; they never reach the guard or the policy
 | `retired_at` | timestamp null | |
 | `retired_by` | text null | |
 | `source_proposal_id` | text null | the rejected proposal it came from |
+| `last_applied_at` | timestamp null | [Last applied](#last-applied) |
 
 Rows are deleted with their coordinator and in the workspace-deletion
 transaction. Active orders are ordered `created_at ASC, id ASC`; the order
@@ -126,15 +127,19 @@ the proposal's `standing_order_ids` column
 
 ## Last applied
 
-`last_applied_at` for each active order is `MAX(created_at)` of the
-coordinator's proposals whose `standing_order_ids` contains the order id.
-The list route computes it with one query per request over every one of
-the coordinator's proposals whose `standing_order_ids` is not `'[]'`, with
-no time bound, parsing the JSON column in Go, so no JSON index is needed on
-either dialect. Proposals are not pruned by age, so an order cited once,
-however long ago, shows that time. The scan is bounded by the
-coordinator's citing proposals, which grow by at most the proposals a
-manager decides. Null reads as "Never applied" (`003.3`).
+`coordinator_standing_orders.last_applied_at` is a stored column, not a
+computed one. In the same transaction that inserts a proposal citing an
+order ([proposal kinds](proposal-kinds.md#propose) step 2, under the
+per-coordinator lock retire also takes), the insert is followed by `UPDATE
+coordinator_standing_orders SET last_applied_at = ? WHERE id = ? AND
+(last_applied_at IS NULL OR last_applied_at < ?)` for each cited id, with
+the proposal's `created_at` bound three times: the write only ever raises
+the column, so an out-of-order commit under the lock cannot move it
+backward. The list route reads the column directly; there is no scan and no
+time bound on how far back a citing proposal counted, so an order cited
+once, however long ago, still shows that time (`003.3`). Null reads as
+"Never applied". Existing rows from before this column existed start null
+and read as "Never applied" until next cited.
 
 ## Shaped by UI
 

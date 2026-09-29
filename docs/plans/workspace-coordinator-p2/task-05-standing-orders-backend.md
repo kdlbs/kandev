@@ -45,8 +45,12 @@ last-applied read.
   order-number order with number, text and date, and the sentence that they
   never grant a permission (`002.1`). A test that an order text asking for a
   denied action is still refused by the guard (`002.3`).
-- `last_applied_at` per active order from every proposal that cites it, with
-  no time bound (`003.3`).
+- `MarkApplied(tx, orderIDs, at)` helper, called by task 04's propose paths
+  in the same transaction as the proposal insert: `UPDATE ... SET
+  last_applied_at = at WHERE id IN (orderIDs) AND (last_applied_at IS NULL
+  OR last_applied_at < at)`, so a write only ever raises the column.
+- The list route reads the stored `last_applied_at` column directly, with
+  no time bound on how far back a citing proposal counted (`003.3`).
 
 ## Out of scope
 
