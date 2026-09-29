@@ -34,6 +34,7 @@ system_design:
   - ../../specs/coordinator/system-design/copilot-popover.md
   - ../../specs/coordinator/system-design/copilot-panel.md
   - ../../specs/coordinator/system-design/proposals.md
+  - ../../specs/coordinator/system-design/proposal-cards.md
 legacy_specs: []
 ---
 
