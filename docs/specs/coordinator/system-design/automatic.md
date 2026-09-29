@@ -8,6 +8,8 @@ owners:
 created: 2026-09-29
 last_updated: 2026-09-29
 requirements:
+  - REQ-COORDINATOR-INTEGRATION-004
+  - REQ-COORDINATOR-INTEGRATION-007
   - REQ-COORDINATOR-AUTOMATIC-001
   - REQ-COORDINATOR-AUTOMATIC-002
   - REQ-COORDINATOR-AUTOMATIC-003
@@ -38,44 +40,90 @@ change; this contract does not.
 
 ## Phase 2 interfaces consumed
 
+Phase 3 code depends on two narrow interfaces, implemented by adapters in
+`internal/coordinator/phase2.go` over what phase 2 built:
+
 ```go
-// Settings, owned by phase 2 (D17 storage).
 type ActionSettings interface {
     Setting(ctx context.Context, coordinatorID, class string) (Setting, error) // {Value, ChangedBy, ChangedAt}
-    RegisterChangeValidator(func(ctx context.Context, coordinatorID, class, from, to string) error)
     Lower(ctx context.Context, coordinatorID, class, reason string) error       // system write, logged
 }
 
-// Log, owned by phase 2 ("What it did").
 type DecisionLog interface {
     EarliestDecision(ctx context.Context, coordinatorID, class string) (time.Time, bool, error)
     Decisions(ctx context.Context, coordinatorID, class string, since, before time.Time) ([]Decision, error) // {ProposalID, Outcome, DecidedAt}
     UndoneTaskIDs(ctx context.Context, coordinatorID string, since, before time.Time) ([]string, error)
-    OnUndo(func(ctx context.Context, coordinatorID, taskID string))
 }
 ```
 
-`Outcome` is one of `approved`, `approved_with_edits`, `rejected`,
-`returned`. A **decided row** is a manager's decision: the adapter keys the
-filter on the log row itself, dropping every row whose decider is the
-automatic path (the adapter records a decision with the proposal's
-`claimed_automatically` at the time of that decision), so automatic approvals count toward none of
-`history_30d`, `volume` and `unedited_rate`, before or after a lower and
-re-raise. A manager's later decision on the same proposal (for example
-**Try again** on an automatic approval that ended `failed`) is its own log
-row with a manager decider and counts like any other.
-`EarliestDecision` applies the same filter. When phase 2's log does not distinguish edits, the adapter
-derives `approved_with_edits` from the proposal row: `final_spec_json`
-differs from `spec_json` in title, description, workflow, step or repository.
+Phase 2 as built stores less than these interfaces name, so the adapters map
+what exists and this design adds the rest, each as a small additive change
+owned by task 09:
+
+| Interface need | Phase 2 as built | Phase 3 provides |
+| --- | --- | --- |
+| `Setting.Value` | `policyFor(c)` (`policy_json`, `policy_revision`) | read as is |
+| `Setting.ChangedBy`, `ChangedAt` | not stored per setting | table `coordinator_class_changes` below; the adapter reads the newest row for the class whose `to_value` equals the current value |
+| Change validator | none | one call site in `SaveSettings`, inside `withCoordinatorLock`, and `Validate(p, phase3)` |
+| `Lower` (system write) | none | `Service.LowerClass` below |
+| Decided rows | `coordinator_activity` rows (outcome, authorization, `edited`, `created_at`) | the filter below |
+| `approved_with_edits` | `edited` flag on the row | derived from it |
+| `decided_at` | not on the proposal | the activity row's `created_at` |
+| `UndoneTaskIDs` | `undone_at` and `target_task_id` on the approved row, set by `markUndone` in `undo.go` | the query below |
+| `OnUndo` | none | a post-commit call added in `markUndone` |
+| `returned` outcome, `automatic` authorization | not in the closed sets | added by [integration](integration.md#log-rows) |
+
+`coordinator_class_changes` (append only, deleted with the coordinator and on
+`workspace.deleted`, never pruned before the coordinator):
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | text primary key | UUID |
+| `coordinator_id` | text not null | indexed with `class, changed_at desc` |
+| `class` | text not null | one of the six actions |
+| `from_value`, `to_value` | text not null | `requires_approval` or `automatic` |
+| `changed_by` | text null | user id; null is the system (`LowerClass`) |
+| `reason` | text null | set for a system change |
+| `changed_at` | timestamp not null | |
+
+`SaveSettings` inserts one row per class whose value changed, in the same
+locked transaction as the policy write. `Service.LowerClass(ctx, coordinatorID,
+class, reason)` opens `withCoordinatorLock`, returns nil when the class does
+not read `automatic`, otherwise writes it `requires_approval`, bumps
+`policy_revision`, inserts a row with null `changed_by` and the reason,
+commits, and publishes `coordinator.updated` as a settings save does.
+
+**Decided rows.** `Decisions` returns the `coordinator_activity` rows of the
+coordinator with class `create_task`, outcome in (`approved`, `rejected`,
+`returned`), authorization not `automatic`, and `created_at` in `[since,
+before)`. `Outcome` is `approved_with_edits` when the row's outcome is
+`approved` and `edited` is set, otherwise the row's outcome; `DecidedAt` is
+`created_at`. A `failed` row is not a decision. An automatic approval, which
+has authorization `automatic`, therefore counts toward none of `history_30d`,
+`volume` and `unedited_rate`, before or after a lower and re-raise. A
+manager's later decision on the same proposal (for example **Try again** on an
+automatic approval that ended `failed`) is its own `requires_approval` row and
+counts like any other. `EarliestDecision` is the minimum `created_at` under the
+same filter. `UndoneTaskIDs` returns the `target_task_id` of this
+coordinator's `create_task` `approved` rows (any authorization) whose
+`undone_at` is in the window. Activity retention (400 days) covers the 30-day
+window and the 24-hour lowering retry.
+
+**`OnUndo`.** `markUndone` calls the coordinator's registered function after
+its transaction commits, with the coordinator id and the undone task id. A
+panic or error there is logged and never fails the undo; the backstop retry
+of [Lowering](#lowering) covers it.
 
 ## Raisable classes
 
 `internal/coordinator/automatic.go` holds `raisableClasses =
-{"create_task"}`. The validator registered with
-`ActionSettings.RegisterChangeValidator` refuses `to == "automatic"` for any
-other class with a 400 error naming the class
-(`AC-COORDINATOR-AUTOMATIC-001.1`), including classes phase 2 or later phases
-add, because the set is a closed allowlist, not a denylist.
+{"create_task"}`. Phase 2's `Validate(p)` refuses `automatic` for every action
+with 400 `automatic_not_available` naming it; it becomes `Validate(p, phase3
+bool)` and accepts `automatic` only for a class in `raisableClasses` while
+phase 3 is effective, so every other class, including classes phase 2 or later
+phases add, is refused with 400 naming the class
+(`AC-COORDINATOR-AUTOMATIC-001.1`), because the set is a closed allowlist, not
+a denylist.
 
 ## Eligibility
 
@@ -130,10 +178,12 @@ coordinator principal (`AC-COORDINATOR-AUTOMATIC-002.2`,
 
 ## Raise gate
 
-The same registered validator, for `class == "create_task"` and `to ==
-"automatic"`, runs `Eligibility` and returns a 409 error naming the first
-unmet condition when not eligible. Phase 2's settings write surfaces it
-unchanged and writes nothing. Lowering (`to == "requires_approval"`) is never
+The change hook called once by `SaveSettings` inside `withCoordinatorLock`, for
+`class == "create_task"` and `to == "automatic"` where the stored value was
+not already `automatic`, runs `Eligibility` and returns a 409 error naming the
+first unmet condition when not eligible; the settings write rolls back and
+stores nothing. A save that leaves an already automatic class unchanged is not
+checked. Lowering (`to == "requires_approval"`) is never
 checked (`AC-COORDINATOR-AUTOMATIC-004.1`).
 
 ## Automatic approval
@@ -176,7 +226,7 @@ of the `pending` row:
    deleted, disabled, or no longer a manager, or the check errors, the
    proposal stays `pending`, the tool returns `{proposal_id, status:
    "pending", note: "automatic approval unavailable; a manager will decide"}`,
-   and, except on a check error, the coordinator calls `ActionSettings.Lower`
+   and, except on a check error, the coordinator calls `LowerClass`
    with the reason "raising manager no longer a manager". Nothing is claimed
    and nothing counts toward the 10.
 4. Call the phase 1 approve service function (the one behind the approve
@@ -193,19 +243,21 @@ of the `pending` row:
    `approved`, or `failed` with the error, which leaves a normal failed card
    for a manager (`AC-COORDINATOR-AUTOMATIC-003.3`).
 
-Phase 2's log records the decision as it records any approval; the adapter
-passes `claimed_automatically` and `decided_by` so the row reads "Automatic,
-raised by <manager>" (`AC-COORDINATOR-AUTOMATIC-003.4`). An improvement
+The approve path writes the `approved` row, or the `failed` row of a failed
+attempt, with authorization `automatic` and actor the raising manager when the
+claimed proposal has `claimed_automatically = 1`, so the row reads "Approved
+automatically, raised by <manager>" (`AC-COORDINATOR-AUTOMATIC-003.4`,
+[Log rows](integration.md#log-rows)). An improvement
 proposal never reaches step 1: the automatic path is only in the
 `propose_task_kandev` handler.
 
 ## Lowering
 
-The coordinator registers `DecisionLog.OnUndo`. When the undone task is the
+The coordinator registers the `OnUndo` function. When the undone task is the
 `task_id` of one of the coordinator's proposals and the decision that created
 that task was automatic (the proposal's `claimed_automatically = 1`; a
 manager's approval of a proposal whose automatic approval ended `failed`
-sets it to 0, so the task it creates is a manager's), it calls `ActionSettings.Lower(ctx,
+sets it to 0, so the task it creates is a manager's), it calls `LowerClass(ctx,
 coordinatorID, "create_task", "undo of an automatic create")`. A failed lower
 is retried by the backstop tick of [wake](wake.md#backstop), which visits every
 coordinator with a proposal with `claimed_automatically = 1` whatever its
@@ -219,16 +271,18 @@ read error skips this coordinator's retry for the tick.
 
 ## Screens
 
-In phase 2's permission settings for one coordinator (UI-06):
+In phase 2's permission settings for one coordinator (UI-06), on the May do
+radio group described in [integration](integration.md#settings-layout):
 
-- Every class other than `create_task` shows "Cannot be raised" in place of
-  a raise control.
+- Every class other than `create_task` shows the Automatic option disabled
+  with "Cannot be raised".
 - `create_task` shows the five conditions as Met or Not met with their values,
   **Review the last 30 days** (opens phase 2's log filtered to this
-  coordinator and class), then **Mark as reviewed** once the log view has been
-  opened in this settings session, and **Raise to automatic**, enabled only
-  when eligible. After a raise: "Raised to automatic by <you> at <time>" with
-  **Lower**.
+  coordinator and class), and **Mark as reviewed** once the log view has been
+  opened in this settings session. Its Automatic option is enabled only when
+  eligible, and choosing it then saving with the page's Save is the raise;
+  choosing Requires approval and saving is the lower. After a raise: "Raised
+  to automatic by <you> at <time>" from the class change history.
 - Copy goes through `t()` in six locales.
 
 ## Security

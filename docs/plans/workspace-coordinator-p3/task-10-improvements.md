@@ -11,6 +11,8 @@ requirements:
   - REQ-COORDINATOR-IMPROVEMENTS-001
   - REQ-COORDINATOR-IMPROVEMENTS-002
   - REQ-COORDINATOR-IMPROVEMENTS-003
+  - REQ-COORDINATOR-INTEGRATION-003
+  - REQ-COORDINATOR-INTEGRATION-006
 acceptance_criteria:
   - AC-COORDINATOR-IMPROVEMENTS-001.1
   - AC-COORDINATOR-IMPROVEMENTS-001.2
@@ -21,8 +23,12 @@ acceptance_criteria:
   - AC-COORDINATOR-IMPROVEMENTS-003.1
   - AC-COORDINATOR-IMPROVEMENTS-003.2
   - AC-COORDINATOR-IMPROVEMENTS-003.3
+  - AC-COORDINATOR-INTEGRATION-003.3
+  - AC-COORDINATOR-INTEGRATION-006.4
+  - AC-COORDINATOR-INTEGRATION-006.5
 system_design:
   - ../../specs/coordinator/system-design/improvements.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 10: Improvement Proposals And Pending Changes (WP-12)
@@ -43,6 +49,18 @@ pending change, and the settings list where a manager applies or discards it.
   the pending-change routes with the base comparison and the phase 1 PATCH
   context write ([Pending changes](../../specs/coordinator/system-design/improvements.md#pending-changes));
   guard refusals; `coordinator_improvement_total`.
+- The improvement `KindExecutor` registered in `registerKinds` with
+  `ReRunsOnStaleClaim() = false` (a claim left `approving` settles `failed`
+  with `outcome_unknown`; a manager's Approve re-runs the idempotent insert),
+  the kind in `knownProposalKind`, `KindExecutors` and `kindAction`, the
+  activity-only class `ActionImprovement` (not in `AllActions`), `recheckPolicy`
+  returning nil for it, the `phase3` input of `ToolNames` and
+  `actionClass` in `mcp/handlers/coordinator_authorization.go`, and its copy
+  (`activityClassImprovement`, "No undo") in six locales
+  ([Proposal statuses and kinds](../../specs/coordinator/system-design/integration.md#proposal-statuses-and-kinds),
+  [Tool list](../../specs/coordinator/system-design/integration.md#tool-list)).
+  The improvement is not a new column: phase 2's `kind` column takes the
+  value `improvement`.
 - `internal/coordinator/no_turn_start_test.go`: append the improvement
   approve and apply rows to `noTurnStartPaths`
   ([copilot](../../specs/coordinator/system-design/copilot.md#attended-only)).
@@ -76,6 +94,17 @@ See [plan UI-07](plan.md#ascii-ui-previews).
   `context_before` and counts toward 25; each invalid field (including no run,
   a foreign run, a foreign task, 0 or 11 references, an unchanged context) is
   refused naming the field and stores nothing.
+- An improvement is shown and counted with message, move and resume
+  proposals, is governed by none of the six per-action settings (a
+  `create_task` setting is never applied to it) and is never automatic; an
+  approval left `approving` past the stale-claim window settles `failed` with
+  `outcome_unknown` and no second pending change, and Approve on that card
+  runs it again with still one pending change
+  (`AC-COORDINATOR-INTEGRATION-006.4`, `006.5`).
+- A conversation opened before phase 3 was on has no
+  `propose_improvement_kandev` in its bound list, and a call from it is
+  refused as not in the profile; one opened after has it
+  (`AC-COORDINATOR-INTEGRATION-003.3`).
 - The card shows the evidence (expired runs as such), keeps Approve disabled
   until the diff is shown, has no Edit, and a raised `create_task` setting never
   approves an improvement.

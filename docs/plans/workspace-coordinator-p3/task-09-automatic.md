@@ -12,6 +12,8 @@ requirements:
   - REQ-COORDINATOR-AUTOMATIC-002
   - REQ-COORDINATOR-AUTOMATIC-003
   - REQ-COORDINATOR-AUTOMATIC-004
+  - REQ-COORDINATOR-INTEGRATION-004
+  - REQ-COORDINATOR-INTEGRATION-007
 acceptance_criteria:
   - AC-COORDINATOR-AUTOMATIC-001.1
   - AC-COORDINATOR-AUTOMATIC-001.2
@@ -26,8 +28,11 @@ acceptance_criteria:
   - AC-COORDINATOR-AUTOMATIC-004.1
   - AC-COORDINATOR-AUTOMATIC-004.2
   - AC-COORDINATOR-AUTOMATIC-004.3
+  - AC-COORDINATOR-INTEGRATION-004.3
+  - AC-COORDINATOR-INTEGRATION-007.2
 system_design:
   - ../../specs/coordinator/system-design/automatic.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 09: The First Automatic Class, create_task (WP-11)
@@ -43,11 +48,24 @@ confirming `create_task`.
 ## In scope
 
 - `internal/coordinator/phase2.go`: adapters for `ActionSettings` and
-  `DecisionLog` over phase 2's code
+  `DecisionLog` over phase 2's code, using the mapping and the additions
+  phase 2 lacks: the `coordinator_class_changes` writes in `SaveSettings`'
+  locked transaction and `Service.LowerClass`, the decided-row filter over
+  `coordinator_activity` (authorization not `automatic`), `UndoneTaskIDs`
+  from the approved rows' `undone_at`, and the post-commit `OnUndo` call in
+  `markUndone` (`undo.go`)
   ([Phase 2 interfaces consumed](../../specs/coordinator/system-design/automatic.md#phase-2-interfaces-consumed)).
+- `policy.go` and `settings.go`: `Validate(p, phase3)` accepts `automatic` for
+  `create_task` only while phase 3 is effective and keeps
+  `automatic_not_available` for every other action; one change-hook call in
+  `SaveSettings` inside `withCoordinatorLock`.
+- The approve path writes the `approved` and `failed` rows of a claim with
+  `claimed_automatically = 1` with authorization `automatic` and actor the
+  raising manager, and its copy in six locales
+  ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
 - `internal/coordinator/automatic.go`: the closed `raisableClasses`, the
-  change validator (400 for other classes, 409 naming the first unmet
-  condition), `Eligibility`, the class review store and routes, the automatic
+  change hook (409 naming the first unmet condition; other classes are
+  refused by `Validate` with 400 naming the class), `Eligibility`, the class review store and routes, the automatic
   branch in `propose_task_kandev` with one transaction under
   `pg_advisory_xact_lock(hashtextextended('coordinator_automatic:' || id, 0))`
   (the SQLite single writer) holding the setting and raiser re-read, the
@@ -61,10 +79,12 @@ confirming `create_task`.
 - `internal/coordinator/no_turn_start_test.go`: append the automatic
   approval row to `noTurnStartPaths`
   ([copilot](../../specs/coordinator/system-design/copilot.md#attended-only)).
-- Web: in phase 2's permission settings, "Cannot be raised", the eligibility
-  list, **Review the last 30 days**, **Mark as reviewed**, **Raise to
-  automatic**, the raised record and **Lower**
-  ([Screens](../../specs/coordinator/system-design/automatic.md#screens)).
+- Web: in phase 2's May do section, the Automatic option (disabled with "Cannot
+  be raised" for every other action; enabled for `create_task` only while
+  eligible; the raise is choosing it and saving), the eligibility list,
+  **Review the last 30 days**, **Mark as reviewed** and the raised record
+  ([Screens](../../specs/coordinator/system-design/automatic.md#screens),
+  [Settings layout](../../specs/coordinator/system-design/integration.md#settings-layout)).
 - Copy in six locales.
 
 ## Out of scope
@@ -76,22 +96,23 @@ confirming `create_task`.
 See [plan UI-06](plan.md#ascii-ui-previews).
 
 ```text
-Create a card   Requires approval
+Create a card   (o) Requires approval  ( ) Automatic (disabled)
   Not met  90% approved without edits (85%)  ...
-  [Review the last 30 days] [Mark as reviewed] [Raise to automatic] (disabled)
+  [Review the last 30 days] [Mark as reviewed]   Automatic option disabled
 Merge           Cannot be raised
 ```
 
 ## Acceptance
 
-- Setting any class other than `create_task` to `automatic` is 400 naming it;
-  `create_task` is 409 naming the first unmet of the five conditions, each
+- Setting any class other than `create_task` to `automatic` is 400 naming it,
+  also with phase 3 effective; `create_task` is 409 naming the first unmet of the five conditions, each
   tested at its boundary (29 and 30 days, 19 and 20 rows, 89% and 90%, one
   undo, 7 days); a log read error refuses; lowering is never checked; review
   and settings writes are refused to readers and a coordinator principal.
 - A raised coordinator's valid proposal is approved automatically with every
   phase 1 approve guarantee and no agent start, returns `approved` with the
-  task id, logs decider `automatic` and the raising manager; the eleventh in
+  task id, logs a row with authorization `automatic` and the raising manager as actor
+  (a failed attempt's row too); the eleventh in
   24 hours stays `pending` with the limit note, also when earlier automatic
   approvals ended `failed`; a failed approval is left `failed` for a manager
   and keeps its `automatic_at` through stale-claim recovery.
@@ -99,6 +120,16 @@ Merge           Cannot be raised
   `pending` with the unavailable note, nothing is claimed or counted, and the
   class is lowered with its reason; a raiser check error leaves it `pending`
   without lowering.
+- The Automatic option of every other action stays disabled with "Cannot be
+  raised", and for `create_task` it is enabled only for a manager while
+  eligible (`AC-COORDINATOR-INTEGRATION-007.2`). A raise and a lower each
+  store a `coordinator_class_changes` row with the manager (or null and the
+  reason for `LowerClass`) and bump `policy_revision`; the raised record
+  reads the newest row.
+- A manager's approval of a proposal whose automatic approval failed writes a
+  `requires_approval` row and every other row keeps its authorization
+  (`AC-COORDINATOR-INTEGRATION-004.3`); the raise's log reads exclude rows
+  with authorization `automatic`.
 - Automatic approvals are not decided rows: after a lower and re-raise, 20
   automatic approvals plus 5 manager decisions fail `volume`.
 - A review POST with any body stores `window_end` = now, `window_start` =

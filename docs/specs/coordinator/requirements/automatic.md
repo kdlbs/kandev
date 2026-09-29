@@ -33,15 +33,17 @@ ordinary task and never starts an agent (D15).
 - **Class review:** a manager's record that they reviewed one coordinator's
   evidence window for one class.
 - **Automatic approval:** an approval the system makes because the class is
-  `automatic`, recorded with decider `automatic` and the manager who raised
-  the setting.
+  `automatic`, recorded in the log with the authorization `automatic` (its
+  decider) and the manager who raised the setting.
 - Other terms are defined in [proposals](proposals.md#terminology) and the
   [system README](../README.md#terms).
 
 ## Mockup
 
 The source mockup (`mockup-v2.1`, outside this repository) shows "Raise to
-automatic" gated "until the last 30 days of this class has been reviewed",
+automatic" (in the built settings page the raise is phase 2's **Automatic**
+option of May do, saved with the page's Save; see
+[integration](integration.md#requirements)) gated "until the last 30 days of this class has been reviewed",
 the record "Raised to automatic, recorded against you", and merge and Move to
 Done as classes that cannot be raised. The plan's ASCII preview UI-06 is the
 reference.
@@ -116,7 +118,7 @@ bounded and recorded.
   proposal shall be left `failed` exactly as a manager's failed approval is,
   for a manager to approve, edit, reply to or reject.
 - **AC-COORDINATOR-AUTOMATIC-003.4:** Every automatic approval shall be a log
-  row naming the decider `automatic` and the manager who raised the setting.
+  row with the authorization `automatic` and the manager who raised the setting as its actor.
 
 ### REQ-COORDINATOR-AUTOMATIC-004: Lowering
 

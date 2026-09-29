@@ -118,15 +118,15 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-RELAY-003.1:** While `features.coordinatorPhase3` is on, a
-  `pending` or `failed` proposal card shall offer **Reply with a condition** to
+  `pending` proposal card shall offer **Reply with a condition** to
   managers on both surfaces. Submitting 1 to 2,000 characters after trimming
   shall set the proposal `returned` with the reply text, the deciding user and
   the time, create nothing, and emit `coordinator.updated`. Empty or longer
   text shall be refused in place and change nothing.
-- **AC-COORDINATOR-RELAY-003.2:** A reply shall follow the same status rules as
-  reject: any status other than `pending` or `failed` returns 409 with the
+- **AC-COORDINATOR-RELAY-003.2:** A reply shall be accepted only for a
+  `pending` proposal: any other status, including `failed`, returns 409 with the
   current proposal, and a reply racing an approve or reject leaves exactly one
-  winner.
+  winner ([integration](integration.md), `AC-COORDINATOR-INTEGRATION-006.1`).
 - **AC-COORDINATOR-RELAY-003.3:** After the proposal is `returned`, the system
   shall send the coordinator's conversation a message from the replying
   manager that quotes the proposal's title and the reply, opening the

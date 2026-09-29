@@ -58,7 +58,8 @@ unattended turns on this decision.
 Phase 3 ships behind a new release toggle, `features.coordinatorPhase3`
 (`KANDEV_FEATURES_COORDINATOR_PHASE3`), `prod: "false"`, `dev: "false"`,
 `e2e: "true"`, restart required. It is effective only while
-`features.coordinator` is also on. Off, no wake is stored, no backstop runs,
+`features.coordinator` and `features.coordinatorPhase2` are also on, because
+phase 3 reads phase 2's watch set, log and per-action settings. Off, no wake is stored, no backstop runs,
 no unattended turn starts, and every phase 3 route returns 404; stored
 settings, wakes, turn rows, reviews and pending changes are kept.
 
@@ -231,8 +232,10 @@ REST when auth is off) stays accepted for them, because a manager is present.
   answer contract exists.
 - **Reply with a condition** settles a proposal as `returned` with the
   manager's text and delivers that text into the coordinator's conversation
-  as the manager's own message, an attended turn. The coordinator may propose
-  again with `in_reply_to`.
+  as the manager's own message, an attended turn. Only a `pending` proposal can be
+  returned; a `failed` one keeps Approve, Reject and Try again, because a retry
+  of a failed create reconciles a task the failed attempt may already have
+  created. The coordinator may propose again with `in_reply_to`.
 - **Improvement proposals** are a second proposal kind, proposed with
   `propose_improvement_kandev`, that suggests a replacement for the
   coordinator's context and cites 1 to 10 pieces of evidence, at least one an
@@ -240,6 +243,37 @@ REST when auth is off) stays accepted for them, because a manager is present.
   manager applies it in settings, where Apply is refused if the context has
   changed since the proposal. Never automatic, never edited, and never a
   target other than the context.
+
+### As built amendment (2026-09-30)
+
+Phase 2 is now built, so the package was checked against its code and settled
+seven points, recorded in
+[integration](../specs/coordinator/requirements/integration.md) and its
+[design](../specs/coordinator/system-design/integration.md):
+
+1. Wakes follow phase 2's effective watch set, through the one
+   `EffectiveWatchSet` read, and an unattended turn goes through the same
+   guard as an attended one.
+2. An unattended turn runs with its conversation's bound tool list. Delivery
+   and containment never add a tool or approve a request; the denial only
+   removes capability.
+3. "What it did" marks unattended rows with the unattended turn's id (a turn
+   delivers up to 20 wakes, so a wake id would not identify it), adds the
+   outcome `returned`, and records an automatic approval with the
+   authorization `automatic` and the raising manager as actor, so no decider
+   column is added. Phase 2 stores no per-setting changed-by or changed-at, so
+   an append-only class change table, a system lower and an undo hook are
+   added.
+4. An unattended turn carries the instructions its session was built with;
+   standing orders are marked applied only when a proposal cites them.
+5. `returned` is set only from `pending`, and an improvement is a phase 2
+   proposal kind that never re-runs on a stale claim (the built recovery
+   refuses a kind that does), so a stale improvement claim settles `failed`
+   and a manager's Approve re-runs the idempotent insert.
+6. The raise of `create_task` is phase 2's Automatic option of May do, saved
+   with Save; there is no separate Raise or Lower control. Autonomy is the
+   sixth entry of the Sections row.
+7. "Woken by" is a renderer in the one transcript message component.
 
 ## Residual risk
 
@@ -323,10 +357,11 @@ Until then no phase 3 work order is built.
 
 ## Consequences
 
-- The coordinator package gains five tables (`coordinator_wakes`,
+- The coordinator package gains six tables (`coordinator_wakes`,
   `coordinator_unattended_turns`, `coordinator_unattended_denials`,
-  `coordinator_class_reviews`, `coordinator_pending_changes`), columns on `coordinators` and
-  `coordinator_proposals`, a recorder, a 60-second backstop and a delivery
+  `coordinator_class_reviews`, `coordinator_class_changes`,
+  `coordinator_pending_changes`), columns on `coordinators`,
+  `coordinator_proposals` and `coordinator_activity`, a recorder, a 60-second backstop and a delivery
   loop, all built only when phase 3 is effective.
 - The task usage writer gains an optional post-commit observer; the
   orchestrator's `handlePermissionRequest` gains an optional coordinator

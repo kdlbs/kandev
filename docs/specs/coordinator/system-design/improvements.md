@@ -11,6 +11,8 @@ requirements:
   - REQ-COORDINATOR-IMPROVEMENTS-001
   - REQ-COORDINATOR-IMPROVEMENTS-002
   - REQ-COORDINATOR-IMPROVEMENTS-003
+  - REQ-COORDINATOR-INTEGRATION-003
+  - REQ-COORDINATOR-INTEGRATION-006
 ---
 
 # Improvement proposals System Design
@@ -34,8 +36,10 @@ configuration.
 
 ## Store
 
-`coordinator_proposals` gains `kind text not null default 'task'` (`task` or
-`improvement`). For an improvement, `spec_json` is:
+Phase 2's `coordinator_proposals.kind` column (default `create_task`) carries
+the value `improvement`, registered as a `KindExecutor` in the phase 2 kinds
+registry ([integration](integration.md#proposal-statuses-and-kinds)); this
+document adds no column to that table. For an improvement, `spec_json` is:
 
 ```json
 {
@@ -72,7 +76,11 @@ Deleted with the coordinator and on `workspace.deleted`.
 
 `propose_improvement_kandev` is registered on the coordinator surface only
 while phase 3 is effective, added to the exact-name auto-approve list and the
-guard's allowed coordinator actions, and absent from every other surface.
+guard's allowed coordinator actions, and absent from every other surface. It
+enters a conversation's bound list through the `phase3` input of
+`ToolNames`, evaluated when the conversation is opened, so a conversation
+opened before phase 3 was on has no such tool
+(`AC-COORDINATOR-INTEGRATION-003.3`).
 Arguments: `title`, `rationale`, `context`, `evidence` (array of objects with
 exactly one of `run_id` or `task_id`). There is no `in_reply_to`: a reply to
 an improvement is delivered with text that asks for a new improvement
@@ -115,7 +123,7 @@ applies nothing.
 - **Show the change** reveals a line diff of `context_before` and
   `context_after` using the existing diff viewer component; the card records
   that it was shown in component state.
-- For managers on a `pending` or `failed` improvement:
+- For managers on a `pending` improvement (a `failed` one keeps Approve and Reject):
   **Approve as a reviewable change**, disabled with the hint "Show the change
   first" until the diff has been shown in this card instance; **Reject**; and
   **Reply with a condition** ([relay](relay.md#cards)). No **Edit**.
@@ -129,12 +137,22 @@ The approve route refuses edits for an improvement with 400 naming `edits`.
 The phase 1 approve route branches on `kind` after the claim:
 
 1. Claim as for tasks (`pending` or `failed` to `approving`, token, frozen
-   spec).
+   spec), through the kinds registry.
 2. Instead of the task create, insert the `coordinator_pending_changes` row
    with `INSERT ... ON CONFLICT (proposal_id) DO NOTHING`, then complete the
    proposal `approved` with `task_id` null, fenced by the claim token.
-3. Stale-claim recovery re-runs step 2, which the unique `proposal_id` makes
-   idempotent.
+3. The improvement executor reports `ReRunsOnStaleClaim() = false`, because
+   the built reclaim path refuses to re-run a kind that reports true. A claim
+   left `approving` past the stale window is settled `failed` with the reason
+   `outcome_unknown` and no second execution
+   (`AC-COORDINATOR-INTEGRATION-006.5`); a manager's Approve on that `failed`
+   card claims it again and re-runs step 2, which the unique `proposal_id`
+   makes idempotent.
+
+An improvement has no per-action policy class among the six. Its activity
+rows use the activity-only class `improvement` and the guard's policy
+re-check returns nil for it, so a task-creation setting never governs it
+([integration](integration.md#proposal-statuses-and-kinds)).
 
 The coordinator's configuration is not touched
 (`AC-COORDINATOR-IMPROVEMENTS-003.1`). The automatic path of

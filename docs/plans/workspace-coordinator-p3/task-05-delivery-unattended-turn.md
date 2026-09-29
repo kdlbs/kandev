@@ -12,6 +12,10 @@ requirements:
   - REQ-COORDINATOR-WAKE-003
   - REQ-COORDINATOR-WAKE-004
   - REQ-COORDINATOR-WAKE-005
+  - REQ-COORDINATOR-INTEGRATION-002
+  - REQ-COORDINATOR-INTEGRATION-003
+  - REQ-COORDINATOR-INTEGRATION-004
+  - REQ-COORDINATOR-INTEGRATION-005
 acceptance_criteria:
   - AC-COORDINATOR-WAKE-003.1
   - AC-COORDINATOR-WAKE-003.2
@@ -22,10 +26,19 @@ acceptance_criteria:
   - AC-COORDINATOR-WAKE-005.3
   - AC-COORDINATOR-WAKE-005.4
   - AC-COORDINATOR-WAKE-005.6
+  - AC-COORDINATOR-INTEGRATION-002.2
+  - AC-COORDINATOR-INTEGRATION-002.4
+  - AC-COORDINATOR-INTEGRATION-003.1
+  - AC-COORDINATOR-INTEGRATION-003.2
+  - AC-COORDINATOR-INTEGRATION-004.1
+  - AC-COORDINATOR-INTEGRATION-005.1
+  - AC-COORDINATOR-INTEGRATION-005.2
+  - AC-COORDINATOR-INTEGRATION-005.3
 system_design:
   - ../../specs/coordinator/system-design/wake.md
   - ../../specs/coordinator/system-design/containment.md
   - ../../specs/coordinator/system-design/spend.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 05: Admission, Delivery And The Unattended Turn (WP-11)
@@ -65,6 +78,21 @@ creates, archives or repoints a conversation.
   which run whatever `autonomy_enabled` reads) and the step 3.2 `Deliver`.
   The turn row's `start_ceiling_subcents` is written at the step 3 insert. Kick triggers from wake insert, conversation idle, the autonomy
   and ceiling PATCH, and turn end.
+- Step 2 reads `EffectiveWatchSet` once per delivery and supersedes a wake
+  whose task is outside it; a failed read leaves the wakes `pending` and
+  delivers none
+  ([Watch set](../../specs/coordinator/system-design/integration.md#watch-set)).
+  Delivery passes no tool, binding or allowlist option to `PromptTask` and
+  the message names no tool
+  ([Tool list](../../specs/coordinator/system-design/integration.md#tool-list)).
+- `currentUnattendedTurn` and the unattended stamp on the rows the coordinator
+  principal writes (the propose handlers and `RecordRefusal`), and the
+  refusal coalescing key including `unattended_turn_id`
+  ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
+  The column and values come from task 01; the copy is task 08's.
+- Instructions, orders and goal: delivery adds none to the wake message;
+  `MarkApplied` stays where phase 2 runs it
+  ([Instructions](../../specs/coordinator/system-design/integration.md#instructions-orders-and-goal)).
 - The turn message text ([Transcript](../../specs/coordinator/system-design/wake.md#transcript)),
   agent-facing, not localized.
 - `no_turn_start_test.go`: add the wake delivery as the one allowed non-manager
@@ -73,7 +101,10 @@ creates, archives or repoints a conversation.
   relay read) to `noTurnStartPaths`. Reply delivery is a manager's message
   and is covered by task 08; the automatic approval row is added by task 09
   and the improvement approve and apply rows by task 10, each with its own
-  code.
+  code. The table also gains a row for the passive resume block
+  `autoResumeBlockedCoordinatorMessageOnly`
+  (`orchestrator/task_operations.go`, `autoResumeEligibility`), which stays
+  unchanged: delivery is a direct `PromptTask` and never a passive resume.
 
 ## Out of scope
 
@@ -126,8 +157,29 @@ creates, archives or repoints a conversation.
   manager message while the `turn.completed` settle is suppressed: the
   backstop settles the unattended row `completed` because the active turn
   differs, and the manager's turn is never treated as unattended.
-- A turn uses the phase 1 tool surface and policy (guard table test runs
-  against a delivery-started session).
+- A turn uses the phase 1 tool surface and policy: the guard table test runs
+  against a delivery-started session and asserts the same refusals and the
+  same bound tool list as an attended session, and that delivery, admission,
+  containment and the permission denial add no tool and approve no request the
+  allowlist left open (`AC-COORDINATOR-INTEGRATION-003.1`, `003.2`). During
+  the turn, a read or proposal naming an unwatched workflow or task is
+  answered as in an attended turn (`AC-COORDINATOR-INTEGRATION-002.4`).
+- A wake whose task left the watch set after it was stored is `superseded` at
+  the next delivery; a failed watch read leaves it `pending`
+  (`AC-COORDINATOR-INTEGRATION-002.2`).
+- A proposal, a refusal and an automatic approval written while the turn is
+  open carry its `unattended_turn_id`; the same writes by a manager's
+  request while it is open, and any write outside a turn, carry none; a
+  failed turn read stamps nothing; two refusals coalesce only when their turn
+  ids match (`AC-COORDINATOR-INTEGRATION-004.1`).
+- The turn carries the session's instructions with no second copy in the wake
+  message; a proposal citing a standing order marks it applied in its own
+  transaction and a turn that proposes nothing marks none; after a
+  conversation reset the next turn is held `no_conversation` until a manager
+  opens the copilot (`AC-COORDINATOR-INTEGRATION-005.1` to `005.3`).
+- A `WAITING_FOR_INPUT` session with no live execution gets the same result
+  from delivery as from a manager's message through `PromptTask` (a resumed
+  turn, or a refusal that returns the wakes to `pending`).
 
 ## Verification
 

@@ -9,6 +9,7 @@ plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-WAKE-001
   - REQ-COORDINATOR-WAKE-002
+  - REQ-COORDINATOR-INTEGRATION-002
 acceptance_criteria:
   - AC-COORDINATOR-WAKE-001.1
   - AC-COORDINATOR-WAKE-001.2
@@ -18,8 +19,11 @@ acceptance_criteria:
   - AC-COORDINATOR-WAKE-002.2
   - AC-COORDINATOR-WAKE-002.3
   - AC-COORDINATOR-WAKE-002.4
+  - AC-COORDINATOR-INTEGRATION-002.1
+  - AC-COORDINATOR-INTEGRATION-002.3
 system_design:
   - ../../specs/coordinator/system-design/wake.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 04: Wake Recorder And Level-Triggered Backstop (WP-11)
@@ -37,6 +41,11 @@ current episode from stored state.
   count below 200, then insert-or-nothing on the unique key, in one
   transaction), pending reads
   ([Own tasks](../../specs/coordinator/system-design/wake.md#own-tasks)).
+  `ListOwnTasks` returns each task's `workflow_id`; the recorder and the
+  backstop read `EffectiveWatchSet` once per coordinator and store a wake only
+  for a watched own task, and drop the event or skip the coordinator's wake
+  duties for the pass when the set cannot be read
+  ([Watch set](../../specs/coordinator/system-design/integration.md#watch-set)).
 - `internal/coordinator/wake_episodes.go`: one reader per kind returning the
   current episode key from stored state (pending clarification bundle,
   pending permission message, `coordinator_stalls` row only while
@@ -76,6 +85,12 @@ current episode from stored state.
   insert and a metric, and the backstop stores it once below 200; 20
   concurrent `RecordWake` calls for new episodes at 190 pending leave exactly
   200 (SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with `-race`).
+- An episode on an own task in an unwatched workflow, or with no workflow,
+  stores no wake from the recorder or the backstop; with the watch read
+  failing, nothing is stored for that coordinator in that pass; adding a
+  workflow to the watch set, or moving an own task into a watched one, stores
+  its existing episodes at the next backstop pass
+  (`AC-COORDINATOR-INTEGRATION-002.1`, `002.3`).
 - A stall row whose `detected_at` is earlier than the task's
   `last_activity_at` stores no wake from the recorder or the backstop.
 - With every event suppressed, the backstop stores each episode within one

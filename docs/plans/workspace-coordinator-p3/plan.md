@@ -25,6 +25,14 @@ requirements:
   - REQ-COORDINATOR-IMPROVEMENTS-001
   - REQ-COORDINATOR-IMPROVEMENTS-002
   - REQ-COORDINATOR-IMPROVEMENTS-003
+  - REQ-COORDINATOR-INTEGRATION-001
+  - REQ-COORDINATOR-INTEGRATION-002
+  - REQ-COORDINATOR-INTEGRATION-003
+  - REQ-COORDINATOR-INTEGRATION-004
+  - REQ-COORDINATOR-INTEGRATION-005
+  - REQ-COORDINATOR-INTEGRATION-006
+  - REQ-COORDINATOR-INTEGRATION-007
+  - REQ-COORDINATOR-INTEGRATION-008
 system_design:
   - ../../specs/coordinator/system-design/wake.md
   - ../../specs/coordinator/system-design/containment.md
@@ -32,6 +40,7 @@ system_design:
   - ../../specs/coordinator/system-design/relay.md
   - ../../specs/coordinator/system-design/automatic.md
   - ../../specs/coordinator/system-design/improvements.md
+  - ../../specs/coordinator/system-design/integration.md
 legacy_specs: []
 ---
 
@@ -49,15 +58,20 @@ and permissions on the Needs you card, reply to a proposal with a condition,
 raise `create_task` to `automatic` once a coordinator's log earns it, and
 review improvement proposals that cite unattended runs.
 
-Everything ships behind `features.coordinatorPhase3` (with
-`features.coordinator`), `prod: "false"`. The decisions and gate are in
+Everything ships behind `features.coordinatorPhase3` (effective only with
+`features.coordinator` and `features.coordinatorPhase2`,
+[integration](../../specs/coordinator/requirements/integration.md)),
+`prod: "false"`. The decisions and gate are in
 [ADR-2026-09-29-coordinator-phase-3-autonomy](../../decisions/2026-09-29-coordinator-phase-3-autonomy.md);
 the phase map is in
 [ADR-2026-09-26-workspace-coordinator](../../decisions/2026-09-26-workspace-coordinator.md#phase-plan).
-Phase 2 (control) is specified in parallel; this plan consumes its D17
-settings, "What it did" log and undo through the adapters of
+Phase 2 (control) is built; this plan consumes its D17 settings, "What it
+did" log, watch set, tool list and proposal kinds as built, through the
+adapters of
 [automatic](../../specs/coordinator/system-design/automatic.md#phase-2-interfaces-consumed)
-and does not specify them.
+and the rulings of
+[integration](../../specs/coordinator/system-design/integration.md), and does
+not respecify them.
 
 ## Gate
 
@@ -103,7 +117,7 @@ request once every work order passes.
 | [task-10](task-10-improvements.md) | WP-12 | M | 06, 08 | Improvement proposals, the card, pending changes applied in settings |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Every acceptance
-criterion of the six requirement documents is owned by exactly one work
+criterion of the seven requirement documents is owned by exactly one work
 order's frontmatter ([Traceability](#traceability)).
 
 ## Backend
@@ -120,6 +134,13 @@ order's frontmatter ([Traceability](#traceability)).
 - `internal/mcp/handlers`: `propose_improvement_kandev` and `in_reply_to` on
   `propose_task_kandev`; the guard's refused routes gain the phase 3 write
   routes (tasks 08, 10).
+- Phase 2 touch points, all additive and listed with owners in
+  [integration](../../specs/coordinator/system-design/integration.md#phase-2-touch-points):
+  `coordinator_activity.unattended_turn_id`, the `returned`, `automatic` and
+  `improvement` values, `coordinator_class_changes`, `Validate(p, phase3)`,
+  the `SaveSettings` change hook, `LowerClass`, the post-commit `OnUndo`, the
+  `returned` proposal status, the improvement `KindExecutor` and the
+  `phase3` input of `ToolNames`.
 - `internal/runtimeflags/registry.go` and root `profiles.yaml`: the flag
   (task 01), through `/runtime-feature-flags`.
 
@@ -284,22 +305,26 @@ Criteria: `AC-COORDINATOR-RELAY-003.*`.
 ### UI-06: Raising `create_task` to automatic (phase 2 permission settings)
 
 ```text
-Create a card        Requires approval
-  Eligibility
-    Met      30 days of history (since 2026-11-02)
-    Met      20 or more decisions (34)
-    Not met  90% approved without edits (85%)
-    Met      Nothing undone (0)
-    Not met  Reviewed in the last 7 days
-  [Review the last 30 days]  [Mark as reviewed]  [Raise to automatic] (disabled)
-Merge                Cannot be raised
-Move to Done         Cannot be raised
-after a raise:       Raised to automatic by you at 10:04  [Lower]
+May do
+  Create a card    ( ) Never  (o) Requires approval  ( ) Automatic (disabled)
+    Eligibility
+      Met      30 days of history (since 2026-11-02)
+      Met      20 or more decisions (34)
+      Not met  90% approved without edits (85%)
+      Met      Nothing undone (0)
+      Not met  Reviewed in the last 7 days
+    [Review the last 30 days]  [Mark as reviewed]
+  Merge            Automatic (disabled)  Cannot be raised
+  Move to Done     Automatic (disabled)  Cannot be raised
+eligible:          Automatic option enabled; choose it, then Save
+after a raise:     Raised to automatic by you at 10:04
+lower:             choose Requires approval, then Save
 ```
 
-Phone: one column; the three buttons stack.
+Phone: one column; the two buttons stack.
 
-Criteria: `AC-COORDINATOR-AUTOMATIC-001.2`, `002.3`.
+Criteria: `AC-COORDINATOR-AUTOMATIC-001.2`, `002.3`,
+`AC-COORDINATOR-INTEGRATION-007.2`.
 
 ### UI-07: Improvement card
 
@@ -327,6 +352,26 @@ Phone: the diff scrolls horizontally inside the card; buttons stack.
 
 Criteria: `AC-COORDINATOR-IMPROVEMENTS-002.*`, `003.1`, `003.2`.
 
+### UI-08: Sections row and log rows
+
+```text
+Sections: Identity | Watches | May do | Standing orders | Goal | Autonomy
+          (Autonomy is present only while phase 3 is effective)
+
+What it did
+  10:04  create_task  Proposed  KAN-431 Split the migration
+         During an unattended turn
+  10:04  create_task  Approved automatically, raised by Dana   Undo
+         During an unattended turn
+  10:09  create_task  Returned by Dana, with a condition
+         Condition: Only if it stays under 200 lines
+  10:12  improvement  Proposed  Ask before proposing on Review   No undo
+```
+
+Phone: each row is a card; the unattended mark is a second muted line.
+
+Criteria: `AC-COORDINATOR-INTEGRATION-004.1` to `004.3`, `007.1`.
+
 ## Traceability
 
 | Criteria | Work order |
@@ -341,6 +386,13 @@ Criteria: `AC-COORDINATOR-IMPROVEMENTS-002.*`, `003.1`, `003.2`.
 | `AC-COORDINATOR-RELAY-003.1` to `003.5` | 08 |
 | `AC-COORDINATOR-AUTOMATIC-001.1` to `004.3` (all 13) | 09 |
 | `AC-COORDINATOR-IMPROVEMENTS-001.1` to `003.3` (all 9) | 10 |
+| `AC-COORDINATOR-INTEGRATION-001.1` | 01 |
+| `AC-COORDINATOR-INTEGRATION-002.1`, `002.3` | 04 |
+| `AC-COORDINATOR-INTEGRATION-002.2`, `002.4`, `003.1`, `003.2`, `004.1`, `005.1`, `005.2`, `005.3` | 05 |
+| `AC-COORDINATOR-INTEGRATION-007.1`, `008.1` | 06 |
+| `AC-COORDINATOR-INTEGRATION-004.2`, `006.1`, `006.2`, `006.3` | 08 |
+| `AC-COORDINATOR-INTEGRATION-004.3`, `007.2` | 09 |
+| `AC-COORDINATOR-INTEGRATION-003.3`, `006.4`, `006.5` | 10 |
 
 The amended phase 1 criteria (`AC-COORDINATOR-COPILOT-002.1`,
 `AC-COORDINATOR-NEEDS-YOU-002.4`, `002.5`) stay owned by their phase 1 work
@@ -368,7 +420,7 @@ orders; tasks 05, 06 and 07 update the phase 1 tests that pin them.
 
 | Risk | Mitigation |
 | --- | --- |
-| Phase 2's settings or log differ from the interfaces task 09 assumes | Adapters in `phase2.go` absorb names; a missing capability re-plans task 09 only |
+| Phase 2's settings or log differ from the interfaces task 09 assumes | Built phase 2 was checked: the adapter mapping and the capabilities phase 3 adds (class change history, change hook, `LowerClass`, `OnUndo`, `automatic` authorization) are in [automatic](../../specs/coordinator/system-design/automatic.md#phase-2-interfaces-consumed); a further mismatch re-plans task 09 only |
 | The log review shows `create_task` is not the right first class | The ADR's evidence gate; task 09 alone re-plans |
 | A usage row lands after the ceiling is crossed | Documented overshoot of one report, or one backstop period on a dropped call or failed cancel; backstop re-check every 60 s |
 | Containment passes on an executor that is not isolated in practice (for example a Docker host that is the backend host with the socket mounted) | Residual recorded in the ADR; the fix text names the conditions checked, not a guarantee |

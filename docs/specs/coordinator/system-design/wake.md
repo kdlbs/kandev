@@ -51,8 +51,10 @@ exactly one conversation, and the rules below never create another.
   `KANDEV_FEATURES_COORDINATOR_PHASE3`) is registered in
   `internal/runtimeflags/registry.go` with `RestartRequired: true` and in root
   `profiles.yaml` as `prod: "false"`, `dev: "false"`, `e2e: "true"`, per the
-  `/runtime-feature-flags` checklist. Phase 3 is **effective** only when both
-  it and `features.coordinator` are on; `internal/backendapp/coordinator.go`
+  `/runtime-feature-flags` checklist. Phase 3 is **effective** only when it,
+  `features.coordinatorPhase2` and `features.coordinator` are all on
+  ([integration](integration.md#effective-condition));
+  `internal/backendapp/coordinator.go`
   computes that once at startup and builds none of this design's subscribers,
   tickers or routes otherwise, so their routes return 404.
 - The `coordinators` table gains, by additive `ALTER`:
@@ -150,7 +152,10 @@ see each other's committed results and never interleave.
 reverse lookup the recorder needs, `CoordinatorsOwningTask(ctx, taskID)`,
 uses the same predicates plus `coordinators.autonomy_enabled = 1`; a task can
 be owned by at most one coordinator because a proposal's external id is
-unique, but the method returns a list and the recorder loops.
+unique, but the method returns a list and the recorder loops. Both return each
+task's `workflow_id`, and every caller keeps only tasks inside the
+coordinator's effective watch set ([integration](integration.md#watch-set)),
+read once per pass or event.
 
 ## Recorder
 
@@ -165,9 +170,10 @@ effective:
 | `task_session.error_changed` with `active: true` | `error` | the payload's `stamp` |
 | `task.state_changed` with `state` `COMPLETED` | `completed` | `completed` |
 
-For each event the recorder resolves `CoordinatorsOwningTask`, skips a session
-that is not the task's primary session, re-reads the condition from stored
-state, and when it holds calls `RecordWake`. `RecordWake` takes the
+For each event the recorder resolves `CoordinatorsOwningTask`, keeps the
+coordinators whose watch set holds the task's workflow, skips a session that
+is not the task's primary session, re-reads the condition from stored state,
+and when it holds calls `RecordWake`. `RecordWake` takes the
 [wake lock](#wake-lock), counts the coordinator's pending rows and, below 200,
 runs `INSERT ... ON CONFLICT (coordinator_id, task_id, kind, episode_key) DO
 NOTHING` in the same transaction. At 200 or more it inserts nothing and
@@ -217,8 +223,9 @@ Each tick:
    `coordinator_backstop_skipped_total`, and does not skip the later duties
    or coordinators.
 3. Only when the re-read row has `autonomy_enabled = 1`, runs the wake duties:
-   1. reads `ListOwnTasks` and, per task, the current episodes from stored
-      state: the primary session's pending clarification bundle and pending
+   1. reads `ListOwnTasks`, keeps the tasks in the coordinator's watch set
+      ([integration](integration.md#watch-set)) and, per task, reads the
+      current episodes from stored state: the primary session's pending clarification bundle and pending
       permission message, the task's `coordinator_stalls` row when
       [current](#stall-currency), the primary session's active error, and the
       task state. It calls `RecordWake` for each. A read error for one
@@ -307,7 +314,9 @@ ceiling-releasing turn end, and each backstop tick.
 4. Build the turn message ([Transcript](#transcript)) and send it through the
    orchestrator's direct prompt path (`orchestrator.Service.PromptTask`,
    extended with an options value carrying the coordinator's system author
-   and `metadata.coordinator_wake_turn_id` set to the turn row id). Delivery
+   and `metadata.coordinator_wake_turn_id` set to the turn row id, and no tool
+   or binding option: the session keeps its bound tool list,
+   [integration](integration.md#tool-list)). Delivery
    never uses the message queue (`orchestrator/messagequeue`), so a wake
    message is never queued behind another turn: admission check 7 ran in
    step 1, and a manager message that made the session busy since then makes
@@ -340,8 +349,8 @@ merely a condition of the same kind:
 | `error` | the primary session's active error has `stamp` equal to `episode_key` |
 | `completed` | the task's state is `COMPLETED` |
 
-The task no longer being an own task (archived, deleted, ephemeral) ends
-every kind. A read error for one wake leaves it `pending`, excludes it from
+The task no longer being a watched own task (archived, deleted, ephemeral,
+or its workflow outside the watch set) ends every kind. A read error for one wake leaves it `pending`, excludes it from
 this delivery, and does not supersede it.
 
 ### Finding the turn's message
@@ -401,8 +410,12 @@ Events since your last turn (N):
 - stall on <identifier> "<title>"
 These were current when this turn started and may have changed since; read
 current state before acting. Propose what should happen. Proposals wait for a
-manager.
+manager unless one has allowed automatic creation of tasks.
 ```
+
+The message carries no orders, goal, context or tool names: the turn has the
+conversation's instructions and bound tool list
+([integration](integration.md#instructions-orders-and-goal)).
 
 Titles are quoted, truncated and stripped of newlines; they are still board
 content ([ADR residual](../../../decisions/2026-09-29-coordinator-phase-3-autonomy.md#residual-risk)).

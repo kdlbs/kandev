@@ -8,21 +8,28 @@ depends_on:
 plan: "plan.md"
 requirements:
   - REQ-COORDINATOR-RELAY-003
+  - REQ-COORDINATOR-INTEGRATION-004
+  - REQ-COORDINATOR-INTEGRATION-006
 acceptance_criteria:
   - AC-COORDINATOR-RELAY-003.1
   - AC-COORDINATOR-RELAY-003.2
   - AC-COORDINATOR-RELAY-003.3
   - AC-COORDINATOR-RELAY-003.4
   - AC-COORDINATOR-RELAY-003.5
+  - AC-COORDINATOR-INTEGRATION-004.2
+  - AC-COORDINATOR-INTEGRATION-006.1
+  - AC-COORDINATOR-INTEGRATION-006.2
+  - AC-COORDINATOR-INTEGRATION-006.3
 system_design:
   - ../../specs/coordinator/system-design/relay.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 08: Reply To A Proposal With A Condition (WP-11)
 
 ## Summary
 
-Adds the `returned` proposal status, the reply and deliver routes, delivery of
+Adds the `returned` proposal status (set only from `pending`), the reply and deliver routes, delivery of
 the reply as the manager's own message to the coordinator's conversation,
 `in_reply_to` on `propose_task_kandev`, and the **Reply with a condition**
 control on both proposal card surfaces.
@@ -43,6 +50,19 @@ control on both proposal card surfaces.
   returned message, and the kind-specific delivery text; the guard's refused list gains both routes;
   `in_reply_to` validation ([Revised proposals](../../specs/coordinator/system-design/relay.md#revised-proposals));
   the client store's never-unsettle rule treats `returned` as settled.
+- The `returned` status against phase 2's proposal store
+  ([Proposal statuses](../../specs/coordinator/system-design/integration.md#proposal-statuses-and-kinds)):
+  the reply's conditional update is `WHERE id = ? AND status = 'pending'`;
+  `ApproveProposal`, `approveKind` and reject answer a `returned` proposal with
+  409 and the current proposal; stale-claim recovery and the open-proposal
+  count and open-target index need no change; the `returned` activity row
+  (`ActivityOutcome` `returned`, class `kindAction(kind)`, authorization
+  `requires_approval`, actor the replying manager, detail the reply text)
+  written in the reply's locked transaction, and its copy in six locales
+  ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
+  The unattended mark copy (`activityUnattended`) is added here with the
+  what-it-did text table. A `failed` card keeps Approve, Reject and Try again
+  and shows no **Reply with a condition**.
 - Web: the control, returned and revised card states and **Send again** in
   the phase 1 `ProposalCard` ([Cards](../../specs/coordinator/system-design/relay.md#cards)).
 - Copy in six locales.
@@ -65,10 +85,16 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
 
 ## Acceptance
 
-- A manager's reply of 1 to 2,000 trimmed characters sets `returned` with the
-  text and decider, creates no task, emits `coordinator.updated`; empty or
-  longer is 400 naming `text`; a settled proposal is 409 before validation; a
-  reply racing approve or reject leaves exactly one winner (race test).
+- A manager's reply of 1 to 2,000 trimmed characters to a `pending` proposal
+  sets `returned` with the text and decider, creates no task, writes the
+  `returned` activity row in the same transaction, emits
+  `coordinator.updated`; empty or longer is 400 naming `text`; a proposal in
+  any other status, including `failed`, is 409 with the current proposal
+  before validation; a reply racing approve or reject leaves exactly one
+  winner (race test). Approve and reject of a `returned` proposal are 409; a
+  `returned` proposal is not counted toward the 25 open, does not hold its
+  task's open-target slot, and is ignored by the stale-claim pass
+  (`AC-COORDINATOR-INTEGRATION-004.2`, `006.1`, `006.2`).
 - The reply is delivered as the manager's message (opening a conversation when
   none), queued behind a busy turn and dispatched when it ends; a send failure leaves `returned` with
   "Reply saved, not delivered" and **Send again**, which delivers once.
@@ -101,7 +127,9 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
   delivery.
 - A reply to an improvement is delivered with the improvement text, which
   names no `in_reply_to`.
-- `in_reply_to` naming a `returned` task proposal of the same coordinator is
+- A revised proposal is a new `pending` row carrying `in_reply_to`; the
+  returned row is never reopened or edited (`AC-COORDINATOR-INTEGRATION-006.3`).
+- `in_reply_to` naming a `returned` `create_task` proposal of the same coordinator is
   accepted; one naming a `returned` improvement is refused; and shown as "Revised after your reply"; any other value is refused
   naming the field; a coordinator principal is refused both routes on every
   transport.

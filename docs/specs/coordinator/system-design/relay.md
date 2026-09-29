@@ -119,9 +119,15 @@ repository query directly, not the flag-gated Inbox handler.
 | `reply_delivery_claimed_at` | timestamp null | when the latest delivery attempt started, kept for diagnostics and the warn log; it gates nothing and is never rendered. At-most-once rests on the message key, see [Reply delivery](#reply-delivery) |
 | `in_reply_to` | text null | a `returned` proposal id of the same coordinator |
 
-`status` gains `returned`, a settled status. It is not open, so it does not
-count toward the 25 and is not listed by `status=pending`. The client store's
-never-unsettle rule treats `returned` as settled.
+`status` gains `returned`, a settled status set only from `pending`. It is
+not open, so it does not count toward the 25, does not hold its task's
+open-target slot and is not listed by `status=pending`; it is not claimable
+and the stale-claim sweep, which selects only `approving`, never reads it. The
+client store's never-unsettle rule treats `returned` as settled. The `kind`
+and `in_reply_to` semantics, the touch points in the approve switches and the
+log row a reply writes are in
+[integration](integration.md#proposal-statuses-and-kinds); `kind` is phase 2's
+existing column and this design does not add it.
 
 ## Reply route
 
@@ -131,14 +137,16 @@ never-unsettle rule treats `returned` as settled.
 1. The coordinator guard refuses a coordinator principal, as for approve and
    reject (`AC-COORDINATOR-RELAY-003.5`).
 2. Read the proposal (404 when absent or of another coordinator). When its
-   status is not `pending` or `failed`, return 409 with the current proposal,
-   before validating the text.
+   status is not `pending` (a `failed` proposal included), return 409 with the
+   current proposal, before validating the text.
 3. Trim; empty or over 2,000 characters is 400 naming `text`.
-4. `UPDATE coordinator_proposals SET status='returned', reply_text=?,
-   decided_by=?, updated_at=? WHERE id=? AND status IN ('pending','failed')`.
-   Zero rows: re-read and return 409 with the current proposal. This is the
-   same single conditional update approve's claim and reject use, so a reply
-   racing either leaves one winner.
+4. In one coordinator-locked transaction, `UPDATE coordinator_proposals SET
+   status='returned', reply_text=?, decided_by=?, updated_at=? WHERE id=? AND
+   status='pending'` and, when it matched, the `returned` activity row
+   ([integration](integration.md#log-rows)). Zero rows: re-read and return 409
+   with the current proposal. This is the same single conditional update
+   approve's claim and reject use, so a reply racing either leaves one
+   winner.
 5. Publish `coordinator.updated`, then run [Reply delivery](#reply-delivery)
    and return the proposal with `reply_delivered_at`.
 
@@ -191,7 +199,7 @@ lookup or cancellation is needed for at-most-once.
    session drains it when its turn ends, as any queued manager message
    does. The queue removes an entry when it dispatches it, so the entry is
    dispatched once; a second notify finds nothing to drain. The agent-facing
-   text depends on the proposal's `kind`. For `task`: `Reply to your proposal
+   text depends on the proposal's `kind`. For `create_task`: `Reply to your proposal
    "<title>" (proposal <id>): <reply text>. If you still think the work is
    needed, propose it again with in_reply_to set to <id>.` For `improvement`:
    `Reply to your improvement "<title>" (proposal <id>): <reply text>. If you
@@ -231,7 +239,7 @@ nothing, so Send again stores the reply once.
 
 - `propose_task_kandev` accepts optional `in_reply_to`. Validation adds: the
   id names a proposal of the calling coordinator with status `returned` and
-  `kind = 'task'`, otherwise the call is refused naming `in_reply_to`.
+  `kind = 'create_task'`, otherwise the call is refused naming `in_reply_to`.
   `propose_improvement_kandev` has no `in_reply_to` argument
   ([improvements](improvements.md#tool)).
 - A proposal card with `in_reply_to` shows "Revised after your reply" and the
@@ -248,7 +256,7 @@ nothing, so Send again stores the reply once.
 ## Cards
 
 The **Reply with a condition** control is added to `ProposalCard` for
-`pending` and `failed` proposals, for managers, while phase 3 is on: a
+`pending` proposals (not `failed`), for managers, while phase 3 is on: a
 textarea (2,000 characters, counter), **Send reply** disabled until the
 trimmed text is non-empty, and **Cancel** returning focus to the control. On
 the chat card it opens in place, unlike Edit, because it has one field. A 409

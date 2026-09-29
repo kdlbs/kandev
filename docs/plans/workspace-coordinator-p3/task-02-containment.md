@@ -20,6 +20,7 @@ acceptance_criteria:
   - AC-COORDINATOR-CONTAINMENT-003.2
 system_design:
   - ../../specs/coordinator/system-design/containment.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 02: Containment Check And Unattended Permissions (WP-11)
@@ -51,6 +52,10 @@ during an unattended turn and counts them on the turn row.
   backstop re-resolves a recorded denial whose message is still pending
   ([Unattended permissions](../../specs/coordinator/system-design/containment.md#unattended-permissions)).
 - `coordinator_containment_failed_total{condition}` and the state-change log.
+- The denial only removes capability: it never adds a tool to the bound list
+  or approves a request the allowlist left open
+  ([integration Tool list](../../specs/coordinator/system-design/integration.md#tool-list);
+  `AC-COORDINATOR-INTEGRATION-003.2` is owned and tested by task 05).
 
 ## Out of scope
 

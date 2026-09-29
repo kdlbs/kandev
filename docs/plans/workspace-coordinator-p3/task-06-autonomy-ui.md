@@ -13,6 +13,8 @@ requirements:
   - REQ-COORDINATOR-SPEND-004
   - REQ-COORDINATOR-CONTAINMENT-002
   - REQ-COORDINATOR-CONTAINMENT-003
+  - REQ-COORDINATOR-INTEGRATION-007
+  - REQ-COORDINATOR-INTEGRATION-008
 acceptance_criteria:
   - AC-COORDINATOR-WAKE-005.5
   - AC-COORDINATOR-WAKE-006.1
@@ -25,10 +27,13 @@ acceptance_criteria:
   - AC-COORDINATOR-SPEND-004.3
   - AC-COORDINATOR-CONTAINMENT-002.3
   - AC-COORDINATOR-CONTAINMENT-003.3
+  - AC-COORDINATOR-INTEGRATION-007.1
+  - AC-COORDINATOR-INTEGRATION-008.1
 system_design:
   - ../../specs/coordinator/system-design/wake.md
   - ../../specs/coordinator/system-design/spend.md
   - ../../specs/coordinator/system-design/containment.md
+  - ../../specs/coordinator/system-design/integration.md
 ---
 
 # Task 06: Autonomy Strip, Held Item, Settings Section And Transcript Entry (WP-11)
@@ -54,13 +59,21 @@ permission count. Adds the public docs section.
   `autonomy:<cid>`), counted in the coordinator count only, and the updated
   phase 1 ordering test for the amended `AC-COORDINATOR-NEEDS-YOU-002.4`
   ([Screens](../../specs/coordinator/system-design/wake.md#screens)).
-- Settings: the Autonomy section's toggle, ceiling field with client
+- Settings: the Autonomy entry of the Sections row (`autonomy` after `goal` in
+  `coordinator-sections.tsx`, present only while phase 3 is effective, with
+  `sectionAutonomy` and `sectionAutonomyHelp` in six locales;
+  `?section=autonomy` opens Identity otherwise)
+  ([Settings layout](../../specs/coordinator/system-design/integration.md#settings-layout));
+  the Autonomy section's toggle, ceiling field with client
   validation, spend lines, containment list with fix lines and **Check
   again** ([spend Screens](../../specs/coordinator/system-design/spend.md#screens),
   [Settings display](../../specs/coordinator/system-design/containment.md#settings-display)).
 - Transcript: the "Woken by" entry keyed on
   `metadata.coordinator_wake_turn_id`
-  ([Transcript](../../specs/coordinator/system-design/wake.md#transcript)).
+  ([Transcript](../../specs/coordinator/system-design/wake.md#transcript)),
+  implemented as a renderer in the one message component so every surface
+  that shows the conversation gets it
+  ([Copilot everywhere](../../specs/coordinator/system-design/integration.md#copilot-everywhere)).
 - Copy in six locales; `docs/public/coordinator.md` Autonomy section through
   `/docs-maintainer`.
 
@@ -99,6 +112,11 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
   turned off while that turn is open, the strip renders "Autonomy: Off" with
   the same warning and Stop; with autonomy off and no failing stop, it does
   not render.
+- With phase 3 effective the Sections row shows Autonomy after Goal and the
+  entry opens the section; with phase 3 not effective the entry is absent and
+  `?section=autonomy` opens Identity (`AC-COORDINATOR-INTEGRATION-007.1`). The
+  "Woken by" entry renders identically in the copilot panel, the popover and
+  the conversation task view (`AC-COORDINATOR-INTEGRATION-008.1`).
 - The transcript renders the unattended message as "Woken by N events" with
   the expandable list and the denied count, distinct from a manager message;
   the 390px layout matches the plan's phone views.

@@ -125,6 +125,14 @@ receives the `watcher.PermissionRequestData` and the active turn id, and:
   still pending whose `(turn_id, pending_id)` is in
   `coordinator_unattended_denials`, without counting it again.
 
+Which requests reach this handler is fixed by the bound tool list: agentctl
+builds its allowlist from the conversation's binding, and an unattended turn
+runs with that binding unchanged, so containment removes capability and never
+adds it. The denial is required because agentctl leaves a request the list
+does not approve pending for a person, and no person is present
+([integration](integration.md#tool-list),
+`AC-COORDINATOR-INTEGRATION-003.2`).
+
 A request whose turn id is not the unattended turn's reaches the panel as in
 phase 1. `coordinator_unattended_denials` rows are deleted with their turn row.
 

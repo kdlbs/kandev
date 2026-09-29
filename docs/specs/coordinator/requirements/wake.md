@@ -34,7 +34,9 @@ conditions that hold it.
 - **Own task:** a task created by approving one of the coordinator's
   proposals (the proposal's `task_id`), while that task exists, is not
   archived and is not ephemeral. Tasks the coordinator only reads are not its
-  own tasks.
+  own tasks. Only an own task whose workflow is in the coordinator's watch set
+  wakes it ([integration](integration.md#terminology),
+  `REQ-COORDINATOR-INTEGRATION-002`).
 - **Episode:** one occurrence of a condition on an own task, identified by the
   tuple (coordinator, task, kind, episode key). The kinds and keys are:
 
@@ -89,7 +91,9 @@ own tasks exactly once.
   wake's status.
 - **AC-COORDINATOR-WAKE-001.3:** A condition on a task that is not an own task
   of the coordinator, on the coordinator's own conversation task, or on any
-  task while the coordinator's autonomy is off, shall store no wake.
+  task while the coordinator's autonomy is off, shall store no wake; a
+  condition on an own task outside the watch set is covered by
+  `AC-COORDINATOR-INTEGRATION-002.1`.
 - **AC-COORDINATOR-WAKE-001.4:** When a coordinator already holds 200 `pending`
   wakes, the system shall store no further wake for it, count the refusal in
   metrics, and store the episode later through the backstop once the
@@ -172,7 +176,8 @@ Mockup:
   its message and its settle shall keep applying to it as they do while
   autonomy is on.
 - **AC-COORDINATOR-WAKE-004.4:** While `features.coordinatorPhase3` or
-  `features.coordinator` is off, the system shall store no wake, run no
+  `features.coordinator` is off, or `features.coordinatorPhase2` is off
+  (`AC-COORDINATOR-INTEGRATION-001.1`), the system shall store no wake, run no
   backstop, start no unattended turn, and hide the Autonomy section; stored
   settings and wakes shall be kept.
 
@@ -208,8 +213,9 @@ that no person started it.
   whose outcome is unknown (for example a timeout) shall count as sent when
   the turn's message is stored, and shall not be sent again.
 - **AC-COORDINATOR-WAKE-005.4:** An unattended turn shall use the same Kandev
-  tool surface and permission policy as an attended turn, except as
-  [containment](containment.md) narrows it.
+  tool surface (its conversation's bound tool list) and permission policy as
+  an attended turn, except as [containment](containment.md) narrows it
+  (`AC-COORDINATOR-INTEGRATION-003.1`).
 - **AC-COORDINATOR-WAKE-005.5:** In the transcript, an unattended turn's
   message shall render as "Woken by" followed by the number of events, with an
   expandable list naming each event's kind and task, visibly distinct from a
@@ -249,8 +255,10 @@ Mockup:
 
 ## Out of scope
 
-- Waking on tasks the coordinator does not own, on phase 2's Watches, on a
-  schedule, or on a heartbeat. A later change may add Watches as a wake source.
+- Waking on tasks the coordinator does not own, on phase 2's Watches as a wake
+  source by themselves, on a schedule, or on a heartbeat. The watch set only
+  narrows own tasks ([integration](integration.md)); a later change may add
+  Watches as a wake source.
 - Waking a coordinator whose autonomy is off, and any wake that starts a task's
   agent. A wake starts only the coordinator's own conversation turn.
 - Re-waking for the same episode, including a task completed a second time
