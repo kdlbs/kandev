@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 created: 2026-09-28
 requirements:

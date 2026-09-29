@@ -179,6 +179,12 @@ func TestHealAgentErrorRowWithRetry_ExhaustsRetriesWithoutBlockingStartup(t *tes
 	if fields["step_name"] != "Review" || fields["target"] != "workspace.ceo_agent" {
 		t.Errorf("warning fields = %+v, want step_name=Review target=workspace.ceo_agent", fields)
 	}
+	if fields["retry_cause"] != string(stepEventsRetryCauseCASConflict) {
+		t.Errorf("retry_cause = %v, want %q", fields["retry_cause"], stepEventsRetryCauseCASConflict)
+	}
+	if _, ok := fields["error"]; ok {
+		t.Errorf("expected no error field for cas_conflict exhaustion, got %v", fields["error"])
+	}
 }
 
 func TestHealAgentErrorRowWithRetry_SucceedsAfterTransientRetries(t *testing.T) {

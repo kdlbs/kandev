@@ -1,7 +1,7 @@
 ---
 id: "01-classify-contention"
 title: "Classify contention in reconciler attempts"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

@@ -78,11 +78,11 @@ type Repository struct {
 	// failParticipantSeatReconcileAttempts is a test-only failpoint for the
 	// participant-seat reconciler's AC-OFFICE-REVIEW-SEATS-005.9 bounded
 	// retry loop: while > 0, tryHealParticipantSeatRow reports a synthetic
-	// concurrent-modification retry without touching the database, and
-	// decrements the counter. A genuine SQLite write race is not
-	// reproducible deterministically against this package's
-	// single-connection test repositories (SetMaxOpenConns(1) serializes
-	// all writes), so this stands in for one.
+	// concurrent-modification (CAS) retry without touching the database,
+	// and decrements the counter. It simulates a zero-row UPDATE, not a
+	// database-level lock error; workflowStepEventsDBFailpoint and
+	// workflowStepEventsAfterReadHook cover injected and genuine
+	// (second-connection) lock contention respectively.
 	failParticipantSeatReconcileAttempts int
 	// failAgentErrorReconcileAttempts is a test-only failpoint for the
 	// on_agent_error reconciler's bounded retry loop (WO-05-2): while > 0,

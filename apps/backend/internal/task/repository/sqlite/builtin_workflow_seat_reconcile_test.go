@@ -271,6 +271,12 @@ func TestHealParticipantSeatRowWithRetry_ExhaustsRetriesWithoutBlockingStartup(t
 	if fields["step_name"] != "Review" || fields["role"] != "reviewer" {
 		t.Errorf("warning fields = %+v, want step_name=Review role=reviewer", fields)
 	}
+	if fields["retry_cause"] != string(stepEventsRetryCauseCASConflict) {
+		t.Errorf("retry_cause = %v, want %q", fields["retry_cause"], stepEventsRetryCauseCASConflict)
+	}
+	if _, ok := fields["error"]; ok {
+		t.Errorf("expected no error field for cas_conflict exhaustion, got %v", fields["error"])
+	}
 }
 
 func TestHealParticipantSeatRowWithRetry_SucceedsAfterTransientRetries(t *testing.T) {
