@@ -74,6 +74,9 @@ function readyContextWith(needsYou: NeedsYouItem[], canManage = false): Coordina
       stepNameByWorkflowStep: new Map(),
       openTasksById: new Map(),
       prsByTaskId: new Map(),
+      tasks: [],
+      loadedAt: 1,
+      error: false,
       tasksNeverLoaded: false,
       inputs: [
         { kind: "tasks", error: false, loadedAt: 1 },

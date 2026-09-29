@@ -10,6 +10,7 @@ import type {
 let readyContext: CoordinatorReadyContext;
 let capturedProps: CoordinatorRouteContentProps | undefined;
 let searchString = "";
+let phase2Enabled = true;
 
 vi.mock("@/lib/routing/client-router", () => ({
   useSearchParams: () => new URLSearchParams(searchString),
@@ -20,6 +21,16 @@ vi.mock("./coordinator-route-content", () => ({
     capturedProps = props;
     return <>{props.children(readyContext)}</>;
   },
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => phase2Enabled,
+}));
+
+vi.mock("./queue/what-it-did", () => ({
+  WhatItDid: (props: { coordinatorId: string }) => (
+    <div data-testid="what-it-did" data-coordinator={props.coordinatorId} />
+  ),
 }));
 
 import { QueuePageClient } from "./queue-page-client";
@@ -70,6 +81,9 @@ function readyContextWith(classification: ClassifyResult): CoordinatorReadyConte
       stepNameByWorkflowStep: new Map(),
       openTasksById: new Map(),
       prsByTaskId: new Map(),
+      tasks: [],
+      loadedAt: 1,
+      error: false,
       tasksNeverLoaded: false,
       inputs: [
         { kind: "tasks", error: false, loadedAt: 1 },
@@ -85,6 +99,7 @@ function readyContextWith(classification: ClassifyResult): CoordinatorReadyConte
 beforeEach(() => {
   capturedProps = undefined;
   searchString = "";
+  phase2Enabled = true;
   readyContext = readyContextWith(emptyClassification());
 });
 
@@ -95,6 +110,7 @@ describe("QueuePageClient", () => {
   });
 
   it("renders groups in Working, In review, Ready to merge, Done, Other order", () => {
+    phase2Enabled = false;
     render(<QueuePageClient workspaceId="ws-1" coordinatorId="co-1" />);
     const list = screen.getByTestId("queue-group-list");
     const order = ["working", "in_review", "ready_to_merge", "done", "other"].map((group) =>
@@ -132,5 +148,18 @@ describe("QueuePageClient", () => {
       .getByTestId("queue-group-other")
       .querySelector("[aria-expanded]") as HTMLElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("renders What it did after the groups when the phase 2 flag is on", () => {
+    render(<QueuePageClient workspaceId="ws-1" coordinatorId="co-1" />);
+    const list = screen.getByTestId("queue-group-list");
+    expect(list.lastElementChild).toBe(screen.getByTestId("what-it-did"));
+    expect(screen.getByTestId("what-it-did").getAttribute("data-coordinator")).toBe("co-1");
+  });
+
+  it("omits What it did when the flag is off", () => {
+    phase2Enabled = false;
+    render(<QueuePageClient workspaceId="ws-1" coordinatorId="co-1" />);
+    expect(screen.queryByTestId("what-it-did")).toBeNull();
   });
 });

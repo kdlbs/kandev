@@ -2,7 +2,9 @@
 
 import { useSearchParams } from "@/lib/routing/client-router";
 import type { QueueGroupKind } from "@/lib/coordinator/attention";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { CoordinatorRouteContent } from "./coordinator-route-content";
+import { WhatItDid } from "./queue/what-it-did";
 import { QueueGroup } from "./components/queue-group";
 
 export type QueuePageClientProps = {
@@ -35,10 +37,11 @@ export function QueuePageClient({ workspaceId, coordinatorId }: QueuePageClientP
   const searchParams = useSearchParams();
   const rawGroup = searchParams.get("group");
   const linkedGroup = isQueueGroupKind(rawGroup) ? rawGroup : undefined;
+  const phase2 = useFeature("coordinatorPhase2");
 
   return (
     <CoordinatorRouteContent workspaceId={workspaceId} coordinatorId={coordinatorId} view="queue">
-      {({ attention }) => (
+      {({ attention, coordinator, canManage }) => (
         <div className="space-y-4" data-testid="queue-group-list">
           {QUEUE_DISPLAY_ORDER.map((group) => (
             <QueueGroup
@@ -50,6 +53,18 @@ export function QueuePageClient({ workspaceId, coordinatorId }: QueuePageClientP
               defaultOpen={linkedGroup === group ? true : undefined}
             />
           ))}
+          {phase2 && (
+            <WhatItDid
+              key={coordinator.id}
+              workspaceId={workspaceId}
+              coordinatorId={coordinator.id}
+              canManage={canManage}
+              tasks={attention.tasks}
+              tasksLoadedAt={attention.loadedAt}
+              tasksError={attention.error}
+              stepNameByWorkflowStep={attention.stepNameByWorkflowStep}
+            />
+          )}
         </div>
       )}
     </CoordinatorRouteContent>

@@ -29,6 +29,12 @@ export type UseCoordinatorAttentionResult = {
   openTasksById: Map<string, AttentionTask>;
   /** Every loaded PR association for the workspace's tasks, keyed by task id (Queue's PR detail column). */
   prsByTaskId: ReadonlyMap<string, TaskPR[]>;
+  /** Every task of the workspace's loaded snapshots, for availability lookups (What it did). */
+  tasks: AttentionTask[];
+  /** When the tasks input first completed for the workspace; set even when `error` is true after a partial failure. */
+  loadedAt: number | undefined;
+  /** True while the latest tasks read has failed. */
+  error: boolean;
   /** True once the tasks input has never had a successful read. */
   tasksNeverLoaded: boolean;
   /** Per-input status, in the banner order tasks, stall records, proposals. */
@@ -105,6 +111,9 @@ export function useCoordinatorAttention(
     stepNameByWorkflowStep: tasksInput.stepNameByWorkflowStep,
     openTasksById,
     prsByTaskId,
+    tasks: tasksInput.tasks,
+    loadedAt: tasksInput.loadedAt,
+    error: tasksInput.error,
     tasksNeverLoaded: tasksInput.loadedAt === undefined,
     inputs,
     retryFailed,
