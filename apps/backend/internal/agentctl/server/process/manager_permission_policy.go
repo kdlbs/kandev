@@ -2,12 +2,14 @@ package process
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/mcp/profile"
 	"go.uber.org/zap"
 )
 
@@ -17,23 +19,23 @@ import (
 // server/config/config.go.
 const injectedKandevMCPServerName = "kandev"
 
-// coordinatorAutoApprovedTools is the exact six-tool allowlist a coordinator
-// session auto-approves, regardless of the profile's auto_approve flag or
+// coordinatorAutoApprovedNames is the tool list a coordinator session
+// auto-approves, regardless of the profile's auto_approve flag or
 // AGENTCTL_AUTO_APPROVE_PERMISSIONS
-// (docs/specs/coordinator/system-design/copilot.md#permission-policy).
-var coordinatorAutoApprovedTools = map[string]bool{
-	"list_tasks_kandev":            true,
-	"get_task_conversation_kandev": true,
-	"list_workflows_kandev":        true,
-	"list_workflow_steps_kandev":   true,
-	"list_repositories_kandev":     true,
-	"propose_task_kandev":          true,
+// (docs/specs/coordinator/system-design/permissions.md#auto-approval): the
+// names bound at conversation open, or the phase-1 seven when the session has
+// no binding. An instance without a coordinator profile approves nothing.
+func (m *Manager) coordinatorAutoApprovedNames() []string {
+	if m.cfg == nil || m.cfg.McpProfile == nil || m.cfg.McpProfile.Surface != profile.SurfaceCoordinator {
+		return nil
+	}
+	return profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
 }
 
 // autoApproveCoordinatorPermission auto-approves a permission request from a
 // coordinator session's agent only when it carries the same host-injected
 // MCP provenance as autoApproveInjectedKandevPermission and its tool name
-// parses to server "kandev" and one of the six coordinator tool names, each
+// parses to server "kandev" and one of the session's bound tool names, each
 // compared as the full string, never by prefix. It is the only auto-approval
 // path consulted in coordinator mode: the blanket AutoApprovePermissions
 // flag and the generic "any kandev tool" injected-MCP approval are both
@@ -43,7 +45,7 @@ func (m *Manager) autoApproveCoordinatorPermission(req *adapter.PermissionReques
 		return nil, false
 	}
 	server, tool, option, ok := m.resolveInjectedKandevPermission(req)
-	if !ok || server != injectedKandevMCPServerName || !coordinatorAutoApprovedTools[tool] {
+	if !ok || server != injectedKandevMCPServerName || !slices.Contains(m.coordinatorAutoApprovedNames(), tool) {
 		return nil, false
 	}
 	m.logger.Info("auto-approving coordinator MCP permission",

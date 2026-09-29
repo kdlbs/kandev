@@ -9,20 +9,23 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func coordinatorPermissionManager(t *testing.T) *Manager {
 	t.Helper()
 	m := injectedKandevPermissionManager(t, injectedKandevMCPServers(43210))
 	m.cfg.McpMode = mcpmode.Coordinator
+	coordinatorProfile := profile.NewCoordinator()
+	m.cfg.McpProfile = &coordinatorProfile
 	return m
 }
 
-// TestCoordinatorPermissionPolicyApprovesOnlySixTools pins the exact-name
-// allowlist: each of the six coordinator tools is auto-approved and an
+// TestCoordinatorPermissionPolicyApprovesOnlyPhaseOneSevenWithoutBinding pins the exact-name
+// allowlist: each of the phase-1 seven tools is auto-approved and an
 // unlisted Kandev tool, even one that the generic injected-MCP policy would
 // approve, is not (docs/specs/coordinator/system-design/copilot.md#permission-policy).
-func TestCoordinatorPermissionPolicyApprovesOnlySixTools(t *testing.T) {
+func TestCoordinatorPermissionPolicyApprovesOnlyPhaseOneSevenWithoutBinding(t *testing.T) {
 	m := coordinatorPermissionManager(t)
 	allowOption := []adapter.PermissionOption{{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce}}
 
@@ -32,6 +35,7 @@ func TestCoordinatorPermissionPolicyApprovesOnlySixTools(t *testing.T) {
 		"mcp__kandev__list_workflows_kandev",
 		"mcp__kandev__list_workflow_steps_kandev",
 		"mcp__kandev__list_repositories_kandev",
+		"mcp__kandev__get_coordinator_item_kandev",
 		"mcp__kandev__propose_task_kandev",
 	} {
 		t.Run(toolName, func(t *testing.T) {
@@ -89,6 +93,8 @@ func TestCoordinatorPermissionPolicyRequiresInjectedProvenance(t *testing.T) {
 		{Name: "kandev", Type: "http", URL: "http://localhost:9999/mcp"}, // wrong port
 	})
 	m.cfg.McpMode = mcpmode.Coordinator
+	coordinatorProfile := profile.NewCoordinator()
+	m.cfg.McpProfile = &coordinatorProfile
 	response, approved := m.autoApproveCoordinatorPermission(&adapter.PermissionRequest{
 		ToolName: permissionStringPtr("mcp__kandev__list_tasks_kandev"),
 		Options:  []adapter.PermissionOption{{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce}},
@@ -174,5 +180,38 @@ func TestCoordinatorModeAutoApprovesThroughHandlePermissionRequest(t *testing.T)
 	}
 	if response == nil || response.Cancelled || response.OptionID != "allow-once" {
 		t.Fatalf("response = %+v, want allow-once without cancellation", response)
+	}
+}
+
+func TestCoordinatorPermissionPolicyApprovesExactlyTheBoundNames(t *testing.T) {
+	m := coordinatorPermissionManager(t)
+	m.cfg.McpProfile.CoordinatorToolPolicy = &profile.CoordinatorToolPolicy{
+		Version: 1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t",
+		ToolNames: []string{"list_tasks_kandev", "propose_message_kandev"},
+	}
+	allow := []adapter.PermissionOption{{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce}}
+	for tool, want := range map[string]bool{
+		"mcp__kandev__list_tasks_kandev":        true,
+		"mcp__kandev__propose_message_kandev":   true,
+		"mcp__kandev__propose_task_kandev":      false, // not bound: denied by policy
+		"mcp__kandev__get_coordinator_item_kan": false, // prefix of a name is not the name
+		"mcp__kandev__list_tasks_kandev_extra":  false,
+	} {
+		_, approved := m.autoApproveCoordinatorPermission(&adapter.PermissionRequest{ToolName: permissionStringPtr(tool), Options: allow})
+		if approved != want {
+			t.Errorf("tool %q approved = %v, want %v", tool, approved, want)
+		}
+	}
+}
+
+func TestCoordinatorPermissionPolicyApprovesNothingWithoutCoordinatorProfile(t *testing.T) {
+	m := coordinatorPermissionManager(t)
+	m.cfg.McpProfile = nil
+	_, approved := m.autoApproveCoordinatorPermission(&adapter.PermissionRequest{
+		ToolName: permissionStringPtr("mcp__kandev__list_tasks_kandev"),
+		Options:  []adapter.PermissionOption{{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce}},
+	})
+	if approved {
+		t.Fatal("instance with no coordinator profile auto-approved a tool")
 	}
 }

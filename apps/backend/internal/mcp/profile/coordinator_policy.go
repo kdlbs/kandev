@@ -100,3 +100,20 @@ func ParseCoordinatorToolPolicyMetadata(value any) (*CoordinatorToolPolicy, erro
 	policy.ToolNames = slices.Clone(policy.ToolNames)
 	return &policy, nil
 }
+
+// coordinatorPhaseOneTools is the tool list of a conversation with no binding.
+var coordinatorPhaseOneTools = []string{
+	"list_tasks_kandev", "get_task_conversation_kandev",
+	"list_workflows_kandev", "list_workflow_steps_kandev",
+	"list_repositories_kandev", "get_coordinator_item_kandev",
+	"propose_task_kandev",
+}
+
+// BoundCoordinatorToolNames returns the tool names a coordinator session may
+// use: the binding's list, or the phase-1 seven when the session has none.
+func BoundCoordinatorToolNames(ctx Context) []string {
+	if ctx.CoordinatorToolPolicy != nil {
+		return slices.Clone(ctx.CoordinatorToolPolicy.ToolNames)
+	}
+	return slices.Clone(coordinatorPhaseOneTools)
+}
