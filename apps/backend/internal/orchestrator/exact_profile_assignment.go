@@ -389,6 +389,19 @@ func resumeOptionsWithExactProfile(
 	return options
 }
 
+func (s *Service) exactProfileLaunchAdmission(
+	ctx context.Context,
+	session *models.TaskSession,
+	exact *ExactProfileLaunchDecision,
+) func(string) error {
+	if exact == nil {
+		return nil
+	}
+	return func(executionID string) error {
+		return s.admitExactProfileLaunchAttempt(ctx, session, exact, executionID)
+	}
+}
+
 // recordExactProfileInferenceEvidence records the first actual model progress
 // observed for an admitted immutable attempt. Delivery and terminal frames do
 // not prove inference; the repository rechecks the full frozen tuple before

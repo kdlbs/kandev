@@ -1016,9 +1016,12 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // Branch replacement is intentionally opt-in; ordinary resume preserves the
 // original worktree branch and reports when it is unrecoverable.
 type ResumeOptions struct {
-	ExactProfile           bool
-	ExactProfileModel      string
-	ExactProfileRevision   int64
+	ExactProfile         bool
+	ExactProfileModel    string
+	ExactProfileRevision int64
+	// OnExecutionAdmitted runs after the recovered execution has been
+	// persisted, but before its agent process starts.
+	OnExecutionAdmitted    func(executionID string) error
 	AllowBranchReplacement bool
 	// AllowCompletedSessionResume is granted only by an explicit user recovery
 	// or a pinned follow-up dispatch. It does not change the global terminal
@@ -1286,6 +1289,16 @@ func (e *Executor) resumeSession(
 				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
 		}
 		return nil, err
+	}
+	if startAgent && options.OnExecutionAdmitted != nil {
+		if err := options.OnExecutionAdmitted(resp.AgentExecutionID); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+			e.rollbackResumeStateAfterFailure(
+				launchCtx, task.ID, session.ID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			)
+			return nil, fmt.Errorf("%w: %v", ErrExactAttemptAdmission, err)
+		}
 	}
 
 	worktreePath := resp.WorktreePath

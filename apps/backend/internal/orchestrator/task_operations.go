@@ -3088,6 +3088,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, err
 	}
 	options = resumeOptionsWithExactProfile(options, exactAssignment)
+	options.OnExecutionAdmitted = s.exactProfileLaunchAdmission(ctx, session, exactAssignment)
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
 		return nil, err
 	}
@@ -3963,7 +3964,11 @@ func (s *Service) attemptColdResume(
 		dispatchCtx,
 		session,
 		true,
-		resumeOptionsWithExactProfile(executor.ResumeOptions{}, exactAssignment),
+		func() executor.ResumeOptions {
+			options := resumeOptionsWithExactProfile(executor.ResumeOptions{}, exactAssignment)
+			options.OnExecutionAdmitted = s.exactProfileLaunchAdmission(resumeCtx, session, exactAssignment)
+			return options
+		}(),
 	)
 	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
@@ -3974,9 +3979,11 @@ func (s *Service) attemptColdResume(
 		return false, attemptErr
 	}
 	if launchErr != nil {
-		s.recordExactProfileLaunchReceipt(
-			resumeCtx, session.TaskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), launchErr,
-		)
+		if !errors.Is(launchErr, executor.ErrExactAttemptAdmission) {
+			s.recordExactProfileLaunchReceipt(
+				resumeCtx, session.TaskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), launchErr,
+			)
+		}
 		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
@@ -4174,10 +4181,13 @@ func (s *Service) startAgentOnPreparedWorkspace(
 		ExactProfileModel:      exactProfileModel(exactAssignment),
 		ExecutorID:             session.ExecutorID,
 		StartAgent:             true,
+		OnExecutionAdmitted:    s.exactProfileLaunchAdmission(launchCtx, session, exactAssignment),
 	}); err != nil {
-		s.recordExactProfileLaunchReceipt(
-			launchCtx, session.TaskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err,
-		)
+		if !errors.Is(err, executor.ErrExactAttemptAdmission) {
+			s.recordExactProfileLaunchReceipt(
+				launchCtx, session.TaskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err,
+			)
+		}
 		if execution != nil && resumeAttempt != nil {
 			resumeAttempt.setExecutionID(execution.AgentExecutionID)
 		}
