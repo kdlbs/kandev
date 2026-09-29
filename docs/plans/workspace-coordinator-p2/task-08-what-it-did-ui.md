@@ -17,9 +17,8 @@ acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-002.5
   - AC-COORDINATOR-ACTIVITY-LOG-002.6
   - AC-COORDINATOR-ACTIVITY-LOG-003.1
-    - AC-COORDINATOR-ACTIVITY-LOG-003.6
+  - AC-COORDINATOR-ACTIVITY-LOG-003.6
   - AC-COORDINATOR-ACTIVITY-LOG-003.7
-
 system_design:
   - ../../specs/coordinator/system-design/activity-log.md
 ---
