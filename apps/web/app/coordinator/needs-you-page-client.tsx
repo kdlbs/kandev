@@ -3,6 +3,8 @@
 import type { CoordinatorInputStatus } from "./use-coordinator-attention";
 import { CoordinatorRouteContent } from "./coordinator-route-content";
 import { NeedsYouItemsPanel } from "./components/needs-you-items-panel";
+import { GoalNote } from "./components/goal-note";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 export type NeedsYouPageClientProps = {
   workspaceId: string;
@@ -20,6 +22,7 @@ function allInputsLoaded(inputs: CoordinatorInputStatus[]): boolean {
  * (docs/specs/coordinator/requirements/needs-you.md REQ-COORDINATOR-NEEDS-YOU-001..003).
  */
 export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageClientProps) {
+  const phase2 = useFeature("coordinatorPhase2");
   return (
     <CoordinatorRouteContent
       workspaceId={workspaceId}
@@ -27,22 +30,31 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
       view="needs-you"
     >
       {({ coordinator, attention, canManage }) => (
-        <NeedsYouItemsPanel
-          items={attention.classification.needsYou}
-          workingCount={attention.classification.queue.working.length}
-          inputsLoaded={allInputsLoaded(attention.inputs)}
-          workspaceId={workspaceId}
-          coordinatorId={coordinator.id}
-          coordinatorName={coordinator.name}
-          canManage={canManage}
-          attentionMaps={{
-            stepNameByTaskId: attention.stepNameByTaskId,
-            workflowNameById: attention.workflowNameById,
-            stepNameByWorkflowStep: attention.stepNameByWorkflowStep,
-            openTasksById: attention.openTasksById,
-          }}
-          computeNeedsYouCount={attention.computeNeedsYouCount}
-        />
+        <>
+          {phase2 && (
+            <GoalNote
+              workspaceId={workspaceId}
+              coordinatorId={coordinator.id}
+              canManage={canManage}
+            />
+          )}
+          <NeedsYouItemsPanel
+            items={attention.classification.needsYou}
+            workingCount={attention.classification.queue.working.length}
+            inputsLoaded={allInputsLoaded(attention.inputs)}
+            workspaceId={workspaceId}
+            coordinatorId={coordinator.id}
+            coordinatorName={coordinator.name}
+            canManage={canManage}
+            attentionMaps={{
+              stepNameByTaskId: attention.stepNameByTaskId,
+              workflowNameById: attention.workflowNameById,
+              stepNameByWorkflowStep: attention.stepNameByWorkflowStep,
+              openTasksById: attention.openTasksById,
+            }}
+            computeNeedsYouCount={attention.computeNeedsYouCount}
+          />
+        </>
       )}
     </CoordinatorRouteContent>
   );

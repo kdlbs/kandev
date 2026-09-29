@@ -20,6 +20,8 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  usePathname: () => "/settings/workspaces/w1/coordinators/c1",
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/toast/sonner", () => ({
   toast: { error: (...args: unknown[]) => mockToastError(...args), success: vi.fn() },
@@ -37,6 +39,7 @@ type StoreState = {
   agentProfiles: { items: AgentProfileOption[] };
   executors: { items: Executor[] };
   workspaces: { items: Array<{ id: string; scopes?: string[] }> };
+  features: { coordinatorPhase2: boolean };
 };
 
 let storeState: StoreState;
@@ -98,6 +101,7 @@ function setup(
     patch?: ReturnType<typeof vi.fn>;
     remove?: ReturnType<typeof vi.fn>;
     refresh?: ReturnType<typeof vi.fn>;
+    phase2?: boolean;
   } = {},
 ) {
   storeState = {
@@ -114,6 +118,7 @@ function setup(
     },
     executors: { items: [mkExecutor()] },
     workspaces: { items: [{ id: "w1", scopes: options.scopes ?? ["workspace.manage"] }] },
+    features: { coordinatorPhase2: options.phase2 ?? false },
   };
   const status = options.status ?? "ready";
   const coordinatorValue = options.coordinator === undefined ? coordinator() : options.coordinator;
@@ -323,5 +328,23 @@ describe("CoordinatorEditorPage: save", () => {
     );
     // The extra keystroke is still unsaved: the save bar must stay dirty.
     expect(screen.getByRole("button", { name: SAVE_BUTTON_NAME })).toBeTruthy();
+  });
+});
+
+describe("CoordinatorEditorPage: phase 2 sections", () => {
+  it("renders the phase-1 page with no Sections row while the flag is off", () => {
+    setup();
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+  });
+
+  it("shows Identity, Standing orders and Goal with the phase-1 fields under Identity when on", () => {
+    setup({ phase2: true });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Identity",
+      "Standing orders",
+      "Goal",
+    ]);
+    expect(screen.getByLabelText("Name")).toBeTruthy();
   });
 });

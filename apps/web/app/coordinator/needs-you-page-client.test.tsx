@@ -34,11 +34,24 @@ vi.mock("./coordinator-route-content", () => ({
   },
 }));
 
+let phase2On = false;
+vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => phase2On }));
+vi.mock("./components/goal-note", () => ({
+  GoalNote: (props: { coordinatorId: string; canManage: boolean }) => (
+    <div data-testid="goal-note-stub" data-manage={String(props.canManage)}>
+      {props.coordinatorId}
+    </div>
+  ),
+}));
+
 import { NeedsYouPageClient } from "./needs-you-page-client";
 
 const TIMESTAMP = "2026-09-27T00:00:00Z";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  phase2On = false;
+});
 
 function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
   return {
@@ -326,5 +339,35 @@ describe("NeedsYouPageClient - focus after a decision", () => {
     );
 
     expect(document.activeElement?.id).toBe(needsYouItemHeadingId("t-2"));
+  });
+});
+
+describe("NeedsYouPageClient: goal note", () => {
+  it("renders no goal note while the phase-2 flag is off", () => {
+    readyContext = readyContextWith([]);
+    render(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+    expect(screen.queryByTestId("goal-note-stub")).toBeNull();
+  });
+
+  it("renders the goal note above the body, empty state included, when the flag is on", () => {
+    phase2On = true;
+    readyContext = readyContextWith([], true);
+    render(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+    const note = screen.getByTestId("goal-note-stub");
+    expect(note.textContent).toBe("co-1");
+    expect(note.dataset.manage).toBe("true");
+    expect(document.getElementById(NEEDS_YOU_EMPTY_HEADING_ID)).toBeTruthy();
   });
 });
