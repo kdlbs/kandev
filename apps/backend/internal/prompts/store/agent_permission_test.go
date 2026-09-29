@@ -37,6 +37,7 @@ func TestPromptAgentWriteGuards(t *testing.T) {
 	repo, cleanup := createTestRepo(t)
 	t.Cleanup(cleanup)
 	assertAgentWriteGuards(t, repo)
+	assertOperatorWriteGuard(t, repo)
 }
 
 func TestPostgresPromptAgentWriteGuards(t *testing.T) {
@@ -44,6 +45,7 @@ func TestPostgresPromptAgentWriteGuards(t *testing.T) {
 	repo, err := newSQLiteRepositoryWithDB(database, database)
 	require.NoError(t, err)
 	assertAgentWriteGuards(t, repo)
+	assertOperatorWriteGuard(t, repo)
 	assertPermissionReplay(t, database)
 }
 
@@ -99,4 +101,24 @@ func assertAgentWriteGuards(t *testing.T, repo *sqliteRepository) {
 			}
 		})
 	}
+}
+
+func assertOperatorWriteGuard(t *testing.T, repo *sqliteRepository) {
+	t.Helper()
+	ctx := context.Background()
+	prompt := &models.Prompt{Name: "operator-race", Content: "Original", AllowAgentEdits: true}
+	require.NoError(t, repo.CreatePrompt(ctx, prompt))
+	stale, err := repo.GetPromptByID(ctx, prompt.ID)
+	require.NoError(t, err)
+	prompt.AllowAgentEdits = false
+	require.NoError(t, repo.UpdatePrompt(ctx, prompt))
+	revoked, err := repo.GetPromptByID(ctx, prompt.ID)
+	require.NoError(t, err)
+	stale.Content = "Stale content save"
+	require.ErrorIs(t, repo.UpdatePrompt(ctx, stale), ErrPromptWriteRejected)
+	saved, err := repo.GetPromptByID(ctx, prompt.ID)
+	require.NoError(t, err)
+	require.False(t, saved.AllowAgentEdits)
+	require.Equal(t, "Original", saved.Content)
+	require.True(t, revoked.UpdatedAt.Equal(saved.UpdatedAt))
 }

@@ -122,3 +122,12 @@ func TestSharedPromptWriteErrors(t *testing.T) {
 		require.NotContains(t, string(resp.Payload), "secret")
 	}
 }
+
+func TestSharedPromptConcurrentWriteReturnsConflict(t *testing.T) {
+	h, _, dispatcher := newPromptWriteFixture(t)
+	h.SetPromptWriter(failedPromptWriter{err: promptstore.ErrPromptWriteRejected}, nil)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{Synthetic: true})
+	resp, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPUpdateSharedPrompt, map[string]any{"name": "prompt", "content": "content"}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+}

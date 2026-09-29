@@ -75,8 +75,8 @@ git diff --check
 
 ## Results
 
-Passed 20 web unit tests across four files, web type checking, changed-file
-ESLint, and complete i18n validation. Seven Chromium prompt tests and two
+Passed 23 web unit tests across four files, web type checking, changed-file
+ESLint, and complete i18n validation. Eight Chromium prompt tests and two
 mobile-Chrome tests passed through the managed host runner. Captured desktop and
 phone screenshots from synthetic fixtures. The phone test verifies a 44px switch
 target, saving/reopening permission, and no horizontal overflow; the desktop test
@@ -87,3 +87,11 @@ invalidation, and permission UI failed before implementation. All now pass.
 Public docs (47 pages), validator tests (62), specification/catalog checks, and
 PR documentation coverage preflight passed. CI, automated review disposition,
 and merge remain external delivery gates tracked in the PR.
+
+
+Review remediation: unchanged switches follow remote permission updates and are
+omitted from content saves. Regressions cover remote revocation with a retained
+local draft and explicit opt-in saves. Failed refreshes retain an unloaded cache
+and retry three times with bounded backoff; tests cover recovery and exhaustion.
+Both prompt E2E files clean up their created prompts, including the phone test.
+Desktop E2E also saves a local draft after a second operator revokes permission.

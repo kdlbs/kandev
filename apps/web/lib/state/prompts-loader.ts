@@ -31,17 +31,19 @@ export function loadPrompts(store: StoreApi<AppState>): Promise<void> {
   // Deferring until the request is registered also deduplicates reentrant consumers.
   const pending = Promise.resolve()
     .then(async () => {
+      let failures = 0;
       for (;;) {
         const revision = state.revision;
         try {
           const response = await listPrompts({ cache: "no-store" });
           if (revision !== state.revision) continue;
           store.getState().setPrompts(response.prompts ?? []);
+          break;
         } catch {
           if (revision !== state.revision) continue;
-          store.getState().setPrompts(store.getState().prompts.items);
+          if (++failures >= 3) break;
+          await new Promise((resolve) => setTimeout(resolve, 1_000 * failures));
         }
-        break;
       }
     })
     .finally(() => {

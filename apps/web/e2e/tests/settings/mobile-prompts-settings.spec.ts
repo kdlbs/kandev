@@ -1,15 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
 
-test.describe("Prompts settings on a phone", () => {
-  test.afterEach(async ({ apiClient }) => {
-    const { prompts } = await apiClient.listPrompts();
-    for (const prompt of prompts) {
-      if (!prompt.builtin) {
-        await apiClient.deletePrompt(prompt.id).catch(() => undefined);
-      }
+test.afterEach(async ({ apiClient }) => {
+  const { prompts } = await apiClient.listPrompts();
+  for (const prompt of prompts) {
+    if (!prompt.builtin) {
+      await apiClient.deletePrompt(prompt.id).catch(() => undefined);
     }
-  });
+  }
+});
 
+test.describe("Prompts settings on a phone", () => {
   test("opens prompt deletion in a touch-sized confirmation sheet", async ({
     testPage,
     apiClient,

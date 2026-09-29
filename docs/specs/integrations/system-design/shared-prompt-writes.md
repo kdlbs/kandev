@@ -24,7 +24,7 @@ The backend checks `org.config.manage` from the trusted authentication context.
 Existing transport authentication and automation dispatch restrictions remain.
 
 The generic settings prompt adapter uses the same guarded service update as the
-new tool. It cannot change agent-edit permission. Existing generic rename support
+new tool and includes the permission in its read projection. It cannot change agent-edit permission. Existing generic rename support
 remains available only for eligible custom prompts.
 
 ## Persistence and failures
@@ -32,7 +32,9 @@ remains available only for eligible custom prompts.
 Add `custom_prompts.allow_agent_edits INTEGER NOT NULL DEFAULT 0` through an
 idempotent dialect-aware migration before built-in seeding. Preserve every legacy
 content value, identity, and timestamp. Model and HTTP/MCP DTOs expose a boolean.
-Operator PATCH accepts an optional permission; omission preserves it. Built-in
+Operator PATCH accepts an optional permission; omission preserves it. Operator
+updates also compare the observed modification timestamp and return HTTP 409 on
+a concurrent change, so content-only saves cannot restore revoked permission. Built-in
 prompts cannot acquire effective agent-write permission. MCP creation sets it true.
 
 Agent updates use a conditional database write over the observed ID and name,
@@ -42,6 +44,7 @@ Unique name constraints arbitrate concurrent creation. Service validation retain
 512-byte names and 1 MiB content limits and existing trim behavior.
 
 MCP maps invalid, duplicate, missing, and protected prompts to explicit errors;
+concurrent writes return conflict rather than validation errors, and
 unexpected storage errors are logged without returning internals or prompt bodies.
 See [permission decision](../../../decisions/2026-09-29-shared-prompt-agent-permissions.md).
 
@@ -52,12 +55,18 @@ through the event bus and existing WebSocket broadcaster. Browser handlers inval
 the prompts cache, and the shared prompt loader refreshes it. A per-store request
 generation prevents an in-flight response from clearing newer invalidation. Existing
 editor form state stays local and survives remote refreshes. Reconnection invalidates
-saved prompts as well. Failed mutations publish nothing.
+saved prompts as well, including the initial connection to close the gap between
+the first read and live subscription. Failed mutations publish nothing. Failed
+reads retain cached content without marking it loaded and retry up to three
+attempts with bounded backoff. A later invalidation or consumer mount can retry
+after exhaustion.
 
 Settings retains its existing inline prompt edit surface. An accessible translated
 “Allow agent edits” switch appears for custom prompts, with explanatory text that
 edits affect every reference. It shares the existing floating Save changes action,
-dirty tracking, and error handling. Phone presentation keeps the single-column
+dirty tracking, and error handling. Only explicitly changed permission is sent
+on save; otherwise the switch follows the latest remote permission while the
+content draft stays local. Phone presentation keeps the single-column
 page scroller and a labelled touch target at least 44px tall; there is no new overlay.
 
 ## Verification

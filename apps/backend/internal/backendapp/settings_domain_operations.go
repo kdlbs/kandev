@@ -235,6 +235,7 @@ func (s *settingsOperations) readPrompt(ctx context.Context, id string) (map[str
 			return map[string]any{
 				"id": prompt.ID, "name": prompt.Name, "content": prompt.Content, "builtin": prompt.Builtin,
 				"created_at": prompt.CreatedAt, "updated_at": prompt.UpdatedAt,
+				"allow_agent_edits": prompt.AllowAgentEdits && !prompt.Builtin,
 			}, nil
 		}
 	}

@@ -22,10 +22,12 @@ import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
 
-const defaultFormState = {
+type PromptFormState = { name: string; content: string; allowAgentEdits?: boolean };
+
+const defaultFormState: PromptFormState = {
   name: "",
   content: "",
-  allowAgentEdits: false,
+  allowAgentEdits: undefined,
 };
 
 /** The sigil the chat input matches on. Typed verbatim, so never translated. */
@@ -52,8 +54,6 @@ async function runPromptSave(
     throw error;
   }
 }
-
-type PromptFormState = typeof defaultFormState;
 
 type PromptCreateFormProps = {
   formState: PromptFormState;
@@ -154,10 +154,15 @@ function PromptEditForm({
       />
       {!prompt.builtin && (
         <PromptAgentPermission
-          allowed={formState.allowAgentEdits}
+          allowed={formState.allowAgentEdits ?? prompt.allow_agent_edits ?? false}
           saved={prompt.allow_agent_edits ?? false}
           disabled={isBusy}
-          onChange={(allowAgentEdits) => onFormChange({ allowAgentEdits })}
+          onChange={(allowed) =>
+            onFormChange({
+              allowAgentEdits:
+                allowed === (prompt.allow_agent_edits ?? false) ? undefined : allowed,
+            })
+          }
         />
       )}
       <div className="flex items-center gap-2">
@@ -190,7 +195,9 @@ function PromptListItem({
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
   const permissionIsDirty =
-    isEditing && formState.allowAgentEdits !== (prompt.allow_agent_edits ?? false);
+    isEditing &&
+    formState.allowAgentEdits !== undefined &&
+    formState.allowAgentEdits !== (prompt.allow_agent_edits ?? false);
 
   return (
     <div
@@ -377,7 +384,11 @@ function usePromptRequests(
   const updateRequest = useRequest(async (id: string, s: typeof defaultFormState) => {
     const updated = await updatePrompt(
       id,
-      { name: s.name.trim(), content: s.content.trim(), allow_agent_edits: s.allowAgentEdits },
+      {
+        name: s.name.trim(),
+        content: s.content.trim(),
+        ...(s.allowAgentEdits === undefined ? {} : { allow_agent_edits: s.allowAgentEdits }),
+      },
       { cache: "no-store" },
     );
     applyPrompts((current) => current.map((p) => (p.id === id ? updated : p)));
@@ -446,7 +457,7 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setFormState({
       name: prompt.name,
       content: prompt.content,
-      allowAgentEdits: prompt.allow_agent_edits ?? false,
+      allowAgentEdits: undefined,
     });
   };
   const startCreate = () => {
@@ -486,7 +497,10 @@ export function getPromptDraftMeta(
   formState: PromptFormState,
 ) {
   const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
-  const revision = JSON.stringify(formState);
+  const revision = JSON.stringify({
+    ...formState,
+    allowAgentEdits: formState.allowAgentEdits ?? editingPrompt?.allow_agent_edits ?? false,
+  });
   const savedRevision = JSON.stringify({
     name: editingPrompt?.name ?? "",
     content: editingPrompt?.content ?? "",

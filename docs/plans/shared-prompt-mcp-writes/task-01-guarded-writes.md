@@ -46,7 +46,7 @@ Permission bypass, concurrent revocation, migration data loss, and stale readbac
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race ./internal/prompts/... ./internal/mcp/handlers ./internal/mcp/server ./config/prompts -count=1)
+(cd apps/backend && go test -race ./internal/prompts/... ./internal/mcp/handlers ./internal/mcp/server ./internal/gateway/websocket ./config/prompts -count=1)
 (cd apps/backend && go test -race ./internal/backendapp -run 'Test.*(Prompt|Settings)' -count=1)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1)
@@ -65,3 +65,13 @@ Red evidence: missing capability/permission, catalog registration, migration, an
 change-notification tests failed before implementation; these pass afterward.
 Dedicated agent writes and the generic settings adapter share the same guarded
 service. Duplicate PostgreSQL name conflicts return the domain error.
+
+
+Review remediation: operator database updates compare the observed timestamp,
+preventing a content-only PATCH from overwriting a concurrent revocation. HTTP
+and MCP report stale writes as conflicts. Regressions cover this guard on both
+databases, error projection, and generic-settings read permission metadata. The
+CI gateway subscription-count expectation now includes prompt invalidation, and
+a focused broadcast test verifies its content-free payload. CI also exposed an
+unchanged SSH timeout test; ten local race-enabled repetitions passed, and the
+next PR head must still pass remote CI before delivery.

@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/prompts/models"
 )
 
-var ErrPromptWriteRejected = errors.New("shared prompt changed or no longer allows agent edits; read it again")
+var ErrPromptWriteRejected = errors.New("shared prompt changed; read it again before saving")
 
 func (r *sqliteRepository) UpdatePromptForAgent(ctx context.Context, prompt *models.Prompt, expectedName string) error {
 	updatedAt := time.Now().UTC()

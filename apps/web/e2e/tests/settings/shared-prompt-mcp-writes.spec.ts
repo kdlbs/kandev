@@ -2,6 +2,14 @@ import { test, expect } from "../../fixtures/test-base";
 import { callPromptTool } from "../../helpers/shared-prompt-mcp";
 import { replacePromptEditor, promptEditorText } from "../../helpers/settings-prompt-editor";
 
+test.afterEach(async ({ apiClient }) => {
+  const names = ["review-policy", "release-policy", "concurrent-review"];
+  const { prompts } = await apiClient.listPrompts();
+  for (const prompt of prompts) {
+    if (names.includes(prompt.name)) await apiClient.deletePrompt(prompt.id);
+  }
+});
+
 test("operator controls shared prompt agent edits and MCP changes appear live", async ({
   testPage,
   apiClient,
@@ -77,4 +85,55 @@ test("operator controls shared prompt agent edits and MCP changes appear live", 
     ).isError,
   ).toBe(true);
   await expect(row).toContainText("Remote revision");
+});
+
+test("content saves keep permission revoked by another operator", async ({
+  testPage,
+  apiClient,
+  backend,
+}) => {
+  await callPromptTool(backend.baseUrl, "create_shared_prompt_kandev", {
+    name: "concurrent-review",
+    content: "Original policy",
+  });
+  const prompt = (await apiClient.listPrompts()).prompts.find(
+    (item) => item.name === "concurrent-review",
+  )!;
+  await testPage.goto("/settings/prompts");
+  const row = testPage.locator('[data-prompt-name="concurrent-review"]');
+  await row.getByTestId("prompt-edit-button").click();
+  const toggle = row.getByRole("switch", { name: "Allow agent edits" });
+  await expect(toggle).toBeChecked();
+  await replacePromptEditor(
+    testPage,
+    row.getByTestId("prompt-content-input"),
+    "Local operator draft",
+  );
+  const revoke = await testPage.request.patch(`${backend.baseUrl}/api/v1/prompts/${prompt.id}`, {
+    data: { allow_agent_edits: false },
+  });
+  expect(revoke.ok()).toBe(true);
+  await expect(toggle).not.toBeChecked();
+  await expect(promptEditorText(row.getByTestId("prompt-content-input"))).toContainText(
+    "Local operator draft",
+  );
+  const saveRequest = testPage.waitForRequest(
+    (request) => request.method() === "PATCH" && request.url().endsWith(`/prompts/${prompt.id}`),
+  );
+  await testPage
+    .getByTestId("settings-floating-save")
+    .getByRole("button", { name: "Save changes" })
+    .click();
+  expect((await saveRequest).postDataJSON()).not.toHaveProperty("allow_agent_edits");
+  await expect(toggle).toHaveCount(0);
+  const saved = (await apiClient.listPrompts()).prompts.find((item) => item.id === prompt.id)!;
+  expect(saved.content).toBe("Local operator draft");
+  expect(
+    (
+      await callPromptTool(backend.baseUrl, "update_shared_prompt_kandev", {
+        name: prompt.name,
+        content: "Still forbidden",
+      })
+    ).isError,
+  ).toBe(true);
 });

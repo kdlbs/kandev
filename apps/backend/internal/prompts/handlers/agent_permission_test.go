@@ -2,11 +2,18 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/prompts/controller"
+	"github.com/kandev/kandev/internal/prompts/models"
+	"github.com/kandev/kandev/internal/prompts/service"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,4 +35,28 @@ func TestPromptHTTPAgentPermission(t *testing.T) {
 		require.Equal(t, true, prompt["allow_agent_edits"])
 	}
 	require.Equal(t, "Changed", prompt["content"])
+}
+
+type conflictingPromptStore struct{ promptstore.Repository }
+
+func (conflictingPromptStore) GetPromptByID(context.Context, string) (*models.Prompt, error) {
+	return &models.Prompt{ID: "prompt", Name: "review", Content: "Original"}, nil
+}
+
+func (conflictingPromptStore) UpdatePrompt(context.Context, *models.Prompt) error {
+	return promptstore.ErrPromptWriteRejected
+}
+
+func TestPromptHTTPConcurrentUpdateReturnsConflict(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	handler := NewHandlers(controller.NewController(service.NewService(conflictingPromptStore{})), log)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "prompt"}}
+	ctx.Request = httptest.NewRequest(http.MethodPatch, "/api/v1/prompts/prompt", bytes.NewBufferString(`{"content":"New"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	handler.httpUpdatePrompt(ctx)
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "read it again")
 }

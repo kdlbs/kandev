@@ -261,13 +261,24 @@ func (r *sqliteRepository) UpdatePrompt(ctx context.Context, prompt *models.Prom
 	}
 	prompt.Name = strings.TrimSpace(prompt.Name)
 	prompt.Content = strings.TrimSpace(prompt.Content)
-	prompt.UpdatedAt = time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	updatedAt := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE custom_prompts
 		SET name = ?, content = ?, allow_agent_edits = ?, updated_at = ?
-		WHERE id = ?
-	`), prompt.Name, prompt.Content, boolInt(prompt.AllowAgentEdits && !prompt.Builtin), prompt.UpdatedAt, prompt.ID)
-	return err
+		WHERE id = ? AND updated_at = ?
+	`), prompt.Name, prompt.Content, boolInt(prompt.AllowAgentEdits && !prompt.Builtin), updatedAt, prompt.ID, prompt.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrPromptWriteRejected
+	}
+	prompt.UpdatedAt = updatedAt
+	return nil
 }
 
 func (r *sqliteRepository) DeletePrompt(ctx context.Context, id string) error {

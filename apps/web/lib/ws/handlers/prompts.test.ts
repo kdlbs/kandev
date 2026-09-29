@@ -24,7 +24,10 @@ function changed(store: ReturnType<typeof createAppStore>) {
 }
 
 describe("prompt invalidation", () => {
-  afterEach(() => mocks.listPrompts.mockReset());
+  afterEach(() => {
+    mocks.listPrompts.mockReset();
+    vi.useRealTimers();
+  });
   it("refreshes already-loaded prompts after a remote mutation", async () => {
     const store = createAppStore();
     store.getState().setPrompts([prompt("Old")]);
@@ -51,15 +54,35 @@ describe("prompt invalidation", () => {
     await vi.waitFor(() => expect(store.getState().prompts.items[0].content).toBe("Latest"));
     expect(mocks.listPrompts).toHaveBeenCalledTimes(2);
   });
-  it("keeps cached content when a refresh fails and retries on a later change", async () => {
+  it("retries a transient refresh failure without a second change notification", async () => {
+    vi.useFakeTimers();
     const store = createAppStore();
     store.getState().setPrompts([prompt("Cached")]);
     mocks.listPrompts.mockRejectedValueOnce(new Error("offline"));
-    changed(store);
-    await vi.waitFor(() => expect(store.getState().prompts.loading).toBe(false));
-    expect(store.getState().prompts.items[0].content).toBe("Cached");
     mocks.listPrompts.mockResolvedValueOnce({ prompts: [prompt("Recovered")] });
     changed(store);
-    await vi.waitFor(() => expect(store.getState().prompts.items[0].content).toBe("Recovered"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().prompts.items[0].content).toBe("Cached");
+    expect(store.getState().prompts.loaded).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.getState().prompts.items[0].content).toBe("Recovered");
+    expect(store.getState().prompts.loaded).toBe(true);
+    expect(mocks.listPrompts).toHaveBeenCalledTimes(2);
+  });
+  it("bounds failed retries while retaining a retryable cache", async () => {
+    vi.useFakeTimers();
+    const store = createAppStore();
+    store.getState().setPrompts([prompt("Cached")]);
+    mocks.listPrompts.mockRejectedValue(new Error("offline"));
+    changed(store);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mocks.listPrompts).toHaveBeenCalledTimes(3);
+    expect(store.getState().prompts.items[0].content).toBe("Cached");
+    expect(store.getState().prompts.loaded).toBe(false);
+    expect(store.getState().prompts.loading).toBe(false);
+    mocks.listPrompts.mockResolvedValueOnce({ prompts: [prompt("Recovered")] });
+    changed(store);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().prompts.items[0].content).toBe("Recovered");
   });
 });

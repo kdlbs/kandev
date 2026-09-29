@@ -84,7 +84,7 @@ func (h *Handlers) sharedPromptWriteError(msg *ws.Message, err error) (*ws.Messa
 	case errors.Is(err, promptservice.ErrBuiltinPrompt), errors.Is(err, promptservice.ErrPromptAgentEditsDisabled):
 		code, message = ws.ErrorCodeForbidden, err.Error()
 	case errors.Is(err, promptstore.ErrPromptWriteRejected):
-		code, message = ws.ErrorCodeValidation, err.Error()
+		code, message = ws.ErrorCodeConflict, err.Error()
 	default:
 		h.logger.Error("failed to save shared prompt", zap.Error(err))
 	}
