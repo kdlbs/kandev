@@ -376,10 +376,9 @@ ceiling-releasing turn end, and each backstop tick.
    hook of `promptTaskOptions` (`orchestrator/task_operations.go`), run at the
    agentctl acceptance boundary before the prompt runs. It sets
    `session_turn_id` with `UPDATE ... SET session_turn_id = ? WHERE id = ? AND
-   outcome IS NULL AND session_turn_id IS NULL`, so the column is bound before
-   the agent can raise a permission request. A failure is logged at warn and
-   leaves it empty, which [containment](containment.md#unattended-permissions)
-   treats as deny-closed.
+   outcome IS NULL AND session_turn_id IS NULL`, so the column binds at
+   acceptance. A request that beats the binding, or a failed binding (warn log),
+   is matched by session and denied ([containment](containment.md#unattended-permissions)).
 5. On success, set `message_id` from the stored message and, if `onAccepted`
    did not, `session_turn_id` with the same conditional update. On a send error, [find the turn's message](#finding-the-turns-message):
    when found, record it as on success, because the prompt was sent. When it

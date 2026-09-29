@@ -49,7 +49,7 @@ during an unattended turn and counts them on the turn row.
 - Launch currency: condition 3 uses the `updated_at` of the executor profile,
   agent profile and revealed secrets; condition 4 uses the MCP row's
   `updated_at` when the row exists and the agent profile's only when there is
-  no row. A `CREATED` session has no `started_at` and is exempt.
+  no row. A session in state `CREATED` is exempt (decided by state, not `started_at`).
 - New constants `models.PermissionActorCoordinatorUnattended` and
   `models.PermissionSourceCoordinatorWake`; optional `ActorKind` and
   `UnattendedTurnID` on `ResolveAgentPermissionRequest`; optional
@@ -94,7 +94,7 @@ during an unattended turn and counts them on the turn row.
 - Calling `CheckForAdmission` from admission (task 05; it only calls the helper) and the settings display and autonomy read (task 06 renders the fix copy and calls `Check`, not `CheckForAdmission`; the autonomy read uses the no-count path).
 - Residual sources with no `updated_at` (agent-runtime defaults, credentials-manager values): not detected by launch currency, named under Out of scope in the design.
 - Exporting the lifecycle launch environment resolver for shared use by launch and `Check`. It is the way to lift `unverified_source`; the conductor tracks the follow-up.
-- Binding `session_turn_id` at acceptance (`onAccepted`) is task 05's Delivery; this card pins the deny-closed behaviour when it is unbound.
+- Binding `session_turn_id` at acceptance (`onAccepted`) is task 05's Delivery; this card denies and counts a request that arrives while it is unbound (matched by session while the column is empty).
 - Any sandboxing or change to executors, auth or secrets.
 - Wiring `ReresolveRecordedDenials` into the backstop tick (task 04). Admission holding wakes `pending` with hold reason `containment` (task 05). For `AC-COORDINATOR-CONTAINMENT-002.1` this card pins only that `Check` returns the four conditions in order and that the first unmet one is identifiable; `002.2` is pinned by the phase 1 tests passing with every condition failing.
 
@@ -104,7 +104,7 @@ during an unattended turn and counts them on the turn row.
   the design lists (`mock_remote` met only under the e2e profile); auth modes
   `disabled` and `setup` fail; a key `KANDEV_API_KEY` or `KANDEV_RUN_TOKEN`, or
   a value starting `kandev_pat_` from a plain value or a secret, fails; any MCP
-  server fails; each unreadable input fails with detail `unreadable`; a profile with no MCP row is met; a `kandev`-named MCP entry fails; `unverified_source` when the conversation task has any repository-binding env var or the credentials reader is unwired, and a credentials-manager `RequiredEnv` value with a `kandev_pat_` prefix fails; three currency cases: (a) an MCP row updated after `started_at` fails condition 4 while an agent profile updated after it, with an older MCP row, does not, (b) with no MCP row the agent profile's `updated_at` decides, (c) a `CREATED` session is exempt; the executor profile, agent profile or a revealed secret updated after `started_at` fails condition 3 with `changed_since_launch`; `ProviderAPIKeySecretID` holding a `kandev_pat_` value fails; a `ConflictError` is `unreadable`; no
+  server fails; each unreadable input fails with detail `unreadable`; a profile with no MCP row is met; a `kandev`-named MCP entry fails; `unverified_source` when the conversation task has any repository-binding env var or the credentials reader is unwired, and a credentials-manager `RequiredEnv` value with a `kandev_pat_` prefix fails; three currency cases: (a) an MCP row updated after `started_at` fails condition 4 while an agent profile updated after it, with an older MCP row, does not, (b) with no MCP row the agent profile's `updated_at` decides, (c) a `CREATED` session is exempt; the executor profile, agent profile or a revealed secret updated after `started_at` fails condition 3 with `changed_since_launch`; `ProviderAPIKeySecretID` holding a `kandev_pat_` value fails; no
   result is cached (two calls around a profile edit differ).
 - `CheckForAdmission` counts each unmet condition and logs only when (Contained, first unmet) changes; a direct `Check` call moves neither.
 - A permission request during an open unattended turn that the exact-name
@@ -112,7 +112,7 @@ during an unattended turn and counts them on the turn row.
   count incremented; an auto-approved one is untouched; the same request with
   no open turn, or from a later session turn than the unattended one (a
   drained queued manager message), waits for a person; the same `pending_id`
-  delivered twice is counted once and, after a failed first resolution, resolved on the redelivery; a request while `session_turn_id` is unbound waits for a person; a failed resolution is
+  delivered twice is counted once and, after a failed first resolution, resolved on the redelivery; a request while `session_turn_id` is unbound is denied through `ResolveAgentPermission`, counted once, and the conversation is not left waiting for a person; a wiring test asserts the credentials-manager and task-repository readers are non-nil in production wiring, and a nil reader is `unverified_source`; a failed resolution is
   resolved again by a direct call of `ReresolveRecordedDenials(ctx, coordinatorID)` without a second count, only for that coordinator's open turns, never for a settled turn; with a reject option the session is not left `WAITING_FOR_INPUT`, with none the cancel path restores it; a failed message write records and counts nothing; a coordinator session started by delivery
   has profile and environment auto-approve forced off.
 - Attended paths never call `Check`: the phase 1 conversation and message

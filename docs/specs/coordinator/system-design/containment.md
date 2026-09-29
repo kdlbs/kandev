@@ -98,10 +98,15 @@ in this order, and `Contained` is true only when all four are met:
    carries ANY repository binding environment variable (the adapter reads the
    task's repositories and their secret bindings), the condition is not met with
    detail `unverified_source`; a coordinator with no conversation task, or a
-   task with no bindings, has an empty source. The same detail applies when the
-   credentials-manager reader is not wired. A secret that cannot be resolved,
-   a `runtimeenv` `ConflictError` or any other read error fails with detail
-   `unreadable`; an empty source set is met. A match outranks
+   task with no bindings, has an empty source. `OpenConversation` creates the
+   conversation task with no repositories (`coordinator/conversation.go`), so the
+   source is empty by construction today; the check is kept so a later change
+   that attaches one fails closed. The adapter's task-repository reader and
+   credentials-manager reader are wired in `internal/backendapp/coordinator.go`
+   (that wiring is in scope, and a test asserts both are non-nil in production
+   wiring); a nil reader is `unverified_source`. A secret that cannot be resolved,
+   or any other read error fails with detail `unreadable` (the condition never
+   calls `runtimeenv`, so no `ConflictError` arises); an empty source set is met. A match outranks
    `unverified_source`, which outranks a met result; `unreadable` outranks both.
    The resolved values are compared and discarded; they are never logged or
    returned. Lifting `unverified_source` needs the lifecycle resolver exported,
@@ -129,9 +134,11 @@ that feeds the condition is later than that session's `started_at`:
   row exists (an MCP patch bumps only that row, not the agent profile); the
   agent profile's `updated_at` only when there is no MCP row.
 
-A `CREATED` session has not launched, so `started_at` is unset and the rule
-does not apply to it; any other session with a missing `started_at`, and a
-source that has the field but a missing `updated_at`, is `unreadable`. Without
+A session in state `CREATED` has not launched, so the rule does not apply to
+it, decided by the session state and not by `started_at` (the row's `started_at`
+is set to the row's creation time and a resumed session keeps it, as in
+`task/repository/sqlite/session.go`); a source that has the field but a missing
+`updated_at` is `unreadable`. Without
 a session there is nothing launched and the rule does not apply. The fix is the
 phase 1 way to start a new conversation, which launches from the current
 settings. Sources with no timestamp are residuals ([Out of scope](#out-of-scope)).
@@ -161,9 +168,10 @@ The unattended turn row ([wake](wake.md#store)) marks one session turn, its
 binds `session_turn_id` at the agentctl acceptance boundary through the
 existing `onAccepted(turnID)` hook of `promptTaskOptions`
 ([wake Delivery](wake.md#delivery)); until that binding lands the column is
-empty and the row matches no request, so a request in that window is not
-denied here and waits for a person (deny-closed for the unattended turn: the
-turn cannot finish, and the [backstop](wake.md#backstop) settles it).
+empty. The window is real: the active turn is registered before `onAccepted`
+runs, so a permission request can arrive with the column still empty. Such a
+request fails closed: it is denied and counted like any other unattended
+permission, so the conversation never waits for a person.
 
 Phase 1's exact-name auto-approve runs in agentctl
 (`autoApproveCoordinatorPermission` and `coordinatorAutoApprovedNames` in
@@ -178,8 +186,9 @@ package registers on the orchestrator only while phase 3 is effective. It
 receives the `watcher.PermissionRequestData` and the active turn id, and:
 
 - does nothing unless the task is of `coordinator` origin and holds an open
-  unattended turn row whose `session_turn_id` equals the request's active
-  session turn id;
+  unattended turn row for that session whose `session_turn_id` equals the
+  request's active session turn id or is still empty (the unbound window
+  above);
 - otherwise, and only when the permission message was stored (a failed message
   write leaves the request to a person: nothing is recorded, counted or
   resolved), runs one transaction that re-reads the row with `outcome IS NULL`,
@@ -296,7 +305,7 @@ replace the condition's own fix line while they hold:
 | --- | --- |
 | `changed_since_launch` | "Start a new conversation with this coordinator so it launches with the current settings." |
 | `unreadable` | "Kandev could not read this setting. Check the profile and try again." |
-| `unverified_source` | "This coordinator's conversation task or agent profile carries a repository binding that Kandev cannot verify. Remove the binding from the task or profile, or use a coordinator without one." |
+| `unverified_source` | "This coordinator's conversation task carries a repository binding that Kandev cannot verify. Remove the binding from the task, or use a coordinator without one." |
 
 `changed_since_launch` names the new-conversation action, not a session
 restart, because the phase 1 conversation is what launches from current
@@ -336,10 +345,11 @@ change.
 
 ## Out of scope
 
-Launch currency reads only sources that carry an `updated_at`. These
-contribute to condition 3 and have none, so an edit to them after launch is not
-detected: agent-runtime default definitions (`appendAgentRuntimeDefaults`) and
-the credentials-manager values read for `RequiredEnv`. They are named
+Launch currency reads only sources that carry an `updated_at`. Two
+sources feed launch and have none, so an edit to them after launch is not
+detected: the credentials-manager values read for `RequiredEnv`, and the
+agent-runtime default definitions (`appendAgentRuntimeDefaults`), which `Check`
+does not read at all because runtime defaults carry no Kandev credential. They are named
 residuals, not silent gaps; the fix is a new conversation, as for any edit.
 
 Exporting the lifecycle launch environment resolver (the definition assembly
