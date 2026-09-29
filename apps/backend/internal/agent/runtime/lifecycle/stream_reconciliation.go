@@ -10,6 +10,10 @@ import (
 // Callers must reconcile the durable submission before any retry.
 var ErrUncertainPromptDelivery = errors.New("prompt delivery outcome is uncertain")
 
+const durableDeliveryUncertainFailureCode = "DURABLE_DELIVERY_UNCERTAIN"
+const durableDeliveryReconnectingFailureCode = "DURABLE_DELIVERY_RECONNECTING"
+const durableSubmissionSettlementTimeout = 3 * time.Second
+
 type SubmissionReconciliationState string
 
 const (

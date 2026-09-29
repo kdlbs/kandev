@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -38,15 +39,25 @@ type StreamCallbacks struct {
 
 // StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
-	logger     *logger.Logger
-	callbacks  StreamCallbacks
-	deliveryMu sync.RWMutex
-	delivery   AgentDeliveryRepository
-	ackMu      sync.Mutex
-	ackWorkers map[string]*durableDeliveryAckWorker
-	ackWG      sync.WaitGroup
-	mcpMu      sync.RWMutex
-	mcpHandler agentctl.MCPHandler
+	logger                        *logger.Logger
+	callbacks                     StreamCallbacks
+	reconciliationMu              sync.Mutex
+	deliveryReconciliations       map[string]*deliveryReconciliationCycle
+	stoppedReconciliations        map[string]struct{}
+	reconciliationContext         context.Context
+	reconciliationCancel          context.CancelFunc
+	reconciliationNow             func() time.Time
+	reconciliationWait            func(context.Context, time.Duration) error
+	isExecutionCurrent            func(*AgentExecution) bool
+	onDeliveryReconciliationPhase func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
+	deliverySubmissionSettler     func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
+	deliveryMu                    sync.RWMutex
+	delivery                      AgentDeliveryRepository
+	ackMu                         sync.Mutex
+	ackWorkers                    map[string]*durableDeliveryAckWorker
+	ackWG                         sync.WaitGroup
+	mcpMu                         sync.RWMutex
+	mcpHandler                    agentctl.MCPHandler
 	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
 	// stream's task. Nil leaves dispatch unscoped (single-user instances and
 	// isolated tests); set via Manager.SetMCPIdentityScoper.
@@ -157,13 +168,20 @@ func (c *stopChannelContext) Err() error {
 // Either way, Wait() closes a per-StreamManager internal channel that the
 // same drain sites observe — so Wait remains an absolute drain barrier.
 func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler, stopCh <-chan struct{}) *StreamManager {
+	reconciliationContext, reconciliationCancel := context.WithCancel(context.Background())
 	return &StreamManager{
-		logger:     log.WithFields(zap.String("component", "stream-manager")),
-		callbacks:  callbacks,
-		mcpHandler: mcpHandler,
-		stopCh:     stopCh,
-		waitCh:     make(chan struct{}),
-		ackWorkers: make(map[string]*durableDeliveryAckWorker),
+		logger:                  log.WithFields(zap.String("component", "stream-manager")),
+		callbacks:               callbacks,
+		mcpHandler:              mcpHandler,
+		stopCh:                  stopCh,
+		waitCh:                  make(chan struct{}),
+		ackWorkers:              make(map[string]*durableDeliveryAckWorker),
+		deliveryReconciliations: make(map[string]*deliveryReconciliationCycle),
+		stoppedReconciliations:  make(map[string]struct{}),
+		reconciliationContext:   reconciliationContext,
+		reconciliationCancel:    reconciliationCancel,
+		reconciliationNow:       time.Now,
+		reconciliationWait:      waitForReconciliation,
 	}
 }
 
@@ -210,6 +228,8 @@ func (sm *StreamManager) Wait() {
 	sm.wgMu.Lock()
 	sm.stopped = true
 	sm.wgMu.Unlock()
+	sm.reconciliationCancel()
+	sm.cancelAllDeliveryReconciliations()
 	sm.waitChOnce.Do(func() { close(sm.waitCh) })
 	sm.wg.Wait()
 	sm.ackMu.Lock()
@@ -218,6 +238,17 @@ func (sm *StreamManager) Wait() {
 	}
 	sm.ackMu.Unlock()
 	sm.ackWG.Wait()
+}
+
+func waitForReconciliation(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (sm *StreamManager) start(fn func()) bool {
@@ -371,8 +402,15 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			if sm.shouldReconnectAfterStreamOverload(execution, disconnectErr) {
 				return
 			}
-			if sm.reconcileDisconnectedSubmission(ctx, execution, client) {
-				return
+			if execution.DeliveryMode == DurableDeliveryV1 && execution.deliverySubmissionIDSnapshot() != "" {
+				result := sm.reconcileDisconnectedSubmission(ctx, execution)
+				switch result.Outcome {
+				case DeliveryReconciliationRunningAttached, DeliveryReconciliationTerminalSettled,
+					DeliveryReconciliationOwnerMismatch:
+					return
+				default:
+					disconnectErr = errors.Join(ErrUncertainPromptDelivery, result.Err)
+				}
 			}
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}

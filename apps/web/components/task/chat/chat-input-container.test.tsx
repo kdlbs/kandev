@@ -136,7 +136,7 @@ describe("ChatInputContainer launch-error ownership", () => {
   it("uses the uncertain-delivery controls instead of generic recovery choices", () => {
     composerRecovery.current = { sessionId: SESSION_ID, model: { sessionId: SESSION_ID } };
 
-    render(<ChatInputContainer {...baseProps} isFailed uncertainDelivery />);
+    render(<ChatInputContainer {...baseProps} uncertainDelivery />);
 
     expect(screen.getByTestId(testIds.stoppedBanner)).toBeTruthy();
     expect(screen.queryByTestId(testIds.recoveryCard)).toBeNull();

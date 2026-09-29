@@ -2123,6 +2123,8 @@
   "workflowAgentsUnavailable": "此配置文件已不可用。请选择其他配置文件或重置。",
   "agentHasStopped": "该智能体已停止。",
   "durableDeliveryUncertain": "传输已中断。提示的结果不确定。",
+  "durableDeliveryReconnecting": "正在重新连接代理。不会再次发送您的提示。",
+  "deliveryStopOutcomeUnconfirmed": "已请求停止。提示的结果仍然未知。",
   "retryConnection": "重试连接",
   "retryingConnection": "正在重试连接...",
   "agentResponseChangedSelectAgain": "智能体的回复已变化。请重新选择文本。",

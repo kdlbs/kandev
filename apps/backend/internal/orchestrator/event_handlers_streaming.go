@@ -285,6 +285,16 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
 	}
+	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
+		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
+			s.logger.Warn("failed to finish durable delivery terminal settlement",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		cancel()
+	}
 }
 
 func (s *Service) persistNativeCodexTurnID(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {

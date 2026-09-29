@@ -131,6 +131,7 @@ func (s *Server) setupRoutes() {
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/agent/session", s.handleAgentSessionAssociation)
 		api.GET("/agent/delivery", s.handleDeliveryStatus)
 		api.POST("/agent/submissions", s.handleDeliverySubmission)
 		api.GET("/agent/submissions", s.handleDeliverySubmissions)

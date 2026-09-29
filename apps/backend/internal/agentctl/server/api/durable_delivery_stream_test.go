@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -193,7 +194,181 @@ func TestAgentStreamWriterRepairsOutOfOrderDurableEvents(t *testing.T) {
 	}
 }
 
+func TestDurableWriterFinalWake(t *testing.T) {
+	server, procMgr, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+	seedPayload, err := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "seed"})
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if _, err := deliveryJournal.Append(ctx, journal.Event{
+		SessionID: "session-1", IncarnationID: "session-1", HarnessGeneration: 1,
+		StreamID: "session-1", Type: adapter.EventTypeMessageChunk, Payload: seedPayload,
+	}); err != nil {
+		t.Fatalf("append seed: %v", err)
+	}
+	after, err := server.replayAgentStream(ctx, 0, func(adapter.AgentEvent) error { return nil })
+	if err != nil || after != 1 {
+		t.Fatalf("drain seed = cursor %d, error %v; want cursor 1", after, err)
+	}
+
+	// Commit after the drain has reported its cursor but before the writer
+	// begins waiting. No later event will arrive to reveal a missing tail.
+	procMgr.SendErrorEvent("quiet terminal", 7)
+
+	wakeups := procMgr.DeliveryWakeups()
+	if cap(wakeups) != 1 {
+		t.Fatalf("wake capacity = %d, want bounded capacity 1", cap(wakeups))
+	}
+	writerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	got := make(chan adapter.AgentEvent, 1)
+	done := make(chan struct{})
+	writer := durableAgentStreamWriter{
+		server: server, streamID: "stream-1", deliveryStreamID: "session-1", wakeups: wakeups,
+		writeMessage: func(data []byte) error {
+			var event adapter.AgentEvent
+			if err := json.Unmarshal(data, &event); err != nil {
+				return err
+			}
+			got <- event
+			return nil
+		},
+	}
+	go func() {
+		writer.run(writerCtx, after, false)
+		close(done)
+	}()
+
+	select {
+	case event := <-got:
+		if event.DeliverySequence != 2 || event.Type != adapter.EventTypeError || event.Error != "quiet terminal" {
+			t.Fatalf("quiet terminal = %+v, want sequence 2 error", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("quiet final journal event was not delivered from the wake")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("durable stream writer did not stop")
+	}
+}
+
+func TestDurableDetachReattachDuringCommit(t *testing.T) {
+	const eventCount = 32
+	server, procMgr, deliveryJournal := newDurableDeliveryTestServerWithLimit(t, 2)
+	wakeups := procMgr.DeliveryWakeups()
+	ctx := context.Background()
+
+	firstCtx, cancelFirst := context.WithCancel(ctx)
+	firstReached := make(chan struct{})
+	firstDone := make(chan struct{})
+	var firstEvents []uint64
+	firstWriter := durableAgentStreamWriter{
+		server: server, streamID: "stream-1", deliveryStreamID: "session-1", wakeups: wakeups,
+		writeMessage: func(data []byte) error {
+			var event adapter.AgentEvent
+			if err := json.Unmarshal(data, &event); err != nil {
+				return err
+			}
+			firstEvents = append(firstEvents, event.DeliverySequence)
+			if event.DeliverySequence == eventCount/2 {
+				close(firstReached)
+			}
+			return nil
+		},
+	}
+	go func() {
+		firstWriter.run(firstCtx, 0, true)
+		close(firstDone)
+	}()
+
+	continueProducer := make(chan struct{})
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		for i := 1; i <= eventCount; i++ {
+			procMgr.SendErrorEvent(fmt.Sprintf("event-%d", i), uint64(i))
+			if i == eventCount/2 {
+				<-continueProducer
+			}
+		}
+	}()
+
+	select {
+	case <-firstReached:
+	case <-time.After(5 * time.Second):
+		cancelFirst()
+		t.Fatal("live writer did not receive the first committed prefix")
+	}
+	cancelFirst()
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("detached writer did not stop")
+	}
+	if len(procMgr.GetUpdates()) != 0 {
+		t.Fatalf("durable payloads accumulated in notification queue: %d", len(procMgr.GetUpdates()))
+	}
+	if err := deliveryJournal.Acknowledge(ctx, "session-1", eventCount/2); err != nil {
+		t.Fatalf("acknowledge delivered prefix: %v", err)
+	}
+	close(continueProducer)
+	select {
+	case <-producerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("detached producer stalled while the stream was disconnected")
+	}
+
+	secondCtx, cancelSecond := context.WithCancel(ctx)
+	defer cancelSecond()
+	var secondEvents []uint64
+	secondDone := make(chan struct{})
+	secondWriter := durableAgentStreamWriter{
+		server: server, streamID: "stream-1", deliveryStreamID: "session-1", wakeups: wakeups,
+		writeMessage: func(data []byte) error {
+			var event adapter.AgentEvent
+			if err := json.Unmarshal(data, &event); err != nil {
+				return err
+			}
+			secondEvents = append(secondEvents, event.DeliverySequence)
+			if event.DeliverySequence == eventCount {
+				cancelSecond()
+			}
+			return nil
+		},
+	}
+	go func() {
+		secondWriter.run(secondCtx, eventCount/2, true)
+		close(secondDone)
+	}()
+	select {
+	case <-secondDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reattached writer did not deliver the retained tail")
+	}
+
+	allEvents := append(append([]uint64(nil), firstEvents...), secondEvents...)
+	if len(allEvents) != eventCount {
+		t.Fatalf("delivered event count = %d, want %d (first %v, second %v)", len(allEvents), eventCount, firstEvents, secondEvents)
+	}
+	for i, sequence := range allEvents {
+		if sequence != uint64(i+1) {
+			t.Fatalf("sequence at index %d = %d, want %d", i, sequence, i+1)
+		}
+	}
+	if cap(wakeups) != 1 || cap(procMgr.GetUpdates()) != 2 {
+		t.Fatalf("queue capacities = wake %d, updates %d; want 1 and 2", cap(wakeups), cap(procMgr.GetUpdates()))
+	}
+}
+
 func newDurableDeliveryTestServer(t *testing.T) (*Server, *process.Manager, *journal.Journal) {
+	return newDurableDeliveryTestServerWithLimit(t, 0)
+}
+
+func newDurableDeliveryTestServerWithLimit(t *testing.T, detachedEventLimit int) (*Server, *process.Manager, *journal.Journal) {
 	t.Helper()
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{
@@ -202,13 +377,14 @@ func newDurableDeliveryTestServer(t *testing.T) (*Server, *process.Manager, *jou
 		SessionID:          "session-1",
 		InstanceID:         "instance-1",
 		DurableJournalPath: filepath.Join(t.TempDir(), "delivery.bbolt"),
+		DetachedEventLimit: detachedEventLimit,
 	}
 	procMgr := process.NewManager(cfg, log)
 	deliveryJournal, err := procMgr.DeliveryJournal()
 	if err != nil {
 		t.Fatalf("open delivery journal: %v", err)
 	}
-	t.Cleanup(func() { _ = deliveryJournal.Close() })
+	t.Cleanup(func() { _ = procMgr.StopForTeardown(context.Background()) })
 	return NewServer(cfg, procMgr, nil, nil, log), procMgr, deliveryJournal
 }
 

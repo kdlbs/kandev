@@ -305,13 +305,6 @@ func (m *Manager) reapplyReboundSessionConfig(
 	return nil
 }
 
-func modeID(mode *CachedModeState) string {
-	if mode == nil {
-		return ""
-	}
-	return mode.CurrentModeID
-}
-
 func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) error {
 	readyCtx, cancel := context.WithTimeout(ctx, workspaceRebindReadyTimeout)
 	defer cancel()

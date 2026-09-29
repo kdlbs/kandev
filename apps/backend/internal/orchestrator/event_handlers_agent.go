@@ -836,7 +836,6 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("session_state", string(session.State)))
 		return
 	}
-
 	// Snapshot which turn this event reports the completion of *before*
 	// contending for the guard — re-checked below once it's held. See the
 	// function doc comment for the race this closes.
@@ -1053,7 +1052,6 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
 	}
-
 	// A move_task_kandev call during this turn deferred the actual move to
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular

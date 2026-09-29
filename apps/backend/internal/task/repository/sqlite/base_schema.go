@@ -257,6 +257,10 @@ const controlServerRecordSchemaDDL = `
 		credential_secret_id TEXT NOT NULL,
 		capabilities TEXT NOT NULL DEFAULT '[]',
 		diagnostic_log_path TEXT NOT NULL,
+		process_id INTEGER NOT NULL DEFAULT 0,
+		process_group_id INTEGER NOT NULL DEFAULT 0,
+		process_session_id INTEGER NOT NULL DEFAULT 0,
+		process_birth_token TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

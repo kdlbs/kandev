@@ -36,12 +36,12 @@ type fakeTurnOutcomeBackend struct {
 	publishedCountsAtAck []int
 }
 
-func (f *fakeTurnOutcomeBackend) fetchTurnOutcomeWithRetry(_ context.Context, instanceID string) (*agentctl.TurnOutcome, error) {
+func (f *fakeTurnOutcomeBackend) fetchTurnOutcomeForEpoch(_ context.Context, instanceID string, _ uint64) (*agentctl.TurnOutcome, error) {
 	f.fetchCalls = append(f.fetchCalls, instanceID)
 	return f.outcome, f.fetchErr
 }
 
-func (f *fakeTurnOutcomeBackend) ackTurnOutcome(_ context.Context, instanceID string, turnID int64) error {
+func (f *fakeTurnOutcomeBackend) ackTurnOutcomeForEpoch(_ context.Context, instanceID string, turnID int64, _ uint64) error {
 	f.ackedCalls = append(f.ackedCalls, ackedTurnOutcome{instanceID: instanceID, turnID: turnID})
 	if f.eventBus != nil {
 		f.publishedCountsAtAck = append(f.publishedCountsAtAck, len(f.eventBus.PublishedEvents))
@@ -226,6 +226,73 @@ func TestApplyRecoveredTurnOutcomeDedupesLiveRedelivery(t *testing.T) {
 	if got := countEventType(eventBus.PublishedEvents, events.AgentReady); got != readyCountAfterApply {
 		t.Fatalf("agent.ready published %d times after redelivery, want %d (redelivery must be a no-op)",
 			got, readyCountAfterApply)
+	}
+}
+
+func TestRuntimeReplacementReplaysTerminalOnce(t *testing.T) {
+	owner := agentctl.NewRuntimeOwner(nil, newTestLogger(), "replacement-boot")
+	t.Cleanup(owner.Stop)
+	prior, err := owner.PrepareBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prior.Configure("127.0.0.1", 41001, "prior-secret", 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := prior.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if !owner.MarkUnavailableEpoch(prior.Epoch(), agentctl.AvailabilityReasonAgentctlExited) {
+		t.Fatal("retire prior runtime")
+	}
+	successor, err := owner.PrepareBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := successor.Configure("127.0.0.1", 41002, "successor-secret", 2, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := successor.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := owner.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := lease.NewBoundInstanceClient(41003, newTestLogger())
+	lease.Close()
+
+	outcome := &agentctl.TurnOutcome{
+		TurnID: 21,
+		Event:  streams.AgentEvent{Type: streams.EventTypeComplete, PromptGeneration: 8},
+	}
+	backend := &fakeTurnOutcomeBackend{MockExecutor: &MockExecutor{name: executor.NameStandalone}, outcome: outcome}
+	manager, eventBus := newTurnOutcomeTestManager(t, backend)
+	manager.SetRuntimeOwner(owner)
+	execution := createTestExecution("replacement-execution", "task-1", "session-1")
+	execution.runtimeEpoch = successor.Epoch()
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("add recovered execution: %v", err)
+	}
+	backend.eventBus = eventBus
+	ri := &ExecutorInstance{RuntimeName: executor.NameStandalone, StandaloneInstanceID: "instance-1", Client: client}
+	recovered, disposition := manager.retrieveRecoveredTurnOutcome(context.Background(), ri)
+	if disposition != recoveredTurnOutcomeApplied || recovered != outcome {
+		t.Fatalf("recovered outcome = %p, disposition=%v; want retained terminal", recovered, disposition)
+	}
+	manager.applyRecoveredTurnOutcome(context.Background(), execution, ri, recovered)
+	readyAfterReplay := countEventType(eventBus.PublishedEvents, events.AgentReady)
+	if readyAfterReplay != 1 {
+		t.Fatalf("agent.ready count after retained terminal replay = %d, want 1", readyAfterReplay)
+	}
+	redelivered := outcome.Event
+	redelivered.ControlTurnID = outcome.TurnID
+	manager.handleAgentEvent(execution, redelivered)
+	if got := countEventType(eventBus.PublishedEvents, events.AgentReady); got != readyAfterReplay {
+		t.Fatalf("agent.ready count after live terminal redelivery = %d, want %d", got, readyAfterReplay)
+	}
+	if len(backend.ackedCalls) != 1 {
+		t.Fatalf("terminal acknowledgement count = %d, want 1", len(backend.ackedCalls))
 	}
 }
 

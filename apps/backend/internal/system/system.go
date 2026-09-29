@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -53,6 +54,7 @@ type BuildInfo struct {
 	Version   string
 	Commit    string
 	BuildTime string
+	BootID    string
 }
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
@@ -75,28 +77,36 @@ type Wiring struct {
 	SessionCapacityEnvironment sessioncapacity.Environment
 	TaskSessions               sleepinhibition.SessionReader
 	ToolPayloadChanged         func(context.Context, []string)
+	AgentRuntimeRecovery       AgentRuntimeRecoveryTarget
+}
+
+// AgentRuntimeRecoveryTarget owns retry admission and the boot, epoch, and
+// revision fences for a local agent runtime replacement.
+type AgentRuntimeRecoveryTarget interface {
+	RetryAtRevision(context.Context, string, uint64, uint64, string) (agentruntime.AvailabilitySnapshot, error)
 }
 
 // Service exposes the composed system sub-services. Each field is
 // addressable so the cmd/kandev wiring can attach callbacks (Restart)
 // after construction.
 type Service struct {
-	logger          *logger.Logger
-	Info            *info.Service
-	Jobs            *jobs.Tracker
-	Disk            *disk.Service
-	Database        *database.Service
-	Backups         *backups.Service
-	LogBundles      *logbundle.Service
-	FrontendErrors  *frontenderrors.Service
-	Metrics         *metrics.Service
-	MessageQueue    *queuesettings.Service
-	SessionCapacity *sessioncapacity.Service
-	SleepInhibition *sleepinhibition.Service
-	Updates         *updates.Service
-	Restart         restart.Manager
-	Storage         *storage.Handler
-	ToolRetention   *toolretention.Service
+	logger               *logger.Logger
+	Info                 *info.Service
+	Jobs                 *jobs.Tracker
+	Disk                 *disk.Service
+	Database             *database.Service
+	Backups              *backups.Service
+	LogBundles           *logbundle.Service
+	FrontendErrors       *frontenderrors.Service
+	Metrics              *metrics.Service
+	MessageQueue         *queuesettings.Service
+	SessionCapacity      *sessioncapacity.Service
+	SleepInhibition      *sleepinhibition.Service
+	Updates              *updates.Service
+	Restart              restart.Manager
+	Storage              *storage.Handler
+	ToolRetention        *toolretention.Service
+	AgentRuntimeRecovery AgentRuntimeRecoveryTarget
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
 	Persistence    *systempersistence.Handler
@@ -205,7 +215,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	return &Service{
 		logger:        log,
-		Info:          info.NewService(build.Version, build.Commit, build.BuildTime),
+		Info:          info.NewServiceWithBootID(build.Version, build.Commit, build.BuildTime, build.BootID),
 		Jobs:          tracker,
 		Disk:          disk.NewService(homeDir, tracker, log),
 		Database:      dbSvc,
@@ -215,14 +225,15 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
 			BuildTime: build.BuildTime, Log: log,
 		}),
-		FrontendErrors:  frontenderrors.New(log, nil),
-		Metrics:         metricsSvc,
-		MessageQueue:    queueSettingsSvc,
-		SessionCapacity: sessionCapacitySvc,
-		SleepInhibition: sleepInhibitionSvc,
-		Updates:         updatesSvc,
-		Restart:         restart.NewManagerFromEnv(),
-		Persistence:     persistenceHandler,
+		FrontendErrors:       frontenderrors.New(log, nil),
+		Metrics:              metricsSvc,
+		MessageQueue:         queueSettingsSvc,
+		SessionCapacity:      sessionCapacitySvc,
+		SleepInhibition:      sleepInhibitionSvc,
+		Updates:              updatesSvc,
+		Restart:              restart.NewManagerFromEnv(),
+		Persistence:          persistenceHandler,
+		AgentRuntimeRecovery: wiring.AgentRuntimeRecovery,
 	}
 }
 
@@ -242,6 +253,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	// authentication disabled the synthetic single-user identity is an admin,
 	// so behavior is unchanged; with it enabled, members are read-only here.
 	admin := g.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
+	if s.AgentRuntimeRecovery != nil {
+		admin.POST("/agent-runtime/retry", handleAgentRuntimeRetry(s.AgentRuntimeRecovery))
+	}
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {

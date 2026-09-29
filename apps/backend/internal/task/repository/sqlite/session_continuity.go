@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func (r *Repository) initSessionContinuitySchema() error {
-	_, err := r.db.Exec(`
+const sessionContinuitySchema = `
 		CREATE TABLE IF NOT EXISTS harness_session_generations (
 			session_id TEXT NOT NULL,
 			incarnation_id TEXT NOT NULL,
@@ -80,6 +80,11 @@ func (r *Repository) initSessionContinuitySchema() error {
 			reason TEXT NOT NULL,
 			state TEXT NOT NULL,
 			consumer_reference TEXT NOT NULL DEFAULT '',
+			delivery_submission_id TEXT NOT NULL DEFAULT '',
+			delivery_stream_id TEXT NOT NULL DEFAULT '',
+			delivery_sequence BIGINT NOT NULL DEFAULT 0,
+			delivery_turn_id TEXT NOT NULL DEFAULT '',
+			delivery_outcome TEXT NOT NULL DEFAULT '',
 			authorized_action TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
@@ -89,7 +94,10 @@ func (r *Repository) initSessionContinuitySchema() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_session_recovery_blocks_open
 			ON session_recovery_blocks(session_id, incarnation_id, state);
-	`)
+	`
+
+func (r *Repository) initSessionContinuitySchema() error {
+	_, err := r.db.Exec(sessionContinuitySchema)
 	return err
 }
 
@@ -306,6 +314,104 @@ func (r *Repository) UpsertSessionRecoveryBlock(ctx context.Context, block *mode
 	if block == nil {
 		return fmt.Errorf("session recovery block is required")
 	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.upsertSessionRecoveryBlockTx(ctx, tx, block); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) upsertSessionRecoveryBlockTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	block *models.SessionRecoveryBlock,
+) error {
+	if err := prepareSessionRecoveryBlock(block); err != nil {
+		return err
+	}
+	if err := r.bindProjectedTerminalToRecoveryBlock(ctx, tx, block); err != nil {
+		return err
+	}
+	query := `
+		INSERT INTO session_recovery_blocks
+		(id, session_id, incarnation_id, expected_generation, reason, state,
+		 consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
+		 delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO UPDATE SET
+		 state = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.state ELSE excluded.state END,
+		 consumer_reference = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.consumer_reference ELSE excluded.consumer_reference END,
+		 delivery_submission_id = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.delivery_submission_id ELSE excluded.delivery_submission_id END,
+		 delivery_stream_id = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.delivery_stream_id ELSE excluded.delivery_stream_id END,
+		 delivery_sequence = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.delivery_sequence ELSE excluded.delivery_sequence END,
+		 delivery_turn_id = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.delivery_turn_id ELSE excluded.delivery_turn_id END,
+		 delivery_outcome = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.delivery_outcome ELSE excluded.delivery_outcome END,
+		 authorized_action = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.authorized_action ELSE excluded.authorized_action END,
+		 updated_at = excluded.updated_at,
+		 resolved_at = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   THEN session_recovery_blocks.resolved_at ELSE excluded.resolved_at END
+		RETURNING id`
+	var canonicalID string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(query), block.ID, block.SessionID,
+		block.IncarnationID, block.ExpectedGeneration, block.Reason, block.State,
+		block.ConsumerReference, block.DeliverySubmissionID, block.DeliveryStreamID, block.DeliverySequence,
+		block.DeliveryTurnID, block.DeliveryOutcome, block.AuthorizedAction, block.CreatedAt, block.UpdatedAt,
+		block.ResolvedAt, models.RecoveryBlockOpen, models.RecoveryBlockOpen, models.RecoveryBlockOpen,
+		models.RecoveryBlockOpen,
+		models.RecoveryBlockOpen, models.RecoveryBlockOpen, models.RecoveryBlockOpen, models.RecoveryBlockOpen,
+		models.RecoveryBlockOpen).Scan(&canonicalID)
+	if err == nil {
+		block.ID = canonicalID
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func prepareSessionRecoveryBlock(block *models.SessionRecoveryBlock) error {
+	if block == nil {
+		return fmt.Errorf("session recovery block is required")
+	}
 	if block.ID == "" {
 		block.ID = uuid.NewString()
 	}
@@ -313,39 +419,22 @@ func (r *Repository) UpsertSessionRecoveryBlock(ctx context.Context, block *mode
 		block.CreatedAt = time.Now().UTC()
 	}
 	block.UpdatedAt = time.Now().UTC()
-	query := `
-		INSERT INTO session_recovery_blocks
-		(id, session_id, incarnation_id, expected_generation, reason, state,
-		 consumer_reference, authorized_action, created_at, updated_at, resolved_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO UPDATE SET
-		 state = excluded.state,
-			consumer_reference = excluded.consumer_reference,
-			authorized_action = excluded.authorized_action,
-			updated_at = excluded.updated_at,
-			resolved_at = excluded.resolved_at
-		RETURNING id`
-	var canonicalID string
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), block.ID, block.SessionID,
-		block.IncarnationID, block.ExpectedGeneration, block.Reason, block.State,
-		block.ConsumerReference, block.AuthorizedAction, block.CreatedAt, block.UpdatedAt,
-		block.ResolvedAt).Scan(&canonicalID)
-	if err == nil {
-		block.ID = canonicalID
-	}
-	return err
+	return nil
 }
 
 func (r *Repository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) (*models.SessionRecoveryBlock, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
-		       consumer_reference, authorized_action, created_at, updated_at, resolved_at
+		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
+		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
 		FROM session_recovery_blocks
 		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = ?
 		ORDER BY created_at LIMIT 1`), sessionID, incarnationID, expectedGeneration, models.RecoveryBlockOpen)
 	var block models.SessionRecoveryBlock
 	if err := row.Scan(&block.ID, &block.SessionID, &block.IncarnationID, &block.ExpectedGeneration,
-		&block.Reason, &block.State, &block.ConsumerReference, &block.AuthorizedAction,
+		&block.Reason, &block.State, &block.ConsumerReference, &block.DeliverySubmissionID,
+		&block.DeliveryStreamID, &block.DeliverySequence, &block.DeliveryTurnID, &block.DeliveryOutcome,
+		&block.AuthorizedAction,
 		&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
 		return nil, err
 	}
@@ -357,11 +446,14 @@ func (r *Repository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID,
 func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*models.SessionRecoveryBlock, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
-		       consumer_reference, authorized_action, created_at, updated_at, resolved_at
+		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
+		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
 		FROM session_recovery_blocks WHERE id = ?`), id)
 	var block models.SessionRecoveryBlock
 	if err := row.Scan(&block.ID, &block.SessionID, &block.IncarnationID, &block.ExpectedGeneration,
-		&block.Reason, &block.State, &block.ConsumerReference, &block.AuthorizedAction,
+		&block.Reason, &block.State, &block.ConsumerReference, &block.DeliverySubmissionID,
+		&block.DeliveryStreamID, &block.DeliverySequence, &block.DeliveryTurnID, &block.DeliveryOutcome,
+		&block.AuthorizedAction,
 		&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
 		return nil, err
 	}

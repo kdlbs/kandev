@@ -185,6 +185,34 @@ func TestNotifyWorktreeMaterializedWithoutEventBusIsNoOp(t *testing.T) {
 	mgr.NotifyWorktreeMaterialized(context.Background(), MaterializedWorktree{SessionID: "session-1"})
 }
 
+func TestPublishAgentctlDeliveryRecoveryKeepsCapturedSubmissionIdentity(t *testing.T) {
+	h := newWorkspaceEventsHarness(t)
+	identity := DeliveryReconciliationIdentity{
+		SessionID: "session-1", ExecutionID: "exec-1", IncarnationID: "inc-1",
+		HarnessGeneration: 7, StreamID: "stream-1", SubmissionID: "submission-1",
+		PromptGeneration: 12,
+	}
+	h.mgr.eventPublisher.PublishAgentctlDeliveryRecovery(
+		context.Background(), h.exec, identity, DeliveryReconciliationPhaseUncertain,
+	)
+
+	got := h.only(t)
+	if got.Subject != events.AgentctlError {
+		t.Fatalf("subject = %q, want %q", got.Subject, events.AgentctlError)
+	}
+	payload, ok := got.Event.Data.(AgentctlEventPayload)
+	if !ok {
+		t.Fatalf("payload type = %T", got.Event.Data)
+	}
+	if payload.DeliveryRecoveryPhase != string(DeliveryReconciliationPhaseUncertain) ||
+		payload.DeliverySubmissionID != identity.SubmissionID || payload.DeliveryStreamID != identity.StreamID ||
+		payload.DeliveryIncarnationID != identity.IncarnationID ||
+		payload.DeliveryHarnessGeneration != identity.HarnessGeneration ||
+		payload.PromptGeneration != identity.PromptGeneration {
+		t.Fatalf("recovery identity = %+v, want captured identity %+v", payload, identity)
+	}
+}
+
 func TestBranchSnapshotErrorWrapsCause(t *testing.T) {
 	cause := errors.New("write executors_running: disk full")
 	err := &BranchSnapshotError{Cause: cause}

@@ -131,6 +131,20 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	)
 }
 
+// PromptAgentWithSubmissionID preserves an admitted prompt identity when the
+// caller does not need a dispatch callback.
+func (m *Manager) PromptAgentWithSubmissionID(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	submissionID string,
+) (*PromptResult, error) {
+	return m.PromptAgentWithDispatchCallbackAndSubmissionID(
+		ctx, executionID, prompt, attachments, dispatchOnly, nil, submissionID,
+	)
+}
+
 // PromptAgentWithDispatchCallbackAndSubmissionID preserves a backend-owned
 // durable submission identity through lifecycle reconnects.
 func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
@@ -145,6 +159,13 @@ func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if m.isIdleSettledRetiredLocalExecution(execution) {
+		m.retireStaleLocalExecution(execution)
+		return nil, fmt.Errorf("retired idle execution %q requires native restore: %w", executionID, ErrExecutionNotFound)
+	}
+	if err := m.runtimeReplacementRecoveryError(execution); err != nil {
+		return nil, err
 	}
 	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
 	if err != nil {
@@ -239,6 +260,9 @@ func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionI
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if err := m.runtimeReplacementRecoveryError(execution); err != nil {
+		return nil, err
 	}
 	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
 	if err != nil {
@@ -481,7 +505,7 @@ func (m *Manager) escalateStuckCancel(
 	}
 
 	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" && client != nil {
-		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryReconciliationTimeout)
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), durableSubmissionSettlementTimeout)
 		settleErr := client.CancelDeliverySubmission(settleCtx, submissionID)
 		cancel()
 		if settleErr != nil {
@@ -1309,6 +1333,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	if m.streamManager != nil {
+		m.streamManager.cancelDeliveryReconciliation(executionID)
+	}
 	backendForce := force
 	stopCtx := ctx
 	if shouldPreserveKubernetesRuntime(execution, reason) {
@@ -2096,8 +2123,15 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
 	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	if execution.PassthroughProcessID != "" || execution.IsPassthrough || client == nil {
+	if execution.PassthroughProcessID != "" || execution.IsPassthrough {
 		releaseClient()
+		return nil
+	}
+	if client == nil {
+		releaseClient()
+		if execution.DeliveryMode == DurableDeliveryV1 && execution.deliverySubmissionIDSnapshot() != "" {
+			return ErrDeliveryTransportUnavailable
+		}
 		return nil
 	}
 	// InitializeAndPrompt owns the first updates stream. Starting a recovery
@@ -2107,9 +2141,17 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 		releaseClient()
 		return nil
 	}
+	if execution.DeliveryMode == DurableDeliveryV1 && execution.deliverySubmissionIDSnapshot() != "" {
+		releaseClient()
+		if m.streamManager == nil {
+			return fmt.Errorf("stream manager is not configured")
+		}
+		return m.streamManager.ReconcileAgentDelivery(ctx, execution).AsError()
+	}
 	if client.HasAgentStream() {
 		releaseClient()
-		if execution.Status == v1.AgentStatusFailed &&
+		if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
+			execution.FailureCode != durableDeliveryReconnectingFailureCode &&
 			execution.isSessionInitialized() && execution.ACPSessionID != "" {
 			return m.restoreRecoveredFailedExecution(ctx, execution)
 		}
@@ -2138,7 +2180,9 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !hasAgentStream {
 		return fmt.Errorf("agent stream not connected")
 	}
-	if execution.Status == v1.AgentStatusFailed && execution.isSessionInitialized() && execution.ACPSessionID != "" {
+	if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
+		execution.FailureCode != durableDeliveryReconnectingFailureCode &&
+		execution.isSessionInitialized() && execution.ACPSessionID != "" {
 		return m.restoreRecoveredFailedExecution(ctx, execution)
 	}
 	return nil

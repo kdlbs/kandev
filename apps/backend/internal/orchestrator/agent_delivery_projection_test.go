@@ -66,3 +66,58 @@ func TestReplayedTerminalIntentAdvancesOnce(t *testing.T) {
 		t.Fatalf("effect state = %q, want %q", stored.State, models.DeliveryEffectCompleted)
 	}
 }
+
+func TestReplayedCompletedEffectSettlesSessionWithoutActiveSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-delivery-replay-settle", "session-delivery-replay-settle", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	effect := workflowEffectForTurn("turn-delivery-replay-settle")
+	if _, err := repo.PutAgentDeliveryEffect(ctx, effect); err != nil {
+		t.Fatalf("PutAgentDeliveryEffect: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-delivery-replay-settle")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if svc.processOnTurnCompleteViaEngine(withWorkflowEffect(ctx, effect), session.TaskID, session) {
+		t.Fatal("replayed terminal effect unexpectedly transitioned the workflow")
+	}
+	updated, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after replay: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after replay = %q, want %q", updated.State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func TestReplayedCompletedEffectPreservesActiveSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-delivery-replay-successor", "session-delivery-replay-successor", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	effect := workflowEffectForTurn("turn-delivery-replay-successor")
+	if _, err := repo.PutAgentDeliveryEffect(ctx, effect); err != nil {
+		t.Fatalf("PutAgentDeliveryEffect: %v", err)
+	}
+	if _, err := svc.turnService.StartTurn(ctx, "session-delivery-replay-successor"); err != nil {
+		t.Fatalf("StartTurn successor: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-delivery-replay-successor")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if svc.processOnTurnCompleteViaEngine(withWorkflowEffect(ctx, effect), session.TaskID, session) {
+		t.Fatal("replayed terminal effect unexpectedly transitioned the workflow")
+	}
+	updated, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after replay: %v", err)
+	}
+	if updated.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state after replay = %q, want %q with an active successor", updated.State, models.TaskSessionStateRunning)
+	}
+}

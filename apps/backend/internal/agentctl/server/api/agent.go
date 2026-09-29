@@ -304,6 +304,17 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 			s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
 		}
 	}()
+	if s.procMgr != nil {
+		if wakeups := s.procMgr.DeliveryWakeups(); wakeups != nil && deliveryStreamID != "" {
+			writer := durableAgentStreamWriter{
+				server: s, streamID: streamID, deliveryStreamID: deliveryStreamID,
+				updatesCh: updatesCh, mcpRequestCh: mcpRequestCh,
+				wakeups: wakeups, writeMessage: writeMessage,
+			}
+			writer.run(ctx, after, true)
+			return
+		}
+	}
 
 	after, err := s.replayAgentStream(ctx, after, func(notification adapter.AgentEvent) error {
 		if !s.writeAgentStreamNotification(notification, writeMessage, true) {
@@ -376,6 +387,144 @@ func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.C
 			}
 		}
 	}
+}
+
+type durableAgentStreamWriter struct {
+	server           *Server
+	streamID         string
+	deliveryStreamID string
+	updatesCh        <-chan adapter.AgentEvent
+	mcpRequestCh     <-chan *ws.Message
+	wakeups          <-chan struct{}
+	writeMessage     func([]byte) error
+}
+
+// run treats the journal as truth. The bounded wake remains buffered while a
+// page is written, so a racing commit cannot be lost between drain and wait.
+func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draining bool) {
+	deliveryJournal, err := w.server.procMgr.DeliveryJournal()
+	if err != nil {
+		w.server.logAgentStreamReplayFailure(err, w.deliveryStreamID, after, after)
+		return
+	}
+	for ctx.Err() == nil {
+		if !draining {
+			if !w.waitForInput(ctx, &draining) {
+				return
+			}
+			continue
+		}
+		if !w.serviceMCP() || !w.serviceUpdate() {
+			return
+		}
+		next, caughtUp, err := w.drainPage(ctx, deliveryJournal, after)
+		if err != nil {
+			if !errors.Is(err, errAgentStreamReplayStopped) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				w.server.logAgentStreamReplayFailure(err, w.deliveryStreamID, after, next)
+			}
+			return
+		}
+		after = next
+		draining = !caughtUp
+	}
+}
+
+func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *bool) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case _, ok := <-w.wakeups:
+		if !ok {
+			return false
+		}
+		*draining = true
+	case notification, ok := <-w.updatesCh:
+		if !ok {
+			return false
+		}
+		if notification.DeliveryStreamID == w.deliveryStreamID && notification.DeliverySequence > 0 {
+			*draining = true
+			return true
+		}
+		return w.server.writeAgentStreamNotification(notification, w.writeMessage, false)
+	case mcpReq, ok := <-w.mcpRequestCh:
+		if !ok {
+			w.mcpRequestCh = nil
+			return true
+		}
+		return w.server.writeAgentStreamMCPRequest(mcpReq, w.streamID, w.writeMessage)
+	}
+	return true
+}
+
+func (w *durableAgentStreamWriter) serviceMCP() bool {
+	if w.mcpRequestCh == nil {
+		return true
+	}
+	select {
+	case mcpReq, ok := <-w.mcpRequestCh:
+		if !ok {
+			w.mcpRequestCh = nil
+			return true
+		}
+		return w.server.writeAgentStreamMCPRequest(mcpReq, w.streamID, w.writeMessage)
+	default:
+		return true
+	}
+}
+
+func (w *durableAgentStreamWriter) serviceUpdate() bool {
+	if w.updatesCh == nil {
+		return true
+	}
+	select {
+	case notification, ok := <-w.updatesCh:
+		if !ok {
+			return false
+		}
+		if notification.DeliveryStreamID == w.deliveryStreamID && notification.DeliverySequence > 0 {
+			return true
+		}
+		return w.server.writeAgentStreamNotification(notification, w.writeMessage, false)
+	default:
+		return true
+	}
+}
+
+func (w *durableAgentStreamWriter) drainPage(
+	ctx context.Context,
+	deliveryJournal *journal.Journal,
+	after uint64,
+) (uint64, bool, error) {
+	next, highWater, eventCount, err := w.server.replayAgentStreamPage(
+		ctx, deliveryJournal, w.deliveryStreamID, after,
+		func(notification adapter.AgentEvent) error {
+			if !w.server.writeAgentStreamNotification(notification, w.writeMessage, true) {
+				return errAgentStreamReplayStopped
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		if after == 0 && errors.Is(err, journal.ErrStreamNotFound) {
+			return after, true, nil
+		}
+		return after, false, err
+	}
+	if eventCount == 0 && next < highWater {
+		return next, false, journal.ErrSequenceConflict
+	}
+	if next < highWater {
+		return next, false, nil
+	}
+	refreshed, err := w.server.refreshAgentStreamHighWater(ctx, deliveryJournal, w.deliveryStreamID, next)
+	if err != nil {
+		if next == 0 && errors.Is(err, journal.ErrStreamNotFound) {
+			return next, true, nil
+		}
+		return next, false, err
+	}
+	return next, refreshed.HighWater <= next, nil
 }
 
 func (s *Server) writeDurableAgentStreamEvent(

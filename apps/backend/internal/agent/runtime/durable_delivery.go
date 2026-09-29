@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 )
@@ -10,6 +12,15 @@ import (
 type DurableDeliveryMode = lifecycle.DurableDeliveryMode
 type DurableDeliveryDecision = lifecycle.DurableDeliveryDecision
 type DurableDeliveryCapability = lifecycle.DurableDeliveryCapability
+
+// DurableDeliveryCapabilityReader exposes the negotiated peer protocol to
+// admission callers that need to persist the matching canonical submission.
+type DurableDeliveryCapabilityReader interface {
+	DurableDeliveryCapabilityForExecution(
+		context.Context,
+		string,
+	) (DurableDeliveryCapability, bool)
+}
 
 const (
 	DurableDeliveryV1      = lifecycle.DurableDeliveryV1

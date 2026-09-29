@@ -162,6 +162,7 @@ type EventHandlers struct {
 	OnAgentFailed       func(ctx context.Context, data AgentEventData)
 	OnAgentStalled      func(ctx context.Context, payload lifecycle.AgentStalledPayload)
 	OnAgentStopped      func(ctx context.Context, data AgentEventData)
+	OnAgentctlError     func(ctx context.Context, payload lifecycle.AgentctlEventPayload)
 	OnACPSessionCreated func(ctx context.Context, data ACPSessionEventData)
 
 	// Agent stream events (tool calls, message chunks, complete, etc.)
@@ -383,7 +384,28 @@ func (w *Watcher) subscribeToAgentEvents() error {
 		}
 		w.subscriptions = append(w.subscriptions, sub)
 	}
+	if w.handlers.OnAgentctlError != nil {
+		sub, err := w.eventBus.QueueSubscribe(events.AgentctlError, w.queue, w.createAgentctlErrorEventHandler())
+		if err != nil {
+			w.logger.Error("Failed to subscribe to agentctl error event",
+				zap.String("subject", events.AgentctlError), zap.String("queue", w.queue), zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
+	}
 	return nil
+}
+
+func (w *Watcher) createAgentctlErrorEventHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var payload lifecycle.AgentctlEventPayload
+		if err := w.parseEventData(event.Data, &payload); err != nil {
+			w.logger.Error("Failed to parse agentctl error event", zap.Error(err))
+			return nil
+		}
+		w.handlers.OnAgentctlError(ctx, payload)
+		return nil
+	}
 }
 
 func (w *Watcher) subscribeToAgentStallEvents() error {

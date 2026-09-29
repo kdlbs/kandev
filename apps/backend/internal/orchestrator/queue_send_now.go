@@ -291,7 +291,7 @@ func (s *Service) dispatchSendNowSelection(
 	relockGuard func(context.Context) error,
 ) (int, error) {
 	promptabilityErr := s.checkSessionPromptable(taskID, sessionID, sessionState)
-	if promptabilityErr == nil {
+	if turnBefore == "" && promptabilityErr == nil {
 		dispatched, err := s.claimAndDispatchSendNow(ctx, identity, sessionID, scope, entries)
 		if err != nil {
 			return 0, err
@@ -301,7 +301,7 @@ func (s *Service) dispatchSendNowSelection(
 		}
 		return len(entries), nil
 	}
-	if sessionState == models.TaskSessionStateCreated {
+	if turnBefore == "" && sessionState == models.TaskSessionStateCreated {
 		// A queued destination has no running provider for promptTask to reach.
 		// Send Now is an explicit user action, so its worker starts the prepared
 		// session through the manual admission path. A failed start returns the
@@ -315,7 +315,7 @@ func (s *Service) dispatchSendNowSelection(
 		}
 		return len(entries), nil
 	}
-	if !errors.Is(promptabilityErr, ErrAgentPromptInProgress) {
+	if turnBefore == "" && !errors.Is(promptabilityErr, ErrAgentPromptInProgress) {
 		return 0, promptabilityErr
 	}
 
@@ -648,7 +648,16 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	if session, err := s.repo.GetTaskSession(ctx, sessionID); err != nil {
 		return false, fmt.Errorf("load session before send now launch: %w", err)
 	} else if session != nil && session.State == models.TaskSessionStateCreated {
-		startOptions := startCreatedSessionOptions{}
+		startOptions := startCreatedSessionOptions{
+			deliveryProtocol:     deliveryProtocol,
+			deliverySubmissionID: deliverySubmissionID,
+			deliveryPayloadHash:  deliveryPayloadHash,
+			deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+				return s.messageQueue.SetPendingSendNowClaimDelivery(
+					updateCtx, claim, protocol, submissionID, payloadHash,
+				)
+			},
+		}
 		createdPrompt := promptContent
 		createdSkipMessageRecord := false
 		createdPlanMode := claim.Dispatch.PlanMode

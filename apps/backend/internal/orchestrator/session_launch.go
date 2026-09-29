@@ -576,26 +576,64 @@ func (s *Service) recordSessionRecoveryBlock(
 	if consumer == "" {
 		consumer = "interactive"
 	}
-	block := &models.SessionRecoveryBlock{
-		SessionID:          sessionID,
-		IncarnationID:      incarnationID,
-		ExpectedGeneration: generation,
-		Reason:             reason,
-		State:              models.RecoveryBlockOpen,
-		ConsumerReference:  consumer,
-		CreatedAt:          time.Now().UTC(),
-		UpdatedAt:          time.Now().UTC(),
+	block := &models.SessionRecoveryBlock{}
+	var detailed *sessionRecoveryRequiredError
+	if errors.As(launchErr, &detailed) && detailed.Block != nil {
+		block = detailed.Block
 	}
-	if existing, getErr := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation); getErr == nil && existing != nil {
-		return nil
-	} else if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
-		return getErr
+	block.SessionID = sessionID
+	block.IncarnationID = incarnationID
+	block.ExpectedGeneration = generation
+	block.Reason = reason
+	block.State = models.RecoveryBlockOpen
+	if block.ConsumerReference == "" {
+		block.ConsumerReference = consumer
+	}
+	if block.CreatedAt.IsZero() {
+		block.CreatedAt = time.Now().UTC()
+	}
+	block.UpdatedAt = time.Now().UTC()
+	if err := s.bindSessionRecoverySubmission(ctx, block, sessionID, incarnationID, generation); err != nil {
+		return err
 	}
 	if err := store.UpsertSessionRecoveryBlock(ctx, block); err != nil {
 		return fmt.Errorf("persist session recovery block: %w", err)
 	}
 	agentruntime.RecordRecoveryRequired(consumer, reason)
 	return nil
+}
+
+func (s *Service) bindSessionRecoverySubmission(
+	ctx context.Context,
+	block *models.SessionRecoveryBlock,
+	sessionID, incarnationID string,
+	generation int64,
+) error {
+	if block.DeliverySubmissionID == "" {
+		return nil
+	}
+	submissions, supported := s.repo.(taskrepo.AgentDeliveryRepository)
+	if !supported {
+		clearSessionRecoveryDeliveryBinding(block)
+		return nil
+	}
+	submission, err := submissions.GetAgentDeliverySubmission(ctx, block.DeliverySubmissionID)
+	if err != nil && !errors.Is(err, taskrepo.ErrAgentDeliverySubmissionNotFound) {
+		return fmt.Errorf("validate delivery recovery submission: %w", err)
+	}
+	if err != nil || submission.SessionID != sessionID || submission.IncarnationID != incarnationID ||
+		submission.HarnessGeneration != generation {
+		clearSessionRecoveryDeliveryBinding(block)
+	}
+	return nil
+}
+
+func clearSessionRecoveryDeliveryBinding(block *models.SessionRecoveryBlock) {
+	block.DeliverySubmissionID = ""
+	block.DeliveryStreamID = ""
+	block.DeliverySequence = 0
+	block.DeliveryTurnID = ""
+	block.DeliveryOutcome = ""
 }
 
 func validateLaunchActivationSource(source LaunchActivationSource) error {
@@ -1743,6 +1781,9 @@ func (s *Service) RetrySessionDelivery(ctx context.Context, taskID, sessionID st
 	defer cancel()
 	if err := recoverer.RecoverAgentPromptStream(retryCtx, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to reconnect agent stream: %w", err)
+	}
+	if err := s.reconcileAgentDeliverySettlements(retryCtx, sessionID); err != nil {
+		return nil, fmt.Errorf("failed to settle recovered delivery outcome: %w", err)
 	}
 	return &LaunchSessionResponse{
 		Success:   true,

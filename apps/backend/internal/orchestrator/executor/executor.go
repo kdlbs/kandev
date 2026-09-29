@@ -458,6 +458,12 @@ type PromptTurnIDSetter interface {
 	SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error
 }
 
+// InitialDeliverySubmissionIDSetter binds a persisted first message to a
+// prepared execution before the harness process can receive its initial prompt.
+type InitialDeliverySubmissionIDSetter interface {
+	SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error
+}
+
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
 	RuntimeName   agentruntime.Runtime
@@ -553,19 +559,23 @@ type LaunchAgentRequest struct {
 	ACPSessionID                  string // ACP session ID to resume, if available
 	// Durable delivery identity is persisted with the session continuity
 	// record and propagated to agentctl for generation fencing.
-	DeliveryStreamID          string
-	DeliveryIncarnationID     string
-	DeliveryHarnessGeneration uint64
-	ModelOverride             string              // If set, use this model instead of the profile's model
-	ExecutorType              string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig            map[string]string   // Executor config (docker_host, git_token, etc.)
-	PreviousExecutionID       string              // Previous execution ID for runtime reconnect
-	McpMode                   string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
-	McpProviders              []string            // Normalized provider capabilities attached to the task
-	McpProfile                *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
-	IsEphemeral               bool                // Ephemeral task (quick chat) — enables fallback workspace creation
-	WorkspacePath             string              // Optional host folder for repo-less tasks (overrides scratch fallback)
-	OriginalWorkspacePath     string              // First agent-visible path used for native restore policy
+	DeliveryStreamID            string
+	DeliveryIncarnationID       string
+	DeliveryHarnessGeneration   uint64
+	InitialDeliverySubmissionID string
+	// BeforeAgentStart runs inside the executor before it starts the harness.
+	// The callback is never forwarded into the runtime request.
+	BeforeAgentStart      func(context.Context, string) error
+	ModelOverride         string              // If set, use this model instead of the profile's model
+	ExecutorType          string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig        map[string]string   // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID   string              // Previous execution ID for runtime reconnect
+	McpMode               string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders          []string            // Normalized provider capabilities attached to the task
+	McpProfile            *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
+	IsEphemeral           bool                // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath         string              // Optional host folder for repo-less tasks (overrides scratch fallback)
+	OriginalWorkspacePath string              // First agent-visible path used for native restore policy
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -712,6 +722,12 @@ type LaunchOptions struct {
 	OfficeAgentProfileID string
 	ExecutorID           string
 	TurnID               string
+	// DeliverySubmissionID binds a persisted direct first message to the
+	// initial agentctl prompt.
+	DeliverySubmissionID string
+	// BeforeAgentStart admits durable first-prompt state after the execution
+	// exists and before any harness prompt can be dispatched.
+	BeforeAgentStart func(context.Context, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped

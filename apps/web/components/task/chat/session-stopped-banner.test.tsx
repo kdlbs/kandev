@@ -55,6 +55,10 @@ vi.mock("react-i18next", () => ({
         "task:agentHasStopped": "This agent has stopped.",
         "task:durableDeliveryUncertain":
           "Delivery was interrupted. The prompt outcome is uncertain.",
+        "task:durableDeliveryReconnecting":
+          "Reconnecting to the agent. Your prompt will not be sent again.",
+        "task:deliveryStopOutcomeUnconfirmed":
+          "Stop was requested. The prompt outcome is still unknown.",
         "task:resume": "Resume",
         "task:resuming": "Resuming...",
         "task:starting": "Starting...",
@@ -198,7 +202,9 @@ describe("SessionStoppedBanner basics", () => {
     expect(await screen.findByTestId("new-session-dialog")).toBeTruthy();
     expect(mocks.request).not.toHaveBeenCalled();
   });
+});
 
+describe("SessionStoppedBanner delivery recovery", () => {
   it("preserves executor-unavailable recovery copy and controls", () => {
     render(
       <BannerHarness
@@ -239,6 +245,21 @@ describe("SessionStoppedBanner basics", () => {
 
     fireEvent.click(screen.getByTestId("recovery-stop-button"));
     await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));
+    expect((await screen.findByTestId("delivery-stop-outcome-unconfirmed")).textContent).toBe(
+      "Stop was requested. The prompt outcome is still unknown.",
+    );
+  });
+
+  it("keeps reconnecting distinct from an uncertain outcome", () => {
+    render(
+      <BannerHarness mode="recoverable" uncertainDelivery deliveryRecoveryPhase="reconnecting" />,
+    );
+
+    expect(
+      screen.getByText("Reconnecting to the agent. Your prompt will not be sent again."),
+    ).toBeTruthy();
+    expect(screen.getByTestId("recovery-retry-connection-button")).toBeTruthy();
+    expect(screen.getByTestId("recovery-stop-button")).toBeTruthy();
   });
 });
 

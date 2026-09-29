@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
 import { injectLatency } from "./causal-waits";
 import type { SeedData } from "../fixtures/test-base";
 import type { CreateTaskResponse } from "../../lib/types/http";
@@ -36,6 +36,21 @@ type DelayRule = {
   remaining: number;
   delayMs: number;
   reason: string;
+};
+
+type ResponseHandlingState = {
+  requestContexts: Map<string, RequestContext>;
+  rejectRules: Map<string, RejectRule>;
+  rejectedCounts: Map<string, number>;
+  holdRules: Map<string, HoldRule>;
+  heldCounts: Map<string, number>;
+  heldMessages: Map<string, string[]>;
+  failureMessages: Map<string, string>;
+  failedCounts: Map<string, number>;
+  dropRules: Map<string, DropRule>;
+  droppedCounts: Map<string, number>;
+  delayRules: Map<string, DelayRule>;
+  delayedCounts: Map<string, number>;
 };
 
 export type SessionEntryRecoveryProxy = {
@@ -179,6 +194,81 @@ function consumeDelayRule(
   return true;
 }
 
+function interceptServerResponse(
+  message: string,
+  frame: WireFrame | null,
+  context: RequestContext | undefined,
+  socket: WebSocketRoute,
+  state: ResponseHandlingState,
+): boolean {
+  const rejection = consumeRejectRule(context, state.rejectRules, state.rejectedCounts);
+  if (rejection && frame) {
+    socket.send(
+      JSON.stringify({
+        ...frame,
+        type: "error",
+        payload: { code: "E2E_SIMULATED_ERROR", message: rejection },
+      }),
+    );
+    return true;
+  }
+
+  if (context && consumeHoldRule(context, state.holdRules, state.heldCounts)) {
+    const messages = state.heldMessages.get(context.action) ?? [];
+    messages.push(message);
+    state.heldMessages.set(context.action, messages);
+    return true;
+  }
+
+  if (frame && context && state.failureMessages.has(context.action)) {
+    state.failedCounts.set(context.action, (state.failedCounts.get(context.action) ?? 0) + 1);
+    socket.send(
+      JSON.stringify({
+        ...frame,
+        type: "error",
+        payload: {
+          code: "INTERNAL_ERROR",
+          message: state.failureMessages.get(context.action),
+        },
+      }),
+    );
+    return true;
+  }
+
+  if (consumeDropRule(context, state.dropRules, state.droppedCounts)) return true;
+  return consumeDelayRule(
+    context?.action,
+    message,
+    state.delayRules,
+    state.delayedCounts,
+    (delayedMessage) => socket.send(delayedMessage),
+  );
+}
+
+function forwardServerMessage(
+  message: string | Buffer,
+  socket: WebSocketRoute,
+  state: ResponseHandlingState,
+) {
+  if (typeof message !== "string") {
+    socket.send(message);
+    return;
+  }
+
+  for (const part of message.split("\n")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const frame = parseFrame(trimmed);
+    const context = takeResponseContext(frame, state.requestContexts);
+    if (
+      !isResponseFrame(frame) ||
+      !interceptServerResponse(trimmed, frame, context, socket, state)
+    ) {
+      socket.send(trimmed);
+    }
+  }
+}
+
 /**
  * Fail, delay, drop, or hold selected gateway responses while forwarding other frames.
  * Rules correlate replies by request id, so the test never relies on
@@ -199,6 +289,20 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const heldMessages = new Map<string, string[]>();
   const failureMessages = new Map<string, string>();
   let sendHeldMessage: ((message: string) => void) | undefined;
+  const responseState: ResponseHandlingState = {
+    requestContexts,
+    rejectRules,
+    rejectedCounts,
+    holdRules,
+    heldCounts,
+    heldMessages,
+    failureMessages,
+    failedCounts,
+    dropRules,
+    droppedCounts,
+    delayRules: rules,
+    delayedCounts,
+  };
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     sendHeldMessage = (message) => ws.send(message);
@@ -237,57 +341,7 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
       server.send(message);
     });
 
-    server.onMessage((message) => {
-      if (typeof message !== "string") {
-        ws.send(message);
-        return;
-      }
-
-      for (const part of message.split("\n")) {
-        const trimmed = part.trim();
-        if (!trimmed) continue;
-        const frame = parseFrame(trimmed);
-        const context = takeResponseContext(frame, requestContexts);
-        if (isResponseFrame(frame)) {
-          const rejection = consumeRejectRule(context, rejectedCounts);
-          if (rejection && frame) {
-            ws.send(
-              JSON.stringify({
-                ...frame,
-                type: "error",
-                payload: { code: "E2E_SIMULATED_ERROR", message: rejection },
-              }),
-            );
-            continue;
-          }
-          if (consumeHoldRule(context, holdRules, heldCounts) && context) {
-            const messages = heldMessages.get(context.action) ?? [];
-            messages.push(trimmed);
-            heldMessages.set(context.action, messages);
-            continue;
-          }
-          if (frame && context && failureMessages.has(context.action)) {
-            failedCounts.set(context.action, (failedCounts.get(context.action) ?? 0) + 1);
-            ws.send(
-              JSON.stringify({
-                ...frame,
-                type: "error",
-                payload: {
-                  code: "INTERNAL_ERROR",
-                  message: failureMessages.get(context.action),
-                },
-              }),
-            );
-            continue;
-          }
-          if (consumeDropRule(context, dropRules, droppedCounts)) continue;
-          if (consumeDelayRule(context?.action, trimmed, rules, delayedCounts, ws.send.bind(ws)))
-            continue;
-        }
-
-        ws.send(trimmed);
-      }
-    });
+    server.onMessage((message) => forwardServerMessage(message, ws, responseState));
   });
 
   return {

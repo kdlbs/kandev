@@ -111,6 +111,62 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	}
 }
 
+func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	task := &v1.Task{ID: "task-delivery", WorkspaceID: "workspace-delivery"}
+	session := &models.TaskSession{
+		ID: "session-delivery", TaskID: task.ID, State: models.TaskSessionStateCreated,
+		AgentProfileID: "profile-delivery",
+	}
+	repo.sessions[session.ID] = cloneMockTaskSession(session)
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID: "runtime-delivery", TaskID: task.ID, SessionID: session.ID,
+		Status: models.ExecutorRunningStatusPrepared, AgentExecutionID: "execution-delivery",
+	}
+	var order atomic.Int32
+	var identityOrder, admissionOrder, startOrder atomic.Int32
+	started := make(chan struct{}, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-delivery", nil
+		},
+		setInitialDeliverySubmissionIDFunc: func(_ context.Context, executionID, submissionID string) error {
+			if executionID != "execution-delivery" || submissionID != "message-delivery" {
+				t.Fatalf("initial delivery identity = %q/%q", executionID, submissionID)
+			}
+			identityOrder.Store(order.Add(1))
+			return nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			startOrder.Store(order.Add(1))
+			started <- struct{}{}
+			return nil
+		},
+	}
+	request := &LaunchAgentRequest{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		InitialDeliverySubmissionID: "message-delivery",
+		BeforeAgentStart: func(context.Context, string) error {
+			admissionOrder.Store(order.Add(1))
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
+		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, false,
+	)
+	require.NoError(t, err)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("existing workspace did not start the agent")
+	}
+	if identityOrder.Load() == 0 || admissionOrder.Load() <= identityOrder.Load() || startOrder.Load() <= admissionOrder.Load() {
+		t.Fatalf("initial identity/admission/start ordering = %d/%d/%d", identityOrder.Load(), admissionOrder.Load(), startOrder.Load())
+	}
+}
+
 type runningStateRaceRepository struct{ *mockRepository }
 
 func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(

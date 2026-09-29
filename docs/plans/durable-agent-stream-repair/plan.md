@@ -147,3 +147,15 @@ Planning and implementation validation passed on 2026-09-15:
 Tasks 01-07 are implemented and validated sequentially with TDD.
 The filtered benchmark commands passed without matching benchmark output in this checkout; they remain recorded as command-level validation, while the journal benchmark produced measurements.
 Preserve user changes and keep this package uncommitted.
+
+## Runtime replacement extension (2026-09-27)
+
+The [runtime replacement package](../agentctl-runtime-replacement/plan.md) adds in-process agentctl recovery to PR #3598.
+Its six work orders are pending. Prior implementation results remain historical and do not verify this extension.
+The new package explicitly replaces the old mandatory-backend-restart availability policy while preserving durable uncertainty guards.
+
+## Surviving-agent reattachment follow-up (2026-09-27)
+
+The [reattachment package](../durable-agent-reattachment/plan.md) owns the five review items promised to @nova28.
+Its work orders remain pending. Preserve this package's recorded results and outstanding release gates.
+Live remote reattachment remains distinct from confirmed local runtime replacement.

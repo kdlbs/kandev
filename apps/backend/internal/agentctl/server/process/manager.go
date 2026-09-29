@@ -123,6 +123,8 @@ type Manager struct {
 	deliveryJournalMu          sync.RWMutex
 	deliveryJournalClose       sync.Once
 	deliveryJournalCloseErr    error
+	deliveryWakeOnce           sync.Once
+	deliveryWakeCh             chan struct{}
 	deliverySubmissionMu       sync.Mutex
 	deliveryActiveMu           sync.RWMutex
 	deliveryActiveID           string
@@ -479,6 +481,38 @@ func (m *Manager) DeliveryJournal() (*journal.Journal, error) {
 		return nil, journal.ErrJournalCorrupt
 	}
 	return m.deliveryJournal, nil
+}
+
+// DeliveryWakeups returns the bounded notification channel for committed
+// journal output. The journal remains the source of truth; a wake only tells a
+// stream writer to read from its own cursor.
+func (m *Manager) DeliveryWakeups() <-chan struct{} {
+	if !m.deliveryJournalAvailable() {
+		return nil
+	}
+	m.deliveryWakeOnce.Do(func() {
+		m.deliveryWakeCh = make(chan struct{}, 1)
+	})
+	return m.deliveryWakeCh
+}
+
+func (m *Manager) signalDeliveryWakeup() {
+	if m.DeliveryWakeups() == nil {
+		return
+	}
+	select {
+	case m.deliveryWakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) deliveryJournalAvailable() bool {
+	if m == nil {
+		return false
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	return m.cfg != nil && m.cfg.DurableJournalPath != "" && m.deliveryJournal != nil && m.deliveryJournalErr == nil
 }
 
 // DeliveryCapability is the initialization-time protocol advertisement. A
@@ -2347,6 +2381,10 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			}
 			update = persisted
 			m.recordTerminalOutcome(&update)
+			if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
+				m.signalDeliveryWakeup()
+				continue
+			}
 			select {
 			case m.updatesCh <- update:
 			case <-stopCh:
@@ -2442,6 +2480,7 @@ func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.Ag
 		updates[i].DeliverySequence = committed[i].Sequence
 		updates[i].DeliverySubmissionID = committed[i].SubmissionID
 	}
+	m.signalDeliveryWakeup()
 	return updates, nil
 }
 
@@ -2497,9 +2536,9 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 	} else {
 		event = persisted
 	}
-	select {
-	case m.updatesCh <- event:
-	default:
+	if m.sendUpdateNonBlockingRecorded(event) {
+		return
+	} else {
 		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
 			zap.String("attempt_id", evidence.AttemptID),
 			zap.String("server_name", evidence.ServerName),
@@ -2520,9 +2559,9 @@ func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttem
 	} else {
 		event = persisted
 	}
-	select {
-	case m.updatesCh <- event:
-	default:
+	if m.sendUpdateNonBlockingRecorded(event) {
+		return
+	} else {
 		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
 			zap.String("attempt_id", attempt.AttemptID))
 	}

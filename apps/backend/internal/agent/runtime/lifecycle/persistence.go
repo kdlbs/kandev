@@ -190,6 +190,9 @@ func (m *Manager) resolveLocalPID(execution *AgentExecution) int {
 		return 0
 	}
 	if execution.RuntimeName == agentruntime.RuntimeStandalone {
+		if execution.standaloneHostPID > 0 {
+			return execution.standaloneHostPID
+		}
 		return int(m.standaloneHostPID.Load())
 	}
 	return 0

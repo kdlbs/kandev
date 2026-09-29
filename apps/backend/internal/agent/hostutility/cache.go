@@ -38,3 +38,9 @@ func (c *cache) all() []AgentCapabilities {
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentType < out[j].AgentType })
 	return out
 }
+
+func (c *cache) clear() {
+	c.mu.Lock()
+	c.byType = make(map[string]AgentCapabilities)
+	c.mu.Unlock()
+}

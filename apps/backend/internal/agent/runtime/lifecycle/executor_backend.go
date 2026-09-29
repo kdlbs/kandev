@@ -792,8 +792,8 @@ type ExecutorInstance struct {
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.
-	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
-	// and Sprites (no agentctl auth).
+	// Empty for standalone, where the shared local runtime owner supplies the
+	// credential to each bound instance client, and Sprites (no agentctl auth).
 	AuthToken string
 
 	// BootstrapNonce is the one-time nonce injected into the remote agentctl environment.
@@ -845,6 +845,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
+		startupDisposition:        startupDispositionFromMetadata(metadata),
 		ID:                        ri.InstanceID,
 		ExecutorType:              executorType,
 		RunID:                     req.Env["KANDEV_RUN_ID"],
@@ -870,9 +871,25 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		agentctl:                  ri.Client,
 		standaloneInstanceID:      ri.StandaloneInstanceID,
 		standalonePort:            ri.StandalonePort,
+		runtimeEpoch:              runtimeEpochFromClient(ri.Client),
+		standaloneHostPID:         runtimeProcessIDFromClient(ri.Client),
 		historyEnabled:            historyEnabled,
 		promptDoneCh:              make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
 	return execution
+}
+
+func runtimeEpochFromClient(client *agentctl.Client) uint64 {
+	if client == nil {
+		return 0
+	}
+	return client.RuntimeEpoch()
+}
+
+func runtimeProcessIDFromClient(client *agentctl.Client) int {
+	if client == nil {
+		return 0
+	}
+	return client.RuntimeProcessID()
 }

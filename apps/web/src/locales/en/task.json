@@ -2201,6 +2201,8 @@
   "composerPlaceholderSwitchingAgent": "Switching agent...",
   "agentHasStopped": "This agent has stopped.",
   "durableDeliveryUncertain": "Delivery was interrupted. The prompt outcome is uncertain.",
+  "durableDeliveryReconnecting": "Reconnecting to the agent. Your prompt will not be sent again.",
+  "deliveryStopOutcomeUnconfirmed": "Stop was requested. The prompt outcome is still unknown.",
   "retryConnection": "Retry connection",
   "retryingConnection": "Retrying connection...",
   "resuming": "Resuming...",

@@ -73,7 +73,13 @@ func (r *Repository) initAgentDeliverySchema() error {
 			effect_type TEXT NOT NULL,
 			state TEXT NOT NULL,
 			created_at TIMESTAMP NOT NULL,
-			completed_at TIMESTAMP
+			completed_at TIMESTAMP,
+			session_id TEXT NOT NULL DEFAULT '',
+			incarnation_id TEXT NOT NULL DEFAULT '',
+			harness_generation BIGINT NOT NULL DEFAULT 0,
+			submission_id TEXT NOT NULL DEFAULT '',
+			turn_id TEXT NOT NULL DEFAULT '',
+			outcome TEXT NOT NULL DEFAULT ''
 		);
 	`, blob, blob))
 	return err
@@ -369,13 +375,15 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if !sameAgentDeliveryEvent(&stored, event) {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
-	if projectedAt.Valid {
-		return false, tx.Commit()
+	terminalEffect, err := deliveryTerminalSettlementEffect(&stored)
+	if err != nil {
+		return false, err
 	}
-	if effect != nil {
-		if _, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect); err != nil {
-			return false, err
-		}
+	if projectedAt.Valid {
+		return false, commitProjectedTerminalEffect(ctx, tx, r.db.Rebind, terminalEffect)
+	}
+	if err := insertProjectionEffects(ctx, tx, r.db.Rebind, effect, terminalEffect); err != nil {
+		return false, err
 	}
 	now := r.nowUTC()
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -396,6 +404,32 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	}
 	r.refreshAgentDeliveryLag(ctx)
 	return true, nil
+}
+
+func commitProjectedTerminalEffect(
+	ctx context.Context, tx *sqlx.Tx, rebind func(string) string, terminal *models.AgentDeliveryEffect,
+) error {
+	if terminal != nil {
+		if _, err := insertDeliveryEffectTx(ctx, tx, rebind, terminal); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func insertProjectionEffects(
+	ctx context.Context, tx *sqlx.Tx, rebind func(string) string,
+	effect, terminal *models.AgentDeliveryEffect,
+) error {
+	for _, candidate := range []*models.AgentDeliveryEffect{effect, terminal} {
+		if candidate == nil {
+			continue
+		}
+		if _, err := insertDeliveryEffectTx(ctx, tx, rebind, candidate); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Repository) loadAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, streamID string, sequence int64) (models.AgentDeliveryEvent, sql.NullTime, error) {
@@ -478,10 +512,12 @@ func (r *Repository) GetAgentDeliveryEffect(ctx context.Context, effectKey strin
 	var effect models.AgentDeliveryEffect
 	var completedAt sql.NullTime
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at
+		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
+		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
 		FROM agent_delivery_effects WHERE effect_key = ?`), effectKey).Scan(
 		&effect.EffectKey, &effect.StreamID, &effect.Sequence, &effect.EffectType,
-		&effect.State, &effect.CreatedAt, &completedAt)
+		&effect.State, &effect.CreatedAt, &completedAt, &effect.SessionID, &effect.IncarnationID,
+		&effect.HarnessGeneration, &effect.SubmissionID, &effect.TurnID, &effect.Outcome)
 	if err == sql.ErrNoRows {
 		return nil, repoerrors.ErrAgentDeliveryEffectNotFound
 	}
@@ -509,10 +545,13 @@ func insertDeliveryEffectTx(ctx context.Context, tx deliveryEffectTx, rebind fun
 	}
 	result, err := tx.ExecContext(ctx, rebind(`
 		INSERT INTO agent_delivery_effects
-		(effect_key, stream_id, sequence, effect_type, state, created_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		(effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
+		 session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (effect_key) DO NOTHING`), effect.EffectKey, effect.StreamID,
-		effect.Sequence, effect.EffectType, effect.State, effect.CreatedAt, effect.CompletedAt)
+		effect.Sequence, effect.EffectType, effect.State, effect.CreatedAt, effect.CompletedAt,
+		effect.SessionID, effect.IncarnationID, effect.HarnessGeneration, effect.SubmissionID,
+		effect.TurnID, effect.Outcome)
 	if err != nil {
 		return false, err
 	}
@@ -527,16 +566,14 @@ func insertDeliveryEffectTx(ctx context.Context, tx deliveryEffectTx, rebind fun
 }
 
 func reconcileExistingDeliveryEffect(ctx context.Context, tx deliveryEffectTx, rebind func(string) string, effect *models.AgentDeliveryEffect) (bool, error) {
-	var existing struct {
-		StreamID   string
-		Sequence   int64
-		EffectType string
-		State      string
-	}
+	var existing models.AgentDeliveryEffect
 	if err := tx.QueryRowContext(ctx, rebind(`
-		SELECT stream_id, sequence, effect_type, state
+		SELECT stream_id, sequence, effect_type, state, session_id, incarnation_id,
+		       harness_generation, submission_id, turn_id, outcome
 		FROM agent_delivery_effects WHERE effect_key = ?`), effect.EffectKey).Scan(
-		&existing.StreamID, &existing.Sequence, &existing.EffectType, &existing.State); err != nil {
+		&existing.StreamID, &existing.Sequence, &existing.EffectType, &existing.State,
+		&existing.SessionID, &existing.IncarnationID, &existing.HarnessGeneration,
+		&existing.SubmissionID, &existing.TurnID, &existing.Outcome); err != nil {
 		return false, err
 	}
 	if existing.StreamID == "" && existing.Sequence == 0 && effect.StreamID != "" && effect.Sequence > 0 &&
@@ -550,10 +587,18 @@ func reconcileExistingDeliveryEffect(ctx context.Context, tx deliveryEffectTx, r
 		}
 		return false, nil
 	}
-	if existing.StreamID != effect.StreamID || existing.Sequence != effect.Sequence || existing.EffectType != effect.EffectType {
+	if !sameAgentDeliveryEffect(&existing, effect) {
 		return false, repoerrors.ErrAgentDeliveryEffectConflict
 	}
 	return false, nil
+}
+
+func sameAgentDeliveryEffect(existing, incoming *models.AgentDeliveryEffect) bool {
+	return existing.StreamID == incoming.StreamID && existing.Sequence == incoming.Sequence &&
+		existing.EffectType == incoming.EffectType && existing.SessionID == incoming.SessionID &&
+		existing.IncarnationID == incoming.IncarnationID &&
+		existing.HarnessGeneration == incoming.HarnessGeneration && existing.SubmissionID == incoming.SubmissionID &&
+		existing.TurnID == incoming.TurnID && existing.Outcome == incoming.Outcome
 }
 
 func sameAgentDeliveryEvent(stored, incoming *models.AgentDeliveryEvent) bool {

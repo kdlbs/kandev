@@ -21,12 +21,14 @@ func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 	return m.sendUpdateBlockingRecorded(event)
 }
 
-// sendUpdateBlockingRecorded delivers an event after its terminal outcome and
-// any durable journal record have already been written. Producers that need a
-// commit-before-publish barrier call recordTerminalOutcome and persist their
-// event before entering this helper.
+// sendUpdateBlockingRecorded publishes an already-recorded event. Durable
+// events are read from the journal after a bounded wakeup; legacy events keep
+// their existing backpressure behavior.
 func (m *Manager) sendUpdateBlockingRecorded(event adapter.AgentEvent) bool {
-
+	if m.hasPersistedDeliveryEvent(event) {
+		m.signalDeliveryWakeup()
+		return true
+	}
 	select {
 	case m.updatesCh <- event:
 		return true
@@ -45,4 +47,21 @@ func (m *Manager) sendUpdateBlockingRecorded(event adapter.AgentEvent) bool {
 	case <-stopCh:
 		return false
 	}
+}
+
+func (m *Manager) sendUpdateNonBlockingRecorded(event adapter.AgentEvent) bool {
+	if m.hasPersistedDeliveryEvent(event) {
+		m.signalDeliveryWakeup()
+		return true
+	}
+	select {
+	case m.updatesCh <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Manager) hasPersistedDeliveryEvent(event adapter.AgentEvent) bool {
+	return event.DeliverySequence > 0 && m.deliveryJournalAvailable()
 }

@@ -5,10 +5,13 @@ package launcher
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -24,6 +27,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netprobe"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"go.uber.org/zap"
 )
 
@@ -34,11 +38,17 @@ type Launcher struct {
 	port             int
 	logger           *logger.Logger
 	onUnexpectedExit func()
+	onRuntimeExit    func(ExitReport)
 	startupConfig    commonconfig.AgentctlStartupConfig
 
-	cmd    *exec.Cmd
-	exited chan struct{}
-	mu     sync.Mutex
+	cmd              *exec.Cmd
+	exited           chan struct{}
+	mu               sync.Mutex
+	childLifecycleMu sync.Mutex //nolint:unused // referenced by lifecycle_windows.go
+	processIdentity  processidentity.Identity
+	outputWG         sync.WaitGroup
+	diagnosticMu     sync.Mutex
+	diagnosticTail   string
 
 	// For clean shutdown
 	stopping bool
@@ -69,7 +79,20 @@ type Config struct {
 	Host             string // Host to bind to (default: localhost)
 	Port             int    // Control port (default: 39429)
 	OnUnexpectedExit func() // Called once when the child exits without Stop.
+	OnRuntimeExit    func(ExitReport)
 	StartupConfig    commonconfig.AgentctlStartupConfig
+}
+
+// ExitReport carries the evidence collected after a launched control process
+// exits. Containment is false when its owned process tree could not be proved
+// and stopped safely.
+type ExitReport struct {
+	PID        int
+	ExitCode   int
+	Identity   processidentity.Identity
+	Contained  bool
+	ContainErr error
+	Diagnostic string
 }
 
 // New creates a new Launcher.
@@ -89,6 +112,7 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 		host:             cfg.Host,
 		port:             cfg.Port,
 		onUnexpectedExit: cfg.OnUnexpectedExit,
+		onRuntimeExit:    cfg.OnRuntimeExit,
 		startupConfig:    cfg.StartupConfig,
 		logger:           log.WithFields(zap.String("component", "agentctl-launcher")),
 		exited:           make(chan struct{}),
@@ -116,6 +140,14 @@ func (l *Launcher) Pid() int {
 		return 0
 	}
 	return l.cmd.Process.Pid
+}
+
+// ProcessIdentity returns the verified OS identity captured immediately
+// after the managed child starts. Empty identity fields never authorize a kill.
+func (l *Launcher) ProcessIdentity() processidentity.Identity {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.processIdentity
 }
 
 // AuthToken returns the auth token retrieved via handshake.
@@ -283,6 +315,13 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 		closePipeOnStartFailure(pipeWrite, l.cmd)
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
+	identity, identityErr := processidentity.Capture(l.cmd.Process.Pid)
+	if identityErr != nil {
+		l.logger.Warn("could not capture agentctl process identity; descendant cleanup will fail closed",
+			zap.Int("pid", l.cmd.Process.Pid), zap.Error(identityErr))
+	} else {
+		l.processIdentity = identity
+	}
 
 	closeChildPipeEnd(l.cmd)
 	l.parentPipe = pipeWrite
@@ -292,14 +331,23 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// this). Failure is non-fatal: agentctl still works, but a parent crash
 	// may leak an agentctl.exe that holds the control port (issue #892).
 	if err := l.installChildLifecycle(l.cmd); err != nil {
-		l.logger.Warn("failed to install child lifecycle protection; agentctl may outlive a parent crash",
-			zap.Error(err))
+		_ = l.cmd.Process.Kill()
+		_ = l.cmd.Wait()
+		l.closeParentPipeLocked()
+		return fmt.Errorf("failed to establish agentctl process containment: %w", err)
 	}
 
 	l.logger.Info("agentctl process started", zap.Int("pid", l.cmd.Process.Pid))
 
-	go l.pipeOutput("stdout", bufio.NewScanner(stdout))
-	go l.pipeOutput("stderr", bufio.NewScanner(stderr))
+	l.outputWG.Add(2)
+	go func() {
+		defer l.outputWG.Done()
+		l.pipeOutput("stdout", stdout)
+	}()
+	go func() {
+		defer l.outputWG.Done()
+		l.pipeOutput("stderr", stderr)
+	}()
 	go l.monitorExit()
 
 	return nil
@@ -608,40 +656,64 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 	return fmt.Errorf("timeout waiting for agentctl to become healthy")
 }
 
-// pipeOutput reads from a scanner and logs each line. stdout is diagnostic
-// noise (ACP travels over the socket, not stdout).
-// Both streams carry the child's own structured logs — agentctl's logger
-// writes to stdout by default — so a line the child tagged with a level is
-// forwarded at that level rather than flattened. Flattening stdout to DEBUG
-// dropped every agentctl record below the parent's default INFO file level,
-// which left its permission decisions recorded nowhere.
-// A line without a recognizable level falls back to WARN on stderr, where an
-// unstructured panic or traceback must stay visible, and to DEBUG on stdout,
-// where it is passthrough noise.
-func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
-	for scanner.Scan() {
-		line := scanner.Text()
-		level := childLogLevel(line)
-		if level == "" {
-			// An unrecognized line means different things per stream: on stderr
-			// it is a panic or traceback that must stay visible, on stdout it is
-			// passthrough noise.
-			if name == "stderr" {
-				l.logger.Warn(line, zap.String("stream", name))
-			} else {
-				l.logger.Debug(line, zap.String("stream", name))
-			}
+// pipeOutput drains a child output stream and preserves its structured log
+// level. Unstructured stderr remains visible at WARN, while stdout passthrough
+// noise stays at DEBUG.
+func (l *Launcher) pipeOutput(name string, source io.Reader) {
+	reader := bufio.NewReaderSize(source, 32*1024)
+	line := make([]byte, 0, 4096)
+	truncated := false
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		available := maxDiagnosticLineBytes - len(line)
+		if available > len(fragment) {
+			available = len(fragment)
+		}
+		if available > 0 {
+			line = append(line, fragment[:available]...)
+		}
+		if available < len(fragment) && len(bytes.Trim(fragment[available:], "\r\n")) > 0 {
+			truncated = true
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
-		switch level {
-		case "DEBUG":
-			l.logger.Debug(line, zap.String("stream", name))
-		case "INFO":
-			l.logger.Info(line, zap.String("stream", name))
-		case "ERROR", "FATAL", "PANIC", "DPANIC":
-			l.logger.Error(line, zap.String("stream", name))
-		default:
-			l.logger.Warn(line, zap.String("stream", name))
+		l.handleOutputLine(name, line, truncated)
+		line = line[:0]
+		truncated = false
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (l *Launcher) handleOutputLine(name string, line []byte, truncated bool) {
+	line = bytes.TrimSuffix(line, []byte{'\n'})
+	line = bytes.TrimSuffix(line, []byte{'\r'})
+	if truncated {
+		line = append(line, []byte(" [truncated]")...)
+	}
+	text := string(line)
+	if name == "stderr" && text != "" {
+		l.captureDiagnostic(text)
+	}
+	if text == "" {
+		return
+	}
+	switch childLogLevel(text) {
+	case "DEBUG":
+		l.logger.Debug(text, zap.String("stream", name))
+	case "INFO":
+		l.logger.Info(text, zap.String("stream", name))
+	case "WARN":
+		l.logger.Warn(text, zap.String("stream", name))
+	case "ERROR", "FATAL", "PANIC", "DPANIC":
+		l.logger.Error(text, zap.String("stream", name))
+	default:
+		if name == "stderr" {
+			l.logger.Warn(text, zap.String("stream", name))
+		} else {
+			l.logger.Debug(text, zap.String("stream", name))
 		}
 	}
 }
@@ -764,23 +836,51 @@ func stripANSI(s string) string {
 // monitorExit waits for the process to exit and signals via the exited channel.
 func (l *Launcher) monitorExit() {
 	err := l.cmd.Wait()
+	l.outputWG.Wait()
 
 	l.mu.Lock()
 	stopping := l.stopping
+	identity := l.processIdentity
+	pid := l.cmd.Process.Pid
+	code := l.cmd.ProcessState.ExitCode()
+	l.mu.Unlock()
+
+	report := ExitReport{PID: pid, ExitCode: code, Identity: identity, Diagnostic: l.diagnostic()}
+	if !stopping {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		report.ContainErr = l.containOwnedChildren(ctx, identity)
+		cancel()
+		report.Contained = report.ContainErr == nil
+	}
+	l.mu.Lock()
+	stopping = l.stopping
 	l.mu.Unlock()
 
 	if err != nil && !stopping {
 		l.logger.Error("agentctl exited unexpectedly",
 			zap.Error(err),
-			zap.Int("pid", l.cmd.Process.Pid),
-			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
+			zap.Int("pid", pid),
+			zap.Int("exit_code", code))
 	} else if !stopping {
 		l.logger.Info("agentctl exited",
-			zap.Int("pid", l.cmd.Process.Pid),
-			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
+			zap.Int("pid", pid),
+			zap.Int("exit_code", code))
 	}
-	if !stopping && l.onUnexpectedExit != nil {
-		l.onUnexpectedExit()
+	if !stopping && report.Diagnostic != "" {
+		l.logger.Debug("agentctl exit diagnostics",
+			zap.Int("pid", pid), zap.String("diagnostic", report.Diagnostic))
+	}
+	if !stopping {
+		if report.ContainErr != nil {
+			l.logger.Error("could not verify or contain agentctl descendants",
+				zap.Int("pid", pid), zap.Error(report.ContainErr))
+		}
+		if l.onRuntimeExit != nil {
+			l.onRuntimeExit(report)
+		}
+		if l.onUnexpectedExit != nil {
+			l.onUnexpectedExit()
+		}
 	}
 
 	close(l.exited)

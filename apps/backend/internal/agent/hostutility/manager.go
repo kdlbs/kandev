@@ -48,6 +48,7 @@ type Manager struct {
 	controlHost     string
 	controlPort     int
 	controlClient   *agentctlclient.ControlClient
+	runtimeOwner    *agentctlclient.RuntimeOwner
 	authToken       string // per-launch auth token for instance clients
 	log             *logger.Logger
 	profileResolver interface {
@@ -78,6 +79,7 @@ type Manager struct {
 	managedRuntimeSelections      managedruntime.SelectionReader
 	startCancel                   context.CancelFunc
 	stopped                       bool
+	runtimeEpoch                  uint64
 }
 
 // ProviderGatewayAuthResolver resolves provider authentication for a saved
@@ -105,6 +107,7 @@ func (m *Manager) SetProviderGatewayAuthResolver(resolver ProviderGatewayAuthRes
 type instance struct {
 	agentType         string
 	instanceID        string
+	runtimeEpoch      uint64
 	workDir           string
 	client            *agentctlclient.Client
 	operationGateOnce sync.Once
@@ -165,6 +168,18 @@ func (m *Manager) SetAuthToken(token string) {
 	m.authToken = token
 }
 
+// SetRuntimeOwner makes local utility instances follow the shared standalone
+// agentctl binding instead of retaining startup endpoint and credential data.
+func (m *Manager) SetRuntimeOwner(owner *agentctlclient.RuntimeOwner) {
+	m.runtimeOwner = owner
+	if owner != nil {
+		m.controlHost = ""
+		m.controlPort = 0
+		m.controlClient = nil
+		m.authToken = ""
+	}
+}
+
 // SetManagedRuntimeSelectionStore wires the install-wide exact-version
 // resolver used by every host-local managed-runtime command path.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
@@ -196,6 +211,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		cancel()
 	}()
+	if err := m.reconcileRuntimeEpoch(ctx); err != nil {
+		return fmt.Errorf("acquire local agent runtime for host utilities: %w", err)
+	}
 
 	// Create a process-scoped parent dir so concurrent kandev processes do not
 	// share state, and so Stop only removes dirs owned by this process.
@@ -308,13 +326,18 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 	if inst == nil {
 		return
 	}
-	if m.controlClient != nil {
+	if m.runtimeOwner != nil {
+		m.deleteRuntimeInstance(ctx, inst)
+	} else if m.controlClient != nil {
 		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
 			m.log.Warn("failed to delete host utility instance",
 				zap.String("agent_type", inst.agentType),
 				zap.String("instance_id", inst.instanceID),
 				zap.Error(err))
 		}
+	}
+	if inst.client != nil {
+		inst.client.Close()
 	}
 	if inst.workDir == "" {
 		return
@@ -325,6 +348,59 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 			zap.String("path", inst.workDir),
 			zap.Error(err))
 	}
+}
+
+func (m *Manager) deleteRuntimeInstance(ctx context.Context, inst *instance) {
+	lease, err := m.runtimeOwner.Acquire(ctx)
+	if err != nil {
+		return
+	}
+	defer lease.Close()
+	if lease.Epoch() != inst.runtimeEpoch {
+		return
+	}
+	control := lease.NewControlClient(m.log)
+	if control == nil {
+		return
+	}
+	if err := control.DeleteInstance(lease.Context(), inst.instanceID); err != nil {
+		m.log.Warn("failed to delete host utility instance",
+			zap.String("agent_type", inst.agentType),
+			zap.String("instance_id", inst.instanceID),
+			zap.Error(err))
+	}
+}
+
+func (m *Manager) reconcileRuntimeEpoch(ctx context.Context) error {
+	if m.runtimeOwner == nil {
+		return nil
+	}
+	lease, err := m.runtimeOwner.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	epoch := lease.Epoch()
+	lease.Close()
+
+	m.mu.Lock()
+	if m.runtimeEpoch == epoch {
+		m.mu.Unlock()
+		return nil
+	}
+	oldInstances := make([]*instance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		oldInstances = append(oldInstances, inst)
+	}
+	m.instances = make(map[string]*instance)
+	m.runtimeEpoch = epoch
+	m.mu.Unlock()
+
+	m.cache.clear()
+	m.modelCache.clear()
+	for _, inst := range oldInstances {
+		m.deleteInstance(ctx, inst)
+	}
+	return nil
 }
 
 // eligibleAgents returns enabled agents that implement supported inference
@@ -462,14 +538,42 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 		// and never runs a persistent agent subprocess. Probe/Prompt calls
 		// spawn their own ephemeral ACP subprocesses via InferencePrompt/Probe.
 	}
-	resp, err := m.controlClient.CreateInstance(ctx, req)
+	var control *agentctlclient.ControlClient
+	controlCtx := ctx
+	var lease *agentctlclient.RuntimeLease
+	var err error
+	if m.runtimeOwner != nil {
+		lease, err = m.runtimeOwner.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer lease.Close()
+		control = lease.NewControlClient(m.log)
+		controlCtx = lease.Context()
+	} else {
+		control = m.controlClient
+	}
+	if control == nil {
+		return nil, errors.New("host utility control client unavailable")
+	}
+	resp, err := control.CreateInstance(controlCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("create instance: %w", err)
 	}
+	if lease != nil {
+		if err := lease.CheckCurrent(); err != nil {
+			return nil, fmt.Errorf("host utility instance creation outcome is uncertain after runtime retirement: %w", err)
+		}
+	}
 
-	client := agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
-		agentctlclient.WithExecutionID(resp.ID),
-		agentctlclient.WithAuthToken(m.authToken))
+	var client *agentctlclient.Client
+	if lease != nil {
+		client = lease.NewBoundInstanceClient(resp.Port, m.log, agentctlclient.WithExecutionID(resp.ID))
+	} else {
+		client = agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
+			agentctlclient.WithExecutionID(resp.ID),
+			agentctlclient.WithAuthToken(m.authToken))
+	}
 
 	// Wait a moment for the instance HTTP server to come up.
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -485,12 +589,22 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 		deleteCancel()
 		return nil, fmt.Errorf("instance %s not healthy: %w", resp.ID, err)
 	}
+	if lease != nil && lease.CheckCurrent() != nil {
+		client.Close()
+		return nil, agentctlclient.ErrRuntimeLeaseRetired
+	}
 
 	return &instance{
 		agentType:  agentType,
 		instanceID: resp.ID,
-		workDir:    workDir,
-		client:     client,
+		runtimeEpoch: func() uint64 {
+			if lease == nil {
+				return 0
+			}
+			return lease.Epoch()
+		}(),
+		workDir: workDir,
+		client:  client,
 	}, nil
 }
 
@@ -524,6 +638,9 @@ var errManagerStopped = errors.New("host utility manager stopped")
 // getInstance returns the warm instance for the agent type, lazily recreating
 // it if missing (e.g. after a previous failure or crash).
 func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance, agents.InferenceAgent, error) {
+	if err := m.reconcileRuntimeEpoch(ctx); err != nil {
+		return nil, nil, err
+	}
 	ia, ok := m.registry.GetInferenceAgent(agentType)
 	if !ok {
 		return nil, nil, fmt.Errorf("agent %q not found or not inference-capable", agentType)

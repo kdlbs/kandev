@@ -5,6 +5,7 @@ import type { AppState, HydrationState } from "./app-state-types";
 import { mergeInitialState } from "./default-state";
 import { buildStateOverrides } from "./store-overrides";
 import { getQuickChatSelectionIdentity } from "@/lib/quick-chat/selection-storage";
+import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { createTaskOverviewSlice } from "./slices/task-overview";
 import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
 
@@ -76,7 +77,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createSystemSlice(set as any, get as any, api as any),
         setAgentRuntime: (snapshot) =>
           set((draft) => {
-            draft.agentRuntime = snapshot;
+            draft.agentRuntime = newerAgentRuntimeSnapshot(draft.agentRuntime, snapshot);
           }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createUISlice(set as any, get as any, api as any),

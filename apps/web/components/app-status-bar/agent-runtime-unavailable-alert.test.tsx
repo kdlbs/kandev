@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { RestartCapabilityState } from "@/hooks/domains/system/use-restart-capability";
 import type { KandevRestartController } from "@/hooks/domains/system/use-kandev-restart";
+import type { AgentRuntimeRecoveryError } from "@/hooks/domains/system/use-agent-runtime-recovery";
 import { AgentRuntimeUnavailableAlert } from "./agent-runtime-unavailable-alert";
 
 const RESTART_BUTTON_LABEL = "Restart Kandev";
@@ -22,6 +23,16 @@ const restartController = vi.hoisted(() => ({
     dismiss: vi.fn(),
   } as KandevRestartController,
 }));
+const runtimeRecovery = vi.hoisted(() => ({
+  value: {
+    canRetry: false,
+    error: null as AgentRuntimeRecoveryError | null,
+    isAdmin: true,
+    isRecovering: false,
+    isRetrying: false,
+    retry: vi.fn(),
+  },
+}));
 
 vi.mock("@/hooks/domains/system/use-restart-capability", () => ({
   useRestartCapability: () => restartCapability.value,
@@ -29,6 +40,10 @@ vi.mock("@/hooks/domains/system/use-restart-capability", () => ({
 
 vi.mock("@/hooks/domains/system/use-kandev-restart", () => ({
   useKandevRestart: () => restartController.value,
+}));
+
+vi.mock("@/hooks/domains/system/use-agent-runtime-recovery", () => ({
+  useAgentRuntimeRecovery: () => runtimeRecovery.value,
 }));
 
 vi.mock("@/components/settings/system/restart-progress-dialog", () => ({
@@ -88,6 +103,14 @@ describe("AgentRuntimeUnavailableAlert", () => {
       start: vi.fn(),
       dismiss: vi.fn(),
     };
+    runtimeRecovery.value = {
+      canRetry: false,
+      error: null,
+      isAdmin: true,
+      isRecovering: false,
+      isRetrying: false,
+      retry: vi.fn(),
+    };
   });
 
   afterEach(cleanup);
@@ -140,5 +163,45 @@ describe("AgentRuntimeUnavailableAlert", () => {
     expect(action.className).toContain("h-11");
     expect(action.className).toContain("w-full");
     expect(action.className).toContain("sm:w-auto");
+  });
+
+  it("offers administrator retry and keeps restart as the secondary fallback", () => {
+    runtimeRecovery.value.canRetry = true;
+    renderAlert();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry agent runtime" }));
+    expect(runtimeRecovery.value.retry).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: RESTART_BUTTON_LABEL })).toBeTruthy();
+  });
+
+  it("shows recovery progress as a polite status without mutation controls", () => {
+    runtimeRecovery.value.isRecovering = true;
+    render(
+      <StateProvider
+        initialState={{
+          agentRuntime: {
+            status: "recovering",
+            boot_id: "boot-1",
+            runtime_epoch: 5,
+            revision: 8,
+          },
+        }}
+      >
+        <AgentRuntimeUnavailableAlert />
+      </StateProvider>,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toContain("Recovering the local agent runtime");
+    expect(screen.getByTestId("agent-runtime-alert").querySelector("button")).toBeNull();
+  });
+
+  it("shows administrator guidance without mutation controls to members", () => {
+    runtimeRecovery.value.isAdmin = false;
+    renderAlert();
+
+    expect(screen.getByText(/workspace administrator/i)).toBeTruthy();
+    expect(screen.getByTestId("agent-runtime-alert").querySelector("button")).toBeNull();
   });
 });

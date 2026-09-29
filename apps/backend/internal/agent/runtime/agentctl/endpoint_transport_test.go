@@ -360,6 +360,39 @@ func TestPluginExecutorLeasedControlHandshakeAndInstanceCreation(t *testing.T) {
 	}
 }
 
+func TestEndpointDialWebSocketReturnsUpgradeFailure(t *testing.T) {
+	_, dependencies, endpoint := newPluginExecutorTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "upgrade unavailable", http.StatusServiceUnavailable)
+	}))
+
+	now := time.Now()
+	resolver := func(context.Context) (*ConnectionLease, error) {
+		return &ConnectionLease{BaseURL: endpoint, ExpiresAt: now.Add(time.Minute), Generation: "g1"}, nil
+	}
+	client, err := newEndpointClient(context.Background(), resolver, newTestLogger(), dependencies, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newEndpointClient(): %v", err)
+	}
+	defer client.Close()
+
+	conn, response, err := client.dialWebSocket(context.Background(), "/ws", nil)
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("dialWebSocket() returned a connection for a rejected upgrade")
+	}
+	if err == nil {
+		t.Fatal("dialWebSocket() error = nil, want upgrade rejection")
+	}
+	if response == nil || response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("dialWebSocket() response = %#v, want HTTP %d", response, http.StatusServiceUnavailable)
+	}
+	_ = response.Body.Close()
+}
+
 func TestPluginExecutorTransportMatrix(t *testing.T) {
 	type observedRequest struct {
 		path          string

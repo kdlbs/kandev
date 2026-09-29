@@ -2123,6 +2123,8 @@
   "workflowAgentsUnavailable": "此設定檔已不可用。請選擇其他設定檔或重置。",
   "agentHasStopped": "該代理程式已停止。",
   "durableDeliveryUncertain": "傳輸已中斷。提示的結果不確定。",
+  "durableDeliveryReconnecting": "正在重新連線代理。提示不會再次傳送。",
+  "deliveryStopOutcomeUnconfirmed": "已要求停止。提示的結果仍然未知。",
   "retryConnection": "重試連線",
   "retryingConnection": "正在重試連線...",
   "agentResponseChangedSelectAgain": "代理程式的回覆已變化。請重新選擇文字。",

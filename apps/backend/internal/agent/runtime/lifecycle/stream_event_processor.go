@@ -221,6 +221,18 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		sm.scheduleDurableDeliveryAck(client, prepared.event)
 		return nil
 	}
+	if prepared.durableEvent != nil && prepared.durableEvent.Terminal {
+		if err := sm.projectDurableAgentDeliveryEventWithEffect(
+			ctx, prepared.durableEvent, delivery, prepared.deliveryEffect,
+		); err != nil {
+			return fmt.Errorf("project durable terminal agent event: %w", err)
+		}
+		sm.scheduleDurableDeliveryAck(client, prepared.event)
+		if !prepared.skipCallback {
+			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
+		}
+		return nil
+	}
 	event, canonicalProjected, err := sm.projectCanonicalAgentEvent(
 		ctx, execution, prepared.event, prepared.durableEvent, delivery, client,
 	)

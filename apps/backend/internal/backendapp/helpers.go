@@ -1961,7 +1961,8 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus,
+		p.agentRuntimeAvailability, p.lifecycleMgr, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
 

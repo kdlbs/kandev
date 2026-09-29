@@ -974,6 +974,9 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 	if req.TurnID != "" {
 		reqWithWorktree.Metadata["prompt_turn_id"] = req.TurnID
 	}
+	if req.InitialDeliverySubmissionID != "" {
+		reqWithWorktree.Metadata[initialDeliverySubmissionIDMetadataKey] = req.InitialDeliverySubmissionID
+	}
 
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
@@ -1853,6 +1856,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		// The workspace-only execution was created before a prompt was admitted.
 		// Transfer this launch's prompt payload before StartAgentProcess reads it.
 		execution.setMetadataValue("task_description", req.TaskDescription)
+		execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, req.InitialDeliverySubmissionID)
 		execution.setMetadataValue("attachments", append([]MessageAttachment(nil), req.Attachments...))
 		execution.setMetadataValue("session_id", req.SessionID)
 		execution.setMetadataValue("prompt_turn_id", req.TurnID)
@@ -1928,10 +1932,18 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// can promote it instead of erroring as if a real agent were running.
 	if req.SessionID != "" {
 		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
-			if existingExecution.AgentCommand == "" {
+			switch {
+			case m.isRetiredLocalExecution(existingExecution):
+				if existingExecution.AgentCommand != "" && req.RecoveryAction == "" &&
+					!m.isIdleSettledRetiredLocalExecution(existingExecution) {
+					return nil, m.runtimeReplacementRecoveryError(existingExecution)
+				}
+				m.retireStaleLocalExecution(existingExecution)
+			case existingExecution.AgentCommand == "":
 				return existingExecution, nil
+			default:
+				return nil, fmt.Errorf("%w: session %q (execution: %s)", ErrAgentAlreadyRunning, req.SessionID, existingExecution.ID)
 			}
-			return nil, fmt.Errorf("%w: session %q (execution: %s)", ErrAgentAlreadyRunning, req.SessionID, existingExecution.ID)
 		}
 	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
@@ -2622,6 +2634,27 @@ func (m *Manager) SetPromptTurnID(_ context.Context, executionID, turnID string)
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 	execution.setPromptTurnID(turnID)
+	return nil
+}
+
+// SetInitialDeliverySubmissionID preserves a persisted first-message identity
+// on a workspace-only execution before StartAgentProcess initializes its ACP
+// session and sends the prompt.
+func (m *Manager) SetInitialDeliverySubmissionID(
+	_ context.Context,
+	executionID, submissionID string,
+) error {
+	if submissionID == "" {
+		return nil
+	}
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if execution.isSessionInitialized() || execution.ACPSessionID != "" {
+		return fmt.Errorf("execution %q already has an initialized agent session", executionID)
+	}
+	execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, submissionID)
 	return nil
 }
 

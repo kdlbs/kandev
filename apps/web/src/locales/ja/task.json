@@ -2624,6 +2624,8 @@
   "gitStatusRetry": "再試行",
   "continueFromHistory": "保存済み履歴から続行",
   "durableDeliveryUncertain": "配信が中断されました。プロンプトの結果は不明です。",
+  "durableDeliveryReconnecting": "エージェントに再接続しています。プロンプトは再送信されません。",
+  "deliveryStopOutcomeUnconfirmed": "停止を要求しました。プロンプトの結果はまだ不明です。",
   "retryConnection": "接続を再試行",
   "retryingConnection": "接続を再試行中..."
 }

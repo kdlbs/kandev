@@ -406,3 +406,67 @@ func TestDurableAdoptionErrorTextIncludesReason(t *testing.T) {
 		t.Fatal("wrapped adoption reason was not discoverable")
 	}
 }
+
+func TestInitialPromptDeliverySubmissionIDUsesAdmittedMessageIdentity(t *testing.T) {
+	execution := &AgentExecution{
+		SessionID:                 "session-1",
+		DeliveryMode:              DurableDeliveryV1,
+		DeliveryHarnessGeneration: 3,
+		metadata: map[string]interface{}{
+			"initial_delivery_submission_id": "message-1",
+		},
+	}
+
+	if got := initialPromptDeliverySubmissionID(execution); got != "message-1" {
+		t.Fatalf("initial prompt submission ID = %q, want the admitted message identity", got)
+	}
+}
+
+func TestDeliverySubmissionIdentityPrefersExplicitRequest(t *testing.T) {
+	tests := []struct {
+		name         string
+		requested    string
+		acknowledged string
+		want         string
+	}{
+		{
+			name:         "explicit message identity survives concurrent prompt acknowledgement",
+			requested:    "message-1",
+			acknowledged: "prompt:message-2",
+			want:         "prompt:message-1",
+		},
+		{
+			name:         "server generated identity is used when request has no durable identity",
+			acknowledged: "prompt:generated",
+			want:         "prompt:generated",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deliverySubmissionIdentityForPrompt(tt.requested, tt.acknowledged); got != tt.want {
+				t.Fatalf("deliverySubmissionIdentityForPrompt(%q, %q) = %q, want %q", tt.requested, tt.acknowledged, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetInitialDeliverySubmissionIDBindsOnlyBeforeSessionInitialization(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{ID: "execution-1", SessionID: "session-1"}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if err := manager.SetInitialDeliverySubmissionID(context.Background(), execution.ID, "message-1"); err != nil {
+		t.Fatalf("set initial delivery submission: %v", err)
+	}
+	if got := execution.metadataString(initialDeliverySubmissionIDMetadataKey); got != "message-1" {
+		t.Fatalf("initial delivery submission = %q, want message-1", got)
+	}
+	execution.setSessionInitialized(true)
+	if err := manager.SetInitialDeliverySubmissionID(context.Background(), execution.ID, "message-2"); err == nil {
+		t.Fatal("expected initialized execution to reject a replacement initial identity")
+	}
+	if got := execution.metadataString(initialDeliverySubmissionIDMetadataKey); got != "message-1" {
+		t.Fatalf("rejected replacement changed initial delivery submission to %q", got)
+	}
+}

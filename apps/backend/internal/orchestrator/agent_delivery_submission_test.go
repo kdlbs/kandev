@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +27,34 @@ func (m *durableDeliveryTestAgentManager) DurableDeliveryCapabilityForExecution(
 		return m.capabilityFn(ctx, executionID)
 	}
 	return m.capability, m.advertised
+}
+
+func TestRuntimeReplacementAdmissionEntrypoints(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-runtime-replacement", "session-runtime-replacement", "step-1")
+	agentManager := &durableDeliveryTestAgentManager{mockAgentManager: &mockAgentManager{}}
+	service := createTestServiceWithAgent(
+		repo, newMockStepGetter(), newMockTaskRepo(), agentManager,
+	)
+	retired := &lifecycle.RestoreRequiredError{
+		Decision: lifecycle.RestoreDecision{
+			Outcome:                lifecycle.RestoreOutcomeBlocked,
+			Reason:                 lifecycle.RestoreReasonUnknown,
+			PreserveNativeIdentity: true,
+		},
+	}
+	err := service.persistRuntimeReplacementRecoveryBlock(ctx, "session-runtime-replacement", nil, retired)
+	if !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("normalized runtime error = %v, want session recovery required", err)
+	}
+	block, err := service.GetOpenSessionRecoveryBlock(ctx, "session-runtime-replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block == nil || block.Reason != string(lifecycle.RestoreReasonUnknown) {
+		t.Fatalf("runtime replacement block = %#v, want bounded unknown recovery", block)
+	}
 }
 
 func TestPrepareAgentDeliverySubmissionUsesStableBackendIdentity(t *testing.T) {

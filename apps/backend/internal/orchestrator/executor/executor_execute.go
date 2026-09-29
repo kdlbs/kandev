@@ -250,6 +250,32 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
 			startupErr = err
+			if errors.Is(err, lifecycle.ErrAgentReattachment) {
+				cleanupCtx := context.WithoutCancel(updateCtx)
+				owned, _, ownershipErr := e.bootstrapFailureOwnsSession(
+					cleanupCtx, sessionID, agentExecutionID, startAttemptID,
+				)
+				if ownershipErr != nil {
+					e.logger.Warn("failed to verify ownership after agent reattachment failure",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.String("agent_execution_id", agentExecutionID),
+						zap.Error(ownershipErr))
+					return
+				}
+				if !owned {
+					return
+				}
+				e.logger.Warn("existing agent reattachment failed; preserving the live peer",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("agent_execution_id", agentExecutionID),
+					zap.Error(err))
+				if e.onAgentProcessStartFailed != nil {
+					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
+				}
+				return
+			}
 			if isNativeRestoreStartupContext(ctx) {
 				// Native restore has a caller waiting for this result. That owner
 				// classifies the actual error and tears down this exact execution.
@@ -290,6 +316,12 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 		}
 		if isCancellableResumeContext(ctx) && ctx.Err() != nil {
 			startupErr = ctx.Err()
+			if e.isReattachedExistingStartup(agentExecutionID) {
+				if e.onAgentProcessStartFailed != nil {
+					e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
+				}
+				return
+			}
 			if isNativeRestoreStartupContext(ctx) {
 				return
 			}
@@ -311,6 +343,15 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 		}
 	}()
 	return result
+}
+
+type startupDispositionProvider interface {
+	StartupDisposition(string) lifecycle.AgentStartupDisposition
+}
+
+func (e *Executor) isReattachedExistingStartup(agentExecutionID string) bool {
+	provider, ok := e.agentManager.(startupDispositionProvider)
+	return ok && provider.StartupDisposition(agentExecutionID) == lifecycle.AgentStartupReattachedExisting
 }
 
 func (e *Executor) handleAgentProcessStartFailure(
@@ -1841,6 +1882,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	req.TurnID = opts.TurnID
+	req.InitialDeliverySubmissionID = opts.DeliverySubmissionID
+	req.BeforeAgentStart = opts.BeforeAgentStart
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID
 	}
@@ -1985,6 +2028,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+	}
+	if startAgent && req.BeforeAgentStart != nil {
+		if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
+			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
+		}
 	}
 	if startAgent && (prompt != "" || len(opts.Attachments) > 0) {
 		if err := e.registerInitialPromptDispatchCallbacks(
@@ -2768,9 +2817,25 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			// Non-fatal: agent may start without description
 		}
 	}
+	if request.InitialDeliverySubmissionID != "" {
+		setter, ok := e.agentManager.(InitialDeliverySubmissionIDSetter)
+		if !ok {
+			return nil, errors.New("agent manager cannot bind the initial delivery submission")
+		}
+		if err := setter.SetInitialDeliverySubmissionID(
+			ctx, executionID, request.InitialDeliverySubmissionID,
+		); err != nil {
+			return nil, fmt.Errorf("bind initial delivery submission: %w", err)
+		}
+	}
 	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
 	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
+	}
+	if request.BeforeAgentStart != nil {
+		if err := request.BeforeAgentStart(ctx, executionID); err != nil {
+			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
+		}
 	}
 
 	// Lazy workspace restoration creates an execution without an agent command.

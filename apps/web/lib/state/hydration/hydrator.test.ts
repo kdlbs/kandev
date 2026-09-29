@@ -71,6 +71,31 @@ describe("hydrateUI — quick chat name overlay", () => {
   });
 });
 
+describe("hydrateState — agent runtime availability", () => {
+  it("keeps a newer live runtime snapshot when a delayed boot payload arrives", () => {
+    const draft = makeAppDraft();
+    draft.agentRuntime = {
+      status: "recovering",
+      boot_id: "boot-1",
+      runtime_epoch: 3,
+      revision: 9,
+    };
+
+    const result = produce(draft, (next: Draft<AppState>) => {
+      hydrateState(next, {
+        agentRuntime: {
+          status: "unavailable",
+          boot_id: "boot-1",
+          runtime_epoch: 3,
+          revision: 8,
+        },
+      });
+    });
+
+    expect(result.agentRuntime).toEqual(draft.agentRuntime);
+  });
+});
+
 describe("hydrateUI — typed quick chat sessions", () => {
   beforeEach(() => {
     window.localStorage.clear();

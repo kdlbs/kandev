@@ -618,6 +618,27 @@ func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservin
 	)
 }
 
+// StartCreatedSessionWithDeliverySubmission binds a persisted first message
+// before the initial prompt can reach agentctl.
+func (s *Service) StartCreatedSessionWithDeliverySubmission(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	start DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		start.SkipMessageRecord, start.PlanMode, start.AutoStart,
+		start.Attachments, start.References, start.PromptReferenceContext,
+		startCreatedSessionOptions{
+			canvasGuidanceResolved:   start.CanvasGuidanceResolved,
+			includeCanvasGuidance:    start.IncludeCanvasGuidance,
+			promptReferencesPrepared: start.PromptReferencesPrepared,
+			preserveDirectPrompt:     start.PreserveDirectPrompt,
+			deliverySubmissionID:     start.DeliverySubmissionID,
+		},
+	)
+}
+
 // startCreatedSessionWithComposedPrompt launches a prepared session from an
 // auto-start path whose prompt was already composed and recorded by the
 // orchestrator. The ordinary public entry point intentionally applies the
@@ -666,6 +687,10 @@ type startCreatedSessionOptions struct {
 	// server-owned expansion snapshot, including an empty snapshot.
 	promptReferencesPrepared bool
 	preserveDirectPrompt     bool
+	deliverySubmissionID     string
+	deliveryProtocol         string
+	deliveryPayloadHash      string
+	deliveryClaimUpdater     deliveryClaimUpdater
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
@@ -996,6 +1021,25 @@ func (s *Service) startCreatedSession(
 	); err != nil {
 		return nil, err
 	}
+	if options.deliverySubmissionID != "" {
+		launchOptions.DeliverySubmissionID = options.deliverySubmissionID
+		launchOptions.BeforeAgentStart = func(admissionCtx context.Context, executionID string) error {
+			_, admissionErr := s.prepareAgentDeliverySubmission(
+				admissionCtx,
+				session,
+				executionID,
+				effectivePrompt,
+				attachments,
+				promptTaskOptions{
+					deliveryProtocol:     options.deliveryProtocol,
+					deliverySubmissionID: options.deliverySubmissionID,
+					deliveryPayloadHash:  options.deliveryPayloadHash,
+					deliveryClaimUpdater: options.deliveryClaimUpdater,
+				},
+			)
+			return admissionErr
+		}
+	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
@@ -1003,6 +1047,9 @@ func (s *Service) startCreatedSession(
 	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
+		if errors.Is(err, ErrSessionRecoveryRequired) {
+			return nil, err
+		}
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			if initialTurnCreated {
 				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
@@ -6179,6 +6226,22 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual, promptTaskOptions{})
 }
 
+// PromptTaskWithDeliverySubmissionID binds a direct persisted user message to
+// the same canonical submission record used by queued prompts.
+func (s *Service) PromptTaskWithDeliverySubmissionID(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	submissionID string,
+) (*PromptResult, error) {
+	return s.promptTask(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly,
+		launchOriginManual, promptTaskOptions{deliverySubmissionID: submissionID},
+	)
+}
+
 type promptTaskOptions struct {
 	internalContinuation bool
 	// recoveryAction is populated only by the explicit context-continuation
@@ -6947,12 +7010,13 @@ func (s *Service) finishPromptExecutorDispatch(
 		options.promptAccepted.Store(true)
 	}
 	if execErr != nil {
+		execErr = s.persistRuntimeReplacementRecoveryBlock(ctx, sessionID, delivery, execErr)
 		if delivery != nil {
 			unknownErr := delivery.markInterrupted(
 				context.WithoutCancel(ctx), "prompt_dispatch_failed",
 			)
 			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome",
+				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome", delivery,
 			)
 			if unknownErr != nil {
 				execErr = errors.Join(execErr, unknownErr)
@@ -6991,7 +7055,7 @@ func (s *Service) finishPromptExecutorDispatch(
 				context.WithoutCancel(ctx), "prompt_publication_failed",
 			)
 			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome",
+				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome", delivery,
 			)
 			return nil, &acceptedPromptDispatchError{
 				err: errors.Join(publicationErr, unknownErr, recoveryErr),
@@ -7002,7 +7066,7 @@ func (s *Service) finishPromptExecutorDispatch(
 	if delivery != nil {
 		if completionErr := delivery.markCompleted(context.WithoutCancel(ctx)); completionErr != nil {
 			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "backend_delivery_completion_failed",
+				context.WithoutCancel(ctx), sessionID, "backend_delivery_completion_failed", delivery,
 			)
 			return &PromptResult{
 					StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
@@ -7012,6 +7076,25 @@ func (s *Service) finishPromptExecutorDispatch(
 		}
 	}
 	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID}, nil
+}
+
+func (s *Service) persistRuntimeReplacementRecoveryBlock(
+	ctx context.Context,
+	sessionID string,
+	delivery *agentDeliverySubmissionRuntime,
+	err error,
+) error {
+	if err == nil || delivery != nil {
+		return err
+	}
+	var restoreRequired *lifecycle.RestoreRequiredError
+	if !errors.As(err, &restoreRequired) {
+		return err
+	}
+	recoveryErr := s.deliveryRecoveryError(
+		context.WithoutCancel(ctx), sessionID, restoreRequired.RecoveryReason(),
+	)
+	return errors.Join(err, recoveryErr)
 }
 
 // validateAndRunDispatchBoundary resolves promptTask's queued-dispatch
@@ -9164,7 +9247,9 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 		!routingerr.IsTransientProviderError(err.Error()) {
 		s.writeTaskReviewState(ctx, taskID, sessionID)
 	}
-	s.completeTurnForSession(ctx, sessionID)
+	if !errors.Is(err, lifecycle.ErrUncertainPromptDelivery) {
+		s.completeTurnForSession(ctx, sessionID)
+	}
 	return err
 }
 
@@ -10606,7 +10691,9 @@ func (s *Service) stopCancelledResumeStartup(
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
 	err := s.executor.StopExecution(stopCtx, executionID, "cancelled resume startup", true)
 	cancel()
-	if relockErr := relockGuard(ctx); relockErr != nil {
+	relockCtx, cancelRelock := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+	defer cancelRelock()
+	if relockErr := relockGuard(relockCtx); relockErr != nil {
 		s.releaseExecutionTeardownClaim(attempt.sessionID, executionID)
 		return false, fmt.Errorf("reacquire cancellation guard after stopping resume startup: %w", relockErr)
 	}

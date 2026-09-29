@@ -327,6 +327,8 @@ An acknowledged event must never depend on an agentctl record that cleanup can r
 
 ## Reconciliation
 
+[Reattachment design](durable-agent-reattachment.md) defines repeatable cycles, evidence-scoped settlement, and persistent session recovery.
+
 A disconnect first enters `reconnecting`, not prompt failure.
 Lifecycle queries the same agentctl owner, submission state, and stream identity.
 It makes at most three attempts within a ten-second connection-recovery window.

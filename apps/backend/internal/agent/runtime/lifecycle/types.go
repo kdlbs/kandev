@@ -32,6 +32,9 @@ const AgentCtlPort = ports.AgentCtl
 type AgentExecution struct {
 	RequiredNativeConversationID string
 	ID                           string
+	// startupDisposition is frozen from the merged executor metadata before
+	// this execution is published to lifecycle callers.
+	startupDisposition AgentStartupDisposition
 	// ResumeAttemptID identifies the immutable recovery attempt that created or
 	// started this execution. It is copied onto every lifecycle callback so a
 	// delayed callback cannot be accepted by a replacement attempt.
@@ -221,6 +224,8 @@ type AgentExecution struct {
 	// Standalone mode info (when not using Docker)
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone execution
+	runtimeEpoch         uint64 // Local agentctl generation that owns this execution
+	standaloneHostPID    int    // Local agentctl process that created this execution
 
 	// IsPassthrough captures the session's mode as decided at session-creation
 	// time (TaskSession.IsPassthrough snapshot). StartAgentProcess uses this
@@ -1496,12 +1501,13 @@ type LaunchRequest struct {
 	ACPSessionID         string // ACP session ID to resume, if available
 	// Durable delivery identity is resolved by the orchestrator from the
 	// persisted session incarnation and harness generation.
-	DeliveryStreamID          string
-	DeliveryIncarnationID     string
-	DeliveryHarnessGeneration uint64
-	Metadata                  map[string]interface{}
-	ModelOverride             string         // If set, use this model instead of the profile's model
-	RouteOverride             *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	DeliveryStreamID            string
+	DeliveryIncarnationID       string
+	DeliveryHarnessGeneration   uint64
+	InitialDeliverySubmissionID string
+	Metadata                    map[string]interface{}
+	ModelOverride               string         // If set, use this model instead of the profile's model
+	RouteOverride               *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.

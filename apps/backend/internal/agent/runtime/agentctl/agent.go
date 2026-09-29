@@ -544,14 +544,19 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 // StreamUpdatesFrom opens the updates stream after a committed delivery
 // sequence. A zero cursor preserves the original first-connect behavior.
 func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
+	streamCtx, cancel, err := c.RuntimeBoundContext(ctx)
+	if err != nil {
+		return err
+	}
 	const wsRoute = "/api/v1/agent/stream"
 	route := wsRoute
 	if after > 0 {
 		route += "?after=" + strconv.FormatUint(after, 10)
 	}
 
-	conn, _, err := c.dialWebSocket(ctx, route, c.wsAuthHeaders())
+	conn, _, err := c.dialWebSocket(streamCtx, route, c.wsAuthHeaders())
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
@@ -568,7 +573,10 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
-	go c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+	go func() {
+		defer cancel()
+		c.readUpdatesStream(streamCtx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+	}()
 
 	return nil
 }

@@ -824,6 +824,15 @@ func (m *Manager) Stop() error {
 	m.logger.Info("stopping lifecycle manager")
 
 	m.closeStopCh()
+	m.runtimeAvailabilityMu.Lock()
+	runtimeAvailabilitySubscription := m.runtimeAvailabilitySubscription
+	m.runtimeAvailabilitySubscription = nil
+	m.runtimeAvailabilityMu.Unlock()
+	if runtimeAvailabilitySubscription != nil {
+		if err := runtimeAvailabilitySubscription.Unsubscribe(); err != nil {
+			m.logger.Warn("failed to unsubscribe from local runtime availability", zap.Error(err))
+		}
+	}
 	if m.streamManager != nil {
 		m.streamManager.Wait()
 	}
@@ -1005,6 +1014,9 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 // Typical usage: Called by cleanup loops or after successful StopAgent completion.
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
+	if m.streamManager != nil {
+		m.streamManager.cancelDeliveryReconciliation(executionID)
+	}
 	m.releaseActivity(executionActivityKey(executionID))
 	if execution, ok := m.executionStore.Get(executionID); ok {
 		m.closeStreamCoalescer(execution)

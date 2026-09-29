@@ -52,6 +52,7 @@ type UnstoppableSessionRecorder interface {
 // In this mode, a single agentctl control server manages multiple agent instances.
 type StandaloneExecutor struct {
 	ctl                 *agentctl.ControlClient
+	runtimeOwner        *agentctl.RuntimeOwner
 	host                string
 	port                int
 	authToken           string // per-launch auth token from launcher
@@ -81,6 +82,32 @@ func NewStandaloneExecutor(ctl *agentctl.ControlClient, host string, port int, l
 // SetAuthToken sets the per-launch auth token for authenticating instance clients.
 func (r *StandaloneExecutor) SetAuthToken(token string) {
 	r.authToken = token
+}
+
+// SetRuntimeOwner makes local standalone operations resolve the authenticated
+// control binding from the shared runtime owner. The constructor's static
+// client fields remain available only to embedded callers and tests.
+func (r *StandaloneExecutor) SetRuntimeOwner(owner *agentctl.RuntimeOwner) {
+	r.runtimeOwner = owner
+}
+
+func (r *StandaloneExecutor) acquireControl(ctx context.Context) (*agentctl.ControlClient, context.Context, func(), *agentctl.RuntimeLease, error) {
+	if r.runtimeOwner == nil {
+		if r.ctl == nil {
+			return nil, nil, func() {}, nil, agentctl.ErrRuntimeUnavailable
+		}
+		return r.ctl, ctx, func() {}, nil, nil
+	}
+	lease, err := r.runtimeOwner.Acquire(ctx)
+	if err != nil {
+		return nil, nil, func() {}, nil, err
+	}
+	control := lease.NewControlClient(r.logger)
+	if control == nil {
+		lease.Close()
+		return nil, nil, func() {}, nil, agentctl.ErrRuntimeUnavailable
+	}
+	return control, lease.Context(), lease.Close, lease, nil
 }
 
 // SetPeerCapabilities records the authenticated control-server capability
@@ -114,6 +141,15 @@ func (r *StandaloneExecutor) SetUnstoppableSessionRecorder(recorder UnstoppableS
 // attempts. DeleteInstance itself already treats an already-absent instance
 // (404) as success.
 func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID string) error {
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return r.stopWithRetryClient(controlCtx, control, instanceID)
+}
+
+func (r *StandaloneExecutor) stopWithRetryClient(ctx context.Context, control *agentctl.ControlClient, instanceID string) error {
 	timeout := r.recoveryReadTimeout
 	if timeout <= 0 {
 		timeout = defaultRecoveryReadTimeout
@@ -126,7 +162,7 @@ func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID strin
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-		lastErr = r.ctl.DeleteInstance(attemptCtx, instanceID)
+		lastErr = control.DeleteInstance(attemptCtx, instanceID)
 		cancel()
 		if lastErr == nil {
 			return nil
@@ -143,6 +179,15 @@ func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID strin
 // declared to come from the adopted instance, so a transient failure here
 // must be retried before an instance's reconstruction is given up on.
 func (r *StandaloneExecutor) listInstancesWithRetry(ctx context.Context) ([]*agentctl.InstanceInfo, error) {
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return r.listInstancesWithRetryClient(controlCtx, control)
+}
+
+func (r *StandaloneExecutor) listInstancesWithRetryClient(ctx context.Context, control *agentctl.ControlClient) ([]*agentctl.InstanceInfo, error) {
 	timeout := r.recoveryReadTimeout
 	if timeout <= 0 {
 		timeout = defaultRecoveryReadTimeout
@@ -155,7 +200,7 @@ func (r *StandaloneExecutor) listInstancesWithRetry(ctx context.Context) ([]*age
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-		instances, err := r.ctl.ListInstances(attemptCtx)
+		instances, err := control.ListInstances(attemptCtx)
 		cancel()
 		if err == nil {
 			return instances, nil
@@ -170,24 +215,39 @@ func (r *StandaloneExecutor) Name() executor.Name {
 }
 
 func (r *StandaloneExecutor) HealthCheck(ctx context.Context) error {
-	return r.ctl.Health(ctx)
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return control.Health(controlCtx)
 }
 
 // SubprocessAdmission returns the admission snapshot from the host agentctl
 // control server for backend diagnostics.
 func (r *StandaloneExecutor) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {
-	return r.ctl.SubprocessAdmission(ctx)
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return subproc.Snapshot{}, err
+	}
+	defer release()
+	return control.SubprocessAdmission(controlCtx)
 }
 
 func (r *StandaloneExecutor) waitForReady(ctx context.Context) error {
-	if err := r.ctl.Health(ctx); err == nil {
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := control.Health(controlCtx); err == nil {
 		return nil
 	}
 
-	waitCtx := ctx
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+	waitCtx := controlCtx
+	if _, hasDeadline := controlCtx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
-		waitCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		waitCtx, cancel = context.WithTimeout(controlCtx, 10*time.Second)
 		defer cancel()
 	}
 
@@ -199,7 +259,7 @@ func (r *StandaloneExecutor) waitForReady(ctx context.Context) error {
 		case <-waitCtx.Done():
 			return fmt.Errorf("agentctl not ready: %w", waitCtx.Err())
 		case <-ticker.C:
-			if err := r.ctl.Health(waitCtx); err == nil {
+			if err := control.Health(waitCtx); err == nil {
 				return nil
 			}
 		}
@@ -299,16 +359,32 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		zap.String("req_protocol", req.Protocol),
 		zap.String("createReq_protocol", createReq.Protocol))
 
-	resp, err := r.ctl.CreateInstance(ctx, createReq)
+	control, controlCtx, releaseControl, lease, err := r.acquireControl(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseControl()
+	resp, err := control.CreateInstance(controlCtx, createReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standalone instance: %w", err)
 	}
+	if lease != nil {
+		if err := lease.CheckCurrent(); err != nil {
+			return nil, fmt.Errorf("standalone instance creation outcome is uncertain after runtime retirement: %w", err)
+		}
+	}
 
 	// Create agentctl client pointing to the instance port
-	client := agentctl.NewClient(r.host, resp.Port, r.logger,
-		agentctl.WithExecutionID(req.InstanceID),
-		agentctl.WithSessionID(req.SessionID),
-		agentctl.WithAuthToken(r.authToken))
+	var client *agentctl.Client
+	if lease != nil {
+		client = lease.NewBoundInstanceClient(resp.Port, r.logger,
+			agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID))
+	} else {
+		client = agentctl.NewClient(r.host, resp.Port, r.logger,
+			agentctl.WithExecutionID(req.InstanceID),
+			agentctl.WithSessionID(req.SessionID),
+			agentctl.WithAuthToken(r.authToken))
+	}
 
 	// Extract runtime-specific values from metadata
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
@@ -346,7 +422,16 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 		return nil // No standalone instance to stop
 	}
 
-	if err := r.ctl.DeleteInstance(ctx, instance.StandaloneInstanceID); err != nil {
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if instance.Client != nil && instance.Client.RuntimeEpoch() != 0 && r.runtimeOwner != nil &&
+		!r.runtimeOwner.IsEpochCurrent(instance.Client.RuntimeEpoch()) {
+		return errors.Join(agentctl.ErrRuntimeStopUnconfirmed, agentctl.ErrRuntimeLeaseRetired)
+	}
+	if err := control.DeleteInstance(controlCtx, instance.StandaloneInstanceID); err != nil {
 		return fmt.Errorf("failed to stop standalone instance: %w", err)
 	}
 
@@ -391,7 +476,12 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 
 // RecoverInstancesDetailed performs standalone recovery and classifies per-candidate outcomes.
 func (r *StandaloneExecutor) RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
-	instances, err := r.listInstancesWithRetry(ctx)
+	control, controlCtx, release, lease, err := r.acquireControl(ctx)
+	if err != nil {
+		return nil, enumerationFailedOutcomes(ctx, records), nil
+	}
+	defer release()
+	instances, err := r.listInstancesWithRetryClient(controlCtx, control)
 	if err != nil {
 		r.logger.Warn("failed to enumerate standalone instances for recovery; leaving every record to the existing repair path",
 			zap.Error(err))
@@ -412,12 +502,13 @@ func (r *StandaloneExecutor) RecoverInstancesDetailed(ctx context.Context, recor
 	}
 
 	pending := pendingLoserCounts(correlation.ToStop, correlation.Winners)
-	results := r.dispatchRecoveryStops(correlation.ToStop)
-	tracker := &jointFailureTracker{exec: r, winners: winnersBySession}
+	results := r.dispatchRecoveryStopsWithClient(correlation.ToStop, control)
+	tracker := &jointFailureTracker{exec: r, winners: winnersBySession, control: control}
 	r.collectRecoveryStops(ctx, results, correlation.Winners, pending, tracker)
 
 	outcomes := r.classifyNonWinningOutcomes(ctx, records, instances, correlation.Winners, winnersBySession)
-	return r.buildRecoveredInstances(ctx, correlation.Winners, indexRecordsBySession(records)), outcomes, nil
+	recovered := r.buildRecoveredInstancesWithLease(controlCtx, correlation.Winners, indexRecordsBySession(records), lease)
+	return recovered, outcomes, nil
 }
 
 func enumerationFailedOutcomes(ctx context.Context, records []*models.ExecutorRunning) map[string]RecoveryCandidateOutcome {
@@ -505,6 +596,23 @@ func (r *StandaloneExecutor) dispatchRecoveryStops(toStop []*agentctl.InstanceIn
 		go func(inst *agentctl.InstanceInfo) {
 			defer wg.Done()
 			results <- recoveryStopOutcome{inst: inst, err: r.stopWithRetry(context.Background(), inst.ID)}
+		}(inst)
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	return results
+}
+
+func (r *StandaloneExecutor) dispatchRecoveryStopsWithClient(toStop []*agentctl.InstanceInfo, control *agentctl.ControlClient) <-chan recoveryStopOutcome {
+	results := make(chan recoveryStopOutcome, len(toStop))
+	var wg sync.WaitGroup
+	for _, inst := range toStop {
+		wg.Add(1)
+		go func(inst *agentctl.InstanceInfo) {
+			defer wg.Done()
+			results <- recoveryStopOutcome{inst: inst, err: r.stopWithRetryClient(context.Background(), control, inst.ID)}
 		}(inst)
 	}
 	go func() {
@@ -636,6 +744,7 @@ func (r *StandaloneExecutor) handleRecoveryStopResult(res recoveryStopOutcome, p
 type jointFailureTracker struct {
 	exec    *StandaloneExecutor
 	winners map[string]*agentctl.InstanceInfo
+	control *agentctl.ControlClient
 	handled sync.Map // sessionID -> *sync.Once
 }
 
@@ -653,7 +762,17 @@ func (t *jointFailureTracker) onLoserStopFailed(sessionID string) {
 		if t.exec.unstoppableRecorder != nil {
 			t.exec.unstoppableRecorder.RetainAsUnstoppable(sessionID)
 		}
-		t.exec.stopWinnerAfterLoserFailure(sessionID, winner)
+		if t.control == nil {
+			t.exec.stopWinnerAfterLoserFailure(sessionID, winner)
+			return
+		}
+		if err := t.exec.stopWithRetryClient(context.Background(), t.control, winner.ID); err != nil {
+			t.exec.logger.Warn("failed to stop the winning instance after its losing duplicate could not be stopped; retaining session as unstoppable",
+				zap.String("instance_id", winner.ID), zap.String("session_id", sessionID), zap.Error(err))
+			return
+		}
+		t.exec.logger.Warn("stopped the winning instance because its losing duplicate could not be stopped; session left not re-tracked",
+			zap.String("instance_id", winner.ID), zap.String("session_id", sessionID))
 	})
 }
 
@@ -692,14 +811,29 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 	winners map[string]*agentctl.InstanceInfo,
 	recordBySession map[string]*models.ExecutorRunning,
 ) []*ExecutorInstance {
+	return r.buildRecoveredInstancesWithLease(ctx, winners, recordBySession, nil)
+}
+
+func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
+	ctx context.Context,
+	winners map[string]*agentctl.InstanceInfo,
+	recordBySession map[string]*models.ExecutorRunning,
+	lease *agentctl.RuntimeLease,
+) []*ExecutorInstance {
 	recovered := make([]*ExecutorInstance, 0, len(winners))
 	for sessionID, inst := range winners {
 		record := recordBySession[sessionID]
 
-		client := agentctl.NewClient(r.host, inst.Port, r.logger,
-			agentctl.WithExecutionID(inst.ID),
-			agentctl.WithSessionID(sessionID),
-			agentctl.WithAuthToken(r.authToken))
+		var client *agentctl.Client
+		if lease != nil {
+			client = lease.NewBoundInstanceClient(inst.Port, r.logger,
+				agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID))
+		} else {
+			client = agentctl.NewClient(r.host, inst.Port, r.logger,
+				agentctl.WithExecutionID(inst.ID),
+				agentctl.WithSessionID(sessionID),
+				agentctl.WithAuthToken(r.authToken))
+		}
 		deliveryStatus, legacyEvidence, deliveryErr := r.discoverDeliveryStatus(ctx, client)
 
 		// AC-EXECUTORS-SURVIVAL-002.14: task identity and workspace path's

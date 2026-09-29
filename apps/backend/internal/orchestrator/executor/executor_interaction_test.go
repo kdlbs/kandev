@@ -10,7 +10,96 @@ import (
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type submissionIdentityPromptManager struct {
+	*mockAgentManager
+	gotSubmissionID string
+}
+
+func (m *submissionIdentityPromptManager) PromptAgentWithSubmissionID(
+	_ context.Context,
+	_, _ string,
+	_ []v1.MessageAttachment,
+	_ bool,
+	submissionID string,
+) (*PromptResult, error) {
+	m.gotSubmissionID = submissionID
+	return &PromptResult{}, nil
+}
+
+func (m *submissionIdentityPromptManager) PromptAgentWithDispatchCallbackAndSubmissionID(
+	_ context.Context,
+	_, _ string,
+	_ []v1.MessageAttachment,
+	_ bool,
+	_ func(),
+	submissionID string,
+) (*PromptResult, error) {
+	m.gotSubmissionID = submissionID
+	return &PromptResult{}, nil
+}
+
+type callbackOnlyPromptManager struct {
+	*mockAgentManager
+	dispatchCallbackCalls int
+}
+
+func (m *callbackOnlyPromptManager) PromptAgentWithDispatchCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
+	m.dispatchCallbackCalls++
+	if onDispatched != nil {
+		onDispatched()
+	}
+	return m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+}
+
+func TestDispatchPromptPreservesSubmissionWithoutDispatchCallback(t *testing.T) {
+	manager := &submissionIdentityPromptManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	if _, err := exec.dispatchToAgent(
+		context.Background(), "execution-1", "prompt", nil, false, nil, nil, false, "prompt:message-1",
+	); err != nil {
+		t.Fatalf("dispatchToAgent: %v", err)
+	}
+	if manager.gotSubmissionID != "prompt:message-1" {
+		t.Fatalf("submission ID = %q, want prompt:message-1", manager.gotSubmissionID)
+	}
+}
+
+func TestDispatchPromptPreservesSubmissionWithDispatchCallback(t *testing.T) {
+	manager := &submissionIdentityPromptManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	if _, err := exec.dispatchToAgent(
+		context.Background(), "execution-1", "prompt", nil, false, nil, func() {}, false, "prompt:message-2",
+	); err != nil {
+		t.Fatalf("dispatchToAgent: %v", err)
+	}
+	if manager.gotSubmissionID != "prompt:message-2" {
+		t.Fatalf("submission ID = %q, want prompt:message-2", manager.gotSubmissionID)
+	}
+}
+
+func TestDispatchPromptRejectsCallbackManagerWithoutSubmissionCapability(t *testing.T) {
+	manager := &callbackOnlyPromptManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	_, err := exec.dispatchToAgent(
+		context.Background(), "execution-1", "prompt", nil, false, nil, func() {}, false, "prompt:message-3",
+	)
+	if !errors.Is(err, ErrPromptDispatchCallbackUnsupported) {
+		t.Fatalf("dispatch error = %v, want missing submission-aware capability", err)
+	}
+	if manager.dispatchCallbackCalls != 0 || manager.promptAgentCallCount != 0 {
+		t.Fatalf("submission was dispatched through legacy callback: callback=%d prompt=%d",
+			manager.dispatchCallbackCalls, manager.promptAgentCallCount)
+	}
+}
 
 func TestStopSessionDetailed_DoesNotOverwriteTerminalRace(t *testing.T) {
 	repo := newMockRepository()

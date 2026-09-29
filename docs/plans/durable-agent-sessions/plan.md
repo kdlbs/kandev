@@ -390,3 +390,9 @@ package.
 The [streaming repair package](../durable-agent-stream-repair/plan.md) tracks confirmed replay, legacy, batching, capacity, and recovery defects.
 Its seven work orders are pending. Historical completed task results above remain unchanged and do not prove these repairs.
 Release readiness requires the follow-up evidence; earlier green CI does not cover the new regressions.
+
+## Runtime replacement extension (2026-09-27)
+
+The [runtime replacement package](../agentctl-runtime-replacement/plan.md) adds in-process agentctl recovery to PR #3598.
+Its six work orders are pending. Prior implementation results remain historical and do not verify this extension.
+The new package explicitly replaces the old mandatory-backend-restart availability policy while preserving durable uncertainty guards.

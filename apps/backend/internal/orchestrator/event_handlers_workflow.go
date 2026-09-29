@@ -7498,6 +7498,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		return false
 	}
 	if s.workflowEffectAlreadyApplied(ctx, workflowEffectFromContext(ctx)) {
+		s.settleReplayedTurnWithoutSuccessor(ctx, taskID, session.ID)
 		return false
 	}
 
@@ -7541,6 +7542,33 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		ctx = cancellationTransitionAttribution(ctx)
 	}
 	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, transitionLifecycleWithOnEnter)
+}
+
+func (s *Service) settleReplayedTurnWithoutSuccessor(ctx context.Context, taskID, sessionID string) {
+	if s.turnService == nil {
+		return
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to check active turn after replayed workflow effect",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if activeTurn != nil {
+		return
+	}
+
+	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session after replayed workflow effect",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if currentSession == nil || currentSession.TaskID != taskID ||
+		(currentSession.State != models.TaskSessionStateRunning && currentSession.State != models.TaskSessionStateStarting) {
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, currentSession)
 }
 
 // acquireTurnCompletionCriticalSection serializes on_turn_complete

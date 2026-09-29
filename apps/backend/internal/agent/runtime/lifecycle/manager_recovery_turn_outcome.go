@@ -16,8 +16,8 @@ import (
 // that doesn't implement it (Docker, Sprites, SSH, Kubernetes) is out of
 // scope, and recovery treats that exactly like "nothing retained."
 type turnOutcomeApplier interface {
-	fetchTurnOutcomeWithRetry(ctx context.Context, instanceID string) (*agentctl.TurnOutcome, error)
-	ackTurnOutcome(ctx context.Context, instanceID string, turnID int64) error
+	fetchTurnOutcomeForEpoch(ctx context.Context, instanceID string, runtimeEpoch uint64) (*agentctl.TurnOutcome, error)
+	ackTurnOutcomeForEpoch(ctx context.Context, instanceID string, turnID int64, runtimeEpoch uint64) error
 }
 
 // recoveredTurnOutcomeResult is the outcome of retrieveRecoveredTurnOutcome:
@@ -49,7 +49,11 @@ func (m *Manager) retrieveRecoveredTurnOutcome(ctx context.Context, ri *Executor
 	if !ok {
 		return nil, recoveredTurnOutcomeNone
 	}
-	outcome, err := applier.fetchTurnOutcomeWithRetry(ctx, ri.StandaloneInstanceID)
+	runtimeEpoch := runtimeEpochFromClient(ri.Client)
+	if ri.Client != nil && !ri.Client.RuntimeCurrent() {
+		return nil, recoveredTurnOutcomeReadFailed
+	}
+	outcome, err := applier.fetchTurnOutcomeForEpoch(ctx, ri.StandaloneInstanceID, runtimeEpoch)
 	if err != nil {
 		m.logger.Warn("failed to retrieve recovered instance's turn outcome after exhausting retries",
 			zap.String("instance_id", ri.InstanceID),
@@ -89,6 +93,13 @@ func (m *Manager) retrieveRecoveredTurnOutcome(ctx context.Context, ri *Executor
 func (m *Manager) applyRecoveredTurnOutcome(
 	ctx context.Context, execution *AgentExecution, ri *ExecutorInstance, outcome *agentctl.TurnOutcome,
 ) {
+	if !m.runtimeExecutionCurrent(execution) || (ri.Client != nil && !ri.Client.RuntimeCurrent()) {
+		m.logger.Debug("skipping recovered turn outcome from a retired local runtime generation",
+			zap.String("instance_id", ri.InstanceID),
+			zap.String("session_id", execution.SessionID),
+			zap.Uint64("runtime_epoch", execution.runtimeEpoch))
+		return
+	}
 	_ = m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 		current.promptGeneration = outcome.Event.PromptGeneration
 	})
@@ -104,7 +115,10 @@ func (m *Manager) applyRecoveredTurnOutcome(
 	if !ok {
 		return
 	}
-	if err := applier.ackTurnOutcome(ctx, ri.StandaloneInstanceID, outcome.TurnID); err != nil {
+	if !m.runtimeExecutionCurrent(execution) || (ri.Client != nil && !ri.Client.RuntimeCurrent()) {
+		return
+	}
+	if err := applier.ackTurnOutcomeForEpoch(ctx, ri.StandaloneInstanceID, outcome.TurnID, execution.runtimeEpoch); err != nil {
 		m.logger.Warn("failed to acknowledge applied turn outcome; a later backend will re-apply it idempotently",
 			zap.String("instance_id", ri.InstanceID),
 			zap.Int64("turn_id", outcome.TurnID),
@@ -116,6 +130,9 @@ func (m *Manager) applyRecoveredTurnOutcome(
 // "nothing retained" case: publish the session as running exactly as an
 // ordinary launch's first activity would.
 func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, execution *AgentExecution) {
+	if !m.runtimeExecutionCurrent(execution) {
+		return
+	}
 	// Nothing was retained, so any turn still in flight across the restart
 	// carries a PromptGeneration this freshly reconstructed execution object
 	// has never seen (its own counter was recreated from zero). Let the first
@@ -143,6 +160,9 @@ func durableRecoveryHasPendingWork(execution *AgentExecution) bool {
 // publishRecoveredExecutionReady settles an adopted durable execution whose
 // captured stream is already projected and whose peer has no active prompt.
 func (m *Manager) publishRecoveredExecutionReady(ctx context.Context, execution *AgentExecution) {
+	if !m.runtimeExecutionCurrent(execution) {
+		return
+	}
 	if execution == nil {
 		return
 	}

@@ -16,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	"go.uber.org/zap"
 )
 
 // AgentDeliveryRepository is the backend half of the retained agentctl
@@ -47,11 +46,13 @@ type agentDeliveryEffectReader interface {
 	GetAgentDeliveryEffect(ctx context.Context, effectKey string) (*models.AgentDeliveryEffect, error)
 }
 
+type agentDeliveryTerminalSettler interface {
+	SettleAgentDeliveryTerminal(context.Context, string, int64, models.DeliverySubmissionState, time.Time) (bool, error)
+}
+
 type harnessGenerationReader interface {
 	GetCurrentHarnessSessionGeneration(context.Context, string, string) (*models.HarnessSessionGeneration, error)
 }
-
-const deliveryReconciliationTimeout = 3 * time.Second
 
 var errAgentDeliveryCursorUnavailable = errors.New("agent delivery cursor is unavailable")
 
@@ -186,71 +187,61 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	return nil
 }
 
-// reconcileDisconnectedSubmission performs one bounded state query before the
-// ordinary disconnect failure path. Dispatch completion only means that the
-// prompt call was accepted by the harness. Recovery is safe only after the
-// journal has retained a terminal event and the backend cursor is still behind
-// it, so the reconnect can replay the actual terminal outcome. An accepted
-// prompt without that evidence remains uncertain and is never resent.
+// reconcileDisconnectedSubmission runs the same bounded operation used by
+// user-triggered retry. The old socket context has already ended, so this
+// state-only query is detached from that context but still follows manager
+// shutdown and per-execution Stop cancellation.
 func (sm *StreamManager) reconcileDisconnectedSubmission(
 	ctx context.Context,
 	execution *AgentExecution,
-	client *agentctl.Client,
-) bool {
-	if execution == nil || client == nil || execution.deliverySubmissionIDSnapshot() == "" {
-		return false
-	}
-	submissionID := execution.deliverySubmissionIDSnapshot()
-	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryReconciliationTimeout)
-	defer cancel()
-	submission, err := client.GetDeliverySubmission(reconcileCtx, submissionID)
-	if err != nil {
-		sm.logger.Warn("durable prompt submission reconciliation failed",
-			zap.String("execution_id", execution.ID),
-			zap.String("submission_id", submissionID),
-			zap.Error(err))
-		return false
-	}
-	if submission.State != journal.SubmissionCompleted ||
-		!submission.TerminalEventRetained || submission.TerminalSequence == 0 {
-		return false
-	}
-	delivery := sm.deliveryRepository()
-	if delivery == nil {
-		return false
-	}
-	streamID := execution.DeliveryStreamID
-	if streamID == "" {
-		streamID = execution.SessionID
-	}
-	cursor, cursorErr := delivery.GetAgentDeliveryCursor(reconcileCtx, streamID)
-	if cursorErr != nil && !errors.Is(cursorErr, sql.ErrNoRows) {
-		sm.logger.Warn("durable prompt reconciliation could not verify projected terminal event",
-			zap.String("execution_id", execution.ID),
-			zap.String("submission_id", submissionID),
-			zap.Error(cursorErr))
-		return false
-	}
-	if cursor != nil && cursor.ProjectedSequence >= int64(submission.TerminalSequence) {
-		// The canonical projection already passed the terminal event. There is
-		// no retained outcome here that can safely reconstruct a missing
-		// lifecycle signal, so leave the execution in the explicit recovery path.
-		return false
-	}
-	// The stream reader has already detached this connection before invoking
-	// its disconnect callback. Reconnect asynchronously so committed terminal
-	// events are replayed from the backend's projected cursor.
-	sm.connectUpdatesStreamAsync(execution, nil)
-	sm.logger.Info("reconciled completed durable prompt after stream disconnect",
-		zap.String("execution_id", execution.ID),
-		zap.String("submission_id", submissionID))
-	return true
+) DeliveryReconciliationResult {
+	return sm.ReconcileAgentDelivery(context.WithoutCancel(ctx), execution)
 }
 
 func (sm *StreamManager) setAgentDeliveryRepository(repository AgentDeliveryRepository) {
 	sm.deliveryMu.Lock()
 	sm.delivery = repository
+	sm.deliverySubmissionSettler = nil
+	if settler, ok := repository.(agentDeliveryTerminalSettler); ok {
+		sm.deliverySubmissionSettler = func(
+			ctx context.Context,
+			_ *AgentExecution,
+			identity DeliveryReconciliationIdentity,
+			submission *journal.Submission,
+		) (bool, error) {
+			return settleProjectedDeliveryTerminal(ctx, repository, settler, identity, submission)
+		}
+	}
 	sm.deliveryMu.Unlock()
+}
+
+func settleProjectedDeliveryTerminal(
+	ctx context.Context,
+	repository AgentDeliveryRepository,
+	settler agentDeliveryTerminalSettler,
+	identity DeliveryReconciliationIdentity,
+	submission *journal.Submission,
+) (bool, error) {
+	if !submissionHasRetainedTerminal(submission) || submission.TerminalSequence == 0 {
+		return false, nil
+	}
+	cursor, err := repository.GetAgentDeliveryCursor(ctx, identity.StreamID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if cursor == nil || cursor.ProjectedSequence < int64(submission.TerminalSequence) {
+		return false, nil
+	}
+	return settler.SettleAgentDeliveryTerminal(
+		ctx,
+		identity.StreamID,
+		int64(submission.TerminalSequence),
+		models.DeliverySubmissionState(submission.State),
+		time.Now().UTC(),
+	)
 }
 
 func (sm *StreamManager) deliveryRepository() AgentDeliveryRepository {
@@ -350,7 +341,24 @@ func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
 		return nil
 	}
 	_, returnError := repository.ProjectAgentDeliveryEvent(ctx, deliveryEvent, effect)
-	return returnError
+	if returnError != nil {
+		return returnError
+	}
+	if !deliveryEvent.Terminal || deliveryEvent.SubmissionID == "" {
+		return nil
+	}
+	outcome := models.DeliverySubmissionState(deliveryEvent.EventType)
+	switch outcome {
+	case models.DeliverySubmissionCompleted, models.DeliverySubmissionFailed, models.DeliverySubmissionCancelled:
+	default:
+		return nil
+	}
+	settler, ok := repository.(agentDeliveryTerminalSettler)
+	if !ok {
+		return nil
+	}
+	_, err := settler.SettleAgentDeliveryTerminal(ctx, deliveryEvent.StreamID, deliveryEvent.Sequence, outcome, time.Now().UTC())
+	return err
 }
 
 func (sm *StreamManager) projectAndAcknowledgeDurableAgentEvent(

@@ -669,6 +669,10 @@ type promptAgentWithDispatchCallbackAndSubmissionID interface {
 	PromptAgentWithDispatchCallbackAndSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, func(), string) (*PromptResult, error)
 }
 
+type promptAgentWithSubmissionID interface {
+	PromptAgentWithSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, string) (*PromptResult, error)
+}
+
 // steerAgentWithDispatchCallback is the optional capability an agent manager
 // implements to accept steers. It is a separate interface (like
 // promptAgentWithDispatchCallback) so the core agentManager interface and its
@@ -739,6 +743,14 @@ func (e *Executor) dispatchToAgent(
 			return nil, ErrPromptDispatchCallbackUnsupported
 		}
 		return notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+	}
+	if submissionID != "" {
+		if notifier, ok := e.agentManager.(promptAgentWithSubmissionID); ok {
+			return notifier.PromptAgentWithSubmissionID(
+				ctx, executionID, prompt, attachments, dispatchOnly, submissionID,
+			)
+		}
+		return nil, ErrPromptDispatchCallbackUnsupported
 	}
 	return e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 }

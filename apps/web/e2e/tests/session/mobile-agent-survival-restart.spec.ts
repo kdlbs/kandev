@@ -44,10 +44,21 @@ test.describe("mobile: agent survival across backend restart", () => {
       await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
         timeout: 30_000,
       });
+      const liveSessionID = (await apiClient.listTaskSessions(task.id)).sessions.find(
+        (item) => item.is_primary,
+      )?.id;
+      expect(liveSessionID).toBeTruthy();
 
       await backend.restart();
       await testPage.reload();
       await session.waitForLoad();
+
+      const reattachedTask = await apiClient.getTask(task.id);
+      expect(reattachedTask.state).toBe("IN_PROGRESS");
+      const reattachedSessions = await apiClient.listTaskSessions(task.id);
+      const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
+      expect(reattachedSession?.id).toBe(liveSessionID);
+      expect(reattachedSession?.state).toBe("RUNNING");
 
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
@@ -56,6 +67,9 @@ test.describe("mobile: agent survival across backend restart", () => {
         timeout: 30_000,
       });
       await session.waitForChatIdle({ timeout: 15_000 });
+      await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(
+        1,
+      );
 
       await session.sendMessageViaButton("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });

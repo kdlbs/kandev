@@ -68,6 +68,8 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.2:** When a cursor is invalid, expired, or from another stream, agentctl must return a typed error. It must not skip history or create an unbounded queue.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.3:** When a backend adopts a surviving agent, recovery must preserve the original stream identity and replay position. Adoption must not replace the conversation.
 
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.4:** While detached and within journal capacity, a durable producer shall continue committing output without waiting for an absent stream consumer. Reattachment shall deliver the complete retained tail, including terminal events.
+
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005: Idempotent backend projection
 
 **Intent:** Replay must not duplicate messages, turn completion, or workflow effects.
@@ -92,6 +94,10 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.2:** When reconciliation cannot establish the outcome, Kandev must show an uncertain state, keep Stop available, and prevent automatic queue dispatch or tool replay.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.3:** When adoption cannot establish the active submission, Kandev must block new dispatch and replacement. Stop must remain available during reconciliation.
 
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4:** After bounded initial reconciliation expires, later state-only reconciliation shall remain possible for the same owned submission without resend.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5:** When retained evidence settles an uncertain submission, Kandev shall resolve only its matching delivery block after projection and authoritative outcome settlement. Other recovery blocks shall remain effective.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.6:** Reconnecting and uncertain session state shall survive browser reload and backend restart. It shall not appear idle and ready for new work while delivery remains unresolved.
+
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007: Compatible rollout
 
 **Intent:** Compatible installations must receive durable delivery without an operator toggle or misleading fallback.
@@ -105,6 +111,8 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.3:** When compatible peers use a supported retained environment, durable delivery must activate automatically. The functionality must not require a feature flag.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.4:** When a supported durable environment has a journal error, Kandev must block unsafe admission. It must not downgrade to legacy delivery.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.5:** When a backend adopts a surviving agent, it must establish delivery capability before accepting new work. An undiscovered capability must not imply legacy support.
+
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.6:** Reattachment to a surviving initialized agent shall preserve its existing session without ACP initialization or prompt dispatch. Failed reattachment shall not force-stop that process through new-start cleanup.
 
 ## Out of scope
 

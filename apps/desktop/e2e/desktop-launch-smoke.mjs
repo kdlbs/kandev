@@ -587,7 +587,7 @@ export async function readInstances(instancesDir) {
         JSON.parse(await readFile(join(instancesDir, entry.name, "instance.json"), "utf8")),
       );
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     }
   }
   return instances;

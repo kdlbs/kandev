@@ -74,6 +74,8 @@ type resumeAndPromptOrchestrator interface {
 	) (*orchestrator.PromptResult, error)
 }
 
+type deliverySubmissionPromptOrchestrator = orchestrator.DeliverySubmissionPromptStarter
+
 // AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
 type AtomicQueuedPromptCoordinator interface {
 	MaxQueuedPromptsPerSession() int
@@ -93,6 +95,7 @@ type canvasGuidanceProjection struct {
 	include                  bool
 	preserveDirectPrompt     bool
 	promptReferencesPrepared bool
+	deliverySubmissionID     string
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -515,6 +518,7 @@ type wsAddMessageRequest struct {
 	includeCanvasGuidance    bool
 	initialTaskBriefSelected bool
 	promptReferencesPrepared bool
+	deliverySubmissionID     string
 }
 
 type addMessageReplayIdentity struct {
@@ -921,6 +925,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	req.Content = message.Content
+	req.deliverySubmissionID = message.ID
 	initialTaskBriefQueued := initialTaskBrief != nil && !initialTaskBrief.Selected
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the
@@ -1486,6 +1491,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 				include:                  req.includeCanvasGuidance,
 				preserveDirectPrompt:     req.initialTaskBriefSelected,
 				promptReferencesPrepared: req.promptReferencesPrepared,
+				deliverySubmissionID:     req.deliverySubmissionID,
 			},
 		)
 	}()
@@ -1569,7 +1575,28 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		if len(canvasGuidance) > 0 {
 			projection = canvasGuidance[0]
 		}
-		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
+		if projection.deliverySubmissionID != "" {
+			starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithDeliverySubmission)
+			if !ok {
+				err = errors.New("orchestrator cannot preserve the direct prompt delivery identity")
+			} else {
+				_, err = starter.StartCreatedSessionWithDeliverySubmission(
+					ctx, taskID, sessionID, agentProfileID, content,
+					orchestrator.DirectPromptStartOptions{
+						SkipMessageRecord:        true,
+						PlanMode:                 planMode,
+						Attachments:              attachments,
+						References:               references,
+						PromptReferenceContext:   trustedPromptContext,
+						PromptReferencesPrepared: projection.promptReferencesPrepared,
+						CanvasGuidanceResolved:   projection.resolved,
+						IncludeCanvasGuidance:    projection.include,
+						PreserveDirectPrompt:     projection.preserveDirectPrompt,
+						DeliverySubmissionID:     projection.deliverySubmissionID,
+					},
+				)
+			}
+		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
 			projection.preserveDirectPrompt && len(canvasGuidance) > 0 {
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 				ctx, taskID, sessionID, agentProfileID,
@@ -1597,6 +1624,9 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			)
 		}
 		if err != nil {
+			if isPromptErrorOwnedByRecovery(err) || errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+				return
+			}
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -1622,7 +1652,22 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		return
 	}
 
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+	var err error
+	var deliverySubmissionID string
+	if len(canvasGuidance) > 0 {
+		deliverySubmissionID = canvasGuidance[0].deliverySubmissionID
+	}
+	if deliverySubmissionID != "" {
+		if deliveryPrompt, ok := h.orchestrator.(deliverySubmissionPromptOrchestrator); ok {
+			_, err = deliveryPrompt.PromptTaskWithDeliverySubmissionID(
+				ctx, taskID, sessionID, content, model, planMode, attachments, false, deliverySubmissionID,
+			)
+		} else {
+			_, err = h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+		}
+	} else {
+		_, err = h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+	}
 	if err != nil {
 		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
 	}
@@ -1701,7 +1746,9 @@ func isAgentReportedError(err error) bool {
 var errPromptRecoveryCardOwnsFailure = errors.New("session recovery owns prompt failure")
 
 func isPromptErrorOwnedByRecovery(err error) bool {
-	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) || errors.Is(err, errPromptRecoveryCardOwnsFailure)
+	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) ||
+		errors.Is(err, orchestrator.ErrSessionRecoveryRequired) ||
+		errors.Is(err, errPromptRecoveryCardOwnsFailure)
 }
 
 func (h *MessageHandlers) hasActiveSessionRecovery(ctx context.Context, taskID, sessionID string, failure error) bool {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -19,12 +21,7 @@ import (
 
 const durableDeliveryUnresolvedReason = "unresolved_durable_work"
 
-type durableDeliveryCapabilityReader interface {
-	DurableDeliveryCapabilityForExecution(
-		context.Context,
-		string,
-	) (agentruntime.DurableDeliveryCapability, bool)
-}
+type durableDeliveryCapabilityReader = agentruntime.DurableDeliveryCapabilityReader
 
 type deliveryClaimUpdater func(context.Context, string, string, string) error
 
@@ -102,9 +99,14 @@ func (s *Service) deliveryRecoveryError(
 	ctx context.Context,
 	sessionID string,
 	reason string,
+	submissions ...*agentDeliverySubmissionRuntime,
 ) error {
 	recoveryErr := &sessionRecoveryRequiredError{
 		Block: &models.SessionRecoveryBlock{Reason: reason},
+	}
+	if len(submissions) > 0 && submissions[0] != nil {
+		recoveryErr.Block.DeliverySubmissionID = submissions[0].id
+		recoveryErr.Block.ConsumerReference = "agent_delivery"
 	}
 	if err := s.recordSessionRecoveryBlock(ctx, sessionID, "agent_delivery", recoveryErr); err != nil {
 		return errors.Join(recoveryErr, fmt.Errorf("persist durable delivery recovery block: %w", err))
@@ -170,6 +172,13 @@ func (s *Service) prepareAgentDeliverySubmission(
 	attachments []v1.MessageAttachment,
 	options promptTaskOptions,
 ) (*agentDeliverySubmissionRuntime, error) {
+	sessionID := ""
+	if session != nil {
+		sessionID = session.ID
+	}
+	s.logger.Debug("preparing direct agent delivery submission",
+		zap.String("session_id", sessionID), zap.String("execution_id", executionID),
+		zap.String("submission_id", options.deliverySubmissionID))
 	if session == nil || options.deliverySubmissionID == "" {
 		return nil, nil
 	}
@@ -180,6 +189,9 @@ func (s *Service) prepareAgentDeliverySubmission(
 	if err != nil {
 		return nil, err
 	}
+	s.logger.Debug("resolved direct agent delivery protocol",
+		zap.String("session_id", session.ID), zap.String("execution_id", executionID),
+		zap.String("submission_id", options.deliverySubmissionID), zap.String("protocol", protocol))
 
 	if protocol == messagequeue.DeliveryProtocolLegacy {
 		if err := persistDeliveryClaim(
@@ -322,6 +334,9 @@ func (s *Service) prepareBackendDeliverySubmission(
 	if reason := admitBackendDeliverySubmission(ctx, store, submission, now); reason != "" {
 		return nil, s.deliveryRecoveryError(ctx, session.ID, reason)
 	}
+	s.logger.Debug("admitted canonical agent delivery submission",
+		zap.String("session_id", session.ID), zap.String("submission_id", submissionID),
+		zap.Int64("harness_generation", generation))
 	return &agentDeliverySubmissionRuntime{
 		store: store, id: submissionID, sessionID: session.ID,
 		dispatchOnly: false,

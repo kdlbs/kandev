@@ -325,6 +325,47 @@ func TestAgentEventHandling(t *testing.T) {
 	})
 }
 
+func TestAgentctlErrorRecoveryEventIsRoutedWithImmutableIdentity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := newMockEventBus()
+		var received lifecycle.AgentctlEventPayload
+		handled := false
+		watch := NewWatcher(eventBus, EventHandlers{
+			OnAgentctlError: func(_ context.Context, payload lifecycle.AgentctlEventPayload) {
+				received = payload
+				handled = true
+			},
+		}, "orchestrator-test", createTestLogger())
+		if err := watch.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = watch.Stop() }()
+
+		payload := lifecycle.AgentctlEventPayload{
+			TaskID: "task-1", SessionID: "session-1", AgentExecutionID: "exec-1",
+			DeliveryRecoveryPhase: "uncertain", DeliverySubmissionID: "submission-1",
+			DeliveryStreamID: "stream-1", DeliveryIncarnationID: "inc-1",
+			DeliveryHarnessGeneration: 3, PromptGeneration: 8,
+		}
+		if err := eventBus.Publish(context.Background(), events.AgentctlError,
+			bus.NewEvent(events.AgentctlError, "test", payload)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if !handled {
+			t.Fatal("agentctl error event was not routed")
+		}
+		if received.DeliveryRecoveryPhase != payload.DeliveryRecoveryPhase ||
+			received.DeliverySubmissionID != payload.DeliverySubmissionID ||
+			received.DeliveryStreamID != payload.DeliveryStreamID ||
+			received.DeliveryIncarnationID != payload.DeliveryIncarnationID ||
+			received.DeliveryHarnessGeneration != payload.DeliveryHarnessGeneration ||
+			received.PromptGeneration != payload.PromptGeneration {
+			t.Fatalf("received recovery identity = %+v, want %+v", received, payload)
+		}
+	})
+}
+
 func TestWatcherDispatchesAgentStalled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		eventBus := newMockEventBus()

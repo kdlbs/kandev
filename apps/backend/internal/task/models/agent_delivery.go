@@ -6,9 +6,13 @@ const (
 	// DeliveryEffectPending means an effect has been recorded but its
 	// authoritative consumer has not committed the state transition yet.
 	DeliveryEffectPending = "pending"
+	// DeliveryEffectBlockResolved means the terminal effect and matching
+	// recovery block were settled; queue claim cleanup remains retryable.
+	DeliveryEffectBlockResolved = "block_resolved"
 	// DeliveryEffectCompleted means the effect key was committed together with
 	// the authoritative state transition.
-	DeliveryEffectCompleted = "completed"
+	DeliveryEffectCompleted    = "completed"
+	DeliveryTerminalEffectType = "agent_delivery.terminal_settlement"
 )
 
 // DeliverySubmissionState is the durable state of one immutable prompt
@@ -77,11 +81,17 @@ type AgentDeliveryCursor struct {
 // AgentDeliveryEffect is a durable idempotency key for a projected workflow
 // or turn intent. Consumers claim it at their authoritative state transition.
 type AgentDeliveryEffect struct {
-	EffectKey   string     `json:"effect_key"`
-	StreamID    string     `json:"stream_id"`
-	Sequence    int64      `json:"sequence"`
-	EffectType  string     `json:"effect_type"`
-	State       string     `json:"state"`
-	CreatedAt   time.Time  `json:"created_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	EffectKey         string     `json:"effect_key"`
+	StreamID          string     `json:"stream_id"`
+	Sequence          int64      `json:"sequence"`
+	EffectType        string     `json:"effect_type"`
+	State             string     `json:"state"`
+	SessionID         string     `json:"session_id,omitempty"`
+	IncarnationID     string     `json:"incarnation_id,omitempty"`
+	HarnessGeneration int64      `json:"harness_generation,omitempty"`
+	SubmissionID      string     `json:"submission_id,omitempty"`
+	TurnID            string     `json:"turn_id,omitempty"`
+	Outcome           string     `json:"outcome,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 }

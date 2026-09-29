@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -24,6 +25,7 @@ var (
 )
 
 const initialPromptSubmissionPrefix = "prompt:initial:"
+const initialDeliverySubmissionIDMetadataKey = "initial_delivery_submission_id"
 
 func initialPromptSubmissionID(sessionID string, generation uint64) string {
 	if sessionID == "" {
@@ -36,19 +38,27 @@ func initialPromptSubmissionID(sessionID string, generation uint64) string {
 }
 
 func initialPromptDeliverySubmissionID(execution *AgentExecution) string {
-	if execution == nil || execution.SessionID == "" {
+	if execution == nil || execution.SessionID == "" || execution.DeliveryMode != DurableDeliveryV1 {
 		return ""
 	}
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
-	if client == nil {
-		return ""
-	}
-	capability, advertised := client.DurableDeliveryCapability()
-	if !advertised || !capability.Durable || capability.Version != journal.CurrentVersion || capability.Unresolved {
-		return ""
+	if submissionID := models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey]); submissionID != "" {
+		return submissionID
 	}
 	return initialPromptSubmissionID(execution.SessionID, execution.DeliveryHarnessGeneration)
+}
+
+// deliverySubmissionIdentityForPrompt keeps the caller's immutable identity
+// attached to the prompt it admitted. Agentctl clients also expose their most
+// recently accepted ID for legacy requests, but another concurrent prompt can
+// update that value before this request observes it.
+func deliverySubmissionIdentityForPrompt(requestedID, acknowledgedID string) string {
+	if requestedID == "" {
+		return acknowledgedID
+	}
+	if strings.HasPrefix(requestedID, "prompt:") {
+		return requestedID
+	}
+	return "prompt:" + requestedID
 }
 
 type agentDeliverySubmissionReader interface {

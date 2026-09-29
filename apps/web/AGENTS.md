@@ -270,10 +270,8 @@ When you hit a limit, extract a helper function, custom hook, or sub-component. 
 
 ## Plugin system
 
-The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/PLUGIN-API.md`
-and `lib/plugins/types.ts` are its detailed host implementation — all three must change together.
-`lib/plugins/registry.ts` is the reactive singleton `PluginRegistry`; every
-`register*` call needs matching cleanup in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled plugin leaks a stale registration.
+The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/PLUGIN-API.md` and `lib/plugins/types.ts` are its detailed host implementation — all three must change together.
+`lib/plugins/registry.ts` is the reactive singleton `PluginRegistry`; every `register*` call needs matching cleanup in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled plugin leaks a stale registration.
 
 - **Task panels** (`registerTaskPanel`): one generic dockview component, `"plugin-panel"`, shared by
   every plugin — identity lives in `params: { pluginId, panelKey }` (id helpers in

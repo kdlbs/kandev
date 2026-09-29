@@ -213,6 +213,15 @@ func (r *Repository) markCanonicalDeliveryBatchProjectedTx(
 				return err
 			}
 		}
+		terminalEffect, err := deliveryTerminalSettlementEffect(&item.stored)
+		if err != nil {
+			return err
+		}
+		if terminalEffect != nil {
+			if _, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, terminalEffect); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE agent_delivery_inbox SET projected_at = ?
 			WHERE stream_id = ? AND sequence = ?`), now, item.stored.StreamID, item.stored.Sequence); err != nil {

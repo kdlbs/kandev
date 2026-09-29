@@ -645,6 +645,14 @@ type SessionContinuityRepository interface {
 	ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error)
 }
 
+// AgentDeliveryRecoveryRepository persists the revisioned session notice for
+// an uncertain durable prompt outcome.
+type AgentDeliveryRecoveryRepository interface {
+	UpsertAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, block *models.SessionRecoveryBlock) (bool, error)
+	ResolveAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, action string) (bool, error)
+	ClearAgentDeliveryRecovery(ctx context.Context, sessionID, incarnationID, submissionID string, harnessGeneration int64) (bool, error)
+}
+
 // AgentDeliveryRepository owns the backend side of the durable agentctl
 // protocol. Inbox receipt and projection watermarks are deliberately separate.
 type AgentDeliveryRepository interface {
@@ -657,6 +665,15 @@ type AgentDeliveryRepository interface {
 	ProjectAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
 	PutAgentDeliveryEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
 	GetAgentDeliveryEffect(ctx context.Context, effectKey string) (*models.AgentDeliveryEffect, error)
+}
+
+// AgentDeliverySettlementRepository exposes the durable outbox used to finish
+// exact terminal submissions after ordered projection. Implementations retain
+// non-completed effects until queue-claim cleanup succeeds.
+type AgentDeliverySettlementRepository interface {
+	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
+	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
+	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over

@@ -150,7 +150,7 @@ func (w *deliveryEventWriter) run() {
 	for first := range w.input {
 		batch := []deliveryWriteRequest{first}
 		batchBytes := first.size
-		if batchBytes < deliveryWriterBatchBytes && !isTerminalDeliveryEvent(first.update) {
+		if len(w.input) > 0 && batchBytes < deliveryWriterBatchBytes && !isTerminalDeliveryEvent(first.update) {
 			timer := time.NewTimer(deliveryWriterBatchWait)
 			batch = collectDeliveryBatch(w.input, batch, batchBytes, timer.C)
 			if !timer.Stop() {

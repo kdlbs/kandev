@@ -2985,6 +2985,26 @@ func (s *Service) DeletePendingQueueDispatch(ctx context.Context, msg *QueuedMes
 	})
 }
 
+// AcknowledgeDurablePendingQueueDispatch removes the exact pending claim only
+// after its matching retained submission has authoritative terminal evidence.
+// Ordinary dispatch recovery deliberately keeps this claim until then.
+func (s *Service) AcknowledgeDurablePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	protocol, submissionID, _ := msg.DeliverySubmission()
+	if protocol != DeliveryProtocolV1 || submissionID == "" {
+		return errors.New("durable queue claim identity is incomplete")
+	}
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return errors.New("pending queue dispatch persistence unavailable")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.DeletePendingQueueDispatch(admittedCtx, msg)
+	})
+}
+
 func (s *Service) deletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
 	repo, ok := s.repo.(pendingQueueDispatchRepository)
 	if !ok || msg.IsDurableDelivery() {
