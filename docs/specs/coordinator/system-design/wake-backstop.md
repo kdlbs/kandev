@@ -99,7 +99,7 @@ Each tick:
 2. For each coordinator in the visit set, re-reads the coordinator row and
    runs the turn and setting duties in this order:
    1. message recovery for its open turn with `message_id` null
-      ([Finding the turn's message](wake.md#finding-the-turns-message));
+      ([Finding the turn's message](wake-recovery.md#finding-the-turns-message));
    2. missed-settle re-derivation for its open turn ([Turn end](wake.md#turn-end)),
       only when the row's `session_turn_id` is non-null (a row with it null is
       left to step 1 and the two-minute `send_failed` rule),

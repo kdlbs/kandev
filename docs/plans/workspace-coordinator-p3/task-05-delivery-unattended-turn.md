@@ -36,6 +36,8 @@ acceptance_criteria:
   - AC-COORDINATOR-INTEGRATION-005.3
 system_design:
   - ../../specs/coordinator/system-design/wake.md
+  - ../../specs/coordinator/system-design/wake-recovery.md
+  - ../../specs/coordinator/system-design/wake-screens.md
   - ../../specs/coordinator/system-design/containment.md
   - ../../specs/coordinator/system-design/spend.md
   - ../../specs/coordinator/system-design/integration.md
@@ -52,9 +54,16 @@ creates, archives or repoints a conversation.
 
 ## In scope
 
-- `internal/coordinator/admission.go`: `Admit` with the eight checks in order,
-  calling task 02's `Check` and task 03's `Spend`, through two
-  coordinator-side interfaces (a session snapshot reader and a message finder)
+- `internal/coordinator/admission.go`: `Admit(ctx, coordinatorID, mode)` with
+  the eight checks in order and two modes (`AdmitCounting` calls task 02's
+  `CheckForAdmission` and counts held reasons; `AdmitReadOnly`, used by the
+  autonomy read, calls `Check` and writes and counts nothing), calling task
+  03's `Spend`, through two coordinator-side interfaces (a session snapshot
+  reader and a message finder). Check 7 reads the queue through
+  `messagequeue.Service.HasPendingForSession` (error-returning, any entry
+  counts; a read error is a hold with detail `read_error`), and also holds
+  while the coordinator has a turn row with `outcome IS NULL` (detail
+  `turn_open`)
   and with a `CREATED` primary session held as `conversation_unavailable`
   (detail `session_not_started`)
   ([Admission](../../specs/coordinator/system-design/wake.md#admission)).
@@ -70,10 +79,13 @@ creates, archives or repoints a conversation.
   `afterDispatchAdmission` seam with `CreateUserMessageIdempotent`,
   `metadata.coordinator_wake_turn_id`, the claimed turn id, author type
   `user`; never the message queue), the lookup
-  of the turn's stored message by that key, and the `send_failed` rollback
-  only for a refusal before dispatch (`ErrAgentPromptInProgress`,
-  `ErrSessionNotPromptable`, invalid request, the exported store-failure
-  sentinel of that seam)
+  of the turn's stored message by that key, the sent test (a found message
+  counts as sent only when `GetTurn` of its `TurnID` exists in the row's
+  session), and the `send_failed` rollback for any refusal before dispatch
+  (identified by the wrapper sentinel `ErrWakePromptNotDispatched`, not an
+  enumerated list), for a stored message whose reserved turn was rolled back,
+  and for a store failure of that seam, each returning the wakes to `pending`
+  and conditional on `outcome IS NULL AND message_id IS NULL`
   ([Delivery](../../specs/coordinator/system-design/wake.md#delivery)).
 - `internal/coordinator/turns.go`: `session_turn_id` from the stored
   message, turn end on `turn.completed` for that turn id, the backstop's
@@ -102,7 +114,15 @@ creates, archives or repoints a conversation.
 - Instructions, orders and goal: delivery adds none to the wake message;
   `MarkApplied` stays where phase 2 runs it
   ([Instructions](../../specs/coordinator/system-design/integration.md#instructions-orders-and-goal)).
-- The turn message text ([Transcript](../../specs/coordinator/system-design/wake.md#transcript)),
+- `coordinator.updated` with `autonomy_changed: true` from each delivery and
+  turn settle that changed a row, and the counters
+  `coordinator_wake_delivered_total`, `coordinator_wake_superseded_total`,
+  `coordinator_unattended_turn_total{outcome}` and
+  `coordinator_admission_held_total{reason}`, each owned by the step that
+  changes the row ([Observability](../../specs/coordinator/system-design/wake.md#observability)).
+- A turn row with a null `session_turn_id` stamps no log row
+  ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
+- The turn message text ([Transcript](../../specs/coordinator/system-design/wake-screens.md#transcript)),
   agent-facing, not localized.
 - `no_turn_start_test.go`: add the wake delivery as the one allowed non-manager
   turn start (amended `AC-COORDINATOR-COPILOT-002.1`) and add every other
@@ -189,6 +209,17 @@ creates, archives or repoints a conversation.
 - A `CREATED` primary session is held `conversation_unavailable` with detail
   `session_not_started`, and a store failure at the dispatch boundary
   settles `send_failed` with the wakes back to `pending`.
+- A stored message whose reserved turn was rolled back on a pre-acceptance
+  dispatch failure is not sent: the turn settles `send_failed` (`interrupted`
+  at startup), its wakes are `pending`, and the next delivery sends a new
+  message under a new turn id; a found message whose turn read errors leaves the
+  row untouched that tick.
+- `Admit` in `AdmitReadOnly` mode moves no counter and writes no log; check 7
+  holds for a queued message (read error: `read_error`) and for an open turn
+  row (`turn_open`); check 8 uses the newest `finished_at`, tie broken by id
+  descending.
+- A duplicate or losing settle changes no row and so publishes no
+  `autonomy_changed`, counts no outcome and kicks no delivery.
 - A `WAITING_FOR_INPUT` session with no live execution gets the same result
   from delivery as from a manager's message through `PromptTask` (a resumed
   turn, or a refusal that returns the wakes to `pending`).
@@ -203,5 +234,8 @@ make -C apps/backend lint
 
 ## Risks
 
-- Reading "queued message" must use the orchestrator's queue read, not a
-  message-table heuristic; a wrong read sends into a busy session.
+- Reading "queued message" must use the orchestrator's queue read
+  (`HasPendingForSession`), not a message-table heuristic or `GetStatus`
+  (which swallows errors); a wrong read sends into a busy session.
+- A stored message is not proof of a send: the orchestrator rolls back the
+  reserved turn on a pre-acceptance failure and leaves the message.

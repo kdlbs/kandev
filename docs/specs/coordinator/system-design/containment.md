@@ -285,7 +285,7 @@ test pins it for a session started by delivery.
 ## Settings display
 
 The Autonomy section of the coordinator's settings (UI-04) reads the
-`containment` block of the autonomy read ([wake](wake.md#autonomy-read)) when
+`containment` block of the autonomy read ([wake](wake-screens.md#autonomy-read)) when
 it opens and on **Check again**, and lists the four conditions with Met or
 Not met and a fix line:
 
@@ -327,7 +327,10 @@ verbatim config key.
 
 `containment.go` exports a helper, `CheckForAdmission(ctx, coordinator,
 recorder)`, that runs `Check`, counts and logs, and returns the `Result`.
-Admission (task 05) calls only the helper; this card owns and tests the
+Admission (task 05) calls only the helper in its counting mode
+(`AdmitCounting`, used by delivery) and `Check` in its read-only mode
+(`AdmitReadOnly`, used by the autonomy read; see
+[wake](wake.md#admission)); this card owns and tests the
 counter and log with a fake caller. The autonomy read and the settings display
 call `Check` directly, without counting, so opening settings never moves the
 counter. The autonomy read is a no-count path: its `Check` call is not

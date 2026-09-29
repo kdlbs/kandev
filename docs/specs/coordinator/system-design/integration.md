@@ -136,7 +136,7 @@ Task 01's contract for the settings fields of [wake](wake.md#flag-and-settings) 
   PATCH path) both count as a failure. The `coordinator.updated`
   `autonomy_changed` field is added to the payload type in task 01 and
   published by this PATCH only (change-only); the other publish sites of
-  [Autonomy read](wake.md#autonomy-read) belong to task 04 (wake insert) and
+  [Autonomy read](wake-screens.md#autonomy-read) belong to task 04 (wake insert) and
   task 05 (delivery, turn settle).
 
 **Deletion of every phase 3 table.** Only `coordinator_wakes`
@@ -286,7 +286,13 @@ made inside the propose call is stamped by task 09, which owns the automatic
 approval writer: its actor is the raising manager path, so the stamp comes
 from `currentUnattendedTurn` at that call site, not from the actor. Rows a manager's request writes (approve, reject,
 reply, undo) are never stamped, even while an unattended turn is open. A read
-that fails stamps nothing and logs at warn. A refusal coalesces into an
+that fails stamps nothing and logs at warn. A turn row whose `session_turn_id`
+is null (the message not yet found) stamps nothing either: the resolver never
+falls back to matching the session alone, so a manager's attended turn is never
+mistaken for the unattended one. The gap is bounded to the interval between the
+send and the message being recorded (Delivery step 5 records it in the same
+call; only the backstop's recovery leaves it longer than a moment), and a row
+written in it carries no mark rather than a wrong one. A refusal coalesces into an
 existing row only when both rows carry the same
 `unattended_turn_id` (both null counts as the same). The turn id, not a wake
 id, is stored because one turn delivers up to 20 wakes; the turn's wakes are
@@ -345,7 +351,7 @@ that session, so:
 
 - It carries the instructions its session was built with, with the same three
   sections. Delivery adds no orders, goal or context to the wake message; the
-  message stays the events list of [Transcript](wake.md#transcript).
+  message stays the events list of [Transcript](wake-screens.md#transcript).
 - `MarkApplied(tx, coordinatorID, orderIDs, at)` runs where phase 2 runs it,
   in the transaction that stores a proposal citing `standing_order_ids`
   (`ProposeTask` and the kind propose path). An unattended turn that proposes
