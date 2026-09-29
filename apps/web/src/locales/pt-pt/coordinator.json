@@ -393,5 +393,6 @@
   "controlErrorInvalidScope": "Escolha se quer observar todos os quadros ou apenas os selecionados.",
   "controlErrorActionMissing": "Cada ação precisa de uma definição. Escolha uma para cada linha.",
   "controlErrorDuplicateBoard": "Um quadro aparece duas vezes. Retire uma das cópias.",
-  "controlErrorUnknownAction": "O pedido indica uma ação que não existe. Recarregue a página e comece de novo."
+  "controlErrorUnknownAction": "O pedido indica uma ação que não existe. Recarregue a página e comece de novo.",
+  "answerHere": "Responder aqui"
 }

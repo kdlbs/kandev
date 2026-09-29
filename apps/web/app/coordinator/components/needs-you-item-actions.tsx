@@ -40,19 +40,45 @@ function ShowEvidenceAction({ task, stall }: { task: AttentionTask; stall: Atten
   );
 }
 
-export type NeedsYouItemPrimaryActionsProps = {
-  item: NeedsYouItem;
+export type AnswerHereControl = {
+  expanded: boolean;
+  onToggle: () => void;
 };
 
+export type NeedsYouItemPrimaryActionsProps = {
+  item: NeedsYouItem;
+  /** Present when the item can be answered in place (relay.md "Question card"). */
+  answerHere?: AnswerHereControl;
+};
+
+function AnswerHereAction({ control }: { control: AnswerHereControl }) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  return (
+    <Button
+      variant="default"
+      size="sm"
+      className={cn("cursor-pointer", !isFinePointer && "min-h-11 min-w-11")}
+      aria-expanded={control.expanded}
+      onClick={control.onToggle}
+      data-testid="needs-you-answer-here"
+    >
+      {t("coordinator:answerHere")}
+    </Button>
+  );
+}
+
 /**
- * The item's primary actions, by kind: question/error offer Open task only;
+ * The item's primary actions, by kind: question/error offer Open task (a
+ * question also offers Answer here while it can be answered in place); error offers Open task only;
  * stall offers Open task and Show the evidence; a proposal offers neither
  * (AC-COORDINATOR-NEEDS-YOU-002.5/.6/.7/.8).
  */
-export function NeedsYouItemPrimaryActions({ item }: NeedsYouItemPrimaryActionsProps) {
+export function NeedsYouItemPrimaryActions({ item, answerHere }: NeedsYouItemPrimaryActionsProps) {
   if (item.kind === "proposal") return null;
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {item.kind === "question" && answerHere && <AnswerHereAction control={answerHere} />}
       <OpenTaskAction task={item.task} />
       {item.kind === "stall" && <ShowEvidenceAction task={item.task} stall={item.stall} />}
     </div>

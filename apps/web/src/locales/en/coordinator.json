@@ -393,5 +393,6 @@
   "controlErrorInvalidScope": "Choose whether to watch every board or only selected boards.",
   "controlErrorActionMissing": "Every action needs a setting. Choose one for each row.",
   "controlErrorDuplicateBoard": "A board is listed twice. Take one copy out of scope.",
-  "controlErrorUnknownAction": "The request names an action that does not exist. Reload the page and start again."
+  "controlErrorUnknownAction": "The request names an action that does not exist. Reload the page and start again.",
+  "answerHere": "Answer here"
 }

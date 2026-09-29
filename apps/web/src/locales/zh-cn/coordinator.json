@@ -393,5 +393,6 @@
   "controlErrorInvalidScope": "请选择监视所有看板，还是只监视所选看板。",
   "controlErrorActionMissing": "每个操作都需要一个设置。请为每一行选择一项。",
   "controlErrorDuplicateBoard": "有一个看板被列出了两次。请将其中一份移出范围。",
-  "controlErrorUnknownAction": "请求中包含不存在的操作。请刷新页面后重新开始。"
+  "controlErrorUnknownAction": "请求中包含不存在的操作。请刷新页面后重新开始。",
+  "answerHere": "在此回答"
 }

@@ -393,5 +393,6 @@
   "controlErrorInvalidScope": "すべてのボードを監視するか、選択したボードだけを監視するかを選んでください。",
   "controlErrorActionMissing": "すべての操作に設定が必要です。各行で1つ選んでください。",
   "controlErrorDuplicateBoard": "同じボードが2回リストされています。1つを対象から外してください。",
-  "controlErrorUnknownAction": "リクエストに存在しない操作が含まれています。ページを再読み込みして、最初からやり直してください。"
+  "controlErrorUnknownAction": "リクエストに存在しない操作が含まれています。ページを再読み込みして、最初からやり直してください。",
+  "answerHere": "ここで回答"
 }

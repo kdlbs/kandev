@@ -1,15 +1,18 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@kandev/ui/card";
 import { cn } from "@/lib/utils";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import { useProposalRow } from "@/hooks/domains/coordinator/use-proposals";
+import { useRelayItem } from "@/hooks/domains/coordinator/use-relay-item";
+import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
 import { deriveCopilotItemId, deriveCopilotItemRef } from "@/lib/coordinator/copilot-id";
 import { formatAge } from "@/lib/coordinator/format";
 import { resolveProposalSourceTask, severityFor, whyClearsText } from "@/lib/coordinator/item-text";
 import { ProposalCard, type ProposalCardForm } from "../proposal-card/proposal-card";
 import { AskAboutThisButton, NeedsYouItemPrimaryActions } from "./needs-you-item-actions";
+import { RelayAnswer } from "./relay-answer";
 
 export type NeedsYouItemCardProps = {
   item: NeedsYouItem;
@@ -26,11 +29,37 @@ export type NeedsYouItemCardProps = {
   onAutoFormOpened?: () => void;
   /** "full" variant's "Next" toast line (proposal-cards.md#cards "Toast counts"). */
   computeNeedsYouCount?: () => number;
+  /** Reports whether the item is expanded (held) so the list keeps rendering it. */
+  onExpandedChange?: (item: NeedsYouItem, expanded: boolean) => void;
 };
 
 /** `needs-you-item-heading-<id>`, the focusable heading id `proposal-cards.md#cards "Focus after a decision"` moves focus to. */
 export function needsYouItemHeadingId(itemId: string): string {
   return `needs-you-item-heading-${itemId}`;
+}
+
+function useItemRelay(
+  item: NeedsYouItem,
+  workspaceId: string,
+  coordinatorId: string,
+  canManage: boolean,
+) {
+  const phase3Effective = useCoordinatorPhase3Effective();
+  return useRelayItem({
+    workspaceId,
+    coordinatorId,
+    taskId: item.kind === "question" ? item.task.id : null,
+    pendingAction: item.kind === "question" ? item.pendingAction : undefined,
+    enabled: item.kind === "question" && phase3Effective && canManage,
+    refreshKey: relayRefreshKey(item),
+  });
+}
+
+/** Changes whenever the task's status summary changes, which re-reads the relay. */
+function relayRefreshKey(item: NeedsYouItem): string {
+  if (item.kind !== "question") return "";
+  const summary = item.task.statusSummary;
+  return [summary?.pending_action, summary?.last_activity_at, item.task.updatedAt].join("|");
 }
 
 function headFor(
@@ -59,6 +88,7 @@ function headFor(
  * a proposal, and the kind-specific actions
  * (docs/specs/coordinator/requirements/needs-you.md REQ-COORDINATOR-NEEDS-YOU-002).
  */
+// eslint-disable-next-line max-lines-per-function -- the card composes the head, kind-specific bodies and the held answer
 export function NeedsYouItemCard({
   item,
   workspaceId,
@@ -72,6 +102,7 @@ export function NeedsYouItemCard({
   autoOpenForm,
   onAutoFormOpened,
   computeNeedsYouCount,
+  onExpandedChange,
 }: NeedsYouItemCardProps) {
   const { t } = useTranslation();
   const head = headFor(item, stepNameByTaskId, openTasksById, t("coordinator:newTask"));
@@ -82,12 +113,19 @@ export function NeedsYouItemCard({
   const headingRef = useRef<HTMLDivElement>(null);
   const proposalId = item.kind === "proposal" ? item.proposal.id : null;
   const proposalRow = useProposalRow(coordinatorId, proposalId);
+  const relay = useItemRelay(item, workspaceId, coordinatorId, canManage);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    onExpandedChange?.(item, relay.expanded);
+  }, [item, relay.expanded, onExpandedChange]);
+  const answerable = relay.offered || relay.expanded;
 
   return (
     // The severity is the stripe down the left edge, so the list can be
     // scanned for what decides now without reading every badge (mockup v2.1
     // `.item.hot` / `.item.cool`).
     <Card
+      ref={cardRef}
       className={cn(
         "border-l-[3px]",
         severity === "decide-now" ? "border-l-destructive" : "border-l-primary",
@@ -145,13 +183,23 @@ export function NeedsYouItemCard({
         <dl className="grid grid-cols-[minmax(82px,max-content)_minmax(0,1fr)] gap-x-2.5 gap-y-0.5">
           <dt className="text-muted-foreground">{t("coordinator:whyItIsHere")}</dt>
           <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{why}</dd>
-          <dt className="text-muted-foreground">{t("coordinator:whatClearsIt")}</dt>
-          <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{clears}</dd>
+          {!answerable && (
+            <>
+              <dt className="text-muted-foreground">{t("coordinator:whatClearsIt")}</dt>
+              <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{clears}</dd>
+            </>
+          )}
         </dl>
+        <RelayAnswer relay={relay} itemRef={cardRef} />
       </CardContent>
       {item.kind !== "proposal" && (
         <CardFooter>
-          <NeedsYouItemPrimaryActions item={item} />
+          <NeedsYouItemPrimaryActions
+            item={item}
+            answerHere={
+              answerable ? { expanded: relay.expanded, onToggle: relay.toggle } : undefined
+            }
+          />
         </CardFooter>
       )}
     </Card>
