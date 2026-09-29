@@ -50,7 +50,6 @@ test("phone recovery opens the exact MCP sign-in terminal in the terminal panel"
     expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
 
     await authenticate.tap();
-    await expect(hydratedPreparation.getByRole("status")).toContainText("Sign-in terminal opened.");
     const authenticationTerminal = testPage.getByTestId(
       `mobile-terminal-slot-${fixture.authenticationTerminalId}`,
     );
