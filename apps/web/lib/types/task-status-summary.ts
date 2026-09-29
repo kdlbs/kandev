@@ -37,6 +37,14 @@ export type TaskStatusSummaryLaunchQueue = {
   };
 };
 
+export type TaskStatusSummaryCompletionGate = {
+  revision: number;
+  criteria_count: number;
+  verified_count: number;
+  blocker_count: number;
+  blocked: boolean;
+};
+
 export type TaskStatusSummary = {
   revision: number;
   updated_at: string;
@@ -53,6 +61,7 @@ export type TaskStatusSummary = {
   queued_prompt_count?: number;
   /** Automatic session launch waiting for admission, independent of the selected session. */
   launch_queue?: TaskStatusSummaryLaunchQueue | null;
+  completion_gate?: TaskStatusSummaryCompletionGate | null;
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;
@@ -70,6 +79,7 @@ export type TaskStatusSummary = {
     attention?: boolean;
     auto_fix_enabled?: boolean;
     auto_merge_enabled?: boolean;
+    has_merge_conflicts?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

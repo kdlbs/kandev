@@ -209,6 +209,15 @@ call using the actual MCP tool name, arguments, and completed MCP result. The
 shell-shaped transport category is never exposed as the presentation's stored
 tool identity.
 
+Cursor and Grok ACP may transport MCP calls in an `other` tool frame whose
+`rawInput` contains `providerIdentifier`, `toolName`, and `args`. Their ACP
+dialects recognize that complete provider envelope and persist the same
+provider-neutral identity and unwrapped arguments used by other MCP transports.
+Historic messages using this envelope remain replayable from their stored
+`kandev: <tool>_kandev` title and `raw_input.args`; no message migration or
+repeat tool call is required. Foreign providers and unrelated `other` frames
+remain generic activity.
+
 No raw CSV, file bytes, images, or other binary payloads are copied into SQLite
 for this feature.
 

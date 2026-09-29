@@ -209,8 +209,9 @@ a validated near reset, retry the same candidate with a bounded exponential
 schedule, and then either skip to the next candidate or stop. Exact policy
 fields, ordering, legacy normalization, validation, and unknown-error behavior
 are owned by [Provider Error Recovery](../../platform/requirements/provider-error-recovery.md).
-Unknown, ambiguous, stale, or effect-unsafe failures always stop automatic
-recovery even if a class policy would retry or skip.
+Unknown failures stop automatic recovery except for the opt-in
+[repeated-failure extension](dynamic-unclassified-fallback.md).
+Ambiguous, stale, or effect-unsafe failures always stop automatic recovery.
 
 If no candidate is eligible, the task remains assigned to the dynamic profile
 and enters a visible waiting or action-required state. It is not reassigned to a
@@ -452,6 +453,10 @@ and never derive historical attribution from current session state.
   Office read models consume shared route status by task-session or run ID.
 
 ## Delivery and rollout
+
+This section records the initial gated delivery. The later
+[graduation design](dynamic-routing-graduation.md) owns default-on promotion and
+retirement after the base implementation plan is complete.
 
 - The feature is guarded by `features.dynamicAgentRouting` and
   `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING`. The backend is authoritative and

@@ -78,6 +78,9 @@ type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
 // returns nil when the task has no deferred launch.
 type LaunchQueueLoader func(context.Context, string) (*LaunchQueueSummary, error)
 
+// CompletionGateLoader reads the bounded current completion state for one task.
+type CompletionGateLoader func(context.Context, string) (*CompletionGateSummary, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -102,6 +105,7 @@ type ProjectorConfig struct {
 	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
+	LoadCompletionGate      CompletionGateLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -134,6 +138,7 @@ type Projector struct {
 	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
+	loadCompletionGate      CompletionGateLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
@@ -169,16 +174,18 @@ type projectionState struct {
 	// clearedErrorStamps records, per session, the stamp of the last error this
 	// projection cleared, so a durable breadcrumb replayed on a later session
 	// event cannot re-arm an error affordance the agent already recovered from.
-	clearedErrorStamps  map[string]string
-	errorsObserved      bool
-	git                 map[string]GitSummary
-	gitBaseline         *GitSummary
-	gitObserved         bool
-	prs                 map[string]pullRequestObservation
-	prBaseline          *PullRequestSummary
-	prObserved          bool
-	launchQueue         *LaunchQueueSummary
-	launchQueueObserved bool
+	clearedErrorStamps     map[string]string
+	errorsObserved         bool
+	git                    map[string]GitSummary
+	gitBaseline            *GitSummary
+	gitObserved            bool
+	prs                    map[string]pullRequestObservation
+	prBaseline             *PullRequestSummary
+	prObserved             bool
+	launchQueue            *LaunchQueueSummary
+	launchQueueObserved    bool
+	completionGate         *CompletionGateSummary
+	completionGateObserved bool
 }
 
 type sessionObservation struct {
@@ -201,6 +208,7 @@ type pullRequestObservation struct {
 	reviewState           string
 	checksState           string
 	mergeableState        string
+	hasMergeConflicts     *bool
 	mergeQueueState       string
 	unresolvedReviewCount int
 	pendingReviewCount    int
@@ -235,6 +243,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
+		loadCompletionGate:      cfg.LoadCompletionGate,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
@@ -323,6 +332,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.BuildPermissionRequestWildcardSubject(),
 		events.BuildGitEventWildcardSubject(),
 		events.GitHubTaskPRUpdated,
+		events.GitHubTaskPRDeleted,
 		events.GitHubTaskCIOptionsUpdated,
 		events.MessageQueueStatusChanged,
 	}
@@ -423,12 +433,17 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
 	pullRequestChanged := false
-	if event.Type == events.GitHubTaskCIOptionsUpdated && p.loadPullRequests != nil {
+	if (event.Type == events.GitHubTaskCIOptionsUpdated || event.Type == events.GitHubTaskPRDeleted) && p.loadPullRequests != nil {
 		before := derivePullRequestSummary(state)
 		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 			return err
 		}
-		pullRequestChanged = !equalPullRequestSummary(before, derivePullRequestSummary(state))
+		after := derivePullRequestSummary(state)
+		pullRequestChanged = !equalPullRequestSummary(before, after)
+		if event.Type == events.GitHubTaskPRDeleted && state.current != nil {
+			pullRequestChanged = pullRequestChanged ||
+				!equalPullRequestSummary(state.current.PullRequest, after)
+		}
 	}
 	taskErrorChanged := false
 	if p.loadTaskLaunchError != nil && isTaskErrorRefreshEvent(event.Type) {
@@ -454,6 +469,16 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		state.launchQueue = cloneLaunchQueue(nextQueue)
 		state.launchQueueObserved = true
 	}
+	completionGateChanged := false
+	if p.loadCompletionGate != nil && isCompletionGateRefreshEvent(event.Type) {
+		nextGate, loadErr := p.loadCompletionGate(ctx, taskID)
+		if loadErr != nil {
+			return fmt.Errorf("load completion gate for task status summary %q: %w", taskID, loadErr)
+		}
+		completionGateChanged = state.current == nil || !state.completionGateObserved || !equalCompletionGate(state.completionGate, nextGate)
+		state.completionGate = cloneCompletionGate(nextGate)
+		state.completionGateObserved = true
+	}
 
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
@@ -465,7 +490,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged || completionGateChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -475,11 +500,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
 	if !changed {
 		return nil
 	}

@@ -31,6 +31,8 @@ const EXPECTED_UI_PRIMITIVES = [
   "Alert",
   "Badge",
   "Button",
+  "Action",
+  "ActionGroup",
   "Card",
   "ChartContainer",
   "ChartLegend",
@@ -90,6 +92,9 @@ const EXPECTED_UI_PRIMITIVES = [
   "Textarea",
   "Tooltip",
   "TooltipProvider",
+  "WorkspaceAgentChat",
+  "WorkspaceTaskStatus",
+  "WorkspaceTaskUsage",
 ];
 
 const originalFetch = global.fetch;
@@ -188,6 +193,17 @@ describe("buildHostApi — host contract", () => {
     const host = buildHostApi("jira", createAppStore());
 
     expect(host.i18n).toBeDefined();
+  });
+
+  it("exposes canonical task queries and Host-issued human response receipts", () => {
+    const host = buildHostApi("managed-coordinator", createAppStore());
+
+    expect(host.queries?.useTaskStatus).toBeTypeOf("function");
+    expect(host.queries?.useTaskUsage).toBeTypeOf("function");
+    expect(host.interactions?.issueResponseReceipt).toBeTypeOf("function");
+    expect(host.ui.WorkspaceAgentChat).toBeTypeOf("function");
+    expect(host.ui.WorkspaceTaskStatus).toBeTypeOf("function");
+    expect(host.ui.WorkspaceTaskUsage).toBeTypeOf("function");
   });
 
   it("translates plugin messages through both imperative and reactive APIs", () => {

@@ -242,6 +242,35 @@ describe("FileDiffToolbar", () => {
   });
 });
 
+describe("Mobile file actions", () => {
+  it("opens file comments after selecting the mobile menu action", async () => {
+    mocks.isMobile = true;
+    const onCommentFile = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar
+          filePath="src/app.ts"
+          sessionId="session-1"
+          source="pr"
+          wordWrap={false}
+          expandUnchanged={false}
+          onDiscard={vi.fn()}
+          onCommentFile={onCommentFile}
+          onToggleExpandUnchanged={vi.fn()}
+          onToggleWordWrap={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "More actions for src/app.ts" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Comment on file" }));
+
+    await waitFor(() => expect(onCommentFile).toHaveBeenCalledOnce());
+  });
+});
+
 describe("FileDiffToolbar path safety", () => {
   it.each(unsafePathCases)(
     "refuses to copy a $name control-character path from the desktop toolbar",

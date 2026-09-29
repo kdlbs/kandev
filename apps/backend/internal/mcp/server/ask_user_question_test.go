@@ -42,6 +42,10 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 	assert.Contains(t, props, "context_paragraphs")
 	assert.NotContains(t, props, "prompt", "legacy 'prompt' must not be top-level anymore")
 	assert.NotContains(t, props, "options", "legacy 'options' must not be top-level anymore")
+	questions := props[questionsArg].(map[string]interface{})
+	items := questions["items"].(map[string]interface{})
+	questionProps := items[propsKey].(map[string]interface{})
+	assert.Contains(t, questionProps, allowCustomTextArg, "question schema must expose the custom-text policy")
 
 	required, _ := parsed["required"].([]interface{})
 	requiredSet := make(map[string]bool)
@@ -85,8 +89,9 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	result := callTool(t, s, "ask_user_question_kandev", map[string]interface{}{
 		"questions": []map[string]interface{}{
 			{
-				"id":     "q1",
-				"prompt": "Which database?",
+				"id":               "q1",
+				"prompt":           "Which database?",
+				allowCustomTextArg: false,
 				"options": []map[string]interface{}{
 					{"label": "Postgres", "description": "Relational"},
 					{"label": "Mongo", "description": "Document"},
@@ -103,6 +108,7 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	require.True(t, ok, "questions should be normalized to []map")
 	require.Len(t, questions, 1)
 	assert.Equal(t, "q1", questions[0]["id"])
+	assert.Equal(t, false, questions[0][allowCustomTextArg])
 
 	// Result text should be a JSON map keyed by question id.
 	require.NotEmpty(t, result.Content)
@@ -112,6 +118,20 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(textBlock.Text), &parsed))
 	q1 := parsed["q1"].(map[string]interface{})
 	assert.Equal(t, "q1_opt1", q1["selected_option"])
+}
+
+func TestAskUserQuestionRejectsNonBooleanCustomTextPolicy(t *testing.T) {
+	server := newTaskModeServer(t, &testBackend{}, "task-current")
+	result := callTool(t, server, "ask_user_question_kandev", map[string]interface{}{
+		"questions": []map[string]interface{}{{
+			"prompt": "Which database?", allowCustomTextArg: "sometimes",
+			"options": []map[string]interface{}{
+				{"label": "Postgres", "description": "Relational"},
+				{"label": "Mongo", "description": "Document"},
+			},
+		}},
+	})
+	assert.True(t, result.IsError)
 }
 
 func TestAskUserQuestion_PreservesLiteralContextEscapes(t *testing.T) {

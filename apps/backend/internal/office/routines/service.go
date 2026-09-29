@@ -1371,16 +1371,26 @@ func marshalRoutinePayload(routineID string, vars map[string]string, gap *gapSum
 // (office-routine-runs R1), so the gate cannot rely on that event alone
 // ever clearing it. Reading the linked task's real state here means a
 // heavy run's gate self-heals at the next fire even when that event
-// never arrives. Returns active unchanged when it is still genuinely
-// active, still lightweight (no linked task), or its state can't be
-// determined. A lookup or close-out failure fails closed, leaving the task
-// active until a later fire can retry reconciliation. Returns nil once the
-// linked task is confirmed terminal, archived, or missing and the run closes.
+// never arrives. An empty LinkedTaskID on a task_created row is never
+// produced by current code (materialiseHeavyRoutineRun always sets both
+// together), so such a row can only be a stale write from before that
+// invariant held. Its fingerprint would otherwise gate every future fire
+// forever, so it is closed the same way an absent linked task is.
+// Returns active unchanged when it is still genuinely active or its
+// state can't be determined. A lookup or close-out failure fails closed,
+// leaving the task active until a later fire can retry reconciliation.
+// Returns nil once the run closes: the linked task is confirmed
+// terminal, archived, or missing, or the run never had one.
 func (s *RoutineService) selfHealIfTaskTerminal(
 	ctx context.Context, routine *Routine, active *RoutineRun,
 ) *RoutineRun {
 	if active.LinkedTaskID == "" {
-		return active
+		if _, err := s.closeOutRun(ctx, active, "missing"); err != nil {
+			s.logger.Warn("close out legacy unlinked active run",
+				zap.String("routine", routine.Name), zap.String("run_id", active.ID), zap.Error(err))
+			return active
+		}
+		return nil
 	}
 	terminalStatus, err := s.repo.GetTaskTerminalStatus(ctx, active.LinkedTaskID)
 	if err != nil {

@@ -4,7 +4,6 @@ import { immer } from "zustand/middleware/immer";
 import { createSystemSlice, defaultSystemState } from "./system-slice";
 import type { SystemSlice } from "./types";
 import type {
-  SystemInfo,
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
@@ -21,17 +20,6 @@ function makeStore() {
     immer((...a) => ({ ...(createSystemSlice as any)(...a) })),
   );
 }
-
-const INFO: SystemInfo = {
-  version: "1.2.3",
-  commit: "abc1234",
-  build_time: "2026-01-01T00:00:00Z",
-  go_version: "go1.24",
-  os: "darwin",
-  arch: "arm64",
-  boot_id: "boot-1",
-  started_at: "2026-01-01T00:00:00Z",
-};
 
 const DISK_USAGE: DiskUsageResponse = {
   data: {
@@ -50,20 +38,30 @@ const DISK_USAGE: DiskUsageResponse = {
   home_dir: "/data/kandev",
 };
 
+const DB_STATS_AT = "2026-05-17T00:00:00Z";
+
 const DB_STATS: DatabaseStats = {
   driver: "sqlite",
   path: "/data/kandev.db",
   backup_directory: "/data/backups",
   size_bytes: 12345,
   wal_size_bytes: 678,
+  message_content_bytes: 100,
+  message_metadata_bytes: 200,
+  message_payload_bytes: 300,
+  git_snapshot_bytes: 400,
+  logical_stats_state: "ready",
+  logical_stats_measured_at: DB_STATS_AT,
+  metadata_stale: false,
+  metadata_measured_at: DB_STATS_AT,
   schema_version: "1.0.0",
-  last_backup_at: "2026-05-17T00:00:00Z",
+  last_backup_at: DB_STATS_AT,
 };
 
 const SNAPSHOT: SnapshotInfo = {
   name: "manual-1.db",
   size_bytes: 1024,
-  mtime: "2026-05-17T00:00:00Z",
+  mtime: DB_STATS_AT,
   kind: "manual",
 };
 
@@ -159,6 +157,7 @@ describe("system storage slice", () => {
       overview,
       analysisRevision: 0,
       disk: null,
+      diskIdentity: null,
       runs: [],
       quarantine: [],
     });
@@ -170,18 +169,11 @@ describe("system slice", () => {
     const store = makeStore();
     const s = store.getState();
     expect(s.system).toEqual(defaultSystemState.system);
-    expect(s.system.info).toBeNull();
     expect(s.system.diskUsage).toBeNull();
     expect(s.system.database).toBeNull();
     expect(s.system.backups).toEqual({ items: [], loaded: false });
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
-  });
-
-  it("setSystemInfo stores the payload", () => {
-    const store = makeStore();
-    store.getState().setSystemInfo(INFO);
-    expect(store.getState().system.info).toEqual(INFO);
   });
 
   it("setSystemDiskUsage replaces the cached response", () => {

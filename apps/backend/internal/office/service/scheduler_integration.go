@@ -678,7 +678,8 @@ func (si *SchedulerIntegration) launchAgent(
 			si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
 				"phase": "adapter.invoke", "error_message": err.Error(),
 			})
-			si.failTasklessRun(ctx, run, agent, err.Error())
+			si.releaseCheckoutIfNeeded(ctx, run)
+			_ = si.svc.HandleRunFailure(ctx, run, err)
 			return false
 		}
 		IncLoopLaunch(agent.WorkspaceID)
@@ -941,6 +942,11 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	taskID string, launch LaunchContext,
 ) (handled bool, launched bool) {
+	if agent.ExecutionAgentProfileID != "" {
+		// A dynamic-bound Office agent owns provider order through its bound
+		// profile; the legacy workspace-routing dispatcher must not override it.
+		return false, false
+	}
 	rd := si.svc.routingDispatcher
 	if rd == nil {
 		return false, false

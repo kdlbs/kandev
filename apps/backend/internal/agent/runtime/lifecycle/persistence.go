@@ -28,9 +28,8 @@ import (
 // refactor, executors_running is the single source of truth and the lifecycle
 // manager owns its lifecycle.
 type ExecutorRunningWriter interface {
-	// UpsertExecutorRunning inserts or updates the row. Caller passes a fully
-	// populated *models.ExecutorRunning; the underlying SQL preserves nothing
-	// from the prior row (idempotent re-creation on every successful Add).
+	// UpsertExecutorRunning inserts or updates the row. Idle-suspension provenance
+	// changes only through its compare-and-set methods, not lifecycle snapshots.
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 
 	// DeleteExecutorRunningBySessionID removes the row when an execution is
@@ -43,6 +42,13 @@ type ExecutorRunningWriter interface {
 	// row (#1597 resume-safety invariant). Idempotent-friendly: returns
 	// ErrExecutorRunningNotFound if no row exists.
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
+}
+
+type idleSuspensionInventory interface {
+	GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error)
+	ClaimExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, time.Time) (bool, error)
+	ValidateExecutorRunningIdleSuspensionPolicy(context.Context, string, string, string, time.Time) (bool, error)
+	CompareAndSetExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, string) error
 }
 
 // SetExecutorRunningWriter wires the writer used to persist row state in
@@ -115,6 +121,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		running.WorktreePath = execution.WorkspacePath
 	}
 	if prior != nil {
+		running.IdleSuspensionState = prior.IdleSuspensionState
 		if strings.TrimSpace(prior.ExecutorID) != "" {
 			running.ExecutorID = prior.ExecutorID
 		}
@@ -501,6 +508,10 @@ type executorRunningLister interface {
 	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
 }
 
+type pluginExecutorRunningLister interface {
+	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
 // ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
 // every live standalone executors_running row, read at startup step 3 before
 // any control-server contact, so the recovery guard can be taken against it
@@ -513,6 +524,16 @@ func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*mo
 		return nil, nil
 	}
 	return lister.ListExecutorsRunningLiveStandalone(ctx)
+}
+
+// ListLivePluginExecutorsRunning includes stopped inventory so callers can
+// distinguish a retained environment from an empty session record.
+func (m *Manager) ListLivePluginExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(pluginExecutorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningPluginRemote(ctx)
 }
 
 type executorRunningCASWriter interface {

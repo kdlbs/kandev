@@ -49,6 +49,25 @@ func TestWsRecoverWorkspaceInventoryRequiresIdempotencyKeyBeforeServiceAccess(t 
 	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
 }
 
+func TestWSForkConversationRequiresIdentityAndMapsServiceError(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	handlers := NewHandlers(&orchestrator.Service{}, log)
+
+	missing := createTestMessage(t, ws.ActionSessionFork, map[string]interface{}{"task_id": "task-1"})
+	response, err := handlers.wsForkConversation(context.Background(), missing)
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
+
+	valid := createTestMessage(t, ws.ActionSessionFork, map[string]interface{}{
+		"task_id": "task-1", "session_id": "session-1", "turn_id": "turn-1",
+		"request_id": "7e9d7199-15bd-4fe3-897c-0861314a4be2",
+	})
+	response, err = handlers.wsForkConversation(context.Background(), valid)
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)
+}
+
 func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
 	err := &orchestrator.BranchRecoveryError{
@@ -172,4 +191,15 @@ func TestWsRespondToPermissionRequiresTaskAndRequestIdentity(t *testing.T) {
 			require.Equal(t, test.want, payload.Message)
 		})
 	}
+}
+
+func TestWsRecoverRelocationRequiresErrorStampBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "relocate_and_resume",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	require.Contains(t, payload.Message, "error_stamp")
 }

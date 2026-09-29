@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -221,6 +222,43 @@ func TestPrepareResumeRepositorySettings_GuestSessionReuseValidatesAgainstResolv
 	}
 	if !req.WorkspaceReuseRequired {
 		t.Fatalf("req.WorkspaceReuseRequired = false, want true for a live guest-session reuse")
+	}
+}
+
+func TestPrepareResumeRepositorySettings_DirtyCloneRelocationUsesSelectedWorktreeIdentity(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "feature/always",
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	canonicalRow := &models.TaskEnvironmentRepo{
+		ID: "env-repo-1", TaskEnvironmentID: "env-1", RepositoryID: "repo-1",
+		BranchSlug: "main", WorktreeID: "worktree-selected", Status: taskEnvironmentRepoStatusActive,
+	}
+	env := &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree),
+		MaterializationSessionID: "sess-owner", Repos: []*models.TaskEnvironmentRepo{canonicalRow},
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskEnvironmentRepos[env.ID] = []*models.TaskEnvironmentRepo{canonicalRow}
+
+	session := &models.TaskSession{
+		ID: "sess-guest", TaskID: "task-1", TaskEnvironmentID: "env-1", RepositoryID: "repo-1",
+		Worktrees: []*models.TaskEnvironmentRepo{canonicalRow},
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: session.ID, ExecutorType: string(models.ExecutorTypeWorktree)}
+	ctx := worktree.WithDirtyCloneRelocation(context.Background())
+
+	if _, _, _, err := e.prepareResumeRepositorySettings(ctx, &v1.Task{ID: "task-1"}, session, req, ResumeOptions{}); err != nil {
+		t.Fatalf("prepareResumeRepositorySettings() = %v, want nil for the exact selected relocated worktree", err)
+	}
+	if req.BranchIdentitySlug != canonicalRow.BranchSlug {
+		t.Fatalf("req.BranchIdentitySlug = %q, want selected environment identity %q", req.BranchIdentitySlug, canonicalRow.BranchSlug)
+	}
+	if req.WorktreeID != canonicalRow.WorktreeID {
+		t.Fatalf("req.WorktreeID = %q, want exact selected worktree %q", req.WorktreeID, canonicalRow.WorktreeID)
 	}
 }
 

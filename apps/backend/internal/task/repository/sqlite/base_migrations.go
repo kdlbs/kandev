@@ -185,6 +185,8 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("task_environment_repos.worktree_branch_owner", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown'`)
 	_ = r.migrate.Apply("task_environment_repos.worktree_integration_ref", `ALTER TABLE task_environment_repos ADD COLUMN worktree_integration_ref TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("task_environment_repos.worktree_recovery_head_sha", `ALTER TABLE task_environment_repos ADD COLUMN worktree_recovery_head_sha TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_source_clone_path", `ALTER TABLE task_environment_repos ADD COLUMN worktree_source_clone_path TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_source_common_dir", `ALTER TABLE task_environment_repos ADD COLUMN worktree_source_common_dir TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("task_environment_repos.worktree_branch_compacted_at", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_compacted_at TIMESTAMP`)
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
@@ -262,6 +264,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// only). Must run after migrateSessionsAddCostColumns so a legacy DB has
 	// the columns to widen before this ALTERs their type.
 	r.migrateTaskSessionsRollupColumnsToBigint()
+	r.migrateTaskUsageObservationColumns()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -297,6 +300,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
 	r.migrate.Apply("workspaces.task_sequence", `ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("workspaces.acp_idle_suspension_enabled", `ALTER TABLE workspaces ADD COLUMN acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.acp_idle_timeout_minutes", `ALTER TABLE workspaces ADD COLUMN acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0)`)
+	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("executors_running.idle_suspension_policy_updated_at", `ALTER TABLE executors_running ADD COLUMN idle_suspension_policy_updated_at TIMESTAMP`)
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,
@@ -362,6 +369,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("workflow_steps.complete_task_on_enter", `ALTER TABLE workflow_steps ADD COLUMN complete_task_on_enter INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
 	_ = r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'park'`)
+	_ = r.migrate.Apply("workflow_steps.disable_unclassified_fallback", `ALTER TABLE workflow_steps ADD COLUMN disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0`)
 	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
 	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.25). Kept
 	// compatible with databases whose workflow repository has not replayed its
@@ -474,6 +482,137 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			last_success_at      TIMESTAMP,
 			updated_at           TIMESTAMP NOT NULL
 		)`)
+
+	// Exact task command identity shares the task commit boundary. It has no
+	// foreign key because retained operation identities must survive task
+	// deletion and prevent an old command from being replayed after recovery.
+	_ = r.migrate.Apply("exact_task_command_operations.table", `
+		CREATE TABLE IF NOT EXISTS exact_task_command_operations (
+			operation_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			payload_digest TEXT NOT NULL,
+			result_resource_version TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`)
+	_ = r.migrate.Apply("exact_task_command_operations.task", `
+		CREATE INDEX IF NOT EXISTS idx_exact_task_command_operations_task
+			ON exact_task_command_operations(workspace_id, task_id, created_at)`)
+
+	// A task has at most one current management claim. Released claims remain
+	// as rows with an empty owner so the monotonically increasing generation
+	// cannot be reset by a later acquisition. The append-only history is kept
+	// separately so human takeover remains inspectable after owner changes.
+	_ = r.migrate.Apply("task_management_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_management_claims (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			owner_kind TEXT NOT NULL DEFAULT '' CHECK (owner_kind IN ('', 'plugin', 'human')),
+			owner_actor_id TEXT NOT NULL DEFAULT '',
+			installation_id TEXT NOT NULL DEFAULT '',
+			instance_key TEXT NOT NULL DEFAULT '',
+			generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+			resource_version TEXT NOT NULL,
+			acquired_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL,
+			updated_by_actor TEXT NOT NULL DEFAULT '',
+			CHECK ((owner_kind = '' AND owner_actor_id = '' AND installation_id = '' AND instance_key = '' AND acquired_at IS NULL) OR
+				(owner_kind = 'plugin' AND owner_actor_id = '' AND installation_id <> '' AND instance_key <> '' AND acquired_at IS NOT NULL) OR
+				(owner_kind = 'human' AND owner_actor_id <> '' AND installation_id = '' AND instance_key = '' AND acquired_at IS NOT NULL)),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_management_claims.workspace", `
+		CREATE INDEX IF NOT EXISTS idx_task_management_claims_workspace
+			ON task_management_claims(workspace_id, task_id)`)
+	_ = r.migrate.Apply("task_management_claim_history.table", `
+		CREATE TABLE IF NOT EXISTS task_management_claim_history (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			action TEXT NOT NULL CHECK (action IN ('acquired', 'released', 'transferred', 'human_superseded')),
+			previous_owner_kind TEXT NOT NULL DEFAULT '',
+			previous_owner_actor_id TEXT NOT NULL DEFAULT '',
+			previous_installation_id TEXT NOT NULL DEFAULT '',
+			previous_instance_key TEXT NOT NULL DEFAULT '',
+			installation_id TEXT NOT NULL DEFAULT '',
+			instance_key TEXT NOT NULL DEFAULT '',
+			owner_kind TEXT NOT NULL DEFAULT '' CHECK (owner_kind IN ('', 'plugin', 'human')),
+			owner_actor_id TEXT NOT NULL DEFAULT '',
+			generation INTEGER NOT NULL CHECK (generation >= 0),
+			actor_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			resource_version TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_management_claim_history.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_management_claim_history_task
+			ON task_management_claim_history(workspace_id, task_id, created_at, id)`)
+
+	// Task completion criteria remain task-owned and revisioned even when the
+	// current set is empty. Criterion evidence is replaced only by exact verify
+	// commands; history is append-only and is deleted with its task.
+	_ = r.migrate.Apply("task_completion_sets.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_sets (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_criteria.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_criteria (
+			task_id TEXT NOT NULL,
+			criterion_id TEXT NOT NULL,
+			description TEXT NOT NULL,
+			criterion_revision BIGINT NOT NULL CHECK (criterion_revision > 0),
+			subject_kind TEXT NOT NULL,
+			subject_id TEXT NOT NULL,
+			verified_revision BIGINT NOT NULL DEFAULT 0,
+			evidence_kind TEXT NOT NULL DEFAULT '',
+			evidence_id TEXT NOT NULL DEFAULT '',
+			evidence_revision TEXT NOT NULL DEFAULT '',
+			evidence_summary TEXT NOT NULL DEFAULT '',
+			evidence_reference TEXT NOT NULL DEFAULT '',
+			verifier_kind TEXT NOT NULL DEFAULT '',
+			verifier_id TEXT NOT NULL DEFAULT '',
+			verified_at TIMESTAMP,
+			PRIMARY KEY (task_id, criterion_id),
+			FOREIGN KEY (task_id) REFERENCES task_completion_sets(task_id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_gate_history.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_gate_history (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			action TEXT NOT NULL,
+			actor_kind TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			details TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_gate_history.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_history_task
+			ON task_completion_gate_history(workspace_id, task_id, created_at, id)`)
+	// Exact plugin completion commands retain their applied result so a retry
+	// after a lost receipt can return the same gate snapshot without replaying a
+	// criteria mutation under a stale revision.
+	_ = r.migrate.Apply("task_completion_gate_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_gate_operations (
+			operation_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			payload_digest TEXT NOT NULL,
+			result_json TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		) `)
+	_ = r.migrate.Apply("task_completion_gate_operations.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_operations_task
+			ON task_completion_gate_operations(workspace_id, task_id, created_at)`)
 
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup

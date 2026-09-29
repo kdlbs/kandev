@@ -91,8 +91,7 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
-	serviceCfg.OfficeSessionIdentity =
-		cfg != nil && cfg.Features.OfficeSessionIdentity
+	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -213,6 +212,8 @@ func provideOrchestrator(
 	// Wired unconditionally: dependencies are a core Kanban relationship, not an
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+	orchestratorSvc.SetBackgroundWorkObserver(taskSvc)
+	taskSvc.SetBackgroundWorkActionDispatcher(lifecycleMgr)
 
 	// Let the task service read the orchestrator's task-level
 	// parked_on_background_work OR-aggregate and its own monotonic revision so

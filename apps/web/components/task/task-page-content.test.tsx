@@ -1,10 +1,11 @@
-import { createElement, type ReactNode, useEffect } from "react";
+import { createElement, type ReactNode, useEffect, useState } from "react";
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import * as api from "@/lib/api";
 import { taskId, workflowId, workspaceId, type Task } from "@/lib/types/http";
 import { TaskLoadErrorState, useTaskDetails } from "./task-page-content";
+import { TaskRouteSessionHydrationProvider } from "./task-route-session-hydration";
 import { TaskRemovalBoundary } from "./task-removal-boundary";
 
 afterEach(() => {
@@ -49,6 +50,33 @@ describe("TaskLoadErrorState", () => {
 });
 
 describe("useTaskDetails reconnect refresh", () => {
+  it("retains a reconnect refresh until route hydration finishes", async () => {
+    const initialTask = { id: taskId(TASK_A), title: "Before reconnect" } as Task;
+    const refreshedTask = { ...initialTask, title: "After reconnect" };
+    const fetchTask = vi.spyOn(api, "fetchTask").mockResolvedValue(refreshedTask);
+    let setReady!: (ready: boolean) => void;
+    function Wrapper({ children }: { children: ReactNode }) {
+      const [isReady, updateReady] = useState(false);
+      setReady = updateReady;
+      return (
+        <StateProvider initialState={{ connection: { status: "disconnected" } } as never}>
+          <TaskRouteSessionHydrationProvider isReady={isReady}>
+            {children}
+          </TaskRouteSessionHydrationProvider>
+        </StateProvider>
+      );
+    }
+    const { result } = renderHook(
+      () => ({ details: useTaskDetails(TASK_A, initialTask), store: useAppStoreApi() }),
+      { wrapper: Wrapper },
+    );
+    act(() => result.current.store.getState().setConnectionStatus("connected"));
+    expect(fetchTask).not.toHaveBeenCalled();
+    act(() => setReady(true));
+    await waitFor(() => expect(result.current.details.task?.title).toBe("After reconnect"));
+    expect(fetchTask).toHaveBeenCalledTimes(1);
+  });
+
   it("reloads task placement after the websocket reconnects", async () => {
     const initialTask = {
       id: taskId(TASK_A),
@@ -71,6 +99,9 @@ describe("useTaskDetails reconnect refresh", () => {
       updated_at: "2026-07-19T00:00:00Z",
     };
     const fetchTask = vi.spyOn(api, "fetchTask").mockResolvedValue(movedTask);
+    const listTaskSessions = vi
+      .spyOn(api, "listTaskSessions")
+      .mockResolvedValue({ sessions: [], total: 0 });
     const wrapper = createStateWrapper({
       tasks: { activeTaskId: TASK_A },
       connection: { status: "disconnected" },
@@ -101,6 +132,7 @@ describe("useTaskDetails reconnect refresh", () => {
     act(() => result.current.store.getState().setConnectionStatus("connected"));
 
     await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_A, { cache: "no-store" }));
+    expect(listTaskSessions).toHaveBeenCalledWith(TASK_A, { cache: "no-store" });
     await waitFor(() => {
       expect(result.current.details.task).toMatchObject({
         workflow_id: "workflow-destination",
@@ -275,4 +307,32 @@ describe("TaskRemovalBoundary displayed identity", () => {
     await waitFor(() => expect(screen.getByTestId("displayed-task-content")).toBeTruthy());
     expect(screen.queryByTestId(REMOVAL_STATUS_TEST_ID)).toBeNull();
   });
+});
+
+describe("useTaskDetails route loading", () => {
+  it("does not duplicate task details while the route owns their load", () => {
+    const fetchTask = vi.spyOn(api, "fetchTask").mockImplementation(() => new Promise(() => {}));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider>
+        <TaskRouteSessionHydrationProvider isReady={false}>
+          {children}
+        </TaskRouteSessionHydrationProvider>
+      </StateProvider>
+    );
+    renderHook(() => useTaskDetails(TASK_B, null), { wrapper });
+    expect(fetchTask).not.toHaveBeenCalled();
+  });
+});
+
+it("uses newly hydrated route details without retaining the provisional task", () => {
+  const initial = { id: taskId(TASK_A), title: "Provisional task" } as Task;
+  const authoritative = { ...initial, title: "Authoritative task", repositories: [] };
+  const fetchTask = vi.spyOn(api, "fetchTask");
+  const { result, rerender } = renderHook(({ task }) => useTaskDetails(TASK_A, task), {
+    wrapper: createStateWrapper({}),
+    initialProps: { task: initial },
+  });
+  rerender({ task: authoritative });
+  expect(result.current.task).toBe(authoritative);
+  expect(fetchTask).not.toHaveBeenCalled();
 });

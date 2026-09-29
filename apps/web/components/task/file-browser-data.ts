@@ -9,6 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useTaskFolderAction } from "@/hooks/use-task-folder-action";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useFileBrowserSearch, useFileBrowserTree } from "./file-browser-hooks";
+import { useFileTreeCacheBinding } from "./file-browser-tree-state";
 import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
 
 export function getFileBrowserResetKey({
@@ -49,7 +50,8 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const search = useFileBrowserSearch(sessionId);
   const resetKey = useFileBrowserResetKey(sessionId, environmentId);
-  const treeState = useFileBrowserTree(sessionId, resetKey);
+  const cacheBinding = useFileTreeCacheBinding(environmentId ?? sessionId, resetKey);
+  const treeState = useFileBrowserTree(sessionId, resetKey, cacheBinding);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   const fileStatuses = useMemo(
     () =>
@@ -63,6 +65,7 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
     treeLoaded: isTreeLoaded,
   });
   return {
+    sessionId,
     isSessionFailed,
     sessionError,
     folderAction,

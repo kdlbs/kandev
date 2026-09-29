@@ -6,6 +6,26 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
+import type { ComboboxOption } from "./combobox";
+import { Button } from "@kandev/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@kandev/ui/command";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import {
   processFile,
@@ -54,6 +74,7 @@ import {
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 export { BranchSelector } from "./branch-selector";
 export type { BranchOption, BranchSelectorProps } from "./branch-selector";
@@ -135,6 +156,9 @@ type AgentSelectorProps = {
   placeholder: string;
   triggerClassName?: string;
   popoverPortal?: boolean;
+  touchTarget?: boolean;
+  testId?: string;
+  triggerId?: string;
 };
 
 export const AgentSelector = memo(function AgentSelector({
@@ -145,6 +169,9 @@ export const AgentSelector = memo(function AgentSelector({
   placeholder,
   triggerClassName,
   popoverPortal,
+  touchTarget,
+  testId,
+  triggerId,
 }: AgentSelectorProps) {
   const { t } = useTranslation();
   return (
@@ -160,7 +187,9 @@ export const AgentSelector = memo(function AgentSelector({
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
-      testId="agent-profile-selector"
+      touchTarget={touchTarget}
+      testId={testId ?? "agent-profile-selector"}
+      triggerId={triggerId}
     />
   );
 });
@@ -203,7 +232,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
 });
 
 type ExecutorProfileSelectorProps = {
-  options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  options: ComboboxOption[];
   value: string;
   onValueChange: (value: string) => void;
   disabled: boolean;
@@ -211,6 +240,94 @@ type ExecutorProfileSelectorProps = {
   triggerClassName?: string;
   popoverPortal?: boolean;
 };
+
+function TouchExecutorProfileSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  triggerClassName,
+}: ExecutorProfileSelectorProps) {
+  const { t } = useTranslation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+  return (
+    <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <DrawerTrigger asChild>
+        <Button
+          variant="ghost"
+          role="combobox"
+          aria-label={t("task:executorProfile2")}
+          aria-expanded={drawerOpen}
+          aria-haspopup="dialog"
+          disabled={disabled}
+          data-testid="executor-profile-selector"
+          className={cn("h-11 min-h-12 w-full justify-between", triggerClassName)}
+        >
+          <span className="min-w-0 truncate text-left">
+            {selected?.renderTriggerLabel?.() ??
+              selected?.renderLabel?.() ??
+              selected?.label ??
+              placeholder}
+          </span>
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent className="flex h-[min(82dvh,40rem)] max-h-[calc(100dvh-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
+        <DrawerHeader className="shrink-0 pr-12 text-left">
+          <DrawerTitle>{t("task:executorProfile2")}</DrawerTitle>
+          <DrawerDescription>{placeholder}</DrawerDescription>
+          <DrawerClose asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("common:close")}
+              className="absolute right-3 top-3 min-h-12 min-w-12"
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </DrawerClose>
+        </DrawerHeader>
+        <Command
+          className="min-h-0 flex-1 border-t"
+          data-testid="executor-profile-selector-dropdown"
+        >
+          <CommandInput placeholder={t("task:searchProfiles")} className="h-11 min-h-12" />
+          <CommandList className="min-h-0 flex-1 overflow-y-auto" data-vaul-no-drag>
+            <CommandEmpty>{t("task:noProfileFound")}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.value}
+                  value={option.value}
+                  keywords={[option.label, option.description ?? ""]}
+                  disabled={option.disabled}
+                  className="min-h-12 py-2"
+                  onSelect={() => {
+                    if (option.disabled) return;
+                    onValueChange(option.value);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <span className="flex min-w-0 flex-1 items-center">
+                    {option.renderLabel ? option.renderLabel() : option.label}
+                  </span>
+                  <IconCheck
+                    className={cn(
+                      "ml-2 h-4 w-4 shrink-0",
+                      option.value === value ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </DrawerContent>
+    </Drawer>
+  );
+}
 
 export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   options,
@@ -222,6 +339,19 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   popoverPortal,
 }: ExecutorProfileSelectorProps) {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  if (usesTouchDrawer) {
+    return (
+      <TouchExecutorProfileSelector
+        options={options}
+        value={value}
+        onValueChange={onValueChange}
+        disabled={disabled}
+        placeholder={placeholder}
+        triggerClassName={triggerClassName}
+      />
+    );
+  }
   return (
     <Combobox
       options={options}
@@ -770,6 +900,7 @@ function useCreationComposerPluginActions(args: {
         submittable: !args.disabled && args.description.trim().length > 0,
         composer,
       }}
+      actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />
   );
 }

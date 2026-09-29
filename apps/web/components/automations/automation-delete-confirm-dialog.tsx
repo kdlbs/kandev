@@ -42,10 +42,7 @@ export function AutomationDeleteConfirmDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel
-            disabled={isDeleting}
-            className="min-h-12 w-full cursor-pointer sm:min-h-9 sm:w-auto"
-          >
+          <AlertDialogCancel disabled={isDeleting} className="w-full cursor-pointer sm:w-auto">
             {t("common:cancel")}
           </AlertDialogCancel>
           <Button
@@ -53,7 +50,7 @@ export function AutomationDeleteConfirmDialog({
             variant="destructive"
             disabled={isDeleting}
             data-testid="automation-delete-confirm"
-            className="min-h-12 w-full cursor-pointer sm:min-h-9 sm:w-auto"
+            className="w-full cursor-pointer sm:w-auto"
             onClick={onConfirm}
           >
             {t("automations:delete")}

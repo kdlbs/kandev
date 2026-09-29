@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -14,7 +15,7 @@ const (
 	// agent receives from one history-list call.
 	DefaultPlanRevisionPageLimit = 20
 	// MaxPlanRevisionPageLimit bounds one agent history-list call.
-	MaxPlanRevisionPageLimit = 100
+	MaxPlanRevisionPageLimit = contract.MaxPlanRevisionPageLimit
 )
 
 var (

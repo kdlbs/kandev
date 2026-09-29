@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
-import type { ExecutorType } from "./executor";
+import type { ExecutorProvider, ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -23,7 +23,7 @@ import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
-export type { ExecutorType } from "./executor";
+export type { ExecutorProvider, ExecutorProviderCapabilities, ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 export type {
   SavedLayout,
@@ -130,6 +130,7 @@ export type StepDefinition = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
@@ -159,6 +160,7 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
   complete_task_on_enter?: boolean;
   wip_limit?: number;
@@ -312,6 +314,8 @@ export type Workspace = {
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
   default_config_agent_profile_id?: AgentProfileId | null;
+  acp_idle_suspension_enabled: boolean;
+  acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;
@@ -556,6 +560,7 @@ export type WorkflowStepDTO = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
@@ -811,6 +816,52 @@ export type ListTasksResponse = {
   total: number;
 };
 
+export type SidebarTaskQuery = {
+  filters: Array<{
+    dimension: string;
+    op: string;
+    value: string | string[] | boolean;
+  }>;
+  sort: { key: string; direction: string };
+  group: string;
+  collapsed_group_keys: string[];
+  collapsed_task_ids: string[];
+  page: number;
+  page_size: number;
+  locale: string;
+};
+
+export type SidebarTaskPageEntry = {
+  kind: "task" | "group" | "continuation";
+  task_id?: string;
+  task?: Task;
+  group_key?: string;
+  group_label?: string;
+  workflow_name?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
+  depth?: number;
+  parent_id?: string;
+  parent_title?: string;
+  continuation?: boolean;
+  matching_count?: number;
+  wip_queue_position?: number;
+  wip_queue_total?: number;
+  subtask_count?: number;
+};
+
+export type SidebarTaskPageResponse = {
+  query_key: string;
+  page: number;
+  page_size: number;
+  total_entries: number;
+  total_tasks: number;
+  total_visible_tasks: number;
+  has_previous: boolean;
+  has_next: boolean;
+  entries: SidebarTaskPageEntry[];
+};
+
 export type ListRepositorySetsResponse = {
   repository_sets: RepositorySet[];
   total: number;
@@ -906,6 +957,7 @@ export type Executor = {
   is_system: boolean;
   config?: Record<string, string>;
   profiles?: ExecutorProfile[];
+  provider?: ExecutorProvider;
   created_at: string;
   updated_at: string;
 };
@@ -924,6 +976,8 @@ export type ExecutorProfile = {
   name: string;
   mcp_policy?: string;
   config?: Record<string, string>;
+  secret_fields?: Record<string, boolean>;
+  provider?: ExecutorProvider;
   prepare_script: string;
   cleanup_script: string;
   env_vars?: ProfileEnvVar[];
@@ -1067,6 +1121,7 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;

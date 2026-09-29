@@ -77,6 +77,7 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
             r"uses: actions/checkout@[0-9a-f]{40} # v[0-9]+",
         )
         self.assertIn("persist-credentials: false", self.workflow)
+        self.assertIn("TRUSTED_CHECKOUT_SHA: ${{ env.CHECKOUT_REF }}", self.workflow)
         self.assertIn("github.event.merge_group.base_sha", self.workflow)
         self.assertNotIn("github.event.pull_request.head.sha", self.workflow)
         self.assertIn("ref: ${{ env.CHECKOUT_REF }}", self.workflow)
@@ -86,6 +87,17 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertIn("node .github/scripts/pr-docs.cjs", self.workflow)
         self.assertIn("name: Publish PR documentation coverage status", self.workflow)
         self.assertNotIn("name: PR documentation coverage\n", self.workflow)
+        git_reader = (REPO_ROOT / ".github" / "scripts" / "pr-docs-git.cjs").read_text(
+            encoding="utf-8"
+        )
+        validator = (REPO_ROOT / ".github" / "scripts" / "pr-docs.cjs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("refs/pull/${this.pullNumber}/head", git_reader)
+        self.assertIn("--filter=blob:none", git_reader)
+        self.assertIn("--no-textconv", git_reader)
+        self.assertNotIn("/search/code", validator)
+        self.assertNotIn("searchCode(", validator)
 
     # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.1, AC-CI-PR-DOCS-003.2
     def test_dispatch_is_restricted_to_the_default_branch_and_script_owns_statuses(self) -> None:
@@ -109,10 +121,13 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertRegex(
             lint_workflow,
             r"(?m)^      - name: Test pull request documentation validator$\n"
-            r"^        run: node --test .github/scripts/pr-docs.test.cjs$",
+            r"^        run: node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs$",
         )
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("@node --test .github/scripts/pr-docs.test.cjs", makefile)
+        self.assertIn(
+            "@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs",
+            makefile,
+        )
 
 
 if __name__ == "__main__":

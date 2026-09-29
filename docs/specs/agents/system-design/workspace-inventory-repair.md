@@ -35,6 +35,12 @@ required repository slots from canonical task-repository records and resolves
 the environment from the session. Caller-provided paths, repository IDs,
 branches, and environment IDs are not accepted.
 
+Explicit inventory repair bypasses the generic filesystem-recovery preflight.
+Its executor path proves and attests the preserved checkout before normal
+worktree recovery admission; clone relocation and missing-checkout restoration
+cannot run before that proof. Other recovery actions retain their preflight,
+including the error-stamp fence for managed-clone relocation.
+
 ## Candidate selection and checkout proof
 
 For one mismatched slot, the executor builds a candidate from an existing stale

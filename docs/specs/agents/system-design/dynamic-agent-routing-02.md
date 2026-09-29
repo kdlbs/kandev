@@ -115,8 +115,9 @@ require the current exclusive probe lease.
   the earliest known recovery time and remediation actions.
 - If a route action carries a stale generation, Kandev does not change route
   state and returns the authoritative route snapshot.
-- If an error is unclassified, stale, conflicting, or effect-unsafe, Kandev
-  does not apply its candidate class policy and enters manual recovery.
+- If an error is unclassified, Kandev enters manual recovery except for the
+  [repeated-failure extension](dynamic-unclassified-fallback.md). Stale,
+  conflicting, and effect-unsafe evidence never authorizes that extension.
 - If an ACP diagnostic is followed by a matching high-confidence terminal
   provider error before any other output or tool activity, the transcript keeps
   the diagnostic but the shared recovery evidence treats the attempt as

@@ -301,6 +301,41 @@ The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspa
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
 
+### Query sidebar tasks over HTTP
+
+The web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+
+```json
+{
+  "filters": [{ "dimension": "archived", "op": "is", "value": false }],
+  "sort": { "key": "lastActivityAt", "direction": "desc" },
+  "group": "none",
+  "collapsed_group_keys": [],
+  "collapsed_task_ids": [],
+  "page": 1,
+  "page_size": 100,
+  "locale": "en"
+}
+```
+
+`page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
+
+The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
+
+A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
+accepts up to 1,000 values, including an empty list. Each decoded string is
+limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
+Repository values are repository names, while workflow values are workflow IDs.
+
+Invalid queries return HTTP 400 with the existing `error` string and an additive
+`error_code: "sidebar_query_invalid"`. The `details` object includes a stable
+`reason` and, where relevant, a zero-based `filter_index` and numeric `limit`.
+Reasons include `list_count`, `scalar_length`, `clause_count`, `invalid_clause`,
+`malformed_query`, `page_bounds`, `sorting`, `grouping`, `collapsed_count`, and
+`locale`. Clients should render their own localized recovery message and treat
+unknown reasons as invalid input. Authorization failures remain separate from
+query validation.
+
 ### Send a user turn
 
 `message.add` requires `task_id`, `session_id`, and either non-whitespace `content` or at least one attachment. Optional fields are `author_id`, `model`, `plan_mode`, `has_review_comments`, `attachments`, `context_files`, and `entity_references`.
@@ -915,7 +950,7 @@ Routing is an efficiency mechanism, not the access-control boundary. With authen
 
 Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions.
 
-The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. With the restart-required `features.lspBrowserContinuity` flag enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
+The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. Browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` flag remains as a kill switch; an explicit false value restores browser-owned cleanup. With continuity enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
 
 The browser shows **Reconnecting** for an uncertain transport loss and retries attachment. A browser-reported `1005` or `1006`, graceful backend restart close `1001`, or backend transport close `4009` does not confirm that the language-server process exited. Close `4006` means the task-host process exited; the editor clears that generation's providers and diagnostics and offers **Retry**. Close `4010` means the task runtime stopped, so the editor ends the lease without reconnecting it. A backend restart releases leases, so the next connection starts a fresh process and repeats project analysis.
 

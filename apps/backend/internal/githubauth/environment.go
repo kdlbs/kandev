@@ -1,6 +1,10 @@
 package githubauth
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/kandev/kandev/internal/gitconfigenv"
+)
 
 const (
 	CredentialBrokerURLEnv         = "KANDEV_GITHUB_CREDENTIAL_BROKER_URL"
@@ -68,4 +72,44 @@ func IsHostGitHubCredentialHelperEntry(key, value string) bool {
 	return strings.HasPrefix(key, "credential.https://") &&
 		strings.HasSuffix(key, ".helper") &&
 		IsHostGitHubCredentialHelper(value)
+}
+
+// IsManagedGitCredentialConfigEntry identifies a generated managed helper and
+// its adjacent reset/useHttpPath entries. An unmarked legacy helper is owned
+// only when the inherited environment contains a managed broker contract.
+func IsManagedGitCredentialConfigEntry(index int, entries []gitconfigenv.Entry, managed bool) bool {
+	entry := entries[index]
+	if strings.EqualFold(entry.Key, "credential.useHttpPath") && entry.Value == "true" && index > 0 {
+		previous := entries[index-1]
+		_, ok := managedGitCredentialHelperScope(previous.Key)
+		return ok && isManagedGitCredentialHelper(previous.Value, managed)
+	}
+	scope, ok := managedGitCredentialHelperScope(entry.Key)
+	if !ok {
+		return false
+	}
+	if isManagedGitCredentialHelper(entry.Value, managed) {
+		return true
+	}
+	if entry.Value != "" || index+1 >= len(entries) {
+		return false
+	}
+	next := entries[index+1]
+	nextScope, ok := managedGitCredentialHelperScope(next.Key)
+	return ok && scope == nextScope && isManagedGitCredentialHelper(next.Value, managed)
+}
+
+func managedGitCredentialHelperScope(key string) (string, bool) {
+	normalized := strings.ToLower(key)
+	const prefix, suffix = "credential.", ".helper"
+	if !strings.HasPrefix(normalized, prefix+"https://") || !strings.HasSuffix(normalized, suffix) {
+		return "", false
+	}
+	// Git section and variable names ignore case; URL subsections do not.
+	return key[len(prefix) : len(key)-len(suffix)], true
+}
+
+func isManagedGitCredentialHelper(value string, managed bool) bool {
+	return value == ManagedGitCredentialHelper || value == LegacyShimGitCredentialHelper ||
+		(managed && value == LegacyGitCredentialHelper)
 }

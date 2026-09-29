@@ -67,6 +67,14 @@ func (h *postRemovalSwapDirectoryHandle) RemoveDirectory(context.Context) error 
 	return os.Rename(h.path, h.replacementPath)
 }
 
+func (h *postRemovalSwapDirectoryHandle) CreateSubdirectory(string, os.FileMode) (storageworkspaces.DirectoryHandle, error) {
+	return nil, os.ErrNotExist
+}
+
+func (h *postRemovalSwapDirectoryHandle) ProcessPath(int) (string, *os.File, error) {
+	return "", nil, os.ErrNotExist
+}
+
 func (h *postRemovalSwapDirectoryHandle) ReadFile(string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }

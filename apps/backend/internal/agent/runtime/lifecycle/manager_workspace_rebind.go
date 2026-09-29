@@ -266,7 +266,9 @@ func (m *Manager) reapplyReboundSessionConfig(
 			}
 		}
 	}
-	m.reapplySessionModeAfterReset(ctx, execution, sessionID, mode)
+	if err := m.reapplySessionModeAfterReset(ctx, execution, sessionID, mode); err != nil {
+		return fmt.Errorf("restore permission mode after workspace rebind: %w", err)
+	}
 	return nil
 }
 

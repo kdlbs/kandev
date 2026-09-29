@@ -37,6 +37,11 @@ type Instance struct {
 	// Port is the HTTP port this instance is listening on
 	Port int
 
+	lease PortLease
+
+	listenerActive atomic.Bool
+	listenerDone   chan struct{}
+
 	// Status is the current status of the instance (e.g., "running", "stopped", "error")
 	Status string
 
@@ -148,6 +153,11 @@ type CreateRequest struct {
 	// Protocol is the protocol adapter to use (acp). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
+	// CodexAppServerEnabled is an explicit backend decision for native Codex
+	// instances. The control API defaults to disabled so callers cannot select
+	// this protocol by supplying only a protocol string.
+	CodexAppServerEnabled bool `json:"codex_app_server_enabled,omitempty"`
+
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
 	// Required for debug file naming. Typically matches the agent ID from the registry.
 	AgentType string `json:"agent_type,omitempty"`
@@ -240,6 +250,12 @@ type InstanceInfo struct {
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
 
+	// LeaseGeneration is the allocator-local generation for this instance's port.
+	LeaseGeneration uint64 `json:"lease_generation"`
+
+	// ListenerActive reports whether the instance HTTP server's Serve call is active.
+	ListenerActive bool `json:"listener_active"`
+
 	// Status is the current status of the instance
 	Status string `json:"status"`
 
@@ -301,6 +317,8 @@ func (i *Instance) Info() *InstanceInfo {
 	return &InstanceInfo{
 		ID:                   i.ID,
 		Port:                 i.Port,
+		LeaseGeneration:      i.lease.Generation,
+		ListenerActive:       i.listenerActive.Load(),
 		Status:               i.Status,
 		WorkspacePath:        i.WorkspacePath,
 		AgentCommand:         i.AgentCommand,

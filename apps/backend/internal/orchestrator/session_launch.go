@@ -5,13 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+const (
+	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
+	recoveryActionResume                   = "resume"
+	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
+	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionRuntimeRetry             = "runtime_retry"
 )
 
 // sessionTerminalErrText mirrors lifecycle.ErrSessionTerminal's message. It is
@@ -37,8 +47,9 @@ const (
 type LaunchActivationSource string
 
 const (
-	LaunchActivationSourceUserAction  LaunchActivationSource = "user_action"
-	LaunchActivationSourceSessionOpen LaunchActivationSource = "session_open"
+	LaunchActivationSourceUserAction   LaunchActivationSource = "user_action"
+	LaunchActivationSourceSessionOpen  LaunchActivationSource = "session_open"
+	LaunchActivationSourceSessionFocus LaunchActivationSource = "session_focus"
 
 	activationDispositionSuppressed = "suppressed"
 	activationDispositionQueued     = "queued"
@@ -130,6 +141,9 @@ type LaunchSessionRequest struct {
 	// ordinary launch, ensure, and startup recovery paths must keep completed
 	// sessions terminal.
 	AllowCompletedSessionResume bool `json:"-"`
+	// RequireIdleSuspensionProvenance is granted only by the explicit focus
+	// activation source and is never accepted as a client field.
+	RequireIdleSuspensionProvenance bool `json:"-"`
 	// ActivationSource distinguishes passive task opening from an explicit
 	// launch action. An omitted value preserves the existing behavior.
 	ActivationSource LaunchActivationSource `json:"activation_source,omitempty"`
@@ -219,6 +233,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return nil, errors.New("session_open activation cannot include a prompt")
 	}
 	intent := ResolveIntent(req)
+	if err := validateFocusActivationIntent(req); err != nil {
+		return nil, err
+	}
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
 	// Launching a session starts an agent turn: session.prompt.
@@ -261,8 +278,19 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 }
 
 func validateLaunchActivationSource(source LaunchActivationSource) error {
-	if source != "" && source != LaunchActivationSourceUserAction && source != LaunchActivationSourceSessionOpen {
+	if source != "" && source != LaunchActivationSourceUserAction &&
+		source != LaunchActivationSourceSessionOpen && source != LaunchActivationSourceSessionFocus {
 		return fmt.Errorf("unknown launch activation source %q", source)
+	}
+	return nil
+}
+
+func validateFocusActivationIntent(req *LaunchSessionRequest) error {
+	if req == nil || req.ActivationSource != LaunchActivationSourceSessionFocus {
+		return nil
+	}
+	if ResolveIntent(req) != IntentResume || strings.TrimSpace(req.Prompt) != "" {
+		return errors.New("session_focus activation requires a promptless resume intent")
 	}
 	return nil
 }
@@ -524,6 +552,24 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req.ActivationSource == LaunchActivationSourceSessionFocus {
+		execution, session, resumed, err := s.focusTaskSession(ctx, req.TaskID, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !resumed {
+			return &LaunchSessionResponse{
+				Success:               true,
+				TaskID:                req.TaskID,
+				SessionID:             req.SessionID,
+				State:                 sessionStateOrEmpty(session),
+				AgentProfileID:        sessionProfileOrEmpty(session),
+				ActivationDisposition: activationDispositionSuppressed,
+				ActivationReason:      "idle_suspension_not_current",
+			}, nil
+		}
+		return executionToLaunchResponse(req.TaskID, execution), nil
+	}
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	resumeCtx := ctx
 	if req.ActivationSource == LaunchActivationSourceSessionOpen {
@@ -535,6 +581,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		WorkspaceInventoryIdempotencyKey: req.WorkspaceInventoryIdempotencyKey,
 		AllowCompletedSessionResume:      req.AllowCompletedSessionResume,
 		Origin:                           string(launchOriginForActivation(req)),
+		RequireIdleSuspensionProvenance:  req.RequireIdleSuspensionProvenance,
 	})
 	if err != nil {
 		var blocked *sessionOpenRecoveryBlockedError
@@ -797,15 +844,20 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	return resp, nil
 }
 
-// RecoverSession handles user-initiated recovery after an agent CLI failure.
-// action selects one of the explicit retry, branch replacement, fresh start,
-// or preservation-only inventory repair paths.
+// RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
 	IdempotencyKey string
+	ErrorStamp     string
 }
 
-func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
-	return s.RecoverSessionWithOptions(ctx, taskID, sessionID, action, RecoverSessionOptions{})
+// RecoverSession handles explicit retry, branch replacement, fresh start, and
+// stamp-fenced managed clone relocation after an agent CLI failure.
+func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string, errorStamps ...string) (*LaunchSessionResponse, error) {
+	options := RecoverSessionOptions{}
+	if len(errorStamps) > 0 {
+		options.ErrorStamp = errorStamps[0]
+	}
+	return s.RecoverSessionWithOptions(ctx, taskID, sessionID, action, options)
 }
 
 func (s *Service) RecoverSessionWithOptions(
@@ -825,44 +877,202 @@ func (s *Service) RecoverSessionWithOptions(
 	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
 		return nil, err
 	}
-	if action == "runtime_retry" {
-		if s.wasResumeAttempt(ctx, sessionID) {
-			action = "resume"
-		} else {
-			action = "fresh_start"
-		}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session for recovery: %w", err)
 	}
-	switch action {
-	case "fresh_start":
-		if err := s.clearResumeToken(ctx, sessionID); err != nil {
-			return nil, fmt.Errorf("failed to clear resume token for fresh start: %w", err)
-		}
-	case "resume":
-		// no-op — relaunch with existing resume token
-	case "resume_new_branch":
-		// The launch carries the explicit permission. It is not persisted on the
-		// session and cannot be inferred from a previous failed attempt.
-	case "repair_workspace_inventory":
-		if strings.TrimSpace(options.IdempotencyKey) == "" {
-			return nil, models.ErrWorkspaceInventoryRecoveryInvalid
-		}
-	default:
-		return nil, fmt.Errorf("invalid recovery action: %s", action)
+	if session == nil || session.TaskID != taskID {
+		return nil, fmt.Errorf("session not found")
+	}
+	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
+	if err != nil {
+		return nil, err
+	}
+	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, []string{options.ErrorStamp})
+	if err != nil {
+		return nil, err
 	}
 
-	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
+	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	if err != nil {
+		return nil, err
+	}
+	if recoveryAdmission != nil {
+		defer func() { _ = recoveryAdmission.Release(context.WithoutCancel(ctx)) }()
+		launchCtx = worktree.WithRecoveryAdmission(launchCtx, recoveryAdmission)
+	}
+
+	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
+		return nil, err
+	}
+
+	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 		TaskID:                           taskID,
 		SessionID:                        sessionID,
 		Intent:                           IntentResume,
-		AllowBranchReplacement:           action == "resume_new_branch",
-		AllowCompletedSessionResume:      action == "resume",
-		RepairWorkspaceInventory:         action == "repair_workspace_inventory",
+		AllowBranchReplacement:           action == recoveryActionResumeNewBranch,
+		AllowCompletedSessionResume:      action == recoveryActionResume,
+		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}
 	return resp, nil
+}
+
+func (s *Service) preflightSessionRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	action string,
+) (*worktree.RecoveryAdmission, error) {
+	// Inventory repair must attest the original checkout before any filesystem
+	// recovery can modify it. Its executor path validates inventory first.
+	if action == recoveryActionRepairWorkspaceInventory {
+		return nil, nil
+	}
+	admission, err := s.executor.PreflightSessionWorktreeRecovery(
+		ctx, taskID, session, action == recoveryActionResumeNewBranch,
+	)
+	if err != nil {
+		branchError := s.branchRecoveryError(ctx, taskID, session.ID, err)
+		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, branchError)
+	}
+	return admission, nil
+}
+
+func normalizeSessionRecoveryAction(
+	ctx context.Context,
+	sessionID, action string,
+	wasResumeAttempt func(context.Context, string) bool,
+) (string, error) {
+	if action == recoveryActionRuntimeRetry {
+		if wasResumeAttempt(ctx, sessionID) {
+			action = recoveryActionResume
+		} else {
+			action = recoveryActionFreshStart
+		}
+	}
+	if action != recoveryActionResume && action != recoveryActionResumeNewBranch &&
+		action != recoveryActionFreshStart && action != models.RecoveryActionRelocateAndResume &&
+		action != recoveryActionRepairWorkspaceInventory {
+		return "", fmt.Errorf("invalid recovery action: %s", action)
+	}
+	return action, nil
+}
+
+func (s *Service) prepareManagedCloneRelocationRecovery(
+	ctx context.Context,
+	session *models.TaskSession,
+	action string,
+	errorStamps []string,
+) (context.Context, error) {
+	if action != models.RecoveryActionRelocateAndResume {
+		return ctx, nil
+	}
+	stamp := ""
+	if len(errorStamps) > 0 {
+		stamp = errorStamps[0]
+	}
+	if !isManagedCloneRelocationAuthorized(session, session.TaskID, stamp) {
+		return nil, &ManagedCloneRelocationRecoveryError{Stale: true}
+	}
+	ctx = worktree.WithDirtyCloneRelocation(ctx)
+	return worktree.WithManagedCloneRelocationAuthorization(ctx, func(checkCtx context.Context) error {
+		current, err := s.repo.GetTaskSession(checkCtx, session.ID)
+		if err != nil || !isManagedCloneRelocationAuthorized(current, session.TaskID, stamp) {
+			return worktree.ErrManagedCloneRelocationAuthorizationStale
+		}
+		return nil
+	}), nil
+}
+
+func isManagedCloneRelocationAuthorized(session *models.TaskSession, taskID, stamp string) bool {
+	if session == nil || session.ID == "" || session.TaskID != taskID || stamp == "" ||
+		(session.State != models.TaskSessionStateCancelled && session.State != models.TaskSessionStateFailed &&
+			session.State != models.TaskSessionStateWaitingForInput) {
+		return false
+	}
+	lastError, ok := models.LoadLastAgentError(session.Metadata)
+	return ok && !lastError.IsDismissed() &&
+		lastError.Code == models.LaunchErrorCategoryManagedCloneRelocationRequired && lastError.MatchesStamp(stamp)
+}
+
+func (s *Service) managedCloneRelocationPreflightError(
+	ctx context.Context,
+	session *models.TaskSession,
+	action string,
+	preflightErr error,
+) error {
+	if errors.Is(preflightErr, worktree.ErrManagedCloneRelocationAuthorizationStale) {
+		return &ManagedCloneRelocationRecoveryError{Stale: true}
+	}
+	var relocationRequired *worktree.ManagedCloneRelocationRequiredError
+	if !errors.As(preflightErr, &relocationRequired) {
+		return preflightErr
+	}
+	if action == models.RecoveryActionRelocateAndResume {
+		return currentManagedCloneRelocationError(session)
+	}
+	stamp, err := s.persistManagedCloneRelocationRequired(ctx, session)
+	if err != nil {
+		return err
+	}
+	return &ManagedCloneRelocationRecoveryError{Stamp: stamp}
+}
+
+func currentManagedCloneRelocationError(session *models.TaskSession) error {
+	lastError, ok := models.LoadLastAgentError(session.Metadata)
+	if ok && !lastError.IsDismissed() && lastError.Code == models.LaunchErrorCategoryManagedCloneRelocationRequired {
+		return &ManagedCloneRelocationRecoveryError{Stamp: lastError.Stamp()}
+	}
+	return &ManagedCloneRelocationRecoveryError{Stale: true}
+}
+
+func (s *Service) applySessionRecoveryAction(ctx context.Context, sessionID, action string) error {
+	if action != recoveryActionFreshStart {
+		return nil
+	}
+	if err := s.clearResumeToken(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to clear resume token for fresh start: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) persistManagedCloneRelocationRequired(
+	ctx context.Context,
+	session *models.TaskSession,
+) (string, error) {
+	if session == nil || session.ID == "" {
+		return "", fmt.Errorf("session identity is required for recovery state")
+	}
+	if current, ok := models.LoadLastAgentError(session.Metadata); ok && !current.IsDismissed() &&
+		current.Code == models.LaunchErrorCategoryManagedCloneRelocationRequired &&
+		len(current.RecoveryActions) == 1 && current.RecoveryActions[0] == models.RecoveryActionRelocateAndResume {
+		return current.Stamp(), nil
+	}
+	now := time.Now().UTC()
+	errorValue := models.LastAgentError{
+		Message:         "The task workspace contains local changes and needs explicit relocation.",
+		OccurredAt:      now,
+		Scope:           models.ErrorScopeSession,
+		Phase:           models.LaunchErrorPhaseBootstrap,
+		Code:            models.LaunchErrorCategoryManagedCloneRelocationRequired,
+		Details:         "Move the workspace files and resume to continue this task session.",
+		RecoveryActions: []string{models.RecoveryActionRelocateAndResume},
+		StampValue: models.StableLaunchErrorStamp(
+			session.TaskID, session.ID, models.LaunchErrorCategoryManagedCloneRelocationRequired,
+			now.Format(time.RFC3339Nano),
+		),
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyLastAgentError, errorValue); err != nil {
+		return "", fmt.Errorf("persist workspace recovery options: %w", err)
+	}
+	return errorValue.Stamp(), nil
 }
 
 // normalizeRecoverSessionError maps a missing-profile resume failure to a

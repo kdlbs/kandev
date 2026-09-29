@@ -45,6 +45,10 @@ Implemented and verified: focused executor, orchestrator, handlers, worktree,
 and sqlite suites pass, including the PostgreSQL same-key concurrency and
 convergence test run against a disposable PostgreSQL fixture.
 
+Upstream conflict integration preserves both recovery contracts and adds a
+regression for inventory proof before filesystem recovery. Local affected-package
+tests pass; current-head GitHub CI and review validation remain pending.
+
 ## Risks
 
 - Reciprocal-identity proof must never trust caller-supplied paths; all

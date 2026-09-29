@@ -116,6 +116,7 @@ GET    /api/v1/system/info                        - versions, commit, build time
 GET    /api/v1/system/disk-usage                  - cached breakdown + computedAt; null while computing
 POST   /api/v1/system/disk-usage/refresh          - kick async recompute; 202
 GET    /api/v1/system/database                    - driver, path, sizeBytes, walSizeBytes, schemaVersion, lastBackupAt
+POST   /api/v1/system/database/refresh             - request a logical-stat scan retry; 204
 POST   /api/v1/system/database/vacuum             - 202 + jobId
 POST   /api/v1/system/database/optimize           - 202 + jobId
 POST   /api/v1/system/database/reset              - factory reset; body { confirm: "RESET" }

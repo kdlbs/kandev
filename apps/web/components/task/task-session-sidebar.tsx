@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
-import { linkToTask, replaceTaskUrl } from "@/lib/links";
-import type { Repository, TaskSessionState } from "@/lib/types/http";
+import { linkToTask } from "@/lib/links";
+import type { Repository, SidebarTaskPageResponse, TaskSessionState } from "@/lib/types/http";
+import type { AggregatedSidebarTasks } from "./task-session-sidebar-aggregate";
+import type { SidebarItemContext } from "./task-session-sidebar-item";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
-import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
@@ -21,24 +22,27 @@ import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import {
   buildSwitchToSession,
   effectiveTaskPendingAction,
   selectTaskWithLayout,
 } from "./task-select-helpers";
-import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
-import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
+import { groupSidebarTaskPage } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
-import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import { buildSidebarItem } from "./task-session-sidebar-item";
 import { useSidebarTaskEdit } from "./task-session-sidebar-edit";
 import { TaskMoveErrorBanner } from "./task-move-error-banner";
 import { useMoveToStep } from "./task-session-sidebar-move";
+import { SidebarTaskPageContent } from "./sidebar-task-page-content";
+import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
+import { applyView } from "@/lib/sidebar/apply-view";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { applySidebarPageMetadata } from "./sidebar-page-metadata";
+import { findSidebarTask } from "./task-session-sidebar-task-lookup";
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -47,14 +51,66 @@ type TaskSessionSidebarProps = {
   hideFilterBar?: boolean;
 };
 
-function findSidebarTask(state: ReturnType<StoreApi["getState"]>, taskId: string) {
-  const activeTask = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-  if (activeTask) return activeTask;
-  for (const tasks of Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {})) {
-    const archivedTask = tasks.find((task) => task.id === taskId);
-    if (archivedTask) return archivedTask;
-  }
-  return undefined;
+const EMPTY_SIDEBAR_TASKS: AggregatedSidebarTasks["allTasks"] = [];
+
+function buildSidebarTaskItems(params: {
+  workspaceId: string | null;
+  repositoriesByWorkspace: Record<string, Repository[]>;
+  allTasks: AggregatedSidebarTasks["allTasks"];
+  allSteps: AggregatedSidebarTasks["allSteps"];
+  pageEntries: SidebarTaskPageResponse["entries"];
+  workflows: Array<{ id: string; name: string }>;
+  wipQueueByTaskId: Map<string, WipQueueStatus>;
+  acknowledgedAgentErrors: Record<string, string>;
+  dismissedAgentErrors: Record<string, string>;
+  automaticColorSettings: SidebarItemContext["automaticColorSettings"];
+  pendingArchiveTaskIds: ReadonlySet<string>;
+}): ReturnType<typeof buildSidebarItem>[] {
+  const {
+    workspaceId,
+    repositoriesByWorkspace,
+    allTasks,
+    allSteps,
+    pageEntries,
+    workflows,
+    wipQueueByTaskId,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+    automaticColorSettings,
+    pendingArchiveTaskIds,
+  } = params;
+  const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
+  const repositorySlugById = new Map(repositories.map((repo) => [repo.id, repositorySlug(repo)]));
+  const repositoriesById = new Map(
+    Object.values(repositoriesByWorkspace)
+      .flat()
+      .map((repo) => [repo.id, repo]),
+  );
+  const stepColorById = new Map(allSteps.map((step) => [step.id, step.color]));
+  const titleById = new Map(allTasks.map((task) => [task.id, task.title]));
+  const workflowNameById = new Map(workflows.map((workflow) => [workflow.id, workflow.name]));
+  const stepTitleById = new Map(allSteps.map((step) => [step.id, step.title]));
+  applySidebarPageMetadata(pageEntries, {
+    titleById,
+    workflowNameById,
+    stepTitleById,
+    stepColorById,
+  });
+  const context: SidebarItemContext = {
+    repositorySlugById,
+    titleById,
+    workflowNameById,
+    stepTitleById,
+    wipQueueByTaskId,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+    workspaceId: workspaceId ?? undefined,
+    repositoriesById,
+    stepColorById,
+    automaticColorSettings,
+    pendingArchiveTaskIds,
+  };
+  return allTasks.map((task) => buildSidebarItem(task, context));
 }
 
 export function useSidebarData(workspaceId: string | null) {
@@ -67,7 +123,6 @@ export function useSidebarData(workspaceId: string | null) {
   const automaticColorSettings = useAppStore(
     (state) => state.userSettings.sidebarTaskColorAutomation,
   );
-  const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -79,6 +134,8 @@ export function useSidebarData(workspaceId: string | null) {
     pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
+    page,
+    pageEntries,
     wipQueueByTaskId,
     workflows,
     isLoading: isLoadingWorkflow,
@@ -90,56 +147,35 @@ export function useSidebarData(workspaceId: string | null) {
     retryWorkspaceContext,
   } = useWorkspaceSidebarTasks(workspaceId);
 
-  const tasksWithRepositories = useMemo(() => {
-    const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
-    const repositorySlugById = new Map(
-      repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
-    );
-    const repositoriesById = new Map(
-      Object.values(repositoriesByWorkspace)
-        .flat()
-        .map((repo: Repository) => [repo.id, repo]),
-    );
-    const stepColorById = new Map(allSteps.map((step) => [step.id, step.color]));
-    const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
-    const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));
-    const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
-    const mapCtx = {
-      repositorySlugById,
-      titleById,
-      workflowNameById,
-      stepTitleById,
+  const tasksWithRepositories = useMemo(
+    () =>
+      buildSidebarTaskItems({
+        workspaceId,
+        repositoriesByWorkspace,
+        allTasks,
+        allSteps,
+        pageEntries,
+        workflows,
+        wipQueueByTaskId,
+        acknowledgedAgentErrors,
+        dismissedAgentErrors,
+        automaticColorSettings,
+        pendingArchiveTaskIds,
+      }),
+    [
+      repositoriesByWorkspace,
+      allTasks,
+      allSteps,
+      pageEntries,
+      workflows,
+      workspaceId,
       wipQueueByTaskId,
       acknowledgedAgentErrors,
       dismissedAgentErrors,
-      workspaceId: workspaceId ?? undefined,
-      repositoriesById,
-      stepColorById,
       automaticColorSettings,
       pendingArchiveTaskIds,
-    };
-    const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
-    if (
-      archivedState.isArchived &&
-      archivedState.archivedTaskId &&
-      !items.some((t) => t.id === archivedState.archivedTaskId)
-    ) {
-      items.unshift(buildArchivedSidebarItem(archivedState, mapCtx));
-    }
-    return items;
-  }, [
-    repositoriesByWorkspace,
-    allTasks,
-    allSteps,
-    workflows,
-    workspaceId,
-    archivedState,
-    wipQueueByTaskId,
-    acknowledgedAgentErrors,
-    dismissedAgentErrors,
-    automaticColorSettings,
-    pendingArchiveTaskIds,
-  ]);
+    ],
+  );
 
   return {
     activeTaskId,
@@ -149,10 +185,13 @@ export function useSidebarData(workspaceId: string | null) {
     isLoadingWorkflow,
     archivedError,
     retryArchivedTasks,
+    page,
+    pageEntries,
     workspaceContextError,
     workspaceContextPending,
     workspaceContextAccessDenied,
     retryWorkspaceContext,
+    allTasks,
     tasksWithRepositories,
     workflows,
   };
@@ -160,7 +199,7 @@ export function useSidebarData(workspaceId: string | null) {
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 
-function useArchiveActions(store: StoreApi) {
+function useArchiveActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const { t } = useTranslation();
   const { runArchive: archiveAndSwitch } = useTaskMenuActions({ useLayoutSwitch: true });
   const [archivingTask, setArchivingTask] = useState<{
@@ -195,14 +234,14 @@ function useArchiveActions(store: StoreApi) {
         return;
       }
       const state = store.getState();
-      const task = findSidebarTask(state, taskId);
+      const task = findSidebarTask(state, taskId, pageTasks);
       setArchivingTask({
         id: taskId,
         title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [runArchive, store, t],
+    [pageTasks, runArchive, store, t],
   );
 
   const handleArchiveConfirm = useCallback(
@@ -223,7 +262,7 @@ function useArchiveActions(store: StoreApi) {
   };
 }
 
-function useDeleteActions(store: StoreApi) {
+function useDeleteActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const { t } = useTranslation();
   const { runDelete } = useTaskMenuActions({ useLayoutSwitch: true });
   const [deletingTask, setDeletingTask] = useState<{
@@ -236,14 +275,14 @@ function useDeleteActions(store: StoreApi) {
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findSidebarTask(state, taskId);
+      const task = findSidebarTask(state, taskId, pageTasks);
       setDeletingTask({
         id: taskId,
         title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [pageTasks, store, t],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -277,6 +316,7 @@ function useDeleteActions(store: StoreApi) {
 
 function useSidebarTaskSelection(params: {
   store: StoreApi;
+  pageTasks: AggregatedSidebarTasks["allTasks"];
   pathname: string | null;
   router: ReturnType<typeof useRouter>;
   loadTaskSessionsForTask: ReturnType<typeof useTaskRemoval>["loadTaskSessionsForTask"];
@@ -286,6 +326,7 @@ function useSidebarTaskSelection(params: {
 }) {
   const {
     store,
+    pageTasks,
     pathname,
     router,
     loadTaskSessionsForTask,
@@ -309,17 +350,12 @@ function useSidebarTaskSelection(params: {
   return useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findSidebarTask(state, taskId);
+      const task = findSidebarTask(state, taskId, pageTasks);
       const onTaskRoute =
         !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
-      if (!onTaskRoute && (!effectiveTaskPendingAction(task) || task?.isArchived)) {
+      if (!onTaskRoute && !task?.isArchived && !effectiveTaskPendingAction(task)) {
         setActiveTask(taskId);
         router.push(linkToTask(taskId));
-        return;
-      }
-      if (task?.isArchived) {
-        setActiveTask(taskId);
-        replaceTaskUrl(taskId);
         return;
       }
       selectTaskWithLayout({
@@ -333,13 +369,14 @@ function useSidebarTaskSelection(params: {
         setActiveTask,
         setPreparingTaskId,
         navigateToTask: onTaskRoute
-          ? replaceTaskUrl
-          : (selectedTaskId) => router.push(linkToTask(selectedTaskId)),
+          ? (selectedTaskId, sessionId) => router.replace(linkToTask(selectedTaskId, { sessionId }))
+          : (selectedTaskId, sessionId) => router.push(linkToTask(selectedTaskId, { sessionId })),
         selectionSignal: selectionControllerRef.current?.signal,
       });
     },
     [
       loadTaskSessionsForTask,
+      pageTasks,
       pathname,
       router,
       setActiveSession,
@@ -351,7 +388,7 @@ function useSidebarTaskSelection(params: {
   );
 }
 
-export function useSidebarActions(store: StoreApi) {
+export function useSidebarActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
@@ -364,6 +401,7 @@ export function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useSidebarTaskSelection({
     store,
+    pageTasks,
     pathname,
     router,
     loadTaskSessionsForTask,
@@ -372,13 +410,16 @@ export function useSidebarActions(store: StoreApi) {
     setPreparingTaskId,
   });
 
-  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store) };
+  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store, pageTasks) };
 }
 
-export function useTaskRowActions(store: StoreApi) {
+export function useTaskRowActions(
+  store: StoreApi,
+  pageTasks: AggregatedSidebarTasks["allTasks"] = EMPTY_SIDEBAR_TASKS,
+) {
   const { renameTaskById } = useTaskActions();
-  const archiveActions = useArchiveActions(store);
-  const deleteActions = useDeleteActions(store);
+  const archiveActions = useArchiveActions(store, pageTasks);
+  const deleteActions = useDeleteActions(store, pageTasks);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useNestTaskByDrag();
   const linkActions = useSidebarLinkActions(store);
@@ -455,13 +496,15 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     stepsByWorkflowId,
     workflows,
     isLoadingWorkflow,
-    archivedError,
     retryArchivedTasks,
     workspaceContextError,
     workspaceContextPending,
     workspaceContextAccessDenied,
     retryWorkspaceContext,
     tasksWithRepositories,
+    allTasks,
+    page,
+    pageEntries,
   } = useSidebarData(workspaceId);
 
   // Only highlight while viewing a task route; AppSidebar is global and activeTaskId lingers.
@@ -470,7 +513,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const highlightedTaskId = onTaskRoute ? activeTaskId : null;
   const highlightedSelectedTaskId = onTaskRoute ? selectedTaskId : null;
 
-  const sidebarActions = useSidebarActions(store);
+  const sidebarActions = useSidebarActions(store, allTasks);
   const { preparingTaskId, taskMoveError } = sidebarActions;
   const taskLinkHandlers = useSidebarTaskLinking(workspaceId, sidebarActions);
   const repositories =
@@ -491,7 +534,31 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
   const collapsedSubtaskParents = useAppStore((state) => state.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
-  const { grouped, effectiveView, prefs } = useGroupedSidebarView(displayTasks);
+  const effectiveView = page.view;
+  const prefs = useSidebarTaskPrefs();
+  const grouped = useMemo(
+    () =>
+      MOCK_SIDEBAR
+        ? applyView(displayTasks, effectiveView, {
+            pinnedTaskIds: prefs.pinnedTaskIds,
+            orderedTaskIds: prefs.orderedTaskIds,
+            subtaskOrderByParentId: prefs.subtaskOrderByParentId,
+          })
+        : groupSidebarTaskPage(
+            displayTasks,
+            pageEntries,
+            effectiveView.group,
+            prefs.subtaskOrderByParentId,
+          ),
+    [
+      displayTasks,
+      effectiveView,
+      pageEntries,
+      prefs.orderedTaskIds,
+      prefs.pinnedTaskIds,
+      prefs.subtaskOrderByParentId,
+    ],
+  );
   const { pinnedTaskIds, togglePinnedTask, handleReorderGroup, handleReorderSubtasks } = prefs;
   const selection = useSidebarSelection({
     workspaceId,
@@ -499,6 +566,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     collapsedGroups: effectiveView.collapsedGroups,
     collapsedSubtaskParents,
     displayTasks,
+    selectionScopeKey: page.scopeKey,
   });
   const handleToggleGroup = useCallback(
     (groupKey: string) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey),
@@ -523,7 +591,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleReorderSubtasks,
     handleNestTask: sidebarActions.handleNestTask,
     isLoadingWorkflow,
-    archivedError,
+    archivedError: null,
     retryArchivedTasks,
     archivedLoadErrorLabel: t("sidebar:archivedLoadFailed"),
     archivedRetryLabel: t("sidebar:retry"),
@@ -533,15 +601,21 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     workspaceContextLoadErrorLabel: t("sidebar:workspaceContextRefreshFailed"),
     workspaceContextAccessDeniedLabel: t("sidebar:workspaceContextAccessDenied"),
     retryWorkspaceContext,
-    totalTaskCount: displayTasks.length,
+    totalTaskCount: page.response?.total_tasks ?? displayTasks.length,
     selection,
   });
+  const listScrollRef = useRef<HTMLDivElement>(null);
   return (
     <PanelRoot data-testid="task-sidebar">
       {!hideFilterBar && <SidebarFilterBar />}
       {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
-      <TaskSidebarScrollArea>
-        <TaskSwitcher {...switcherProps} />
+      <TaskSidebarScrollArea viewportRef={listScrollRef}>
+        <SidebarTaskPageContent
+          page={page}
+          workspaceContextError={workspaceContextError}
+          switcherProps={switcherProps}
+          scrollRef={listScrollRef}
+        />
         <PluginSlot name="task-sidebar" />
       </TaskSidebarScrollArea>
       <SidebarDialogs

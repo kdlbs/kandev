@@ -1,10 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   invalidateIntegrationAvailability,
   subscribeIntegrationAvailability,
 } from "@/lib/integrations/integration-availability-events";
+import {
+  getIntegrationHealthResourceScope,
+  integrationHealthAuthScopeIdentity,
+  type IntegrationHealthProvider,
+  type IntegrationHealthSnapshot,
+} from "./integration-health-resource";
 
 export { invalidateIntegrationAvailability };
 
@@ -19,77 +26,88 @@ export type IntegrationConfigStatus = {
   lastOk?: boolean;
 };
 
-// Reads the backend-recorded auth health for the integration.
-// Returns true only when a config exists, has a secret, and the most recent
-// probe succeeded. Pass `active=false` to skip fetching entirely (e.g. while
-// the user toggle is off) — this avoids the polling overhead on disabled
-// integrations.
+const EMPTY_SNAPSHOT: IntegrationHealthSnapshot<never> = {
+  value: null,
+  loading: false,
+  loaded: false,
+  error: null,
+  lastUpdatedAt: null,
+};
+
+export type IntegrationAvailabilityScope = {
+  provider: IntegrationHealthProvider;
+  workspaceId?: string | null;
+  refreshMs?: number;
+  active?: boolean;
+};
+
+export function useIntegrationHealth<T>(
+  fetchConfig: () => Promise<T>,
+  {
+    provider,
+    workspaceId,
+    refreshMs = INTEGRATION_STATUS_REFRESH_MS,
+    active = true,
+  }: IntegrationAvailabilityScope,
+): IntegrationHealthSnapshot<T> {
+  const store = useAppStoreApi();
+  const identity = useAppStore(integrationHealthAuthScopeIdentity);
+  const scope = useMemo(() => getIntegrationHealthResourceScope(store), [identity, store]);
+  const key = active ? scope.key(provider, workspaceId) : null;
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      key ? scope.subscribe(key, listener, fetchConfig, refreshMs) : () => {},
+    [fetchConfig, key, refreshMs, scope],
+  );
+  const getSnapshot = useCallback(
+    () => (key ? scope.getSnapshot<T>(key) : EMPTY_SNAPSHOT),
+    [key, scope],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+// Reads backend-recorded auth health for the integration. A successful null
+// response is a settled no-config result and does not trigger more reads when
+// another consumer mounts.
 export function useIntegrationAuthed(
   fetchConfig: () => Promise<IntegrationConfigStatus | null>,
-  refreshMs: number = INTEGRATION_STATUS_REFRESH_MS,
-  active: boolean = true,
+  scope: IntegrationAvailabilityScope,
 ): boolean {
-  const [authed, setAuthed] = useState(false);
-  useEffect(() => {
-    if (!active) {
-      setAuthed(false);
-      return;
-    }
-    // Drop any auth state carried over from a previous `fetchConfig` before the
-    // new probe resolves. `fetchConfig` is keyed by workspace for per-workspace
-    // integrations, so a workspace switch must not keep showing the previous
-    // workspace's "authed" result during the in-flight recheck.
-    setAuthed(false);
-    let cancelled = false;
-    // Monotonic request id: if a slow earlier probe finishes after a newer
-    // one we ignore it, otherwise an old "auth ok" could clobber a fresh
-    // "auth failed" (or vice versa) and the UI would flap until the next
-    // tick.
-    let requestId = 0;
-    async function refresh() {
-      const current = ++requestId;
-      try {
-        const cfg = await fetchConfig();
-        if (cancelled || current !== requestId) return;
-        setAuthed(!!cfg?.hasSecret && !!cfg.lastOk);
-      } catch {
-        if (cancelled || current !== requestId) return;
-        setAuthed(false);
-      }
-    }
-    void refresh();
-    const id = setInterval(() => void refresh(), refreshMs);
-    const unsubscribe = subscribeIntegrationAvailability(() => void refresh());
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      unsubscribe();
-    };
-  }, [active, fetchConfig, refreshMs]);
-  return authed;
+  const snapshot = useIntegrationHealth(fetchConfig, scope);
+  return (scope.active ?? true) && !!snapshot.value?.hasSecret && !!snapshot.value.lastOk;
 }
 
 export type IntegrationAvailabilityOptions = {
+  provider: IntegrationHealthProvider;
+  workspaceId?: string | null;
   // The workspace's enabled toggle, already read by the caller (it owns the
-  // workspace id its `fetchConfig` is keyed by, so it owns the toggle read
-  // too). `loaded` gates the probe so we don't waste a fetch on the first
-  // render when the toggle is off.
+  // workspace id its fetchConfig is keyed by, so it owns the toggle read too).
   enabledState: { enabled: boolean; loaded: boolean };
   fetchConfig: () => Promise<IntegrationConfigStatus | null>;
   refreshMs?: number;
 };
 
 // Combined check for showing an integration's UI: the workspace's toggle is on
-// AND the backend reports a configured, healthy connection. When the toggle is
-// off (or hasn't loaded yet) the auth probe is skipped — disabled
-// integrations don't poll the backend.
+// AND the backend reports a configured, healthy connection. Disabled
+// integrations are not subscribed and do not probe the backend.
 export function useIntegrationAvailable({
   enabledState,
   fetchConfig,
+  provider,
+  workspaceId,
   refreshMs,
 }: IntegrationAvailabilityOptions): boolean {
   const { enabled, loaded } = enabledState;
   const active = loaded && enabled;
-  const authed = useIntegrationAuthed(fetchConfig, refreshMs, active);
+  const authed = useIntegrationAuthed(fetchConfig, {
+    provider,
+    workspaceId,
+    refreshMs,
+    active,
+  });
   return active && authed;
 }
+
+// Kept as a direct export for callers that need to subscribe to credential
+// invalidation without owning the health resource.
+export { subscribeIntegrationAvailability };

@@ -966,6 +966,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
+		claimAgentStartAttempt(session)
 	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
@@ -1024,6 +1025,10 @@ type ResumeOptions struct {
 	// or a pinned follow-up dispatch. It does not change the global terminal
 	// session predicate or permit implicit resume paths.
 	AllowCompletedSessionResume bool
+	// RequireIdleSuspensionProvenance admits only a session parked by the
+	// workspace idle policy. It protects focus recovery from reviving a manual
+	// stop, cancellation, archive, or workflow-owned session.
+	RequireIdleSuspensionProvenance bool
 	// Origin carries the session ceiling's explicit automatic/manual launch
 	// classification ("automatic" or "manual") from the caller into
 	// ResumeTaskSessionWithOptions's admission gate. A plain string rather
@@ -1118,10 +1123,6 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	if startAgent {
-		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
-	}
-
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	completedResume := options.AllowCompletedSessionResume &&
@@ -1177,7 +1178,7 @@ func (e *Executor) resumeSession(
 	}
 
 	var recoveryAdmission *worktree.RecoveryAdmission
-	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType)
+	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement)
 	if err != nil {
 		if resumeStatePersisted {
 			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
@@ -1186,7 +1187,7 @@ func (e *Executor) resumeSession(
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
 	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
@@ -1731,6 +1732,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 		return "", nil, nil, err
 	}
 	applyResumeRepositoryFlags(req, allRepos)
+	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
 		if !options.RepairWorkspaceInventory {
 			return "", existingEnv, nil, err
@@ -2417,6 +2419,7 @@ func (e *Executor) persistResumeStateWithOptions(
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
+		claimAgentStartAttempt(session)
 		if completedResume {
 			if session.Metadata == nil {
 				session.Metadata = make(map[string]interface{})
@@ -2536,7 +2539,7 @@ func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("session_state", string(session.State)))
-	}, false, true)
+	}, false, true, models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
 }
 
 func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) error {

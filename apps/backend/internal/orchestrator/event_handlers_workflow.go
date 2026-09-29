@@ -393,47 +393,84 @@ func (s *Service) processOnTurnStartAdmission(
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	return s.processOnTurnStartAdmissionWithGuard(ctx, taskID, sessionID, strict, lock, true)
+}
+
+func (s *Service) processOnTurnStartAdmissionWithGuard(
+	ctx context.Context,
+	taskID, sessionID string,
+	strict bool,
+	lock *cancelInFlightMutex,
+	waitForCancellation bool,
+) (ProcessOnTurnStartResult, error) {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
-	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
-		return ProcessOnTurnStartResult{}, err
+	if waitForCancellation {
+		if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
+			return ProcessOnTurnStartResult{}, err
+		}
+	} else if s.currentCancellation(sessionID) != nil {
+		return ProcessOnTurnStartResult{}, executor.ErrExecutionAlreadyRunning
 	}
 
+	session, err := s.prepareOnTurnStartSession(ctx, taskID, sessionID)
+	if err != nil {
+		return ProcessOnTurnStartResult{}, err
+	}
+	if err := s.evaluateOnTurnStartWorkflow(ctx, taskID, session, strict); err != nil {
+		return ProcessOnTurnStartResult{}, err
+	}
+	return s.onTurnStartTaskAdmission(ctx, taskID)
+}
+
+func (s *Service) prepareOnTurnStartSession(
+	ctx context.Context,
+	taskID, sessionID string,
+) (*models.TaskSession, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return ProcessOnTurnStartResult{}, fmt.Errorf("load session for on_turn_start: %w", err)
+		return nil, fmt.Errorf("load session for on_turn_start: %w", err)
 	}
 	s.clearInitialCreatePromptPassthroughForAcceptedUserTurn(ctx, session)
 	if isTerminalSessionState(session.State) {
-		return ProcessOnTurnStartResult{}, &executor.SessionStateSupersededError{
-			SessionID: session.ID,
-			State:     session.State,
-		}
+		return nil, &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return ProcessOnTurnStartResult{}, fmt.Errorf("load task for on_turn_start: %w", err)
+		return nil, fmt.Errorf("load task for on_turn_start: %w", err)
 	}
 	if task != nil && task.State == v1.TaskStateCompleted && !models.IsCompletionFollowUpSession(session.Metadata) {
 		if err := s.repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyCompletionFollowUp, true); err != nil {
-			return ProcessOnTurnStartResult{}, fmt.Errorf("mark completed task follow-up: %w", err)
+			return nil, fmt.Errorf("mark completed task follow-up: %w", err)
 		}
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
 		}
 		session.Metadata[models.SessionMetaKeyCompletionFollowUp] = true
 	}
-	// ADR 0015 — a fresh user message before the pending signal's
-	// transition has fired cancels the signal (re-open semantics). The
-	// user is continuing the conversation; this step is no longer "done".
+	// A fresh user message re-opens a step when its pending signal has not yet
+	// triggered a transition.
 	s.clearPendingStepSignal(ctx, session)
+	return session, nil
+}
+
+func (s *Service) evaluateOnTurnStartWorkflow(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	strict bool,
+) error {
 	if strict {
 		if _, err := s.processOnTurnStartViaEngineResult(ctx, taskID, session); err != nil {
-			return ProcessOnTurnStartResult{}, fmt.Errorf("evaluate on_turn_start: %w", err)
+			return fmt.Errorf("evaluate on_turn_start: %w", err)
 		}
-	} else {
-		s.processOnTurnStartViaEngine(ctx, taskID, session)
+		return nil
 	}
-	task, err = s.repo.GetTask(ctx, taskID)
+	s.processOnTurnStartViaEngine(ctx, taskID, session)
+	return nil
+}
+
+func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (ProcessOnTurnStartResult, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Do not let a read race turn an unknown admission state into an
 		// immediate prompt. The caller can retry after reconciliation.
@@ -904,6 +941,11 @@ func (s *Service) loadQueuePromotedTaskAndTargetStep(ctx context.Context, taskID
 		// A manual move has not finished its lifecycle yet.
 		// Keep the promotion token durable; source-exit completion will trigger
 		// queue reconciliation and retry destination entry.
+		return nil, nil, false
+	}
+	if s.workflowStepGetter == nil {
+		s.logger.Warn("task.queue_promoted: workflow step lookup unavailable",
+			zap.String("task_id", task.ID), zap.String("step_id", task.WorkflowStepID))
 		return nil, nil, false
 	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
@@ -5550,6 +5592,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if task == nil || (!task.WIPAdmitted && task.QueuedForStepID != "") {
 		return queueDrainSkipped
 	}
+	if managedConversationBlocksQueueDispatch(task) {
+		return queueDrainPaused
+	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
 	if !ok {
 		return queueDrainSkipped
@@ -5565,6 +5610,19 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 		return queueDrainDispatched
 	}
 	return queueDrainSkipped
+}
+
+func managedConversationBlocksQueueDispatch(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	retained, _ := task.Metadata[models.MetaKeyManagedRetained].(bool)
+	if !retained {
+		return false
+	}
+	paused, pausedOK := task.Metadata[models.MetaKeyManagedConversationPaused].(bool)
+	detached, _ := task.Metadata[models.MetaKeyManagedConversationDetached].(bool)
+	return !pausedOK || paused || detached
 }
 
 // dispatchTakenQueuedMessageForSession validates the captured session
@@ -6980,7 +7038,7 @@ func (s *Service) quiesceActiveResetTurn(
 		turnID = ""
 	}
 	operation, _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
-		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
+		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relockWithContext,
 		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
 	)
 	if err != nil {
@@ -7185,9 +7243,13 @@ func (s *Service) applyStepSessionMode(ctx context.Context, session *models.Task
 	// auto-starts the agent fresh), this is a no-op and the profile default
 	// governs the new session — the declared mode stays persisted.
 	if err := s.agentManager.SetSessionModeBySessionID(ctx, session.ID, mode); err != nil {
-		s.logger.Debug("set_session_mode: could not apply mode to a live agent (persisted for next launch/reset)",
+		// Warn, not Debug: a step that declared a mode and failed to apply it
+		// leaves the session running under a different one, and the default
+		// log level would hide that entirely.
+		s.logger.Warn("set_session_mode: could not apply mode to a live agent (persisted for next launch/reset)",
 			zap.String("session_id", session.ID),
 			zap.String("mode", mode),
+			zap.String("mode_source", "workflow_step"),
 			zap.Error(err))
 	}
 }

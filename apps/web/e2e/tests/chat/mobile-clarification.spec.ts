@@ -1,7 +1,23 @@
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
+
+type UpdateNotification = {
+  version: string;
+  title: string;
+  body: string;
+  occurrence_id: string;
+};
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      setUpdateAvailableNotification: (notification: UpdateNotification | null) => void;
+    };
+  };
+};
 
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
@@ -11,6 +27,38 @@ import { waitForSessionSettled } from "./quick-chat-helpers";
  */
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ timeout: 120_000 });
+
+  test("requires an offered choice when custom text is disabled", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Choice Only",
+      { scenario: "clarification-no-other" },
+    );
+
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationCustomInput()).toHaveCount(0);
+    if (prCapture.capturing) await waitForFiniteAnimations(overlay);
+    await prCapture.screenshot("mobile-clarification-choice-only", {
+      caption: "Mobile clarification offers only the choices allowed by Codex",
+    });
+    await session.clarificationOption("Fast").tap();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("You answered");
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+  });
 
   test("Auto-run ON does not bypass a pending clarification on mobile", async ({
     testPage,
@@ -31,7 +79,49 @@ test.describe("Mobile clarification multiline answer", () => {
     await composer.pressSequentially("Queue this from phone 1", { timeout: 30_000 });
     await expect(composer).toContainText("Queue this from phone 1");
     await expect(session.clarificationOverlay()).toBeVisible();
-    await testPage.getByTestId("submit-message-button").tap();
+    await testPage.evaluate(
+      (notification) => {
+        const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E app store is unavailable");
+        store.getState().setUpdateAvailableNotification(notification);
+      },
+      {
+        version: "e2e-mobile-toast",
+        title: "Kandev update available",
+        body: "A newer Kandev release is available.",
+        occurrence_id: "e2e-mobile-toast",
+      },
+    );
+    const updateToast = testPage
+      .getByTestId("toast-message")
+      .filter({ hasText: "Kandev update available" })
+      .last();
+    await expect(updateToast).toContainText("Kandev update available");
+    await expect(updateToast).toContainText("A newer Kandev release is available.");
+    const submit = testPage.getByTestId("submit-message-button");
+    const nav = testPage.getByTestId("session-mobile-bottom-nav");
+    const [submitBox, navBox, toastBox] = await Promise.all([
+      submit.boundingBox(),
+      nav.boundingBox(),
+      updateToast.boundingBox(),
+    ]);
+    if (!submitBox || !navBox || !toastBox) {
+      throw new Error("expected mobile send controls and update toast to be measurable");
+    }
+    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(navBox.y);
+    const toastOverlapsSubmit =
+      toastBox.x < submitBox.x + submitBox.width &&
+      toastBox.x + toastBox.width > submitBox.x &&
+      toastBox.y < submitBox.y + submitBox.height &&
+      toastBox.y + toastBox.height > submitBox.y;
+    expect(toastOverlapsSubmit).toBe(false);
+    const submitOwnsHitTarget = await submit.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return target === button || button.contains(target);
+    });
+    expect(submitOwnsHitTarget).toBe(true);
+    await submit.tap();
 
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();

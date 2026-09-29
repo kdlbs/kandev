@@ -77,3 +77,18 @@ PostgreSQL fixture for
 Implemented and verified. Focused backend suites pass at the delivered
 revision; the inventory guard was proven intact for both reproduced mismatch
 scenarios (`staging-py3` and `dev`).
+
+### Upstream conflict integration
+
+Preserved managed-clone relocation error stamps and idle-suspension provenance
+while merging upstream recovery changes. Explicit inventory repair skips the
+mutating filesystem preflight until its executor proves preserved identity;
+other recovery actions retain preflight admission. Added a service regression
+for refusal before filesystem recovery and kept both handler action validations.
+Updated the relocated-worktree test for the resume-options argument.
+
+Validation: executor, orchestrator, handlers, worktree, SQLite repository, and
+models package suites passed in local runs; the final focused inventory-repair
+regression passed with a typed conflict and no filesystem preflight or launch.
+Specification lint, documentation catalog, public documentation, and harness
+validation passed. Current-head GitHub CI and review validation remain pending.

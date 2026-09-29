@@ -18,6 +18,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	agenttypes "github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -171,6 +172,21 @@ type ExecutorBackend interface {
 	IsAlwaysResumable() bool
 }
 
+// RecoveryCandidateOutcome represents the classified recovery outcome for one candidate record.
+type RecoveryCandidateOutcome string
+
+const (
+	RecoveryOutcomeNoMatchingInstance RecoveryCandidateOutcome = "no_matching_instance"
+	RecoveryOutcomeEnumerationFailed  RecoveryCandidateOutcome = "enumeration_failed"
+	RecoveryOutcomeUnknown            RecoveryCandidateOutcome = "unknown"
+)
+
+// DetailedRecoveryBackend is an optional extension for ExecutorBackend implementations
+// that report detailed per-candidate recovery outcomes.
+type DetailedRecoveryBackend interface {
+	RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error)
+}
+
 // McpServerConfig holds configuration for an MCP server.
 // Type alias for agentctl.McpServerConfig to avoid conversion boilerplate.
 type McpServerConfig = agentctl.McpServerConfig
@@ -199,10 +215,14 @@ const (
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
 	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyPluginExecutor           = "plugin_executor"
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
 	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
+	MetadataKeyDockerNetwork            = "docker_network"
+	MetadataKeyDockerNetworkGwPriority  = "docker_network_gw_priority"
+	MetadataKeyDockerAdditionalNetworks = "docker_additional_networks"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -391,8 +411,12 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_mcp_policy":               true,
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyPluginExecutor:           true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyAllowUserNamespaces:      true,
+	MetadataKeyDockerNetwork:            true,
+	MetadataKeyDockerNetworkGwPriority:  true,
+	MetadataKeyDockerAdditionalNetworks: true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	metadataCheckoutBranch:              true,
@@ -610,6 +634,7 @@ type ExecutorCreateRequest struct {
 	WorkspacePath          string
 	WorkspaceSourceRoots   []string
 	Protocol               string
+	CodexAppServerEnabled  bool
 	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
@@ -655,6 +680,24 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
+	// values are transient and must never be copied to runtime metadata.
+	PluginExecutor *PluginExecutorLaunch
+}
+
+func codexAppServerEnabledForAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || !agentConfig.Enabled() {
+		return false
+	}
+	runtime := agentConfig.Runtime()
+	return runtime != nil && runtime.Protocol == agenttypes.ProtocolCodexAppServer
+}
+
+func protocolForAgent(agentConfig agents.Agent) string {
+	if agentConfig == nil || agentConfig.Runtime() == nil {
+		return ""
+	}
+	return string(agentConfig.Runtime().Protocol)
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.

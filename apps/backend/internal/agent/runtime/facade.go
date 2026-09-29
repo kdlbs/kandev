@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // Recovery stop reasons preserve runtime-specific teardown semantics through
@@ -118,6 +119,21 @@ func (f *facade) Stop(ctx context.Context, executionID string, reason string) er
 	return err
 }
 
+// SuspendIdle delegates to the lifecycle backend's conditional suspension
+// operation without widening the legacy backend contract used by test fakes.
+func (f *facade) SuspendIdle(ctx context.Context, identity IdleSuspensionIdentity) error {
+	if identity.ExecutionID == "" || identity.SessionID == "" {
+		return fmt.Errorf("runtime: idle suspension identity is required")
+	}
+	backend, ok := f.backend.(interface {
+		SuspendIdle(context.Context, lifecycle.IdleSuspensionIdentity) error
+	})
+	if !ok {
+		return ErrUnsupported
+	}
+	return backend.SuspendIdle(ctx, identity)
+}
+
 // GetExecution returns a snapshot view of an execution.
 func (f *facade) GetExecution(_ context.Context, executionID string) (*Execution, error) {
 	if executionID == "" {
@@ -146,6 +162,20 @@ func (f *facade) SetMcpMode(ctx context.Context, executionID string, mode string
 		return fmt.Errorf("runtime: executionID is required")
 	}
 	return f.backend.SetMcpMode(ctx, executionID, mode)
+}
+
+// ExecuteBackgroundWorkAction delegates to the backend.
+func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	if executionID == "" {
+		return streams.BackgroundWorkActionResponse{
+			Success: false,
+			WorkID:  req.WorkID,
+			RunID:   req.RunID,
+			Action:  req.Action,
+			Error:   "runtime: executionID is required",
+		}, nil
+	}
+	return f.backend.ExecuteBackgroundWorkAction(ctx, executionID, req)
 }
 
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend
