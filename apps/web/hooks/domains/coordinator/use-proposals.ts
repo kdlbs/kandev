@@ -13,7 +13,7 @@ import {
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { useWebSocketClient } from "@/lib/ws/connection";
 
-const SETTLED_STATUSES = new Set(["approved", "rejected"]);
+const SETTLED_STATUSES = new Set(["approved", "rejected", "returned"]);
 const OPEN_STATUSES = new Set(["pending", "approving", "failed"]);
 
 export function isSettledProposal(proposal: Pick<StoredProposal, "status">): boolean {
@@ -58,6 +58,11 @@ export function mergeProposal(
   if (incomingNs > cachedNs) return incoming;
   if (incomingNs < cachedNs) return cached;
   if (isSettledProposal(incoming) && !isSettledProposal(cached)) return incoming;
+  // A delivery does not move `updated_at`, so an equal-time returned row that
+  // records the delivery is the newer state.
+  if (incoming.status === "returned" && cached.status === "returned") {
+    if (incoming.reply_delivered_at && !cached.reply_delivered_at) return incoming;
+  }
   return cached;
 }
 

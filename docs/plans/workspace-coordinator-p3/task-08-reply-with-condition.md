@@ -47,7 +47,7 @@ control on both proposal card surfaces.
   writer on both dialects (message insert `ON CONFLICT (id) DO NOTHING`, queue
   entry only when one row was inserted, one transaction, before any
   dispatch), the `NotifyQueuedUserPrompt` kick, the finalisation on any
-  returned message, and the kind-specific delivery text; the guard's refused list gains both routes;
+  returned message, and the kind-specific delivery text; the reserved MCP action names `coordinator.reply_proposal` and `coordinator.deliver_reply` join `DecisionActions` (no handler registered), so the guard refuses both for a coordinator or unresolved principal; both routes are registered only while phase 3 is effective and the proposal DTO carries the three reply fields only then;
   `in_reply_to` validation ([Revised proposals](../../specs/coordinator/system-design/relay.md#revised-proposals));
   the client store's never-unsettle rule treats `returned` as settled.
 - The `returned` status against phase 2's proposal store
@@ -60,20 +60,29 @@ control on both proposal card surfaces.
   `requires_approval`, actor the replying manager, detail the reply text)
   written in the reply's locked transaction, and its copy in six locales
   ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
-  The unattended mark copy (`activityUnattended`) is added here with the
-  what-it-did text table. A `failed` card keeps its phase 2 controls (Approve,
+  The unattended mark (`AC-COORDINATOR-INTEGRATION-004.1`, rendering only;
+  task 05 stamps `unattended_turn_id` and the activity DTO carries it) is
+  rendered and its copy (`activityUnattended`) added here with the what-it-did
+  text table: a row with a turn id shows "During an unattended turn" as a second
+  muted line on the Action cell and the phone card. A `failed` card keeps its phase 2 controls (Approve,
   Edit and Reject; an improvement card Approve and Reject) and shows no
   **Reply with a condition**; there is no **Try again** on a proposal card
   (`AC-COORDINATOR-INTEGRATION-006.1`).
-- Web: the control, returned and revised card states and **Send again** in
-  the phase 1 `ProposalCard` ([Cards](../../specs/coordinator/system-design/relay.md#cards)).
+- Web: the control (shown only for kinds with registered delivery text:
+  `create_task`, `message`, `move`, `resume`), returned and revised card states
+  and **Send again** in the phase 1 `ProposalCard`, on the Needs you item and
+  the copilot chat card (no `status=all` list is added) ([Cards](../../specs/coordinator/system-design/relay.md#cards)).
 - Copy in six locales.
 
 ## Out of scope
 
-- A reply tool for the coordinator; replies to improvement proposals use the
-  same route and the improvement delivery text, and need no `in_reply_to`
-  (task 10 renders the control).
+- A reply tool for the coordinator.
+- The `improvement` kind, which task 10 adds after this task: its delivery
+  text, its `returned` activity class (`improvement`), its reply control and
+  the refusal of `in_reply_to` naming a returned improvement are task 10's
+  ([task 10](task-10-improvements.md)). This task's delivery selects text by
+  kind and treats a kind with no registered text as not replyable, so task 10
+  adds one entry.
 
 ## ASCII UI preview
 
@@ -127,14 +136,38 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
 - With the conversation replaced after a crash that followed step 3's
   commit, Send again stores nothing in the new conversation and records the
   delivery.
-- A reply to an improvement is delivered with the improvement text, which
-  names no `in_reply_to`.
+- A reply to a `message`, `move` or `resume` proposal is delivered with the
+  kind text of the design, which names no `in_reply_to`; a reply to a
+  `create_task` proposal names it.
 - A revised proposal is a new `pending` row carrying `in_reply_to`; the
   returned row is never reopened or edited (`AC-COORDINATOR-INTEGRATION-006.3`).
-- `in_reply_to` naming a `returned` `create_task` proposal of the same coordinator is
-  accepted; one naming a `returned` improvement is refused; and shown as "Revised after your reply"; any other value is refused
-  naming the field; a coordinator principal is refused both routes on every
+- `in_reply_to` naming a `returned` `create_task` proposal of the same
+  coordinator is accepted and the new card shows "Revised after your reply";
+  several proposals may name one returned row; any other value (another
+  status, another coordinator, a `returned` `message`, `move` or `resume`
+  proposal, or any value while phase 3 is off) is refused naming
+  `in_reply_to`; a coordinator principal is refused both routes on every
   transport.
+- A row with `unattended_turn_id` renders the "During an unattended turn"
+  mark on the Action cell and the phone card, and a row without one renders no
+  mark (component test).
+- A reply to a proposal whose kind has no registered delivery text is 400
+  naming `kind` and writes nothing; delivery text titles are `spec_json.title`
+  for `create_task` and `Resume|Message|Move task <task_id>` for the others;
+  the queue entry, not the message, carries `user_message_recorded`; delivery
+  runs under a 20-second deadline detached from the client; a reply sent from a
+  Needs you item stays rendered from the response with **Send again** on a
+  failed delivery.
+- **Send again** by a different manager stores the message authored by the
+  row's `decided_by`; a Needs you item sending a reply is held (not counted)
+  and shows the returned state until it is released; a saved reply whose
+  request hit a network error shows "Your reply may not have been saved" and
+  the next refresh shows it `returned`.
+- A failed delivery answers the reply and deliver routes with 200 and the
+  proposal with `reply_delivered_at` null, never a 5xx; with phase 3 off both
+  routes are 404 and the DTO omits `reply_text`, `reply_delivered_at` and
+  `in_reply_to`; `coordinator.updated` is published after the reply and again
+  when delivery is recorded.
 
 ## Verification
 

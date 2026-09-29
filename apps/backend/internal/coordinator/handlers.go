@@ -47,6 +47,10 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.GET("/coordinators/:cid/proposals/:pid", h.httpGetProposal)
 	workspace.POST("/coordinators/:cid/proposals/:pid/approve", h.httpApproveProposal)
 	workspace.POST("/coordinators/:cid/proposals/:pid/reject", h.httpRejectProposal)
+	if h.service.phase3 {
+		workspace.POST("/coordinators/:cid/proposals/:pid/reply", h.httpReplyToProposal)
+		workspace.POST("/coordinators/:cid/proposals/:pid/reply/deliver", h.httpDeliverReply)
+	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 	if svc.phase2 {
 		registerStandingOrderRoutes(workspace, h)
@@ -190,7 +194,7 @@ func (h *Handlers) httpListProposals(c *gin.Context) {
 	}
 	dtos := make([]*ProposalDTO, len(items))
 	for i, item := range items {
-		dtos[i] = NewProposalDTOFor(item, h.service.phase2)
+		dtos[i] = NewProposalDTOPhases(item, h.service.phase2, h.service.phase3)
 	}
 	c.JSON(http.StatusOK, NewProposalListResponse(dtos))
 }
@@ -223,7 +227,7 @@ func (h *Handlers) httpGetProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTOFor(found, h.service.phase2))
+	c.JSON(http.StatusOK, NewProposalDTOPhases(found, h.service.phase2, h.service.phase3))
 }
 
 // httpApproveProposal backs
@@ -240,7 +244,7 @@ func (h *Handlers) httpApproveProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTOFor(updated, h.service.phase2))
+	c.JSON(http.StatusOK, NewProposalDTOPhases(updated, h.service.phase2, h.service.phase3))
 }
 
 // httpRejectProposal backs
@@ -257,7 +261,34 @@ func (h *Handlers) httpRejectProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTOFor(updated, h.service.phase2))
+	c.JSON(http.StatusOK, NewProposalDTOPhases(updated, h.service.phase2, h.service.phase3))
+}
+
+// httpReplyToProposal backs
+// POST /api/v1/workspaces/:id/coordinators/:cid/proposals/:pid/reply.
+func (h *Handlers) httpReplyToProposal(c *gin.Context) {
+	var req ReplyRequest
+	if err := decodeOptionalJSONBody(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("invalid request body"))
+		return
+	}
+	updated, err := h.service.ReplyToProposal(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("pid"), req)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, NewProposalDTOPhases(updated, h.service.phase2, h.service.phase3))
+}
+
+// httpDeliverReply backs
+// POST /api/v1/workspaces/:id/coordinators/:cid/proposals/:pid/reply/deliver.
+func (h *Handlers) httpDeliverReply(c *gin.Context) {
+	updated, err := h.service.DeliverReply(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("pid"))
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, NewProposalDTOPhases(updated, h.service.phase2, h.service.phase3))
 }
 
 // decodeOptionalJSONBody reads c.Request.Body and, unless it is empty or
@@ -315,7 +346,7 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	case errors.Is(err, ErrStandingOrderLimit):
 		c.JSON(http.StatusBadRequest, NewStandingOrderLimitResponse())
 	case errors.As(err, &conflictErr):
-		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal, h.service.phase2))
+		c.JSON(http.StatusConflict, NewProposalConflictResponsePhases(conflictErr.Proposal, h.service.phase2, h.service.phase3))
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse("not found"))
 	case errors.Is(err, service.ErrForbidden):

@@ -142,6 +142,9 @@ func registerCoordinatorRoutes(p routeParams) {
 		}
 		wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
 		wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)
+		if p.taskSvc != nil && p.orchestratorSvc != nil {
+			svc.SetReplyDeps(p.taskSvc, p.orchestratorSvc)
+		}
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}

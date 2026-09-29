@@ -90,6 +90,11 @@ See [plan UI-07](plan.md#ascii-ui-previews).
 
 - The tool has no `in_reply_to` argument, and an improvement card never
   shows "Revised after your reply".
+- A reply to a pending improvement (task 08's route) is delivered with the
+  improvement text of [relay](../../specs/coordinator/system-design/relay.md#reply-delivery)
+  and writes a `returned` activity row of class `improvement`; a
+  `propose_task_kandev` call whose `in_reply_to` names a `returned`
+  improvement is refused naming the field.
 - A valid call stores one `pending` improvement with the server-read
   `context_before` and counts toward 25; each invalid field (including no run,
   a foreign run, a foreign task, 0 or 11 references, an unchanged context) is

@@ -33,6 +33,10 @@ const ActionListActivity = "coordinator.list_activity"
 const (
 	ActionApproveProposal = "coordinator.approve_proposal"
 	ActionRejectProposal  = "coordinator.reject_proposal"
+	// ActionReplyProposal and ActionDeliverReply reserve the reply route and
+	// the deliver route the same way: REST only, no handler.
+	ActionReplyProposal = "coordinator.reply_proposal"
+	ActionDeliverReply  = "coordinator.deliver_reply"
 )
 
 // DecisionActions is the set of reserved decision action names the
@@ -41,6 +45,8 @@ const (
 var DecisionActions = map[string]struct{}{
 	ActionApproveProposal: {},
 	ActionRejectProposal:  {},
+	ActionReplyProposal:   {},
+	ActionDeliverReply:    {},
 }
 
 // Proposal spec field names, matching their JSON keys.

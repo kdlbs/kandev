@@ -75,7 +75,7 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	decidedBy := decidingUserID(ctx)
 
 	switch proposal.Status {
-	case ProposalStatusApproved, ProposalStatusRejected:
+	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned:
 		return nil, &ProposalConflictError{Proposal: proposal}
 	case ProposalStatusApproving:
 		return s.approveApproving(ctx, workspaceID, coordinatorID, proposalID, proposal, carriesEdits)
