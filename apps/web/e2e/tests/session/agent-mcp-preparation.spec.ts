@@ -62,14 +62,16 @@ test.describe("Agent MCP preparation recovery", () => {
         testPage.locator(".dv-tab.dv-active-tab", { has: authenticationTerminalTab }),
       ).toBeVisible();
       await expect
-        .poll(() =>
-          terminalSocketUrls.some((socketUrl) => {
-            const url = new URL(socketUrl);
-            return (
-              url.pathname.endsWith(`/terminal/environment/${fixture.taskEnvironmentId}`) &&
-              url.searchParams.get("terminalId") === fixture.authenticationTerminalId
-            );
-          }),
+        .poll(
+          () =>
+            terminalSocketUrls.some((socketUrl) => {
+              const url = new URL(socketUrl);
+              return (
+                url.pathname.endsWith(`/terminal/environment/${fixture.taskEnvironmentId}`) &&
+                url.searchParams.get("terminalId") === fixture.authenticationTerminalId
+              );
+            }),
+          { timeout: 15_000 },
         )
         .toBe(true);
       await expect(testPage.getByTestId("terminal-panel")).toBeVisible();

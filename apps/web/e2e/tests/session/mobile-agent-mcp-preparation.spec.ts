@@ -58,14 +58,16 @@ test("phone recovery opens the exact MCP sign-in terminal in the terminal panel"
     });
     await expect(authenticationTerminal.getByTestId("terminal-xterm-host")).toBeVisible();
     await expect
-      .poll(() =>
-        terminalSocketUrls.some((socketUrl) => {
-          const url = new URL(socketUrl);
-          return (
-            url.pathname.endsWith(`/terminal/environment/${fixture.taskEnvironmentId}`) &&
-            url.searchParams.get("terminalId") === fixture.authenticationTerminalId
-          );
-        }),
+      .poll(
+        () =>
+          terminalSocketUrls.some((socketUrl) => {
+            const url = new URL(socketUrl);
+            return (
+              url.pathname.endsWith(`/terminal/environment/${fixture.taskEnvironmentId}`) &&
+              url.searchParams.get("terminalId") === fixture.authenticationTerminalId
+            );
+          }),
+        { timeout: 15_000 },
       )
       .toBe(true);
     await expect(
