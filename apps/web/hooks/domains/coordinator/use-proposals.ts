@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import { create } from "zustand";
 import { ApiError } from "@/lib/api/client";
-import { getProposal, listProposals, type Proposal } from "@/lib/api/domains/coordinator-api";
+import {
+  getProposal,
+  isCreateTaskProposal,
+  listProposals,
+  type Proposal,
+} from "@/lib/api/domains/coordinator-api";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { useWebSocketClient } from "@/lib/ws/connection";
 
@@ -233,11 +238,12 @@ function backfillDropped(workspaceId: string, coordinatorId: string, freshIds: S
     if (freshIds.has(id) || isSettledProposal(cached)) continue;
     const seq = useProposalsStore.getState().takeProposalTicket(coordinatorId);
     getProposal(workspaceId, coordinatorId, id)
-      .then((row) =>
+      .then((row) => {
+        if (!isCreateTaskProposal(row)) return;
         useProposalsStore
           .getState()
-          .applyProposalResult(coordinatorId, id, seq, { kind: "success", proposal: row }),
-      )
+          .applyProposalResult(coordinatorId, id, seq, { kind: "success", proposal: row });
+      })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 404) {
           useProposalsStore
@@ -276,8 +282,9 @@ export function useProposals(
     const seq = useProposalsStore.getState().takeProposalTicket(coordinator);
     listProposals(ws, coordinator, "pending")
       .then((res) => {
-        useProposalsStore.getState().mergePendingRows(coordinator, seq, res.proposals);
-        backfillDropped(ws, coordinator, new Set(res.proposals.map((p) => p.id)));
+        const proposals = res.proposals.filter(isCreateTaskProposal);
+        useProposalsStore.getState().mergePendingRows(coordinator, seq, proposals);
+        backfillDropped(ws, coordinator, new Set(proposals.map((p) => p.id)));
         if (listSeq < lastAppliedListSeqRef.current) return;
         lastAppliedListSeqRef.current = listSeq;
         useProposalsStore.getState().setPendingSettled(coordinator);
@@ -373,11 +380,12 @@ export function useProposalById(
   const read = useCallback((ws: string, coordinator: string, id: string) => {
     const seq = useProposalsStore.getState().takeProposalTicket(coordinator);
     getProposal(ws, coordinator, id)
-      .then((row) =>
+      .then((row) => {
+        if (!isCreateTaskProposal(row)) return;
         useProposalsStore
           .getState()
-          .applyProposalResult(coordinator, id, seq, { kind: "success", proposal: row }),
-      )
+          .applyProposalResult(coordinator, id, seq, { kind: "success", proposal: row });
+      })
       .catch((error: unknown) => {
         if (!(error instanceof ApiError) || error.status !== 404) return;
         useProposalsStore

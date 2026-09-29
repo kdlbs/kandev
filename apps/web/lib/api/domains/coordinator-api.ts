@@ -115,7 +115,7 @@ export function isCreateTaskProposal(p: WireProposal): p is CreateTaskProposal {
 }
 
 export type ProposalListResponse = {
-  proposals: Proposal[];
+  proposals: WireProposal[];
 };
 
 // Build decision 3: omit this parameter for the default ("pending"); never
@@ -154,7 +154,7 @@ export type ApproveProposalEdits = {
 export type ProposalConflictBody = {
   error: "proposal_conflict";
   error_code: "proposal_conflict";
-  proposal: Proposal;
+  proposal: WireProposal;
 };
 
 // Mirrors internal/coordinator/events.go's CoordinatorUpdatedPayload
@@ -272,8 +272,8 @@ export function getProposal(
   coordinatorId: string,
   proposalId: string,
   options?: ApiRequestOptions,
-): Promise<Proposal> {
-  return fetchJson<Proposal>(proposalPath(workspaceId, coordinatorId, proposalId), options);
+): Promise<WireProposal> {
+  return fetchJson<WireProposal>(proposalPath(workspaceId, coordinatorId, proposalId), options);
 }
 
 export function listCoordinatorStalls(
@@ -294,8 +294,8 @@ export function approveProposal(
   proposalId: string,
   edits?: ApproveProposalEdits,
   options?: ApiRequestOptions,
-): Promise<Proposal> {
-  return mutate<Proposal>(
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
     proposalPath(workspaceId, coordinatorId, proposalId, "/approve"),
     "POST",
     edits,
@@ -312,8 +312,8 @@ export function rejectProposal(
   proposalId: string,
   reason?: string,
   options?: ApiRequestOptions,
-): Promise<Proposal> {
-  return mutate<Proposal>(
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
     proposalPath(workspaceId, coordinatorId, proposalId, "/reject"),
     "POST",
     reason === undefined ? {} : { reason },
@@ -325,7 +325,7 @@ export function rejectProposal(
 // proposal_conflict error thrown by approveProposal or rejectProposal, or
 // null for any other error (including a 409 with a different error_code,
 // such as the conversation route's coordinator_profile_unavailable).
-export function getProposalConflict(error: unknown): Proposal | null {
+export function getProposalConflict(error: unknown): WireProposal | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
   if (!error.body || typeof error.body !== "object") return null;
   const body = error.body as Partial<ProposalConflictBody>;

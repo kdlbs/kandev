@@ -115,8 +115,25 @@ func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row Ac
 	if row.ID == "" {
 		row.ID = uuid.NewString()
 	}
-	row.CreatedAt, row.UpdatedAt = now, now
-	row.RefusalCount = 1
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = now
+	}
+	if row.UpdatedAt.IsZero() {
+		row.UpdatedAt = now
+	}
+	if row.RefusalCount < 1 {
+		row.RefusalCount = 1
+	}
+	// The row is bound to the coordinator's real workspace, whatever the
+	// caller passed.
+	var workspaceID string
+	if err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT workspace_id FROM coordinators WHERE id = ?`), row.CoordinatorID).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("resolve activity workspace: %w", err)
+	}
+	row.WorkspaceID = workspaceID
 	row.Detail = truncateRunes(row.Detail, activityDetailMaxRunes)
 	_, err := exec.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_activity (`+activityColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),

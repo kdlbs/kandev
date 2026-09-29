@@ -129,7 +129,7 @@ func TestCountOpenProposalsByWorkspace_GroupsByCoordinatorAndExcludesClosed(t *t
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	closed := &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, closed); err != nil {
+	if err := store.InsertProposal(ctx, closed, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	if matched, err := store.RejectProposal(ctx, closed.ID, "", "", time.Now().UTC()); err != nil || !matched {

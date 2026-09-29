@@ -277,15 +277,15 @@ func (s *Store) ListCoordinators(ctx context.Context, workspaceID string) ([]*Co
 	return result, nil
 }
 
-// DeleteCoordinator deletes the coordinator's proposals and the coordinator
-// row in one transaction (coordinators.md#routes). Conversation-task deletion
-// is added by a later work order. ErrNotFound when no row matched.
 // coordinatorOwnedTables lists the per-coordinator tables in deletion order.
 var coordinatorOwnedTables = []string{
 	"coordinator_watches", "coordinator_activity", "coordinator_standing_orders",
 	"coordinator_goals", "coordinator_proposals",
 }
 
+// DeleteCoordinator deletes the coordinator's owned rows and the coordinator
+// row in one transaction (coordinators.md#routes). Conversation-task deletion
+// is added by a later work order. ErrNotFound when no row matched.
 func (s *Store) DeleteCoordinator(ctx context.Context, workspaceID, id string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -525,9 +525,10 @@ func nullableString(v *string) sql.NullString {
 	return sql.NullString{String: *v, Valid: true}
 }
 
-// resetConversation clears the coordinator's conversation task through exec
-// and returns the previous task id, or "" when none was set. The caller
-// archives that task after commit with Service.archiveConversation.
+// resetConversation clears the coordinator's conversation task through exec,
+// increments config_revision, and returns the previous task id, or "" when
+// none was set. The caller archives that task after commit with
+// Service.archiveConversation.
 func (s *Store) resetConversation(ctx context.Context, exec coordinatorExec, coordinatorID string) (string, error) {
 	var prev sql.NullString
 	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT conversation_task_id FROM coordinators WHERE id = ?`), coordinatorID).Scan(&prev)
@@ -537,7 +538,7 @@ func (s *Store) resetConversation(ctx context.Context, exec coordinatorExec, coo
 	if err != nil {
 		return "", fmt.Errorf("read conversation task: %w", err)
 	}
-	if _, err := exec.ExecContext(ctx, s.db.Rebind(`UPDATE coordinators SET conversation_task_id = NULL, updated_at = ? WHERE id = ?`),
+	if _, err := exec.ExecContext(ctx, s.db.Rebind(`UPDATE coordinators SET conversation_task_id = NULL, config_revision = config_revision + 1, updated_at = ? WHERE id = ?`),
 		s.now(), coordinatorID); err != nil {
 		return "", fmt.Errorf("reset conversation: %w", err)
 	}

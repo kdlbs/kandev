@@ -77,6 +77,9 @@ func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordina
 		return WatchSet{}, fmt.Errorf("read watches: %w", err)
 	}
 	sort.Strings(set.WorkflowIDs)
+	if set.All {
+		set.WorkflowIDs = []string{}
+	}
 	return set, nil
 }
 
@@ -93,9 +96,13 @@ type StandingOrder struct {
 	LastAppliedAt    *time.Time `db:"last_applied_at" json:"last_applied_at"`
 }
 
-// ActiveStandingOrders returns the coordinator's active orders, oldest first.
-// The result is never nil.
-func (s *Store) ActiveStandingOrders(ctx context.Context, exec coordinatorExec, coordinatorID string) ([]StandingOrder, error) {
+// ActiveStandingOrders returns the coordinator's active orders, oldest first,
+// read through the reader pool. The result is never nil.
+func (s *Store) ActiveStandingOrders(ctx context.Context, coordinatorID string) ([]StandingOrder, error) {
+	return s.activeStandingOrdersOn(ctx, s.ro, coordinatorID)
+}
+
+func (s *Store) activeStandingOrdersOn(ctx context.Context, exec coordinatorExec, coordinatorID string) ([]StandingOrder, error) {
 	rows, err := exec.QueryContext(ctx, s.db.Rebind(`SELECT id, coordinator_id, text, created_by, created_at, retired_at, retired_by, source_proposal_id, last_applied_at
 		FROM coordinator_standing_orders WHERE coordinator_id = ? AND retired_at IS NULL ORDER BY created_at ASC, id ASC`), coordinatorID)
 	if err != nil {
@@ -142,13 +149,13 @@ type Goal struct {
 const goalColumns = `id, coordinator_id, name, due_on, status, criteria_json, baseline_json, set_at, met_at, met_by, created_at, updated_at`
 
 // ActiveGoal returns the coordinator's active goal, or nil when none.
-func (s *Store) ActiveGoal(ctx context.Context, exec coordinatorExec, coordinatorID string) (*Goal, error) {
-	return s.readGoal(ctx, exec, `SELECT `+goalColumns+` FROM coordinator_goals WHERE coordinator_id = ? AND status = '`+goalStatusActive+`' LIMIT 1`, coordinatorID)
+func (s *Store) ActiveGoal(ctx context.Context, coordinatorID string) (*Goal, error) {
+	return s.readGoal(ctx, s.ro, `SELECT `+goalColumns+` FROM coordinator_goals WHERE coordinator_id = ? AND status = '`+goalStatusActive+`' LIMIT 1`, coordinatorID)
 }
 
 // LastMetGoal returns the most recently met goal, or nil when none.
-func (s *Store) LastMetGoal(ctx context.Context, exec coordinatorExec, coordinatorID string) (*Goal, error) {
-	return s.readGoal(ctx, exec, `SELECT `+goalColumns+` FROM coordinator_goals WHERE coordinator_id = ? AND status = '`+goalStatusMet+`' ORDER BY met_at DESC, id DESC LIMIT 1`, coordinatorID)
+func (s *Store) LastMetGoal(ctx context.Context, coordinatorID string) (*Goal, error) {
+	return s.readGoal(ctx, s.ro, `SELECT `+goalColumns+` FROM coordinator_goals WHERE coordinator_id = ? AND status = '`+goalStatusMet+`' ORDER BY met_at DESC, id DESC LIMIT 1`, coordinatorID)
 }
 
 func (s *Store) readGoal(ctx context.Context, exec coordinatorExec, query, coordinatorID string) (*Goal, error) {
@@ -175,12 +182,12 @@ func (s *Store) readGoal(ctx context.Context, exec coordinatorExec, query, coord
 
 // PolicyView is the effective, read-only policy of one coordinator.
 type PolicyView struct {
-	CoordinatorID  string
-	WorkspaceID    string
-	PolicyRevision int
-	Actions        map[Action]Setting
-	WatchScope     string
-	WorkflowIDs    []string
+	CoordinatorID  string             `json:"coordinator_id"`
+	WorkspaceID    string             `json:"workspace_id"`
+	PolicyRevision int                `json:"policy_revision"`
+	Actions        map[Action]Setting `json:"actions"`
+	WatchScope     string             `json:"watch_scope"`
+	WorkflowIDs    []string           `json:"workflow_ids"`
 }
 
 // policyFor parses the stored policy. An unreadable policy denies every

@@ -72,9 +72,9 @@ const phase2TablesSQL = `
 		workspace_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		due_on TEXT,
-		status TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'active',
 		criteria_json TEXT NOT NULL DEFAULT '[]',
-		baseline_json TEXT NOT NULL,
+		baseline_json TEXT NOT NULL DEFAULT '{}',
 		set_at {{timestamp}} NOT NULL,
 		met_at {{timestamp}},
 		met_by TEXT,
@@ -94,6 +94,7 @@ const phase2IndexesSQL = `
 	CREATE INDEX IF NOT EXISTS idx_coordinator_standing_orders_workspace ON coordinator_standing_orders(workspace_id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_goals_active ON coordinator_goals(coordinator_id) WHERE status = 'active';
 	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_workspace ON coordinator_goals(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_history ON coordinator_goals(coordinator_id, created_at, id);
 	CREATE UNIQUE INDEX IF NOT EXISTS coordinator_proposals_open_target ON coordinator_proposals(coordinator_id, kind, target_task_id)
 		WHERE kind <> 'create_task' AND status IN ('pending','approving','failed');
 `

@@ -58,7 +58,7 @@ func TestActiveStandingOrders(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
-	orders, err := store.ActiveStandingOrders(ctx, store.db, c.ID)
+	orders, err := store.ActiveStandingOrders(ctx, c.ID)
 	if err != nil || orders == nil || len(orders) != 0 {
 		t.Fatalf("empty = %v, %v", orders, err)
 	}
@@ -76,7 +76,7 @@ func TestActiveStandingOrders(t *testing.T) {
 	ins("a", t0, false)
 	ins("c", t0.Add(time.Hour), false)
 	ins("r", t0, true)
-	orders, err = store.ActiveStandingOrders(ctx, store.db, c.ID)
+	orders, err = store.ActiveStandingOrders(ctx, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,10 +93,10 @@ func TestGoalReads(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
-	if g, err := store.ActiveGoal(ctx, store.db, c.ID); err != nil || g != nil {
+	if g, err := store.ActiveGoal(ctx, c.ID); err != nil || g != nil {
 		t.Fatalf("no goal = %v, %v", g, err)
 	}
-	if g, err := store.LastMetGoal(ctx, store.db, c.ID); err != nil || g != nil {
+	if g, err := store.LastMetGoal(ctx, c.ID); err != nil || g != nil {
 		t.Fatalf("no met goal = %v, %v", g, err)
 	}
 	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -109,11 +109,11 @@ func TestGoalReads(t *testing.T) {
 	ins("m1", "met", &m1)
 	ins("m2", "met", &m2)
 	ins("act", "active", nil)
-	g, err := store.ActiveGoal(ctx, store.db, c.ID)
+	g, err := store.ActiveGoal(ctx, c.ID)
 	if err != nil || g == nil || g.ID != "act" || len(g.Criteria) != 1 || !g.Criteria[0].Done {
 		t.Fatalf("active = %+v, %v", g, err)
 	}
-	g, err = store.LastMetGoal(ctx, store.db, c.ID)
+	g, err = store.LastMetGoal(ctx, c.ID)
 	if err != nil || g == nil || g.ID != "m2" {
 		t.Fatalf("last met = %+v, %v", g, err)
 	}

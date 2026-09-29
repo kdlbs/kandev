@@ -135,15 +135,13 @@ func TestPhase2Schema_UpgradeFromPhase1_SQLite(t *testing.T) {
 	}
 	fresh := newTestStore(t)
 	freshSchema := endSchema(t, fresh.db)
-	// A database that already carries config_revision differs from a fresh one
-	// only by that column; the phase-2 columns are identical.
+	// config_revision is part of the base schema, so an upgrade converges on the
+	// fresh schema whether or not the column was already present.
 	if !strings.Contains(schemas[0], "policy_revision") || schemas[0] != freshSchema {
 		t.Fatalf("upgraded schema differs from fresh:\n%s\nvs\n%s", schemas[0], freshSchema)
 	}
-	stripped := strings.ReplaceAll(schemas[1], "config_revision INTEGER 1 0|", "")
-	stripped = strings.ReplaceAll(stripped, "|config_revision INTEGER 1 0", "")
-	if stripped != freshSchema {
-		t.Fatalf("upgrade with config_revision differs from fresh:\n%s\nvs\n%s", stripped, freshSchema)
+	if schemas[1] != freshSchema {
+		t.Fatalf("upgrade with config_revision differs from fresh:\n%s\nvs\n%s", schemas[1], freshSchema)
 	}
 }
 

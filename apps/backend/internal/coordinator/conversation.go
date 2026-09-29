@@ -404,3 +404,10 @@ func (s *Service) archiveConversation(ctx context.Context, coordinatorID, taskID
 	}
 	s.archiveClearedConversationTask(ctx, coordinatorID, taskID)
 }
+
+// resetConversation runs inside the caller's coordinator lock: it clears the
+// conversation task, increments config_revision and returns the previous task
+// id, which the caller archives after commit through archiveConversation.
+func (s *Service) resetConversation(ctx context.Context, exec coordinatorExec, coordinatorID string) (string, error) {
+	return s.store.resetConversation(ctx, exec, coordinatorID)
+}
