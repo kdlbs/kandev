@@ -153,7 +153,7 @@ func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row Ac
 func (s *Store) MarkUndone(ctx context.Context, exec coordinatorExec, rowID, undoneBy string, at time.Time) (bool, error) {
 	at = at.UTC()
 	res, err := exec.ExecContext(ctx, s.db.Rebind(`UPDATE coordinator_activity SET undone_at = ?, undone_by = ?, updated_at = ? WHERE id = ? AND undone_at IS NULL`),
-		at, undoneBy, at, rowID)
+		at, optString(undoneBy), at, rowID)
 	if err != nil {
 		return false, fmt.Errorf("mark activity undone: %w", err)
 	}
