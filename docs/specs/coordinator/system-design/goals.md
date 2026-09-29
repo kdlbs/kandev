@@ -79,7 +79,15 @@ array), a `criteria` element that is not an object, `criteria[i].text` and
 `criteria[i].id` (not a string, `id` also allowing `null`), and `done` (not a
 boolean). A `goal_id` of the wrong type is checked at step 0, before every
 other field. Unknown fields are ignored. On met, an empty body is valid and
-means no `goal_id`.
+means no `goal_id`. A `criteria` element that is not an object is 400 naming
+`criteria[i]` for its index. Authorization (403) and the coordinator lookup
+(404) precede any body decode on PUT, toggle and met, so a reader or an unknown
+coordinator gets 403 or 404 whatever the body holds, and an undecodable body
+is 400 only after both. The handlers therefore must not decode in the handler
+before the service authorizes, as `httpAddStandingOrder` does. After step 0,
+wrong-type errors are checked together with the value errors, field by field in
+the step order below: `{"name":"","criteria":5}` is 400 `name`, and
+`{"name":"x","criteria":5}` is 400 `criteria`.
 
 **PUT** runs in the per-coordinator locked transaction. Authorization (403)
 and the coordinator lookup (404) come first, in the order the other
@@ -137,14 +145,15 @@ only that criterion's `done` and writes it back, so a concurrent toggle,
 PUT or met cannot lose the other's write; they apply in commit order. It
 does not reset the conversation (`001.3`). `done` must be a JSON boolean;
 absent, `null` or any other type is 400 naming `done`. Setting `done` to its
-current value returns 200 and writes nothing. An unknown criterion id
+current value returns 200 and writes nothing; a toggle that changes `done`
+sets `updated_at` from the store clock. An unknown criterion id
 (including one a concurrent PUT just removed) is 404; no active goal is 404.
 Checks run in this order: authorization, coordinator lookup, `done` (400),
 then the goal and criterion (404). The UI reloads the goal on a 404 from a
 toggle or from met.
 
 **Met**, in the per-coordinator locked transaction, sets `status='met'`,
-`met_at`, `met_by` with `WHERE status='active'`
+`met_at`, `met_by` and `updated_at` (all from the store clock) with `WHERE status='active'`
 and resets the conversation. `met_by` is the request identity's user id
 through `decidingUserID`, and NULL when auth is disabled (synthetic
 identity), as in the [activity log](activity-log.md). A body `goal_id` is optional (`null` and `""`
@@ -176,8 +185,8 @@ goal as both; the client refetches on `coordinator.updated`. Accepted.
 ## Baselines
 
 `baseline_json` is computed once, when a goal is created, inside the
-per-coordinator locked transaction, with `set_at` taken from the service
-clock at that moment:
+per-coordinator locked transaction, with `set_at` taken from the store clock
+(`Store.now`, the injectable clock; `Service` has none) at that moment:
 
 ```json
 {"open_tasks": 23, "approved_7d": 9, "rejected_7d": 2}

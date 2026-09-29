@@ -90,5 +90,7 @@ backstop, a violation is 500 and never retried); wrong JSON types and undecodabl
   count query in `measures.go` (phase 1 has no such query), not a per-task
   loop. The baseline log counts use the new exec-taking
   `Store.ActivityCountsIn` on the locked handle, not `Service.ActivitySummary`.
+  The doc comment on `ActivitySummary` in `activity_service.go` still says the
+  goal baselines read it; correct that comment when adding `ActivityCountsIn`.
 - Task 05 adds its section to the same instruction builder; each work order
   adds only its own section.

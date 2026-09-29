@@ -76,9 +76,9 @@ criteria, so that the coordinator's advice points at it.
 - **AC-COORDINATOR-GOALS-001.5:** When a manager sets a goal while the
   coordinator has no active goal, the system shall create a new goal with a
   new baseline (`AC-COORDINATOR-GOALS-003.1`); earlier met goals stay stored.
-- **AC-COORDINATOR-GOALS-001.6:** When a coordinator conversation opens, its
-  standing instructions shall include the active goal's name, due date and
-  criteria with their done state as of that moment; with no active goal they
+- **AC-COORDINATOR-GOALS-001.6:** When a coordinator conversation's first
+  prompt is sent, its standing instructions shall include the active goal's
+  name, due date and criteria with their done state as of that moment; with no active goal they
   shall say that no goal is set. Where the goal cannot be read, the standing
   instructions shall omit the goal section, log a warning and otherwise be
   unchanged, and the conversation shall proceed.

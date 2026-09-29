@@ -315,8 +315,9 @@ as a class only when it has a row created in the window.
 A coordinator that does not exist is `ErrNotFound` (404 on the route, and the
 `goals` and May do callers receive the error). `earliest_row_at` is the
 oldest row of the coordinator at any age, `null` with none. May do reads
-it with N = 30; goal baselines read the approved and rejected counts for 7
-days through the same service function ([goals](goals.md#baselines)).
+it with N = 30; goal baselines read the approved and rejected counts for the 7
+days before the goal is set through `Store.ActivityCountsIn` on the locked
+handle, not through this service function ([goals](goals.md#baselines)).
 
 ## Retention
 
