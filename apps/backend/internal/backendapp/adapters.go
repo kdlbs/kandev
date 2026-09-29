@@ -311,8 +311,11 @@ var _ interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	SuspendIdle(ctx context.Context, identity runtimeapi.IdleSuspensionIdentity) error
+	CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 	PreparePassthroughRunning(sessionID string) (func(), error)
+	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -637,6 +640,12 @@ func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceI
 	return a.mgr.StartAgentProcess(ctx, agentInstanceID)
 }
 
+// RegisterInitialPromptDispatchCallbacks forwards initial prompt acceptance
+// to orchestrator owners that must keep a launch attempt active until dispatch.
+func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
 func (a *lifecycleAdapter) IsAgentCommandConfigured(agentInstanceID string) bool {
 	return a.mgr.IsAgentCommandConfigured(agentInstanceID)
 }
@@ -755,6 +764,14 @@ func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sess
 	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) SuspendIdle(ctx context.Context, identity runtimeapi.IdleSuspensionIdentity) error {
+	return a.mgr.SuspendIdle(ctx, identity)
+}
+
+func (a *lifecycleAdapter) CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error {
+	return a.mgr.CancelIdleSuspension(ctx, sessionID, executionID)
+}
+
 func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
 	return a.mgr.CancelAgentForPrompt(ctx, sessionID, executionID, generation, activityEpoch)
 }
@@ -805,13 +822,6 @@ func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
 	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
 		executionID, beforeAdmission, onDispatched, onFailure,
 	)
-}
-
-func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(
-	executionID string,
-	onDispatched, onFailure func(),
-) error {
-	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
 }
 
 func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(

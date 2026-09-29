@@ -5719,6 +5719,47 @@ func TestResumeTaskSession_WrongTask(t *testing.T) {
 	}
 }
 
+func TestResumeTaskSession_DynamicRouteActionOwnsRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.RouteState = dynamicRouteStatusActionRequired
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		isAgentRunningFn: func(context.Context, string) bool { return false },
+		isAgentReadyFn:   func(context.Context, string) bool { return true },
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			if err := repo.UpdateTaskSessionState(ctx, "session1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+				t.Fatalf("failed to make resumed session ready: %v", err)
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-replacement"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	var blocked *sessionOpenRecoveryBlockedError
+	if !errors.As(err, &blocked) || blocked.reason != autoResumeBlockedDynamicRoute {
+		t.Fatalf("ResumeTaskSession error = %v, want dynamic-route ownership rejection", err)
+	}
+	if got := launchCalls.Load(); got != 0 {
+		t.Fatalf("dynamic-route-owned session launched %d replacement processes, want 0", got)
+	}
+}
+
 func TestResumeTaskSession_OfficeWithoutSchedulerFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

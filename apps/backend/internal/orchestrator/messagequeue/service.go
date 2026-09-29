@@ -3315,6 +3315,20 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	return status
 }
 
+// HasPendingForSession reports whether a session still owns queued actionable
+// work. Callers that need an atomic admission boundary must hold the session
+// admission lock while checking it.
+func (s *Service) HasPendingForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.repo == nil || sessionID == "" {
+		return false, nil
+	}
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 // Snapshot returns an ordered status bound to one immutable session identity.
 func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (*QueueStatus, error) {
 	snapshot, err := s.repo.Snapshot(ctx, identity)

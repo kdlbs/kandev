@@ -271,5 +271,11 @@
   "placement.none": "No units found",
   "placement.moved": "Workspace moved.",
   "placement.failed": "The workspace could not be moved.",
-  "placement.ownerOnly": "Only the workspace owner can move it"
+  "placement.ownerOnly": "Only the workspace owner can move it",
+  "idlePolicyDescription": "Suspend idle ACP agents in this workspace to reduce resource use. This setting is off by default.",
+  "idlePolicyResumeDescription": "The selected session resumes when you open the task or send a message.",
+  "idlePolicyTitle": "Resource saving",
+  "idleSuspensionEnabled": "Suspend idle ACP agents",
+  "idleTimeoutMinutes": "Idle timeout (minutes)",
+  "idleTimeoutMustBePositive": "Enter a whole number greater than zero."
 }

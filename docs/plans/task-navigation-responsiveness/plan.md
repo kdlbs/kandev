@@ -267,3 +267,39 @@ cumulative diff independent ownership within a shared environment. All 67
 affected tests and TypeScript pass; Task 02 and Task 04 record the regression
 evidence. The follow-up production build and desktop/phone smoke checks pass. CI and
 review disposition remain pending on the published PR.
+
+## Follow-up: immediate task route presentation
+
+The user deployed merged revision e99ac10 on September 29 and reported remaining
+whole-task loading. A fresh diagnostic bundle confirms that revision is running.
+The original Files measurements did not measure the task route overlay. In an
+isolated seeded preview, holding `/api/v1/agents` keeps the opaque route loader
+visible on a warm task return; releasing it removes the loader. Client routing
+currently waits for the full optional boot hydration fan-out on every switch.
+
+Continue the already authorized repair through
+[Task 05: Immediate task route presentation](task-05-immediate-task-route.md).
+No delegation or changes to the personal instance are authorized or needed.
+
+UI-03 (desktop and phone retain their existing navigation and scroll owners):
+
+```text
+Before                         After selection
++-------------------------+    +-------------------------+
+| Loading task...         |    | Selected task header    |
+| (all content covered)   |    | Cached chat / task view |
+|                         |    | Independent panel loads |
++-------------------------+    +-------------------------+
+                               | Phone bottom navigation |
+                               +-------------------------+
+```
+
+- [x] Task 05: immediate task route presentation (`.5`-`.7`).
+
+The follow-up separates essential task/session route resolution from optional
+boot enrichment and presents valid current-store task/chat data while refreshing.
+All 133 focused unit tests and 20 final desktop/phone browser tests pass,
+including delayed optional reads, missing tasks, saved session selection, unread
+cursors, and rapid returns with a fresh hydration snapshot. Task 05 records
+the isolated browser measurements and their limits. PR/CI delivery is tracked
+in the task session, separately from completed local implementation.

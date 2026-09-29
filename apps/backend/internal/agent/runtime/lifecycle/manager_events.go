@@ -877,14 +877,47 @@ func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, e
 	})
 }
 
-//nolint:cyclop,funlen // ACP event types share lifecycle bookkeeping before publication.
 func (m *Manager) handleAgentEventAtContextResetBoundary(
 	execution *AgentExecution,
 	event agentctl.AgentEvent,
 	enforceResetBoundary bool,
 	attemptID string,
 ) {
+	m.handleAgentEventAtContextResetBoundaryInternal(execution, event, enforceResetBoundary, attemptID, false)
+}
+
+func (m *Manager) handleAgentEventAtContextResetBoundaryWithIdleSuspensionReplay(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	enforceResetBoundary bool,
+	attemptID string,
+) {
+	m.handleAgentEventAtContextResetBoundaryInternal(execution, event, enforceResetBoundary, attemptID, true)
+}
+
+//nolint:cyclop,funlen // ACP event types share lifecycle bookkeeping before publication.
+func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	enforceResetBoundary bool,
+	attemptID string,
+	idleSuspensionReplay bool,
+) {
 	event.AttemptID = attemptID
+	if !idleSuspensionReplay && execution.bufferIdleSuspensionEvent(idleSuspensionEvent{
+		event: event, enforceResetBoundary: enforceResetBoundary, attemptID: attemptID,
+	}) {
+		m.logger.Debug("buffering agent event during idle suspension",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return
+	}
+	if !idleSuspensionReplay && execution.idleSuspensionAgentStopped.Load() {
+		m.logger.Debug("ignoring agent event after idle process stop",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return
+	}
 	// A terminal event that was already applied from a retained turn outcome
 	// can be redelivered when the live stream attaches. Drop that exact event
 	// instead of applying the completion a second time.

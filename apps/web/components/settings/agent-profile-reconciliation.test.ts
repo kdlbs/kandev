@@ -212,6 +212,7 @@ describe("reconcileAgentProfileSnapshot dynamic drafts", () => {
           waitForReset: { enabled: false, maxWaitSeconds: 0 },
           onExhausted: "skip" as const,
         },
+        unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
       },
     };
     const previous = profile({ kind: "dynamic", dynamic: { version: 1, candidates: [] } });

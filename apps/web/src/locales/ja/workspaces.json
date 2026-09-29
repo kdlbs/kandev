@@ -271,5 +271,11 @@
   "placement.none": "単位見つからず",
   "placement.moved": "ワークスペースを移動しました。",
   "placement.failed": "ワークスペースを移動できませんでした。",
-  "placement.ownerOnly": "ワークスペース所有者だけが移動できます"
+  "placement.ownerOnly": "ワークスペース所有者だけが移動できます",
+  "idlePolicyDescription": "このワークスペースでアイドル状態の ACP エージェントを一時停止して、リソース使用量を減らします。この設定は既定でオフです。",
+  "idlePolicyResumeDescription": "タスクを開くかメッセージを送信すると、選択したセッションが再開します。",
+  "idlePolicyTitle": "リソースを節約",
+  "idleSuspensionEnabled": "アイドル状態の ACP エージェントを一時停止",
+  "idleTimeoutMinutes": "アイドルタイムアウト（分）",
+  "idleTimeoutMustBePositive": "0 より大きい整数を入力してください。"
 }

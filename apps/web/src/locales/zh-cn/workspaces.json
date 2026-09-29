@@ -271,5 +271,11 @@
   "placement.none": "未找到单元",
   "placement.moved": "工作区已移动。",
   "placement.failed": "无法移动该工作区。",
-  "placement.ownerOnly": "仅工作区所有者可移动"
+  "placement.ownerOnly": "仅工作区所有者可移动",
+  "idlePolicyDescription": "挂起此工作区中处于空闲状态的 ACP 代理，以减少资源使用。此设置默认关闭。",
+  "idlePolicyResumeDescription": "打开任务或发送消息时，会恢复所选会话。",
+  "idlePolicyTitle": "节省资源",
+  "idleSuspensionEnabled": "挂起空闲 ACP 代理",
+  "idleTimeoutMinutes": "空闲超时（分钟）",
+  "idleTimeoutMustBePositive": "请输入大于零的整数。"
 }

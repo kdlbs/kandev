@@ -532,6 +532,19 @@ func (s *Service) beginResumeAttempt(
 	ctx context.Context,
 	taskID, sessionID string,
 ) (*resumeAttempt, bool, error) {
+	if cancelInFlightGuardHeld(ctx) {
+		if s.currentCancellation(sessionID) != nil {
+			return nil, false, ErrResumeAttemptCancelled
+		}
+		// The guard marker is only valid for this registration call. Do not
+		// carry it into lifecycle work that can outlive the guard owner.
+		attemptCtx := context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
+		attempt, owner := s.resumeAttemptStore().begin(attemptCtx, taskID, sessionID)
+		if owner {
+			s.captureInterruptedMarkerForResumeAttempt(attemptCtx, attempt)
+		}
+		return attempt, owner, nil
+	}
 	for {
 		lock, release := s.acquireCancelInFlightGuard(sessionID)
 		lock.Lock()

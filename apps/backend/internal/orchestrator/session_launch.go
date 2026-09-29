@@ -46,8 +46,9 @@ const (
 type LaunchActivationSource string
 
 const (
-	LaunchActivationSourceUserAction  LaunchActivationSource = "user_action"
-	LaunchActivationSourceSessionOpen LaunchActivationSource = "session_open"
+	LaunchActivationSourceUserAction   LaunchActivationSource = "user_action"
+	LaunchActivationSourceSessionOpen  LaunchActivationSource = "session_open"
+	LaunchActivationSourceSessionFocus LaunchActivationSource = "session_focus"
 
 	activationDispositionSuppressed = "suppressed"
 	activationDispositionQueued     = "queued"
@@ -137,6 +138,9 @@ type LaunchSessionRequest struct {
 	// ordinary launch, ensure, and startup recovery paths must keep completed
 	// sessions terminal.
 	AllowCompletedSessionResume bool `json:"-"`
+	// RequireIdleSuspensionProvenance is granted only by the explicit focus
+	// activation source and is never accepted as a client field.
+	RequireIdleSuspensionProvenance bool `json:"-"`
 	// ActivationSource distinguishes passive task opening from an explicit
 	// launch action. An omitted value preserves the existing behavior.
 	ActivationSource LaunchActivationSource `json:"activation_source,omitempty"`
@@ -226,6 +230,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return nil, errors.New("session_open activation cannot include a prompt")
 	}
 	intent := ResolveIntent(req)
+	if err := validateFocusActivationIntent(req); err != nil {
+		return nil, err
+	}
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
 	// Launching a session starts an agent turn: session.prompt.
@@ -268,8 +275,19 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 }
 
 func validateLaunchActivationSource(source LaunchActivationSource) error {
-	if source != "" && source != LaunchActivationSourceUserAction && source != LaunchActivationSourceSessionOpen {
+	if source != "" && source != LaunchActivationSourceUserAction &&
+		source != LaunchActivationSourceSessionOpen && source != LaunchActivationSourceSessionFocus {
 		return fmt.Errorf("unknown launch activation source %q", source)
+	}
+	return nil
+}
+
+func validateFocusActivationIntent(req *LaunchSessionRequest) error {
+	if req == nil || req.ActivationSource != LaunchActivationSourceSessionFocus {
+		return nil
+	}
+	if ResolveIntent(req) != IntentResume || strings.TrimSpace(req.Prompt) != "" {
+		return errors.New("session_focus activation requires a promptless resume intent")
 	}
 	return nil
 }
@@ -556,15 +574,34 @@ func (s *Service) withExactProfileLaunchReceipt(
 
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req.ActivationSource == LaunchActivationSourceSessionFocus {
+		execution, session, resumed, err := s.focusTaskSession(ctx, req.TaskID, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !resumed {
+			return &LaunchSessionResponse{
+				Success:               true,
+				TaskID:                req.TaskID,
+				SessionID:             req.SessionID,
+				State:                 sessionStateOrEmpty(session),
+				AgentProfileID:        sessionProfileOrEmpty(session),
+				ActivationDisposition: activationDispositionSuppressed,
+				ActivationReason:      "idle_suspension_not_current",
+			}, nil
+		}
+		return executionToLaunchResponse(req.TaskID, execution), nil
+	}
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	resumeCtx := ctx
 	if req.ActivationSource == LaunchActivationSourceSessionOpen {
 		resumeCtx = withSessionOpenRecoveryContext(ctx)
 	}
 	execution, err := s.ResumeTaskSessionWithOptions(resumeCtx, req.TaskID, req.SessionID, executor.ResumeOptions{
-		AllowBranchReplacement:      req.AllowBranchReplacement,
-		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
-		Origin:                      string(launchOriginForActivation(req)),
+		AllowBranchReplacement:          req.AllowBranchReplacement,
+		AllowCompletedSessionResume:     req.AllowCompletedSessionResume,
+		RequireIdleSuspensionProvenance: req.RequireIdleSuspensionProvenance,
+		Origin:                          string(launchOriginForActivation(req)),
 	})
 	if err != nil {
 		var blocked *sessionOpenRecoveryBlockedError

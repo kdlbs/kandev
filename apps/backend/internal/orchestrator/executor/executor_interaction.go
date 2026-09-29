@@ -1349,6 +1349,9 @@ func (e *Executor) registerInitialPromptDispatchCallbacks(
 	onDispatched func(executionID string),
 	onFailure func(),
 ) error {
+	if onDispatched == nil && onFailure == nil {
+		return nil
+	}
 	registrar, ok := e.agentManager.(interface {
 		RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 	})
