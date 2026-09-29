@@ -15,6 +15,8 @@ type kindsFixture struct {
 	c     *Coordinator
 	svc   *Service
 	undo  *fakeUndoTasks
+	seq   int
+	tasks *fakeKindTasks
 }
 
 func newKindsFixture(t *testing.T) *kindsFixture {
@@ -26,7 +28,7 @@ func newKindsFixture(t *testing.T) *kindsFixture {
 		admitted: true,
 	}
 	svc.SetUndoDeps(undo)
-	mustSave(t, svc, c.WorkspaceID, c.ID, policyBody(map[string]string{"move": "requires_approval"}))
+	mustSave(t, svc, c.WorkspaceID, c.ID, policyBody(map[string]string{"move": "requires_approval", "resume": "requires_approval", "message": "requires_approval"}))
 	return &kindsFixture{store: store, c: c, svc: svc, undo: undo}
 }
 

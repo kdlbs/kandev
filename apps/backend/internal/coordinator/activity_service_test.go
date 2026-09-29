@@ -30,6 +30,7 @@ type fakeUndoTasks struct {
 	getSteps  int
 	nodes     []StepNode
 	nodesErr  error
+	onGetStep func()
 }
 
 type fakeMove struct {
@@ -73,6 +74,9 @@ func (f *fakeUndoTasks) MoveTaskWithOptions(_ context.Context, id, wf, step stri
 
 func (f *fakeUndoTasks) GetStep(_ context.Context, id string) (*UndoStep, error) {
 	f.getSteps++
+	if f.onGetStep != nil {
+		f.onGetStep()
+	}
 	if f.stepErr != nil {
 		return nil, f.stepErr
 	}
