@@ -172,10 +172,60 @@ func TestCoordinatorStandingInstructionsReader_AppendsStandingOrders(t *testing.
 	if _, err := pool.Writer().Exec(`DROP TABLE coordinator_standing_orders`); err != nil {
 		t.Fatal(err)
 	}
-	if got := build(on); got != base {
-		t.Fatalf("failed orders read changed the base block:\n%s", got)
+	if got := build(on); got != base+"\n\n"+noGoalSection {
+		t.Fatalf("failed orders read changed the rest of the block:\n%s", got)
 	}
 }
+
+const noGoalSection = "No goal is set for this coordinator."
+
+// TestCoordinatorStandingInstructionsReader_AppendsGoal verifies the goal
+// section follows the orders only while phase 2 is on, shows the active goal
+// and that an unreadable goal drops that section alone.
+func TestCoordinatorStandingInstructionsReader_AppendsGoal(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	if _, err := pool.Writer().Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, workflow_id TEXT, state TEXT,
+		archived_at DATETIME, is_ephemeral INTEGER NOT NULL DEFAULT 0, origin TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	seed := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", Context: "ctx"}
+	if err := store.CreateCoordinator(ctx, seed); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	on := coordinator.NewService(store, coordinator.NewValidator(nil, nil), allowAllAuthorizer{}, newTestLogger(), coordinator.WithPhase2(true))
+	off := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
+	build := func(svc *coordinator.Service) string {
+		content, err := coordinatorStandingInstructionsReader(svc, newTestLogger())(ctx, seed.ID, "Acme", "ws-1")
+		if err != nil {
+			t.Fatalf("reader: %v", err)
+		}
+		return content
+	}
+	base := build(off)
+	if got := build(on); got != base+"\n\n"+noGoalSection {
+		t.Fatalf("no goal:\n%s", got)
+	}
+	if _, err := on.PutGoal(ctx, "ws-1", seed.ID, []byte(`{"name":"Ship","due_on":"2026-10-31","criteria":[{"text":"a"}]}`)); err != nil {
+		t.Fatalf("PutGoal: %v", err)
+	}
+	want := base + "\n\n" + coordinator.GoalSection(&coordinator.Goal{Name: "Ship", DueOn: ptr("2026-10-31"), Criteria: []coordinator.GoalCriterion{{Text: "a"}}})
+	if got := build(on); got != want || build(off) != base {
+		t.Fatalf("active goal:\n%s", got)
+	}
+	if _, err := pool.Writer().Exec(`DROP TABLE coordinator_goals`); err != nil {
+		t.Fatal(err)
+	}
+	if got := build(on); got != base {
+		t.Fatalf("failed goal read changed the rest of the block:\n%s", got)
+	}
+}
+
+func ptr(s string) *string { return &s }
 
 // TestCoordinatorStandingInstructionsReader_PropagatesLookupFailure verifies
 // an unknown coordinator id surfaces as an error rather than empty content,
