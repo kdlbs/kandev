@@ -5,6 +5,10 @@ import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
 import { GitHelper, makeGitEnv } from "../helpers/git-helper";
 import { enableCanvasFeature, removeCanvas, seedTaskCanvas } from "./canvas/canvas-fixture";
+import {
+  expectFileBrowserIconCentered,
+  readTaskWorkspacePath,
+} from "../helpers/panel-toolbar-geometry";
 
 type HeaderGeometry = {
   height: number;
@@ -143,6 +147,51 @@ async function constrainDockviewPanel(panel: import("@playwright/test").Locator,
 }
 
 test.describe("shared panel toolbars", () => {
+  test("centers Files copy path icons in every state", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const session = await createToolbarTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Copy path icon alignment",
+    );
+    await session.clickTab("Files");
+    await expect(session.files).toBeVisible();
+
+    const copyButton = session.files.getByRole("button", {
+      name: "Copy workspace path",
+      exact: true,
+    });
+    await expect(copyButton).toBeVisible({ timeout: 20_000 });
+    const buttonBox = await copyButton.boundingBox();
+    expect(buttonBox).not.toBeNull();
+    expect(Math.abs(buttonBox!.width - 24)).toBeLessThanOrEqual(1);
+    expect(Math.abs(buttonBox!.height - 24)).toBeLessThanOrEqual(1);
+    await expectFileBrowserIconCentered(copyButton, 0, "normal");
+
+    await copyButton.hover();
+    await expectFileBrowserIconCentered(copyButton, 1, "hovered");
+
+    const expectedPath = await readTaskWorkspacePath(testPage, apiClient);
+    expect(expectedPath.startsWith("/")).toBe(true);
+    await copyButton.click();
+    await expect
+      .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
+      .toBe(expectedPath);
+    await expectFileBrowserIconCentered(copyButton, 1, "copied");
+
+    const pathLabel = session.files.getByTestId("file-browser-workspace-path");
+    const [target, path] = await Promise.all([copyButton.boundingBox(), pathLabel.boundingBox()]);
+    expect(target).not.toBeNull();
+    expect(path).not.toBeNull();
+    expect(target!.x + target!.width).toBeLessThanOrEqual(path!.x + 1);
+    await expectNoDocumentOverflow(testPage, "Files copy path");
+  });
+
   test("keeps migrated panel families at one compact row on desktop", async ({
     testPage,
     apiClient,
