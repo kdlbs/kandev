@@ -150,5 +150,17 @@
   "toastForbidden": "提案を決定する権限がなくなりました。",
   "toastNotFound": "この提案はもう存在しません。",
   "toastNetworkError": "Kandev に接続できませんでした。何も決定されていません。再試行してください。",
-  "toastProposalNoLongerWaiting": "この提案はもう決定待ちではありません。"
+  "toastProposalNoLongerWaiting": "この提案はもう決定待ちではありません。",
+  "activityChipSources_one": "{{count}} 件の情報源を確認しました",
+  "activityChipSources_other": "{{count}} 件の情報源を確認しました",
+  "activityChipFailed": "{{count}} 件失敗",
+  "activityVerbListTasks": "タスクを読み込み中",
+  "activityVerbTaskConversation": "会話を読み込み中",
+  "activityVerbListWorkflows": "ワークフローを確認中",
+  "activityVerbListWorkflowSteps": "ワークフローのステップを確認中",
+  "activityVerbListRepositories": "リポジトリを確認中",
+  "activityVerbCoordinatorItem": "項目を確認中",
+  "activityVerbProposeTask": "提案を作成中",
+  "activityVerbWaiting": "あなたの判断を待っています",
+  "activityVerbWorking": "作業中"
 }

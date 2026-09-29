@@ -150,5 +150,17 @@
   "toastForbidden": "Ŷōũ ńō ĺōńĝēŕ ĥàvē ƥēŕḿĩśśĩōń ţō ďēćĩďē ƥŕōƥōśàĺś.",
   "toastNotFound": "Ţĥĩś ƥŕōƥōśàĺ ńō ĺōńĝēŕ ēxĩśţś.",
   "toastNetworkError": "Ćōũĺď ńōţ ŕēàćĥ Ķàńďēv. Ńōţĥĩńĝ ŵàś ďēćĩďēď. Ţŕŷ àĝàĩń.",
-  "toastProposalNoLongerWaiting": "Ţĥĩś ƥŕōƥōśàĺ ĩś ńō ĺōńĝēŕ ŵàĩţĩńĝ ƒōŕ à ďēćĩśĩōń."
+  "toastProposalNoLongerWaiting": "Ţĥĩś ƥŕōƥōśàĺ ĩś ńō ĺōńĝēŕ ŵàĩţĩńĝ ƒōŕ à ďēćĩśĩōń.",
+  "activityChipSources_one": "Ćĥēćķēď {{count}} śōũŕćē",
+  "activityChipSources_other": "Ćĥēćķēď {{count}} śōũŕćēś",
+  "activityChipFailed": "{{count}} ƒàĩĺēď",
+  "activityVerbListTasks": "Ŕēàďĩńĝ ţàśķś",
+  "activityVerbTaskConversation": "Ŕēàďĩńĝ à ćōńvēŕśàţĩōń",
+  "activityVerbListWorkflows": "Ćĥēćķĩńĝ ŵōŕķƒĺōŵś",
+  "activityVerbListWorkflowSteps": "Ćĥēćķĩńĝ ŵōŕķƒĺōŵ śţēƥś",
+  "activityVerbListRepositories": "Ćĥēćķĩńĝ ŕēƥōśĩţōŕĩēś",
+  "activityVerbCoordinatorItem": "Ĺōōķĩńĝ ũƥ àń ĩţēḿ",
+  "activityVerbProposeTask": "Ďŕàƒţĩńĝ à ƥŕōƥōśàĺ",
+  "activityVerbWaiting": "Ŵàĩţĩńĝ ƒōŕ ŷōũŕ ďēćĩśĩōń",
+  "activityVerbWorking": "Ŵōŕķĩńĝ"
 }

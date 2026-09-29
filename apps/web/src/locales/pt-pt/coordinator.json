@@ -150,5 +150,17 @@
   "toastForbidden": "Já não tem permissão para decidir propostas.",
   "toastNotFound": "Esta proposta já não existe.",
   "toastNetworkError": "Não foi possível contactar o Kandev. Nada foi decidido. Tente novamente.",
-  "toastProposalNoLongerWaiting": "Esta proposta já não está à espera de uma decisão."
+  "toastProposalNoLongerWaiting": "Esta proposta já não está à espera de uma decisão.",
+  "activityChipSources_one": "Consultou {{count}} fonte",
+  "activityChipSources_other": "Consultou {{count}} fontes",
+  "activityChipFailed": "{{count}} com falha",
+  "activityVerbListTasks": "A ler tarefas",
+  "activityVerbTaskConversation": "A ler uma conversa",
+  "activityVerbListWorkflows": "A verificar fluxos de trabalho",
+  "activityVerbListWorkflowSteps": "A verificar etapas do fluxo de trabalho",
+  "activityVerbListRepositories": "A verificar repositórios",
+  "activityVerbCoordinatorItem": "A consultar um item",
+  "activityVerbProposeTask": "A redigir uma proposta",
+  "activityVerbWaiting": "À espera da sua decisão",
+  "activityVerbWorking": "A trabalhar"
 }

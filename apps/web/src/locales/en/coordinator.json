@@ -150,5 +150,17 @@
   "toastForbidden": "You no longer have permission to decide proposals.",
   "toastNotFound": "This proposal no longer exists.",
   "toastNetworkError": "Could not reach Kandev. Nothing was decided. Try again.",
-  "toastProposalNoLongerWaiting": "This proposal is no longer waiting for a decision."
+  "toastProposalNoLongerWaiting": "This proposal is no longer waiting for a decision.",
+  "activityChipSources_one": "Checked {{count}} source",
+  "activityChipSources_other": "Checked {{count}} sources",
+  "activityChipFailed": "{{count}} failed",
+  "activityVerbListTasks": "Reading tasks",
+  "activityVerbTaskConversation": "Reading a conversation",
+  "activityVerbListWorkflows": "Checking workflows",
+  "activityVerbListWorkflowSteps": "Checking workflow steps",
+  "activityVerbListRepositories": "Checking repositories",
+  "activityVerbCoordinatorItem": "Looking up an item",
+  "activityVerbProposeTask": "Drafting a proposal",
+  "activityVerbWaiting": "Waiting for your decision",
+  "activityVerbWorking": "Working"
 }

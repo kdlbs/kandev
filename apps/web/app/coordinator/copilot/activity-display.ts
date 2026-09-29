@@ -130,7 +130,7 @@ function segmentDuration(messages: Message[]): number | null {
     last = ts;
   }
   if (first === null || last === null) return null;
-  const seconds = Number((last - first) / 1_000_000_000n);
+  const seconds = Number((last - first) / BigInt(1_000_000_000));
   return Math.max(1, seconds);
 }
 
@@ -250,7 +250,7 @@ function turnStartMs(messages: Message[], turnId: string | null): number | null 
   if (!turnId) return null;
   const first = messages.find((message) => message.turn_id === turnId);
   const ts = first ? parseTurnTimestamp(first.created_at) : null;
-  return ts === null ? null : Number(ts / 1_000_000n);
+  return ts === null ? null : Number(ts / BigInt(1_000_000));
 }
 
 /** Null while no turn runs or the session is starting. */

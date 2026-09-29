@@ -51,6 +51,9 @@ type QuickChatSessionViewProps = {
   /** Hides the "Environment prepared" and "Started agent" rows once the agent
    *  booted. See {@link hideSuccessfulStartupRows}. */
   hideStartupRows?: boolean;
+  /** Coordinator copilot: status line while running, one chip of tool calls
+   *  after. See {@link QuickChatContent}. */
+  activityDisplay?: boolean;
 };
 
 function resolveTaskArchiveState(
@@ -96,6 +99,7 @@ export function QuickChatSessionView({
   initialDraft,
   transformOutgoing,
   hideStartupRows,
+  activityDisplay,
 }: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
@@ -151,22 +155,22 @@ export function QuickChatSessionView({
           initialDraft={initialDraft}
           transformOutgoing={transformOutgoing}
           hideStartupRows={hideStartupRows}
+          activityDisplay={activityDisplay}
         />
       </div>
     </div>
   );
 
   if (!taskId) return sessionContent;
+  const launchErrorValue = {
+    taskId,
+    workspaceId: task?.workspaceId ?? "",
+    statusSummary,
+    automaticRecovery: resumption,
+  };
   if (isPassthrough) {
     return (
-      <TaskLaunchErrorProvider
-        value={{
-          taskId,
-          workspaceId: task?.workspaceId ?? "",
-          statusSummary,
-          automaticRecovery: resumption,
-        }}
-      >
+      <TaskLaunchErrorProvider value={launchErrorValue}>
         <div className="flex min-h-0 flex-1 flex-col">
           <TaskSharedError />
           {sessionContent}
@@ -175,14 +179,7 @@ export function QuickChatSessionView({
     );
   }
   return (
-    <TaskLaunchErrorProvider
-      value={{
-        taskId,
-        workspaceId: task?.workspaceId ?? "",
-        statusSummary,
-        automaticRecovery: resumption,
-      }}
-    >
+    <TaskLaunchErrorProvider value={launchErrorValue}>
       <div className="flex min-h-0 flex-1 flex-col">
         <TaskSharedError />
         {sessionContent}
