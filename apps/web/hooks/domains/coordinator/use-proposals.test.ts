@@ -752,7 +752,7 @@ describe("resume, message and move rows", () => {
   });
 
   it.each(["resume", "message", "move"] as const)(
-    "interleaving: a stale %s re-read cannot undo a fresher decision, nor a fresher 404",
+    "interleaving: a stale %s re-read cannot undo a fresher decision",
     async (kind) => {
       seedProposal(COORDINATOR_ID, kindRow(kind, { status: "pending" }) as Proposal);
       const stale = deferred<Proposal>();
@@ -773,17 +773,34 @@ describe("resume, message and move rows", () => {
       expect(
         useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId[KIND_ID]?.status,
       ).toBe("approved");
+    },
+  );
 
-      // A stale 404 issued before a fresher success cannot evict the row.
-      const stale404 = deferred<Proposal>();
-      const fresh2 = deferred<Proposal>();
-      getProposalMock.mockReturnValueOnce(stale404.promise).mockReturnValueOnce(fresh2.promise);
+  it.each(["resume", "message", "move"] as const)(
+    "interleaving: a stale %s by-id 404 issued before a fresher backfill success cannot evict its row",
+    async (kind) => {
+      seedProposal(COORDINATOR_ID, kindRow(kind, { status: "pending" }) as Proposal);
+      const byIdRead = deferred<Proposal>();
+      const backfillRead = deferred<Proposal>();
+      getProposalMock
+        .mockReturnValueOnce(byIdRead.promise)
+        .mockReturnValueOnce(backfillRead.promise);
+      listProposalsMock.mockResolvedValue({ proposals: [] });
+
       const { result } = renderHook(() => useProposalById(WORKSPACE_ID, COORDINATOR_ID, KIND_ID));
-      await waitFor(() => expect(getProposalMock).toHaveBeenCalledTimes(3));
+      renderHook(() => useProposals(WORKSPACE_ID, COORDINATOR_ID, true));
+      await waitFor(() => expect(getProposalMock).toHaveBeenCalledTimes(2));
+
       await act(async () => {
-        stale404.reject(new ApiError("gone", 404, {}));
+        backfillRead.resolve(kindRow(kind, { status: "approved", updated_at: T10 }));
       });
-      expect(result.current.notFound).toBe(true);
+      await act(async () => {
+        byIdRead.reject(new ApiError("gone", 404, {}));
+      });
+      expect(
+        useProposalsStore.getState().byCoordinator[COORDINATOR_ID]?.byId[KIND_ID]?.status,
+      ).toBe("approved");
+      expect(result.current.notFound).toBe(false);
     },
   );
 });

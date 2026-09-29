@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
@@ -45,6 +45,10 @@ export function ReadyToMergeActions({
   const session = task.statusSummary?.primary_session;
   const canSendBack = canManage && !!session?.id && sessionAcceptsMessage(session.state);
   const label = task.identifier ?? task.id;
+
+  useEffect(() => {
+    if (!canSendBack) setFormOpen(false);
+  }, [canSendBack]);
 
   function closeForm() {
     setFormOpen(false);

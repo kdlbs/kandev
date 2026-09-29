@@ -104,6 +104,29 @@ describe("ReadyToMergeActions", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
+
+  it("does not reopen the form when the session accepts messages again", async () => {
+    const view = renderActions(task("IDLE"), new Map(), true);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SEND_BACK }));
+    });
+    expect(screen.getByRole("textbox")).not.toBeNull();
+
+    const rerender = (state: string) =>
+      view.rerender(
+        <ReadyToMergeActions item={item(task(state))} prsByTaskId={new Map()} canManage>
+          {(actions) => <div>{actions}</div>}
+        </ReadyToMergeActions>,
+      );
+    await act(async () => rerender("FAILED"));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: SEND_BACK })).toBeNull();
+
+    await act(async () => rerender("IDLE"));
+    const trigger = screen.getByRole("button", { name: SEND_BACK });
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
 });
 
 describe("QueueGroup Ready to merge header", () => {
