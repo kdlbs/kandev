@@ -128,6 +128,16 @@ func registerCoordinatorRoutes(p routeParams) {
 		if p.taskRepo != nil && p.taskSvc != nil {
 			svc.SetRelayDeps(p.taskRepo, p.taskSvc)
 		}
+		if p.taskSvc != nil {
+			coordinatorWakeSources = &coordinatorWakeReader{tasks: p.taskSvc}
+		}
+		if p.addCleanup != nil {
+			p.addCleanup(func() error {
+				svc.StopWakeRecorder()
+				svc.StopWakeBackstop()
+				return nil
+			})
+		}
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}
@@ -295,16 +305,25 @@ func registerCoordinatorRelayRoutes(router *gin.Engine, _ bus.EventBus, svc *coo
 
 // registerCoordinatorWakeState returns the startup hook that prunes wake
 // state. A prune failure is logged and never blocks startup.
-func registerCoordinatorWakeState(_ *gin.Engine, _ bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+func registerCoordinatorWakeState(_ *gin.Engine, eventBus bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	if src := coordinatorWakeSources; src != nil && eventBus != nil {
+		svc.StartWakeRecorder(eventBus, src)
+	} else {
+		log.Warn("coordinator wake sources unavailable; event-driven wake recording is off")
+	}
 	return func(ctx context.Context, _ time.Time) {
 		turns, wakes, err := svc.PruneWakeState(ctx, time.Now().UTC())
 		if err != nil {
 			log.Warn("coordinator wake state pruning failed", zap.Error(err))
-			return
-		}
-		if turns > 0 || wakes > 0 {
+		} else if turns > 0 || wakes > 0 {
 			log.Info("coordinator wake state pruning complete",
 				zap.Int64("turns", turns), zap.Int64("wakes", wakes))
 		}
+		svc.StartWakeBackstop(ctx)
 	}
 }
+
+// coordinatorWakeSources is the task-side read surface of the wake recorder
+// and backstop, set by registerCoordinatorRoutes before the phase 3
+// registrations run.
+var coordinatorWakeSources coordinator.WakeSources

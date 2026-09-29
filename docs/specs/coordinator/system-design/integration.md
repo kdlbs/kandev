@@ -131,13 +131,13 @@ Task 01's contract for the settings fields of [wake](wake.md#flag-and-settings) 
   `Kick(coordinatorID)`. Both are post-commit and best effort: a failure is
   logged at warn and never changes the PATCH result. `Service` holds
   `kick func(ctx context.Context, coordinatorID string) error` (nil means no
-  call), set by task 04 through `SetKick`; task 01 declares the field and
+  call), set by task 05 through `SetKick` (task 04 only calls it); task 01 declares the field and
   setter and no interface. A returned error and a panic (recovered in the
   PATCH path) both count as a failure. The `coordinator.updated`
   `autonomy_changed` field is added to the payload type in task 01 and
   published by this PATCH only (change-only); the other publish sites of
-  [Autonomy read](wake.md#autonomy-read) (wake insert, delivery, turn settle)
-  belong to tasks 04 and 05.
+  [Autonomy read](wake.md#autonomy-read) belong to task 04 (wake insert) and
+  task 05 (delivery, turn settle).
 
 **Deletion of every phase 3 table.** Only `coordinator_wakes`
 carries `workspace_id`; the other phase 3 tables carry `coordinator_id` or
@@ -162,7 +162,8 @@ before that loop. `DeleteWorkspaceState` runs them once per workspace with
 coordinators. `Store.PruneWakeState(ctx, now)` (task 01) is the retention pass. In one
 transaction it deletes, in this order: the denial rows of turns with
 `finished_at` older than 90 days, those turn rows, then wake rows with status
-`delivered` or `superseded` and `updated_at` older than 30 days. A wake with
+`delivered` or `superseded`, `updated_at` older than 30 days and whose task cannot
+become an own task again ([wake](wake-recording.md#retention-and-own-tasks)). A wake with
 status `pending`, and a turn with `finished_at` null (open), are
 never deleted. It is idempotent (a second run at the same `now` deletes
 nothing) and returns the two deleted counts. Its caller is the first step of
@@ -179,7 +180,7 @@ no workflow is never watched. The MCP guard, `list_workflows` and
 `proposeTarget` already use it; phase 3 adds no second filter and none of its
 own paths reads `LoadWatchSet` (the raw read that keeps deleted ids).
 
-A **watched own task** is a task of [`ListOwnTasks`](wake.md#own-tasks) whose
+A **watched own task** is a task of [`ListOwnTasks`](wake-recording.md#own-tasks) whose
 `workflow_id` satisfies `Contains`. `ListOwnTasks` returns each task's
 `workflow_id` (the join to `tasks` already reads the row), so the callers
 filter in memory against one set read:

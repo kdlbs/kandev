@@ -7,6 +7,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -85,12 +86,43 @@ func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string,
 	return nil
 }
 
+// A delivered or superseded wake is the only record that an episode was
+// handled, so it is deleted only once its task can no longer become an own
+// task again: no approved create_task proposal of the coordinator names it, or
+// the task is ephemeral or gone. An archived task keeps its wakes.
+const pruneWakesSQL = `
+	DELETE FROM coordinator_wakes
+	WHERE status IN ('delivered', 'superseded') AND updated_at < ?
+	  AND NOT EXISTS (
+		SELECT 1 FROM coordinator_proposals p
+		WHERE p.coordinator_id = coordinator_wakes.coordinator_id AND p.task_id = coordinator_wakes.task_id
+		  AND p.kind = 'create_task' AND p.status = 'approved')`
+
+const pruneWakesWithTasksSQL = `
+	DELETE FROM coordinator_wakes
+	WHERE status IN ('delivered', 'superseded') AND updated_at < ?
+	  AND (NOT EXISTS (
+			SELECT 1 FROM coordinator_proposals p
+			WHERE p.coordinator_id = coordinator_wakes.coordinator_id AND p.task_id = coordinator_wakes.task_id
+			  AND p.kind = 'create_task' AND p.status = 'approved')
+		OR NOT EXISTS (
+			SELECT 1 FROM tasks t WHERE t.id = coordinator_wakes.task_id AND t.is_ephemeral = 0))`
+
 // PruneWakeState is the phase 3 retention pass. In one transaction it deletes
 // the denials of turns finished more than 90 days ago, those turns, then
-// delivered or superseded wakes last updated more than 30 days ago. Pending
-// wakes and open turns are never deleted. It returns the turn and wake rows
+// delivered or superseded wakes last updated more than 30 days ago whose task
+// can no longer become an own task. Pending wakes and open turns are never
+// deleted. It returns the turn and wake rows
 // deleted and is idempotent for one now.
 func (s *Store) PruneWakeState(ctx context.Context, now time.Time) (turns, wakes int64, err error) {
+	tasksExist, err := db.TableExistsContext(ctx, s.db, "tasks")
+	if err != nil {
+		return 0, 0, fmt.Errorf("check tasks table for wake pruning: %w", err)
+	}
+	pruneWakes := pruneWakesSQL
+	if tasksExist {
+		pruneWakes = pruneWakesWithTasksSQL
+	}
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin prune wake state: %w", err)
@@ -110,8 +142,7 @@ func (s *Store) PruneWakeState(ctx context.Context, now time.Time) (turns, wakes
 	if turns, err = res.RowsAffected(); err != nil {
 		return 0, 0, fmt.Errorf("count pruned turns: %w", err)
 	}
-	res, err = tx.ExecContext(ctx, tx.Rebind(`
-		DELETE FROM coordinator_wakes WHERE status IN ('delivered', 'superseded') AND updated_at < ?`), now.Add(-wakeRetention))
+	res, err = tx.ExecContext(ctx, tx.Rebind(pruneWakes), now.Add(-wakeRetention))
 	if err != nil {
 		return 0, 0, fmt.Errorf("prune wakes: %w", err)
 	}

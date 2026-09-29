@@ -32,9 +32,10 @@ conditions that hold it.
   unattended turns. Only a manager changes it, through the coordinator
   settings routes.
 - **Own task:** a task created by approving one of the coordinator's
-  proposals (the proposal's `task_id`), while that task exists, is not
-  archived and is not ephemeral. Tasks the coordinator only reads are not its
-  own tasks. Only an own task whose workflow is in the coordinator's watch set
+  `create_task` proposals (that proposal's `task_id`), while that task exists,
+  is not archived, is not ephemeral and is not the coordinator's own
+  conversation task. A task that a `message`, `move` or `resume` proposal only
+  targets, and a task the coordinator only reads, is not an own task. Only an own task whose workflow is in the coordinator's watch set
   wakes it ([integration](integration.md#terminology),
   `REQ-COORDINATOR-INTEGRATION-002`).
 - **Episode:** one occurrence of a condition on an own task, identified by the
@@ -83,17 +84,28 @@ own tasks exactly once.
 #### Acceptance criteria
 
 - **AC-COORDINATOR-WAKE-001.1:** When an event reports a condition in the
-  episode table on an own task of a coordinator with autonomy on, the system
-  shall store one `pending` wake for that episode.
+  episode table on an own task of a coordinator with autonomy on and stored
+  state shows that condition, the system shall store one `pending` wake for
+  that episode. An event is only a prompt to look: when stored state no longer
+  shows the condition, nothing is stored.
 - **AC-COORDINATOR-WAKE-001.2:** When the same episode is reported again, by a
   redelivered event, a backend restart, the backstop or any combination, the
   system shall not store a second wake and shall not change the existing
-  wake's status.
+  wake's status, whatever that status is (`pending`, `delivered` or
+  `superseded`). Every path shall derive the episode key from stored state,
+  never from an event payload, so on either dialect the same episode has
+  the same key on every path (a key is never compared across dialects). A condition whose key reads empty is not an episode
+  and stores no wake. Retention shall not delete a `delivered` or `superseded`
+  wake while its task row exists, is not ephemeral and is named by an approved
+  `create_task` proposal of the coordinator (archived or not), so an episode
+  is not stored again 30 days later, including after an unarchive.
 - **AC-COORDINATOR-WAKE-001.3:** A condition on a task that is not an own task
-  of the coordinator, on the coordinator's own conversation task, or on any
-  task while the coordinator's autonomy is off, shall store no wake; a
-  condition on an own task outside the watch set is covered by
-  `AC-COORDINATOR-INTEGRATION-002.1`.
+  of the coordinator (including a task that only a `message`, `move` or
+  `resume` proposal targets), on the coordinator's own conversation task, or
+  on any task while the coordinator's autonomy is off, shall store no wake,
+  including when autonomy is turned off between the moment the condition was
+  read and the moment the wake would be stored; a condition on an own task
+  outside the watch set is covered by `AC-COORDINATOR-INTEGRATION-002.1`.
 - **AC-COORDINATOR-WAKE-001.4:** When a coordinator already holds 200 `pending`
   wakes, the system shall store no further wake for it, count the refusal in
   metrics, and store the episode later through the backstop once the
@@ -114,14 +126,25 @@ truth.
   tasks from stored task, session and stall state, and store a wake for each
   episode that has none.
 - **AC-COORDINATOR-WAKE-002.2:** Given an own task whose condition arose while
-  every event for it was dropped, the system shall store its wake within one
-  backstop period of the condition becoming readable from stored state.
+  every event for it was dropped, the system shall store its wake in the first
+  backstop pass that starts after the condition becomes readable from stored
+  state, except while the coordinator holds 200 `pending` wakes
+  (`AC-COORDINATOR-WAKE-001.4`), when it is stored in the first pass with a
+  free slot for it, in task id then kind order, and except as
+  `AC-COORDINATOR-WAKE-002.3` provides. Passes start every 60 seconds, the first 60 seconds after the
+  backstop starts, and a pass that runs longer than 60 seconds delays the next
+  one rather than overlapping it.
 - **AC-COORDINATOR-WAKE-002.3:** When a backstop pass fails to read one
-  coordinator's own tasks, the system shall log the failure, skip that
-  coordinator for the pass, store nothing for it and continue with the next.
+  coordinator's own tasks, its watch set, or the stored state of any of those
+  tasks, the system shall log the failure, skip that coordinator for the pass,
+  store nothing for it from that pass's reads and continue with the next. A
+  stored-state read that finds nothing (no stall row, no pending action) is
+  not a failure.
 - **AC-COORDINATOR-WAKE-002.4:** When autonomy is turned on, the next backstop
   pass shall store wakes for the episodes that already exist on the
-  coordinator's own tasks.
+  coordinator's own tasks and have no stored wake. An episode whose wake was
+  marked `superseded` when autonomy was turned off keeps that wake and is not
+  stored again; a later occurrence with a new episode key is a new episode.
 
 ### REQ-COORDINATOR-WAKE-003: Busy is not unavailable
 

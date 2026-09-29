@@ -38,7 +38,7 @@ exactly one conversation, and the rules below never create another.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-COORDINATOR-WAKE-001` | [Store](#store), [Recorder](#recorder) |
+| `REQ-COORDINATOR-WAKE-001` | [Store](#store), [Recorder](wake-recording.md#recorder) |
 | `REQ-COORDINATOR-WAKE-002` | [Backstop](#backstop) |
 | `REQ-COORDINATOR-WAKE-003` | [Admission](#admission), [Delivery](#delivery) |
 | `REQ-COORDINATOR-WAKE-004` | [Flag and settings](#flag-and-settings), [Admission](#admission) |
@@ -107,7 +107,7 @@ upgrade conformance test.
 | `workspace_id` | text not null | |
 | `task_id` | text not null | the own task |
 | `kind` | text not null | `question`, `permission`, `stall`, `error`, `completed` |
-| `episode_key` | text not null | per the requirement's episode table; stall keys are RFC 3339 UTC with nanoseconds |
+| `episode_key` | text not null | per the requirement's episode table, never empty; see [Episode keys](wake-recording.md#episode-keys) |
 | `status` | text not null | `pending`, `delivered`, `superseded` |
 | `turn_id` | text null | the `coordinator_unattended_turns.id` it was delivered in |
 | `created_at`, `updated_at` | timestamp not null | UTC |
@@ -139,7 +139,8 @@ open turn a single row per coordinator on both dialects; this is the claim
 `AC-COORDINATOR-WAKE-005.2` rests on. Index `(coordinator_id, started_at, id)`.
 
 Retention: the startup pass deletes wake rows with status `delivered` or
-`superseded` and `updated_at` older than 30 days, and turn rows with
+`superseded`, `updated_at` older than 30 days and a task that cannot become an
+[own task](wake-recording.md#retention-and-own-tasks), and turn rows with
 `finished_at` older than 90 days. Coordinator delete and `workspace.deleted`
 delete both tables' rows for the coordinator in the same transaction that
 deletes its proposals.
@@ -189,56 +190,60 @@ error` (task 01) is the one helper for the three writes. Contract:
   different coordinators also run one after the other there and the design
   makes no independence claim for SQLite.
 
-## Own tasks
-
-`ListOwnTasks(ctx, coordinatorID)` selects `task_id` from
-`coordinator_proposals` where `coordinator_id = ?`, `status = 'approved'` and
-`task_id IS NOT NULL`, joins `tasks` on id, and keeps rows with
-`archived_at IS NULL` and `is_ephemeral = false`, ordered by task id. The
-reverse lookup the recorder needs, `CoordinatorsOwningTask(ctx, taskID)`,
-uses the same predicates plus `coordinators.autonomy_enabled = 1`; a task can
-be owned by at most one coordinator because a proposal's external id is
-unique, but the method returns a list and the recorder loops. Both return each
-task's `workflow_id`, and every caller keeps only tasks inside the
-coordinator's effective watch set ([integration](integration.md#watch-set)),
-read once per pass or event.
-
-## Recorder
-
-`internal/coordinator/wake_recorder.go` subscribes, only while phase 3 is
-effective:
-
-| Event | Kind | Episode key source |
-| --- | --- | --- |
-| `session.pending_action_changed` with `pending_action` `clarification` | `question` | the task repository's pending clarification bundle for the session: its `pending_id` |
-| `session.pending_action_changed` with `pending_action` `permission` | `permission` | the task repository's pending permission message for the session: its `pending_id` |
-| `coordinator_stalls` upsert (hooked in `stalls.go` after a row is written) | `stall` | the row's `last_event_at`, only while the row is [current](#stall-currency) |
-| `task_session.error_changed` with `active: true` | `error` | the payload's `stamp` |
-| `task.state_changed` with `state` `COMPLETED` | `completed` | `completed` |
-
-For each event the recorder resolves `CoordinatorsOwningTask`, keeps the
-coordinators whose watch set holds the task's workflow, skips a session that
-is not the task's primary session, re-reads the condition from stored state,
-and when it holds calls `RecordWake`. `RecordWake` takes the
-[wake lock](#wake-lock), counts the coordinator's pending rows and, below 200,
-runs `INSERT ... ON CONFLICT (coordinator_id, task_id, kind, episode_key) DO
-NOTHING` in the same transaction. At 200 or more it inserts nothing and
-increments `coordinator_wake_dropped_total{reason="cap"}`. Because the count
-and insert run under the lock, concurrent recording never passes 200; only
-wakes returned to `pending` by a failed or interrupted turn can, and they are
-not inserts (`AC-COORDINATOR-WAKE-001.4`). A committed insert calls `Kick(coordinatorID)`
-([Delivery](#delivery)). A read or insert error is logged at warn and dropped;
-the backstop recovers it.
-
 ## Backstop
 
 `internal/coordinator/wake_backstop.go` runs one goroutine with a 60-second
-ticker, started after the startup pass and stopped (joined) before the store
-closes. Its duties come in two groups. **Turn and setting duties** run for a
+ticker. Its duties come in two groups. **Turn and setting duties** run for a
 coordinator whatever its `autonomy_enabled` reads. **Wake duties** run only
 while autonomy is on. Turning autonomy off therefore stops new wakes and
 deliveries at once, but it never abandons a turn that is already open or an
 undo lowering that is already owed (`AC-COORDINATOR-WAKE-004.3`).
+
+### Lifecycle
+
+The backstop is a `WakeBackstop` value owned by the `Service`, with
+`Start(ctx)` and `Stop()` (the goroutine-ownership shape of
+`internal/integrations/healthpoll`):
+
+- `Start` is idempotent, creates a fresh cancellable context under the same
+  mutex `Stop` takes, registers the goroutine on a `sync.WaitGroup`, and runs
+  no pass at start: the first pass is 60 seconds after `Start`. `Stop` is
+  idempotent, cancels the context and waits for the goroutine, including a pass
+  in progress (every store call in a pass takes the pass context, so it
+  returns promptly). `Stop` also latches the value closed: a `Start` after
+  `Stop` is a no-op, so a shutdown that lands before the detached startup pass
+  reaches `StartWakeBackstop` leaves no ticker behind. Tests use a fresh value.
+- One goroutine runs passes serially, so two passes never overlap; a pass that
+  takes longer than 60 seconds makes the ticker drop the missed ticks rather
+  than queue them.
+- A panic in a pass is recovered, logged at error and counted in
+  `coordinator_backstop_skipped_total`; the loop continues.
+- The wake registration (`registerCoordinatorWakeState` in
+  `internal/backendapp/coordinator.go`) keeps `PruneWakeState` first, then
+  calls `svc.StartWakeBackstop(ctx)`, so the backstop starts after the wake
+  hook's own startup pass. The later startup hooks (delivery's settle of an
+  interrupted turn) need no ordering against it: the first pass is 60 seconds
+  after `Start`, and every settle both perform is conditional on the row's
+  `outcome IS NULL` (and `message_id IS NULL` for the no-message settle), so
+  whichever runs first wins and the other is a no-op.
+- `registerCoordinatorRoutes` registers `svc.StopWakeBackstop` through
+  `routeParams.addCleanup` when phase 3 is effective. Cleanups run in reverse
+  registration order and the database pool's cleanup was registered earlier,
+  so the backstop is joined before the store closes.
+- The `Hooks` value carries the three later-task duties: `TurnDuties(ctx,
+  coordinatorID)` (steps 2.1 to 2.3; one field, task 05 composes spend's
+  `CheckCeiling` into it), `Lowering(ctx, coordinatorID)` (step 2.4, task 09)
+  and `Deliver(ctx, coordinatorID)` (step 3.2, task 05).
+  `Service.SetBackstopHooks` merges per field under a mutex (a non-nil field
+  replaces, a nil field leaves the stored one) and is honoured only before
+  `Start`. Every owner calls it in the synchronous body of its registration
+  function, never in the hook that function returns (the returned hooks run
+  after every body, and the wake hook's `Start` is one of them). A hook must
+  return promptly once its `ctx` is cancelled, which bounds `Stop`; a later call logs at warn and changes nothing. A nil field is a
+  no-op; a hook is called serially for one coordinator in the step order
+  below; a hook error or panic is logged at warn, counted in
+  `coordinator_backstop_skipped_total`, and does not skip the later duties or
+  coordinators.
 
 Each tick:
 
@@ -269,16 +274,16 @@ Each tick:
    `coordinator_backstop_skipped_total`, and does not skip the later duties
    or coordinators.
 3. Only when the re-read row has `autonomy_enabled = 1`, runs the wake duties:
-   1. reads `ListOwnTasks`, keeps the tasks in the coordinator's watch set
-      ([integration](integration.md#watch-set)) and, per task, reads the
-      current episodes from stored state: the primary session's pending clarification bundle and pending
-      permission message, the task's `coordinator_stalls` row when
-      [current](#stall-currency), the primary session's active error, and the
-      task state. It calls `RecordWake` for each. A read error for one
-      coordinator logs at warn, increments
-      `coordinator_backstop_skipped_total`, and moves on to the next
-      coordinator.
-   2. Calls `Deliver(coordinatorID)`.
+   1. **Reads first, records after**, as
+      [Backstop recording](wake-recording.md#backstop-recording) states:
+      every own task's current episodes are read from stored state
+      (`ListOwnTasks`, the watch set, `WakeSources`, `GetStall`), and only when
+      every read succeeded does it `RecordWake` each one. A read error
+      abandons this coordinator's wake duties for the pass before anything is
+      recorded, skips step 3.2 for it, logs at warn, increments
+      `coordinator_backstop_skipped_total` and moves on
+      (`AC-COORDINATOR-WAKE-002.3`).
+   2. Calls `Deliver(coordinatorID)` through `Hooks`.
 
 With autonomy off, an open turn therefore keeps the 60-second ceiling bound of
 `AC-COORDINATOR-SPEND-003.2`, the `stop_failing` state of
@@ -293,7 +298,8 @@ A `coordinator_stalls` row is never deleted when its task resumes; it stays
 until the 30-day prune. Every reader in this design (recorder, backstop and
 delivery step 2) therefore treats a stall row as a condition only while it is
 current: the task's persisted `TaskStatusSummary.last_activity_at` is absent
-or not later than the row's `detected_at`. This is the test Needs you applies
+or not later than the row's `detected_at`; a failing `LastActivityAt` read is
+a read error, not an absent value. This is the test Needs you applies
 (`AC-COORDINATOR-NEEDS-YOU-001.2`, [needs-you design](needs-you.md)). A task
 that resumes before delivery makes its stall wake's condition end, and
 delivery supersedes it (`AC-COORDINATOR-WAKE-005.6`). A later stall upserts a
@@ -556,7 +562,8 @@ every wake insert, delivery, turn settle and autonomy PATCH that changes
 ## Observability
 
 Counters `coordinator_wake_recorded_total{kind}`,
-`coordinator_wake_dropped_total{reason}`,
+`coordinator_wake_dropped_total{reason}` (closed set: `cap`, `autonomy_off`,
+`not_own`, `not_found`, `read_error`, `write_error`),
 `coordinator_wake_delivered_total`, `coordinator_wake_superseded_total`,
 `coordinator_unattended_turn_total{outcome}`,
 `coordinator_admission_held_total{reason}` and
