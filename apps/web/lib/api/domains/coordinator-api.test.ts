@@ -15,7 +15,9 @@ import {
   patchCoordinator,
   rejectProposal,
   type Coordinator,
+  isCreateTaskProposal,
   type Proposal,
+  type WireProposal,
 } from "./coordinator-api";
 
 const fetchSpy = vi.fn<typeof fetch>();
@@ -452,5 +454,58 @@ describe("getCoordinatorProfileUnavailable", () => {
     }
 
     expect(getCoordinatorProfileUnavailable(error)).toBeNull();
+  });
+});
+
+describe("phase-2 wire shapes", () => {
+  const base = {
+    id: PROPOSAL_ID,
+    coordinator_id: COORDINATOR_ID,
+    workspace_id: WORKSPACE_ID,
+    status: "pending" as const,
+    claimed_at: null,
+    task_id: null,
+    error: null,
+    reject_reason: null,
+    decided_by: null,
+    created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
+  };
+
+  it("narrows create_task and kind-less proposals to the create shape", () => {
+    const spec = {
+      title: "t",
+      description: "",
+      rationale: "",
+      workflow_id: "",
+      step_id: "",
+      repository_id: "",
+      source_task_id: "",
+    };
+    const legacy: WireProposal = { ...base, spec, final_spec: null };
+    const created: WireProposal = { ...base, kind: "create_task", spec, final_spec: null };
+    expect(isCreateTaskProposal(legacy)).toBe(true);
+    expect(isCreateTaskProposal(created)).toBe(true);
+  });
+
+  it("treats a known non-create kind and an unknown kind as other kinds", () => {
+    const move: WireProposal = { ...base, kind: "move", spec: { step_id: "s" }, final_spec: null };
+    const future: WireProposal = { ...base, kind: "reassign", spec: {}, final_spec: null };
+    expect(isCreateTaskProposal(move)).toBe(false);
+    expect(isCreateTaskProposal(future)).toBe(false);
+  });
+
+  it("reads the coordinator policy and watches fields", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        ...coordinator,
+        policy: { actions: { create_task: "propose" } },
+        policy_revision: 2,
+        watches: { scope: "selected", workflow_ids: ["wf-1"] },
+      }),
+    );
+    const got = await getCoordinator(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    expect(got.policy_revision).toBe(2);
+    expect(got.watches).toEqual({ scope: "selected", workflow_ids: ["wf-1"] });
   });
 });
