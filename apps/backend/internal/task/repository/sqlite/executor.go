@@ -94,7 +94,13 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 
 func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin executor delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
 	`), now, now, id)
 	if err != nil {
@@ -104,7 +110,40 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("executor not found: %s", id)
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM executor_reachability WHERE executor_id = ?
+	`), id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit executor delete: %w", err)
+	}
 	return nil
+}
+
+// scanExecutorRow scans one row of the standard executors column list
+// (id, name, type, status, is_system, resumable, config, created_at,
+// updated_at, deleted_at) into a models.Executor. Shared by every query that
+// selects that exact column set.
+func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor, error) {
+	executor := &models.Executor{}
+	var configJSON string
+	var isSystem int
+	var resumable int
+	if err := scanner.Scan(
+		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+	); err != nil {
+		return nil, err
+	}
+	executor.IsSystem = isSystem == 1
+	executor.Resumable = resumable == 1
+	if configJSON != "" && configJSON != "{}" {
+		if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
+			return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
+		}
+	}
+	return executor, nil
 }
 
 func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
@@ -119,22 +158,9 @@ func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, err
 
 	var result []*models.Executor
 	for rows.Next() {
-		executor := &models.Executor{}
-		var configJSON string
-		var isSystem int
-		var resumable int
-		if err := rows.Scan(
-			&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-			&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
-		); err != nil {
+		executor, err := scanExecutorRow(rows)
+		if err != nil {
 			return nil, err
-		}
-		executor.IsSystem = isSystem == 1
-		executor.Resumable = resumable == 1
-		if configJSON != "" && configJSON != "{}" {
-			if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
-				return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
-			}
 		}
 		result = append(result, executor)
 	}
@@ -319,6 +345,26 @@ func (r *Repository) ListExecutorsRunningLiveStandalone(ctx context.Context) ([]
 	}
 	defer func() { _ = rows.Close() }()
 
+	return scanExecutorRunningRows(rows)
+}
+
+// ListExecutorsRunningPluginRemote returns every retained plugin-backed
+// inventory row. The runtime decides which rows can be re-tracked as running;
+// terminal rows remain visible to cleanup and profile lifecycle checks.
+func (r *Repository) ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE runtime = ?
+		ORDER BY updated_at DESC
+	`), agentruntime.RuntimePluginRemote)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
 	return scanExecutorRunningRows(rows)
 }
 

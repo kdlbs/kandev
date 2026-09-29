@@ -48,7 +48,8 @@ type CreateInstanceRequest struct {
 	ID                     string              `json:"id,omitempty"`
 	WorkspacePath          string              `json:"workspace_path"`
 	AgentCommand           string              `json:"agent_command,omitempty"`
-	Protocol               string              `json:"protocol,omitempty"`       // Protocol adapter to use (currently "acp")
+	Protocol               string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
+	CodexAppServerEnabled  bool                `json:"codex_app_server_enabled,omitempty"`
 	AgentType              string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
 	WorkspaceFlag          string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
 	Env                    map[string]string   `json:"env,omitempty"`
@@ -109,13 +110,15 @@ type CreateInstanceResponse struct {
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
-	ID            string            `json:"id"`
-	Port          int               `json:"port"`
-	Status        string            `json:"status"`
-	WorkspacePath string            `json:"workspace_path"`
-	AgentCommand  string            `json:"agent_command"`
-	Env           map[string]string `json:"env,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	ID              string            `json:"id"`
+	Port            int               `json:"port"`
+	LeaseGeneration uint64            `json:"lease_generation"`
+	ListenerActive  bool              `json:"listener_active"`
+	Status          string            `json:"status"`
+	WorkspacePath   string            `json:"workspace_path"`
+	AgentCommand    string            `json:"agent_command"`
+	Env             map[string]string `json:"env,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
 	// TaskID is the task ID this instance was created for, if any.
@@ -344,6 +347,9 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 	return nil
 }
 
+// ErrInstanceNotFound identifies an absent agentctl instance.
+var ErrInstanceNotFound = errors.New("instance not found")
+
 // GetInstance gets information about a specific instance.
 func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*InstanceInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances/"+instanceID, nil)
@@ -358,7 +364,7 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("instance %q not found", instanceID)
+		return nil, fmt.Errorf("%w: %q", ErrInstanceNotFound, instanceID)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to get instance: status %d", resp.StatusCode)

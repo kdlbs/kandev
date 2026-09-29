@@ -91,6 +91,21 @@ func TestRemoteWorkspaceProjectionFromLaunch_KeepsAdditionalBranchOfPrimaryRepos
 	}
 }
 
+func TestQualifiedPRBase_RemoteWorkspaceProjectionForwardsIdentity(t *testing.T) {
+	qualifiedBase := lifecycleTestQualifiedPRBase()
+	projection, err := remoteWorkspaceProjectionFromLaunch(&LaunchRequest{Repositories: []RepoLaunchSpec{
+		{RepositoryURL: "https://github.com/fork/widget.git", RepoName: "primary", BaseBranch: "main"},
+		{RepositoryURL: "https://github.com/fork/widget.git", RepoName: "fork", BaseBranch: "release/next", CheckoutBranch: "feature/work", PRNumber: 42, QualifiedPRBase: &qualifiedBase},
+	}})
+	if err != nil {
+		t.Fatalf("remoteWorkspaceProjectionFromLaunch: %v", err)
+	}
+	if len(projection) != 1 || projection[0].QualifiedPRBase != &qualifiedBase ||
+		projection[0].PRNumber != qualifiedBase.Target.Number {
+		t.Fatalf("projection = %#v, want qualified PR identity", projection)
+	}
+}
+
 func TestMaterializeWorkspaceRepositories_ReconcilesAllBeforeRescan(t *testing.T) {
 	client := &workspaceMaterializerClientStub{}
 	err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{
@@ -114,6 +129,43 @@ func TestMaterializeWorkspaceRepositories_ForwardsBaseAndCheckoutBranches(t *tes
 	}
 	if got := client.requests[0]; got.BaseBranch != "main" || got.CheckoutBranch != "feature/work" {
 		t.Fatalf("request branches = base:%q checkout:%q", got.BaseBranch, got.CheckoutBranch)
+	}
+}
+
+func TestQualifiedPRBase_RemoteMaterializationForwardsIdentity(t *testing.T) {
+	client := &workspaceMaterializerClientStub{}
+	qualifiedBase := lifecycleTestQualifiedPRBase()
+	if err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/fork/widget.git", Destination: "fork-feature-work",
+		BaseBranch: "release/next", CheckoutBranch: "feature/work", PRNumber: 42, QualifiedPRBase: &qualifiedBase,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.requests[0]; got.QualifiedPRBase != &qualifiedBase || got.PRNumber != 42 || got.BaseBranch != "release/next" {
+		t.Fatalf("materialization request = %#v, want qualified PR base", got)
+	}
+}
+
+func TestQualifiedPRBase_WorkspaceRepositorySpecRetainsIdentity(t *testing.T) {
+	qualifiedBase := lifecycleTestQualifiedPRBase()
+	specs := workspaceRepositorySpecsFromLaunch(&LaunchRequest{Repositories: []RepoLaunchSpec{{
+		RepositoryID: "repo", RepoName: "fork", RepositoryPath: "/repo",
+		BaseBranch: "release/next", CheckoutBranch: "feature/work", PRNumber: 42, QualifiedPRBase: &qualifiedBase,
+	}}})
+	if len(specs) != 1 || specs[0].QualifiedPRBase != &qualifiedBase || specs[0].PRNumber != 42 {
+		t.Fatalf("workspace repository specs = %#v, want qualified PR base", specs)
+	}
+}
+
+func TestQualifiedPRBase_BuildEnvPrepareRequestForwardsIdentity(t *testing.T) {
+	qualifiedBase := lifecycleTestQualifiedPRBase()
+	prep := buildEnvPrepareRequest(&LaunchRequest{
+		RepositoryID: "repo", RepositoryPath: "/repo", PRNumber: 42, QualifiedPRBase: &qualifiedBase,
+		Repositories: []RepoLaunchSpec{{RepositoryID: "repo", RepositoryPath: "/repo", PRNumber: 42, QualifiedPRBase: &qualifiedBase}},
+	}, "/workspace", "worktree")
+	if prep.QualifiedPRBase != &qualifiedBase || prep.PRNumber != 42 || len(prep.Repositories) != 1 ||
+		prep.Repositories[0].QualifiedPRBase != &qualifiedBase || prep.Repositories[0].PRNumber != 42 {
+		t.Fatalf("prepare request lost qualified PR base: %#v", prep)
 	}
 }
 

@@ -149,8 +149,9 @@ Implemented on 2026-09-24 in `/workspace`, branch
 `feature/issue-3773-define-de-8d9203`, base
 `10726dfe8ea41240846db4a6d2ba26ebe9ce9c1a`. The user renewed implementation
 authorization in this session. The 18 files listed above, including all five
-package documents, remain uncommitted. No implementation commit hash,
-push, PR, GitHub comment, task/session creation or live agent launch was produced.
+package documents, were uncommitted at this implementation checkpoint. No commit,
+push, PR, GitHub comment, task/session creation or live agent launch was produced
+during that implementation step.
 The current coordinator owns this same checkout; no worker transfer is needed.
 
 The recovered implementation was inspected before changes. Additional
@@ -213,3 +214,33 @@ authorized opening the PR on 2026-09-26 and continued that request on
 diff exactly matches the patch validated above. This work order records local
 implementation evidence; publication identifiers and commit hook results are
 recorded in the Kandev task handoff. Merging remains a separate decision.
+
+### Publication integration, 2026-09-29
+
+The implementation commit was preserved while merging current `main`
+(`cb9a530004f7d624629c9d9dd6cebdff4a32e7de`) into the existing branch. The only
+text conflict was in `registerCreateTaskTool`: the resolution retains this
+package's sibling-placement descriptions and main's explicit-profile validation
+guidance. The resulting diff against main still contains the same 18 task files.
+
+Post-merge validation:
+
+- Full MCP packages passed: server 2.537s; handlers 26.201s.
+- Focused race tests passed using the command above: server 1.424s;
+  handlers 5.856s.
+- Service depth/reparenting and orchestrator children-completion regressions
+  passed (0.338s and 0.347s) with
+  `go test -tags fts5 ./internal/task/service ./internal/orchestrator -run 'TestCreateTask_SubtaskOfSubtask_|TestService_UpdateTask_RejectsNestingUnderSubtask|TestProcessOnChildrenCompleted_|TestHandleTaskMovedToTerminalStepProcessesParentChildrenCompleted' -count=1`.
+- Catalog: 328 decisions and 1245 specifications; all-spec lint passed.
+- Validator tests: 36 specification tests and 62 public-doc tests passed;
+  all 47 published pages validated.
+- Harness checks passed: 19 tests and 200 files. Dependencies were refreshed
+  with `pnpm install --frozen-lockfile` after the base update.
+- Changed Go files are formatted; `git diff --check origin/main` is clean.
+  Four whitespace findings in the staged base merge are byte-identical to
+  incoming main files and are outside this PR's diff.
+
+The normal merge commit hooks and final publication state are recorded in the
+Kandev task handoff. The original commit completed during the interrupted turn;
+its temporary hook log did not survive the environment restart, so a complete
+original per-hook receipt cannot be reconstructed.

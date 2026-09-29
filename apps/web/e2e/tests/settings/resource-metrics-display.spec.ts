@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
 import {
   captureAppStatusBarSettings,
   restoreAppStatusBarSettings,
@@ -19,7 +20,8 @@ test.describe("Resource metrics display", () => {
   let baseline: SystemMetricsDisplay;
   let statusBarBaseline: AppStatusBarSettingsBaseline;
 
-  test.beforeEach(async ({ apiClient }) => {
+  test.beforeEach(async ({ apiClient, testPage }) => {
+    void testPage;
     const settings = await apiClient.getUserSettings();
     baseline = settings.settings.system_metrics_display as SystemMetricsDisplay;
     statusBarBaseline = await captureAppStatusBarSettings(apiClient);
@@ -31,6 +33,31 @@ test.describe("Resource metrics display", () => {
       system_metrics_display: baseline,
     });
     await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
+  });
+
+  test("keeps detailed desktop metrics in a compact inline status bar", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    const update = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: true, simplified: false },
+    });
+    expect(update.ok).toBe(true);
+    await testPage.emulateMedia({ colorScheme: "dark" });
+    await testPage.goto("/");
+    const metrics = testPage.getByTestId("app-status-metrics");
+    await expect(metrics.getByLabel(/^CPU /)).toBeVisible();
+    await expect(metrics.getByRole("heading")).toHaveCount(0);
+    const host = await requireBox(metrics.getByLabel("Host metrics"), "host badge");
+    const cpu = await requireBox(metrics.getByLabel(/^CPU /), "CPU reading");
+    expect(Math.abs(host.y + host.height / 2 - cpu.y - cpu.height / 2)).toBeLessThanOrEqual(1);
+    expect((await requireBox(metrics, "desktop metrics")).height).toBeLessThanOrEqual(24);
+    await assertNoDocumentHorizontalOverflow(testPage);
+    if (prCapture.capturing) await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+    await prCapture.screenshot("system-metrics-desktop", {
+      caption: "Desktop retains the compact inline host metrics in the status bar",
+    });
   });
 
   test("renders simplified metrics in the status bar", async ({ testPage }) => {

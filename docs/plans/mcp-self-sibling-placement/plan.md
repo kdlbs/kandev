@@ -19,7 +19,8 @@ Deliver the automatic sibling behavior selected for
 [design](../../specs/tasks/system-design/mcp-self-sibling-placement.md) form the
 approved implementation contract. The maintainer authorized implementation on
 2026-09-21 and renewed that authorization on 2026-09-24. Implementation and
-work-order validation are complete. The changes remain uncommitted for review.
+work-order validation are complete. The implementation is committed for
+publication; current delivery evidence is recorded in the task handoff.
 
 One sequential vertical work order covers intent propagation, authenticated
 resolution, result reporting, regression evidence and public documentation.
@@ -34,7 +35,8 @@ coverage, task-mode schema descriptions and public reference updates.
 
 Out of scope: UI, deeper Kanban hierarchy, independent delegator identity,
 Office creation enablement, external-client self support, generic depth-error
-recovery, data migration, contributor-branch changes and GitHub publication.
+recovery, data migration and contributor-branch changes. Publication follows
+the separate authorization recorded below.
 
 ## Technical approach
 

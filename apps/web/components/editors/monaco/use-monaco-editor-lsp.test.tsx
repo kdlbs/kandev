@@ -5,6 +5,9 @@ import { modelUriForDocument } from "@/lib/lsp/file-uri";
 const mocks = vi.hoisted(() => ({
   getWorkspaceUriForSession: vi.fn(() => "file:///workspace"),
   promoteDocumentModel: vi.fn(),
+  openDocument: vi.fn(),
+  closeDocument: vi.fn(),
+  lspStatus: { state: "disabled" as "disabled" | "ready" | "reconnecting" },
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -13,13 +16,15 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-lsp", () => ({
-  useLsp: () => ({ status: { state: "disabled" }, lspLanguage: null, toggle: vi.fn() }),
+  useLsp: () => ({ status: mocks.lspStatus, lspLanguage: "typescript", toggle: vi.fn() }),
 }));
 
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
   lspClientManager: {
     getWorkspaceUriForSession: mocks.getWorkspaceUriForSession,
     promoteDocumentModel: mocks.promoteDocumentModel,
+    openDocument: mocks.openDocument,
+    closeDocument: mocks.closeDocument,
   },
 }));
 
@@ -52,5 +57,30 @@ describe("useMonacoEditorLsp model identity", () => {
       documentUri,
       contentRef.current,
     );
+  });
+
+  it("keeps its document registration through a transient reconnect", () => {
+    mocks.lspStatus.state = "ready";
+    const contentRef = { current: "class Target {}" };
+    const editorRef = { current: null };
+    const { rerender, unmount } = renderHook(() =>
+      useMonacoEditorLsp({
+        sessionId: "session",
+        worktreePath: "/host/worktree",
+        language: "typescript",
+        path: "src/Target.ts",
+        contentRef,
+        editorRef,
+        editorReady: true,
+      }),
+    );
+
+    expect(mocks.openDocument).toHaveBeenCalledTimes(1);
+    mocks.lspStatus.state = "reconnecting";
+    rerender();
+    expect(mocks.closeDocument).not.toHaveBeenCalled();
+
+    unmount();
+    expect(mocks.closeDocument).toHaveBeenCalledTimes(1);
   });
 });

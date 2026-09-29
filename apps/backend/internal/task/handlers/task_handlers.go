@@ -45,8 +45,18 @@ type TaskHandlers struct {
 	unarchiveRecoveryTimeout      time.Duration
 	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
 	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	backgroundWorkEnabled         bool
 	logger                        *logger.Logger
+}
+
+func (h *TaskHandlers) SetBackgroundWorkEnabled(enabled bool) {
+	h.backgroundWorkEnabled = enabled
+}
+
+func (h *TaskHandlers) isBackgroundWorkEnabled() bool {
+	return h.backgroundWorkEnabled
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
@@ -77,6 +87,10 @@ type agentProfileRecentUseRecorder interface {
 		contextValue usermodels.AgentProfileRecentUseContext,
 		profileID string,
 	) (*usermodels.AgentProfileRecentUse, error)
+}
+
+type sidebarTaskSettingsReader interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -113,6 +127,10 @@ func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsed
 
 func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
 	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) SetSidebarTaskSettingsReader(reader sidebarTaskSettingsReader) {
+	h.sidebarSettingsReader = reader
 }
 
 func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
@@ -190,12 +208,20 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
+	api.POST("/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
 	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
 	api.DELETE("/workspaces/:id/tasks/by-external-id", h.httpReleaseTaskExternalID)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/management-claim", h.httpGetTaskManagementClaim)
+	api.POST("/tasks/:id/management-claim", h.httpChangeTaskManagementClaim)
+	api.GET("/tasks/:id/completion-gate", h.httpGetTaskCompletionGate)
+	api.GET("/tasks/:id/completion-gate/history", h.httpListTaskCompletionGateHistory)
+	api.PUT("/tasks/:id/completion-gate/criteria", h.httpSetTaskCompletionCriteria)
+	api.PUT("/tasks/:id/completion-gate/criteria/:criterion_id/evidence", h.httpVerifyTaskCompletionCriterion)
+	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
@@ -208,6 +234,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
+	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
@@ -224,6 +251,8 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// AC-18): per-task and per-session usage/cost totals.
 	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
 	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns", h.httpGetTaskSessionUsageTurns)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns/:turnId", h.httpGetTaskSessionUsageTurn)
 
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single
@@ -243,6 +272,12 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
+
+	// Background workload endpoints
+	api.GET("/task-sessions/:id/background-work", h.httpListBackgroundWorkloads)
+	api.GET("/task-sessions/:id/background-work/:workId", h.httpGetBackgroundWorkload)
+	api.POST("/task-sessions/:id/background-work/:workId/action", h.httpExecuteBackgroundAction)
+	api.GET("/task-sessions/:id/background-work/:workId/usage", h.httpGetBackgroundWorkloadUsage)
 
 	// Quick chat endpoints - create ephemeral task with prepared session, and
 	// resync the tab strip so clients that missed WS events converge.
@@ -265,6 +300,9 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkList, h.wsListBackgroundWorkloads)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkGet, h.wsGetBackgroundWorkload)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkAction, h.wsExecuteBackgroundAction)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
 	// Session file review handlers
@@ -284,6 +322,11 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackDelete, h.wsDeleteTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackClear, h.wsClearTaskPreviewFeedback)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.

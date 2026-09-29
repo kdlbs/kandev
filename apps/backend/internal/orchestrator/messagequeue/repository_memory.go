@@ -26,6 +26,8 @@ type memoryRepository struct {
 	autoMergeOverrides map[QueueSessionIdentity]AutoMergeOverride
 	identities         map[string]QueueSessionIdentity
 	admissionReceipts  map[queueAdmissionKey]queueAdmissionReceipt
+	managedInputs      map[managedInputIDKey]ManagedInputReceipt
+	managedOccurrences map[managedInputOccurrenceKey]managedInputIDKey
 	statusGeneration   map[string]int64
 	authority          func(context.Context, string, string) (QueueSessionIdentity, error)
 }
@@ -46,6 +48,8 @@ func NewMemoryRepository() Repository {
 		statusGeneration:   make(map[string]int64),
 		identities:         make(map[string]QueueSessionIdentity),
 		admissionReceipts:  make(map[queueAdmissionKey]queueAdmissionReceipt),
+		managedInputs:      make(map[managedInputIDKey]ManagedInputReceipt),
+		managedOccurrences: make(map[managedInputOccurrenceKey]managedInputIDKey),
 	}
 }
 
@@ -72,6 +76,16 @@ func (r *memoryRepository) clearSessionStateLocked(sessionID string) {
 	for key := range r.admissionReceipts {
 		if key.SessionID == sessionID {
 			delete(r.admissionReceipts, key)
+		}
+	}
+	for key := range r.managedInputs {
+		if key.Scope.SessionID == sessionID {
+			delete(r.managedInputs, key)
+		}
+	}
+	for key := range r.managedOccurrences {
+		if key.Scope.SessionID == sessionID {
+			delete(r.managedOccurrences, key)
 		}
 	}
 	for identity := range r.autoMergeOverrides {
@@ -250,6 +264,20 @@ func (r *memoryRepository) CountPendingByTaskIDs(_ context.Context, taskIDs []st
 		}
 	}
 	return counts, nil
+}
+
+func (r *memoryRepository) CountQueueDepth(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, entries := range r.entries {
+		for _, entry := range entries {
+			if !entry.IsReservedInFlight() {
+				count++
+			}
+		}
+	}
+	return count, nil
 }
 
 // Insert appends a new entry at the tail of the session's FIFO queue.
@@ -871,8 +899,8 @@ func (r *memoryRepository) FindByID(_ context.Context, entryID string) (*QueuedM
 	return nil, ErrEntryNotFound
 }
 
-// ListDurableDeliveryEntries returns every retained lifecycle or plan-comment
-// receipt in stable FIFO order.
+// ListDurableDeliveryEntries returns every retained managed-input, lifecycle,
+// or plan-comment receipt in stable FIFO order.
 func (r *memoryRepository) ListDurableDeliveryEntries(_ context.Context) ([]QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -939,7 +967,7 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 	return out, nil
 }
 
-// ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
+// ReserveHead returns the lowest-position entry, deleting ordinary rows and retaining durable deliveries.
 func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -957,7 +985,7 @@ func (r *memoryRepository) reserveHeadLocked(
 	}
 	headIndex := lowestPositionIndex(list)
 	head := list[headIndex]
-	if head.IsDeliveryAttempted() {
+	if head.IsDeliveryAttempted() && !isManagedInputQueueEntry(head) {
 		r.removeEntryLocked(sessionID, headIndex)
 		return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
 	}
@@ -1244,7 +1272,8 @@ func (r *memoryRepository) MarkDeliveryAttemptedForSession(
 	for index := range messages {
 		candidate := &messages[index]
 		if candidate.ID == "" || candidate.SessionID != identity.SessionID ||
-			candidate.TaskID != identity.TaskID || !candidate.IsDurablePlanComment() {
+			candidate.TaskID != identity.TaskID ||
+			(!candidate.IsDurablePlanComment() && !isManagedInputQueueEntry(candidate)) {
 			return ErrEntryNotFound
 		}
 		if _, duplicate := seen[candidate.ID]; duplicate {

@@ -114,3 +114,65 @@ func ReportKeylessEnqueue(reason string, cause KeylessCause, detail string) {
 		zap.String("cause", string(cause)),
 		zap.String("detail", detail))
 }
+
+// Reason labels for office_assignment_rate_limit_total — a closed
+// three-value set.
+const (
+	assignmentRateLimitReasonAllowanceExhausted = "allowance_exhausted"
+	assignmentRateLimitReasonCountReadFailed    = "count_read_failed"
+	assignmentRateLimitReasonTaskUnattributed   = "task_unattributed"
+)
+
+// ReportAssignmentRateLimitRefused records a wake refused because its
+// task's REQ-OFFICE-ASSIGN-RATE-001 allowance was already exhausted:
+// counts reason="allowance_exhausted", logs at Warn with the task,
+// assignee, acting-agent, observed-count and allowance fields, and
+// returns QueueOutcomeRateLimited. The caller must not insert a row for
+// this wake.
+func ReportAssignmentRateLimitRefused(
+	taskID, assigneeAgentProfileID, actingAgentID string, observedCount, allowance int,
+) QueueOutcome {
+	incAssignmentRateLimit(assignmentRateLimitReasonAllowanceExhausted)
+	dedupLogger().Warn("assignment wake refused (rate limit)",
+		zap.String("task_id", taskID),
+		zap.String("assignee_agent_profile_id", assigneeAgentProfileID),
+		zap.String("acting_agent_id", actingAgentID),
+		zap.Int("observed_count", observedCount),
+		zap.Int("allowance", allowance))
+	return QueueOutcomeRateLimited
+}
+
+// ReportAssignmentRateLimitCountReadFailed records a degraded admission
+// caused by a failed window-count read: counts reason="count_read_failed"
+// and logs at Warn without an observed count, which the failed read did
+// not produce. The wake is still admitted — this reports the
+// degradation, it does not decide it.
+func ReportAssignmentRateLimitCountReadFailed(
+	taskID, assigneeAgentProfileID, actingAgentID string, allowance int, err error,
+) {
+	incAssignmentRateLimit(assignmentRateLimitReasonCountReadFailed)
+	dedupLogger().Warn("assignment wake admitted (rate limit count read failed)",
+		zap.String("task_id", taskID),
+		zap.String("assignee_agent_profile_id", assigneeAgentProfileID),
+		zap.String("acting_agent_id", actingAgentID),
+		zap.Int("allowance", allowance),
+		zap.Error(err))
+}
+
+// ReportAssignmentRateLimitUnattributed records a degraded admission
+// caused by an otherwise in-scope wake whose task could not be
+// determined: counts reason="task_unattributed" and logs at Warn
+// without a task identifier, which is by definition the
+// value that could not be determined. actingAgentID is logged only when
+// non-empty. The wake is still admitted.
+func ReportAssignmentRateLimitUnattributed(actingAgentID string, allowance int) {
+	incAssignmentRateLimit(assignmentRateLimitReasonTaskUnattributed)
+	fields := []zap.Field{
+		zap.String("reason", assignmentRateLimitReasonTaskUnattributed),
+		zap.Int("allowance", allowance),
+	}
+	if actingAgentID != "" {
+		fields = append(fields, zap.String("acting_agent_id", actingAgentID))
+	}
+	dedupLogger().Warn("assignment wake admitted (task unattributed)", fields...)
+}

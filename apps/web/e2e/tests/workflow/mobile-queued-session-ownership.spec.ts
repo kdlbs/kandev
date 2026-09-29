@@ -67,9 +67,10 @@ test.describe("mobile: queued session ownership", () => {
       await expect(sessionPicker).not.toBeVisible();
 
       await expect(queueStatus).toBeVisible();
+      await expect(testPage.locator('[data-testid="task-parked-session-note"]')).toHaveCount(0);
       await expect(
-        testPage.locator('[data-testid="task-parked-session-note"]:visible'),
-      ).toBeVisible();
+        sessionPage.activeChat().locator(".tiptap.ProseMirror:visible").first(),
+      ).toBeEditable();
       await expectSessionMessagesUnchanged(
         apiClient,
         scenario.sourceSessionId,

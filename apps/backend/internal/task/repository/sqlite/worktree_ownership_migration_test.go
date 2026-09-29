@@ -435,6 +435,41 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 }
 
+func TestCutoverPreservesManagedCloneSourceIdentity(t *testing.T) {
+	db := openLegacyDB(t)
+	for _, column := range []string{
+		"worktree_source_clone_path TEXT NOT NULL DEFAULT ''",
+		"worktree_source_common_dir TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec("ALTER TABLE task_environment_repos ADD COLUMN " + column); err != nil {
+			t.Fatalf("add source clone column: %v", err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-source", taskID: "task-source", repoID: "repo-source", sessionID: "session-source"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-source", seed.repoID, "main", "/tasks/source/repo", "main", "active", now)
+	seedLegacyFlatEnv(t, db, seed, "wt-source", "/tasks/source/repo", "main", now)
+	seedLegacyEnvRepo(t, db, "env-repo-source", seed.envID, seed.repoID, "wt-source", "/tasks/source/repo", "main", now)
+	if _, err := db.Exec(`UPDATE task_environment_repos SET worktree_source_clone_path = ?, worktree_source_common_dir = ? WHERE id = ?`,
+		"/managed/legacy/repo", "/managed/legacy/repo/.git", "env-repo-source"); err != nil {
+		t.Fatalf("seed source clone identity: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeSourceClonePath != "/managed/legacy/repo" ||
+		env.Repos[0].WorktreeSourceCommonDir != "/managed/legacy/repo/.git" {
+		t.Fatalf("managed clone source identity was not preserved: %+v", env.Repos)
+	}
+}
+
 func TestCutover_PreservesLegacyDockerCredentialReferences(t *testing.T) {
 	db := openLegacyDB(t)
 	for _, column := range []string{

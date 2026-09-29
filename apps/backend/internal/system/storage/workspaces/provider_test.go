@@ -621,6 +621,85 @@ func TestPermanentDeleteForceBypassesRetentionWithDedicatedConfirmation(t *testi
 	}
 }
 
+func TestPermanentDeleteProtectsQuarantinedWorkspaceWithActiveWorktree(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		name := "eligible purge"
+		if force {
+			name = "force clear"
+		}
+		t.Run(name, func(t *testing.T) {
+			provider, tasksRoot, store := newProviderFixture(t, Inventory{Complete: true}, nil)
+			original := filepath.Join(tasksRoot, "archived-task")
+			provider.config.Inventory = fakeInventorySource{inventory: Inventory{
+				Complete:      true,
+				WorktreePaths: []string{filepath.Join(original, "repo")},
+			}}
+			quarantinePath := filepath.Join(filepath.Dir(tasksRoot), "trash", "tasks", "entry")
+			if err := os.MkdirAll(quarantinePath, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			payload := filepath.Join(quarantinePath, "artifact")
+			if err := os.WriteFile(payload, []byte("retained"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			entry := storage.QuarantineEntry{
+				ID: "entry", ResourceType: storage.ResourceTypeTaskWorkspace,
+				OriginalPath: original, QuarantinePath: quarantinePath, SizeBytes: 8,
+				State:       storage.QuarantineStateQuarantined,
+				DeleteAfter: provider.config.Now().Add(-time.Hour),
+			}
+			if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+				t.Fatal(err)
+			}
+
+			var err error
+			if force {
+				_, err = provider.PermanentDeleteForce(context.Background(), entry.ID, storage.QuarantineConfirmationForce)
+			} else {
+				_, err = provider.PermanentDelete(context.Background(), entry.ID, storage.QuarantineConfirmationDelete)
+			}
+			if !errors.Is(err, ErrActiveWorktree) {
+				t.Fatalf("PermanentDelete error = %v, want ErrActiveWorktree", err)
+			}
+			if _, err := os.Stat(payload); err != nil {
+				t.Fatalf("quarantined worktree payload changed: %v", err)
+			}
+			if got := store.entries[entry.ID].State; got != storage.QuarantineStateQuarantined {
+				t.Fatalf("quarantine state = %q, want quarantined", got)
+			}
+		})
+	}
+}
+
+func TestPermanentDeleteFailsClosedWhenWorktreeInventoryFails(t *testing.T) {
+	provider, tasksRoot, store := newProviderFixture(t, Inventory{}, errors.New("inventory unavailable"))
+	original := filepath.Join(tasksRoot, "archived-task")
+	quarantinePath := filepath.Join(filepath.Dir(tasksRoot), "trash", "tasks", "entry")
+	if err := os.MkdirAll(quarantinePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := filepath.Join(quarantinePath, "artifact")
+	if err := os.WriteFile(payload, []byte("retained"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry := storage.QuarantineEntry{
+		ID: "entry", ResourceType: storage.ResourceTypeTaskWorkspace,
+		OriginalPath: original, QuarantinePath: quarantinePath, SizeBytes: 8,
+		State:       storage.QuarantineStateQuarantined,
+		DeleteAfter: provider.config.Now().Add(-time.Hour),
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.PermanentDeleteForce(context.Background(), entry.ID, storage.QuarantineConfirmationForce); err == nil {
+		t.Fatal("PermanentDeleteForce succeeded with unavailable inventory")
+	}
+	if _, err := os.Stat(payload); err != nil {
+		t.Fatalf("quarantined worktree payload changed after inventory failure: %v", err)
+	}
+}
+
 func TestReconcileRecreatesMissingRecordFromQuarantineManifest(t *testing.T) {
 	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
 	candidate := createOwnedCandidate(t, root, "reconcile-task_abc", OwnershipMarker{TaskID: "reconcile-task", TaskDirName: "reconcile-task_abc", LayoutVersion: LayoutVersionSemantic})

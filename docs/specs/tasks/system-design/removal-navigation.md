@@ -2,10 +2,12 @@
 status: current
 system: tasks
 created: 2026-09-10
+updated: 2026-09-17
 requirements:
   - REQ-TASKS-REMOVAL-NAVIGATION-001
   - REQ-TASKS-REMOVAL-NAVIGATION-002
   - REQ-TASKS-REMOVAL-NAVIGATION-003
+  - REQ-TASKS-REMOVAL-NAVIGATION-004
 owners:
   - kandev
 ---
@@ -40,6 +42,7 @@ controlled delayed-response regressions before production changes.
 | REQ-TASKS-REMOVAL-NAVIGATION-001 | Presentation boundary, navigation, entry points, mobile  |
 | REQ-TASKS-REMOVAL-NAVIGATION-002 | Operation state, reconciliation, failure recovery, tests |
 | REQ-TASKS-REMOVAL-NAVIGATION-003 | Pending archive presentation in shared task navigation   |
+| REQ-TASKS-REMOVAL-NAVIGATION-004 | Archive progress feedback and notification lifecycle     |
 
 ## Immediate sidebar archive projection
 
@@ -88,6 +91,38 @@ Keep the existing sheet dismissal, scroll owner, safe areas, touch targets, and
 task navigation. Reopening the phone picker while a request is pending must
 still show the dimmed spinner row. No new copy, geometry, or navigation
 composition is required.
+
+## Archive progress feedback
+
+`useTaskActions.archiveTaskById` is the common user-action mutation boundary
+for the board, preview, sidebar, task switcher, task detail, command, message,
+and bulk archive paths. Keep the low-level `archiveTask` API function
+transport-only so API helpers, tests, and non-UI callers do not create browser
+feedback. The `/tasks` listing is the only current user-facing caller that
+invokes `archiveTask` directly; route that action through `useTaskActions` so it
+shares the same progress lifecycle without changing its existing refresh,
+success, or failure handling.
+
+The archive action hook owns one loading-toast record with an in-flight request
+count. The first archive request creates a localized `loading` toast through
+`ToastProvider`; concurrent requests started by the same bulk operation reuse
+that toast and increment the count. Every request decrements the count in a
+`finally` path, and the last settlement dismisses the toast. Independent
+operations started from separate surfaces retain separate feedback, matching
+the existing surface-local concurrency contract.
+
+The loading toast uses the existing non-expiring loading variant, spinner, and
+bottom-right `aria-live="polite"` toast stack. It has the title `Archiving in
+progress` in the English catalog and equivalent copy in every shipped locale.
+It adds no action, drawer, scroll owner, or focus target. Desktop and phone use
+the same toast component; the phone check verifies that the fixed toast remains
+inside the viewport and above the existing app status bar.
+
+The progress lifetime is scoped to the archive mutation request. On settlement
+the action hook dismisses it without claiming an outcome. The existing removal
+coordinator and listing handlers remain the sole owners of success, failure,
+partial-failure, navigation, and recovery notifications, which prevents a
+second terminal toast or a second error report.
 
 ## Operation state
 
@@ -204,6 +239,11 @@ Bulk results retain failed IDs for retry, reconcile successful IDs, and report
 one batch result. Conflicts reuse the existing discard guidance. Avoid duplicate
 toasts between the coordinator, `useTaskActions`, and bulk callers.
 
+Every archive request dismisses its progress contribution in `finally`, so a
+rejection, component transition, or failed recovery cannot strand a loading
+toast. Cancellation never reaches the archive action hook and therefore creates
+no progress notification.
+
 ## Entry points and mobile composition
 
 Integrate desktop sidebar and phone switcher actions, `useTaskCRUD` board actions,
@@ -241,6 +281,12 @@ Keep controls for cold archived views, unselected removal, and remote removal.
 Use real isolated backend fixtures, desktop and mobile projects, and managed
 production builds. Exact scenario mapping and commands belong to the plan.
 
+The existing deferred desktop-sidebar and phone-picker archive scenarios also
+assert the progress toast before releasing the request, its polite live region,
+loading indicator, bottom-right viewport placement, and its removal on failure
+and success. With PR asset capture enabled, those same deterministic pending
+states produce the desktop and phone screenshots used in the pull request.
+
 ## Related records
 
 - [Archive confirmation](archive-confirmation.md)
@@ -252,3 +298,4 @@ This local orchestration change needs no new ADR: its constraints and rationale
 are fully captured by this design and its requirements.
 
 - [Immediate sidebar archive plan](../../../plans/immediate-sidebar-archive/plan.md)
+- [Archive progress feedback plan](../../../plans/archive-progress-feedback/plan.md)

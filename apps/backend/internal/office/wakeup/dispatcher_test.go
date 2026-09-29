@@ -14,8 +14,10 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // testHarness packages the dispatcher with its dependencies. Keeps each
@@ -62,12 +64,28 @@ func newHarness(t *testing.T, policy string) *testHarness {
 		t.Fatalf("seed agent: %v", err)
 	}
 
+	dispatcher := wakeup.NewDispatcher(repo, repo, log)
+	dispatcher.SetRunQueuer(newTestRunQueuer(t, repo, log))
+
 	return &testHarness{
 		t:          t,
 		repo:       repo,
-		dispatcher: wakeup.NewDispatcher(repo, repo, log),
+		dispatcher: dispatcher,
 		agentID:    "agent-1",
 	}
+}
+
+// newTestRunQueuer wires a real office/service.Service backed by a real
+// runs/service.Service over the same repo (repo.RunsRepository() shares
+// the underlying runs table), so createFreshRun's route through
+// QueueRunFromWakeup exercises the actual authoritative seam — priority
+// stamping, workspace resolution, causation resolution — instead of a
+// hand-rolled test double.
+func newTestRunQueuer(t *testing.T, repo *officesqlite.Repository, log *logger.Logger) wakeup.RunQueuer {
+	t.Helper()
+	svc := officeservice.NewService(officeservice.ServiceOptions{Repo: repo, Logger: log})
+	svc.SetRunsService(runsservice.New(repo.RunsRepository(), nil, log, nil))
+	return svc
 }
 
 func (h *testHarness) seedWakeup(id, source, payload string) {
@@ -151,6 +169,45 @@ func TestDispatch_NoInflight_CreatesFreshRun(t *testing.T) {
 	}
 	if !strings.Contains(run.ContextSnapshot, `"reason":"test"`) {
 		t.Errorf("expected payload merged into context_snapshot, got %q", run.ContextSnapshot)
+	}
+}
+
+// TestDispatch_NoInflight_CreatesFreshRun_ThroughAuthoritativeSeam is the
+// Review round 1 finding 1 regression test: createFreshRun used to
+// insert a bare models.Run{} directly via the repository, bypassing
+// runs/service.QueueRun's causation resolution entirely. That left every
+// wakeup-originated run with PriorityClass=0 (the Go zero value,
+// PriorityClassHuman — the *highest* claim preference, inverted from the
+// PriorityClassPeriodic a routine/heartbeat wake should get),
+// WorkspaceID="" (excluded from every real workspace's ceiling/budget
+// accounting), and ActorKind="" (not "system"). Routing through
+// QueueRunFromWakeup must stamp all three correctly.
+func TestDispatch_NoInflight_CreatesFreshRun_ThroughAuthoritativeSeam(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.seedWakeupWithReason("w-1", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, shared.RunReasonRoutineDispatchCron)
+
+	if err := h.dispatcher.Dispatch(context.Background(), "w-1"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	got, err := h.repo.GetWakeupRequest(context.Background(), "w-1")
+	if err != nil {
+		t.Fatalf("get wakeup request: %v", err)
+	}
+	run, err := h.repo.GetRunByID(context.Background(), got.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.PriorityClass != officemodels.PriorityClassPeriodic {
+		t.Errorf("priority_class = %v, want PriorityClassPeriodic (%v)", run.PriorityClass, officemodels.PriorityClassPeriodic)
+	}
+	if run.WorkspaceID != "ws-1" {
+		t.Errorf("workspace_id = %q, want %q (resolved from the agent profile, not left empty)", run.WorkspaceID, "ws-1")
+	}
+	if run.ActorKind != officemodels.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want %q", run.ActorKind, officemodels.ActorKindSystem)
+	}
+	if run.RoutineID != "r-1" {
+		t.Errorf("routine_id = %q, want %q (routine launch budget accounting depends on this)", run.RoutineID, "r-1")
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -46,6 +47,8 @@ var errKubernetesLifecycleRequestIncomplete = errors.New("kubernetes lifecycle r
 // KubernetesExecutor owns Kubernetes Pod/PVC lifecycle and process-local
 // forwards. Cluster clients are initialized lazily from the selected executor.
 type KubernetesExecutor struct {
+	environmentStore  KubernetesEnvironmentStore
+	secretStore       secrets.SecretStore
 	agentctlResolver  *AgentctlResolver
 	logger            *logger.Logger
 	clientFactory     kubernetesRuntimeClientFactory
@@ -53,9 +56,10 @@ type KubernetesExecutor struct {
 	healthRetryDelay  time.Duration
 	launchTimingClock func() time.Time
 
-	mu       sync.Mutex
-	sessions map[string]*kubernetesSession
-	locks    map[string]*kubernetesInstanceLock
+	mu                   sync.Mutex
+	sessions             map[string]*kubernetesSession
+	locks                map[string]*kubernetesInstanceLock
+	pendingControlTokens map[string]string
 }
 
 type kubernetesInstanceLock struct {
@@ -90,9 +94,13 @@ func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logge
 		locks:             make(map[string]*kubernetesInstanceLock),
 	}
 	if agentctlResolver != nil {
-		runtime.resolveBinary = func(platform kubeexecutor.Platform) ([]byte, error) {
+		runtime.resolveBinary = func(ctx context.Context, req *ExecutorCreateRequest, platform kubeexecutor.Platform) ([]byte, error) {
 			arch := strings.TrimPrefix(string(platform), "linux/")
-			path, err := agentctlResolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "linux", GOARCH: arch})
+			var onProgress PrepareProgressCallback
+			if req != nil {
+				onProgress = req.OnProgress
+			}
+			path, err := agentctlResolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: arch}, onProgress)
 			if err != nil {
 				return nil, err
 			}
@@ -107,6 +115,13 @@ func (r *KubernetesExecutor) Name() executor.Name { return executor.NameKubernet
 func (r *KubernetesExecutor) HealthCheck(context.Context) error { return nil }
 
 func (r *KubernetesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	if req != nil && r.environmentStore != nil && req.TaskEnvironmentID != "" {
+		return r.createTaskInstance(ctx, req)
+	}
+	return r.createSessionInstance(ctx, req)
+}
+
+func (r *KubernetesExecutor) createSessionInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	if req == nil || req.InstanceID == "" {
 		return nil, errKubernetesLifecycleRequestIncomplete
 	}
@@ -184,7 +199,7 @@ func (r *KubernetesExecutor) createFresh(
 		if stageErr != nil {
 			return stageErr
 		}
-		binary, stageErr = r.resolveBinary(profile.Platform)
+		binary, stageErr = r.resolveBinary(ctx, req, profile.Platform)
 		if stageErr != nil {
 			return fmt.Errorf("kubernetes lifecycle: resolve agentctl for %s: %w", profile.Platform, stageErr)
 		}
@@ -236,7 +251,7 @@ func newKubernetesFreshLaunch(
 	if err != nil {
 		return nil, err
 	}
-	podName, pvcName := kubernetesResourceNames(req.InstanceID)
+	podName, pvcName := kubernetesResourceNames(identity.InstanceID)
 	return &kubernetesFreshLaunch{
 		executor: executor, runtime: runtime, req: req, executorConfig: executorConfig,
 		profile: profile, identity: identity, podName: podName, pvcName: pvcName,
@@ -307,6 +322,7 @@ func (l *kubernetesFreshLaunch) complete(
 		l.executorConfig, l.profile, l.identity, runningPod, l.workspace.claim,
 		l.workspace.createdClaim != nil, remotePort, KubernetesInventoryStateReady,
 	)
+	metadata[MetadataKeyKubernetesAgentctlInstanceID] = l.req.InstanceID
 	// A fresh lifecycle-managed launch already has provisional Pod/PVC inventory.
 	// Manager persists the final ready row only after both required runtime secret
 	// references are durable, avoiding a restart-visible ready row that cannot
@@ -639,6 +655,11 @@ func kubernetesIdentity(req *ExecutorCreateRequest) (kubeexecutor.ResourceIdenti
 		ExecutorID: getMetadataString(req.Metadata, "executor_id"), ProfileID: getMetadataString(req.Metadata, MetadataKeyExecutorProfileID),
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID, EnvironmentID: req.TaskEnvironmentID,
 	}
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		identity.TaskOwned = true
+		identity.InstanceID = req.TaskEnvironmentID
+	}
+
 	if _, err := kubeexecutor.OwnershipLabels(identity); err != nil {
 		return kubeexecutor.ResourceIdentity{}, err
 	}
@@ -681,6 +702,11 @@ func kubernetesRuntimeMetadata(
 		"executor_id":                              identity.ExecutorID,
 		MetadataKeyExecutorProfileID:               identity.ProfileID,
 	}
+	if identity.TaskOwned {
+		metadata[metadataKubernetesTaskOwned] = true
+		metadata[kubeexecutor.MetadataKeyOwnershipVersion] = kubeexecutor.TaskOwnershipVersion
+	}
+
 	if pod != nil {
 		metadata[MetadataKeyKubernetesNamespace] = pod.Namespace
 		metadata[MetadataKeyKubernetesPodName] = pod.Name

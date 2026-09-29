@@ -8,6 +8,7 @@ import { emitSettingsTargetRequest, settingsTargetFromHash } from "@/lib/setting
 export type SettingsTabOption = {
   id: string;
   label: ReactNode;
+  ariaLabel?: string;
 };
 
 type SettingsTabsContextValue = {
@@ -75,6 +76,7 @@ export function SettingsTabsList({
         <TabsTrigger
           key={tab.id}
           value={tab.id}
+          aria-label={tab.ariaLabel}
           className={cn(
             "h-7 min-w-24 flex-none cursor-pointer px-3 max-md:h-11 [@media(pointer:coarse)]:h-11",
             "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -106,7 +108,7 @@ export function SettingsTabsPanel({
   // i18n-exempt: programmer error for an invalid component composition.
   if (!context) throw new Error("SettingsTabsPanel must be used inside SettingsTabs");
   const active = context.value === value;
-  const visited = context.visitedTabs.has(value);
+  const visited = active || context.visitedTabs.has(value);
   return (
     <TabsContent
       value={value}

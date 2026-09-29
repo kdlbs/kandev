@@ -3,10 +3,12 @@ package backendapp
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -30,10 +32,34 @@ func TestRunsServiceEngineAdapter_QueueRun_CarriesWaveIdentity(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
+
 	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init office repo: %v", err)
 	}
+
+	// resolveCausation's workspace lookup (AC-OFFICE-RUN-CAUSATION-001.20)
+	// needs a resolvable agent_profiles row for agent-wave-1, mirroring
+	// runs/service's own seedAgentProfile test helper.
+	now := time.Now().UTC()
+	if _, err := db.Exec(
+		`INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"test-agent", "test-agent", now, now,
+	); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO agent_profiles (
+			id, agent_id, name, agent_display_name, created_at, updated_at, workspace_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"agent-wave-1", "test-agent", "agent-wave-1", "agent-wave-1", now, now, "ws-wave-1",
+	); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	eb := bus.NewMemoryEventBus(log)
 	svc := runsservice.New(officeRepo.RunsRepository(), eb, log, nil)

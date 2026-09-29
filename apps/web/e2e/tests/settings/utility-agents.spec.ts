@@ -465,10 +465,9 @@ test.describe("Utility Agents settings page", () => {
     ).toBeVisible();
   });
 
-  test("wraps each settings sub-section in a bounded card", async ({ testPage }) => {
-    // Regression guard: these sub-sections used to be bare divs with no
-    // visible border, unlike every other settings page (whose
-    // Card-wrapped Enable/Engine/Behavior sections).
+  test("wraps settings sub-sections in bounded surfaces", async ({ testPage }) => {
+    // Regression guard: migrated sections own one visible group surface while
+    // the specialized configuration chat editor retains its card surface.
     //
     // Mock the inference-agent + builtin-agent APIs so the Actions card
     // (which renders null when there are no builtins — see
@@ -525,19 +524,30 @@ test.describe("Utility Agents settings page", () => {
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
-    for (const { testId, heading } of [
-      { testId: "utility-default-model-card", heading: "Default utility agent model" },
-      { testId: "utility-actions-card", heading: "Actions" },
-      { testId: "utility-custom-agents-card", heading: "Custom utility agents" },
-      { testId: "config-chat-agent-card", heading: "Configuration Chat Agent" },
+    for (const { testId, heading, surface } of [
+      {
+        testId: "utility-default-model-card",
+        heading: "Default utility agent model",
+        surface: "group",
+      },
+      { testId: "utility-actions-card", heading: "Actions", surface: "group" },
+      { testId: "utility-custom-agents-card", heading: "Custom utility agents", surface: "group" },
+      { testId: "config-chat-agent-card", heading: "Configuration Chat Agent", surface: "card" },
     ]) {
-      const card = testPage.getByTestId(testId);
-      await expect(card).toBeVisible();
-      await expect(card).toHaveAttribute("data-slot", "card");
+      const surfaceRoot = testPage.getByTestId(testId);
+      await expect(surfaceRoot).toBeVisible();
+      if (surface === "group") {
+        await expect(surfaceRoot).toHaveAttribute("data-settings-group", "true");
+        await expect(surfaceRoot.locator(':scope > [data-settings-group-card="true"]')).toHaveCount(
+          1,
+        );
+      } else {
+        await expect(surfaceRoot).toHaveAttribute("data-slot", "card");
+      }
       // Card titles must stay real headings (level 3), not just styled div
       // text, so screen-reader heading navigation keeps working.
       await expect(
-        card.getByRole("heading", { name: heading, level: 3, exact: true }),
+        surfaceRoot.getByRole("heading", { name: heading, level: 3, exact: true }),
       ).toBeVisible();
     }
   });

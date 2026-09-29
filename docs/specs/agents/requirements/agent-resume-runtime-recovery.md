@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
-updated: 2026-09-11
+updated: 2026-09-21
 owners:
   - Kandev
 ---
@@ -24,7 +24,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.2:** The stored token is cleared only when the user explicitly chooses **Start fresh**, or is replaced after the agent successfully creates a new provider-native session.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.3:** An authorized resume moves the task session to `STARTING` under the existing per-session resume lock before request assembly reaches scoped GitHub credential issuance. This makes the session eligible for a lease without weakening the credential broker's terminal-session rejection.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.4:** A successful resume persists the non-secret Git credential routing snapshot while the session is still guarded `STARTING`, so the task detail view does not retain an earlier workspace/executor credential policy.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.5:** If request assembly, credential issuance, or launch fails after that early transition, Kandev restores the prior recoverable session state unless another terminal transition won the race.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.5:** If request assembly, credential issuance, or launch fails after that early transition, Kandev restores a prior non-active recoverable state only when it still owns the `STARTING` state. A prior `RUNNING` or `STARTING` state becomes `FAILED` because the relaunch did not recover a live agent, but any concurrent state transition wins and is never overwritten by rollback.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.6:** A completed turn remains represented by the task's review state while its persisted response and session lifecycle state settle. After a backend restart and automatic resume, the prior transcript remains visible and the task returns to the Turn Finished review bucket once the session is again `WAITING_FOR_INPUT`; it does not settle in Backlog or Running.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.7:** The explicit managed-runtime update path may invalidate only the deterministic `_npx` execution directory for the selected built-in package after an initial update failure, then retry once and run the normal ACP capability probe.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.8:** **GIVEN** a valid OpenCode resume token, **WHEN** the OpenCode child exits before answering ACP `initialize`, **THEN** Kandev shows the normal recovery action and retains the same token for the next Resume attempt.

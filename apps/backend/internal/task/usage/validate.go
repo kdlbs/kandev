@@ -14,9 +14,58 @@ func validateStage(p *usageEventPayload) string {
 		return dropReasonInvalid
 	case hasTokenTotalOverflow(p.Usage):
 		return dropReasonOverflow
+	case !validNativeUsageObservation(p):
+		return dropReasonInvalid
 	default:
 		return ""
 	}
+}
+
+func validNativeUsageObservation(p *usageEventPayload) bool {
+	o := p.UsageObservation
+	if o == nil {
+		return true
+	}
+	if !validNativeUsageIdentity(p, o) || !validNativeUsageSource(p, o) {
+		return false
+	}
+	if o.Scope != "direct" && o.Scope != "child" {
+		return false
+	}
+	return validNativeUsageDetails(p, o)
+}
+
+func validNativeUsageIdentity(p *usageEventPayload, o *nativeUsageObservationPayload) bool {
+	return p.Usage != nil && p.TurnID != "" && o.SchemaVersion == 1 && o.ProviderThreadID != "" && o.ProviderTurnID != ""
+}
+
+func validNativeUsageSource(p *usageEventPayload, o *nativeUsageObservationPayload) bool {
+	switch o.Source {
+	case "response":
+		return o.ProviderResponseID != "" && o.Completeness == "exact"
+	case "turn_fallback":
+		return o.ProviderResponseID == "" && o.Completeness == "estimated" && p.Usage.Estimated
+	default:
+		return false
+	}
+}
+
+func validNativeUsageDetails(p *usageEventPayload, o *nativeUsageObservationPayload) bool {
+	if !validReasoningOutputTokens(p.Usage.OutputTokens, o.ReasoningOutputTokens) {
+		return false
+	}
+	if !validNonNegativeOptional(o.ReportedCacheWriteTokens) || !validNonNegativeOptional(o.ReportedTotalTokens) {
+		return false
+	}
+	return o.ReportedCacheWriteTokens == nil || *o.ReportedCacheWriteTokens == 0 || o.PriceSuppressed
+}
+
+func validReasoningOutputTokens(outputTokens int64, reasoning *int64) bool {
+	return reasoning == nil || (*reasoning >= 0 && *reasoning <= outputTokens)
+}
+
+func validNonNegativeOptional(value *int64) bool {
+	return value == nil || *value >= 0
 }
 
 // hasNegativeValue reports whether any token or cost value on u is

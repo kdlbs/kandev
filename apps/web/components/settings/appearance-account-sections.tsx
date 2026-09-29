@@ -2,15 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import { IconActivity, IconGitBranch, IconLayoutSidebar } from "@tabler/icons-react";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
+import { SettingsRow } from "./settings-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import type { AppearanceState } from "./appearance-settings-state";
 import { SidebarHoverSettingsCard } from "./sidebar-hover-settings-card";
 import { AppStatusBarSettingsCard } from "./app-status-bar-settings-card";
-import { SettingsCard } from "./settings-card";
 import { SettingsSection } from "./settings-section";
 import { SystemMetricsSettingsCard } from "./system-metrics-settings-card";
 
@@ -25,37 +23,32 @@ function ChangesPanelLayoutCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard
+    <SettingsRow
       isDirty={isDirty}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.changesPanelLayout}
       data-testid="changes-panel-layout-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:changesPanelLayout")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="changes-panel-layout">{t("settings:fileListView")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
-            <SelectTrigger
-              id="changes-panel-layout"
-              data-testid="changes-panel-layout-select"
-              data-settings-dirty={isDirty}
-              className="cursor-pointer"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="flat">{t("settings:flatList")}</SelectItem>
-              <SelectItem value="tree">{t("settings:tree")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t("settings:displayChangedFilesAsAFlat")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
+      label={t("settings:fileListView")}
+      description={t("settings:displayChangedFilesAsAFlat")}
+      descriptionId="changes-panel-layout-description"
+      controlId="changes-panel-layout"
+      control={
+        <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
+          <SelectTrigger
+            id="changes-panel-layout"
+            data-testid="changes-panel-layout-select"
+            data-settings-dirty={isDirty}
+            aria-describedby="changes-panel-layout-description"
+            className="cursor-pointer"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="flat">{t("settings:flatList")}</SelectItem>
+            <SelectItem value="tree">{t("settings:tree")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
 }
 

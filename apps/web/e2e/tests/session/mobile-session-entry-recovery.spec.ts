@@ -30,17 +30,17 @@ test.describe("mobile session entry recovery", () => {
       `Mobile history recovery ${Date.now()}`,
     );
 
-    proxy.delayNextResponses(
-      "message.list",
-      2,
-      11_000,
-      "force both bounded history attempts to expose the mobile unavailable state",
-    );
+    if (!task.session_id) throw new Error("created recovery task has no session");
+    proxy.rejectResponsesUntilReleased("message.list", "injected history load failure", {
+      sessionId: task.session_id,
+    });
 
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
     const historyNotice = chat.getByTestId("session-history-unavailable");
     await expect(historyNotice).toBeVisible({ timeout: 45_000 });
+    expect(proxy.rejectedResponseCount("message.list")).toBeGreaterThan(0);
+    proxy.releaseRejectedResponses("message.list");
 
     const retry = historyNotice.getByTestId("session-history-retry");
     const retryBox = await retry.boundingBox();
@@ -53,6 +53,5 @@ test.describe("mobile session entry recovery", () => {
     await retry.click();
     await expect(historyNotice).toHaveCount(0);
     await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.delayedResponseCount("message.list")).toBe(2);
   });
 });

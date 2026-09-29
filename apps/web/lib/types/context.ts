@@ -6,6 +6,7 @@ import type {
   AgentMessageComment,
 } from "@/lib/state/slices/comments";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
+import type { TaskPreviewFeedback } from "@/lib/types/http";
 
 type ContextItemBase = {
   id: string;
@@ -50,6 +51,12 @@ export type PlanCommentContextItem = ContextItemBase & {
   onOpen: () => void;
 };
 
+export type PreviewFeedbackContextItem = ContextItemBase & {
+  kind: "preview-feedback";
+  items: TaskPreviewFeedback[];
+  onOpen?: () => void;
+};
+
 export type ImageContextItem = ContextItemBase & {
   kind: "image";
   attachment: FileAttachment;
@@ -84,6 +91,7 @@ export type ContextItem =
   | PromptContextItem
   | CommentContextItem
   | PlanCommentContextItem
+  | PreviewFeedbackContextItem
   | ImageContextItem
   | FileAttachmentContextItem
   | PRFeedbackContextItem

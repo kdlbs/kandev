@@ -32,6 +32,7 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.10:** A missing secret shall block fresh launch and cold resume. The error names the environment key and source, identifies the agent profile when available, and directs the user to select the secret again. A replacement with the same name shall not repair the reference automatically.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.11:** Reference lookup failures shall block deletion with a sanitized internal error. Secret authorization shall run before reference disclosure or a forced deletion.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.12:** Settings shall check references before enabling secret deletion. Existing references shall open a contained conflict dialog that lists visible resources and offers no destructive action. The final deletion request shall repeat the authoritative reference check.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.13:** Global and Workspace Secrets settings shall explain that saving a secret does not add it to a session environment. The guidance shall remain visible when secrets exist. Global guidance shall name agent profile, executor profile, and repository environment bindings. Workspace guidance shall name repository bindings and state that shared profiles cannot use Workspace secrets. The guidance shall be readable on desktop and phone without exposing secret values.
 
 ## Migrated source detail
 
@@ -206,6 +207,13 @@ remove, and replace rows as part of the repository's existing manual-save flow. 
 shown as a missing reference rather than silently dropping the row.
 
 The selector never reveals values. Executor and agent profile selectors show Global secrets only.
+
+### Binding guidance
+
+Both Secrets settings pages explain that saving a secret only stores it. The Global page names
+agent profile, executor profile, and repository bindings. The Workspace page directs users to
+bind the secret to a repository in that workspace and states the shared-profile restriction.
+The guidance remains visible before and after a secret is created.
 
 ## Mobile design contract
 

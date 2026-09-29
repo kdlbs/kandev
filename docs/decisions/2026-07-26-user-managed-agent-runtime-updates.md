@@ -42,6 +42,12 @@ containers use their own unversioned runtime resolution when they launch.
 Native-only distribution channels and separately distributed passthrough or
 authentication helper packages remain outside this boundary.
 
+When a managed package also provides a declared native executable, the host
+update path uses one runtime consistently. For OpenCode, a host `opencode`
+executable uses the selected global `opencode-ai` package version for update
+and the same executable for the capability probe. Executor launches keep their
+executor-safe managed command unless that executor selects a native binary.
+
 ## Consequences
 
 Operators can opt into newly released models without waiting for a Kandev

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,13 +19,9 @@ import { ApiError } from "@/lib/api/client";
 import { listTokens, mintToken, revokeToken, type ApiToken } from "@/lib/api/domains/auth-api";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { formatDateTime } from "@/lib/i18n/formats";
-import { SettingsCardHeader } from "@/components/settings/settings-card-header";
-import {
-  SettingsErrorText,
-  SettingsFieldDescription,
-  SettingsFieldLabel,
-} from "@/components/settings/settings-typography";
+import { SettingsErrorText, SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsGroup } from "@/components/settings/settings-group";
 
 function useTokensList() {
   const { t } = useTranslation();
@@ -228,26 +223,27 @@ export function ApiTokens() {
   };
 
   return (
-    <Card data-testid="api-tokens-card">
-      <SettingsCardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <IconKey className="h-4 w-4" /> {t("account:apiTokens")}
-          </span>
-        }
-        actions={
-          <Button
-            size="sm"
-            className={settingsActionClassName("cursor-pointer")}
-            onClick={() => setMintOpen(true)}
-            data-testid="api-tokens-create"
-          >
-            {t("account:newToken")}
-          </Button>
-        }
-      />
-      <CardContent className="space-y-3">
-        <SettingsFieldDescription>{t("account:apiTokensBlurb")}</SettingsFieldDescription>
+    <SettingsGroup
+      title={
+        <span className="flex items-center gap-2">
+          <IconKey className="h-4 w-4" /> {t("account:apiTokens")}
+        </span>
+      }
+      description={t("account:apiTokensBlurb")}
+      action={
+        <Button
+          size="sm"
+          className={settingsActionClassName("cursor-pointer")}
+          onClick={() => setMintOpen(true)}
+          data-testid="api-tokens-create"
+        >
+          {t("account:newToken")}
+        </Button>
+      }
+      data-testid="api-tokens-card"
+      contentClassName="space-y-3 divide-y-0"
+    >
+      <div className="space-y-3">
         {error && <SettingsErrorText data-testid="api-tokens-error">{error}</SettingsErrorText>}
         {!loaded && !error && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -293,8 +289,8 @@ export function ApiTokens() {
             {t("account:noTokensYet")}
           </p>
         )}
-      </CardContent>
+      </div>
       <MintTokenDialog open={mintOpen} onOpenChange={setMintOpen} onCreated={() => void reload()} />
-    </Card>
+    </SettingsGroup>
   );
 }

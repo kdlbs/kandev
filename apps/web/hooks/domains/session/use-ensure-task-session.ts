@@ -7,6 +7,8 @@ import { taskRemovalCoversTask } from "@/lib/state/task-removal";
 /** Minimal task shape consumed by useEnsureTaskSession. */
 export type EnsureTaskInput = {
   id?: string | null;
+  isArchived?: boolean;
+  archiveStateKnown?: boolean;
   /** Snake_case workflow_step_id from the HTTP Task type. */
   workflowStepId?: string | null;
   /** Snake_case workflow_id from the HTTP Task type. */
@@ -184,7 +186,16 @@ export function useEnsureTaskSession(
 
   /* eslint-disable react-hooks/set-state-in-effect -- ensuring a session is a side effect; status mirrors that external work */
   useEffect(() => {
-    if (!enabled || !taskId || !isLoaded || isRemovalPending) return;
+    if (
+      !enabled ||
+      !taskId ||
+      task?.archiveStateKnown === false ||
+      task?.isArchived === true ||
+      !isLoaded ||
+      isRemovalPending
+    ) {
+      return;
+    }
     if (sessions.length > 0) return;
     // Wait for the workflow steps to resolve before deciding the gate. This
     // branch does NOT latch, so a later steps hydration re-runs the effect
@@ -225,6 +236,8 @@ export function useEnsureTaskSession(
   }, [
     enabled,
     taskId,
+    task?.archiveStateKnown,
+    task?.isArchived,
     isLoaded,
     loadSessions,
     sessions.length,

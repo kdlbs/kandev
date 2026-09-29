@@ -33,13 +33,13 @@ func TestInitOfficeServicesUsesTaskUsageWiringHelper(t *testing.T) {
 	var initOffice *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == "initOfficeServices" {
+		if ok && fn.Name.Name == "constructOfficeServices" {
 			initOffice = fn
 			break
 		}
 	}
 	if initOffice == nil {
-		t.Fatal("initOfficeServices not found in main.go")
+		t.Fatal("constructOfficeServices not found in main.go")
 	}
 
 	var helperCalls int

@@ -125,7 +125,7 @@ Newly registered plugin destinations append in their canonical location until
 customized. Retain hidden entries rather than treating omission as hidden.
 Unknown future node kinds must not be written back by an older editor.
 
-Render optional nodes above the fixed Tasks region in regular workspaces.
+On desktop, render optional nodes above the fixed Tasks region in regular workspaces.
 Keep Office-only regions in their existing order; apply common customizable
 nodes before them. Required Inbox/Needs you entries retain their existing mode
 and feature gates and cannot be hidden in this editor.
@@ -226,6 +226,23 @@ A phone group uses a full-width disclosure row, followed by a compact icon strip
 expansion reveals labelled shortcuts beneath it. The extra line preserves 44px
 hit targets and name space. More contains overflow, without horizontal page scroll.
 
+The saved-layout renderer places visible Home and quick actions before the
+existing `afterPrimary` task/local-navigation outlet. Remaining visible nodes
+follow that outlet in saved relative order. This is an effective phone projection;
+neither layout revisions nor desktop ordering change. Wider sheet consumers retain
+their existing ordering. Required inbox destinations remain reachable. Regular phone workspaces use the Tasks heading plus for built-in task creation; Office and explicit custom New Task shortcuts keep their existing launch controls.
+
+Built-in resource sections do not use the custom group's icon-strip presentation.
+Reuse `MobileAutomationsSection` and `MobileIntegrationsSection` for their labelled
+disclosures, availability, loading/retry, and setup paths. Saved automation rows
+consume the existing catalog and activity controller through the disclosure body
+slot, avoiding a second polling loop. Saved integration plugin
+nodes retain their own ordering and visibility, so the built-in integration section
+excludes those independently rendered plugin links. Canvases use a labelled phone
+disclosure and the shared catalog, including loading/error state and workspace settings.
+Custom mixed groups retain direct shortcuts and automation activity, with an explicit
+chevron on the disclosure. The shared app drawer remains the only vertical scroller.
+
 The editor uses direct full-page settings navigation because it is a multi-step
 editing task. Show the layout list, then a focused section editor, then a picker;
 Back returns to the draft without losing changes. Retain the shared save control
@@ -260,3 +277,4 @@ tradeoffs fit this document; no additional ADR is required.
 ## Delivery
 
 - [Plan and work orders](../../../plans/sidebar-customization/plan.md)
+- [Mobile saved navigation repair](../../../plans/mobile-saved-navigation/plan.md)

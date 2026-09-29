@@ -114,6 +114,30 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
 	t.Helper()
+	svc, repo, workflowCtrl, workflowRepo, _ := newTestTaskServiceWithWorkflowDB(t)
+	return svc, repo, workflowCtrl, workflowRepo
+}
+
+// newTestTaskServiceWithWorkflowDB is newTestTaskServiceWithWorkflow plus the
+// underlying shared *sqlx.DB, for tests that need to break one table
+// (workflow_steps, say) directly to force a genuine repository-layer error
+// without disturbing the rest of the fixture's tables.
+func newTestTaskServiceWithWorkflowDB(t *testing.T) (
+	*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository, *sqlx.DB,
+) {
+	svc, repo, workflowCtrl, workflowRepo, sqlxDB, _ := newTestTaskServiceWithWorkflowDBAndEventBus(t)
+	return svc, repo, workflowCtrl, workflowRepo, sqlxDB
+}
+
+func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
+	*service.Service,
+	*sqliterepo.Repository,
+	*workflowcontroller.Controller,
+	*workflowrepo.Repository,
+	*sqlx.DB,
+	*bus.MemoryEventBus,
+) {
+	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
@@ -151,7 +175,7 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
-	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
+	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB, eventBus
 }
 
 func TestHandleListWorkspacesAutomationIsScopedToPrincipalWorkspace(t *testing.T) {
@@ -2196,6 +2220,9 @@ func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string
 	return nil, nil
 }
 func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
+	return nil, nil
+}
+func (m *mockSessionLauncher) StartCreatedSessionForPeerMessage(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
 	return nil, nil
 }
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {

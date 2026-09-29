@@ -60,13 +60,18 @@ export function TaskItemTrailing({
 
   if (trailing === "relative_time" && compactRelativeTime) {
     return (
-      <div className="group/actions relative flex w-11 shrink-0 items-center self-center [@media(max-width:639px)]:w-auto">
+      <div className="group/actions relative flex w-11 shrink-0 items-center self-center [@media(min-width:640px)_and_(pointer:fine)]:w-fit [@media(min-width:640px)_and_(pointer:fine)]:min-w-6 [@media(min-width:640px)_and_(pointer:fine)]:justify-end [@media(min-width:640px)_and_(pointer:coarse)]:w-auto [@media(min-width:640px)_and_(pointer:coarse)]:min-w-11 [@media(min-width:640px)_and_(pointer:coarse)]:justify-end [@media(max-width:639px)]:w-auto [@media(max-width:639px)]:min-w-11">
         <span
           data-testid="sidebar-task-trailing-time"
           data-time-value={relativeTime}
           title={accessibleRelativeTime}
           className={cn(
-            "flex w-11 shrink-0 justify-end text-right text-[11px] text-muted-foreground/50 tabular-nums transition-opacity duration-100",
+            "flex w-11 shrink-0 justify-end text-right text-[11px] text-muted-foreground/50 tabular-nums whitespace-nowrap transition-opacity duration-100",
+            "[@media(min-width:640px)_and_(pointer:fine)]:w-auto",
+            "[@media(min-width:640px)_and_(pointer:coarse)]:w-auto",
+            "[@media(min-width:640px)_and_(pointer:coarse)]:min-w-11",
+            "[@media(max-width:639px)]:w-auto",
+            "[@media(max-width:639px)]:min-w-11",
             effectiveMenuOpen && "opacity-0",
             !effectiveMenuOpen &&
               "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",

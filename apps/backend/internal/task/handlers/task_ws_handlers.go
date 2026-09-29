@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -385,31 +386,65 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 }
 
 func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete task",
-		func(ctx context.Context, id string) (any, error) {
-			// Route through HandoffService when wired so WS deletion has the
-			// same child reparenting, membership release, and cleanup
-			// orchestration as the HTTP path.
+	var req struct {
+		ID                     string `json:"id"`
+		ConfirmationID         string `json:"confirmation_id"`
+		Cascade                bool   `json:"cascade"`
+		DiscardWorktreeChanges bool   `json:"discard_worktree_changes"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.TaskDeleteTimeout)
+	defer cancel()
+	err := h.service.WithTaskDeleteConfirmation(
+		deleteCtx, req.ConfirmationID, req.ID, req.Cascade, req.DiscardWorktreeChanges,
+		func() error {
+			options := service.DeleteTaskOptions{DiscardWorktreeChanges: req.DiscardWorktreeChanges}
 			if h.handoffSvc != nil {
-				if _, err := h.handoffSvc.DeleteTaskTree(ctx, id, false); err != nil {
-					if !isCascadePostCommitError(err) {
-						return nil, err
-					}
-					h.logger.Warn("task deleted but post-commit housekeeping failed",
-						zap.String("task_id", id), zap.Error(err))
-					return map[string]interface{}{
-						responseKeySuccess:  false,
-						responseKeyPending:  true,
-						dependencyKeyTaskID: id,
-					}, nil
-				}
-				return dto.SuccessResponse{Success: true}, nil
+				_, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, req.ID, req.Cascade, options)
+				return err
 			}
-			if err := h.service.DeleteTask(ctx, id); err != nil {
-				return nil, err
-			}
-			return dto.SuccessResponse{Success: true}, nil
-		})
+			return h.service.DeleteTaskWithOptions(deleteCtx, req.ID, options)
+		},
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "current task deletion preview is required", nil)
+		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnauthorized, "task deletion confirmation requires an authenticated user", nil)
+		case errors.Is(err, service.ErrTaskDeleteConfirmationExpired),
+			errors.Is(err, service.ErrTaskDeleteConfirmationStale),
+			errors.Is(err, service.ErrTaskDeleteConfirmationReplay),
+			errors.Is(err, service.ErrTaskDeleteConfirmationMismatch):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "task deletion preview is no longer current", nil)
+		case errors.Is(err, service.ErrForbidden):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		case errors.Is(err, repoerrors.ErrTaskNotFound):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		case errors.Is(err, service.ErrKubernetesAdminRequired):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		case errors.Is(err, service.ErrActiveTaskSessions):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task is used by an active agent session", nil)
+		case isCascadePostCommitError(err):
+			h.logger.Warn("task deleted but post-commit housekeeping failed",
+				zap.String("task_id", req.ID), zap.Error(err))
+			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				responseKeySuccess:  false,
+				responseKeyPending:  true,
+				dependencyKeyTaskID: req.ID,
+			})
+		default:
+			h.logger.Error("failed to delete task", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete task", nil)
+		}
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
 func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -460,11 +495,13 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsMoveTaskRequest struct {
-	ID             string                     `json:"id"`
-	WorkflowID     string                     `json:"workflow_id"`
-	WorkflowStepID string                     `json:"workflow_step_id"`
-	Position       int                        `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	ID                 string                                     `json:"id"`
+	WorkflowID         string                                     `json:"workflow_id"`
+	WorkflowStepID     string                                     `json:"workflow_step_id"`
+	Position           int                                        `json:"position"`
+	EntryOptions       *workflowmove.EntryOptions                 `json:"entry_options,omitempty"`
+	WorkflowChange     *models.WorkflowChangeRequest              `json:"workflow_change,omitempty"`
+	CompletionOverride *service.TaskCompletionMoveOverrideRequest `json:"completion_override,omitempty"`
 }
 
 func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -492,9 +529,15 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 			AllowActivePrimarySession: true,
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              req.EntryOptions,
+			WorkflowChange:            req.WorkflowChange,
+			CompletionOverride:        req.CompletionOverride,
 		},
 	)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) || errors.Is(err, repoerrors.ErrTaskCompletionCriteriaConflict) ||
+			errors.Is(err, repoerrors.ErrTaskCompletionHumanConfirmationRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements changed or are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
+		}
 		if code, msgText, ok := moveEntryOptionsWSError(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, msgText, nil)
 		}
@@ -577,6 +620,9 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 
 	task, err := h.service.UpdateTaskState(ctx, req.ID, v1.TaskState(req.State))
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
+		}
 		h.logger.Error("failed to update task state", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}

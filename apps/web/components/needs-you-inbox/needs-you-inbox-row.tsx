@@ -41,6 +41,7 @@ import {
   rowSecondaryText,
 } from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
+import { linkToTask } from "@/lib/links";
 import type { TaskSessionState } from "@/lib/types/http";
 import type {
   LateClarificationSnapshot,
@@ -167,8 +168,7 @@ function RowActionsMenu({
 }
 
 function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
-  if (!bundle.session_id) return `/t/${bundle.task_id}`;
-  return `/t/${bundle.task_id}?sessionId=${encodeURIComponent(bundle.session_id)}`;
+  return linkToTask(bundle.task_id, { sessionId: bundle.session_id ?? undefined });
 }
 
 // eslint-disable-next-line max-lines-per-function -- the row keeps its responsive actions and inline panel together.

@@ -195,4 +195,36 @@ export class SSHSettingsPage {
   sessionRow(sessionId: string): Locator {
     return this.page.getByTestId(`ssh-session-row-${sessionId}`);
   }
+
+  // --- reachability card ---
+
+  get reachabilityCard(): Locator {
+    return this.page.getByTestId("ssh-reachability-card");
+  }
+
+  get reachabilityState(): Locator {
+    return this.page.getByTestId("ssh-reachability-state");
+  }
+
+  get reachabilityHost(): Locator {
+    return this.page.getByTestId("ssh-reachability-host");
+  }
+
+  get reachabilityReason(): Locator {
+    return this.page.getByTestId("ssh-reachability-reason");
+  }
+
+  get reachabilityProbeNowButton(): Locator {
+    return this.page.getByTestId("ssh-reachability-probe-now");
+  }
+
+  /**
+   * Click "Probe now" and wait for the synchronous probe route to return.
+   * The button re-enabling is the completion signal — the click handler
+   * awaits the request before clearing its own disabled state.
+   */
+  async probeNow(): Promise<void> {
+    await this.reachabilityProbeNowButton.click();
+    await expect(this.reachabilityProbeNowButton).toBeEnabled({ timeout: 30_000 });
+  }
 }

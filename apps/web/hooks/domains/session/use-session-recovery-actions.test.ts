@@ -5,12 +5,14 @@ import { useSessionRecoveryActions } from "./use-session-recovery-actions";
 const mocks = vi.hoisted(() => ({
   requestSessionRecover: vi.fn(),
   restoreSessionWorkspace: vi.fn(),
+  managedCloneRelocationRecoveryDetails: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock("@/lib/services/session-recovery-service", () => ({
   asRecoveryError: (error: unknown, fallback: string) =>
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,
+  managedCloneRelocationRecoveryDetails: mocks.managedCloneRelocationRecoveryDetails,
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
   requestSessionRecover: mocks.requestSessionRecover,
@@ -27,6 +29,8 @@ vi.mock("react-i18next", () => ({
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const PROVIDER_UNAVAILABLE = "provider unavailable";
+const MANAGED_CLONE_RECOVERY_STAMP = "managed-stamp-2";
+const MANAGED_CLONE_RELOCATION_ERROR = "workspace needs relocation";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -154,4 +158,119 @@ describe("useSessionRecoveryActions", () => {
     rerender({ errorStamp: "bootstrap-2" });
     await waitFor(() => expect(result.current.recoveryError).toBeNull());
   });
+
+  it("surfaces a matching relocation requirement after the server advances the error stamp", async () => {
+    const deferred = Promise.withResolvers<void>();
+    mocks.requestSessionRecover.mockReturnValueOnce(deferred.promise);
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: MANAGED_CLONE_RECOVERY_STAMP,
+    });
+    const { result, rerender } = renderHook(
+      ({ errorStamp }: { errorStamp: string }) =>
+        useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID, errorStamp }),
+      { initialProps: { errorStamp: "old-stamp" } },
+    );
+
+    let attempt!: Promise<boolean>;
+    act(() => {
+      attempt = result.current.handleRecover("resume");
+    });
+    rerender({ errorStamp: MANAGED_CLONE_RECOVERY_STAMP });
+
+    await act(async () => {
+      deferred.reject(new Error(MANAGED_CLONE_RELOCATION_ERROR));
+      await attempt;
+    });
+
+    expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
+    expect(result.current.recoveryError?.message).toBe(MANAGED_CLONE_RELOCATION_ERROR);
+  });
+
+  it("uses the response stamp for the confirmed relocation action", async () => {
+    mocks.requestSessionRecover
+      .mockRejectedValueOnce(new Error(MANAGED_CLONE_RELOCATION_ERROR))
+      .mockResolvedValueOnce(undefined);
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: MANAGED_CLONE_RECOVERY_STAMP,
+    });
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        errorStamp: "old-stamp",
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRecover("resume");
+    });
+    expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
+    await act(async () => {
+      await result.current.handleManagedCloneRelocation();
+    });
+    expect(mocks.requestSessionRecover).toHaveBeenLastCalledWith(
+      TASK_ID,
+      SESSION_ID,
+      "relocate_and_resume",
+      "task:failedToResumeSession",
+      MANAGED_CLONE_RECOVERY_STAMP,
+    );
+  });
+
+  it("clears the authorization stamp when the server reports it is stale", async () => {
+    mocks.requestSessionRecover
+      .mockRejectedValueOnce(new Error(MANAGED_CLONE_RELOCATION_ERROR))
+      .mockRejectedValueOnce(new Error("relocation authorization is stale"));
+    mocks.managedCloneRelocationRecoveryDetails
+      .mockReturnValueOnce({
+        kind: "managed_clone_relocation_required",
+        error_stamp: MANAGED_CLONE_RECOVERY_STAMP,
+      })
+      .mockReturnValueOnce({ kind: "managed_clone_relocation_stale" });
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        errorStamp: "old-stamp",
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRecover("resume");
+    });
+    expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
+
+    await act(async () => {
+      await result.current.handleManagedCloneRelocation();
+    });
+    expect(result.current.managedCloneRecoveryStamp).toBeNull();
+  });
+});
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.16
+it("admits one operation across repeated taps and mounted consumers", async () => {
+  const pending = Promise.withResolvers<void>();
+  mocks.requestSessionRecover.mockReturnValue(pending.promise);
+  const first = renderHook(() =>
+    useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+  );
+  const second = renderHook(() =>
+    useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+  );
+  let requests: Promise<unknown>[] = [];
+  act(() => {
+    requests = [
+      first.result.current.handleRecover("resume"),
+      first.result.current.handleRecover("resume"),
+      second.result.current.handleRecover("fresh_start"),
+    ];
+  });
+  const calls = mocks.requestSessionRecover.mock.calls.length;
+  await act(async () => {
+    pending.resolve();
+    await Promise.all(requests);
+  });
+  expect(calls).toBe(1);
 });

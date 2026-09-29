@@ -8,6 +8,7 @@ vi.mock("@/components/shared/markdown-components", () => ({
   MarkdownFileLinkContext: createContext({}),
   MarkdownTaskContext: createContext(null),
   markdownComponents: {},
+  rehypePlugins: [],
   remarkPlugins: [
     () => (tree: { children: { data?: object }[] }) => {
       if (customSpanFixture.enabled) tree.children[0].data = { hName: "span" };

@@ -104,13 +104,14 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		}
 	}
 	return pluginsdk.Task{
-		ID:          t.ID,
-		WorkspaceID: t.WorkspaceID,
-		WorkflowID:  t.WorkflowID,
-		Title:       t.Title,
-		Description: t.Description,
-		State:       string(t.State),
-		Priority:    t.Priority,
+		ID:              t.ID,
+		WorkspaceID:     t.WorkspaceID,
+		WorkflowID:      t.WorkflowID,
+		ResourceVersion: t.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           string(t.State),
+		Priority:        t.Priority,
 		// CreatedBy: kandev's Task model has no creating-user column — Origin
 		// ("manual"/"agent_created"/"routine"/"automation_run") is the
 		// closest analogue and is what this surfaces.

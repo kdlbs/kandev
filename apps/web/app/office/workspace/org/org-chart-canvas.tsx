@@ -13,6 +13,7 @@ import {
   CARD_H,
 } from "./org-tree-layout";
 import { useTranslation } from "react-i18next";
+import { triggerBlobDownload } from "@/lib/utils/file-download";
 
 type OrgChartCanvasProps = {
   agents: AgentProfile[];
@@ -39,14 +40,7 @@ function exportSvg(svg: SVGSVGElement) {
   const serializer = new XMLSerializer();
   const svgStr = serializer.serializeToString(svg);
   const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "org-chart.svg";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  triggerBlobDownload(blob, "org-chart.svg");
 }
 
 export function OrgChartCanvas({ agents }: OrgChartCanvasProps) {

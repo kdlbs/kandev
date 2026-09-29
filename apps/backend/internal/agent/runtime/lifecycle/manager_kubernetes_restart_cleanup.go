@@ -115,7 +115,7 @@ func resolvePersistedKubernetesCleanupMetadata(
 	if err != nil {
 		return nil, err
 	}
-	req := &ExecutorCreateRequest{TaskID: row.TaskID, SessionID: row.SessionID, Metadata: metadata}
+	req := &ExecutorCreateRequest{TaskID: row.TaskID, SessionID: row.SessionID, TaskEnvironmentID: getMetadataString(metadata, MetadataKeyKubernetesResourceEnvironmentID), Metadata: metadata}
 	if _, _, err := kubernetesRecordedCleanupInventory(req, currentConfig, true); err != nil {
 		return nil, fmt.Errorf("validate persisted Kubernetes runtime inventory: %w", err)
 	}

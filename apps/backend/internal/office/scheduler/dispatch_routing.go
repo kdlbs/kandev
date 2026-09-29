@@ -504,8 +504,12 @@ func (ss *SchedulerService) handleLaunchSuccess(
 // routing/park wake-up loop — a second automatic attempt here would race
 // the ceiling's own replay into a double launch. Parking under
 // blocked_provider_action_required (the same status parkRunMaxAttempts
-// uses) keeps LiftParkedRuns from ever picking the run back up on its own;
-// an operator notices via "Retry now" once capacity is known to be free.
+// uses) keeps LiftParkedRuns from ever picking the run back up on its own.
+// There is no reconciliation path back from the orchestrator's ceiling
+// state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
+// require a durable operator-visible record here, not a lift mechanism),
+// so the run stays parked until an operator finds it and clears the
+// routing block by hand.
 func (ss *SchedulerService) handleLaunchDeferred(
 	ctx context.Context, run *models.Run, workspaceID string, seq int,
 ) (bool, *routing.BlockReason, error) {
@@ -519,6 +523,10 @@ func (ss *SchedulerService) handleLaunchDeferred(
 	if err := ss.repo.UpdateRouteAttemptOutcome(ctx, &attempt); err != nil {
 		return false, nil, err
 	}
+	ss.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
+		"phase":  "deferred",
+		"reason": "session_ceiling",
+	})
 	hydrated := ss.hydrateAttempt(ctx, run.ID, seq, attempt)
 	ss.publishRouteAttemptAppended(ctx, run.ID, hydrated)
 	if err := ss.repo.ParkRunForProviderCapacity(ctx,

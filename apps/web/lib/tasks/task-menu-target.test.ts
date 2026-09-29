@@ -3,7 +3,10 @@ import { createAppStore } from "@/lib/state/store";
 import { resolveTaskMenuTarget } from "./task-menu-target";
 
 const identity = { taskId: "A", workspaceId: "workspace" };
-function fixture(loss?: string) {
+function fixture(
+  loss?: string,
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group",
+) {
   const store = createAppStore();
   store.setState((state) => ({
     workspaces: { ...state.workspaces, activeId: loss === "workspace" ? "elsewhere" : "workspace" },
@@ -32,6 +35,7 @@ function fixture(loss?: string) {
                     priority: "high",
                     isArchived: loss === "archived",
                     primaryExecutorType: "worktree",
+                    workspaceMode,
                   },
                 ],
         },
@@ -54,6 +58,30 @@ describe("task menu eligibility", () => {
       workspaceId: "workspace",
     });
   });
+  it("uses snapshot workflow identity when the task projection omits its workflow ID", () => {
+    const store = fixture();
+    store.setState((state) => ({
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          ...state.kanbanMulti.snapshots,
+          workflow: {
+            ...state.kanbanMulti.snapshots.workflow,
+            tasks: state.kanbanMulti.snapshots.workflow.tasks.map((task) => ({
+              ...task,
+              workflowId: undefined,
+            })),
+          },
+        },
+      },
+    }));
+
+    expect(resolveTaskMenuTarget(store.getState(), identity)).toMatchObject({
+      id: "A",
+      workflowId: "workflow",
+      workspaceId: "workspace",
+    });
+  });
   it.each(["workspace", "missing", "archived", "workflow"] as const)(
     "fails closed on %s loss",
     (loss) => {
@@ -61,4 +89,9 @@ describe("task menu eligibility", () => {
       expect(resolveTaskMenuTarget(state, identity)).toBeNull();
     },
   );
+
+  it("carries the task workspace mode into the management target", () => {
+    const state = fixture(undefined, "inherit_parent").getState();
+    expect(resolveTaskMenuTarget(state, identity)?.workspaceMode).toBe("inherit_parent");
+  });
 });

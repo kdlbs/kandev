@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
@@ -10,6 +11,7 @@ import {
   expectCanvasFrameFillsHost,
   listCanvasReleases,
   removeCanvas,
+  seedCanvasWorkspacePreview,
   seedTaskCanvas,
   waitForSessionWorkspace,
   writeCanvasSource,
@@ -149,8 +151,12 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
     let canvasId: string | undefined;
+    let workspacePreview: Awaited<ReturnType<typeof seedCanvasWorkspacePreview>> | undefined;
     try {
-      const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
+      workspacePreview = await seedCanvasWorkspacePreview(apiClient, seedData);
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, false, {
+        foreignWorkspaceId: workspacePreview.foreignWorkspaceId,
+      });
       canvasId = seeded.canvas.id;
 
       await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
@@ -280,7 +286,21 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         .getByTestId("canvas-fixture-appearance-background")
         .textContent();
       await expect(fixture.getByTestId("canvas-fixture-context")).toHaveText(seeded.taskId);
-      await expect(fixture.getByTestId("canvas-fixture-task-count")).toHaveText("1");
+      const expectedTaskCount = (await apiClient.listTasks(seedData.workspaceId)).tasks.length;
+      expect(expectedTaskCount).toBeGreaterThanOrEqual(2);
+      await fixture.getByTestId("canvas-fixture-refresh").click();
+      await expect(fixture.getByTestId("canvas-fixture-refresh-status")).toHaveText("refreshed");
+      await expect(fixture.getByTestId("canvas-fixture-task-count")).toHaveText(
+        String(expectedTaskCount),
+      );
+      await expect(fixture.locator(".task-item")).toHaveCount(expectedTaskCount);
+      await expect(fixture.getByTestId("canvas-fixture-task-ids")).toContainText(seeded.taskId);
+      await expect(fixture.getByTestId("canvas-fixture-task-ids")).toContainText(
+        workspacePreview.workspaceTaskId,
+      );
+      await expect(fixture.getByTestId("canvas-fixture-foreign-workspace-status")).toHaveText(
+        "denied:403",
+      );
       await expect(fixture.getByTestId("canvas-fixture-workflow-count")).toHaveText("1");
       await expect(fixture.getByTestId("canvas-fixture-step-id")).not.toHaveText("loading");
       await expect(fixture.getByTestId("canvas-fixture-sse-status")).toHaveText("connected");
@@ -356,6 +376,111 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         .not.toBe(lightBackground);
     } finally {
       if (canvasId) await removeCanvas(apiClient, canvasId);
+      await workspacePreview?.cleanup();
+      await releaseFeature();
+    }
+  });
+
+  test("reconciles a published task canvas after returning to the task", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    let taskId: string | undefined;
+    let authoringPage: Page | undefined;
+    try {
+      await testPage.goto("/");
+      authoringPage = await testPage.context().newPage();
+      const seeded = await seedTaskCanvas(authoringPage, apiClient, seedData);
+      canvasId = seeded.canvas.id;
+      taskId = seeded.taskId;
+      await authoringPage.close();
+      authoringPage = undefined;
+
+      await testPage.reload();
+      await testPage.goto(`/t/${encodeURIComponent(seeded.taskId)}`);
+      await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
+      await expect
+        .poll(
+          () =>
+            testPage.evaluate((id) => {
+              const api = (
+                window as unknown as {
+                  __dockviewApi__?: {
+                    getPanel: (panelId: string) => { group?: { id?: string } } | undefined;
+                    panels?: Array<{ id: string }>;
+                  };
+                }
+              ).__dockviewApi__;
+              const panel = api?.getPanel(`canvas:${id}`);
+              return {
+                count:
+                  api?.panels?.filter((candidate) => candidate.id === `canvas:${id}`).length ?? 0,
+                canvasGroup: panel?.group?.id ?? null,
+              };
+            }, seeded.canvas.id),
+          { timeout: 30_000 },
+        )
+        .toEqual({ count: 1, canvasGroup: "group-center" });
+      await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Ready", {
+        timeout: 20_000,
+      });
+
+      await testPage.evaluate((id) => {
+        const api = (
+          window as unknown as {
+            __dockviewApi__?: {
+              getPanel: (panelId: string) => { api: { close: () => void } } | undefined;
+            };
+            __persistDockviewLayout__?: () => void;
+          }
+        ).__dockviewApi__;
+        api?.getPanel(`canvas:${id}`)?.api.close();
+        (
+          window as unknown as { __persistDockviewLayout__?: () => void }
+        ).__persistDockviewLayout__?.();
+      }, seeded.canvas.id);
+      await expect
+        .poll(() =>
+          testPage.evaluate((id) => {
+            const api = (
+              window as unknown as { __dockviewApi__?: { getPanel: (panelId: string) => unknown } }
+            ).__dockviewApi__;
+            return api?.getPanel(`canvas:${id}`) !== undefined;
+          }, seeded.canvas.id),
+        )
+        .toBe(false);
+
+      const taskInventory = waitForHttp(
+        testPage,
+        "GET",
+        new RegExp(`/api/v1/tasks/${encodeURIComponent(seeded.taskId)}/canvases$`),
+      );
+      await testPage.reload();
+      await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
+      await taskInventory;
+      await expect(testPage.getByTestId("dockview-task-layout")).toHaveAttribute(
+        "aria-busy",
+        "false",
+      );
+      await expect
+        .poll(() =>
+          testPage.evaluate((id) => {
+            const api = (
+              window as unknown as { __dockviewApi__?: { getPanel: (panelId: string) => unknown } }
+            ).__dockviewApi__;
+            return api?.getPanel(`canvas:${id}`) !== undefined;
+          }, seeded.canvas.id),
+        )
+        .toBe(false);
+    } finally {
+      await authoringPage?.close();
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
       await releaseFeature();
     }
   });

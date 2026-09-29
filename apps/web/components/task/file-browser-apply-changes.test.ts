@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act } from "@testing-library/react";
 import type { FileTreeNode } from "@/lib/types/backend";
 
 const requestFileTreeMock = vi.fn();
@@ -20,6 +21,35 @@ const SESSION_ID = "sess";
 const REFRESH_OP = "refresh";
 const THM_OLD = "thm/old.txt";
 const THM_NEW = "thm/new.txt";
+const SRC_PATH = "src";
+const SRC_COMPONENTS_PATH = `${SRC_PATH}/components`;
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+it("ignores a file-watch refresh after its navigation owner retires", async () => {
+  let release!: (value: { root: FileTreeNode }) => void;
+  requestFileTreeMock.mockReturnValue(
+    new Promise((resolve) => {
+      release = resolve;
+    }),
+  );
+  const setTree = vi.fn();
+  const setLoadState = vi.fn();
+  let current = true;
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set(),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree,
+    setLoadState,
+    isCurrent: () => current,
+  });
+  expect(requestFileTreeMock).toHaveBeenCalledTimes(1);
+  current = false;
+  await act(async () => release({ root: rootChildrenAfter() }));
+  expect(setTree).not.toHaveBeenCalled();
+  expect(setLoadState).not.toHaveBeenCalled();
+});
 
 beforeEach(async () => {
   vi.resetModules();
@@ -84,7 +114,7 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     applyFileChanges({
       client: client(),
       sessionId: SESSION_ID,
-      expandedPaths: new Set(["src", "src/components"]),
+      expandedPaths: new Set([SRC_PATH, SRC_COMPONENTS_PATH]),
       changes: [{ path: "", operation: REFRESH_OP }],
       setTree: vi.fn(),
       setLoadState: vi.fn(),
@@ -92,8 +122,8 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual([
       "",
-      "src",
-      "src/components",
+      SRC_PATH,
+      SRC_COMPONENTS_PATH,
     ]);
   });
 
@@ -149,6 +179,52 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     const thmNode = next.children?.find((c) => c.path === "thm");
     expect(thmNode?.children?.map((c) => c.path).sort()).toEqual([THM_NEW, THM_OLD]);
   });
+});
+
+it("skips invalid expanded paths during a generic refresh", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set([SRC_PATH, SRC_COMPONENTS_PATH, "/home/jcfs/project/src"]),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual([
+    "",
+    SRC_PATH,
+    SRC_COMPONENTS_PATH,
+  ]);
+});
+
+it("refreshes an expanded path containing a literal colon", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set(["config:dev"]),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual(["", "config:dev"]);
+});
+
+it("ignores a specific change with an invalid path", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set([SRC_PATH]),
+    changes: [{ path: "/home/jcfs/project/src/app.ts", operation: "create" }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock).not.toHaveBeenCalled();
 });
 
 // Regression (#982): refresh scoped to one repo must not wipe sibling repos' loaded subtrees.

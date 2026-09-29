@@ -3,13 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import {
-  archiveTask,
-  deleteTask,
-  listTasksByWorkspace,
-  unarchiveTask,
-  updateUserSettings,
-} from "@/lib/api";
+import { deleteTask, listTasksByWorkspace, unarchiveTask, updateUserSettings } from "@/lib/api";
 import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
@@ -26,6 +20,7 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskListFacets } from "@/hooks/use-task-list-facets";
 import { useTaskListFacetSelection } from "@/hooks/use-task-list-facet-selection";
+import { useTaskActions } from "@/hooks/use-task-actions";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
@@ -165,12 +160,13 @@ function errorDescription(err: unknown): string {
 
 function useTaskMutations(fetchTasks: () => void) {
   const { toast } = useToast();
+  const { archiveTaskById } = useTaskActions();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   const handleArchive = useCallback(
     async (taskId: string, opts?: { cascade?: boolean }) => {
       try {
-        await archiveTask(taskId, opts);
+        await archiveTaskById(taskId, opts);
         toast({
           title: t("tasks:taskArchived"),
           description: t("tasks:taskArchivedDescription"),
@@ -184,7 +180,7 @@ function useTaskMutations(fetchTasks: () => void) {
         });
       }
     },
-    [fetchTasks, toast],
+    [archiveTaskById, fetchTasks, toast],
   );
 
   const handleUnarchive = useCallback(

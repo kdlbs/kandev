@@ -63,7 +63,7 @@ func resolvePreparerSetupScript(req *EnvPrepareRequest, workspacePath string) (s
 
 	resolved := resolver.Resolve(script)
 	if isScriptEffectivelyEmpty(resolved) {
-		prepareScriptLogger.Warn("setup script is comment-only after resolution, skipping",
+		prepareScriptLogger.Debug("setup script is comment-only after resolution, skipping",
 			zap.String("task_id", req.TaskID),
 			zap.String("executor_type", string(req.ExecutorType)),
 			zap.Bool("use_worktree", req.UseWorktree),

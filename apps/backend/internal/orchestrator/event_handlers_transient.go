@@ -583,6 +583,9 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 func (s *Service) stopTransientRetryExecution(ctx context.Context, executionID string) error {
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), transientRetryStopTimeout)
 	defer cancel()
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	return s.executor.StopExecution(stopCtx, executionID, "transient retry: relaunching agent", true)
 }
 

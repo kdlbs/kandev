@@ -83,8 +83,13 @@ export function rewritePreviewUrlForProxy(detectedUrl: string, sessionId: string
     const parsed = new URL(detectedUrl);
     if (!LOCALHOST_HOSTS.has(parsed.hostname)) return null;
     if (!parsed.port) return null;
-    const path = parsed.pathname + parsed.search + parsed.hash;
     const backendUrl = getBackendConfig().apiBaseUrl;
+    const backend = new URL(backendUrl);
+    const proxyPathPrefix = `${backend.pathname.replace(/\/$/, "")}/port-proxy/${sessionId}/`;
+    if (parsed.origin === backend.origin && parsed.pathname.startsWith(proxyPathPrefix)) {
+      return detectedUrl;
+    }
+    const path = parsed.pathname + parsed.search + parsed.hash;
     return `${backendUrl}/port-proxy/${sessionId}/${parsed.port}${path}`;
   } catch {
     return null;

@@ -23,16 +23,24 @@ type createCustomTUIAgentRequest struct {
 	// MCPStrategy names how the wrapped CLI loads MCP servers, so kandev can
 	// point it at the per-session server. Empty (the default) = no MCP tools.
 	MCPStrategy string `json:"mcp_strategy"`
+	// Protocol is the runtime kandev drives the command with: empty (the
+	// default) for terminal passthrough, "acp" for ACP on stdin/stdout.
+	Protocol string `json:"protocol"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste"`
 }
 
 func (r createCustomTUIAgentRequest) toControllerRequest() controller.CreateCustomTUIAgentRequest {
 	return controller.CreateCustomTUIAgentRequest{
-		DisplayName: r.DisplayName,
-		Model:       r.Model,
-		Command:     r.Command,
-		Description: r.Description,
-		CommandArgs: r.CommandArgs,
-		MCPStrategy: r.MCPStrategy,
+		DisplayName:           r.DisplayName,
+		Model:                 r.Model,
+		Command:               r.Command,
+		Description:           r.Description,
+		CommandArgs:           r.CommandArgs,
+		MCPStrategy:           r.MCPStrategy,
+		Protocol:              r.Protocol,
+		DisableBracketedPaste: r.DisableBracketedPaste,
 	}
 }
 
@@ -54,7 +62,8 @@ func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
 	resp, err := h.controller.CreateCustomTUIAgent(c.Request.Context(), body.toControllerRequest())
 	if err != nil {
 		switch err {
-		case controller.ErrInvalidSlug, controller.ErrCommandRequired, controller.ErrUnknownMCPStrategy:
+		case controller.ErrInvalidSlug, controller.ErrCommandRequired, controller.ErrUnknownMCPStrategy,
+			controller.ErrUnknownCustomAgentProtocol, controller.ErrMCPStrategyNotApplicable:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case controller.ErrAgentAlreadyExists:
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -114,7 +123,8 @@ func (h *Handlers) httpUpdateCustomTUIAgentMCP(c *gin.Context) {
 	resp, err := h.controller.SetCustomTUIAgentMCPStrategy(c.Request.Context(), c.Param("id"), body.MCPStrategy)
 	if err != nil {
 		switch err {
-		case controller.ErrUnknownMCPStrategy, controller.ErrNotCustomTUIAgent:
+		case controller.ErrUnknownMCPStrategy, controller.ErrNotCustomTUIAgent,
+			controller.ErrMCPStrategyNotApplicable, controller.ErrUnknownCustomAgentProtocol:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case controller.ErrAgentNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

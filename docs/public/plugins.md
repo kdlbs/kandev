@@ -97,6 +97,13 @@ Kandev does not inspect or reorder children inside a contribution, and disabled
 plugins return to their saved position when re-enabled.
 Full-bleed routes that opt out of host topbar chrome own their Status trigger.
 
+## Use plugins on a phone
+
+Open the hamburger menu to find plugin controls together under **Plugins**.
+On a task, a plugin's task toolbar takes the place of its workspace toolbar,
+so shared status controls appear once. Workspace-only controls, sidebar actions,
+and plugin pages remain available. Desktop keeps its separate toolbar locations.
+
 ## Installing a plugin
 
 The easiest way to install is from the in-app catalog: **Settings > Plugins >
@@ -160,14 +167,15 @@ Once installed, the plugin appears in the list with its category, a status
 badge (`active`), a signing badge (`unsigned` today), and **Disable** and
 **Uninstall** actions. Selecting the row anywhere opens that plugin's own
 settings page; a `Setup required` badge marks a plugin whose manifest declares
-a required setting that has no value yet:
-
-![The Settings > Plugins page listing an installed, active plugin with its category, a Setup required badge, an unsigned badge, Disable/Uninstall actions, and a chevron opening the plugin's settings page.](../screenshots/plugin-settings-list.png)
+a required setting that has no value yet.
 
 The Installed tab also gives you an overview of automatic updates, installed
-versions, available updates, and per-plugin controls:
+versions, available updates, and per-plugin controls. **Install plugin** sits
+beside the list heading. **Sync** and **Check for updates** share a compact
+toolbar, with the automatic-update preference and plugin list below. On phones,
+the secondary actions wrap below the heading and retain touch-sized targets:
 
-![Settings > Plugins showing automatic updates and the installed plugin list with sync, update, enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
+![Settings > Plugins showing the compact install, sync, and update toolbar, automatic updates, and divided plugin rows with enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
 
 <details>
 <summary>Filesystem sideload and synchronization</summary>

@@ -1,6 +1,6 @@
 ---
 title: "Add an Agent CLI"
-description: "Register a local TUI agent or ship a tested built-in passthrough or ACP agent integration."
+description: "Register a local TUI agent or ship a tested built-in passthrough, ACP, or native Codex app-server integration."
 ---
 
 # Add an Agent CLI
@@ -9,34 +9,38 @@ Choose the smallest integration that matches the CLI:
 
 | Need | Path |
 |---|---|
-| Use a local interactive CLI without changing Kandev source | Add a custom TUI agent in Settings |
+| Use a local CLI without changing Kandev source | Add a custom agent in Settings |
 | Ship a passthrough-only CLI as a built-in | Add a declarative `TUIAgent` and registry entry |
 | Show structured chat, tool calls, modes, and resume | Implement a built-in ACP agent |
+| Integrate Codex's native app-server | Extend the dedicated Codex app-server transport |
 
-ACP, REST, and MCP are different boundaries. ACP is the only structured agent protocol accepted by the current agentctl adapter factory. REST/WebSocket control agentctl and Kandev. MCP supplies tools to an agent; it is not a runtime adapter.
+ACP, the native Codex app-server protocol, REST, and MCP are different boundaries. The native app-server adapter is specific to Codex and experimental; it is not a general custom-agent protocol. REST/WebSocket control agentctl and Kandev. MCP supplies tools to an agent; it is not a runtime adapter.
 
 ## Quick path
 
-1. Use **Add TUI Agent** for a local terminal-only CLI.
+1. Use **Add custom agent** for a local CLI, and pick its protocol there.
 2. Add a built-in `TUIAgent` only when every Kandev install needs it.
-3. Use a full ACP integration for structured chat, tools, models, modes, or resume.
+3. Use a full ACP integration for structured chat, tools, models, modes, or resume. Codex app-server support uses its dedicated native transport.
 4. Validate the path you chose:
    - local TUI: installation discovery and exact command-token construction;
-   - built-in or ACP: declared permissions, credentials, resume, and MCP delivery.
+   - built-in, ACP, or native Codex: declared permissions, credentials, resume, and MCP delivery.
 
-## Register a local TUI agent
+## Register a local agent
 
-Open **Settings → Agents**, choose **Add TUI Agent**, and provide:
+Open **Settings → Agents**, choose **Add custom agent**, and provide:
 
 - a display name;
-- an optional model/profile label;
-- a command available on the executor's `PATH`.
+- a protocol: **Terminal** or **ACP**;
+- a command available on the executor's `PATH`;
+- for Terminal only, an optional model/profile label and an MCP strategy.
 
-Use `{{model}}` in the command to insert the optional model value. Kandev derives a stable slug from the display name, persists the definition, registers it at startup, and creates a default passthrough profile.
+Kandev derives a stable slug from the display name, persists the definition, registers it at startup, and creates a default profile in the selected protocol's mode. The command is split into an executable and arguments on whitespace; it is not evaluated by a shell, and shell quoting/expansion is not supported.
 
-This path is terminal passthrough only. It does not provide structured chat messages, tool-call visibility, ACP capability probing, or Kandev MCP injection. The command is split into an executable and arguments on whitespace; it is not evaluated by a shell, and shell quoting/expansion is not supported.
+**Terminal** runs the command as a raw CLI under a PTY. Use `{{model}}` in the command to insert the optional model value. There are no structured chat messages, no tool-call visibility, and no capability probing; Kandev's MCP server reaches the CLI only through the selected MCP strategy, which writes the config file shape that CLI reads.
 
-Use a source integration when the agent must ship for every installation, needs logos/discovery/auth/permissions, needs safe structured argument building, or supports ACP.
+**ACP** drives the command over the Agent Client Protocol on standard input and output, so the agent gets structured chat, tool calls, and the models and modes learned by the host-utility capability probe. Give the command that starts the ACP server, typically behind a flag (`my-agent --acp`). Resolved MCP servers travel in `session/new`, so no MCP strategy applies and none is offered. The protocol is not probed from the command: a CLI's ACP server command is not the command that renders its terminal, so choosing wrong would launch a JSON-RPC server into a terminal tab.
+
+Use a source integration when the agent must ship for every installation, needs logos/auth/permissions/install scripts, needs safe structured argument building, or needs a bridge because the CLI has no ACP server of its own.
 
 ## Ship a built-in passthrough agent
 
@@ -102,6 +106,10 @@ Optional interfaces add specific capabilities:
 `Runtime()` describes working directory, environment, resource limits, required/stripped variables, mounts, session recovery, and the command used outside the host. Set `RuntimeConfig.Protocol` to `agent.ProtocolACP`. The factory in [`internal/agentctl/server/adapter/factory.go`](../../apps/backend/internal/agentctl/server/adapter/factory.go) rejects other structured protocols.
 
 If the upstream CLI has no ACP server, add or reuse a bridge that speaks ACP, or keep the integration passthrough-only. Adding a protocol constant alone does not create an adapter.
+
+## Extend the native Codex app-server integration
+
+The native Codex transport is a separate, experimental integration behind `features.codexAppServer` / `KANDEV_FEATURES_CODEX_APP_SERVER`. It keeps the `codex-app-server` identity separate from `codex-acp`. Do not generalize its provider-specific wire types for another agent. Update the pinned schema fixtures under `pkg/codexappserver/schema/`, the semantic adapter under `internal/agentctl/server/adapter/transport/codexappserver/`, and the normalization contract together. The feature toggle is off by default and restart-required.
 
 ### Detect installation and authentication
 

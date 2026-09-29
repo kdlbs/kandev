@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import type { ProjectedSidebarNode, ProjectedShortcut } from "@/lib/sidebar/layout-projection";
 import type {
@@ -64,6 +65,11 @@ function MobileShortcutSection({
               <span className="flex items-center gap-2">
                 <node.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <span className="truncate">{node.label}</span>
+                {open ? (
+                  <IconChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
                 {running && (
                   <ShortcutActivityIndicator
                     activity={{ state: "running", loading: false, error: false }}

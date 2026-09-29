@@ -264,4 +264,95 @@ test.describe("Task dependencies", () => {
     await testPage.goto(`/t/${unrelated.id}`);
     await expect(testPage.getByTestId("task-dependency-chip")).toHaveCount(0);
   });
+
+  test("dependency links preserve the desktop task workbench", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const predecessor = await apiClient.createTask(seedData.workspaceId, "Navigation predecessor", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const target = await apiClient.createTask(seedData.workspaceId, "Navigation target", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      blocked_by: [predecessor.id],
+    });
+    const dependent = await apiClient.createTask(seedData.workspaceId, "Navigation dependent", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      blocked_by: [target.id],
+    });
+
+    await testPage.goto(`/t/${target.id}`);
+    const title = testPage.locator('[data-testid="task-topbar-title"]:visible');
+    await expect(title).toHaveText(target.title);
+
+    const documentRequests: string[] = [];
+    const onRequest = (request: import("@playwright/test").Request) => {
+      if (
+        request.isNavigationRequest() &&
+        request.frame() === testPage.mainFrame() &&
+        request.resourceType() === "document"
+      ) {
+        documentRequests.push(request.url());
+      }
+    };
+    testPage.on("request", onRequest);
+
+    try {
+      await testPage.evaluate(() => {
+        (window as Window & { __taskLinkDocumentSentinel?: string }).__taskLinkDocumentSentinel =
+          "dependency-links-stay-in-spa";
+      });
+
+      const chip = testPage.getByTestId("task-dependency-chip");
+      await chip.click();
+      const blockedBy = testPage
+        .getByTestId("task-dependency-entry")
+        .filter({ hasText: predecessor.title });
+      await expect(blockedBy).toHaveAttribute("href", `/t/${predecessor.id}`);
+      await blockedBy.click();
+
+      await expect(testPage).toHaveURL(new RegExp(`/t/${predecessor.id}$`));
+      await expect(title).toHaveText(predecessor.title);
+      await expect(testPage.getByTestId("task-dependency-chip-popover")).toHaveCount(0);
+      expect(documentRequests).toHaveLength(0);
+      expect(
+        await testPage.evaluate(
+          () =>
+            (window as Window & { __taskLinkDocumentSentinel?: string }).__taskLinkDocumentSentinel,
+        ),
+      ).toBe("dependency-links-stay-in-spa");
+
+      await testPage.goBack();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${target.id}$`));
+      await expect(title).toHaveText(target.title);
+      expect(documentRequests).toHaveLength(0);
+
+      await chip.click();
+      const blocks = testPage
+        .getByTestId("task-dependency-entry")
+        .filter({ hasText: dependent.title });
+      await expect(blocks).toHaveAttribute("href", `/t/${dependent.id}`);
+      await blocks.click();
+
+      await expect(testPage).toHaveURL(new RegExp(`/t/${dependent.id}$`));
+      await expect(title).toHaveText(dependent.title);
+      await expect(testPage.getByTestId("task-dependency-chip-popover")).toHaveCount(0);
+      expect(documentRequests).toHaveLength(0);
+      expect(
+        await testPage.evaluate(
+          () =>
+            (window as Window & { __taskLinkDocumentSentinel?: string }).__taskLinkDocumentSentinel,
+        ),
+      ).toBe("dependency-links-stay-in-spa");
+    } finally {
+      testPage.off("request", onRequest);
+    }
+  });
 });

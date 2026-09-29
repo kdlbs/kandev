@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/state"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // agentConversationTaskAdapter wraps the shared repository to satisfy the
@@ -140,6 +141,15 @@ type agentConversationDispatcherAdapter struct {
 
 func (a agentConversationDispatcherAdapter) Deliver(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
 	return a.messenger.StartOrPromptIdempotent(ctx, taskID, session, text, source, idempotencyID)
+}
+
+func (a agentConversationDispatcherAdapter) DispatchImmediate(
+	ctx context.Context,
+	taskID string,
+	session *taskmodels.TaskSession,
+	text, source, idempotencyID string,
+) (pluginsdk.ManagedAgentDispatchStatus, error) {
+	return a.messenger.DispatchImmediate(ctx, taskID, session, text, source, idempotencyID)
 }
 
 // NewAgentConversationService creates the managed conversation service wired

@@ -4,12 +4,24 @@ set -eu
 cache_root=${NPM_CONFIG_CACHE:-${npm_config_cache:-"$HOME/.npm"}}
 package_spec=${3:-}
 preference=${2:-}
+shift_count=3
 managed_package_name=opencode-ai
 real_npx=${KANDEV_E2E_REAL_NPX:-/usr/bin/npx}
 mock_agent=${KANDEV_E2E_MOCK_AGENT_PATH:-/usr/local/bin/mock-agent}
 
+if [ "${3:-}" = "--prefix" ]; then
+	case "${4:-}" in
+		"~/.kandev/managed-npm-runtime"|*/kandev-managed-npm-runtime-????????????????) ;;
+		*)
+			exec "$real_npx" "$@"
+			;;
+	esac
+	package_spec=${5:-}
+	shift_count=5
+fi
+
 if [ "${KANDEV_E2E_NPX_BYPASS_FAILURE:-false}" = "true" ]; then
-	shift 3
+	shift "$shift_count"
 	exec "$mock_agent" "$@"
 fi
 
@@ -20,7 +32,7 @@ case "$package_spec" in
 	"$managed_package_name"@*) ;;
 	*)
 		if [ "${KANDEV_E2E_NPX_MOCK_OTHERS:-false}" = "true" ]; then
-			shift 3
+			shift "$shift_count"
 			exec "$mock_agent" "$@"
 		fi
 		exec "$real_npx" "$@"
@@ -38,7 +50,7 @@ offline_invocations="$cache_root/offline-invocations"
 
 if [ "$preference" = "--prefer-offline" ]; then
 	if [ -e "$target_dir/fresh-marker" ]; then
-		shift 3
+		shift "$shift_count"
 		exec "$mock_agent" "$@"
 	fi
 	mkdir -p "$target_dir" "$sibling_dir"
@@ -58,7 +70,7 @@ if [ "$preference" = "--prefer-online" ]; then
 	mkdir -p "$target_dir"
 	printf 'fresh\n' > "$target_dir/fresh-marker"
 	printf '%s\n' "$package_spec" >> "$online_invocations"
-	shift 3
+	shift "$shift_count"
 	exec "$mock_agent" "$@"
 fi
 

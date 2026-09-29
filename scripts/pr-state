@@ -9,7 +9,7 @@
 # Raw output:
 #   JSON object with:
 #   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
-#       merge_base_oid, base_advanced_since_head, head_repository_owner,
+#       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
 #   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
@@ -34,7 +34,7 @@
 # Summary output (--summary):
 #   JSON object with:
 #   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
-#       merge_base_oid, base_advanced_since_head, head_repository_owner,
+#       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
 #   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
@@ -155,6 +155,8 @@ else
 fi
 
 errors='[]'
+GH_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/pr-state-gh-error-XXXXXX")"
+state_tmp_dir=''
 pr_json='{}'
 pr_view_succeeded=false
 checks_json='[]'
@@ -164,6 +166,7 @@ required_status_checks_json='[]'
 required_status_checks_known=false
 base_ref_name=''
 base_head_oid=''
+base_target_oid=''
 merge_base_oid=''
 base_advanced_since_head=null
 approval_required_runs_json='[]'
@@ -177,17 +180,46 @@ since_json='null'
 unresolved_review_thread_count=null
 filtered_review_thread_count=null
 
+cleanup_temp_files() {
+  rm -f "$GH_ERROR_FILE"
+  [[ -z "$state_tmp_dir" ]] || rm -rf "$state_tmp_dir"
+}
+trap cleanup_temp_files EXIT
+
+rate_limit_text() {
+  local text=$1
+  local lower
+  lower="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *'rate limit'* || "$lower" == *'secondary rate'* ||
+    "$lower" == *'secondary-rate'* || "$lower" == *'retry-after'* ||
+    "$lower" == *'x-ratelimit'* || "$lower" == *'http 429'* ||
+    "$lower" == *'status 429'* ]]
+}
+
+rate_limit_detail() {
+  local detail=''
+  [[ -s "$GH_ERROR_FILE" ]] || return 0
+  detail="$(tr '\r\n' '  ' <"$GH_ERROR_FILE" | cut -c1-500)"
+  rate_limit_text "$detail" || return 0
+  printf '%s' "$detail"
+}
+
 add_error() {
   local source=$1
   local message=$2
+  local detail
+  detail="$(rate_limit_detail)"
+  [[ -z "$detail" ]] || message="$message: $detail"
+  : >"$GH_ERROR_FILE"
   errors="$(jq -cn --argjson prev "$errors" --arg source "$source" --arg message "$message" \
     '$prev + [{source: $source, message: $message}]')"
 }
 
 gh_json() {
+  : >"$GH_ERROR_FILE"
   env -u GH_DEBUG -u GITHUB_DEBUG -u GH_TRACE -u GITHUB_TRACE \
     GH_PAGER=cat GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 \
-    gh "$@" 2>/dev/null
+    gh "$@" 2>"$GH_ERROR_FILE"
 }
 
 emit_comment_json() {
@@ -727,13 +759,19 @@ fetch_base_ref_json() {
           pullRequest(number: $pr) {
             baseRefName
             baseRefOid
+            baseRef {
+              target {
+                oid
+              }
+            }
           }
         }
       }' \
     -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
     jq -c '{
       base_ref_name: (.data.repository.pullRequest.baseRefName // null),
-      base_head_oid: (.data.repository.pullRequest.baseRefOid // null)
+      base_head_oid: (.data.repository.pullRequest.baseRefOid // null),
+      base_target_oid: (.data.repository.pullRequest.baseRef.target.oid // null)
     }'
 }
 
@@ -942,6 +980,7 @@ if pr_view_json="$(gh_json pr view "$PR" --json number,baseRefName,headRefName,h
     is_cross_repository: (if has("isCrossRepository") then .isCrossRepository else null end),
     base_ref_name: (.baseRefName // null),
     base_head_oid: null,
+    base_target_oid: null,
     merge_base_oid: null,
     base_advanced_since_head: null,
     head_repository_owner: (.headRepositoryOwner.login // null),
@@ -968,6 +1007,7 @@ if [[ "$pr_view_succeeded" == "true" && -n "$repo_owner" && -n "$repo_name" && -
   if base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$base_context_json")"
     base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$base_context_json")"
+    base_target_oid="$(jq -r '.base_target_oid // ""' <<<"$base_context_json")"
   else
     add_error "base" "gh api graphql base ref lookup failed"
   fi
@@ -999,11 +1039,13 @@ if [[ "$pr_view_succeeded" == "true" && -n "$repo_owner" && -n "$repo_name" && -
   pr_json="$(jq -c \
     --arg base_ref_name "$base_ref_name" \
     --arg base_head_oid "$base_head_oid" \
+    --arg base_target_oid "$base_target_oid" \
     --arg merge_base_oid "$merge_base_oid" \
     --argjson base_advanced_since_head "$base_advanced_since_head" \
     '. + {
       base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
       base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      base_target_oid: (if $base_target_oid == "" then null else $base_target_oid end),
       merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
       base_advanced_since_head: $base_advanced_since_head
     }' <<<"$pr_json")"
@@ -1091,6 +1133,7 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if closing_base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     closing_base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$closing_base_context_json")"
     closing_base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$closing_base_context_json")"
+    closing_base_target_oid="$(jq -r '.base_target_oid // ""' <<<"$closing_base_context_json")"
     closing_merge_base_oid=''
     comparison_head_oid="$closing_head_oid"
     [[ -n "$comparison_head_oid" ]] || comparison_head_oid="$checks_head_sha"
@@ -1103,6 +1146,7 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
     fi
     base_ref_name="$closing_base_ref_name"
     base_head_oid="$closing_base_head_oid"
+    base_target_oid="$closing_base_target_oid"
     merge_base_oid="$closing_merge_base_oid"
     base_advanced_since_head=null
     if [[ -n "$base_head_oid" && -n "$merge_base_oid" ]]; then
@@ -1116,17 +1160,20 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
     add_error "closing_base" "gh api graphql base ref lookup failed after evidence collection"
     base_ref_name=''
     base_head_oid=''
+    base_target_oid=''
     merge_base_oid=''
     base_advanced_since_head=null
   fi
   pr_json="$(jq -c \
     --arg base_ref_name "$base_ref_name" \
     --arg base_head_oid "$base_head_oid" \
+    --arg base_target_oid "$base_target_oid" \
     --arg merge_base_oid "$merge_base_oid" \
     --argjson base_advanced_since_head "$base_advanced_since_head" \
     '. + {
       base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
       base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      base_target_oid: (if $base_target_oid == "" then null else $base_target_oid end),
       merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
       base_advanced_since_head: $base_advanced_since_head
     }' <<<"$pr_json")"
@@ -1141,10 +1188,6 @@ fi
 review_evidence_json="$(review_evidence_json "$opening_head_oid" "$closing_head_oid" "$checks_head_sha" "$reviews_known" "$reviews_api_json" "$is_cross_repository" "$trusted_workflow_json")"
 
 state_tmp_dir="$(mktemp -d)"
-cleanup_state_tmp() {
-  rm -rf "$state_tmp_dir"
-}
-trap cleanup_state_tmp EXIT
 
 printf '%s\n' "$pr_json" >"$state_tmp_dir/pr.json"
 printf '%s\n' "$since_json" >"$state_tmp_dir/since.json"

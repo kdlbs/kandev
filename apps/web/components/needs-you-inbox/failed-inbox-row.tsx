@@ -7,6 +7,7 @@ import { formatRelativeTime } from "@/lib/i18n/formats";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { FAILED_TASK_STATUS } from "@/lib/threads/thread-session-status";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+import { linkToTask } from "@/lib/links";
 import {
   failedInboxOriginMarkerKey,
   hasResolvableFailedInboxReason,
@@ -16,7 +17,7 @@ import type { FailedInboxRow as FailedInboxRowData } from "@/lib/types/failed-in
 // The row addresses a task, never a session (design-01#Session-resolution):
 // the open-task control needs only the task id.
 function taskHrefForRow(row: FailedInboxRowData): string {
-  return `/t/${row.task_id}`;
+  return linkToTask(row.task_id);
 }
 
 export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {

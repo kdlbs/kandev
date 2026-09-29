@@ -54,9 +54,8 @@ unchanged; only the surface carrying them moved.
 
 ## Prior art
 
-**Our own prior reasoning.** Attempted, not skipped: the vault at
-`/Users/henry/Documents/henry/wiki` returned `Operation not permitted` and the
-`obsidian-wiki` CLI is not installed, so this leg returned nothing.
+**Our own prior reasoning.** Attempted; the notes vault was unreadable, so this
+leg returned nothing.
 
 **What other products shipped.** Queried through the `saas-kb` `ai_sdlc` slice.
 *Warp* gives parent and child agents inboxes on a durable bus, is explicit that
@@ -154,8 +153,9 @@ comments, so I can act on a completed stage's written output.
   the comment and document surfaces.
 - **AC-OFFICE-AGENT-COMMENT-READS-001.13:** When an agent caller's JWT carries
   no caller task, the endpoint shall return the forbidden status of
-  AC-OFFICE-AGENT-COMMENT-READS-001.12 for every target, including one that
-  exists, and shall not fall back to an unguarded read.
+  AC-OFFICE-AGENT-COMMENT-READS-001.12 for every target and shall not fall back
+  to an unguarded read, except for a taskless run caller
+  ([REQ-OFFICE-AGENT-COMMENT-READS-009](taskless-comment-reads.md)).
 
 ### REQ-OFFICE-AGENT-COMMENT-READS-002: Return every author's comments
 

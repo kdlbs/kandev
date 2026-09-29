@@ -15,7 +15,14 @@ export type TaskPRSyncResponse =
   | null
   | undefined;
 
-export type TaskPRSyncRequester = (scope: TaskPRSyncScope) => Promise<TaskPRSyncResponse>;
+export type TaskPRSyncRequestOptions = {
+  explicitRefresh?: boolean;
+};
+
+export type TaskPRSyncRequester = (
+  scope: TaskPRSyncScope,
+  options?: TaskPRSyncRequestOptions,
+) => Promise<TaskPRSyncResponse>;
 
 export type TaskPRSyncResourceOptions = {
   retryDelayMs?: number;
@@ -46,6 +53,7 @@ type ResourceEntry = {
   retryTimer: ReturnType<typeof setTimeout> | null;
   stopStoreSubscription: (() => void) | null;
   connectionStatus: AppState["connection"]["status"];
+  requestExplicitRefresh: boolean;
 };
 
 type ResourceStore = {
@@ -56,10 +64,16 @@ type ResourceStore = {
   maxRetries: number;
 };
 
-async function requestTaskPRSync(scope: TaskPRSyncScope): Promise<TaskPRSyncResponse> {
+async function requestTaskPRSync(
+  scope: TaskPRSyncScope,
+  options: TaskPRSyncRequestOptions = {},
+): Promise<TaskPRSyncResponse> {
   const client = getWebSocketClient();
   if (!client) throw NO_WEBSOCKET_CLIENT;
-  return client.request<TaskPRSyncResponse>("github.task_pr.sync", { task_id: scope.taskId });
+  return client.request<TaskPRSyncResponse>("github.task_pr.sync", {
+    task_id: scope.taskId,
+    ...(options.explicitRefresh ? { explicit_refresh: true } : {}),
+  });
 }
 
 function scopeKey(scope: TaskPRSyncScope): string {
@@ -82,6 +96,7 @@ function createEntry(scope: TaskPRSyncScope): ResourceEntry {
     retryTimer: null,
     stopStoreSubscription: null,
     connectionStatus: "disconnected",
+    requestExplicitRefresh: false,
   };
 }
 
@@ -231,10 +246,11 @@ async function runRequest(
   store: ResourceStore,
   entry: ResourceEntry,
   requestGeneration: number,
+  explicitRefresh: boolean,
 ): Promise<void> {
   let result: TaskPRSyncResponse;
   try {
-    result = await store.requester(entry.scope);
+    result = await store.requester(entry.scope, { explicitRefresh });
   } catch (error) {
     if (error !== NO_WEBSOCKET_CLIENT) publishFailure(store, entry, requestGeneration);
     return;
@@ -247,6 +263,7 @@ function settleRequest(store: ResourceStore, entry: ResourceEntry, promise: Prom
   const requestStartedAt = entry.requestStartedAt;
   entry.promise = null;
   entry.requestStartedAt = null;
+  entry.requestExplicitRefresh = false;
   if (!isCurrentEntry(store, entry)) return;
   if (entry.listeners.size === 0) {
     store.entries.delete(entry.key);
@@ -263,11 +280,22 @@ function settleRequest(store: ResourceStore, entry: ResourceEntry, promise: Prom
   }
 }
 
-function startRequest(store: ResourceStore, entry: ResourceEntry): Promise<void> {
-  if (entry.promise) return entry.promise;
+function startRequest(
+  store: ResourceStore,
+  entry: ResourceEntry,
+  explicitRefresh = false,
+): Promise<void> {
+  if (entry.promise) {
+    if (!explicitRefresh || entry.requestExplicitRefresh) return entry.promise;
+    entry.requestGeneration += 1;
+    entry.promise = null;
+    entry.requestStartedAt = null;
+    entry.requestExplicitRefresh = false;
+  }
   const requestGeneration = ++entry.requestGeneration;
   entry.requestStartedAt = Date.now();
-  const promise = runRequest(store, entry, requestGeneration);
+  entry.requestExplicitRefresh = explicitRefresh;
+  const promise = runRequest(store, entry, requestGeneration, explicitRefresh);
   entry.promise = promise;
   void promise.then(
     () => settleRequest(store, entry, promise),
@@ -343,7 +371,7 @@ function createResource(
   return {
     getSnapshot: (scope) => resourceStore.entries.get(scopeKey(scope))?.loaded ?? false,
     invalidate: (scope) => invalidate(resourceStore, scope),
-    refresh: (scope) => startRequest(resourceStore, entryFor(resourceStore, scope)),
+    refresh: (scope) => startRequest(resourceStore, entryFor(resourceStore, scope), true),
     subscribe: (scope, listener) => subscribe(resourceStore, scope, listener),
   };
 }

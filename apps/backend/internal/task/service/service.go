@@ -74,8 +74,15 @@ type WorktreeCleanupIdentityProvider interface {
 	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
 }
 
-// WorktreeDirtyInspector reports local changes before a task deletion mutates
-// task rows or persists a cleanup job.
+// WorktreeArchiveSourceManifestProvider captures the archive-time source
+// evidence required before an owned checkout can be removed.
+type WorktreeArchiveSourceManifestProvider interface {
+	CaptureArchiveSourceManifests(ctx context.Context, worktrees []*worktree.Worktree) (map[string]worktree.ArchiveSourceManifest, error)
+}
+
+// WorktreeDirtyInspector reports local changes before a destructive worktree
+// operation. The delete preflight uses it before task mutation, and archive
+// cleanup uses it before branch-preserving cleanup.
 type WorktreeDirtyInspector interface {
 	InspectDirtyWorktrees(ctx context.Context, worktrees []*worktree.Worktree) ([]worktree.DirtyWorktree, error)
 }
@@ -280,6 +287,17 @@ type WorkflowStepCreator interface {
 	CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error
 }
 
+// ExecutorSaveObserver is notified after an executor create or update
+// commits, with before the pre-update snapshot (nil on create) and after the
+// saved executor. CreateExecutor and UpdateExecutor are the only call sites
+// that can form this before/after comparison — before must be captured prior
+// to any in-place mutation of the loaded executor. Implementations decide for
+// themselves whether the save is worth acting on (e.g. only SSH executors
+// whose connection configuration changed).
+type ExecutorSaveObserver interface {
+	OnExecutorSaved(ctx context.Context, before, after *models.Executor)
+}
+
 // WorkspaceBootstrapper owns the atomic persistence of a standard Kanban
 // workspace and its initial workflow state.
 type WorkspaceBootstrapper interface {
@@ -324,6 +342,12 @@ type AgentProfileExecutorValidator interface {
 // checks, while the task service owns the move transaction.
 type WorkflowMovePreflight interface {
 	PreflightWorkflowStepMove(ctx context.Context, taskID string, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
+}
+
+// WorkflowChangeMovePreflight accepts the candidate task projection so
+// destination routing checks see the draft override map before it is persisted.
+type WorkflowChangeMovePreflight interface {
+	PreflightWorkflowStepChange(ctx context.Context, candidate *models.Task, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
 }
 
 // workflowStepLister is an optional extension used to find WIP steps that
@@ -375,6 +399,7 @@ var (
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
+	ErrExecutorProfileInUse      = errors.New("executor profile is referenced by a retained environment")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP
 	// and MCP adapters. Keep categories stable rather than making callers parse
 	// a validation or runtime error string.
@@ -429,6 +454,7 @@ type Repos struct {
 	TaskActivity                  repository.TaskActivityRepository
 	SubagentContexts              repository.SubagentContextRepository
 	Usage                         repository.UsageRepository
+	BackgroundWork                repository.BackgroundWorkRepository
 	AgentProfiles                 AgentProfileReader
 	AgentProfileExecutorValidator AgentProfileExecutorValidator
 }
@@ -455,6 +481,8 @@ type Service struct {
 	branchPolicies                  repository.RepositoryBranchPolicyRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
 	executors                       repository.ExecutorRepository
+	executorProviderCatalog         models.ExecutorProviderCatalog
+	executorProviderCatalogMu       sync.Mutex
 	environments                    repository.EnvironmentRepository
 	taskEnvironments                repository.TaskEnvironmentRepository
 	reviews                         repository.ReviewRepository
@@ -463,6 +491,7 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	backgroundWork                  repository.BackgroundWorkRepository
 	agentProfiles                   AgentProfileReader
 	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
@@ -478,6 +507,7 @@ type Service struct {
 	logger                          *logger.Logger
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
+	discoveryRootMutationMu         sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
 	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
@@ -498,9 +528,13 @@ type Service struct {
 	workspaceSourceMaterializer     WorkspaceSourceMaterializer
 	workspaceSourceLocksMu          sync.Mutex
 	workspaceSourceLocks            map[string]*sync.Mutex
+	taskDeletePreviewMu             sync.Mutex
+	taskDeletePreviews              map[string]taskDeletePreview
+	managementClaimLocks            parentMutex
 	providerProber                  ProviderDefaultBranchProber
 	gitArchiveCapture               GitArchiveCapture
 	workflowStepCreator             WorkflowStepCreator
+	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
@@ -531,18 +565,19 @@ type Service struct {
 	// set (terminal, healed, or a live execution reappeared), which clears
 	// its entry so a later stall on the same session reports again. Accessed
 	// only from the reconciliation sweep's single goroutine.
-	stallNotifiedSessions       map[string]map[string]struct{}
-	remoteBranchLister          RemoteBranchLister
-	repositorySelectionResolver RepositorySelectionResolver
-	repoCloneLocation           RepoCloneLocation
-	blockers                    BlockerRepository
-	comments                    CommentRepository
-	taskStateActivity           TaskStateActivityLogger
-	secretStore                 secrets.SecretStore
-	workspaceSecretDeleter      WorkspaceSecretDeleter
-	baseBranchPusher            AgentBaseBranchPusher
-	comparisonTargetPusher      AgentComparisonTargetPusher
-	runtimeOverridesMu          sync.Mutex
+	stallNotifiedSessions          map[string]map[string]struct{}
+	remoteBranchLister             RemoteBranchLister
+	repositorySelectionResolver    RepositorySelectionResolver
+	repoCloneLocation              RepoCloneLocation
+	blockers                       BlockerRepository
+	comments                       CommentRepository
+	taskStateActivity              TaskStateActivityLogger
+	secretStore                    secrets.SecretStore
+	workspaceSecretDeleter         WorkspaceSecretDeleter
+	baseBranchPusher               AgentBaseBranchPusher
+	comparisonTargetPusher         AgentComparisonTargetPusher
+	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
+	runtimeOverridesMu             sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -588,13 +623,15 @@ type Service struct {
 	// tasks to a different source step in that window and prove the lock
 	// acquisition re-reads and corrects for it instead of locking a step the
 	// task has already left. Nil in production.
-	bulkMoveBeforeLockForTest func()
-	cleanupWorkerMu           sync.Mutex
-	cleanupWorkerCancel       context.CancelFunc
-	cleanupWorkerWG           sync.WaitGroup
-	cleanupWorkerWake         chan struct{}
-	cleanupRunsMu             sync.Mutex
-	cleanupRuns               map[*taskResourceCleanupRun]struct{}
+	bulkMoveBeforeLockForTest             func()
+	cleanupWorkerMu                       sync.Mutex
+	archiveReclaimBackfillMu              sync.Mutex
+	archiveReclaimBackfillAfterWorktreeID string
+	cleanupWorkerCancel                   context.CancelFunc
+	cleanupWorkerWG                       sync.WaitGroup
+	cleanupWorkerWake                     chan struct{}
+	cleanupRunsMu                         sync.Mutex
+	cleanupRuns                           map[*taskResourceCleanupRun]struct{}
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
@@ -673,6 +710,12 @@ func (s *Service) AttachmentRepository() repository.AttachmentRepository {
 // Workspace-scoped secret references are rejected before a profile is saved.
 func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 	s.secretStore = secretStore
+}
+
+// SetExecutorProviderCatalog wires the plugin-owned remote executor catalog.
+// The narrow model interface keeps task orchestration independent of plugins.
+func (s *Service) SetExecutorProviderCatalog(catalog models.ExecutorProviderCatalog) {
+	s.executorProviderCatalog = catalog
 }
 
 // SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace
@@ -763,6 +806,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		taskActivity:                  repos.TaskActivity,
 		subagentContexts:              repos.SubagentContexts,
 		usage:                         repos.Usage,
+		backgroundWork:                repos.BackgroundWork,
 		agentProfiles:                 repos.AgentProfiles,
 		agentProfileExecutorValidator: repos.AgentProfileExecutorValidator,
 		eventBus:                      eventBus,
@@ -778,6 +822,8 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		lastTaskActivity:              make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount:         make(map[string]int),
 		stallNotifiedSessions:         make(map[string]map[string]struct{}),
+		taskDeletePreviews:            make(map[string]taskDeletePreview),
+		managementClaimLocks:          parentMutex{locks: make(map[string]*sync.Mutex)},
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
@@ -928,6 +974,13 @@ func (s *Service) SetGitArchiveCapture(capture GitArchiveCapture) {
 // SetWorkflowStepCreator wires the workflow step creator for workflow creation.
 func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 	s.workflowStepCreator = creator
+}
+
+// SetExecutorSaveObserver wires the observer notified after every executor
+// create/update commits. Optional — a Service with no observer wired saves
+// executors exactly as before.
+func (s *Service) SetExecutorSaveObserver(observer ExecutorSaveObserver) {
+	s.executorSaveObserver = observer
 }
 
 func (s *Service) SetWorkspaceBootstrapper(bootstrapper WorkspaceBootstrapper) {

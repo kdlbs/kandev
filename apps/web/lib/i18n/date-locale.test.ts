@@ -72,6 +72,7 @@ describe("resolveDateLocale", () => {
     ["zh-cn", "zh-CN"],
     ["zh-tw", "zh-TW"],
     ["zh-hk", "zh-HK"],
+    ["ja", "ja"],
   ])("maps %j to the %j date-fns locale", async (locale, code) => {
     const resolved = await resolveDateLocale(locale as "en");
     expect(resolved.code).toBe(code);
@@ -114,5 +115,16 @@ describe("dateLocale", () => {
     // The gap this PR closes: previously "about 1 hour ago" in Portuguese prose.
     expect(formatTimeDistance(ago(HOUR))).toBe("há aproximadamente 1 hora");
     expect(formatTimeDistance(ago(3 * DAY))).toBe("há 3 dias");
+  });
+
+  it("renders Japanese distances once ja is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    await activateLocale("ja");
+    await primeDateLocale("ja");
+
+    expect(dateLocale().code).toBe("ja");
+    expect(formatTimeDistance(ago(HOUR))).toBe("約1時間前");
+    expect(formatTimeDistance(ago(3 * DAY))).toBe("3日前");
   });
 });

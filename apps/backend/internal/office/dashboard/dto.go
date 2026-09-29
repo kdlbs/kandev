@@ -171,6 +171,7 @@ type RunListItem struct {
 	ID                   string  `json:"id"`
 	AgentProfileID       string  `json:"agent_profile_id"`
 	Reason               string  `json:"reason"`
+	CausationID          string  `json:"causation_id,omitempty"`
 	Payload              string  `json:"payload"`
 	Status               string  `json:"status"`
 	CoalescedCount       int     `json:"coalesced_count"`

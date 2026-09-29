@@ -100,14 +100,16 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 
 	wt := &Worktree{
-		ID:           "wt-stable-root",
-		SessionID:    "session-stable-root",
-		RepositoryID: "repo-stable-root",
-		Path:         "/tmp/stable-root/repo",
-		Branch:       "feature/stable-root",
-		Status:       StatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:              "wt-stable-root",
+		SessionID:       "session-stable-root",
+		RepositoryID:    "repo-stable-root",
+		Path:            "/tmp/stable-root/repo",
+		Branch:          "feature/stable-root",
+		SourceClonePath: "/managed/workspaces/workspace-1/github/acme/repo",
+		SourceCommonDir: "/managed/workspaces/workspace-1/github/acme/repo/.git",
+		Status:          StatusActive,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 	if err := store.CreateWorktree(ctx, wt); err != nil {
 		t.Fatalf("create worktree: %v", err)
@@ -122,6 +124,9 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 	if got.TaskDirName != "original-task-root_abc" {
 		t.Fatalf("TaskDirName = %q, want original-task-root_abc", got.TaskDirName)
+	}
+	if got.SourceClonePath != wt.SourceClonePath || got.SourceCommonDir != wt.SourceCommonDir {
+		t.Fatalf("source clone identity = (%q, %q), want (%q, %q)", got.SourceClonePath, got.SourceCommonDir, wt.SourceClonePath, wt.SourceCommonDir)
 	}
 }
 
@@ -427,12 +432,14 @@ func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	}
 
 	physical := &Worktree{
-		ID:           "wt-physical",
-		SessionID:    "session-inventory",
-		RepositoryID: "repo-physical",
-		Path:         "/tmp/physical-worktree",
-		Branch:       "feature/task",
-		Status:       StatusActive,
+		ID:              "wt-physical",
+		SessionID:       "session-inventory",
+		RepositoryID:    "repo-physical",
+		SourceClonePath: "/managed/source/repo",
+		SourceCommonDir: "/managed/source/repo/.git",
+		Path:            "/tmp/physical-worktree",
+		Branch:          "feature/task",
+		Status:          StatusActive,
 	}
 	if err := store.CreateWorktree(ctx, physical); err != nil {
 		t.Fatalf("create physical worktree: %v", err)
@@ -444,6 +451,10 @@ func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	}
 	if len(byTask) != 1 || byTask[0].ID != physical.ID {
 		t.Fatalf("task worktrees = %+v, want only %q", byTask, physical.ID)
+	}
+	if byTask[0].SourceClonePath != physical.SourceClonePath || byTask[0].SourceCommonDir != physical.SourceCommonDir {
+		t.Fatalf("task worktree source identity = (%q, %q), want (%q, %q)",
+			byTask[0].SourceClonePath, byTask[0].SourceCommonDir, physical.SourceClonePath, physical.SourceCommonDir)
 	}
 
 	paths, err := store.ListActiveWorktreePaths(ctx)

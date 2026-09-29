@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -19,7 +20,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -74,14 +74,29 @@ func getMetadataStringMap(metadata map[string]interface{}, key string) map[strin
 // DockerExecutor implements Runtime for Docker-based agent execution.
 // The Docker client is created lazily on first use (not at startup).
 type DockerExecutor struct {
-	cfg           config.DockerConfig
-	kandevHomeDir string
-	logger        *logger.Logger
+	cfg              config.DockerConfig
+	kandevHomeDir    string
+	logger           *logger.Logger
+	agentctlResolver *AgentctlResolver
 
 	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
 	// Override in tests to simulate failures.
 	newClientFunc   func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
 	brokerPreflight func(context.Context, brokerAgentctlProcessClient, string, map[string]string) error
+
+	// endpoints resolves container ports for the reconnect path. Nil means
+	// the daemon shares the backend's network, so a published port is
+	// directly dialable. A remote daemon supplies a forwarding resolver;
+	// without it reconnect hands back the remote host's loopback, which the
+	// backend cannot reach.
+	endpoints containerEndpointResolver
+
+	// beforeContainerStart re-delivers container inputs into a preserved
+	// container about to be restarted for a reconnect. Nil when the inputs
+	// are bind-mounted, which is every daemon that shares the backend's
+	// filesystem. A remote daemon supplies one so a container preserved
+	// across a backend upgrade does not resume on a stale helper.
+	beforeContainerStart func(ctx context.Context, containerID string) error
 
 	// Lazy-initialized on first use via ensureClient().
 	// Uses mu + initialized instead of sync.Once so that transient Docker
@@ -98,13 +113,22 @@ type DockerExecutor struct {
 // when CreateInstance is called. kandevHomeDir is the resolved kandev root
 // directory used to host per-container agent session dirs (the replacement
 // for host home bind mounts that were leaking host state into containers).
-func NewDockerExecutor(cfg config.DockerConfig, kandevHomeDir string, log *logger.Logger) *DockerExecutor {
+
+func NewDockerExecutor(cfg config.DockerConfig, kandevHomeDir string, log *logger.Logger, resolvers ...*AgentctlResolver) *DockerExecutor {
+	var resolver *AgentctlResolver
+	if len(resolvers) > 0 {
+		resolver = resolvers[0]
+	}
+	if resolver == nil {
+		resolver = NewAgentctlResolver(log)
+	}
 	return &DockerExecutor{
-		cfg:             cfg,
-		kandevHomeDir:   kandevHomeDir,
-		logger:          log.WithFields(zap.String("runtime", "docker")),
-		newClientFunc:   docker.NewClient,
-		brokerPreflight: runBrokerReachabilityViaAgentctl,
+		cfg:              cfg,
+		kandevHomeDir:    kandevHomeDir,
+		logger:           log.WithFields(zap.String("runtime", "docker")),
+		agentctlResolver: resolver,
+		newClientFunc:    docker.NewClient,
+		brokerPreflight:  runBrokerReachabilityViaAgentctl,
 	}
 }
 
@@ -126,7 +150,7 @@ func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, erro
 	cli.SetActivityCoordinator(r.activity)
 
 	r.docker = cli
-	r.containerMgr = NewContainerManager(cli, "", r.kandevHomeDir, r.logger)
+	r.containerMgr = NewContainerManager(cli, r.kandevHomeDir, r.logger, r.agentctlResolver)
 	r.initialized = true
 
 	return r.docker, r.containerMgr, nil
@@ -192,7 +216,9 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		return nil, fmt.Errorf("%w: existing Docker workspace could not be attached", models.ErrWorkspaceReuseUnsafe)
 	}
 
-	r.seedSessionDir(baseCtx, req)
+	if err := r.seedSessionDir(baseCtx, req); err != nil {
+		return nil, fmt.Errorf("prepare agent session configuration: %w", err)
+	}
 
 	containerCfg, err := r.buildContainerLaunchConfig(req)
 	if err != nil {
@@ -210,6 +236,27 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		zap.String("container_ip", containerIP))
 
 	return r.buildCreatedInstance(req, result, containerIP), nil
+}
+
+// RemoteHelperCacheMounts reports helper paths mounted by local Docker
+// containers so the shared cache retains helpers needed by reconnectable work.
+func (r *DockerExecutor) RemoteHelperCacheMounts(ctx context.Context) ([]string, error) {
+	_, manager, err := r.ensureClient()
+	if err != nil {
+		return nil, err
+	}
+	if manager == nil {
+		return nil, fmt.Errorf("docker container manager is unavailable")
+	}
+	containers, err := manager.ListManagedContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var mounts []string
+	for _, containerInfo := range containers {
+		mounts = append(mounts, containerInfo.Mounts...)
+	}
+	return mounts, nil
 }
 
 // reportCreateInstanceProgress wires the "Waiting for Docker container" step
@@ -249,9 +296,9 @@ func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.
 // bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
 // paths into agent state DBs and broke resume on codex.
-func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
+func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) error {
 	if req.AgentConfig == nil || r.kandevHomeDir == "" {
-		return
+		return nil
 	}
 	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
 	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
@@ -270,40 +317,11 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 			zap.String("agent_id", req.AgentConfig.ID()),
 			zap.Error(err))
 	}
+	return nil
 }
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
-	prepareScript, err := r.resolvePrepareScript(req)
-	if err != nil {
-		return ContainerConfig{}, err
-	}
-	return ContainerConfig{
-		AgentConfig:                    req.AgentConfig,
-		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
-		TaskID:                         req.TaskID,
-		TaskTitle:                      req.TaskTitle,
-		TaskEnvironmentID:              req.TaskEnvironmentID,
-		SessionID:                      req.SessionID,
-		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
-		InstanceID:                     req.InstanceID,
-		Credentials:                    req.Env,
-		AutoApprovePermissions:         req.AutoApprovePermissions,
-		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
-		McpServers:                     req.McpServers,
-		McpProviders:                   req.McpProviders,
-		McpProfile:                     req.McpProfile,
-		PrepareScript:                  prepareScript,
-		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
-		AllowUserNamespaces:            getMetadataString(req.Metadata, MetadataKeyAllowUserNamespaces) == boolStringTrue,
-		LocalClonePath:                 localCloneMountPath(req.Metadata),
-		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions:            req.RemoteContributions,
-		ContributionDestinations:       req.ContributionDestinations,
-		ComparisonTargets:              req.ComparisonTargets,
-		AgentctlStartupConfig:          req.AgentctlStartupConfig,
-		ProviderGatewayAuth:            req.ProviderGatewayAuth,
-		Metadata:                       req.Metadata,
-	}, nil
+	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
@@ -395,6 +413,11 @@ func (r *DockerExecutor) ensureContainerRunning(ctx context.Context, dockerClien
 		r.logger.Info("starting stopped docker container for reconnect",
 			zap.String("container_id", info.ID),
 			zap.String("state", info.State))
+		if r.beforeContainerStart != nil {
+			if err := r.beforeContainerStart(ctx, info.ID); err != nil {
+				return nil, "", fmt.Errorf("failed to prepare container %s for restart: %w", info.ID, err)
+			}
+		}
 		if err := dockerClient.StartContainer(ctx, info.ID); err != nil {
 			return nil, "", fmt.Errorf("failed to start container %s: %w", info.ID, err)
 		}
@@ -434,7 +457,10 @@ type reconnectControlClient interface {
 // the agent instance, transparently re-handshakes on a 401, and returns the
 // resolved instance endpoint for the user-facing client.
 func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *docker.Client, containerID, containerIP string, req *ExecutorCreateRequest) (reconnectAgentctlConn, error) {
-	controlHost, controlPort := resolveDockerEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP, r.logger)
+	controlHost, controlPort, err := r.resolveEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP)
+	if err != nil {
+		return reconnectAgentctlConn{}, err
+	}
 	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
 		agentctl.WithControlAuthToken(req.AuthToken))
 	if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
@@ -455,13 +481,40 @@ func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *dock
 	if err != nil {
 		return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
 	}
-	instanceHost, resolvedInstancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instancePort, containerIP, r.logger)
+	instanceHost, resolvedInstancePort, err := r.resolveEndpoint(ctx, dockerClient, containerID, instancePort, containerIP)
+	if err != nil {
+		return reconnectAgentctlConn{}, err
+	}
 	return reconnectAgentctlConn{
 		instanceHost:   instanceHost,
 		instancePort:   resolvedInstancePort,
 		authToken:      authToken,
 		reusingProcess: reusingProcess,
 	}, nil
+}
+
+var errContainerEndpointResolution = errors.New("container endpoint resolution failed")
+
+// resolveEndpoint routes reconnect endpoint lookups through the configured
+// resolver. Local Docker retains its container-IP fallback; a configured
+// remote resolver must surface failures because its container IP is not
+// reachable from the backend.
+func (r *DockerExecutor) resolveEndpoint(
+	ctx context.Context, dockerClient hostPortLookup, containerID string, containerPort int, containerIP string,
+) (string, int, error) {
+	if r.endpoints == nil {
+		host, port := resolveDockerEndpoint(ctx, dockerClient, containerID, containerPort, containerIP, r.logger)
+		return host, port, nil
+	}
+	host, port, err := r.endpoints.Resolve(ctx, containerID, containerPort, containerIP)
+	if err != nil {
+		r.logger.Warn("failed to resolve container endpoint on reconnect",
+			zap.String("container_id", containerID),
+			zap.Int("container_port", containerPort),
+			zap.Error(err))
+		return "", 0, fmt.Errorf("%w: %w", errContainerEndpointResolution, err)
+	}
+	return host, port, nil
 }
 
 func reconnectInstanceID(req *ExecutorCreateRequest, previousExecutionID string) string {
@@ -520,8 +573,11 @@ func (r *DockerExecutor) findExistingInstance(
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
 		if hasManagedGitHubBrokerEnv(req.Env) {
-			instanceHost, instancePort := resolveDockerEndpoint(
-				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
+			instanceHost, instancePort, resolveErr := r.resolveEndpoint(
+				ctx, dockerClient, containerID, instance.Port, containerIP)
+			if resolveErr != nil {
+				return 0, false, resolveErr
+			}
 			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 				agentctl.WithAuthToken(authToken))
 			defer client.Close()
@@ -534,7 +590,10 @@ func (r *DockerExecutor) findExistingInstance(
 			return createReconnectInstance(ctx, ctl, req, prevExecutionID)
 		}
 		// Instance exists, check if agent subprocess is running
-		instanceHost, instancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
+		instanceHost, instancePort, resolveErr := r.resolveEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP)
+		if resolveErr != nil {
+			return 0, false, resolveErr
+		}
 		client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 			agentctl.WithAuthToken(authToken))
 		status, statusErr := client.GetStatus(ctx)
@@ -581,10 +640,12 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
-		ID:            instanceID,
-		WorkspacePath: dockerWorkspacePath,
-		AgentType:     agentType,
-		Env:           selectedCheckoutAgentEnv(req.Env, req.Metadata),
+		ID:                    instanceID,
+		WorkspacePath:         dockerWorkspacePath,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             agentType,
+		Env:                   selectedCheckoutAgentEnv(req.Env, req.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -815,74 +876,7 @@ func (r *DockerExecutor) IsAlwaysResumable() bool         { return true }
 // so simply updating DefaultPrepareScript wouldn't reach those users. The
 // postlude runs after the user's prepare script and is idempotent.
 func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
-	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
-	if script == "" {
-		script = DefaultPrepareScript("local_docker")
-	}
-	if script == "" {
-		return "", nil
-	}
-	options, err := primaryCheckoutOptions(req.Metadata)
-	if err != nil {
-		return "", err
-	}
-	script, err = checkoutOptionsPrepareScript(script, options)
-	if err != nil {
-		return "", err
-	}
-	deferSetup := options != nil && len(options.SparseDirectories) > 0
-	if deferSetup {
-		script = strings.Replace(script, "{{repository.setup_script}}", "", 1)
-	}
-	script = withBranchCheckout(req, script)
-	if binding, ok := req.RemoteContributions[""]; ok {
-		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
-		if err != nil {
-			return "", err
-		}
-		script += contributionScript
-	}
-	script += checkoutOptionsValidationScript(options)
-	if destination, ok := req.ContributionDestinations[""]; ok {
-		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
-		if err != nil {
-			return "", err
-		}
-		script += destinationScript
-	}
-
-	if deferSetup {
-		script += "\n" + selectedCheckoutCredentialScrubScript(req.Metadata) + "\n{{repository.setup_script}}\n"
-	}
-
-	resolver := scriptengine.NewResolver().
-		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
-		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
-		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
-		WithProvider(scriptengine.WorktreeProvider(
-			"",
-			dockerWorkspacePath,
-			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
-			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
-			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
-		)).
-		WithProvider(scriptengine.RepositoryProvider(
-			req.Metadata,
-			req.Env,
-			getGitRemoteURL,
-			injectGitHubTokenIntoCloneURL,
-		)).
-		// Docker image has agents and agentctl pre-installed;
-		// resolve these to empty so stored scripts with these placeholders don't break.
-		// The entrypoint handles agentctl startup, so install/start must be no-ops.
-		WithProvider(scriptengine.AgentInstallProvider(nil)).
-		WithStatic(map[string]string{
-			"kandev.agentctl.port":    "9999",
-			"kandev.agentctl.install": "",
-			"kandev.agentctl.start":   "",
-		})
-
-	return resolver.Resolve(script), nil
+	return resolveDockerPrepareScript(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func localCloneMountPath(metadata map[string]interface{}) string {

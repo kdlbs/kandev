@@ -385,6 +385,7 @@ export function installFakeKotlinLsp(
   options: {
     crashOnOpen?: boolean;
     holdInitialize?: boolean;
+    keepProgress?: boolean;
     progress?: {
       title: string;
       beginPercentage?: number;
@@ -402,10 +403,14 @@ export function installFakeKotlinLsp(
   fs.rmSync(initializeModePath(backend), { force: true });
   fs.rmSync(initializeReleasePath(backend), { force: true });
   if (options.crashOnOpen) fs.writeFileSync(crashModePath(backend), "1\n");
-  if (options.holdInitialize || options.progress) {
+  if (
+    options.holdInitialize ||
+    (options.progress && !options.keepProgress) ||
+    options.keepProgress
+  ) {
     fs.writeFileSync(
       initializeModePath(backend),
-      JSON.stringify({ progress: options.progress ?? null }),
+      JSON.stringify({ progress: options.progress ?? null, keepProgress: options.keepProgress }),
     );
   }
 }

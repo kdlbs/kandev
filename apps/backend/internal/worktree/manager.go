@@ -221,6 +221,14 @@ func (m *Manager) IsEnabled() bool {
 	return m.config.Enabled
 }
 
+// TasksBasePath returns the configured task-worktree root with home expansion.
+func (m *Manager) TasksBasePath() (string, error) {
+	if m == nil {
+		return "", nil
+	}
+	return m.config.ExpandedTasksBasePath()
+}
+
 // AdmitTaskRecovery prevents a task from creating a session while one of its
 // persisted checkouts is present but no longer has trustworthy linked-worktree
 // metadata. Missing paths remain eligible for ordinary materialization.

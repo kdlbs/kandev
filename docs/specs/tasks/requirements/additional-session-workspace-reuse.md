@@ -1,8 +1,8 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-08-30
+updated: 2026-09-22
 owners:
   - kandev
 ---
@@ -75,10 +75,38 @@ starting in a stale workspace retained by the previous executor.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.3:** A missing, non-Git,
   path-mismatched, or executor-mismatched workspace shall fail before agent
   process startup with a typed, recoverable error; it shall not expose the
-  invalid workspace as ready or as the task's current change projection.
+  invalid workspace as ready or as the task's current change projection. A
+  separately authorized recovery can establish a valid replacement before
+  this read-only admission check runs.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.4:** Rejecting an invalid
   workspace shall not delete, move, reset, clean, checkout, or otherwise modify
   the stale path, the canonical repository, or either environment inventory.
+
+### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004: Concurrent Session Workspace Visibility
+
+**Intent:** Keep sanctioned concurrent writing on a shared task workspace
+observable, without introducing a task-wide writer lock.
+
+**User story:** As an operator, I want Kandev to record when an agent starts in
+a task workspace that another session is already working in, so that I can
+recognize a shared-workspace conflict instead of discovering it later as
+corrupted files.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004.1:** When a launch or a
+  resume starts an agent process for a session whose task already holds another
+  session in a working state, the system shall record that co-residency before
+  the agent process starts.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004.2:** A co-residency record
+  shall be an operational counter and a structured log entry only. It shall not
+  refuse, defer, delay, or otherwise change the admission outcome.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004.3:** When the sibling
+  session read fails, the system shall record a skipped observation with its
+  reason rather than reporting an absence of co-residency.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004.4:** Recorded labels shall
+  be a closed set of admission site and skip reason. No task, session,
+  workspace path, branch, or repository identifier shall be a label value.
 
 ## Migrated source detail
 

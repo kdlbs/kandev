@@ -25,6 +25,7 @@ import { useLayoutSettings } from "./use-layout-settings";
 import { SidebarLayoutEditor } from "../sidebar-layout-editor";
 import { useTranslation } from "react-i18next";
 import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import {
   settingsActionClassName,
   settingsControlClassName,
@@ -268,18 +269,26 @@ export function LayoutSettings() {
       <div className="min-w-0 space-y-6" data-testid="layout-settings">
         <LayoutSettingsHeader tabs={<SettingsTabsList ariaLabel={t("settings:layouts")} />} />
         <SettingsTabsPanel value="profiles">
-          <LayoutProfilesPanel
-            controller={controller}
-            isFinePointer={isFinePointer}
-            deleteOpen={deleteOpen}
-            deleteAnchorRef={deleteAnchorRef}
-            requestDelete={requestDelete}
-            closeDelete={closeDelete}
-            confirmDelete={confirmDelete}
-          />
+          <SettingsGroup title={t("settings:layoutProfiles")} contentClassName="p-0 divide-y-0">
+            <LayoutProfilesPanel
+              controller={controller}
+              isFinePointer={isFinePointer}
+              deleteOpen={deleteOpen}
+              deleteAnchorRef={deleteAnchorRef}
+              requestDelete={requestDelete}
+              closeDelete={closeDelete}
+              confirmDelete={confirmDelete}
+            />
+          </SettingsGroup>
         </SettingsTabsPanel>
         <SettingsTabsPanel value="sidebar" testId="settings-layouts-sidebar">
-          <SidebarLayoutEditor embedded />
+          <SettingsGroup
+            title={t("settings:sidebar")}
+            description={t("settings:sidebarDescription")}
+            contentClassName="p-0 divide-y-0"
+          >
+            <SidebarLayoutEditor embedded />
+          </SettingsGroup>
         </SettingsTabsPanel>
       </div>
     </SettingsTabs>

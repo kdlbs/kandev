@@ -15,13 +15,17 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Repository validation performance, including local commit checks and shared CI
+execution, belongs here. The CI system retains hosted workflow trust policy.
+
 Shared read-capacity protection and aggregate reporting availability belong here.
 Domain systems retain ownership of source records and workspace context identity.
 
 ## Ownership
 
 This system owns startup and shutdown contracts, process and port-independent
-runtime safety, configuration precedence, diagnostics, notifications,
+runtime safety, foreground delivery semantics (including explicit same-turn
+steering), configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
 
 Settings discovery and interface parity belong to Platform. Each settings domain
@@ -38,6 +42,7 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### Requirements
 
+- [Task Status Summary Projection Contention](requirements/task-summary-contention.md)
 - [CI performance](requirements/ci-performance.md)
 
 - [Startup lifecycle](requirements/startup-lifecycle.md)
@@ -58,6 +63,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Environment-specific browser tab title prefixes](requirements/dev-preview-title-prefixes.md)
 - [Browser console retention](requirements/browser-console-retention.md)
 - [Diagnostic logging](requirements/diagnostic-logging.md)
+- [Runtime failure attribution](requirements/runtime-failure-attribution.md)
 - [Duration-aware E2E sharding and CI reliability](requirements/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](requirements/external-e2e-runner-capacity.md)
 - [Expected runtime log severity](requirements/expected-runtime-log-severity.md)
@@ -70,6 +76,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Additional I18n Audit Gaps](requirements/i18n-second-audit-gaps.md)
 - [Internationalization (i18n)](requirements/i18n.md)
 - [LSP File Intelligence](requirements/lsp-file-intelligence.md)
+- [LSP continuity graduation](requirements/lsp-continuity-graduation.md)
 - [Session MCP Attachment Observability](requirements/mcp-session-observability.md)
 - [Mid-Turn Steering](requirements/mid-turn-steering.md)
 - [Semantic Notifications](requirements/notifications.md)
@@ -89,6 +96,7 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### System design
 
+- [Task Status Summary Projection Contention](system-design/task-summary-contention.md)
 - [CI performance](system-design/ci-performance.md)
 
 - [Startup lifecycle](system-design/startup-lifecycle.md)
@@ -109,13 +117,16 @@ retains ownership of its values, validation, authority, and persistence.
 - [Viewport-bounded Session Delivery](system-design/viewport-bounded-session-delivery.md)
 - [Diagnostic logging System Design Part 1](system-design/diagnostic-logging-01.md)
 - [Diagnostic logging System Design Part 2](system-design/diagnostic-logging-02.md)
+- [Runtime failure attribution](system-design/runtime-failure-attribution.md)
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
+- [Frontend feature state](system-design/features-slice-state.md)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](system-design/external-e2e-runner-capacity.md)
 - [Health Endpoint — Surface the Running Version](system-design/health-endpoint-version.md)
 - [Internationalization (i18n)](system-design/i18n.md)
 - [LSP File Intelligence System Design Part 1](system-design/lsp-file-intelligence-01.md)
 - [LSP File Intelligence System Design Part 2](system-design/lsp-file-intelligence-02.md)
+- [LSP continuity graduation](system-design/lsp-continuity-graduation.md)
 - [Session MCP Attachment Observability](system-design/mcp-session-observability.md)
 - [Required Persisted Store Parity](system-design/postgres-domain-store-parity.md)
 - [Provider Error Recovery](system-design/provider-error-recovery.md)

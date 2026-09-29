@@ -313,4 +313,6 @@ The [recovery eligibility repair](../session-open-recovery-eligibility/plan.md)
 owns the historical-stop and settled-deferral regressions found after restart.
 It replaces the parking suppression policy and removes the parking note, with
 separate and combined recovery cases on desktop and phone. Existing results and PostgreSQL prerequisites here
-remain unchanged. The follow-up work order is pending implementation.
+remain unchanged. The follow-up UI work order is complete. Its 2026-09-23 update also
+covers Review-to-Implement peer resumption with legacy parking metadata. The recovery
+package remains the single owner for removing parking presentation and its E2E coverage.

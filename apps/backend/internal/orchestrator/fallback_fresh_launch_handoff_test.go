@@ -62,7 +62,7 @@ func TestFallbackFreshLaunch_ComposedPromptSurvivesStepRecomposition(t *testing.
 	composedPrompt := "Run the next workflow step.\n\n" + stepHandoffPromptHeading + "\n\n" + handoff
 
 	err = svc.fallbackFreshLaunchOnMissingExecution(
-		ctx, taskID, sessionID, composedPrompt, true, composedPrompt, false, false, nil, nil, nil,
+		ctx, taskID, sessionID, composedPrompt, true, composedPrompt, false, "", false, nil, nil, nil,
 	)
 	require.NoError(t, err)
 	require.Contains(t, launchedDescription, handoff,

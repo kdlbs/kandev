@@ -175,8 +175,12 @@ the full task list.
   move those actions below the task list. Existing workspace context, activity
   indicators, launch behavior, and focus handoff shall be retained.
 - **AC-UI-MOBILE-MENU-007.2:** Regular workspace sections shall follow Tasks,
-  Automations, Integrations, Utilities order. Existing eligible plugin actions,
-  canvases, and page-local destinations shall remain reachable. Utilities shall
+  Automations, Integrations, Utilities order. Existing eligible plugin actions
+  shall share one Plugins section. Toolbar selection and context presentation
+  shall follow AC-UI-MOBILE-MENU-008.1 and AC-UI-MOBILE-MENU-008.2.
+  Optional system metrics shall follow navigation instead
+  of separating plugin controls. Canvases and page-local destinations shall
+  remain reachable. Utilities shall
   place Settings before Stats, followed by theme and support actions; existing
   conditional status and health affordances shall retain their behavior.
 - **AC-UI-MOBILE-MENU-007.3:** Integrations shall use a labelled, keyboard- and
@@ -191,6 +195,24 @@ the full task list.
   workspace isolation shall remain authoritative even while collapsed. Wider
   navigation composition, Tasks' initial expanded state, and Automations'
   initial collapsed state shall remain unchanged.
+
+### REQ-UI-MOBILE-MENU-008: One contextual toolbar per plugin
+
+- **AC-UI-MOBILE-MENU-008.1:** Phone navigation shall show plugin controls in
+  one wrapping group under Plugins without Workspace and Task subheadings.
+  This supersedes the former workspace/task subgroup distinction in
+  AC-UI-MOBILE-MENU-007.2.
+  When task controls are available, each plugin contributing to the task
+  toolbar shall use that toolbar instead of its workspace toolbar. All task
+  contributions from that plugin remain reachable. Workspace-only plugins
+  and sidebar workspace actions remain available.
+- **AC-UI-MOBILE-MENU-008.2:** Listing pages and task pages without task
+  contributions, including archived tasks, shall retain workspace toolbar
+  controls. A registered task control that renders no content shall retain its
+  workspace fallback until task content appears, and restore that fallback if
+  task content disappears. Selection follows live contributions, preserves each selected
+  slot's context and error isolation, and does not change desktop/tablet
+  placement or plugin destinations in saved sidebar layouts.
 
 ## Out of scope
 
@@ -213,3 +235,6 @@ the full task list.
 ## Implementation plans
 
 - [Unified mobile navigation](../../../plans/unified-mobile-navigation/plan.md)
+- [Coherent mobile plugin menu](../../../plans/mobile-plugin-menu-coherence/plan.md)
+
+- [Mobile plugin deduplication](../../../plans/mobile-plugin-deduplication/plan.md)

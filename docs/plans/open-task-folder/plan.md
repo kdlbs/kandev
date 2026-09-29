@@ -172,3 +172,9 @@ CI remediation: the desktop source-attachment suite also assumes an installed
 folder opener. It now explicitly stubs capability and native opening, matching
 the phone fixture and preserving real backend discovery tests. Both previously
 failing browser cases pass locally (2/2); targeted lint and typecheck pass.
+
+## Follow-up relocation (2026-09-22)
+
+The [editor dropdown package](../editor-dropdown-folder/plan.md) supersedes this
+package's standalone desktop button placement. This completed record and its test
+results describe PR #3784; they are not validation of the pending relocation.

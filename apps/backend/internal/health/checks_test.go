@@ -191,6 +191,59 @@ func TestGitHubChecker_StatusFailureDoesNotInspectAmbientAuth(t *testing.T) {
 	}
 }
 
+// --- WorkflowSyncChecker tests ---
+
+type mockWorkflowSyncProvider struct {
+	summary WorkflowSyncCircuitSummary
+	err     error
+}
+
+func (m *mockWorkflowSyncProvider) WorkflowSyncCircuitSummary(context.Context) (WorkflowSyncCircuitSummary, error) {
+	return m.summary, m.err
+}
+
+func TestWorkflowSyncChecker_NilProviderReportsNothing(t *testing.T) {
+	checker := NewWorkflowSyncChecker(nil)
+	issues := checker.Check(context.Background())
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues for a nil (optional) provider, got %+v", issues)
+	}
+}
+
+func TestWorkflowSyncChecker_NoOpenCircuitsReportsNothing(t *testing.T) {
+	checker := NewWorkflowSyncChecker(&mockWorkflowSyncProvider{
+		summary: WorkflowSyncCircuitSummary{Total: 3},
+	})
+	issues := checker.Check(context.Background())
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues when nothing is open, got %+v", issues)
+	}
+}
+
+func TestWorkflowSyncChecker_OpenAuthOrConfigReportsIssue(t *testing.T) {
+	checker := NewWorkflowSyncChecker(&mockWorkflowSyncProvider{
+		summary: WorkflowSyncCircuitSummary{Total: 3, OpenAuth: 1, OpenConfig: 1, OpenTransient: 1},
+	})
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 || issues[0].ID != "workflow_sync_circuit_open" {
+		t.Fatalf("issues = %+v", issues)
+	}
+	if issues[0].Severity != SeverityWarning {
+		t.Errorf("severity = %q, want %q", issues[0].Severity, SeverityWarning)
+	}
+	if !strings.Contains(issues[0].Message, "2 of 3") {
+		t.Errorf("message should count only auth+config as degraded, got %q", issues[0].Message)
+	}
+}
+
+func TestWorkflowSyncChecker_StatusFailureReportsIssue(t *testing.T) {
+	checker := NewWorkflowSyncChecker(&mockWorkflowSyncProvider{err: errors.New("db unavailable")})
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 || issues[0].ID != "workflow_sync_status_unavailable" {
+		t.Fatalf("issues = %+v", issues)
+	}
+}
+
 // --- GitExecutableChecker tests ---
 
 func TestGitExecutableChecker_Found(t *testing.T) {

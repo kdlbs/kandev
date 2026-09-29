@@ -778,6 +778,9 @@ func (s *Service) cleanupCancelledResumeAttempt(attempt *resumeAttempt) {
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), cancellationOperationTTL)
 	defer cancel()
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	if err := s.executor.StopExecution(cleanupCtx, executionID, "cancelled resume startup", true); err != nil && s.logger != nil {
 		s.logger.Debug("failed to clean up cancelled resume execution",
 			zap.String("task_id", attempt.taskID),

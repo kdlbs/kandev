@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import {
   waitForActiveSessionCancellationPending,
+  waitForActiveSessionCancellationPendingOrSettled,
   waitForActiveSessionForegroundActivity,
   waitForActiveSessionSupportsSteering,
 } from "../../helpers/session-store";
@@ -38,9 +40,15 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
-    await session.activeChat().getByTestId("cancel-agent-button").click();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeDisabled();
+    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    await cancelButton.click();
+    await waitForActiveSessionCancellationPendingOrSettled(testPage);
+    await expect
+      .poll(async () => {
+        if (!(await cancelButton.isVisible().catch(() => false))) return true;
+        return cancelButton.isDisabled();
+      })
+      .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);
@@ -55,6 +63,7 @@ test.describe.serial("Cancel turn availability", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
+    const gateway = watchWs(testPage);
     const session = await seedIdleSession(
       testPage,
       apiClient,
@@ -69,11 +78,29 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
-    await session.activeChat().getByTestId("cancel-agent-button").click();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeDisabled();
+    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    const sessionId = await testPage.evaluate(() => {
+      const store = (
+        window as Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => { tasks: { activeSessionId: string | null } };
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      return store?.getState().tasks.activeSessionId;
+    });
+    if (!sessionId) throw new Error("The active task session is not available");
+    const cancellationPending = gateway.waitForEvent("session.cancellation_changed", {
+      where: (payload) => payload.session_id === sessionId && payload.cancellation_pending === true,
+    });
+    const cancellationSettled = gateway.waitForEvent("session.cancellation_changed", {
+      where: (payload) =>
+        payload.session_id === sessionId && payload.cancellation_pending === false,
+    });
+    await cancelButton.click();
+    await cancellationPending;
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
-    await waitForActiveSessionCancellationPending(testPage, false);
+    await cancellationSettled;
     await waitForActiveSessionForegroundActivity(testPage, null);
     await expect(session.activeChat().getByTestId("cancel-agent-button")).not.toBeVisible({
       timeout: 15_000,

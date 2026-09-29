@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -176,27 +177,92 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 	return nil
 }
 
+// ForkSession asks the current provider session to fork through a completed
+// turn. The operation is not retried because an interrupted response is
+// ambiguous at the provider boundary.
+func (c *Client) ForkSession(ctx context.Context, sessionID, completedTurnID string) (string, error) {
+	if sessionID == "" || completedTurnID == "" {
+		return "", errors.New("session ID and completed turn ID are required")
+	}
+	resp, err := c.sendStreamRequest(ctx, "agent.session.fork", struct {
+		SessionID       string `json:"session_id"`
+		CompletedTurnID string `json:"completed_turn_id"`
+	}{SessionID: sessionID, CompletedTurnID: completedTurnID})
+	if err != nil {
+		return "", fmt.Errorf("fork session request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		var payload ws.ErrorPayload
+		if err := resp.ParsePayload(&payload); err != nil {
+			return "", errors.New("fork session failed: unable to parse error")
+		}
+		if payload.Code == ws.ErrorCodeConflict {
+			return "", fmt.Errorf("%w: %s", protocol.ErrForkPrecondition, payload.Message)
+		}
+		return "", fmt.Errorf("fork session failed: %s", payload.Message)
+	}
+	var result struct {
+		Success   bool   `json:"success"`
+		SessionID string `json:"session_id"`
+		Error     string `json:"error"`
+	}
+	if err := resp.ParsePayload(&result); err != nil {
+		return "", fmt.Errorf("failed to parse fork session response: %w", err)
+	}
+	if !result.Success || result.SessionID == "" {
+		if result.Error == "" {
+			result.Error = "response omitted forked session ID"
+		}
+		return "", fmt.Errorf("fork session failed: %s", result.Error)
+	}
+	return result.SessionID, nil
+}
+
+// ModeResult reports which mode the agent ended up in after a mode change.
+// A clamped or unobserved mode must not read as a clean apply, so the caller
+// receives the agent's own answer rather than an echo of the request.
+type ModeResult struct {
+	Requested string `json:"requested"`
+	Effective string `json:"effective"`
+	Confirmed bool   `json:"confirmed"`
+}
+
+// Applied reports whether the agent confirmed the exact requested mode.
+func (r ModeResult) Applied() bool {
+	return r.Confirmed && r.Effective == r.Requested
+}
+
 // SetMode changes the agent's session mode via the agent WebSocket stream.
-func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
+func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) (ModeResult, error) {
 	payload := struct {
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}{SessionID: sessionID, ModeID: modeID}
 
+	result := ModeResult{Requested: modeID}
+
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_mode", payload)
 	if err != nil {
-		return fmt.Errorf("set mode request failed: %w", err)
+		return result, fmt.Errorf("set mode request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set mode failed: unable to parse error")
+			return result, fmt.Errorf("set mode failed: unable to parse error")
 		}
-		return fmt.Errorf("set mode failed: %s", errPayload.Message)
+		return result, fmt.Errorf("set mode failed: %s", errPayload.Message)
 	}
 
-	return nil
+	// An older agentctl answers without the result body. Leaving Confirmed
+	// false there is correct: nothing observed the applied mode.
+	if err := resp.ParsePayload(&result); err != nil {
+		return ModeResult{Requested: modeID}, nil
+	}
+	if result.Requested == "" {
+		result.Requested = modeID
+	}
+	return result, nil
 }
 
 // SetModel changes the agent's model via the agent WebSocket stream.
@@ -346,9 +412,8 @@ type MCPHandler interface {
 // If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
 // If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
+	const wsRoute = "/api/v1/agent/stream"
+	conn, _, err := c.dialWebSocket(ctx, wsRoute, c.wsAuthHeaders())
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
@@ -357,7 +422,7 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	c.agentStreamConn = conn
 	c.mu.Unlock()
 
-	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
+	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
 
 	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {

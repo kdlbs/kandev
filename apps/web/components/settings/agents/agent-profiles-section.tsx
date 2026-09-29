@@ -73,18 +73,31 @@ function ProfileRowActions({
   deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
+  duplicateDisabled,
 }: {
   profile: AgentProfile;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
+  duplicateDisabled: boolean;
 }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
         <Button
           ref={deleteAnchorRef}
           variant="ghost"
@@ -109,6 +122,7 @@ function ProfileRowActions({
           <DropdownMenuItem
             className="cursor-pointer"
             data-testid={`duplicate-profile-${profile.id}`}
+            disabled={duplicateDisabled}
             onSelect={onDuplicate}
           >
             <IconCopy className="h-4 w-4 mr-2" />
@@ -136,11 +150,13 @@ function ProfileRowInlineActions({
   deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
+  duplicateDisabled,
 }: {
   profile: AgentProfile;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
+  duplicateDisabled: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -153,6 +169,7 @@ function ProfileRowInlineActions({
             size="icon"
             className="cursor-pointer"
             data-testid={`duplicate-profile-inline-${profile.id}`}
+            disabled={duplicateDisabled}
             onClick={onDuplicate}
             aria-label={t("agents:duplicate")}
           >
@@ -240,6 +257,7 @@ type ProfileRowCardProps = {
   onDuplicate: () => void;
   onConfirmDelete: () => void;
   confirmationProps: ProfileRowDeleteConfirmationBaseProps;
+  duplicateDisabled: boolean;
 };
 
 function ProfileRowCard({
@@ -253,6 +271,7 @@ function ProfileRowCard({
   onDuplicate,
   onConfirmDelete,
   confirmationProps,
+  duplicateDisabled,
 }: ProfileRowCardProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
@@ -305,6 +324,7 @@ function ProfileRowCard({
                 deleteAnchorRef={deleteAnchorRef}
                 onDuplicate={onDuplicate}
                 onConfirmDelete={onConfirmDelete}
+                duplicateDisabled={duplicateDisabled}
               />
             ) : (
               <ProfileRowActions
@@ -312,6 +332,7 @@ function ProfileRowCard({
                 deleteAnchorRef={deleteAnchorRef}
                 onDuplicate={onDuplicate}
                 onConfirmDelete={onConfirmDelete}
+                duplicateDisabled={duplicateDisabled}
               />
             ))}
         </div>
@@ -336,6 +357,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
   const href = profileHref(agent.name, profile.id);
   const closeDeleteConfirmation = () => {
     setConfirmOpen(false);
@@ -402,6 +424,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       onDuplicate={() => void handleDuplicate(agent, profile)}
       onConfirmDelete={() => setConfirmOpen(true)}
       confirmationProps={confirmationProps}
+      duplicateDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
     />
   );
 }

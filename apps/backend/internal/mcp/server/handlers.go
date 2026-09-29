@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/task/service"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -27,6 +27,7 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	allowCustomTextArg   = "allow_custom_text"
 	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
@@ -1026,6 +1027,11 @@ func normalizeAndValidateQuestion(q map[string]interface{}, index int, seenIDs m
 		return mcp.NewToolResultError(fmt.Sprintf("question %d has duplicate id %q", index+1, id))
 	}
 	seenIDs[id] = true
+	if value, exists := q[allowCustomTextArg]; exists {
+		if _, ok := value.(bool); !ok {
+			return mcp.NewToolResultError(fmt.Sprintf("question %d field %q must be a boolean", index+1, allowCustomTextArg))
+		}
+	}
 
 	options, errResult := decodeOptionsForQuestion(q, index)
 	if errResult != nil {
@@ -1288,7 +1294,7 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 		if mode, present, wrongType := planModeArg(req); present && (wrongType || mode != "") {
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"mode is not supported by create_task_plan_kandev; use update_task_plan_kandev with mode=%q to add a section to an existing plan without resending it",
-				service.PlanWriteModeAppend,
+				taskcontract.PlanWriteModeAppend,
 			)), nil
 		}
 		content, err := req.RequireString("content")
@@ -1385,10 +1391,10 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		// cannot reach.
 		mode, _, wrongType := planModeArg(req)
 		if wrongType {
-			return mcp.NewToolResultError(fmt.Sprintf("mode must be a string; accepted values are %q and %q", service.PlanWriteModeReplace, service.PlanWriteModeAppend)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("mode must be a string; accepted values are %q and %q", taskcontract.PlanWriteModeReplace, taskcontract.PlanWriteModeAppend)), nil
 		}
 		if mode != "" {
-			if _, err := service.ParsePlanWriteMode(mode); err != nil {
+			if _, err := taskcontract.ParsePlanWriteMode(mode); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 		}

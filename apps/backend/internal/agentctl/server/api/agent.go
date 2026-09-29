@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -79,6 +80,17 @@ type LoadSessionResponse struct {
 	SessionID  string                     `json:"session_id,omitempty"`
 	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
 	Error      string                     `json:"error,omitempty"`
+}
+
+type ForkSessionRequest struct {
+	SessionID       string `json:"session_id"`
+	CompletedTurnID string `json:"completed_turn_id"`
+}
+
+type ForkSessionResponse struct {
+	Success   bool   `json:"success"`
+	SessionID string `json:"session_id,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -317,6 +329,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSNewSession(ctx, msg)
 	case "agent.session.load":
 		return s.handleWSLoadSession(ctx, msg)
+	case "agent.session.fork":
+		return s.handleWSForkSession(ctx, msg)
 	case "agent.prompt":
 		return s.handleWSPrompt(ctx, msg)
 	case "agent.cancel":
@@ -347,6 +361,38 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
 	}
+}
+
+func (s *Server) handleWSForkSession(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req ForkSessionRequest
+	if err := msg.ParsePayload(&req); err != nil || req.SessionID == "" || req.CompletedTurnID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id and completed_turn_id are required", nil)
+		return resp
+	}
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+	forkable, ok := agentAdapter.(adapter.ForkableSession)
+	if !ok {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent does not support conversation forks", nil)
+		return resp
+	}
+	forkCtx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
+	defer cancel()
+	sessionID, err := forkable.ForkSession(forkCtx, req.SessionID, req.CompletedTurnID)
+	if err != nil {
+		s.logger.Error(msg.Action+" failed", zap.Error(err))
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, protocol.ErrForkPrecondition) {
+			code = ws.ErrorCodeConflict
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
+		return resp
+	}
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, ForkSessionResponse{Success: true, SessionID: sessionID})
+	return resp
 }
 
 func (s *Server) handleWSPermissionCancel(msg *ws.Message) *ws.Message {
@@ -588,8 +634,15 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		s.logger.Debug("reset MCP backend client for new session")
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
+	mcpServers, err := s.procMgr.MCPServersForSession(req.McpServers)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		return resp
+	}
+	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "managed conversation MCP broker is unavailable", nil)
+		return resp
+	}
 	if s.mcpServer != nil {
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
@@ -639,8 +692,15 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		s.logger.Debug("reset MCP backend client for loaded session")
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
+	mcpServers, err := s.procMgr.MCPServersForSession(req.McpServers)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		return resp
+	}
+	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "managed conversation MCP broker is unavailable", nil)
+		return resp
+	}
 	if s.mcpServer != nil {
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
@@ -840,13 +900,28 @@ func (s *Server) handleWSSetMode(ctx context.Context, msg *ws.Message) *ws.Messa
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ModeResult
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		ms, ok := a.(adapter.ModeSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support mode switching")
 		}
-		return ms.SetMode(ctx, req.ModeID)
+		var err error
+		result, err = ms.SetMode(ctx, req.ModeID)
+		return err
 	})
+	if resp.Type == ws.MessageTypeError {
+		return resp
+	}
+	// The caller needs the mode the agent ended up in, not the one it asked
+	// for: a clamped mode is otherwise reported as a clean apply.
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"success":   true,
+		"requested": result.Requested,
+		"effective": result.Effective,
+		"confirmed": result.Confirmed,
+	})
+	return settled
 }
 
 // adapterAction extracts common boilerplate for WS handlers that operate on the agent adapter:
@@ -937,8 +1012,15 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		return resp
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
+	mcpServers, err := s.procMgr.MCPServersForSession(req.McpServers)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		return resp
+	}
+	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "managed conversation MCP broker is unavailable", nil)
+		return resp
+	}
 	if s.mcpServer != nil {
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}

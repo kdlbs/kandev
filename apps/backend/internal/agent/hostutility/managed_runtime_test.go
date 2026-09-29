@@ -24,6 +24,7 @@ func (r managedRuntimeSelectionReader) Get(
 }
 
 func TestResolveInferenceCommandUsesActiveExactVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	manager := &Manager{managedRuntimeSelections: managedRuntimeSelectionReader{
 		selection: managedruntime.Selection{Package: "opencode-ai", Version: "1.18.5"},
 		found:     true,
@@ -41,6 +42,7 @@ func TestResolveInferenceCommandUsesActiveExactVersion(t *testing.T) {
 }
 
 func TestResolveInferenceCommandPreservesLegacyAndReportsSelectionErrors(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	manager := &Manager{managedRuntimeSelections: managedRuntimeSelectionReader{}}
 	command, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{})

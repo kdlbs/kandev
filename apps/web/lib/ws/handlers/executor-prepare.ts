@@ -36,6 +36,9 @@ export function registerExecutorPrepareHandlers(store: StoreApi<AppState>): WsHa
         const steps = payload.steps?.length
           ? payload.steps.map((s) => ({
               name: s.name,
+              kind: s.kind,
+              remotePlatform: s.remote_platform,
+              failureCode: s.failure_code,
               command: s.command,
               status: s.status,
               output: s.output,
@@ -80,6 +83,9 @@ function updateSteps(
   }
   steps[payload.step_index] = {
     name: payload.step_name,
+    kind: payload.step_kind,
+    remotePlatform: payload.remote_platform,
+    failureCode: payload.failure_code,
     command: payload.step_command,
     status: payload.status,
     output: payload.output,

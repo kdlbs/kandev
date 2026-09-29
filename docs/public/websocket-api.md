@@ -226,7 +226,7 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
-`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Moves requested by an active agent use the deferred MCP path and persist the complete options through turn completion, WIP promotion, and backend restart before the retained move is applied.
+`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Actual workflow-step changes requested through `move_task_kandev` from a RUNNING or STARTING session use the deferred MCP path and persist their complete options through turn completion, WIP promotion, and backend restart. A valid same-step MCP request without entry options returns `disposition: "applied"` with the stored task, so the caller does not need to retry.
 
 ```json
 {
@@ -276,6 +276,27 @@ Every task-session response includes immutable `queue_incarnation_id`. Kandev ge
 The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspaceId/mentions/search?q=<plain-text>&limit=<per-source-limit>&exclude_task_id=<optional-task-id>`. `q` is required after trimming and accepts 1–200 Unicode characters. `limit` defaults to 5 and is clamped to 1–10. When supplied, `exclude_task_id` must belong to the requested workspace.
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
+
+### Query sidebar tasks over HTTP
+
+The web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+
+```json
+{
+  "filters": [{ "dimension": "archived", "op": "is", "value": false }],
+  "sort": { "key": "lastActivityAt", "direction": "desc" },
+  "group": "none",
+  "collapsed_group_keys": [],
+  "collapsed_task_ids": [],
+  "page": 1,
+  "page_size": 100,
+  "locale": "en"
+}
+```
+
+`page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
+
+The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
 
 ### Send a user turn
 
@@ -890,5 +911,9 @@ Routing is an efficiency mechanism, not the access-control boundary. With authen
 - **Responses arrive in the wrong order:** this is normal concurrent dispatch. Match by unique `id`, never arrival order.
 
 Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions.
+
+The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. Browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` flag remains as a kill switch; an explicit false value restores browser-owned cleanup. With continuity enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
+
+The browser shows **Reconnecting** for an uncertain transport loss and retries attachment. A browser-reported `1005` or `1006`, graceful backend restart close `1001`, or backend transport close `4009` does not confirm that the language-server process exited. Close `4006` means the task-host process exited; the editor clears that generation's providers and diagnostics and offers **Retry**. Close `4010` means the task runtime stopped, so the editor ends the lease without reconnecting it. A backend restart releases leases, so the next connection starts a fresh process and repeats project analysis.
 
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Git Operations](git-operations.md), [Operations](operations.md), [Workflow Import / Export](workflow-import-export.md), and [Workflow Sync](workflow-sync.md).

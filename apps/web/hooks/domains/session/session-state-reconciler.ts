@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import { fetchTaskSession } from "@/lib/api";
 import type { AppState } from "@/lib/state/store";
+import { captureTaskSessionHydrationEpoch } from "@/lib/state/slices/session/hydration-epochs";
 import { isStaleSessionStateEvent } from "@/lib/ws/handlers/agent-session";
 
 const BUSY_SESSION_STATES = new Set(["STARTING", "RUNNING", "CREATED"]);
@@ -71,6 +72,10 @@ export function acquireSessionStateReconciliation(
 
   function reconcile() {
     reconciliation.inFlight = true;
+    const hydrationEpochAtRequestStart = captureTaskSessionHydrationEpoch(
+      store.getState(),
+      sessionId,
+    );
     fetchTaskSession(sessionId)
       .then((res) => {
         if (
@@ -82,7 +87,7 @@ export function acquireSessionStateReconciliation(
         }
         const current = store.getState().taskSessions.items[sessionId];
         if (isStaleSessionStateEvent(current, res.session.updated_at)) return;
-        store.getState().setTaskSession(res.session);
+        store.getState().setTaskSession(res.session, hydrationEpochAtRequestStart);
       })
       .catch(() => {})
       .finally(scheduleNext);

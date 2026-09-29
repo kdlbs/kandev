@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/gitbase"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
@@ -188,6 +189,12 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 // origin or incurs provider authentication work.
 func (m *Manager) refreshRepositoryForMaterialization(ctx context.Context, req *CreateRequest) error {
 	if req == nil || req.RemoteSyncHandled {
+		return nil
+	}
+	if req.QualifiedPRBase != nil {
+		// Qualified target and PR-head fetches are the authoritative provider
+		// route for this checkout; origin refresh is branch-only and may point
+		// at a fork with an unrelated branch of the same name.
 		return nil
 	}
 	if req.RefreshRepositoryWithState != nil {
@@ -624,6 +631,9 @@ func recreateSourceBranch(existingBranch, checkoutBranch string) string {
 // is updated to reflect the resolved name and a non-empty warning/detail pair is
 // returned for surfacing on the resulting worktree record.
 func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateRequest) (baseRef, warning, detail string, err error) {
+	if req.QualifiedPRBase != nil {
+		return m.materializeQualifiedPRBase(ctx, req)
+	}
 	baseRef = req.BaseBranch
 	warning = req.baseRefreshFallbackWarning
 	detail = req.baseRefreshFallbackDetail
@@ -728,6 +738,34 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	return m.finishBaseFallback(req, baseRef, fallback, resolvedFallback)
 }
 
+func (m *Manager) materializeQualifiedPRBase(ctx context.Context, req *CreateRequest) (string, string, string, error) {
+	base, err := gitbase.Materialize(ctx, func(runCtx context.Context, args ...string) (string, error) {
+		output, runErr, execCtxErr := m.runGitCombinedAfterAcquire(runCtx, m.fetchTimeout, req.RepositoryPath, args...)
+		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
+			return string(output), ctxErr
+		}
+		return string(output), runErr
+	}, *req.QualifiedPRBase)
+	if err != nil {
+		return "", "", "", fmt.Errorf("materialize qualified PR base %s:%s: %w", req.QualifiedPRBase.Target.TargetRepository.Path, req.QualifiedPRBase.Target.TargetBranch, err)
+	}
+	return base.Ref, "", "", nil
+}
+
+func (m *Manager) materializeQualifiedPRHead(ctx context.Context, req CreateRequest) (string, error) {
+	head, err := gitbase.FetchPullRequestHead(ctx, func(runCtx context.Context, args ...string) (string, error) {
+		output, runErr, execCtxErr := m.runGitCombinedAfterAcquire(runCtx, m.fetchTimeout, req.RepositoryPath, args...)
+		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
+			return string(output), ctxErr
+		}
+		return string(output), runErr
+	}, req.QualifiedPRBase.Target)
+	if err != nil {
+		return "", fmt.Errorf("materialize qualified PR head %d: %w", req.PRNumber, err)
+	}
+	return head.OID, nil
+}
+
 func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string) (string, error) {
 	if req.RemoteSyncHandled {
 		resolved, _, _, _, err := m.resolveRefreshedBaseRefWithFallback(ctx, req.RepositoryPath, fallback, "")
@@ -791,7 +829,14 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		return m.createContributionInTaskDir(ctx, req, worktreePath, fallbackWarning, fallbackDetail)
 	}
 	if req.CheckoutBranch != "" {
-		if req.RemoteSyncHandled {
+		switch {
+		case req.QualifiedPRBase != nil:
+			selectedRef, prepareErr := m.materializeQualifiedPRHead(ctx, req)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+			startPoint = selectedRef
+		case req.RemoteSyncHandled:
 			selectedRef, prepareErr := m.prepareBranchFromRefreshedOrigin(
 				ctx, req.RepositoryPath, req.CheckoutBranch, req.CheckoutBranch, req.PRNumber,
 			)
@@ -812,7 +857,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 				// stale local branch.
 				startPoint = selectedRef
 			}
-		} else {
+		default:
 			// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
 			// fork PR branches don't exist as plain refs locally or under
 			// origin/<branch>, so the existence probe must be skipped and the
@@ -1996,6 +2041,19 @@ func (m *Manager) restoreMissingTasksBaseForRecreate(worktreePath string, existi
 	return nil
 }
 
+func (m *Manager) materializeRecreatedQualifiedPRHead(ctx context.Context, req *CreateRequest) (string, error) {
+	if req.QualifiedPRBase == nil {
+		return "", nil
+	}
+	if _, _, _, err := m.resolveBaseRefWithFallback(ctx, req); err != nil {
+		return "", err
+	}
+	if req.RemoteContribution != nil {
+		return "", nil
+	}
+	return m.materializeQualifiedPRHead(ctx, *req)
+}
+
 // recreate recreates a worktree from stored metadata.
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
@@ -2006,7 +2064,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// Recreate bypasses the new-worktree path, so perform the same required
 	// base refresh before touching the existing worktree path. A failed refresh
 	// must leave the retryable on-disk state intact.
-	if req.PullBeforeWorktree && !req.RemoteSyncHandled {
+	qualifiedPRHeadOID, err := m.materializeRecreatedQualifiedPRHead(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+	if req.QualifiedPRBase == nil && req.PullBeforeWorktree && !req.RemoteSyncHandled {
 		refreshReq := req
 		_, warning, detail, err := m.resolveBaseRefWithFallback(ctx, &refreshReq)
 		if err != nil {
@@ -2041,9 +2103,13 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		repoLock.Unlock()
 		m.releaseRepoLock(req.RepositoryPath)
 	}()
-	emptyRemoteBaseRef, err := m.ensureEmptyRemoteBaseline(ctx, &req)
-	if err != nil {
-		return nil, err
+	emptyRemoteBaseRef := ""
+	if req.QualifiedPRBase == nil {
+		baselineRef, baselineErr := m.ensureEmptyRemoteBaseline(ctx, &req)
+		if baselineErr != nil {
+			return nil, baselineErr
+		}
+		emptyRemoteBaseRef = baselineRef
 	}
 
 	// Reuse the original on-disk path so the worktree is recreated in the
@@ -2125,6 +2191,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, contributionRef)
 			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
 				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
+			}
+		} else if qualifiedPRHeadOID != "" {
+			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, qualifiedPRHeadOID)
+			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
+				return nil, fmt.Errorf("restore qualified PR worktree branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
 		} else if emptyRemoteBaseRef != "" {
 			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, emptyRemoteBaseRef)
@@ -2242,5 +2313,6 @@ func recreatedStartPoint(selectedRef, existingBranch string) string {
 }
 
 func shouldRefreshRecreatedBranch(req CreateRequest, recoveredFromHead bool, emptyRemoteBaseRef string) bool {
-	return !recoveredFromHead && req.RemoteSyncHandled && req.RemoteContribution == nil && emptyRemoteBaseRef == ""
+	return !recoveredFromHead && req.RemoteSyncHandled && req.RemoteContribution == nil &&
+		req.QualifiedPRBase == nil && emptyRemoteBaseRef == ""
 }

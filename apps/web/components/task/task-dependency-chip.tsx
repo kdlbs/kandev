@@ -28,6 +28,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@kandev/ui/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import TaskLink from "@/components/routing/task-link";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { getTaskDependencies } from "@/lib/api/domains/task-dependencies-api";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
@@ -153,15 +154,23 @@ function statusIcon(status?: string) {
 function DependencyRow({
   ref: entry,
   showStatus,
+  touchTarget,
+  onNavigated,
 }: {
   ref: TaskDependencyRef;
   showStatus: boolean;
+  touchTarget: boolean;
+  onNavigated: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <a
-      href={`/tasks/${entry.id}`}
-      className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent min-w-0"
+    <TaskLink
+      taskId={entry.id}
+      onNavigated={onNavigated}
+      className={cn(
+        "flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent",
+        touchTarget && "[@media(pointer:coarse)]:min-h-11",
+      )}
       data-testid="task-dependency-entry"
     >
       {showStatus ? (
@@ -175,11 +184,19 @@ function DependencyRow({
           {t(`task:state.${entry.state}`, { defaultValue: entry.state })}
         </span>
       )}
-    </a>
+    </TaskLink>
   );
 }
 
-function DependencyLists({ data }: { data: DependencyChipData }) {
+function DependencyLists({
+  data,
+  touchTarget,
+  onNavigated,
+}: {
+  data: DependencyChipData;
+  touchTarget: boolean;
+  onNavigated: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-3">
@@ -189,7 +206,13 @@ function DependencyLists({ data }: { data: DependencyChipData }) {
             {t("task:dependencyBlockedBy")}
           </h4>
           {data.dependsOn.map((entry) => (
-            <DependencyRow key={entry.id} ref={entry} showStatus />
+            <DependencyRow
+              key={entry.id}
+              ref={entry}
+              showStatus
+              touchTarget={touchTarget}
+              onNavigated={onNavigated}
+            />
           ))}
         </section>
       )}
@@ -199,7 +222,13 @@ function DependencyLists({ data }: { data: DependencyChipData }) {
             {t("task:dependencyBlocks")}
           </h4>
           {data.blocks.map((entry) => (
-            <DependencyRow key={entry.id} ref={entry} showStatus={false} />
+            <DependencyRow
+              key={entry.id}
+              ref={entry}
+              showStatus={false}
+              touchTarget={touchTarget}
+              onNavigated={onNavigated}
+            />
           ))}
         </section>
       )}
@@ -293,7 +322,7 @@ export function TaskDependencyChip({ taskId }: { taskId: string | null }) {
             </DrawerClose>
           </DrawerHeader>
           <div className="overflow-y-auto p-2">
-            <DependencyLists data={data} />
+            <DependencyLists data={data} touchTarget onNavigated={() => setOpen(false)} />
           </div>
         </DrawerContent>
       </Drawer>
@@ -313,7 +342,7 @@ export function TaskDependencyChip({ taskId }: { taskId: string | null }) {
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-2" data-testid="task-dependency-chip-popover">
-        <DependencyLists data={data} />
+        <DependencyLists data={data} touchTarget={false} onNavigated={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );

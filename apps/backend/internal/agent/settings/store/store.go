@@ -93,6 +93,13 @@ type AgentProfileMcpConfigPatcher interface {
 	) (*models.AgentProfileMcpConfig, error)
 }
 
+// AgentProfileModelAdopter fills an unset profile model without replacing the
+// rest of the profile row. The boolean is false when the profile already has a
+// model or was deleted before the background probe completed.
+type AgentProfileModelAdopter interface {
+	UpdateAgentProfileModelIfEmpty(ctx context.Context, profileID, model string) (bool, error)
+}
+
 // DynamicProfileRepository is the optional extension implemented by settings
 // stores that persist the dynamic profile document. Keeping it separate from
 // Repository lets small controller fakes and plugin adapters retain the

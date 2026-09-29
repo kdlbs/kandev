@@ -30,6 +30,9 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 	if !ok {
 		return nil, fmt.Errorf("agent %q does not support inference", agentID)
 	}
+	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
+		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentID)
+	}
 
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
@@ -55,10 +58,12 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		AgentID: agentID,
 		Model:   model,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   execution.WorkspacePath,
-			StripEnv:  agents.StripEnvFor(ia),
+			Protocol:        cfg.Protocol,
+			Command:         cfg.Command.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         execution.WorkspacePath,
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 
@@ -94,6 +99,9 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	ia, ok := m.registry.GetInferenceAgent(agentName)
 	if !ok {
 		return nil, fmt.Errorf("agent %q does not support inference", agentName)
+	}
+	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
+		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentName)
 	}
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
@@ -142,9 +150,10 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
+			Protocol: cfg.Protocol,
+			Command:  cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
-			ProviderGatewayAuth: gatewayAuth,
+			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	})
 }
@@ -163,7 +172,7 @@ func (m *Manager) ListInferenceAgentsWithContext(ctx context.Context) []Inferenc
 	for _, ia := range inferenceAgents {
 		// Get base agent for metadata
 		ag, ok := ia.(agents.Agent)
-		if !ok {
+		if !ok || !ag.Enabled() {
 			continue
 		}
 

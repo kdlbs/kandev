@@ -26,11 +26,16 @@ function makeSession(id: string): TaskSession {
   } as TaskSession;
 }
 
-function makeStore(cachedSession: TaskSession, activityEpoch = 0): StoreApi<AppState> {
+function makeStore(
+  cachedSession: TaskSession,
+  activityEpoch = 0,
+  readCursorEpoch = 0,
+): StoreApi<AppState> {
   const state = {
     taskSessions: {
       items: { [cachedSession.id]: cachedSession },
       activityEpochBySession: { [cachedSession.id]: activityEpoch },
+      readCursorEpochBySession: { [cachedSession.id]: readCursorEpoch },
     },
     taskSessionsByTask: {
       itemsByTaskId: { [TASK_ID]: [cachedSession] },
@@ -101,7 +106,7 @@ describe("useTaskRemoval session loading", () => {
 
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession], {
-      [CACHED_SESSION_ID]: 0,
+      [CACHED_SESSION_ID]: { activity: 0, readCursor: 0 },
     });
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(1, TASK_ID, true);
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(2, TASK_ID, true);
@@ -117,18 +122,19 @@ describe("useTaskRemoval session loading", () => {
     });
     listTaskSessionsMock.mockReturnValueOnce(response);
     const cachedSession = makeSession(CACHED_SESSION_ID);
-    const store = makeStore(cachedSession, 4);
+    const store = makeStore(cachedSession, 4, 7);
     const { result } = renderHook(() => useTaskRemoval({ store }));
 
     const load = result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
     await vi.waitFor(() => expect(listTaskSessionsMock).toHaveBeenCalledOnce());
     store.getState().taskSessions.activityEpochBySession![cachedSession.id] = 5;
+    store.getState().taskSessions.readCursorEpochBySession![cachedSession.id] = 8;
     const freshSession = makeSession("fresh-session");
     resolveResponse({ sessions: [freshSession] });
 
     await expect(load).resolves.toEqual([freshSession]);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [freshSession], {
-      [cachedSession.id]: 4,
+      [cachedSession.id]: { activity: 4, readCursor: 7 },
     });
   });
 });

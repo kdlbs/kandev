@@ -27,6 +27,9 @@ by the [Office system](../office/README.md).
 - Core UI behavior belongs to the [UI system](../ui/README.md).
 - External service credentials belong to the [integration system](../integrations/README.md).
 - Desktop packaging belongs to the [desktop system](../desktop/README.md).
+- Remote executor environment identity, inventory, and recovery belong to the
+  [executor system](../executors/README.md). Its draft
+  [provider contract](../executors/system-design/remote-executor-plugins.md) uses plugin lifecycle and dispatch.
 
 ## Migration record
 
@@ -38,6 +41,8 @@ canonical requirement and system-design documents. Use the catalog command to fi
 - [UI](../ui/README.md): renders plugin contributions.
 - [Canvases](../canvases/README.md): binds plugin web applications to task
   and workspace canvas lifecycles.
+- [Tasks](../tasks/README.md): owns task and workflow state, including the
+  transition ledger projected through the Host data API.
 - [Canvas distribution](../canvases/system-design/marketplace-sharing.md): owns
   canvas export/import and the canvas-specific marketplace flow; reuses plugin
   manifests, static validation, catalog sources, and the runtime trust contract.
