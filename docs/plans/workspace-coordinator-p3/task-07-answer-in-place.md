@@ -42,7 +42,7 @@ chat's permission response. No answer contract changes.
   `apps/web/lib/permissions/respond.ts`, chat behaviour pinned by its existing
   tests; `app/coordinator/components/question-answer.tsx` and
   `permission-answer.tsx`; **Answer here** in the item actions for managers
-  while the flag is on; phase 1's text and **Open task** otherwise
+  while phase 3 is effective; phase 1's text and **Open task** otherwise
   (amended `AC-COORDINATOR-NEEDS-YOU-002.5`).
 - Copy in six locales.
 

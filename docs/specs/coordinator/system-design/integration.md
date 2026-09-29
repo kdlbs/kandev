@@ -88,9 +88,13 @@ filter in memory against one set read:
   none.
 - **Adding to the set.** No hook is needed: a workflow added to the set, or a
   task moved into one, is a task the next backstop pass reads as watched, so
-  its existing episodes are stored then (`AC-COORDINATOR-INTEGRATION-002.3`).
-  Removing a workflow supersedes its pending wakes at the next delivery step 2,
-  not at the moment of the change.
+  its episodes that have no stored wake are stored then
+  (`AC-COORDINATOR-INTEGRATION-002.3`). An episode whose wake was superseded
+  while the task was unwatched stays superseded: the wake key is unique on the
+  episode and the insert is `ON CONFLICT DO NOTHING`, so re-watching neither
+  revives it nor stores a second one (`AC-COORDINATOR-WAKE-001.2`); only a new
+  episode, with a new key, wakes. Removing a workflow supersedes its pending
+  wakes at the next delivery step 2, not at the moment of the change.
 
 The unattended turn's reads and proposals go through the phase 2 guard as an
 attended turn's do: a read naming `workflow_id` or `task_id` is checked with
@@ -130,10 +134,16 @@ agentctl builds its exact-name approval allowlist from the same list
   `propose_improvement_kandev` only when phase 3 is effective at the time the
   conversation is opened. The binding validator and the allowlist derive from
   the list, so no separate registration is needed. A conversation opened
-  earlier keeps its list until it is reopened, and a call to the tool from it
-  is refused `not_in_profile` and logged as a refusal
-  (`AC-COORDINATOR-INTEGRATION-003.3`); changing the list mid-conversation is
-  not done, because the binding is the conversation's identity.
+  earlier keeps its list until it is reopened. While phase 3 is effective, a
+  call to the tool from such a conversation is refused `not_in_profile` and
+  logged as a refusal (`AC-COORDINATOR-INTEGRATION-003.3`). While phase 3 is
+  not effective, the tool is outside the guard's allowed coordinator actions,
+  so a call from any conversation, including one whose list still holds the
+  tool, is the phase 1 unknown-action error of the guard's check 0, stores
+  nothing and writes no row
+  ([permissions](permissions.md#guard), `AC-COORDINATOR-IMPROVEMENTS-001.1`).
+  Changing the list mid-conversation is not done, because the binding is the
+  conversation's identity.
 - **Test.** The guard table of phase 2 runs against a session started by
   `Deliver`, asserting the same refusals and the same bound list as an
   attended session ([delivery](wake.md#delivery)).

@@ -25,6 +25,9 @@ or an addition that phase 2 leaves room for.
 
 ## Terminology
 
+- **Phase 3 effective:** `features.coordinator`, `features.coordinatorPhase2`
+  and `features.coordinatorPhase3` are all on. Every "while phase 3 is
+  effective" in the phase 3 documents means this, never the third flag alone.
 - **Watch set:** a coordinator's effective Watches from phase 2
   (`REQ-COORDINATOR-PERMISSIONS` Watches): every workflow when its scope is
   `all`, otherwise the selected workflows that still exist. A task without a
@@ -81,9 +84,11 @@ unattended turn that follows sees no more than that.
   set cannot be read, the wake shall stay `pending` and be excluded from that
   delivery.
 - **AC-COORDINATOR-INTEGRATION-002.3:** Adding a workflow to the watch set, or
-  moving an own task into a watched workflow, shall store wakes for that
-  task's existing episodes at the next backstop pass, as turning autonomy on
-  does.
+  moving an own task into a watched workflow, shall store wakes at the next
+  backstop pass for that task's episodes that have no stored wake, as turning
+  autonomy on does. An episode whose wake is stored, whatever its status,
+  including `superseded`, shall keep it and get no second wake
+  (`AC-COORDINATOR-WAKE-001.2`).
 - **AC-COORDINATOR-INTEGRATION-002.4:** During an unattended turn, the
   coordinator surface shall answer a read or proposal that names an unwatched
   workflow or task exactly as it does during an attended turn, and no wake path
@@ -108,8 +113,10 @@ it runs in, or less.
   does to a request the allowlist left open.
 - **AC-COORDINATOR-INTEGRATION-003.3:** A conversation opened before phase 3
   was on shall keep its bound list, so it has no `propose_improvement_kandev`
-  tool until it is reopened; the tool shall be absent from its list and a call
-  to it refused as not in the profile.
+  tool until it is reopened; the tool shall be absent from its list and, while
+  phase 3 is effective, a call to it refused as not in the profile. While phase
+  3 is not effective the call is answered as
+  `AC-COORDINATOR-IMPROVEMENTS-001.1` says.
 
 ### REQ-COORDINATOR-INTEGRATION-004: The log names unattended and automatic acts
 
@@ -124,8 +131,9 @@ person decided.
   written outside an unattended turn shall carry no turn id.
 - **AC-COORDINATOR-INTEGRATION-004.2:** A manager's reply with a condition
   shall write a row with the outcome `returned`, the replying manager and the
-  reply text as detail, and the log shall render it as "Returned with a
-  condition".
+  reply text as detail, and the log shall render it as "Returned by {{name}},
+  with a condition" (`{{name}}` the manager's name), or "Returned, with a
+  condition" when the manager cannot be named.
 - **AC-COORDINATOR-INTEGRATION-004.3:** An automatic approval, and the row of
   an automatic approval that failed, shall be written with the authorization
   `automatic` and the raising manager as actor. Every other row shall keep
@@ -164,8 +172,11 @@ kinds already follow.
 - **AC-COORDINATOR-INTEGRATION-006.1:** A reply with a condition shall set a
   proposal `returned` only from `pending`. A proposal in any other status,
   including `failed`, shall answer the reply with 409 and the current
-  proposal, and a `failed` card shall keep Approve, Reject and Try again
-  without **Reply with a condition**.
+  proposal. A `failed` card shall keep the controls phase 2 gives it (Approve,
+  Edit and Reject on a `create_task` card; Approve and Reject on an
+  improvement card, whose Approve reads **Approve as a reviewable change**)
+  and shall not offer **Reply with a condition**. Retrying a failed proposal
+  is Approve; no proposal card has a **Try again** control.
 - **AC-COORDINATOR-INTEGRATION-006.2:** A `returned` proposal shall not be
   claimable by approve, shall be ignored by stale-claim recovery, shall not
   count toward the open-proposal limit, and shall not hold the open-target
@@ -199,11 +210,12 @@ Mockup:
   changes waiting for the manager. While it is not effective the entry is
   absent and a link to it opens the first section.
 - **AC-COORDINATOR-INTEGRATION-007.2:** The **Automatic** option of May do
-  shall stay disabled with "Not available yet" for every action except
-  `create_task`. For `create_task` it shall be enabled only for a manager
-  while the coordinator is eligible ([automatic](automatic.md)), and the
-  settings write shall refuse `automatic` for `create_task` with the first
-  unmet condition otherwise. The settings write shall keep refusing
+  shall stay disabled for every action except `create_task`, reading "Cannot
+  be raised" while phase 3 is effective and "Not available yet" while it is
+  not. For `create_task` it shall be enabled only for a manager while phase 3
+  is effective and the coordinator is eligible ([automatic](automatic.md)),
+  and the settings write shall refuse `automatic` for `create_task` with the
+  first unmet condition otherwise. The settings write shall keep refusing
   `automatic` for every other action with `automatic_not_available`.
 
 ### REQ-COORDINATOR-INTEGRATION-008: The copilot shows the conversation everywhere

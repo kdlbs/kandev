@@ -45,22 +45,37 @@ Starts only after G3 is met.
   empty named registration functions `registerCoordinatorContainment`,
   `...Spend`, `...Wake`, `...Delivery`, `...Relay`, `...Reply`,
   `...Automatic`, `...Improvements`.
-- `internal/coordinator/store.go`: `coordinators.autonomy_enabled`,
+- `internal/coordinator/store.go` (types and queries) and the schema file below: `coordinators.autonomy_enabled`,
   `coordinators.cost_ceiling_subcents`; `coordinator_proposals.reply_text`, `reply_delivered_at`, `reply_delivery_claimed_at`,
   `in_reply_to`, `decided_automatically`, `claimed_automatically`,
   `automatic_at`; tables `coordinator_wakes`,
   `coordinator_unattended_turns` (with the partial unique index,
   `session_turn_id`, `start_ceiling_subcents` and `stop_requested_at`), `coordinator_unattended_denials`,
-  `coordinator_class_reviews`, `coordinator_class_changes`,
-  `coordinator_pending_changes`; phase 2's `coordinator_proposals.kind`
-  column is reused, not added; the phase 2 additions
-  `coordinator_activity.unattended_turn_id` (nullable, no foreign key), the
-  activity outcome `returned`, the authorization `automatic` and the
-  activity-only class `improvement`
+  `coordinator_class_reviews`, `coordinator_pending_changes`; phase 2's
+  `coordinator_proposals.kind` column is reused, not added; the activity
+  outcome `returned`, the authorization `automatic` and the activity-only
+  class `improvement`
   ([integration Log rows](../../specs/coordinator/system-design/integration.md#log-rows));
   deletion with
   the coordinator and on `workspace.deleted`; retention in the startup pass
-  ([wake Store](../../specs/coordinator/system-design/wake.md#store)).
+  ([wake Store](../../specs/coordinator/system-design/wake.md#store)). Phase 2
+  as built keeps `createTablesSQL` to the three phase 1 tables and adds every
+  later column by `ALTER TABLE`, so each phase 3 column on an existing table
+  is one more entry of `phase2ColumnMigrations` and each new table and index
+  one more statement of `phase2TablesSQL` and `phase2IndexesSQL`, all in the
+  file named next, never in `createTablesSQL`.
+- `internal/coordinator/store_phase2_schema.go`, the file phase 2's additive
+  schema lives in: the column `coordinator_activity.unattended_turn_id`
+  (nullable, no foreign key) as one `phase2ColumnMigrations` entry,
+  `{"coordinator_activity.unattended_turn_id", "ALTER TABLE coordinator_activity
+  ADD COLUMN unattended_turn_id TEXT"}`; the table `coordinator_class_changes`
+  ([automatic](../../specs/coordinator/system-design/automatic.md#phase-2-interfaces-consumed)
+  for its columns) as `CREATE TABLE IF NOT EXISTS` in `phase2TablesSQL`; and
+  in `phase2IndexesSQL` `CREATE INDEX IF NOT EXISTS
+  idx_coordinator_class_changes_class ON coordinator_class_changes
+  (coordinator_id, class, changed_at DESC)`. `migratePhase2` already runs
+  columns, then tables, then indexes, each replayable, so no migration
+  function is added.
 - PATCH fields `autonomy_enabled` and `cost_ceiling_usd` with the integer
   parser ([spend Ceiling](../../specs/coordinator/system-design/spend.md#ceiling)),
   the interlock, no `config_revision` change, and the supersede on autonomy
@@ -70,7 +85,7 @@ Starts only after G3 is met.
   refuses the fields from a coordinator principal.
 - Typed client fields in `apps/web/lib/api/domains/coordinator-api.ts`, and an
   empty Autonomy section in the coordinator settings page rendered only while
-  the flag is on.
+  phase 3 is effective.
 
 ## Out of scope
 

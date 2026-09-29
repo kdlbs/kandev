@@ -81,7 +81,8 @@ exactly one conversation, and the rules below never create another.
 
 ## Store
 
-Both tables live in `internal/coordinator/store.go`'s schema, created with
+Both tables live in `internal/coordinator/store_phase2_schema.go`'s
+`phase2TablesSQL` (their indexes in `phase2IndexesSQL`), created with
 `CREATE TABLE IF NOT EXISTS` on both dialects and covered by the store's
 upgrade conformance test.
 

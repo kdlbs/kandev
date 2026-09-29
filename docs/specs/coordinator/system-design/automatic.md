@@ -71,6 +71,7 @@ owned by task 09:
 | `decided_at` | not on the proposal | the activity row's `created_at` |
 | `UndoneTaskIDs` | `undone_at` and `target_task_id` on the approved row, set by `markUndone` in `undo.go` | the query below |
 | `OnUndo` | none | a post-commit call added in `markUndone` |
+| Locked reads and claim for the automatic section | `lockedCoordinatorRow` reads the row on a handle; `ClaimProposal` runs on `s.db` | `NewestClassChangeTx`, `CountAutomaticDecidedTx` and `ClaimProposalTx` ([Automatic approval](#automatic-approval)) |
 | `returned` outcome, `automatic` authorization | not in the closed sets | added by [integration](integration.md#log-rows) |
 
 `coordinator_class_changes` (append only, deleted with the coordinator and on
@@ -196,52 +197,95 @@ every approve claim's `UPDATE` (1 by the automatic claim, 0 by a manager's
 claim) and kept by stale-claim recovery, which re-uses the claim it
 recovers. `decided_automatically` answers "was this proposal ever approved
 automatically" (the 24-hour count); `claimed_automatically` answers "was the
-current attempt, and so any task it created, automatic". In `propose_task_kandev`'s handler, after the phase 1 validation and insert
+current attempt, and so any task it created, automatic".
+
+**The transaction-aware claim.** Phase 2 as built has `Store.ClaimProposal` and
+`ClaimProposalRaw`, which execute through the store's `s.db`, so they cannot
+join a caller's transaction. Phase 3 adds, in the manner of `CompleteProposalTx`
+and `InsertProposalWith`, `Store.ClaimProposalTx(ctx, exec coordinatorExec, id,
+token, finalSpec, decidedBy, now, automaticAt *time.Time)` and the matching
+`ClaimProposalRawTx`. `ClaimProposal` and `ClaimProposalRaw` keep their
+signatures and become one-line calls of the `Tx` forms with `s.db` and a nil
+`automaticAt`, so every existing caller is unchanged and a manager's claim
+still writes `claimed_automatically = 0` and never touches
+`decided_automatically` or `automatic_at`. A non-nil `automaticAt` makes the
+same `UPDATE` also set `decided_automatically = 1`, `claimed_automatically = 1`
+and `automatic_at`. The conditional `WHERE id = ? AND status IN ('pending',
+'failed')` is unchanged and its `matched` result is returned as before.
+
+The approve service is split at the seam its manager path already has, with no
+change of behaviour for that path: `prepareApproval(ctx, workspaceID,
+proposal, edits) (ProposalSpec, error)` is `approvePending`'s
+`buildCandidateSpec` and `validateProposalSpecFor` and writes nothing;
+`finishClaim(ctx, workspaceID, coordinatorID, proposal, token, spec)` is
+`claimAndProceed`'s tail (publish `coordinator.updated`, log,
+`completeClaimedApproval`). `claimAndProceed` becomes `prepared spec ->
+ClaimProposal -> finishClaim`. The automatic path adds
+`Service.approveAutomatically(ctx, workspaceID, coordinatorID, proposal,
+raiser)`, which takes the claim through `ClaimProposalTx` inside step 3 below
+and runs `finishClaim` after that transaction commits.
+
+In `propose_task_kandev`'s handler, after the phase 1 validation and insert
 of the `pending` row:
 
-1. Read the `create_task` setting. Not `automatic` (or an error): return the
-   phase 1 result. This read is a cheap filter; step 2 decides.
-2. Open one transaction and take the coordinator's automatic lock in it:
-   `pg_advisory_xact_lock(hashtextextended('coordinator_automatic:' ||
-   coordinator_id, 0))` on PostgreSQL; on SQLite the store's single writer
-   serialises the transaction. The lock is held until the claim commits, so
-   steps 2 to 4's count, re-read and claim are one critical section across
-   processes. Inside it, re-read the `create_task` setting and its
-   `ChangedBy` through `ActionSettings.Setting`; when it is no longer
-   `automatic`, commit nothing and return the phase 1 result, because a
-   lower that committed before this read wins
-   (`AC-COORDINATOR-AUTOMATIC-004.1`). A lower that commits after it takes
-   effect for the next proposal; this one was decided under the setting it
-   read. Then count proposals with
-   `decided_automatically = 1 AND automatic_at >= now - 24h`, whatever their
-   status: an automatic approval that ended `failed` counts toward the 10,
-   because the limit bounds automatic attempts. At 10 or more,
-   return `{proposal_id, status: "pending", note: "automatic limit reached; a
-   manager will decide"}` (`AC-COORDINATOR-AUTOMATIC-003.2`).
-3. Resolve the raiser from the setting re-read in step 2: its `ChangedBy`
-   must be an active user who
-   holds `workspace.manage` on the coordinator's workspace, checked through
-   the same authorisation the approve route uses (with auth disabled, the
-   synthetic admin passes as it does on every route). When the user is
+1. Read the `create_task` setting and its `ChangedBy` through
+   `ActionSettings.Setting`. Not `automatic` (or an error): return the phase 1
+   result. This read is a cheap filter; step 3 decides.
+2. Resolve the raiser from that read: its `ChangedBy` must be an active user
+   who holds `workspace.manage` on the coordinator's workspace, checked
+   through the same authorisation the approve route uses (with auth disabled,
+   the synthetic admin passes as it does on every route). This runs before the
+   lock, because it reads outside the coordinator tables. When the user is
    deleted, disabled, or no longer a manager, or the check errors, the
    proposal stays `pending`, the tool returns `{proposal_id, status:
    "pending", note: "automatic approval unavailable; a manager will decide"}`,
-   and, except on a check error, the coordinator calls `LowerClass`
-   with the reason "raising manager no longer a manager". Nothing is claimed
-   and nothing counts toward the 10.
-4. Call the phase 1 approve service function (the one behind the approve
-   route, below its HTTP authorisation) with no edits, the setting's
-   `ChangedBy` as the deciding user and a flag that sets
-   `decided_automatically = 1`, `claimed_automatically = 1` and
-   `automatic_at` in the claim's `UPDATE`,
-   which runs inside step 2's transaction; the lock is released when it
-   commits, before the task create. Every phase 1
-   guarantee holds: the claim, the frozen spec, the pre-create eligible-step
-   check, the idempotent create by external id, and no agent start (D15).
-   The task is created under the raising manager's identity.
-5. Return `{proposal_id, status, task_id}` with the resulting status:
-   `approved`, or `failed` with the error, which leaves a normal failed card
-   for a manager (`AC-COORDINATOR-AUTOMATIC-003.3`).
+   and, except on a check error, the coordinator calls `LowerClass` with the
+   reason "raising manager no longer a manager". Nothing is claimed and
+   nothing counts toward the 10. Then run `prepareApproval` with no edits; an
+   error there leaves the proposal `pending`, is logged at warn and returns
+   the same unavailable note.
+3. Call `Store.withCoordinatorLock(ctx, coordinatorID, fn)`, the per-coordinator
+   lock `SaveSettings`, `LowerClass` and `InsertProposalWith` already take
+   (`BEGIN IMMEDIATE` on SQLite, `SELECT ... FOR UPDATE` on the coordinator row
+   on PostgreSQL), so a lower and this section exclude each other on both
+   dialects and no separate automatic lock exists. `fn` uses only its
+   `coordinatorExec` handle, as the helper's contract requires:
+   1. Re-read the `create_task` value from the locked coordinator row
+      (`lockedCoordinatorRow`) and its `ChangedBy` through the store's
+      `NewestClassChangeTx`. When the value is no longer `automatic`, or
+      `ChangedBy` differs from the raiser step 2 checked, write nothing and
+      return the phase 1 result, because a lower or a re-raise that committed
+      before the lock wins (`AC-COORDINATOR-AUTOMATIC-004.1`). A lower that
+      commits after the lock takes effect for the next proposal; this one was
+      decided under the setting it read.
+   2. Count proposals with `decided_automatically = 1 AND automatic_at >=
+      now - 24h` (`CountAutomaticDecidedTx`), whatever their status: an
+      automatic approval that ended `failed` counts toward the 10, because the
+      limit bounds automatic attempts. At 10 or more, write nothing and
+      return `{proposal_id, status: "pending", note: "automatic limit
+      reached; a manager will decide"}`
+      (`AC-COORDINATOR-AUTOMATIC-003.2`).
+   3. Claim with `ClaimProposalTx`, no edits, the raiser as the deciding user
+      and `automaticAt = now`.
+4. Outcomes of the section. Committed with `matched`: continue to step 5, with
+   the lock already released. `matched` false (a manager approved or rejected
+   the proposal between its insert and the lock): nothing was written, and the
+   tool returns `{proposal_id, status}` with the row's re-read status, counting
+   nothing. An error from any statement in `fn`, a failed commit, a cancelled
+   context or a panic rolls the whole section back through the helper's
+   deferred rollback: the proposal stays `pending`, nothing is counted,
+   nothing is claimed, the error is logged at error, and the tool returns the
+   unavailable note of step 2. A coordinator that no longer exists is
+   `ErrNotFound`, answered as phase 1 answers it.
+5. After the commit, run `finishClaim`: every phase 1 guarantee holds: the
+   frozen spec, the pre-create eligible-step check, the idempotent create by
+   external id, and no agent start (D15). The task is created under the
+   raising manager's identity, outside the transaction. Return
+   `{proposal_id, status, task_id}` with the resulting status: `approved`, or
+   `failed` with the error, which leaves a normal failed card for a manager
+   (`AC-COORDINATOR-AUTOMATIC-003.3`). A crash after the commit leaves the row
+   `approving` with `claimed_automatically = 1`, which stale-claim recovery
+   re-uses.
 
 The approve path writes the `approved` row, or the `failed` row of a failed
 attempt, with authorization `automatic` and actor the raising manager when the

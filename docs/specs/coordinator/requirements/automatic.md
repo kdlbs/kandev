@@ -116,7 +116,9 @@ bounded and recorded.
   reached.
 - **AC-COORDINATOR-AUTOMATIC-003.3:** When the automatic approval fails, the
   proposal shall be left `failed` exactly as a manager's failed approval is,
-  for a manager to approve, edit, reply to or reject.
+  for a manager to approve, edit or reject. A reply with a condition is not
+  available on a `failed` proposal
+  (`AC-COORDINATOR-INTEGRATION-006.1`).
 - **AC-COORDINATOR-AUTOMATIC-003.4:** Every automatic approval shall be a log
   row with the authorization `automatic` and the manager who raised the setting as its actor.
 

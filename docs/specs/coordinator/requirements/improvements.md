@@ -53,14 +53,18 @@ with the runs that show why.
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-IMPROVEMENTS-001.1:** While `features.coordinatorPhase3` is
-  on, a coordinator session shall have `propose_improvement_kandev`. When it
-  is called with a title of 1 to 60 characters after trimming, a rationale of
-  at most 10,000 characters, a replacement context that passes the
-  coordinator context validation, and valid evidence, the system shall store
-  one `pending` improvement proposal holding the current context beside the
-  replacement, emit `coordinator.updated`
-  and change nothing else.
+- **AC-COORDINATOR-IMPROVEMENTS-001.1:** A conversation opened while phase 3
+  is effective ([integration](integration.md#terminology)) shall have
+  `propose_improvement_kandev`; one opened earlier shall not until it is
+  reopened (`AC-COORDINATOR-INTEGRATION-003.3`). When the tool is called with
+  a title of 1 to 60 characters after trimming, a rationale of at most 10,000
+  characters, a replacement context that passes the coordinator context
+  validation, and valid evidence, the system shall store one `pending`
+  improvement proposal holding the current context beside the replacement,
+  emit `coordinator.updated` and change nothing else. When the tool is called
+  while phase 3 is not effective, including from a conversation opened while
+  it was, the system shall answer with the phase 1 unknown-action error, store
+  nothing and write no log row.
 - **AC-COORDINATOR-IMPROVEMENTS-001.2:** The system shall refuse the call,
   storing nothing and naming the field, when any field above is invalid, when
   the evidence has fewer than one or more than ten references, has no run,

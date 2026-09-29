@@ -70,7 +70,7 @@ repository query directly, not the flag-gated Inbox handler.
 
 - A question item (the `question or permission` group of
   [needs-you](needs-you.md#classification) with `pending_action ==
-  "clarification"`) shows **Answer here** to managers while phase 3 is on.
+  "clarification"`) shows **Answer here** to managers while phase 3 is effective.
   Readers and phase-3-off clients keep the phase 1 text and **Open task**.
 - **Answer here** fetches the relay read and renders
   `ClarificationPanelSection` with `pending`, the bundle `messages`,
@@ -94,7 +94,7 @@ repository query directly, not the flag-gated Inbox handler.
 
 `apps/web/app/coordinator/components/permission-answer.tsx`:
 
-- A permission item shows **Answer here** to managers while phase 3 is on.
+- A permission item shows **Answer here** to managers while phase 3 is effective.
 - It renders the permission message's title, action details and one button
   per option, and resolves through the same `permission.respond` WebSocket
   request `use-permission-handlers.ts` sends, with the message's `task_id`,
@@ -256,7 +256,7 @@ nothing, so Send again stores the reply once.
 ## Cards
 
 The **Reply with a condition** control is added to `ProposalCard` for
-`pending` proposals (not `failed`), for managers, while phase 3 is on: a
+`pending` proposals (not `failed`), for managers, while phase 3 is effective: a
 textarea (2,000 characters, counter), **Send reply** disabled until the
 trimmed text is non-empty, and **Cancel** returning focus to the control. On
 the chat card it opens in place, unlike Edit, because it has one field. A 409

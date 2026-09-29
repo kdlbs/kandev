@@ -66,10 +66,18 @@ confirming `create_task`.
 - `internal/coordinator/automatic.go`: the closed `raisableClasses`, the
   change hook (409 naming the first unmet condition; other classes are
   refused by `Validate` with 400 naming the class), `Eligibility`, the class review store and routes, the automatic
-  branch in `propose_task_kandev` with one transaction under
-  `pg_advisory_xact_lock(hashtextextended('coordinator_automatic:' || id, 0))`
-  (the SQLite single writer) holding the setting and raiser re-read, the
-  10-per-24h count on `automatic_at` whatever the outcome, and the claim;
+  branch in `propose_task_kandev`: the raiser check and
+  `prepareApproval` before the lock, then one `withCoordinatorLock` section
+  (the lock `SaveSettings` and `LowerClass` take, no separate automatic lock)
+  holding the tx-handle setting re-read, the 10-per-24h count on
+  `automatic_at` whatever the outcome, and the claim through the new
+  `Store.ClaimProposalTx` and `ClaimProposalRawTx` (`coordinatorExec`
+  parameter and `automaticAt`; `ClaimProposal` and `ClaimProposalRaw` become
+  calls of them with `s.db` and nil), `NewestClassChangeTx` and
+  `CountAutomaticDecidedTx`, the approve service split into `prepareApproval`,
+  `claimAndProceed` and `finishClaim`, and `Service.approveAutomatically`
+  running `finishClaim` after the commit
+  ([Automatic approval](../../specs/coordinator/system-design/automatic.md#automatic-approval));
   `decided_automatically`, `claimed_automatically` and `automatic_at` on the
   claim (`claimed_automatically` 0 on a manager's claim), the adapter's
   exclusion of log rows decided by the automatic path, the
@@ -150,7 +158,14 @@ Merge           Cannot be raised
 - Two processes proposing concurrently at 9 automatic approvals in 24 hours
   on PostgreSQL produce exactly one tenth automatic approval (`-race` and a
   two-connection PostgreSQL test); a lower committed between step 1's read
-  and the lock leaves the proposal `pending` and unclaimed.
+  and the lock leaves the proposal `pending` and unclaimed. The claim joins
+  the caller's transaction: a forced error after `ClaimProposalTx` inside the
+  section, a failed commit and a cancelled context each leave the proposal
+  `pending`, unstamped and uncounted and return the unavailable note; a
+  proposal a manager rejected before the lock (`matched` false) writes nothing
+  and returns its current status; `ClaimProposal`'s existing tests pass
+  unchanged and a manager's claim writes `claimed_automatically = 0` and never
+  touches `decided_automatically` or `automatic_at`.
 
 ## Verification
 

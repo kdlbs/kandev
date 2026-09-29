@@ -61,8 +61,10 @@ control on both proposal card surfaces.
   written in the reply's locked transaction, and its copy in six locales
   ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
   The unattended mark copy (`activityUnattended`) is added here with the
-  what-it-did text table. A `failed` card keeps Approve, Reject and Try again
-  and shows no **Reply with a condition**.
+  what-it-did text table. A `failed` card keeps its phase 2 controls (Approve,
+  Edit and Reject; an improvement card Approve and Reject) and shows no
+  **Reply with a condition**; there is no **Try again** on a proposal card
+  (`AC-COORDINATOR-INTEGRATION-006.1`).
 - Web: the control, returned and revised card states and **Send again** in
   the phase 1 `ProposalCard` ([Cards](../../specs/coordinator/system-design/relay.md#cards)).
 - Copy in six locales.

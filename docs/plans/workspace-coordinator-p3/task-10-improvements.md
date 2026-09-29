@@ -102,9 +102,12 @@ See [plan UI-07](plan.md#ascii-ui-previews).
   runs it again with still one pending change
   (`AC-COORDINATOR-INTEGRATION-006.4`, `006.5`).
 - A conversation opened before phase 3 was on has no
-  `propose_improvement_kandev` in its bound list, and a call from it is
-  refused as not in the profile; one opened after has it
-  (`AC-COORDINATOR-INTEGRATION-003.3`).
+  `propose_improvement_kandev` in its bound list, and while phase 3 is
+  effective a call from it is refused as not in the profile and logged; one
+  opened while phase 3 was effective has it. A call to the tool while phase 3
+  is not effective, from a conversation whose list holds it, is the phase 1
+  unknown-action error with nothing stored and no log row
+  (`AC-COORDINATOR-INTEGRATION-003.3`, `AC-COORDINATOR-IMPROVEMENTS-001.1`).
 - The card shows the evidence (expired runs as such), keeps Approve disabled
   until the diff is shown, has no Edit, and a raised `create_task` setting never
   approves an improvement.

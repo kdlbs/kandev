@@ -57,11 +57,11 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-RELAY-001.1:** While `features.coordinatorPhase3` is on, a
-  question item whose task has an answerable clarification bundle shall offer
+- **AC-COORDINATOR-RELAY-001.1:** While phase 3 is effective
+  ([integration](integration.md#terminology)), a question item whose task has an answerable clarification bundle shall offer
   **Answer here** to managers, in place of the phase 1 text "Answer it on the
   task."; **Open task** stays. This replaces
-  `AC-COORDINATOR-NEEDS-YOU-002.5` for questions while the flag is on.
+  `AC-COORDINATOR-NEEDS-YOU-002.5` for questions while phase 3 is effective.
 - **AC-COORDINATOR-RELAY-001.2:** **Answer here** shall expand the item to show
   the bundle's questions, options and shared context through the same
   clarification answer component the task chat and the Inbox render.
@@ -89,10 +89,11 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-RELAY-002.1:** While `features.coordinatorPhase3` is on, a
+- **AC-COORDINATOR-RELAY-002.1:** While phase 3 is effective, a
   permission item whose task's primary session has a pending permission
   request shall offer **Answer here** to managers; it replaces
-  `AC-COORDINATOR-NEEDS-YOU-002.5` for permissions while the flag is on.
+  `AC-COORDINATOR-NEEDS-YOU-002.5` for permissions while phase 3 is
+  effective.
 - **AC-COORDINATOR-RELAY-002.2:** **Answer here** shall show the request's
   title, action details and one button per option, and choosing one shall
   resolve the request through the same permission response path the task chat
@@ -117,7 +118,7 @@ Mockup:
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-RELAY-003.1:** While `features.coordinatorPhase3` is on, a
+- **AC-COORDINATOR-RELAY-003.1:** While phase 3 is effective, a
   `pending` proposal card shall offer **Reply with a condition** to
   managers on both surfaces. Submitting 1 to 2,000 characters after trimming
   shall set the proposal `returned` with the reply text, the deciding user and
@@ -136,8 +137,10 @@ Mockup:
   the proposal. However deliveries overlap, including a slow send outliving
   its claim, the reply shall reach the conversation at most once.
 - **AC-COORDINATOR-RELAY-003.4:** `propose_task_kandev` shall accept an
-  optional `in_reply_to` naming a `returned` proposal of the same coordinator;
-  any other value shall be refused naming the field. A proposal with
+  optional `in_reply_to` naming a `returned` `create_task` proposal of the same
+  coordinator; any other value, including a `returned` proposal of another
+  kind, shall be refused naming the field. `propose_improvement_kandev` has no
+  `in_reply_to`. A proposal with
   `in_reply_to` shall show "Revised after your reply" with the reply text.
 - **AC-COORDINATOR-RELAY-003.5:** A coordinator principal shall be refused the
   reply route, as for approve and reject.
