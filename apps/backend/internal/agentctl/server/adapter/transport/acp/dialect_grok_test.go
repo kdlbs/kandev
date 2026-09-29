@@ -175,7 +175,7 @@ func TestSetGrokModel_UsesSessionSetModel(t *testing.T) {
 	a := grokAdapterWithModels(t, models, config)
 	conn := &fakeGrokSetModelConn{}
 
-	if err := a.setModelWithConn(context.Background(), conn, "sess-grok", "grok-4.5", models, config); err != nil {
+	if err := a.setModelWithConn(context.Background(), conn, "sess-grok", "grok-4.5"); err != nil {
 		t.Fatalf("setModel: %v", err)
 	}
 	if len(conn.reqs) != 1 {
@@ -245,7 +245,7 @@ func TestSetGrokModel_IncompatibleHarnessAsksForNewSession(t *testing.T) {
 	}
 
 	err := a.setModelWithConn(
-		context.Background(), conn, "sess-grok", "grok-composer-2.5-fast", models, config,
+		context.Background(), conn, "sess-grok", "grok-composer-2.5-fast",
 	)
 	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
 		t.Fatalf("setModel error = %v, want actionable new-session instruction", err)
@@ -283,8 +283,6 @@ func TestSetModelWithConn_GrokDriverAsksForNewSession(t *testing.T) {
 		conn,
 		"sess-grok",
 		"grok-composer-2.5-fast",
-		models,
-		config,
 	)
 	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
 		t.Fatalf("SetModel error = %v, want actionable new-session instruction", err)
@@ -316,7 +314,7 @@ func TestSetModelWithConn_SerializesConcurrentGrokChanges(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() {
 		firstDone <- adapter.setModelWithConn(
-			context.Background(), conn, "sess-grok", "grok-first", models, config,
+			context.Background(), conn, "sess-grok", "grok-first",
 		)
 	}()
 	if got := <-conn.started; got != "grok-first" {
@@ -326,7 +324,7 @@ func TestSetModelWithConn_SerializesConcurrentGrokChanges(t *testing.T) {
 	secondDone := make(chan error, 1)
 	go func() {
 		secondDone <- adapter.setModelWithConn(
-			context.Background(), conn, "sess-grok", "grok-latest", models, config,
+			context.Background(), conn, "sess-grok", "grok-latest",
 		)
 	}()
 	select {
@@ -363,7 +361,7 @@ func TestSetModelWithConn_StaleGrokCompletionDoesNotMutateReplacementSession(t *
 	done := make(chan error, 1)
 	go func() {
 		done <- adapter.setModelWithConn(
-			context.Background(), conn, "sess-grok", "grok-stale", models, oldConfig,
+			context.Background(), conn, "sess-grok", "grok-stale",
 		)
 	}()
 	<-conn.started

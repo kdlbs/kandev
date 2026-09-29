@@ -12,6 +12,7 @@ import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
 import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
+import { registerBackgroundWorkHandlers } from "@/lib/ws/handlers/background-work";
 import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
 
 import { createMessagesHandlerRegistration } from "@/lib/ws/handlers/messages";
@@ -75,6 +76,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionPendingActionHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
+    ...registerBackgroundWorkHandlers(store),
     ...registerUsersHandlers(store),
     ...registerSessionHostnamesHandlers(store),
     ...registerTerminalsHandlers(store),

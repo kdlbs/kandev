@@ -239,6 +239,7 @@ func createTestServiceWithSessionsRepo(
 		Reviews:           repo,
 		ResourceCleanups:  repo,
 		Usage:             repo,
+		BackgroundWork:    repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
 	// Reach comes from the unit tree, so the service tests wire the real one

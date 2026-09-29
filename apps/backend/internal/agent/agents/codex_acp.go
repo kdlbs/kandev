@@ -42,9 +42,9 @@ type CodexACP struct {
 }
 
 // codexPassthroughPermSettings maps passthrough-only toggles to @openai/codex CLI
-// flags. Not returned from PermissionSettings(): ACP auto-approve uses agentctl
-// approval_policy. The legacy --full-auto flag was removed; auto_approve uses
-// --ask-for-approval never.
+// flags. Not returned from PermissionSettings(): ACP auto-approve is handled by
+// agentctl's permission flow, not by a subprocess flag. The legacy --full-auto
+// flag was removed; auto_approve uses --ask-for-approval never.
 var codexPassthroughPermSettings = map[string]PermissionSetting{
 	PermissionKeyAutoApprove: {
 		Supported:    true,

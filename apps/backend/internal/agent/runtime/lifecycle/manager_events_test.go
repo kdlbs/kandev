@@ -149,6 +149,22 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 	t.Fatal("no complete stream event published")
 }
 
+func TestUsageObservationUsesItsPromptGenerationTurnID(t *testing.T) {
+	execution := &AgentExecution{}
+	execution.setPromptTurnID("turn-a")
+	generationA := beginExecutionPrompt(execution)
+	execution.setPromptTurnID("turn-b")
+	beginExecutionPrompt(execution)
+
+	manager := &Manager{}
+	event := manager.handleAgentEventState(execution, agentctl.AgentEvent{
+		Type: streams.EventTypeUsageObservation, PromptGeneration: generationA,
+	})
+	if event.TurnID != "turn-a" {
+		t.Fatalf("usage turn ID = %q, want turn-a for prompt generation %d", event.TurnID, generationA)
+	}
+}
+
 // TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity pins that the
 // stream event's AgentProfileID is the acting agent's own office identity
 // (execution.officeProfileID()), not the concrete AgentProfileID the CLI

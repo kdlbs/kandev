@@ -218,7 +218,11 @@
         "apps/backend/internal/clarification/resolver.go",
         "apps/web/components/task/dockview-session-tabs.ts",
         "apps/web/components/threads/thread-task-actions.tsx",
-        "apps/web/components/task/task-management-surface.tsx"
+        "apps/web/components/task/task-management-surface.tsx",
+        "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter.go",
+        "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/activity.go",
+        "apps/backend/internal/orchestrator/conversation_fork.go",
+        "apps/web/components/task/chat/messages/message-actions.tsx"
       ],
       "tests": [
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
@@ -228,7 +232,11 @@
         "apps/backend/internal/mcp/server/external_integration_test.go",
         "apps/web/components/task/dockview-session-tabs.test.ts",
         "apps/web/e2e/tests/task/threads-task-actions.spec.ts",
-        "apps/web/e2e/tests/task/mobile-threads-task-actions.spec.ts"
+        "apps/web/e2e/tests/task/mobile-threads-task-actions.spec.ts",
+        "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter_test.go",
+        "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/fork_test.go",
+        "apps/backend/internal/orchestrator/conversation_fork_test.go",
+        "apps/web/components/task/chat/messages/message-actions.test.tsx"
       ],
       "mcpTools": [
         "answer_question_kandev",
@@ -362,7 +370,13 @@
         "apps/backend/internal/mcp/handlers/settings_handlers.go",
         "apps/backend/internal/mcp/server/settings_tools.go",
         "apps/web/app/settings/agents/page.tsx",
-        "apps/web/hooks/domains/settings/use-dynamic-models.ts"
+        "apps/web/hooks/domains/settings/use-dynamic-models.ts",
+        "apps/backend/internal/agent/agents/codex_app_server.go",
+        "apps/backend/internal/agent/registry/registry.go",
+        "apps/backend/internal/runtimeflags/registry.go",
+        "apps/web/components/settings/agents/agent-profiles-section.tsx",
+        "apps/web/components/task/chat/conversation-usage-display.tsx",
+        "apps/backend/internal/task/handlers/task_usage_handlers.go"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -371,7 +385,13 @@
         "apps/backend/internal/mcp/server/settings_tools_test.go",
         "apps/web/components/settings/agent-profile-page.test.tsx",
         "apps/web/lib/settings-discovery/coverage-inventory.test.ts",
-        "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
+        "apps/web/hooks/domains/settings/use-dynamic-models.test.ts",
+        "apps/backend/internal/agent/agents/codex_app_server_test.go",
+        "apps/backend/internal/agent/registry/registry_test.go",
+        "apps/backend/internal/runtimeflags/registry_test.go",
+        "apps/web/components/settings/agents/agent-profiles-section.test.tsx",
+        "apps/web/components/task/chat/conversation-usage-display.test.tsx",
+        "apps/web/lib/api/domains/conversation-usage-api.test.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",
@@ -644,9 +664,14 @@
     },
     {
       "id": "team-access",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "experimental",
-      "docs": ["team-access"],
+      "docs": [
+        "team-access"
+      ],
       "sources": [
         "apps/backend/internal/authz/scopes.go",
         "apps/backend/internal/authz/roles.go",
@@ -669,13 +694,19 @@
         "apps/web/lib/ws/handlers/tasks-assignee.test.ts",
         "apps/web/components/settings/workspaces/workspace-placement-card.test.tsx"
       ],
-      "settingsRoutes": ["/settings/units"]
+      "settingsRoutes": [
+        "/settings/units"
+      ]
     },
     {
       "id": "organizations",
-      "audiences": ["operator"],
+      "audiences": [
+        "operator"
+      ],
       "stability": "experimental",
-      "docs": ["organizations"],
+      "docs": [
+        "organizations"
+      ],
       "sources": [
         "apps/backend/internal/org/service.go",
         "apps/backend/internal/org/store.go",
@@ -686,7 +717,9 @@
         "apps/backend/internal/authz/resolve_test.go",
         "apps/backend/internal/task/service/service_team_access_test.go"
       ],
-      "settingsRoutes": ["/settings/system/organizations"]
+      "settingsRoutes": [
+        "/settings/system/organizations"
+      ]
     },
     {
       "id": "system-health-and-maintenance",
@@ -811,9 +844,15 @@
     },
     {
       "id": "agent-authored-canvases",
-      "audiences": ["user", "operator", "contributor"],
+      "audiences": [
+        "user",
+        "operator",
+        "contributor"
+      ],
       "stability": "experimental",
-      "docs": ["canvases"],
+      "docs": [
+        "canvases"
+      ],
       "sources": [
         "apps/backend/internal/canvas/service.go",
         "apps/backend/internal/canvas/repository.go",

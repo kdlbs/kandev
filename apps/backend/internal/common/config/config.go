@@ -566,6 +566,15 @@ type FeaturesConfig struct {
 	// watches, standing orders, goals, activity log and the new proposal
 	// kinds). It only takes effect together with Coordinator.
 	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
+
+	// CodexAppServer enables the separate native Codex app-server agent. It is
+	// off in every shipped profile and requires a restart because its protocol
+	// adapter and profile catalogue are composed at startup.
+	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// AgentBackgroundWork enables normalized background work tracking,
+	// interactive controls, and subagent observation.
+	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
 }
 
 // LoggingConfig holds logging configuration.
