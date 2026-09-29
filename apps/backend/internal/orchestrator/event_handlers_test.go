@@ -304,6 +304,7 @@ type mockAgentManager struct {
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
+	initialPromptAdmissionCallback  func() error
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -395,10 +396,11 @@ type mockAgentManager struct {
 	cancelAgentForPromptFunc  func(context.Context, string, string, uint64, uint64) error
 	cancelAgentForPromptCalls atomic.Int32
 
-	currentPromptGeneration     atomic.Uint64
-	currentPromptActivityEpoch  atomic.Uint64
-	currentPromptExecutionID    string
-	currentPromptLastActivityAt time.Time
+	currentPromptGeneration            atomic.Uint64
+	currentPromptActivityEpoch         atomic.Uint64
+	currentPromptExecutionID           string
+	currentPromptLastActivityAt        time.Time
+	advancePromptGenerationOnAdmission bool
 
 	// getPromptActivityForSessionFunc, when set, overrides
 	// GetPromptActivityForSession's default (report the current*
@@ -416,6 +418,7 @@ type mockAgentManager struct {
 	setSessionModelCalls              []sessionModelCall
 	setSessionModelSupported          bool
 	setSessionModelErr                error
+	setSessionModelFunc               func(context.Context, string, string) error
 	setSessionConfigCalls             []sessionConfigCall
 	setSessionConfigSupported         bool
 	setSessionConfigErr               error
@@ -475,7 +478,16 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 }
 
 func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks("", nil, onDispatched, onFailure)
+}
+
+func (m *mockAgentManager) RegisterInitialPromptAdmissionCallbacks(
+	_ string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	m.mu.Lock()
+	m.initialPromptAdmissionCallback = beforeAdmission
 	m.initialPromptDispatchCallback = onDispatched
 	m.initialPromptFailureCallback = onFailure
 	m.mu.Unlock()
@@ -540,6 +552,25 @@ func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, 
 		onDispatched()
 	}
 	return result, err
+}
+
+func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	if m.advancePromptGenerationOnAdmission {
+		m.currentPromptGeneration.Add(1)
+	}
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 }
 
 func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
@@ -736,7 +767,10 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, executionI
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
 	return nil
 }
-func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, sessionID, modelID string) error {
+func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error {
+	if m.setSessionModelFunc != nil {
+		return m.setSessionModelFunc(ctx, sessionID, modelID)
+	}
 	if !m.setSessionModelSupported {
 		return fmt.Errorf("not supported")
 	}

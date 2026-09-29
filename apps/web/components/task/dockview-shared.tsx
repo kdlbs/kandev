@@ -46,6 +46,7 @@ import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
+import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -129,6 +130,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
+  "background-work": PortalSlot,
   // Generic component every plugin-contributed task panel shares (Approach
   // A1) — panel identity lives in params.pluginId/params.panelKey, resolved
   // by PluginTaskPanel. See lib/state/layout-manager/plugin-panels.ts.
@@ -449,6 +451,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
       presentation="desktop"
     />
   ),
+  "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

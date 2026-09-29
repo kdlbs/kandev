@@ -1,3 +1,4 @@
+import type { WorkloadRunObservation, WorkloadOutputChunk } from "@/lib/types/background-work";
 import type {
   WorkspaceRestorationAttempt,
   WorkspaceRestorationState,
@@ -469,6 +470,12 @@ export type LaunchWarningState = {
   bySessionId: Record<string, LaunchWarningEntry>;
 };
 
+export type BackgroundWorkState = {
+  workloadsBySessionId: Record<string, WorkloadRunObservation[]>;
+  activeWorkIdBySessionId: Record<string, string>;
+  loadingBySessionId: Record<string, boolean>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -486,6 +493,7 @@ export type SessionRuntimeSliceState = {
   sessionModels: SessionModelsState;
   sessionMcpStatus: SessionMCPStatusState;
   promptUsage: PromptUsageState;
+  usageInvalidation: { bySessionId: Record<string, number> };
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
@@ -494,6 +502,7 @@ export type SessionRuntimeSliceState = {
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
   workspaceRestoration: WorkspaceRestorationState;
+  backgroundWork: BackgroundWorkState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -563,6 +572,7 @@ export type SessionRuntimeSliceActions = {
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions — env-scoped (sessions in the same task share one shell list)
@@ -590,6 +600,12 @@ export type SessionRuntimeSliceActions = {
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  setBackgroundWorkloads: (sessionId: string, workloads: WorkloadRunObservation[]) => void;
+  updateBackgroundWorkload: (sessionId: string, workload: WorkloadRunObservation) => void;
+  appendBackgroundWorkloadOutput: (sessionId: string, chunk: WorkloadOutputChunk) => void;
+  setActiveBackgroundWorkload: (sessionId: string, workId: string) => void;
+  clearBackgroundWork: (sessionId: string) => void;
+  setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

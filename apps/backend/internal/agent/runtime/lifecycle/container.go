@@ -119,11 +119,13 @@ func buildContainerCreateInstanceRequest(
 	stripEnv []string,
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
-		ID:            config.InstanceID,
-		WorkspacePath: "/workspace",
-		AgentCommand:  "",
-		AgentType:     agentType,
-		Env:           selectedCheckoutAgentEnv(config.Credentials, config.Metadata),
+		ID:                    config.InstanceID,
+		WorkspacePath:         "/workspace",
+		AgentCommand:          "",
+		AgentType:             agentType,
+		Protocol:              protocolForAgent(config.AgentConfig),
+		CodexAppServerEnabled: codexAppServerEnabledForAgent(config.AgentConfig),
+		Env:                   selectedCheckoutAgentEnv(config.Credentials, config.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,

@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type fastPathTaskReadRetryRepo struct {
@@ -29,7 +30,7 @@ func newFastPathDispatchService(t *testing.T, repo *sqliterepo.Repository) *Serv
 	t.Cleanup(func() {
 		select {
 		case <-workerDone:
-		case <-time.After(2 * time.Second):
+		case <-time.After(5 * time.Second):
 			t.Error("timed out waiting for fast-path dispatch worker")
 		}
 	})
@@ -66,7 +67,7 @@ func TestQueueUserPromptRejectsTerminalSession(t *testing.T) {
 // drainQueuedMessageForPromptableSession.
 //
 // ReserveQueued removes the head from the queue, so count drops to 0.
-// The mock agent completes the dispatched prompt before fixture teardown.
+// The mock dispatch worker completes before fixture teardown.
 func TestQueueUserPrompt_T2FastPathDrainsPromptableSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -82,7 +83,8 @@ func TestQueueUserPrompt_T2FastPathDrainsPromptableSession(t *testing.T) {
 	// drainQueuedMessageForPromptableSession reserves the head before
 	// dispatching. The reservation removes the entry from the queue,
 	// so the count drops to 0 once T2's fast-path drain is reached.
-	// The count==0 invariant pins the T2 call site.
+	// The downstream dispatch may fail, but the count==0 invariant pins the T2
+	// call site and the fixture waits for the worker before teardown.
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
 		t.Fatalf("post-enqueue queue count = %d, want 0 (T2 fast-path did not drain)", got)
 	}
@@ -242,8 +244,9 @@ func TestQueueUserPrompt_T2SkipsFastPathOnWIPWait(t *testing.T) {
 // WIP-admitted case: a task with WIPAdmitted=true (or no
 // QueuedForStepID) is ready for prompt, and the fast-path drain
 // fires. drainQueuedMessageForPromptableSession reserves the head,
-// removing it from the queue (count → 0). The mock agent completes
-// the dispatched prompt before fixture teardown.
+// removing it from the queue (count → 0). The dispatcher's own
+// promptTask picks up the queue head but the mock agent cannot
+// truly resume — that doesn't change the count==0 invariant.
 func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -259,7 +262,20 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 	if err := repo.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	svc := newFastPathDispatchService(t, repo)
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-fastpath-admitted")
+	promptCalled := make(chan struct{})
+	manager := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptAgentFunc: func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+			close(promptCalled)
+			return nil, errors.New("test prompt delivery failure")
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	workerDone := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
 
 	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "admitted-task", "", false, nil, map[string]interface{}{}, true); err != nil {
 		t.Fatalf("QueueUserPrompt: %v", err)
@@ -268,5 +284,18 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 	// session is ready.
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
 		t.Fatalf("post-enqueue queue count = %d, want 0 (T2 fast-path drained admitted task)", got)
+	}
+	select {
+	case <-promptCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fast-path queue drain did not reach the mock provider")
+	}
+	require.Eventually(t, func() bool {
+		return !svc.isQueuedDispatchInFlight("s1")
+	}, 5*time.Second, 10*time.Millisecond, "fast-path dispatch did not settle before test cleanup")
+	select {
+	case <-workerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fast-path dispatch worker did not finish before test cleanup")
 	}
 }

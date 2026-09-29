@@ -490,7 +490,7 @@ func TestInitializeAndPromptWithLayers_AppliesOnlyWinningModeBeforePrompt(t *tes
 		WorkspacePath: "/workspace", agentctl: client, promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
 	promptDispatched := make(chan struct{}, 1)
-	execution.setInitialPromptDispatchCallbacks(func() {
+	execution.setInitialPromptDispatchCallbacks(nil, func() {
 		promptDispatched <- struct{}{}
 		execution.promptDoneCh <- PromptCompletionSignal{StopReason: "test-complete"}
 	}, nil)
@@ -577,7 +577,7 @@ func TestInitializeAndPromptWithLayers_ReappliesModeAfterResumeBeforePrompt(t *t
 		promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
 	promptDispatched := make(chan struct{}, 1)
-	execution.setInitialPromptDispatchCallbacks(func() {
+	execution.setInitialPromptDispatchCallbacks(nil, func() {
 		promptDispatched <- struct{}{}
 		execution.promptDoneCh <- PromptCompletionSignal{StopReason: "test-complete"}
 	}, nil)
@@ -1461,8 +1461,12 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 		agentctl:      client,
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
-	dispatched := make(chan struct{}, 1)
-	execution.setInitialPromptDispatchCallbacks(func() { dispatched <- struct{}{} }, nil)
+	callbacks := make(chan string, 2)
+	execution.setInitialPromptDispatchCallbacks(
+		func() error { callbacks <- "admission"; return nil },
+		func() { callbacks <- "dispatched" },
+		nil,
+	)
 
 	agentConfig := &testAgent{
 		id:      "test-agent",
@@ -1487,11 +1491,16 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
 
-	// Wait for the prompt to be sent asynchronously
-	select {
-	case <-dispatched:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for initial prompt dispatch callback")
+	// The final ownership check runs after prompt preparation and before acceptance.
+	for _, want := range []string{"admission", "dispatched"} {
+		select {
+		case got := <-callbacks:
+			if got != want {
+				t.Fatalf("initial prompt callback = %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for initial prompt %s callback", want)
+		}
 	}
 
 	actions := mock.getActionLog()

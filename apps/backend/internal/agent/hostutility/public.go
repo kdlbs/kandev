@@ -78,7 +78,8 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		Mode:                   profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
+			Protocol: cfg.Protocol,
+			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
@@ -355,6 +356,7 @@ func (m *Manager) ExecutePromptWithMCP(
 		Model:   resolved,
 		Mode:    mode,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
+			Protocol:        cfg.Protocol,
 			Command:         command.Args(),
 			ModelFlag:       cfg.ModelFlag.Args(),
 			WorkDir:         inst.workDir,

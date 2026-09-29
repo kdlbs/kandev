@@ -2784,9 +2784,9 @@ func (h *Handlers) publishStepCompletionEvent(
 //   - WAITING/COMPLETED: message is recorded and the agent is prompted (auto-resuming if needed)
 //   - CREATED          : message is recorded then the agent is started with it as initial prompt
 //
-// Strict validation: missing sender_task_id, self-message, and unknown sender
-// task all reject with an MCP error rather than silently delivering an
-// unattributed message.
+// Strict validation: missing sender_task_id, same-session targets, and unknown
+// sender tasks reject with an MCP error. Same-task messages are allowed only
+// when session_id names a distinct sibling session.
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID            string `json:"task_id"`
@@ -4757,10 +4757,11 @@ func (h *Handlers) publishQueueStatusEvent(
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                   `json:"session_id"`
-		TaskID    string                   `json:"task_id"`
-		Questions []clarification.Question `json:"questions"`
-		Context   string                   `json:"context"`
+		SessionID         string                   `json:"session_id"`
+		TaskID            string                   `json:"task_id"`
+		Questions         []clarification.Question `json:"questions"`
+		Context           string                   `json:"context"`
+		AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4771,7 +4772,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// Single source of truth — same validator the HTTP handler uses, so
 	// duplicate IDs / bad option counts / empty prompts can't slip through
 	// either path.
-	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
+	validateQuestions := clarification.NormalizeAndValidateQuestions
+	if req.AllowFreeTextOnly {
+		validateQuestions = clarification.NormalizeAndValidateQuestionsAllowFreeTextOnly
+	}
+	if errMsg := validateQuestions(req.Questions); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 

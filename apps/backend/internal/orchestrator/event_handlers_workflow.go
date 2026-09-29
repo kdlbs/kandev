@@ -400,7 +400,7 @@ func (s *Service) processOnTurnStartAdmissionWithGuard(
 	ctx context.Context,
 	taskID, sessionID string,
 	strict bool,
-	lock *sync.Mutex,
+	lock *cancelInFlightMutex,
 	waitForCancellation bool,
 ) (ProcessOnTurnStartResult, error) {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
@@ -941,6 +941,11 @@ func (s *Service) loadQueuePromotedTaskAndTargetStep(ctx context.Context, taskID
 		// A manual move has not finished its lifecycle yet.
 		// Keep the promotion token durable; source-exit completion will trigger
 		// queue reconciliation and retry destination entry.
+		return nil, nil, false
+	}
+	if s.workflowStepGetter == nil {
+		s.logger.Warn("task.queue_promoted: workflow step lookup unavailable",
+			zap.String("task_id", task.ID), zap.String("step_id", task.WorkflowStepID))
 		return nil, nil, false
 	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
@@ -7033,7 +7038,7 @@ func (s *Service) quiesceActiveResetTurn(
 		turnID = ""
 	}
 	operation, _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
-		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
+		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relockWithContext,
 		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
 	)
 	if err != nil {

@@ -792,6 +792,46 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}, nil
 }
 
+// RegisterInitialPromptAdmissionCallbacks forwards the restart prompt's final
+// ownership check and acceptance callbacks to the lifecycle execution.
+func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
+	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
+		executionID, beforeAdmission, onDispatched, onFailure,
+	)
+}
+
+func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(
+	executionID string,
+	onDispatched, onFailure func(),
+) error {
+	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
+func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	agentInstanceID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithAdmissionCallback(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
 // Compile-time guard for the steer capability. The executor selects the steer
 // path by asserting the agent manager to its unexported
 // steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
@@ -800,6 +840,11 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 // error, not a runtime regression.
 var _ interface {
 	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
+var _ interface {
+	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 } = (*lifecycleAdapter)(nil)
 
 // SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
@@ -849,6 +894,12 @@ func (a *lifecycleAdapter) SetSessionConfigOptionBySessionID(ctx context.Context
 // SetSessionModeBySessionID applies a session permission mode via ACP session/set_mode.
 func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
 	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)
+}
+
+// ForkSessionBySessionID asks an agent runtime with native fork support to
+// fork one of its completed provider turns.
+func (a *lifecycleAdapter) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	return a.mgr.ForkSessionBySessionID(ctx, sessionID, providerTurnID)
 }
 
 // RespondToPermissionBySessionID sends a response to a permission request for a session
@@ -1577,6 +1628,19 @@ func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context
 // in the bundle is deleted so we don't leave a half-rendered group dangling in
 // the chat. Best-effort: if cleanup itself fails the caller still receives the
 // original error and the orphan messages stay (logged at warn-level).
+func clarificationQuestionData(question clarification.Question, options []interface{}) map[string]interface{} {
+	data := map[string]interface{}{
+		"id":      question.ID,
+		"title":   question.Title,
+		"prompt":  question.Prompt,
+		"options": options,
+	}
+	if question.AllowCustomText != nil {
+		data["allow_custom_text"] = *question.AllowCustomText
+	}
+	return data
+}
+
 func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
@@ -1590,12 +1654,7 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 			}
 		}
 
-		questionData := map[string]interface{}{
-			"id":      question.ID,
-			"title":   question.Title,
-			"prompt":  question.Prompt,
-			"options": options,
-		}
+		questionData := clarificationQuestionData(question, options)
 
 		metadata := map[string]interface{}{
 			"pending_id":     pendingID,
