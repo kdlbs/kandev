@@ -10,9 +10,13 @@ import (
 
 // bindCoordinatorToolPolicy carries the conversation task's stored tool
 // binding into the launch profile. A task with no binding keeps the phase-1
-// tool set; a binding that is present but unreadable, or that names another
-// task, fails the launch rather than widening or narrowing the surface.
-func bindCoordinatorToolPolicy(profile *mcpprofile.Context, task *models.Task) error {
+// tool set, as does every task while phase 2 is off; a binding that is
+// present but unreadable, or that names another task, fails the launch
+// rather than widening or narrowing the surface.
+func bindCoordinatorToolPolicy(profile *mcpprofile.Context, task *models.Task, phase2 bool) error {
+	if !phase2 {
+		return nil
+	}
 	value, present := task.Metadata[mcpprofile.CoordinatorToolPolicyMetadataKey]
 	if !present {
 		return nil

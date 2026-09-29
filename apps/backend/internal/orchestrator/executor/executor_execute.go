@@ -158,7 +158,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 			return mcpprofile.Context{}, cErr
 		}
 		profile := mcpprofile.NewCoordinator()
-		if err := bindCoordinatorToolPolicy(&profile, task); err != nil {
+		if err := bindCoordinatorToolPolicy(&profile, task, e.coordinators.Phase2Enabled()); err != nil {
 			return mcpprofile.Context{}, err
 		}
 		return e.withCanvasCapability(profile), nil
