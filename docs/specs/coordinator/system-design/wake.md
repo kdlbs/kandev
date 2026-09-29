@@ -77,7 +77,18 @@ exactly one conversation, and the rules below never create another.
   coordinator_id=? AND status='pending'`. An open unattended turn is not
   touched.
 - Every coordinator GET and list response carries both fields
-  (`cost_ceiling_usd` as a decimal string with two places, or `null`).
+  (`cost_ceiling_usd` as a decimal string with two places, or `null`) while
+  phase 3 is effective, and carries neither key otherwise, the way phase 2's
+  fields are omitted while its flag is off. The activity row's
+  `unattended_turn_id` follows the same rule: present (string or `null`) only
+  while phase 3 is effective. The web computes "effective" as the AND of the
+  three `useFeature` reads (`coordinator`, `coordinatorPhase2`,
+  `coordinatorPhase3`) in one hook, and the typed client marks the new fields
+  optional.
+
+The PATCH field rules (check order, presence, idempotency, post-commit
+`Kick` and `autonomy_changed`) are in
+[integration](integration.md#autonomy-patch-and-deletion).
 
 ## Store
 
@@ -132,6 +143,9 @@ Retention: the startup pass deletes wake rows with status `delivered` or
 delete both tables' rows for the coordinator in the same transaction that
 deletes its proposals.
 
+Deletion of every phase 3 table, and the retention pass, are in
+[integration](integration.md#autonomy-patch-and-deletion).
+
 ## Wake lock
 
 Three writes read a coordinator's state and then write on it: recording a
@@ -143,6 +157,36 @@ coordinator id, the same shape `office/repository/sqlite/participants.go`
 uses; on SQLite the single writer connection already serialises write
 transactions. The lock is released at commit or rollback, so the three writes
 see each other's committed results and never interleave.
+
+`Store.WithWakeLock(ctx, coordinatorID, fn func(tx coordinatorExec) error)
+error` (task 01) is the one helper for the three writes. Contract:
+
+- It opens its own write transaction, the way `withCoordinatorLock` does
+  (a `BEGIN IMMEDIATE` connection on SQLite, `BeginTxx` on PostgreSQL), and
+  hands `fn` the transaction handle; `fn` never opens another and never calls
+  `WithWakeLock` again (a nested call on PostgreSQL would wait on a lock its
+  own caller holds).
+- Order inside the transaction, on both dialects: first the advisory lock
+  (PostgreSQL only; a no-op on SQLite), then `lockCoordinatorRow` with
+  `FOR UPDATE`, then `fn`. The wake lock is always taken before the
+  coordinator row lock, never after, and a holder that needs the row reads it
+  only after the lock. The autonomy-off PATCH cannot use the helper's own
+  transaction, because phase 2's PATCH already owns one; it takes the same
+  advisory lock as the first statement of that transaction, before
+  `lockedCoordinatorRow`, by calling the shared `takeWakeLock(ctx, tx,
+  coordinatorID)` step the helper is built on.
+- A coordinator id with no row returns `ErrNotFound` before `fn` runs, so no
+  wake, turn or supersede is written for a deleted coordinator.
+- `fn` returning an error, or a cancelled `ctx`, rolls the transaction back
+  and returns that error; a commit failure is returned
+  as `commit wake lock: %w` and the writes are not applied.
+- Concurrency guarantee: two callers for one coordinator run `fn`
+  one after the other on both dialects, and the second sees the first's
+  committed writes. Two callers for two different coordinators are not
+  serialised by the lock on PostgreSQL (the advisory keys differ). On SQLite
+  the single writer connection serialises every write transaction, so
+  different coordinators also run one after the other there and the design
+  makes no independence claim for SQLite.
 
 ## Own tasks
 

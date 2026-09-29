@@ -58,7 +58,9 @@ type DecisionLog interface {
 
 Phase 2 as built stores less than these interfaces name, so the adapters map
 what exists and this design adds the rest, each as a small additive change
-owned by task 09:
+owned by task 09, except that the `coordinator_class_changes` table and its
+index are created by task 01 in `store_phase2_schema.go`
+([integration](integration.md#phase-2-touch-points)) and task 09 writes to it:
 
 | Interface need | Phase 2 as built | Phase 3 provides |
 | --- | --- | --- |
