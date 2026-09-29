@@ -117,6 +117,43 @@ describe("RightSidePanel layout", () => {
     expect(screen.getByTestId(MAIN_ID)).toBe(mainBefore);
     expect((mainBefore.parentElement as HTMLElement).style.width).toBe("");
   });
+
+  it("keeps the panel content mounted across inline, floating and full screen relayouts", () => {
+    const { rerender, onClose, onWidthChange } = renderPanel({
+      mainSizing: "fluid",
+      mobileFullScreen: true,
+    });
+    const contentBefore = screen.getByTestId(CONTENT_ID);
+    const relayout = () =>
+      rerender(
+        <RightSidePanel
+          open
+          onClose={onClose}
+          widthPx={500}
+          onWidthChange={onWidthChange}
+          backdropLabel="Close panel"
+          panelTestId={PANEL_ID}
+          mainSizing="fluid"
+          mobileFullScreen
+          main={<button data-testid="main-content">main</button>}
+        >
+          <button data-testid="panel-content">panel</button>
+        </RightSidePanel>,
+      );
+    layoutState.shouldFloat = true;
+    relayout();
+    expect(screen.getByTestId(CONTENT_ID)).toBe(contentBefore);
+    expect(screen.getByTestId(PANEL_ID).className).toContain("fixed");
+    responsiveState.isMobile = true;
+    relayout();
+    expect(screen.getByTestId(CONTENT_ID)).toBe(contentBefore);
+    expect(screen.queryByTestId(BACKDROP_ID)).toBeNull();
+    layoutState.shouldFloat = false;
+    responsiveState.isMobile = false;
+    relayout();
+    expect(screen.getByTestId(CONTENT_ID)).toBe(contentBefore);
+    expect(screen.getByTestId(PANEL_ID).className).toContain("border-l");
+  });
 });
 
 describe("RightSidePanel width clamp", () => {

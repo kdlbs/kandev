@@ -99,78 +99,68 @@ function escapeHandler(closeOnEscape: boolean | undefined, onClose: () => void) 
   };
 }
 
-function PanelBody({
-  onResizeMouseDown,
-  panelTestId,
-  children,
-}: Pick<PanelFrameProps, "onResizeMouseDown" | "panelTestId" | "children">) {
-  return (
-    <>
-      <ResizeHandle
-        onMouseDown={onResizeMouseDown}
-        testId={suffixed(panelTestId, "resize-handle")}
-      />
-      <div className="flex-1 min-w-0 overflow-hidden">{children}</div>
-    </>
-  );
-}
+type PanelMode = "inline" | "floating" | "fullscreen";
 
-function FloatingPanel(props: PanelFrameProps) {
-  const { onClose, backdropLabel, closeOnEscape, panelTestId, widthPx } = props;
+const PANEL_MODE_CLASS: Record<PanelMode, string> = {
+  inline: "flex-shrink-0 border-l bg-background flex",
+  floating:
+    "fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl",
+  fullscreen:
+    "fixed inset-x-0 top-0 bottom-[var(--app-status-bar-height)] z-40 flex min-w-0 bg-background",
+};
+
+// One element for every mode: switching layout only changes its class and style, so the
+// panel content keeps its identity (focus, scroll, composer) across relayouts.
+function PanelFrame({
+  mode,
+  onClose,
+  backdropLabel,
+  closeOnEscape,
+  panelTestId,
+  widthPx,
+  onResizeMouseDown,
+  children,
+}: PanelFrameProps & { mode: PanelMode }) {
+  const style =
+    mode === "fullscreen"
+      ? undefined
+      : {
+          width: `${widthPx}px`,
+          ...(mode === "floating" ? { maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw` } : {}),
+        };
   return (
     <>
-      <div
-        data-testid={suffixed(panelTestId, "backdrop")}
-        className="fixed inset-0 bg-black/30 z-30"
-        onClick={onClose}
-        aria-label={backdropLabel}
-      />
+      {mode === "floating" && (
+        <div
+          data-testid={suffixed(panelTestId, "backdrop")}
+          className="fixed inset-0 bg-black/30 z-30"
+          onClick={onClose}
+          aria-label={backdropLabel}
+        />
+      )}
       <div
         data-testid={panelTestId}
-        className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"
-        style={{ width: `${widthPx}px`, maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw` }}
+        className={PANEL_MODE_CLASS[mode]}
+        style={style}
         onKeyDown={escapeHandler(closeOnEscape, onClose)}
       >
-        <PanelBody {...props} />
+        {mode !== "fullscreen" && (
+          <ResizeHandle
+            onMouseDown={onResizeMouseDown}
+            testId={suffixed(panelTestId, "resize-handle")}
+          />
+        )}
+        <div className="flex-1 min-w-0 overflow-hidden">{children}</div>
       </div>
     </>
   );
 }
 
-function InlinePanel(props: PanelFrameProps) {
-  const { onClose, closeOnEscape, panelTestId, widthPx } = props;
-  return (
-    <div
-      data-testid={panelTestId}
-      className="flex-shrink-0 border-l bg-background flex"
-      style={{ width: `${widthPx}px` }}
-      onKeyDown={escapeHandler(closeOnEscape, onClose)}
-    >
-      <PanelBody {...props} />
-    </div>
-  );
-}
-
-function FullScreenPanel({
-  onClose,
-  closeOnEscape,
-  panelTestId,
-  children,
-}: Pick<PanelFrameProps, "onClose" | "closeOnEscape" | "panelTestId" | "children">) {
-  return (
-    <div
-      data-testid={panelTestId}
-      className="fixed inset-x-0 top-0 bottom-[var(--app-status-bar-height)] z-40 flex min-w-0 bg-background"
-      onKeyDown={escapeHandler(closeOnEscape, onClose)}
-    >
-      <div className="flex-1 min-w-0 overflow-hidden">{children}</div>
-    </div>
-  );
-}
-
 function renderPanel(frame: PanelFrameProps, fullScreen: boolean, shouldFloat: boolean) {
-  if (fullScreen) return <FullScreenPanel {...frame} />;
-  return shouldFloat ? <FloatingPanel {...frame} /> : <InlinePanel {...frame} />;
+  let mode: PanelMode = "inline";
+  if (fullScreen) mode = "fullscreen";
+  else if (shouldFloat) mode = "floating";
+  return <PanelFrame mode={mode} {...frame} />;
 }
 
 export function RightSidePanel({
