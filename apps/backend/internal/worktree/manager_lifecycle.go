@@ -317,10 +317,20 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		defer func() { _ = handle.Close() }()
 	}
 	if !valid {
-		if err := m.classifyUnavailableReusableWorktree(ctx, req, wt); err != nil {
-			return nil, err
+		classifyErr := m.classifyUnavailableReusableWorktree(ctx, req, wt)
+		if classifyErr != nil {
+			return nil, classifyErr
 		}
-		return nil, ErrReuseWorktreeUnavailable
+		// A directory that is entirely gone cannot be held by another
+		// session with uncommitted changes, so the attach-only no-git-ops
+		// guarantee is not at risk. If the recorded path still exists the
+		// checkout may be live — keep failing closed there. Also require a
+		// real git repository so recreate never runs against a placeholder
+		// path with nothing to fetch the branch from.
+		if _, statErr := os.Lstat(wt.Path); statErr == nil || !m.isGitRepo(req.RepositoryPath) {
+			return nil, ErrReuseWorktreeUnavailable
+		}
+		return m.recreate(ctx, wt, req)
 	}
 	return wt, nil
 }

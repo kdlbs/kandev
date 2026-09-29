@@ -70,10 +70,18 @@ func TestCreate_ReuseRequiredReportsUnrecoverableBranch(t *testing.T) {
 	}
 }
 
-func TestCreate_ReuseRequiredDoesNotReportBranchLossWhenTrackingRefWasPruned(t *testing.T) {
+// TestCreate_ReuseRequiredRecreatesWhenBranchExistsOnlyOnOrigin covers the
+// incident where a task's checkout directory was deleted out-of-band while
+// its branch survives only on the authoritative origin (local branch and
+// remote-tracking ref both pruned). Attach-only reuse must recreate the
+// checkout from origin instead of failing session recovery with
+// ErrReuseWorktreeUnavailable.
+func TestCreate_ReuseRequiredRecreatesWhenBranchExistsOnlyOnOrigin(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
+	wantSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/remotes/origin/feature/pr-branch"))
 	runGit(t, repoPath, "update-ref", "-d", "refs/remotes/origin/feature/pr-branch")
 	runGit(t, repoPath, "branch", "-D", "feature/pr-branch")
+	worktreePath := filepath.Join(t.TempDir(), "missing-worktree")
 
 	store := newMockStore()
 	store.worktrees["canonical-worktree"] = &Worktree{
@@ -81,7 +89,7 @@ func TestCreate_ReuseRequiredDoesNotReportBranchLossWhenTrackingRefWasPruned(t *
 		TaskID:            "task-1",
 		TaskEnvironmentID: "environment-1",
 		RepositoryID:      "repository-1",
-		Path:              filepath.Join(t.TempDir(), "missing-worktree"),
+		Path:              worktreePath,
 		Branch:            "feature/pr-branch",
 		Status:            StatusActive,
 	}
@@ -90,7 +98,7 @@ func TestCreate_ReuseRequiredDoesNotReportBranchLossWhenTrackingRefWasPruned(t *
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	_, err = mgr.Create(context.Background(), CreateRequest{
+	got, err := mgr.Create(context.Background(), CreateRequest{
 		TaskID:            "task-1",
 		TaskEnvironmentID: "environment-1",
 		RepositoryID:      "repository-1",
@@ -99,11 +107,17 @@ func TestCreate_ReuseRequiredDoesNotReportBranchLossWhenTrackingRefWasPruned(t *
 		WorktreeID:        "canonical-worktree",
 		ReuseRequired:     true,
 	})
-	if !errors.Is(err, ErrReuseWorktreeUnavailable) {
-		t.Fatalf("Create() error = %v, want ErrReuseWorktreeUnavailable", err)
+	if err != nil {
+		t.Fatalf("Create() error = %v, want recreated worktree when branch exists on origin", err)
 	}
-	if errors.Is(err, ErrBranchUnrecoverable) {
-		t.Fatalf("Create() misclassified a branch that still exists on origin as unrecoverable: %v", err)
+	if got.Path != worktreePath {
+		t.Fatalf("Create() path = %q, want %q", got.Path, worktreePath)
+	}
+	if !mgr.IsValid(worktreePath) {
+		t.Fatalf("Create() did not recreate a valid worktree at %q", worktreePath)
+	}
+	if gotSHA := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD")); gotSHA != wantSHA {
+		t.Fatalf("recreated HEAD = %q, want origin tip %q", gotSHA, wantSHA)
 	}
 }
 
