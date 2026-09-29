@@ -28,17 +28,17 @@ function pickEligibleStepId(seedData: SeedData): string {
   return eligible.id;
 }
 
-async function openCopilot(page: Page): Promise<Locator> {
+async function openCopilot(page: Page): Promise<{ popover: Locator; sessionId: string }> {
   const coordinatorRead = waitForHttp(page, "GET", COORDINATOR_READ);
   const conversationOpened = waitForHttp(page, "POST", CONVERSATION_OPENED);
   const launcher = page.getByTestId("coordinator-copilot-launcher");
   await expect(launcher).toBeVisible({ timeout: 10_000 });
   await launcher.click();
   await coordinatorRead;
-  await conversationOpened;
+  const opened = (await (await conversationOpened).json()) as { session_id: string };
   const popover = page.getByTestId("coordinator-copilot-popover");
   await expect(popover).toBeVisible();
-  return popover;
+  return { popover, sessionId: opened.session_id };
 }
 
 async function proposeTask(popover: Locator, seedData: SeedData, title: string): Promise<string> {
@@ -78,7 +78,7 @@ test.describe("Coordinator reply with a condition", () => {
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
-    const popover = await openCopilot(testPage);
+    const { popover, sessionId } = await openCopilot(testPage);
     const proposalId = await proposeTask(popover, seedData, "Reply to me");
 
     await testPage.getByTestId("coordinator-copilot-popover-backdrop").click();
@@ -114,6 +114,19 @@ test.describe("Coordinator reply with a condition", () => {
         { message: "the reply should be recorded as returned and delivered" },
       )
       .toEqual({ status: "returned", delivered: true });
+
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listSessionMessages(sessionId)).messages.filter(
+            (message) => message.author_type === "user" && message.content.includes(CONDITION),
+          ).length,
+        {
+          timeout: 30_000,
+          message: "the condition should reach the coordinator conversation once",
+        },
+      )
+      .toBe(1);
 
     await testPage.getByTestId("coordinator-copilot-launcher").click();
     await expect(popover).toBeVisible();
