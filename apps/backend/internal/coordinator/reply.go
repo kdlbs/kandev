@@ -155,10 +155,12 @@ func (s *Service) ReplyToProposal(ctx context.Context, workspaceID, coordinatorI
 	returned.Status, returned.ReplyText, returned.UpdatedAt = ProposalStatusReturned, &text, now
 	returned.DecidedBy = &decidedBy
 
-	_, delivered := s.deliverReply(ctx, &returned)
-	replyTotal.Add(fmt.Sprint(delivered), 1)
-	if !delivered {
-		s.logger.Warn("reply not delivered", zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID))
+	claimed, delivered := s.deliverReply(ctx, &returned)
+	if claimed {
+		replyTotal.Add(fmt.Sprint(delivered), 1)
+		if !delivered {
+			s.logger.Warn("reply not delivered", zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID))
+		}
 	}
 	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil {
@@ -287,10 +289,10 @@ func (s *Service) sendReply(ctx context.Context, p *Proposal) error {
 	if err != nil {
 		return fmt.Errorf("queue reply: %w", err)
 	}
-	sessionID := conv.SessionID
+	taskID, sessionID := conv.TaskID, conv.SessionID
 	if message != nil && message.TaskSessionID != "" {
-		sessionID = message.TaskSessionID
+		taskID, sessionID = message.TaskID, message.TaskSessionID
 	}
-	s.replyNotifier.NotifyQueuedUserPrompt(ctx, conv.TaskID, sessionID)
+	s.replyNotifier.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 	return nil
 }

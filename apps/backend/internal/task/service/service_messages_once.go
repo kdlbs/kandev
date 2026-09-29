@@ -16,6 +16,16 @@ type queuedMessageOnceWriter interface {
 	CreateMessageAndQueueOnce(context.Context, *models.Message, *messagequeue.QueuedMessage, int) (bool, error)
 }
 
+func validateQueuedOnceInput(id string, req *CreateMessageRequest, queued *messagequeue.QueuedMessage) error {
+	if id == "" || req == nil || queued == nil {
+		return errors.New("message id, request and queue entry are required")
+	}
+	if req.AuthorType != string(models.MessageAuthorUser) {
+		return errors.New("queued messages are authored by a user")
+	}
+	return nil
+}
+
 // CreateQueuedMessageOnce stores a user message and its queue entry, both
 // under id, at most once. created is true when this call inserted them; when a
 // message with id already exists nothing is inserted and that stored message
@@ -29,8 +39,8 @@ func (s *Service) CreateQueuedMessageOnce(
 	queued *messagequeue.QueuedMessage,
 	maxPerSession int,
 ) (*models.Message, bool, error) {
-	if id == "" || req == nil || queued == nil {
-		return nil, false, errors.New("message id, request and queue entry are required")
+	if err := validateQueuedOnceInput(id, req, queued); err != nil {
+		return nil, false, err
 	}
 	writer, ok := s.messages.(queuedMessageOnceWriter)
 	if !ok {

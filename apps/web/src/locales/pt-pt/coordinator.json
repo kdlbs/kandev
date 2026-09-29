@@ -453,6 +453,7 @@
   "mergeAlwaysHuman": "Integrar um pull request é sempre uma decisão humana.",
   "answerHere": "Responder aqui",
   "proposalStatusReturned": "Devolvida com a sua condição: {{text}}",
+  "proposalStatusReturnedNoText": "Devolvida com a sua condição",
   "replyAction": "Responder com uma condição",
   "replyLabel": "A sua condição",
   "replyPlaceholder": "Diga ao coordenador o que alterar",

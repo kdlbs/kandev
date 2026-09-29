@@ -145,6 +145,7 @@ export function ReplySection({
   }
 
   if (proposal.status === "returned") {
+    if (!phase3) return null;
     return (
       <ReturnedActions proposal={proposal} reply={reply} onRedeliver={() => void redeliver()} />
     );

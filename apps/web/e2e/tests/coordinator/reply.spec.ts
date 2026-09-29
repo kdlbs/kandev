@@ -134,5 +134,10 @@ test.describe("Coordinator reply with a condition", () => {
     await expect(
       chatCard.locator("p", { hasText: `Returned with your condition: ${CONDITION}` }),
     ).toBeVisible();
+
+    const conditionMessages = (await apiClient.listSessionMessages(sessionId)).messages.filter(
+      (message) => message.author_type === "user" && message.content.includes(CONDITION),
+    );
+    expect(conditionMessages).toHaveLength(1);
   });
 });

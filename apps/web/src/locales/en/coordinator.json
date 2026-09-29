@@ -453,6 +453,7 @@
   "mergeAlwaysHuman": "Merging a pull request is always human.",
   "answerHere": "Answer here",
   "proposalStatusReturned": "Returned with your condition: {{text}}",
+  "proposalStatusReturnedNoText": "Returned with your condition",
   "replyAction": "Reply with a condition",
   "replyLabel": "Your condition",
   "replyPlaceholder": "Tell the coordinator what to change",

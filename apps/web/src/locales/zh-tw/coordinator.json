@@ -453,6 +453,7 @@
   "mergeAlwaysHuman": "合併提取要求始終由人來決定。",
   "answerHere": "在此回答",
   "proposalStatusReturned": "已按你的條件退回：{{text}}",
+  "proposalStatusReturnedNoText": "已按你的條件退回",
   "replyAction": "附條件回覆",
   "replyLabel": "你的條件",
   "replyPlaceholder": "告訴協調員需要修改什麼",

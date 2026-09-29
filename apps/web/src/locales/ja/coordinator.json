@@ -453,6 +453,7 @@
   "mergeAlwaysHuman": "プルリクエストのマージは常に人が行います。",
   "answerHere": "ここで回答",
   "proposalStatusReturned": "条件付きで差し戻しました: {{text}}",
+  "proposalStatusReturnedNoText": "条件付きで差し戻しました",
   "replyAction": "条件付きで返信",
   "replyLabel": "条件",
   "replyPlaceholder": "コーディネーターに変更してほしい点を伝えてください",

@@ -37,6 +37,7 @@ const RETURNED_LINE = "Returned with your condition: narrower";
 const TOAST_ID = "toast-message";
 const CONDITION_LABEL = "Your condition";
 const SEND_REPLY = "Send reply";
+const SEND_AGAIN = "Send again";
 
 function proposal(overrides: Partial<Proposal> = {}): Proposal {
   return {
@@ -202,7 +203,7 @@ describe("ProposalCard returned states", () => {
     renderCard(returned());
     expect(screen.getAllByText(RETURNED_LINE).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Reply saved, not delivered").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Send again" }));
+    fireEvent.click(screen.getByRole("button", { name: SEND_AGAIN }));
     expect(redeliver).toHaveBeenCalledOnce();
     await waitFor(() =>
       expect(screen.getByTestId(TOAST_ID).textContent).toBe("Could not reach Kandev. Try again."),
@@ -220,14 +221,22 @@ describe("ProposalCard returned states", () => {
 
   it("offers no Send again once delivered", () => {
     renderCard(returned({ reply_delivered_at: "2026-09-27T00:01:00Z" }));
-    expect(screen.queryByRole("button", { name: "Send again" })).toBeNull();
+    expect(screen.queryByRole("button", { name: SEND_AGAIN })).toBeNull();
+    expect(screen.queryByText("Reply saved, not delivered")).toBeNull();
+  });
+
+  it("shows a settled line without text or Send again when phase 3 is off", () => {
+    phase3.effective = false;
+    renderCard(returned({ reply_text: undefined, reply_delivered_at: undefined }));
+    expect(screen.getAllByText("Returned with your condition").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: SEND_AGAIN })).toBeNull();
     expect(screen.queryByText("Reply saved, not delivered")).toBeNull();
   });
 
   it("shows the returned line to a non-manager without controls", () => {
     renderCard(returned(), { canManage: false });
     expect(screen.getAllByText(RETURNED_LINE).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Send again" })).toBeNull();
+    expect(screen.queryByRole("button", { name: SEND_AGAIN })).toBeNull();
   });
 });
 

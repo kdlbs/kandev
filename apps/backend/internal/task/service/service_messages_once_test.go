@@ -58,3 +58,14 @@ func TestServiceCreateQueuedMessageOnce(t *testing.T) {
 		t.Fatalf("queue metadata = %#v", entries[0].Metadata)
 	}
 }
+
+func TestServiceCreateQueuedMessageOnceRefusesNonUserAuthor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	sessionID, _ := seedServicePlanComment(t, ctx, repo, "once-agent")
+	req := &CreateMessageRequest{TaskSessionID: sessionID, TaskID: "task-123", Content: "x", AuthorType: "agent", AuthorID: "someone"}
+	queued := &messagequeue.QueuedMessage{QueuedBy: messagequeue.QueuedByUser}
+	if _, created, err := svc.CreateQueuedMessageOnce(ctx, "coordinator-reply:agent", req, queued, 10); err == nil || created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+}

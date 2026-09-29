@@ -71,7 +71,9 @@ export function proposalStatusLine(
         ? t("coordinator:proposalStatusRejectedWithReason", { reason: proposal.reject_reason })
         : t("coordinator:proposalStatusRejected");
     case "returned":
-      return t("coordinator:proposalStatusReturned", { text: proposal.reply_text ?? "" });
+      return proposal.reply_text
+        ? t("coordinator:proposalStatusReturned", { text: proposal.reply_text })
+        : t("coordinator:proposalStatusReturnedNoText");
     default:
       return proposal.status;
   }
