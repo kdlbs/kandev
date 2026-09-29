@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import { openTaskSession, waitForAgentMessage } from "../../helpers/session";
 import {
+  readIdleSuspensionSnapshot,
   readIdleSuspensionState,
   readSessionContentMessageCount,
   readSessionMessageCount,
@@ -65,12 +66,12 @@ test.describe("mobile: workspace ACP idle suspension", () => {
         "agent",
       );
       await expect
-        .poll(() => readIdleSuspensionState(databasePath, task.session_id!), {
+        .poll(() => JSON.stringify(readIdleSuspensionSnapshot(databasePath, task.session_id!)), {
           timeout: 110_000,
           intervals: [500, 1_000],
           message: "workspace policy suspends a settled mock ACP session on mobile",
         })
-        .toBe("suspended");
+        .toContain('"idleSuspensionState":"suspended"');
 
       await apiClient.addUserMessage(task.id, task.session_id, "/e2e:simple-message");
       await expect

@@ -81,9 +81,6 @@ func newIdleParkingFixture(t *testing.T, enabled bool, timeout int, provider str
 		t.Fatalf("age runtime settlement: %v", err)
 	}
 	agent := &idleParkingTestAgent{mockAgentManager: &mockAgentManager{isAgentRunning: true}}
-	agent.probeBackgroundWorkloadsFunc = func(context.Context, string) (client.ProbeResult, error) {
-		return client.ProbeResultSettled, nil
-	}
 	agent.currentPromptExecutionID = running.AgentExecutionID
 	agent.currentPromptLastActivityAt = old
 	agent.currentPromptGeneration.Store(4)
@@ -156,9 +153,7 @@ func TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning(t *testing.T) {
 	})
 	t.Run("known background workload", func(t *testing.T) {
 		svc, agent, _ := newIdleParkingFixture(t, true, 1, "opencode")
-		agent.probeBackgroundWorkloadsFunc = func(context.Context, string) (client.ProbeResult, error) {
-			return client.ProbeResultLive, nil
-		}
+		svc.registerBackgroundTask("session-idle-parking", "background-work")
 		svc.suspendWorkspaceIdleSessionsOnce(context.Background())
 		if got := len(agent.suspensionCalls()); got != 0 {
 			t.Fatalf("suspension calls = %d, want 0 for known active work", got)
@@ -166,27 +161,30 @@ func TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning(t *testing.T) {
 	})
 }
 
-func TestIdleParkingSkipsInconclusiveBackgroundProbe(t *testing.T) {
+func TestIdleParkingDoesNotDependOnProcessDescendantProbe(t *testing.T) {
 	tests := []struct {
 		name   string
 		result client.ProbeResult
 		err    error
-		want   int
 	}{
 		{name: "live", result: client.ProbeResultLive},
 		{name: "unknown", result: client.ProbeResultUnknown},
-		{name: "error", result: client.ProbeResultSettled, err: errors.New("probe failed")},
-		{name: "settled", result: client.ProbeResultSettled, want: 1},
+		{name: "probe error", result: client.ProbeResultUnknown, err: errors.New("probe failed")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, agent, _ := newIdleParkingFixture(t, true, 1, "claude-acp")
+			probeCalls := 0
 			agent.probeBackgroundWorkloadsFunc = func(context.Context, string) (client.ProbeResult, error) {
+				probeCalls++
 				return tt.result, tt.err
 			}
 			svc.suspendWorkspaceIdleSessionsOnce(context.Background())
-			if got := len(agent.suspensionCalls()); got != tt.want {
-				t.Fatalf("suspension calls = %d, want %d for probe result %q (err=%v)", got, tt.want, tt.result, tt.err)
+			if probeCalls != 0 {
+				t.Fatalf("process-descendant probe calls = %d, want 0", probeCalls)
+			}
+			if got := len(agent.suspensionCalls()); got != 1 {
+				t.Fatalf("suspension calls = %d, want 1 when process probe is %q (err=%v)", got, tt.result, tt.err)
 			}
 		})
 	}

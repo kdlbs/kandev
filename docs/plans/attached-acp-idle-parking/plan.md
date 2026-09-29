@@ -145,6 +145,8 @@ Issue #4006 remains assigned to `carlosflorencio`.
 
 PR fixup closed a startup-status/focus overlap by making focus join the pending startup recovery for the same request generation. A deferred frontend regression proves the overlap produces one status request and one `session.launch`; the fix satisfies the existing concurrent-resume design rule, so no durable contract changed. The workspace policy card and session-resumption suites passed together (40 tests), along with changed-file ESLint, web typecheck, documentation catalog validation, specification lint, and whitespace checks. No new mobile E2E was needed because this is shared lifecycle state with no change to layout, touch, navigation, or scrolling; existing mobile idle-suspension coverage remains applicable.
 
+The current-head mobile E2E then exposed an unintended gate: workspace eligibility required an OS process-descendant probe to return `settled`, contrary to AC-EXECUTORS-IDLE-PARKING-001.2 and the system design. Removed that prerequisite and retained Kandev's tracked background-work registry as the known-work guard. The new regression proves the idle policy does not call the process probe even when it would report live, unknown, or error; a separate case proves tracked background work still protects the session. The mobile E2E now includes the persisted executor/session/workspace snapshot in its suspension wait and passes through message wake and touch-composer delivery. Focused Go, race, build, and mobile E2E results are recorded in Task 02.
+
 ## Risks
 
 - ACP does not expose every provider-internal activity. The opt-in policy uses Kandev-observed state and protects known work.

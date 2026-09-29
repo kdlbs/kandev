@@ -121,7 +121,6 @@ const (
 	idleParkingSkipOwnershipProtected   idleParkingSkipReason = "ownership_protected"
 	idleParkingSkipSessionState         idleParkingSkipReason = "session_state"
 	idleParkingSkipKnownWork            idleParkingSkipReason = "known_work"
-	idleParkingSkipProbeInconclusive    idleParkingSkipReason = "background_probe_inconclusive"
 	idleParkingSkipRestoreUnavailable   idleParkingSkipReason = "restore_unavailable"
 	idleParkingSkipActivityUnavailable  idleParkingSkipReason = "activity_unavailable"
 	idleParkingSkipStaleActivity        idleParkingSkipReason = "stale_activity"
@@ -135,7 +134,6 @@ var idleParkingSkipReasonOrder = [...]idleParkingSkipReason{
 	idleParkingSkipOwnershipProtected,
 	idleParkingSkipSessionState,
 	idleParkingSkipKnownWork,
-	idleParkingSkipProbeInconclusive,
 	idleParkingSkipRestoreUnavailable,
 	idleParkingSkipActivityUnavailable,
 	idleParkingSkipStaleActivity,
@@ -467,9 +465,6 @@ func (s *Service) workspaceIdleCandidate(
 	if s.sessionHasKnownIdleWork(ctx, current.SessionID) {
 		return workspaceIdleCandidate{}, idleParkingSkipKnownWork, false
 	}
-	if !s.backgroundWorkSettled(ctx, current.SessionID) {
-		return workspaceIdleCandidate{}, idleParkingSkipProbeInconclusive, false
-	}
 	executionID, generation, activityEpoch, lastActivityAt, reason, ok := s.workspaceIdleActivity(ctx, current, session, workspace, now)
 	if !ok {
 		return workspaceIdleCandidate{}, reason, false
@@ -537,17 +532,6 @@ func (s *Service) workspaceIdleSession(ctx context.Context, row *models.Executor
 	return session, "", true
 }
 
-func (s *Service) backgroundWorkSettled(ctx context.Context, sessionID string) bool {
-	prober, ok := s.agentManager.(interface {
-		ProbeBackgroundWorkloads(context.Context, string) (agentruntime.BackgroundWorkloadProbeResult, error)
-	})
-	if !ok {
-		return false
-	}
-	result, err := prober.ProbeBackgroundWorkloads(ctx, sessionID)
-	return err == nil && result == agentruntime.BackgroundWorkloadProbeResultSettled
-}
-
 func (s *Service) workspaceIdleActivity(
 	ctx context.Context,
 	row *models.ExecutorRunning,
@@ -604,7 +588,7 @@ func buildWorkspaceIdleCandidate(
 
 func (s *Service) sessionHasKnownIdleWork(ctx context.Context, sessionID string) bool {
 	if s == nil || s.agentManager == nil || sessionID == "" || s.sessionHasActiveTurn(ctx, sessionID) ||
-		(s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID)) {
+		(s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID)) || s.hasKnownBackgroundWork(sessionID) {
 		return true
 	}
 	clarifications, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
@@ -617,6 +601,15 @@ func (s *Service) sessionHasKnownIdleWork(ctx context.Context, sessionID string)
 	}
 	hasPending, err := s.messageQueue.HasPendingForSession(ctx, sessionID)
 	return err != nil || hasPending
+}
+
+func (s *Service) hasKnownBackgroundWork(sessionID string) bool {
+	activity := s.lockTurnActivity(sessionID, false)
+	if activity == nil {
+		return false
+	}
+	defer activity.mu.Unlock()
+	return len(activity.background) > 0
 }
 
 func idleParkingTimeout(minutes int) time.Duration {

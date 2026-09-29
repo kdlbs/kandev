@@ -99,4 +99,6 @@ A provider-specific live smoke is supplementary evidence, not a substitute for d
 
 The Chromium flow saved workspace policy, observed an idle ACP runtime stop, resumed the same session on explicit focus without a prompt, and observed a second suspension after a fresh idle interval. The mobile flow sent a user message while the runtime was parked, observed recovery and exactly-once user/agent content delivery, then verified a touch-composer message was also delivered once.
 
+The mobile suspension wait includes the persisted executor, session, and workspace snapshot for actionable failures. It passed after the workspace policy stopped depending on the OS process-descendant probe; Kandev-tracked background work remains protected.
+
 The public workspace settings guide now documents the opt-in policy and defaults. `node scripts/validate-public-docs.mjs`, `python3 scripts/list-docs.py validate`, and `python3 scripts/lint-spec-files.py --all` passed. No macOS-specific provider smoke was required by the clarified requirements.

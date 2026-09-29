@@ -153,3 +153,5 @@ Post-fixup validation passed:
 (cd . && python3 scripts/list-docs.py validate) # 322 decisions and 1222 specifications
 (cd . && python3 scripts/lint-spec-files.py --all)
 ```
+
+The mobile PR E2E exposed an unintended dependency on the OS process-descendant probe: its inconclusive result prevented an otherwise settled ACP session from parking. Removed that probe from workspace policy eligibility, as required by AC-EXECUTORS-IDLE-PARKING-001.2 and the system design. Kandev-tracked background-work registrations remain a positive known-work guard. `TestIdleParkingDoesNotDependOnProcessDescendantProbe` verifies that live, unknown, and failed probe outcomes are not consulted, while `TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning` verifies that tracked work blocks suspension. The focused backend tests passed normally and under `-race`; the mobile E2E passed after the fix.
