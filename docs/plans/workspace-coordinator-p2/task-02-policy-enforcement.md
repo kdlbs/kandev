@@ -71,9 +71,10 @@ refused log rows, workflow-deletion handling and the approve re-check.
   Watches filter per tool, `RecordRefusal` with reason codes and ids taken
   from the principal, the unchanged refusal text, and no settings-shaped
   action on the surface (`002.2`, `002.5`, `003.3`).
-- Workflow-deleted subscriber, the post-save reconcile step and the startup
-  pass cleanup of watch rows for absent workflows (`003.5` backend half; the
-  Configure notice and the Needs you notice are task 06's).
+- The effective watch set (stored ids naming an existing workflow, hidden
+  included; settings DTOs list only effective ids) and the best-effort
+  workflow-deleted subscriber (`003.5` backend half; the Configure notice and
+  the Needs you notice are task 06's). No reconcile or startup pass.
 - Approve re-check 409 `policy_denied` in the phase-1 approve route, on new
   claims only and only with the flag on (`002.6`; the card copy is task 09's;
   task 04 adds the kind-specific cases).
@@ -105,7 +106,7 @@ refused log rows, workflow-deletion handling and the approve re-check.
 
 Write the interleaving table first, before code: it is the design's
 [Interleavings](../../specs/coordinator/system-design/permissions.md#interleavings)
-table, rows 1 to 10, one test per row, each asserting the stated result
+table, rows 1 to 9, 10a and 10b, one test per row, each asserting the stated result
 (including that row 2 leaves a pending proposal whose approve is 409
 `policy_denied`, and that row 5 executes). Commit it failing, then the code.
 
@@ -132,8 +133,11 @@ by a coordinator principal asserts one `not_in_profile` row with class
 `unknown`; a binding-invalid call writes its row with the principal's
 coordinator and workspace ids; a failed policy read refuses and writes no
 row; an invalid payload keeps the 400 and writes no row; unwatched reads and propose targets assert
-no row. A Playwright spec with the mock agent sets Message to Denied, opens
-a conversation and asserts `propose_message_kandev` is not registered for
+no row. Store tests assert a stored id whose workflow was deleted (hidden
+workflows still count) is omitted from the GET and PUT DTOs, from an
+all-deleted `selected` set (the "watches no board" state), and that a PUT
+dropping it succeeds. A Playwright spec with the mock agent sets Create a task to Denied, opens
+a conversation and asserts `propose_task_kandev` is not registered for
 the session, the mock's call to it creates no proposal, and no refused row
 is written (the call never reaches the guard, `002.2`).
 

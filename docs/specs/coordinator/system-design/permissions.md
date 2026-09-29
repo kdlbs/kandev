@@ -92,7 +92,7 @@ to parse is treated as all `denied` and logged at error once per
 coordinator and revision; the settings GET returns it as all `denied`. The
 full result table, the `Allows` behaviour on an unknown action, where the
 log state lives and the `Service.Policy` return shape are in
-[coordinators](shared-interface.md#shared-interface).
+[shared interface](shared-interface.md#shared-interface).
 
 `Validate(p Policy) error` returns a field error naming the action when an
 action is outside the six, a value is outside the three,
@@ -149,41 +149,48 @@ actions is named before any known action is checked.
 | `watches_empty` | `selected` with no workflow, including `workflow_ids` absent or `null` |
 | `watches_too_many` | more than 50 workflow ids |
 | `watches_duplicate` | a repeated workflow id |
-| `watches_foreign_workflow` | a workflow id that is not a workflow of the coordinator's workspace, including one deleted moments ago |
+| `watches_foreign_workflow` | an id that is not an existing workflow of the coordinator's workspace and is not in the stored set (a stored id that no longer exists is dropped) |
 
-A failure to read workflows during validation is 500 with nothing stored.
-Workflow existence and workspace membership are read through the workflow
-service **before** the lock is taken (a reader-pool read, as
-[shared interface](shared-interface.md#transactions) requires); the locked
-transaction then compares and writes only. The reconcile step after commit
-closes the window this leaves ([Workflow deletion](#workflow-deletion)).
+Workflow existence is read through the task service's `GetWorkflow`
+(a hidden workflow exists; one of another workspace is foreign) **before** the
+lock, a reader-pool read as [shared interface](shared-interface.md#transactions)
+requires; the locked transaction compares and writes only. A failed read is
+500 with nothing stored. The body is first compared with the stored Watches as
+sent (equal means absent). Otherwise a body id that is in the stored set and
+no longer exists is dropped; any other id that is not an existing workflow of
+the workspace is `watches_foreign_workflow`; a set left empty by dropping is
+`watches_empty`.
+
+**Body shapes.** Top-level members other than `policy` and `watches` are
+ignored. A present `policy` without `actions`, or with `actions` null, is
+`action_missing` naming the first action in the fixed order. A present
+`watches` without `scope`, or with a null one, is `invalid_scope`.
+`{scope:"selected"}` with `workflow_ids` absent or null equals a stored empty
+`selected` set (no-op) and is `watches_empty` otherwise. The route checks
+unknown and missing action keys itself, unknown keys first in sorted key order,
+before it calls `Validate`.
 
 The save runs in one transaction: take the per-coordinator lock of
 [proposals](proposals.md#propose), read the row and watch rows, validate
 (policy as above; Watches: `selected` with 1 to 50 unique workflow ids, each
 a workflow of the coordinator's workspace read through the workflow
 service, already read), compare with the stored values, and when anything differs write
-`policy_json`, `watch_scope`, the watch rows (delete and re-insert),
+`policy_json`, `watch_scope`, the watch rows (delete and re-insert, only when the Watches member differs),
 `policy_revision = policy_revision + 1` and `updated_at`, and calls
-`resetConversation`. A stored watch row read under the lock for a workflow
-that is no longer in the workflow service's list does not count as differing
-by itself: comparison is on the id set as stored, so a repeat of the stored
-set is a no-op even when a member has been deleted (the reconcile step
-removes it). When nothing differs it writes nothing
+`resetConversation`. When nothing differs it writes nothing
 (`AC-COORDINATOR-PERMISSIONS-001.2`). Comparison is on the normalised
 values: the policy map, and for `selected` the workflow id set.
 
 The lock serialises concurrent saves, so each change increases the revision
 exactly once and the last committed save sets every member it sent
-(`004.2`). After commit, the conversation reset runs, then the
-[reconcile step](#workflow-deletion) for a `selected` save, then
+(`004.2`). After commit, the conversation reset runs, then
 `coordinator.updated` is published.
 
 ## Conversation reset
 
-`resetConversation(ctx, exec, coordinatorID)` in `internal/coordinator/service.go`
+`resetConversation(ctx, exec, coordinatorID)` in `internal/coordinator/conversation.go`
 (exact signature and after-commit archive in
-[coordinators](shared-interface.md#shared-interface)) clears `conversation_task_id` and increments the phase-1 `config_revision`
+[shared interface](shared-interface.md#shared-interface)) clears `conversation_task_id` and increments the phase-1 `config_revision`
 in the caller's transaction, and after commit archives the old conversation
 task through the same path a context change uses
 ([coordinators](coordinators.md#routes)), including its
@@ -252,7 +259,9 @@ type CoordinatorToolPolicy struct {
 }
 ```
 
-`ConversationTaskID` is filled after the task id exists, through the task
+The create step stamps the key with an empty `ConversationTaskID`, which
+`Validate` refuses, and no session exists until the update below fills it, so
+nothing resolves the empty value. `ConversationTaskID` is filled after the task id exists, through the task
 service's internal metadata update in the same route step before step 4. An
 error from that update fails the route step exactly as a failed task create
 does: the just-created task is deleted, nothing is bound, and the route
@@ -323,8 +332,6 @@ bound names. The refusal a running session can meet is
 `policy_denied`: a propose tool registered at open whose action a manager
 has since set to `denied`, called before the save's conversation reset has
 archived that conversation.
-An invalid binding fails the start in that branch, as the other fail-closed
-checks do ([copilot](copilot.md#fail-closed)).
 
 ## Guard
 
@@ -344,7 +351,7 @@ order, for a coordinator principal with the phase-2 flag on:
    be in the bound names. An action with no tool name, including one outside
    the phase-1 allowlist and every settings-shaped action, fails here.
 3. For a propose action, read the coordinator's stored policy through
-   `Service.Policy` (one indexed row read per call) and require
+   `Service.Policy` and require
    `Allows(action)`.
 4. Parse the payload (an invalid payload keeps the phase-1 400, no row), run
    the phase-1 reference checks, then for every id argument the
@@ -366,7 +373,7 @@ Each check has one result shape:
 | 1, binding unparsable or invalid | phase-1 unknown-action error | `refused`, reason `binding_invalid`, class of the called action (`unknown` when the action maps to no propose tool) |
 | 2, not in the bound names | phase-1 unknown-action error | `refused`, reason `not_in_profile`, class of the called action (`unknown` for a name that is no action, and for every read tool) |
 | 3, stored policy `denied` | phase-1 unknown-action error | `refused`, reason `policy_denied`, class of the propose action |
-| 3, policy read fails | phase-1 unknown-action error, logged at error | none |
+| 3, policy or watch read fails | the phase-1 not-found error, logged at error | none |
 | 4, invalid payload | the phase-1 400 | none |
 | 4, read of an unwatched id | the phase-1 not-found error, identical to an absent id | none |
 | 4, watch set read fails | the phase-1 not-found error, logged at error | none |
@@ -398,21 +405,22 @@ is the table the work order's tests assert:
 | # | Order | Result |
 | --- | --- | --- |
 | 1 | S tightens an action and commits before the guard's policy read | check 3 refuses with reason `policy_denied`; one `refused` row; no proposal |
-| 2 | Guard's policy read (allowed) commits before S; S tightens; the propose insert follows | the call completes: a `pending` proposal exists and the `proposed` row is written. S has already reset the conversation, so the session ends. The proposal cannot execute: approve is refused 409 `policy_denied` while the setting stays `denied`, and Reject succeeds. No refused row (the call passed the guard) |
+| 2 | Guard's policy read (allowed) commits before S; S tightens; the propose insert follows | the call completes: a `pending` proposal exists and the `proposed` row is written. S has already reset the conversation, so the session ends. The proposal cannot execute: approve is refused 409 `policy_denied` while the setting stays `denied`, and Reject succeeds. No refused row (the call passed the guard). Archiving the session does not cancel a call the guard already authorized |
 | 3 | S loosens an action (for example `message` from `denied`) while a conversation is running | the running conversation's bound names are unchanged, so the tool is not registered and a direct call fails check 2 (`not_in_profile`); loosening applies only to the next conversation, which S's reset makes the next open |
 | 4 | Guard reads `denied`, S then loosens, in that order | the call is refused (`policy_denied` row) and stays refused; no retry is implied |
 | 5 | Approve's re-check reads the setting as allowed, then S tightens it before the claim | the approval proceeds and executes: it was decided against the settings in force when the manager pressed approve. The next propose or approve sees the tightened setting |
 | 6 | Approve's re-check reads after S committed the tightening | 409 `policy_denied`, no claim, no write; Reject succeeds |
 | 7 | The conversation route reads `config_revision` r, S commits (`resetConversation` bumps it), the route then runs its conditional update | the update matches no row; the route deletes the new task and returns 409, as for a context change (`004.1`) |
-| 8 | The route's conditional update commits, then S commits | S's reset clears `conversation_task_id`, increments `config_revision` and archives the just-opened conversation; the binding it carries is stale and never used again |
+| 8 | The route's conditional update commits, then S commits | the route returns 200; S's reset then clears `conversation_task_id`, increments `config_revision` and archives the just-opened conversation; the binding it carries is stale and never used again |
 | 9 | Two managers' saves S1 and S2 | serialised by the lock; each save that changes something raises `policy_revision` by one; the last commit sets every member it sent (`004.2`); a save equal to the stored value at its commit is a no-op |
-| 10 | S selects workflow W while W is deleted | see [Workflow deletion](#workflow-deletion) |
+| 10a | W is deleted before S's workflow read | S's body with W: `watches_foreign_workflow` 400, nothing stored; if W was in the stored set it is dropped and the save is 200 |
+| 10b | W is deleted after S's workflow read, S commits | 200; W's row is stored, `policy_revision` +1, `watch_scope` `selected`; the effective set omits W from then on and the subscriber, if it runs after S, removes the row |
 
 ## Watch filter
 
-`WatchSet` (`internal/coordinator/watches.go`) is loaded once per guard call
+`WatchSet` (`internal/coordinator/reads_phase2.go`) is loaded once per guard call
 (shape, order and error behaviour in
-[coordinators](shared-interface.md#shared-interface)): `All bool` or a sorted set
+[shared interface](shared-interface.md#shared-interface)): `All bool` or a sorted set
 of workflow ids.
 
 | Call | Rule when not `All` |
@@ -423,8 +431,12 @@ of workflow ids.
 | propose tools | target task, workflow or step outside the set: the tool's validation error naming the field, no activity row ([Guard](#guard)) |
 
 A task with no workflow (a conversation task, a Quick Chat) is never
-watched. An empty `selected` set (after workflow deletion) watches nothing:
-list reads return empty results (`003.5`).
+watched. The **effective watch set** is the stored ids that name an existing
+workflow (hidden included). Every read of Watches applies it: the settings
+GET and PUT DTO list only effective ids (`GetWorkflow` per id, at most 50), and
+a stale id matches no task, so the guard needs no check. A `selected` scope
+with an empty effective set watches nothing: list reads return empty results
+and the "watches no board" state shows (`003.5`).
 
 Needs you, the Queue and the count strip apply the same set in the
 classification input query of [needs-you](needs-you.md#inputs): tasks and
@@ -434,37 +446,16 @@ sidebar badge shows is recomputed through the same query.
 
 ## Workflow deletion
 
-The workflow service publishes `workflow.deleted` after the deletion has
-committed. A subscriber to it runs, in one transaction on the writer pool,
-`SELECT DISTINCT coordinator_id FROM coordinator_watches WHERE workflow_id =
-? ORDER BY coordinator_id` and then `DELETE FROM coordinator_watches WHERE
-workflow_id = ?`, and after commit publishes `coordinator.updated` once for
-each selected coordinator id. It never changes `watch_scope`, so a `selected`
-coordinator with no rows watches nothing. It does not bump `policy_revision`
-or archive the conversation: the guard reads Watches live, so the narrowed
-scope applies to the next call. The Configure and Needs you empty-scope
-notices read `watch_scope = selected` with zero rows.
-
-- **Repeat or no match.** A repeated event, or a workflow no coordinator
-  watches, selects and deletes nothing, publishes nothing and succeeds.
-- **Subscriber error.** The error is logged at error with the workflow id and
-  the event is not retried. Two repairs follow, so a missed event never leaves
-  a permanent stale row: the coordinator startup pass deletes every
-  `coordinator_watches` row whose workflow the workflow service no longer
-  lists for the row's `workspace_id` (same statement shape, one
-  `coordinator.updated` per affected coordinator), and the settings save's
-  reconcile step below.
-- **Reconcile after a `selected` save.** After the save commits, the route
-  re-reads the workflows of the coordinator's workspace through the workflow
-  service and deletes, in one statement, any of the coordinator's watch rows
-  whose workflow is gone (publishing `coordinator.updated` when it deleted
-  any; it does not bump `policy_revision`). A workflow deleted between the
-  save's validation and its commit is therefore removed by whichever of the
-  reconcile and the subscriber runs second: the deletion commits before the
-  event, so at least one of them runs after the save's rows are visible.
-  Until then a stale id is harmless: `WatchSet.Contains` of a deleted
-  workflow's id matches no task, and the settings GET may list it.
-  A failed reconcile is logged at warn and leaves the save's 200 unchanged.
+The task service publishes `workflow.deleted` after the deletion has
+committed. A subscriber, best-effort tidying only, runs in one transaction on
+the writer pool `SELECT DISTINCT coordinator_id FROM coordinator_watches WHERE
+workflow_id = ? ORDER BY coordinator_id`, `DELETE FROM coordinator_watches
+WHERE workflow_id = ?`, and after commit publishes `coordinator.updated` once
+per selected coordinator. It never changes `watch_scope`, `policy_revision` or
+the conversation. A repeat or a workflow nobody watches deletes and publishes
+nothing. A subscriber error is logged at error and not retried: the effective
+set already omits the deleted workflow, so nothing visible depends on it. It
+is registered with the phase-2 flag on.
 
 ## Approve re-check
 
@@ -506,7 +497,7 @@ of [Interleavings](#interleavings).
 
 The permission-policy rule of [copilot](copilot.md#permission-policy)
 changes one input: the allowed names are the session's bound names instead
-of the constant six. agentctl receives them with the coordinator mode as a
+of the constant seven. agentctl receives them with the coordinator mode as a
 list in the instance configuration (`CoordinatorToolNames`), set by the
 executor from the same resolver output. Comparison stays by full qualified
 name, never by prefix (`002.4`). An instance built by the lifecycle alone
@@ -562,8 +553,9 @@ managers.
   MCP handlers and an error response on the WebSocket `task.create` and
   `task.update` actions), unless the request carries
   `AllowReservedMetadata bool` tagged `json:"-"`, which only the coordinator
-  service sets. An update that does not carry the key leaves a stored one
-  untouched. Launch metadata additionally strips the key and re-derives it
+  service sets. An update whose metadata lacks a `kandev.coordinator_` key keeps its
+  stored value (restored after `protectedTaskMetadataUpdate` replaces the map,
+  as for `MetaKeyHandoffs`). Launch metadata additionally strips the key and re-derives it
   from the resolved profile, so no agent or client can supply a binding
   through any path. Task-service tests cover HTTP, MCP and WebSocket create
   and update with the prefix (refused), the same requests with the flag
