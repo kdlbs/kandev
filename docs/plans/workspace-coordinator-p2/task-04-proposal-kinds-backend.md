@@ -101,10 +101,37 @@ creates, and `standing_order_ids` on every propose tool.
 
 ## Verification
 
-Write the interleaving table first, before code: two concurrent approves of
-one proposal; the stale-claim sweep during an execution; a crash after the
-execution and before the settle; a reject racing an approve. Each row names
-the order of the operations and the expected result: one execution at most.
+Interleaving table (written before code; each row is a test in
+`interleavings_kinds_test.go`). Expected result for every row: `Execute` runs
+at most once and the row settles exactly once.
+
+| # | Order of operations | Expected result |
+|---|---|---|
+| 1 | Approve A and approve B of one pending non-create proposal run concurrently | One claim wins and runs `Execute` once; the loser gets 409 (row `approving`) or 200 with the settled row; executor stub records one call |
+| 2 | Approve claims, `Execute` runs past the stale window, the sweep runs, then `Execute` returns | Sweep settles `failed` `outcome_unknown` without calling `Execute`; the late fenced completion matches zero rows, writes nothing, logs warn `execute_settle_fenced`; caller returns 200 with the failed row |
+| 3 | Approve claims and `Execute` runs; the process stops before the settle; startup pass runs | Startup pass settles `failed` `outcome_unknown` without calling `Execute`; the executor stub records no second call |
+| 4 | Approve claims; reject arrives while `approving` | Reject returns 409 (reject takes only pending or failed); the approve settles normally |
+| 5 | Reject settles a `failed` row; a stale approve read of the same row claims afterwards | The claim is conditional on the status, so it matches zero rows and `Execute` does not run |
+| 6 | `Execute` reaches its 60 s deadline | Settle runs on a detached context: `approved` if `Execute` returned nil, `failed` `outcome_unknown` if it returned a deadline error |
+| 7 | Deadline fires, the row settles `outcome_unknown`, then the resume launch finishes | The launch goroutine owned by the resume attempt registry writes nothing and logs warn `execute_settle_fenced` |
+| 8 | Move: the sweep settles the claim between the claim and the fenced `from_step_id` write | The fenced write matches zero rows, no move call is made, warn `execute_settle_fenced` |
+| 9 | Approve of a stale non-create claim | Returns 200 with the `failed` `outcome_unknown` row; no `Execute` call; works with `features.coordinatorPhase2` off |
+
+Conductor rulings that override the design prose:
+
+- R4-1: `Execute` returns at the 60 s deadline. The resume launch runs in a
+  goroutine owned by the resume attempt registry (tracked, never unowned), so
+  approve never blocks for a cold launch. At the deadline the row settles
+  `outcome_unknown`; the late launch result writes nothing (the fenced
+  completion matches zero rows and logs warn `execute_settle_fenced`). The
+  stale-claim sweep stays the backstop; there is no second sweep.
+- R4-2: move check 6 reads every step of the target workflow through the seam
+  (a list-steps read) and calls `StartsAgentOnEnter(steps, stepID)`.
+- R4-3: `outcome_unknown` only means the side effect may have happened. A
+  `from_step_id` pre-write error, before any move call, settles `failed` even
+  when the deadline has fired.
+- R4-4: a deleted target task (`ErrTaskNotFound`) maps to `task_archived`, the
+  code undo uses.
 
 ```bash
 make -C apps/backend test PKG=./internal/coordinator/...
