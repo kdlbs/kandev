@@ -244,3 +244,21 @@ describe("useCoordinatorAttention - computeNeedsYouCount", () => {
     expect(result.current.computeNeedsYouCount()).toBe(0);
   });
 });
+
+describe("useCoordinatorAttention - task snapshots", () => {
+  it("exposes the tasks input's tasks, loadedAt and error", () => {
+    mockUseCoordinatorTasks.mockReturnValue({
+      tasks: [task("t-1"), task("t-2")],
+      stepNameByTaskId: new Map(),
+      workflowNameById: new Map(),
+      stepNameByWorkflowStep: new Map(),
+      error: true,
+      loadedAt: 700,
+      retry: retryTasksMock,
+    });
+    const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
+    expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1", "t-2"]);
+    expect(result.current.loadedAt).toBe(700);
+    expect(result.current.error).toBe(true);
+  });
+});

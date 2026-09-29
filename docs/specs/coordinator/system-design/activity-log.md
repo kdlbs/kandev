@@ -166,17 +166,11 @@ row has a `target_task_id`, a move row's proposal exists and its
 `outcome_json` parses with both `from_step_id` and `to_step_id`; the page's
 move proposals are read in one query by id), `target_task_identifier` (the task's identifier such as KAN-431, read
 through the seam's `GetTask`, null when the task is gone or the read fails)
-and, on a move row, `from_step_name` (the proposal outcome's `from_step_id`
-resolved through the seam's `GetStep`, null when the step is gone or the read
-fails; both read once per row of the page, a failed read is logged at warn
-and never fails the list), `actor_name` resolved from `actor_user_id` through the user
-service at read time, and `undone_by_name` resolved from `undone_by` the
-same way (null while the id is null). The row also carries `actor_missing` and
-`undone_by_missing`, true only when the id is set and the user no longer
-exists (the name is then null); the client shows the translated "A former
-member" for them, so the server sends no display text. When the user service
-fails, the names are null and the flags false for that page, a warn is
-logged and the list still returns.
+andand, on a move row, `from_step_id` (the proposal outcome's id, null when
+absent). The server sends user ids (`actor_user_id`, `undone_by`) and no
+display names or step names: the client resolves both ([What it did
+UI](#what-it-did-ui), `002.8`, `003.10`), so the list never reads the user
+service or the step store and a failure of either cannot affect it.
 
 ## Undo
 
@@ -282,7 +276,7 @@ phase-2 coordinator session ([permissions](permissions.md#tool-profile)).
 The MCP action `coordinator.list_activity` resolves the coordinator from the
 principal only; it takes no coordinator or workspace argument, so it cannot
 read another coordinator's rows (`004.1`). It returns the list route's rows
-without `actor_user_id`, `undone_by`, `actor_name` or `undone_by_name`, and
+without `actor_user_id` and `undone_by`, and
 with both `created_at` and `updated_at` (`004.2`; a coalesced refusal's
 `updated_at` is the time of its latest repeat), default limit
 20, and refuses a limit outside 1 to 50 or a bad cursor naming the field
@@ -340,56 +334,12 @@ deletes its rows whatever the flag.
 
 ## What it did UI
 
-`apps/web/app/coordinator/queue/what-it-did.tsx`, below the phase-1 Queue
-groups, fed by `hooks/domains/coordinator/use-activity.ts`:
-
-- Loads the first page on mount; **Load more** appends by cursor; a
-  `coordinator.updated` event refetches the first page and merges by id.
-- A class filter select (All, the six classes and "Unknown action"); `?class=`
-  in the URL preselects it, which May do's link uses; an unrecognised value
-  selects All.
-- Columns When, Action, Action class, How it was authorised, Undo, as in
-  `AC-COORDINATOR-ACTIVITY-LOG-002.4`. How it was authorised shows
-  "Requires approval" or "Denied", plus "Approved by <name>" ("Approved" when
-  the actor is null and not missing, "Approved by A former member" when
-  `actor_missing`), "with edits", "x N". A refused row's Action cell shows the
-  reason text of its `reason_code` (`002.4`), keyed by code in all six
-  locales, with "Refused." plus the code for a code with no text.
-- Undo column: **Undo** for managers on rows with `undoable` true; "No undo"
-  on every row whose action class is `message` or `resume`, whatever its
-  outcome (`proposed`, `approved`, `rejected`, `failed` or `refused`), and
-  for readers too; "Undone by <name>, <time>" on the original row that was
-  reversed (`undone_at` set), in place of Undo, with `<name>` from
-  `undone_by_name` and `<time>` from `undone_at` (`003.6`); nothing on any
-  other row, including the separate row whose outcome is `undone`, which
-  shows the undoer through `actor_name` in How it was authorised (`002.4`)
-  (`003.1`). The 409 `undo_conflict` message shows inline by its `reason`:
-  "It has moved since" for `moved`, `archived` and any unknown or absent reason, "An agent is working on
-  it. Stop it, then undo." for `agent_running`, "The step it came from no
-  longer exists." for `step_deleted`, "The step it came from is now a
-  finishing step." for `step_done`, "The step it came from is full." for
-  `step_full` (`003.7`). A 404 from undo shows "This action is no longer
-  listed." and refetches. "Undone by" shows "Undone,
-  <time>" when `undone_by_name` is null because `undone_by` is null.
-  Undo first opens a confirmation dialog titled "Undo this?" whose text
-  names the effect: for a created task "The task <identifier> will be
-  archived. Any agent working on it will be stopped.", for a move "The task <identifier> will move back to
-  <from step name>." ("the step it came from" when `from_step_name` is null; "the task" when `target_task_identifier` is null) It has two buttons, **Undo** and **Cancel**, with
-  Cancel focused on open. Cancel or Escape closes it and sends nothing;
-  Undo sends the request and closes it, and the outcomes below apply.
-  The other two refusals: 409 `already_undone` (a double click, or another
-  manager undid it first) shows no error; the list refetches, so the row
-  shows "Undone by <name>, <time>" of whoever undid it. 409 `not_undoable`
-  (reachable only from a direct API call, since `undoable` is computed
-  from fields undo never changes; the UI handles it defensively) shows "This can no longer be undone" inline in place of
-  the button and refetches the list. Any other error (500, network) shows
-  "Undo failed. Try again." inline and keeps the Undo button.
-- Empty states from `002.5`. Readers see no Undo (`002.6`).
-- Phone width stacks each row as a card with the same fields.
+The Queue section that renders these rows, its copy and its undo flow are
+specified in [What it did UI](what-it-did-ui.md).
 
 ## Phase 3 contract
 
-Phase 3 may rely on, and phase 2 will not change without a new ADR:
+Phase 3 may rely on, and phase 2 will not change without an ADR:
 
 - the `coordinator_activity` columns and outcome values above;
 - a row per proposal decision written in the same transaction as it;
@@ -410,8 +360,8 @@ Phase 3 may rely on, and phase 2 will not change without a new ADR:
 Undo logs at info with the row, coordinator and task ids and the result.
 Retention logs the deleted count. `coordinator_activity_rows_total` (expvar,
 labelled by `outcome`) is incremented by `InsertActivity` after a successful
-insert statement. It counts insert statements that succeeded, so a caller's
-later rollback is not subtracted; no identifier is a label.
+insert statement. It counts succeeded insert statements (a later rollback is
+not subtracted); no identifier is a label.
 
 ## Related decisions
 
