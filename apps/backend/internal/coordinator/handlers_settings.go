@@ -26,7 +26,7 @@ func (h *Handlers) httpPutSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxSettingsBodyBytes))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("invalid request body"))
+		h.respondError(c, bodyErr("", "request body is unreadable or too large"))
 		return
 	}
 	saved, err := h.service.SaveSettings(ctx, c.Param("id"), c.Param("cid"), body)

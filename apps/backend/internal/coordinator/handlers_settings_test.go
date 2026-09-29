@@ -59,6 +59,20 @@ func TestHTTPPutSettingsValidationIs400WithCode(t *testing.T) {
 	}
 }
 
+func TestHTTPPutSettingsOversizedBodyIsInvalidBody(t *testing.T) {
+	h, _, c := settingsHandlers(t)
+	body := `{"policy":"` + strings.Repeat("a", maxSettingsBodyBytes) + `"}`
+	rec := runHandler(h.httpPutSettings, http.MethodPut, "/x", body, workspaceParams(c.ID))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]string
+	decodeBody(t, rec, &got)
+	if got["code"] != codeInvalidBody || got["error"] == "" {
+		t.Fatalf("body = %v, want code %q", got, codeInvalidBody)
+	}
+}
+
 func TestHTTPSettingsStaleWorkflowIsAbsentFromEveryDTO(t *testing.T) {
 	h, store, c := settingsHandlers(t)
 	rec := runHandler(h.httpPutSettings, http.MethodPut, "/x", `{"watches":{"scope":"selected","workflow_ids":["wf-a","wf-b"]}}`, workspaceParams(c.ID))

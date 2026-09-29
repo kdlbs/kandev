@@ -137,8 +137,8 @@ func parsePolicyMember(raw json.RawMessage) (*Policy, error) {
 	p := Policy{Version: policyVersion, Actions: make(map[Action]Setting, len(AllActions))}
 	for _, a := range AllActions {
 		var s string
-		if err := json.Unmarshal(actions[string(a)], &s); err != nil || !validSetting(Setting(s)) {
-			return nil, policyFieldErr(codeInvalidSetting, string(a), "invalid setting for "+string(a))
+		if err := json.Unmarshal(actions[string(a)], &s); err != nil {
+			s = ""
 		}
 		p.Actions[a] = Setting(s)
 	}
@@ -155,6 +155,8 @@ func policyValidateErr(err error, p Policy) *SettingsError {
 	}
 	code := codeInvalidSetting
 	switch {
+	case !validSetting(p.Actions[Action(fe.Field)]):
+		return policyFieldErr(codeInvalidSetting, fe.Field, "invalid setting for "+fe.Field)
 	case fe.Code == codeAutomaticNotAvailable:
 		code = codeAutomaticNotAvailable
 	case Action(fe.Field) == ActionStop && p.Actions[ActionStop] != SettingDenied:
