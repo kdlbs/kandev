@@ -65,10 +65,14 @@ Use `/tdd` after the explicit implementation request. Mark this task
 the dependency. The Dockerfile is configuration, but a real failing image
 probe is available and is the regression gate for this repair.
 
-From the repository root, after writing the test script:
+From the repository root, after writing the test script, pull the immutable
+inputs. The smoke inspects local images before running them; registry references
+must be pulled and local tags must be built beforehand.
 
 ```bash
 bash -n scripts/test-docker-runtime.sh
+docker pull ghcr.io/kdlbs/kandev@sha256:33c9211aea048af542fb68da80088dc28ab3ed947378dd12f97d98e7d2d2bf93
+docker pull ghcr.io/kdlbs/kandev@sha256:5a7558e4ed370652a8128b49d8d8701cd0639ba83b6648ca139e103d06c450de
 # Both calls must fail specifically because ps is unavailable.
 bash scripts/test-docker-runtime.sh ghcr.io/kdlbs/kandev@sha256:33c9211aea048af542fb68da80088dc28ab3ed947378dd12f97d98e7d2d2bf93
 bash scripts/test-docker-runtime.sh ghcr.io/kdlbs/kandev@sha256:5a7558e4ed370652a8128b49d8d8701cd0639ba83b6648ca139e103d06c450de
@@ -191,6 +195,7 @@ in `docs/public/docker.md` and `docs/images.md` now identify that tool.
 | --- | --- |
 | `bash -n scripts/test-docker-runtime.sh` and embedded Python syntax | Passed |
 | Smoke on the original base and universal digests above | Both failed before the dependency edit with parent-probe exit 127 and `ps: command not found` |
+| Documented pull-then-smoke sequence after removing the owned original image references | Both pulls restored the absent references and the smokes reached the expected missing-`ps` failure; rebuilt local base and universal tags still passed |
 | `docker build --platform linux/amd64 -f Dockerfile -t kandev-3617-implementation:base /tmp/kandev-3617-implementation/ctx` | Passed using the documented published-bundle context |
 | `docker build --platform linux/amd64 -f Dockerfile.universal --build-arg BASE_IMAGE=kandev-3617-implementation:base -t kandev-3617-implementation:universal .` | Passed; an interrupted initial attempt was restarted after confirming no build client remained |
 | `bash scripts/test-docker-runtime.sh kandev-3617-implementation:base kandev-3617-implementation:universal` | Passed: both UID 1000, parent probes, 140 ordered commands each, delayed probes, stderr and exit status |
@@ -212,3 +217,7 @@ The design-phase unmodified-supervisor A/B reproduction supplies causal
 evidence, while the permanent smoke checks the runtime prerequisite and shell
 behavior. Application binaries were reused, not recompiled. No credentials,
 permission changes or live Kandev volumes were used.
+
+PR review clarified the local-image prerequisite in the script's usage comments
+and added the explicit pulls above. The repeat checks passed without changing
+the smoke's behavior or requiring a registry copy of locally built images.

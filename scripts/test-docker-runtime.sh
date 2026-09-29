@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Images must already exist locally. Pull registry references or build local
+# tags before running this smoke check.
 if (($# == 0)); then
   echo 'Usage: scripts/test-docker-runtime.sh IMAGE [IMAGE ...]' >&2
   exit 2

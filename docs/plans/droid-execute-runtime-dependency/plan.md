@@ -185,6 +185,13 @@ probes, stderr and intentional exit 7. See the work order for exact image IDs
 and commands. The host's existing nvm Node 24.18.0 toolchain was activated for
 the implementation checks and normal commit hooks.
 
+PR review clarified that the smoke requires locally available images. The work
+order now pulls its two immutable registry inputs before running the red checks,
+and the script documents that prerequisite. After removing the owned original
+image references, both documented pull-then-smoke sequences reached the expected
+missing-`ps` failure. Both locally built corrected images still passed the smoke.
+Shell syntax, specification catalog/lint and diff checks passed again.
+
 The branch was fast-forwarded to main `abc7a85f1aa16762f33aca7c8d1f8947a206f939`
 before delivery; its unrelated worktree recovery change leaves both Docker
 recipes, entrypoint and smoke script unchanged. PR CI/review and merge evidence
