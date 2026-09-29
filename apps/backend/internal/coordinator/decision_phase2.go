@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -66,7 +67,8 @@ func specEdited(p *Proposal) bool {
 		return false
 	}
 	f, o := p.FinalSpec, p.Spec
-	return f.Title != o.Title || f.Description != o.Description || f.WorkflowID != o.WorkflowID ||
+	return strings.TrimSpace(f.Title) != strings.TrimSpace(o.Title) ||
+		strings.TrimSpace(f.Description) != strings.TrimSpace(o.Description) || f.WorkflowID != o.WorkflowID ||
 		f.StepID != o.StepID || f.RepositoryID != o.RepositoryID
 }
 
@@ -84,11 +86,15 @@ func (s *Service) completeProposalStore(ctx context.Context, workspaceID, coordi
 	if err != nil {
 		return false, err
 	}
+	actor := current.DecidedBy
+	if actor != nil && *actor == "" {
+		actor = nil
+	}
 	row := ActivityRow{
 		Edited:        specEdited(current),
 		CoordinatorID: coordinatorID, WorkspaceID: workspaceID, ActionClass: ActionCreateTask,
 		Outcome: ActivityApproved, Authorization: AuthRequiresApproval,
-		TargetTaskID: &taskID, ProposalID: &proposalID, ActorUserID: optString(decidingUserID(ctx)),
+		TargetTaskID: &taskID, ProposalID: &proposalID, ActorUserID: actor,
 	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.CompleteProposalTx(ctx, tx, proposalID, token, taskID, time.Now())
