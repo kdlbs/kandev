@@ -42,6 +42,8 @@ read tool and daily retention. This is the phase-3 evidence source.
 - Hooks in the phase-1 create path, through task 01's `Record`: propose insert, completion to
   `approved` (with `edited`), reject, failure to `failed`. Task 04 adds the
   same calls for the other kinds through the shared writer.
+- `RecordRefusal` publishes `coordinator.updated` after its transaction
+  commits (insert or coalesce); `undo.go` defines the task-service seam.
 - Routes `GET activity`, `GET activity/summary`, `POST activity/:rid/undo`
   with cursor paging, class filter, scopes and 404 across workspaces.
 - Undo for `create_task` (archive) and `move` (move back) with the
@@ -73,8 +75,9 @@ make -C apps/backend test PKG=./internal/mcp/...
 ```
 
 Tests: a fault-injected row insert leaves the proposal unchanged
-(the hook half of task 01's `001.6`); a losing claimer writes no row; a direct Resume writes nothing (`001.5`, a
-service-level test that calls the orchestrator stub and asserts zero rows);
+(the hook half of task 01's `001.6`); a losing claimer writes no row; a direct Resume or Send it back writes nothing (`001.5`, a source-scan test
+that `stalls.go`, `recovery.go` and the resume paths contain no `Record` call,
+because those web paths never enter the coordinator package);
 two concurrent undos of one create archive once and return one 409
 (`003.4`); a moved-again task returns `undo_conflict` (`003.3`); a failed
 marker transaction leaves the row undoable and a retry only marks it
@@ -90,7 +93,19 @@ rows or any user id (`004.1`, `004.2`); limit 0 and 51 are refused
 401-day-old row survives (`005.1`); a move undo retried after a failed
 marker finds the task on `from_step_id`, skips `MoveTask` and marks the row
 (`003.3`); summary counts and `days=0`/`91` refusals (`005.2`); another
-workspace's coordinator is 404 (`005.3`).
+workspace's coordinator is 404 (`005.3`); undo of a move with a running
+agent session is 409 `undo_conflict` reason `agent_running` and leaves the row
+undoable, a deleted `from_step_id` is reason `step_deleted`, and the move
+enters the step with `SkipStepPrompt` (`003.7`, `003.8`); with auth off
+`undone_by` and `actor_user_id` are NULL and the list shows null names
+(`003.6`); a row with NULL `outcome_json`, an unparseable one, a missing
+proposal or a create row without `target_task_id` lists `undoable` false and
+undo is `not_undoable` (`003.9`); `limit` 0, 51, empty and `abc`, an empty
+`class` (All) and a repeated `class` behave per `002.3` and `002.7`; the last
+page has a null `next_cursor`; a refusal publishes `coordinator.updated`; a
+second undo waiting on the row mutex returns the context error when its
+request ends; retention runs never overlap and the delete-scan test admits
+`retention.go`.
 
 ## Likely files
 
