@@ -24,12 +24,14 @@ const claudeACPPackage = "@agentclientprotocol/claude-agent-acp"
 // there goes through agentctl's auto-approve channel.
 var claudeACPPermSettings = map[string]PermissionSetting{
 	PermissionKeyDangerouslySkipPermissions: {
-		Supported:   true,
-		Default:     false,
-		Label:       "Skip permission prompts",
-		Description: "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
-		ApplyMethod: PermissionApplyMethodCLIFlag,
-		CLIFlag:     "--dangerously-skip-permissions",
+		Supported:       true,
+		Default:         false,
+		Label:           "Skip permission prompts",
+		Description:     "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
+		ApplyMethod:     PermissionApplyMethodCLIFlag,
+		CLIFlag:         "--dangerously-skip-permissions",
+		PassthroughOnly: true,
+		ACPEquivalent:   "the profile's permission mode (Bypass permissions)",
 	},
 }
 
@@ -52,24 +54,25 @@ func NewClaudeACP() *ClaudeACP {
 		StandardPassthrough: StandardPassthrough{
 			PermSettings: claudeACPPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:             true,
-				Label:                 "CLI Passthrough",
-				Description:           "Show terminal directly instead of chat interface",
-				PassthroughCmd:        NewCommand("npx", "-y", "@anthropic-ai/claude-code"),
-				ModelFlag:             NewParam("--model", "{model}"),
-				IdleTimeout:           3 * time.Second,
-				BufferMaxBytes:        DefaultBufferMaxBytes,
-				ResumeFlag:            NewParam("-c"),
-				SessionResumeFlag:     NewParam("--resume"),
-				MCPStrategy:           mcpconfig.ClaudeStrategy{},
-				AutoInjectPrompt:      true,
-				SubmitSequence:        "\r",
-				DisableBracketedPaste: true,
+				Supported:         true,
+				Label:             "CLI Passthrough",
+				Description:       "Show terminal directly instead of chat interface",
+				PassthroughCmd:    NewCommand("npx", "-y", "@anthropic-ai/claude-code"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				IdleTimeout:       3 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
+				ResumeFlag:        NewParam("-c"),
+				SessionResumeFlag: NewParam("--resume"),
+				MCPStrategy:       mcpconfig.ClaudeStrategy{},
+				AutoInjectPrompt:  true,
+				SubmitSequence:    "\r",
 				// Claude Code's Ink TUI coalesces multi-byte stdin reads into a
-				// paste burst, absorbing trailing "\r" into the input rather than
-				// dispatching Enter. A short delay before the submit byte forces
-				// it to arrive as a discrete keystroke. 150ms is just over Ink's
-				// paste-detection window and still feels instant to the user.
+				// paste burst, absorbing a trailing "\r" into the input rather
+				// than dispatching Enter. A short delay before the submit byte
+				// makes it arrive as a discrete keystroke; 150ms is just over
+				// Ink's paste-detection window and still feels instant. Because
+				// the submit byte is its own write, the body travels as a
+				// bracketed paste, which the TUI absorbs whole at any length.
 				SubmitDelay: 150 * time.Millisecond,
 			},
 		},
@@ -131,6 +134,12 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			"MCP_TIMEOUT":      "30000",
 			"MCP_TOOL_TIMEOUT": "7200000",
 		},
+		ContainerEnv: map[string]string{
+			// Claude's ACP bridge limits bypass mode for root unless the process
+			// runs in a declared sandbox. Executor isolation makes this available;
+			// it does not select a session mode.
+			"IS_SANDBOX": "1",
+		},
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
 		},
@@ -154,14 +163,16 @@ func (a *ClaudeACP) RemoteAuth() *RemoteAuth {
 				Type:      "env",
 				EnvVar:    "CLAUDE_CODE_OAUTH_TOKEN",
 				SetupHint: "Run `claude setup-token` to generate a long-lived OAuth token",
-				SetupScript: `mkdir -p "${HOME}/.claude"
-cat > "${HOME}/.claude/.credentials.json" <<CREDS
+				SetupScript: `config_dir="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+mkdir -p "$config_dir"
+umask 077
+cat > "$config_dir/.credentials.json" <<CREDS
 {"claudeAiOauth":{"accessToken":"${CLAUDE_CODE_OAUTH_TOKEN}","expiresAt":4102444800000}}
 CREDS
 cat > "${HOME}/.claude.json" <<'JSON'
 {"hasCompletedOnboarding":true}
 JSON
-chmod 600 "${HOME}/.claude/.credentials.json"
+chmod 600 "$config_dir/.credentials.json"
 chmod 600 "${HOME}/.claude.json"`,
 			},
 		},

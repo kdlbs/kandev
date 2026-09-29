@@ -20,6 +20,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
+		"limits.lspMaxConnections",
 		"messageQueue.maxPerSession",
 		"agentctl.notificationQueueCapacity",
 		"launcher.noBrowser",
@@ -28,11 +29,31 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 			t.Errorf("catalog is missing %q", key)
 		}
 	}
+	entry, ok := CatalogEntryForKey("limits.lspMaxConnections")
+	if !ok || !strings.Contains(entry.Description, "including leases detached from a browser") {
+		t.Fatalf("LSP capacity description = %q, want detached leases included", entry.Description)
+	}
 }
 
 func TestConfigurationCatalogMatchesAuditedEnvironmentInventory(t *testing.T) {
 	if err := validateCatalogAgainstAuditedInventory(ConfigurationCatalog(), ConfigurationExclusions(), auditedStartupEnvironmentInventory()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRetiredOfficeSessionIdentityEnvironmentIsNotCataloged(t *testing.T) {
+	const envVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	for _, entry := range ConfigurationCatalog() {
+		for _, candidate := range entry.EnvVars {
+			if candidate == envVar {
+				t.Fatalf("retired environment variable %q remains in configuration catalog", envVar)
+			}
+		}
+	}
+	for _, exclusion := range ConfigurationExclusions() {
+		if exclusion.EnvVar == envVar {
+			t.Fatalf("retired environment variable %q remains in configuration exclusions", envVar)
+		}
 	}
 }
 
@@ -90,7 +111,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "DOCKER_HOST", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_APIVERSION", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_TLSVERIFY", class: "catalog"},
-		{envVar: "KANDEV_DOCKER_DEFAULTNETWORK", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_VOLUMEBASEPATH", class: "catalog"},
 		{envVar: "KANDEV_AGENT_STANDALONE_HOST", class: "catalog"},
 		{envVar: "AGENTCTL_PORT", class: "catalog"},
@@ -168,7 +188,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_FEATURES_CANVASES", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", class: "exclusion"},
-		{envVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_AGENT_SURVIVAL", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_AGENT_MESSAGES", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_ACP_MAX_FILES", class: "exclusion"},

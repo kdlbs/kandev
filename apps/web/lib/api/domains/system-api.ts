@@ -62,6 +62,13 @@ export function fetchDatabaseStats(options?: ApiRequestOptions): Promise<Databas
   return fetchJson<DatabaseStats>(`${SYSTEM_BASE}/database`, options);
 }
 
+export function retryDatabaseStats(options?: ApiRequestOptions): Promise<void> {
+  return fetchJson<void>(`${SYSTEM_BASE}/database/refresh`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 export function vacuumDatabase(options?: ApiRequestOptions): Promise<JobAcceptResponse> {
   return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/database/vacuum`, {
     ...options,

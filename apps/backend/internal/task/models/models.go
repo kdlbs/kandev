@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -98,9 +100,27 @@ type PluginMessageFilter struct {
 
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
-	MetaKeyAgentProfileID    = "agent_profile_id"
-	MetaKeyExecutorID        = "executor_id"
-	MetaKeyExecutorProfileID = "executor_profile_id"
+	MetaKeyAgentProfileID = "agent_profile_id"
+	// MetaKeyAutoStartError records why an asynchronous auto-start failed after
+	// its creating call already returned success. Without it the only evidence
+	// is a backend log line and the task sits in CREATED with no session,
+	// looking exactly like a task nobody asked to start.
+	MetaKeyAutoStartError              = "auto_start_error"
+	MetaKeyExecutorID                  = "executor_id"
+	MetaKeyExecutorProfileID           = "executor_profile_id"
+	MetaKeyManagedByPlugin             = "kandev.managed_by_plugin"
+	MetaKeyManagedRetained             = "kandev.managed_retained"
+	MetaKeyManagedInstallationID       = "kandev.installation_id"
+	MetaKeyManagedWorkspaceID          = "kandev.workspace_id"
+	MetaKeyManagedInstanceKey          = "kandev.instance_key"
+	MetaKeyManagedConversationRevision = "kandev.conversation_revision"
+	MetaKeyManagedConversationPaused   = "kandev.desired_paused"
+	MetaKeyManagedConversationDetached = "kandev.detached"
+	MetaKeyManagedApprovalRevision     = "kandev.approval_revision"
+	MetaKeyManagedManifestDigest       = "kandev.manifest_digest"
+	MetaKeyManagedAgentToolNames       = "kandev.agent_tool_names"
+	MetaKeyManagedPolicyInvalidated    = "kandev.managed_policy_invalidated"
+	MetaKeyManagedRetentionMode        = "kandev.retention_mode"
 	// Automation target metadata is written to continuation tasks so a
 	// change from hidden to visible ownership or from repository-backed to
 	// repository-free execution cannot silently reuse the old task.
@@ -132,6 +152,10 @@ const (
 	// instructions and profile choice ride on this transient marker and are
 	// cleared once the target entry is dispatched.
 	MetaKeyWorkflowMovePending = "workflow_move_pending"
+	// MetaKeyTaskManagementDeferredFence binds a WIP-queued workflow move to
+	// the management generation that admitted it. Promotion rechecks this
+	// marker so an old manager cannot trigger destination entry after transfer.
+	MetaKeyTaskManagementDeferredFence = "task_management_deferred_fence"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.
@@ -275,6 +299,65 @@ const (
 	// task created from it. Mutated via an optimistic compare-and-set.
 	MetaKeyHandoffs = "handoffs"
 )
+
+// ManagedToolPolicyFromTask returns the persisted restricted policy only for
+// a retained managed conversation. Incomplete or inactive metadata fails
+// closed instead of falling back to a normal task tool profile.
+//
+//nolint:cyclop // The task policy parser validates every persisted field before execution.
+func ManagedToolPolicyFromTask(task *Task) (*mcpprofile.ManagedToolPolicy, bool, error) {
+	if task == nil || task.Metadata == nil {
+		return nil, false, nil
+	}
+	retained, _ := task.Metadata[MetaKeyManagedRetained].(bool)
+	if !retained {
+		if StringFromAny(task.Metadata[MetaKeyManagedRetentionMode]) != "" {
+			return nil, true, errors.New("managed conversation retained marker is invalid")
+		}
+		return nil, false, nil
+	}
+	paused, pausedOK := task.Metadata[MetaKeyManagedConversationPaused].(bool)
+	detached, detachedOK := task.Metadata[MetaKeyManagedConversationDetached].(bool)
+	policyInvalidated, invalidationExists := task.Metadata[MetaKeyManagedPolicyInvalidated]
+	workspaceID := StringFromAny(task.Metadata[MetaKeyManagedWorkspaceID])
+	if !pausedOK || !detachedOK || paused || detached || (invalidationExists && policyInvalidated != false) || workspaceID == "" || workspaceID != task.WorkspaceID {
+		return nil, true, errors.New("managed conversation is inactive or has invalid workspace metadata")
+	}
+	conversationRevision, err := strconv.ParseUint(StringFromAny(task.Metadata[MetaKeyManagedConversationRevision]), 10, 64)
+	if err != nil {
+		return nil, true, errors.New("managed conversation revision is invalid")
+	}
+	approvalRevision, err := strconv.ParseUint(StringFromAny(task.Metadata[MetaKeyManagedApprovalRevision]), 10, 64)
+	if err != nil {
+		return nil, true, errors.New("managed conversation approval revision is invalid")
+	}
+	toolNamesValue, exists := task.Metadata[MetaKeyManagedAgentToolNames]
+	if !exists {
+		return nil, true, errors.New("managed conversation tool selection is missing")
+	}
+	encodedNames, err := json.Marshal(toolNamesValue)
+	if err != nil {
+		return nil, true, errors.New("managed conversation tool selection is invalid")
+	}
+	var toolNames []string
+	if err := json.Unmarshal(encodedNames, &toolNames); err != nil {
+		return nil, true, errors.New("managed conversation tool selection is invalid")
+	}
+	policy := &mcpprofile.ManagedToolPolicy{
+		PluginID:             StringFromAny(task.Metadata[MetaKeyManagedByPlugin]),
+		InstallationID:       StringFromAny(task.Metadata[MetaKeyManagedInstallationID]),
+		WorkspaceID:          workspaceID,
+		InstanceKey:          StringFromAny(task.Metadata[MetaKeyManagedInstanceKey]),
+		ConversationRevision: conversationRevision,
+		ApprovalRevision:     approvalRevision,
+		ManifestDigest:       StringFromAny(task.Metadata[MetaKeyManagedManifestDigest]),
+		AgentToolNames:       toolNames,
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, true, err
+	}
+	return policy, true, nil
+}
 
 // officeCarrierMetadataKeys is every MetaKeyOfficeCarrier* key above, kept
 // next to that block so a new carrier key can't be added to one without
@@ -654,6 +737,14 @@ const (
 	// Startup recovery sets it after accepting an ambiguous reservation and
 	// clears it only after the task service replays the public turn events.
 	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
+	// TurnMetaKeyCodexNativeTurnID binds a Kandev turn to the native provider
+	// turn required for safe conversation forks. It is backend-only metadata.
+	TurnMetaKeyCodexNativeTurnID = "codex_native_turn_id"
+
+	// SessionMetaKeyCodexForkRequestPrefix names per-request, at-most-once fork
+	// records on the source session. Ambiguous provider responses remain
+	// uncertain and are never retried automatically.
+	SessionMetaKeyCodexForkRequestPrefix = "codex_fork_request_"
 )
 
 var promptDispatchMetadataKeys = [...]string{
@@ -918,6 +1009,12 @@ func LoadTurnRuntimeConfigSnapshot(metadata map[string]interface{}) (TurnRuntime
 // Cleared on successful transition, on user reply before transition, or any
 // other step change.
 const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
+
+// SessionMetaKeyAgentStartAttemptID identifies the process-start attempt that
+// owns asynchronous bootstrap results. Session activity may advance the row
+// revision while that attempt is still starting, so UpdatedAt is not an
+// attempt identity.
+const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
 
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
@@ -1316,6 +1413,80 @@ type Task struct {
 	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
+const (
+	TaskManagementClaimAcquire     = "acquire"
+	TaskManagementClaimTransfer    = "transfer"
+	TaskManagementClaimRelease     = "release"
+	TaskManagementClaimAcquired    = "acquired"
+	TaskManagementClaimReleased    = "released"
+	TaskManagementClaimTransferred = "transferred"
+)
+
+// TaskManagementClaim is the durable owner projection for an optional
+// plugin-owned task manager. An empty InstallationID represents a released
+// claim; Generation continues to increase across releases and reacquisitions.
+type TaskManagementClaim struct {
+	TaskID          string     `json:"task_id"`
+	WorkspaceID     string     `json:"workspace_id"`
+	OwnerKind       string     `json:"owner_kind"`
+	OwnerActorID    string     `json:"owner_actor_id,omitempty"`
+	InstallationID  string     `json:"installation_id,omitempty"`
+	InstanceKey     string     `json:"instance_key,omitempty"`
+	Generation      int64      `json:"generation"`
+	ResourceVersion string     `json:"resource_version"`
+	AcquiredAt      *time.Time `json:"acquired_at,omitempty"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	UpdatedByActor  string     `json:"updated_by_actor,omitempty"`
+}
+
+// TaskManagementClaimChange is an optimistic, task-scoped ownership command.
+// Both observed versions are required so a command cannot act on an older task
+// or replace a claim that changed after the UI or plugin read it.
+type TaskManagementClaimChange struct {
+	Action                       string
+	TaskID                       string
+	WorkspaceID                  string
+	ExpectedTaskResourceVersion  string
+	ExpectedClaimResourceVersion string
+	InstallationID               string
+	InstanceKey                  string
+	OwnerKind                    string
+	OwnerActorID                 string
+	ActorID                      string
+	ActorInstallationID          string
+	ActorInstanceKey             string
+	Reason                       string
+}
+
+// TaskManagementClaimFence is the captured manager identity attached to an
+// exact plugin mutation. It is checked inside the task write transaction.
+type TaskManagementClaimFence struct {
+	InstallationID string
+	InstanceKey    string
+	Generation     int64
+}
+
+// TaskManagementClaimHistory is an immutable record of one owner transition.
+type TaskManagementClaimHistory struct {
+	ID                     string    `db:"id" json:"id"`
+	TaskID                 string    `db:"task_id" json:"task_id"`
+	WorkspaceID            string    `db:"workspace_id" json:"workspace_id"`
+	Action                 string    `db:"action" json:"action"`
+	PreviousOwnerKind      string    `db:"previous_owner_kind" json:"previous_owner_kind,omitempty"`
+	PreviousOwnerActorID   string    `db:"previous_owner_actor_id" json:"previous_owner_actor_id,omitempty"`
+	PreviousInstallationID string    `db:"previous_installation_id" json:"previous_installation_id,omitempty"`
+	PreviousInstanceKey    string    `db:"previous_instance_key" json:"previous_instance_key,omitempty"`
+	InstallationID         string    `db:"installation_id" json:"installation_id,omitempty"`
+	InstanceKey            string    `db:"instance_key" json:"instance_key,omitempty"`
+	OwnerKind              string    `db:"owner_kind" json:"owner_kind,omitempty"`
+	OwnerActorID           string    `db:"owner_actor_id" json:"owner_actor_id,omitempty"`
+	Generation             int64     `db:"generation" json:"generation"`
+	ActorID                string    `db:"actor_id" json:"actor_id"`
+	Reason                 string    `db:"reason" json:"reason"`
+	ResourceVersion        string    `db:"resource_version" json:"resource_version"`
+	CreatedAt              time.Time `db:"created_at" json:"created_at"`
+}
+
 // IsOfficeOwnedAndAssigned reports whether runtime behavior belongs to an
 // Office-owned task with a designated runner. Kanban tasks may also project a
 // runner from their workflow step, but retain normal per-session semantics.
@@ -1669,6 +1840,15 @@ const (
 	PermissionStatusExpired PermissionStatus = "expired"
 )
 
+// PermissionDecision records the option and policy source that resolved a
+// permission request. Human decisions continue to use PermissionResolutionAudit;
+// this metadata shape is also available to other decision sources.
+type PermissionDecision struct {
+	OptionID   string `json:"option_id"`
+	OptionKind string `json:"option_kind"`
+	Source     string `json:"source"`
+}
+
 type PermissionResolutionActorKind string
 
 const (
@@ -1684,6 +1864,7 @@ const (
 	PermissionSourceWeb         PermissionResolutionSource = "web"
 	PermissionSourceExternalMCP PermissionResolutionSource = "external_mcp"
 	PermissionSourceAutomation  PermissionResolutionSource = "automation"
+	PermissionSourceAutoApprove PermissionResolutionSource = "auto_approve"
 	// PermissionSourceAutomationMCP identifies a resolution made by the
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.
@@ -2385,6 +2566,7 @@ const (
 	ExecutorTypeSSH          ExecutorType = "ssh"
 	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
+	ExecutorTypePluginRemote ExecutorType = "plugin_remote"
 )
 
 // IsRemoteExecutorType reports whether the given executor type represents
@@ -2392,7 +2574,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote, ExecutorTypePluginRemote:
 		return true
 	default:
 		return false
@@ -2406,7 +2588,7 @@ func IsRemoteExecutorType(t ExecutorType) bool {
 // when adding a new ExecutorType.
 func (t ExecutorType) Runtime() agentruntime.Runtime {
 	switch t {
-	case ExecutorTypeLocal, ExecutorTypeWorktree, ExecutorTypeMockRemote:
+	case ExecutorTypeLocal, ExecutorType("local_pc"), ExecutorTypeWorktree, ExecutorTypeMockRemote:
 		return agentruntime.RuntimeStandalone
 	case ExecutorTypeLocalDocker:
 		return agentruntime.RuntimeDocker
@@ -2418,8 +2600,10 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSSH
 	case ExecutorTypeKubernetes:
 		return agentruntime.RuntimeKubernetes
+	case ExecutorTypePluginRemote:
+		return agentruntime.RuntimePluginRemote
 	default:
-		return agentruntime.RuntimeStandalone
+		return agentruntime.RuntimeUnknown
 	}
 }
 
@@ -2465,6 +2649,8 @@ type Executor struct {
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+	// Provider is a transient projection populated from the live plugin catalog.
+	Provider *ExecutorProvider `json:"provider,omitempty" db:"-"`
 }
 
 // ExecutorRunning tracks an active executor instance for a session.
@@ -2480,9 +2666,13 @@ type ExecutorRunning struct {
 	ResumeToken        string               `json:"resume_token,omitempty"`
 	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
 	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
-	ContainerID        string               `json:"container_id,omitempty"`
-	AgentctlURL        string               `json:"agentctl_url,omitempty"`
-	AgentctlPort       int                  `json:"agentctl_port,omitempty"`
+	// TransientAuthToken carries a decrypted agentctl token only between the
+	// lifecycle recovery inventory read and the matching remote runtime. It is
+	// excluded from JSON and database persistence.
+	TransientAuthToken string `json:"-" db:"-"`
+	ContainerID        string `json:"container_id,omitempty"`
+	AgentctlURL        string `json:"agentctl_url,omitempty"`
+	AgentctlPort       int    `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`
@@ -2500,6 +2690,9 @@ type ExecutorRunning struct {
 	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+	// ExpectedPluginExecutorRevision is the inventory-envelope revision observed
+	// before a provider operation. It is transient and required for updates.
+	ExpectedPluginExecutorRevision uint64 `json:"-" db:"-"`
 }
 
 // ProfileEnvVar represents an environment variable for an executor profile.
@@ -2637,6 +2830,8 @@ type TaskEnvironmentRepo struct {
 	WorktreeBranchOwner       string     `json:"-"`
 	WorktreeIntegrationRef    string     `json:"-"`
 	WorktreeRecoveryHeadSHA   string     `json:"-"`
+	WorktreeSourceClonePath   string     `json:"-"`
+	WorktreeSourceCommonDir   string     `json:"-"`
 	WorktreeBranchCompactedAt *time.Time `json:"-"`
 	Position                  int        `json:"position"`
 	ErrorMessage              string     `json:"error_message,omitempty"`
@@ -2650,12 +2845,14 @@ type TaskEnvironmentRepo struct {
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority
 // required while an automatic host-worktree recovery is in progress.
 type TaskEnvironmentRecoveryClaimRequest struct {
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	SessionID           string
-	OperationID         string
-	ExecutorType        string
+	TaskEnvironmentID          string
+	OwnerTaskID                string
+	OwnershipGeneration        int64
+	SessionID                  string
+	OperationID                string
+	ExecutorType               string
+	AllowCurrentSessionRuntime bool
+	CleanupJobID               string
 }
 
 // TaskEnvironmentRecoveryClaim is the durable authority held from recovery

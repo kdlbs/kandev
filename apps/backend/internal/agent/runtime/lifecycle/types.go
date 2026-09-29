@@ -20,6 +20,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -48,6 +49,9 @@ type AgentExecution struct {
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
 	WorkspaceID       string
+	// ExecutorType preserves launch locality for features that must only access
+	// the backend user's host filesystem. Empty means locality is unknown.
+	ExecutorType string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -104,6 +108,7 @@ type AgentExecution struct {
 	// AgentReady is published, so a queued successor cannot overwrite the
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
+	promptTurnIDs     map[uint64]string
 	promptLifecycleMu sync.Mutex
 
 	// recoveryAppliedControlTurnID is the control-server-assigned turn
@@ -761,6 +766,15 @@ func (e *AgentExecution) promptTurnIDSnapshot() string {
 	return e.promptTurnID
 }
 
+func (e *AgentExecution) promptTurnIDForGeneration(generation uint64) string {
+	if e == nil || generation == 0 {
+		return ""
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptTurnIDs[generation]
+}
+
 func (e *AgentExecution) setPromptTurnID(turnID string) {
 	if e == nil {
 		return
@@ -1156,23 +1170,28 @@ type WorkspaceFolderSpec struct {
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepoName               string
-	IntegrationRef         string
-	BaseBranch             string
-	DefaultBranch          string
-	CheckoutBranch         string
-	PRNumber               int
-	QualifiedPRBase        *models.PRBase
-	ComparisonTarget       *models.ComparisonTarget
-	WorktreeID             string
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	BranchSlug             string
-	BranchIdentitySlug     string
+	RepositoryID            string
+	RepositoryPath          string
+	WorktreePath            string
+	WorktreeBranch          string
+	CloneRelocation         *worktree.ManagedCloneRelocationProof
+	WorktreeSourceClonePath string
+	WorktreeSourceCommonDir string
+	RepoName                string
+	IntegrationRef          string
+	BaseBranch              string
+	DefaultBranch           string
+	CheckoutBranch          string
+	PRNumber                int
+	QualifiedPRBase         *models.PRBase
+	ComparisonTarget        *models.ComparisonTarget
+	WorktreeID              string
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	BranchSlug              string
+	BranchIdentitySlug      string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -1394,11 +1413,12 @@ type AgentProfileInfo struct {
 	AutoFallback bool
 	// RequireExactModel makes the configured model an explicit identity
 	// requirement. False preserves compatible pre-PR behavior.
-	RequireExactModel   bool
-	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
-	CLIPassthrough      bool
-	NativeSessionResume bool // Agent supports ACP session/load for resume
-	SupportsMCP         bool
+	RequireExactModel    bool
+	AllowIndexing        bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	CLIPassthrough       bool
+	CursorMCPAuthEnabled bool
+	NativeSessionResume  bool // Agent supports ACP session/load for resume
+	SupportsMCP          bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
@@ -1466,6 +1486,7 @@ type WorkspaceInfo struct {
 	// concurrent environment ownership transfer. A zero value is retained for
 	// legacy callers that do not project the generation.
 	ValidatedTaskEnvironmentGeneration int64
+	WorktreeRecoveryAdmitted           bool
 	// TaskArchived and WorkspaceOwnerArchived are projected by the task service
 	// so lifecycle callers cannot restore an archived task through a cached or
 	// direct workspace entry point.

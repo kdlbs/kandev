@@ -1,12 +1,13 @@
 "use client";
 
 import { WebAppFrame } from "./web-app-frame";
+import type { WebAppStartupFailureReason } from "./web-app-startup";
 
 export type CanvasPageProps = {
   runtimeUrl?: string | null;
   title: string;
   onLoad?: () => void;
-  onError?: () => void;
+  onError?: (reason: WebAppStartupFailureReason) => void;
 };
 
 /**

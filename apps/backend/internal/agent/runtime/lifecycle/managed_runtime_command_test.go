@@ -171,7 +171,7 @@ func TestRemotePreflightUsesResolvedManagedRuntimeVersion(t *testing.T) {
 		ManagedRuntimeVersion: "1.18.5",
 	}
 	got := buildRemotePreflightAgentCommand(req).Args()
-	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai@1.18.5", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.18.5", "acp", "--print-logs", "--log-level", "ERROR"}
 	if !strings.EqualFold(strings.Join(got, " "), strings.Join(want, " ")) {
 		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
 	}

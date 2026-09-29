@@ -204,6 +204,49 @@ describe("QueuedGhostMessage reorder handle", () => {
     expect(screen.queryByTestId(HANDLE_TESTID)).toBeNull();
   });
 });
+
+describe("QueuedGhostMessage sender badge", () => {
+  it("uses the same-task sender tab label shown in the transcript", () => {
+    const sessionId = "sender-session-1";
+    const senderSession = {
+      id: sessionId,
+      task_id: "task-1",
+      name: "Luna",
+      state: "WAITING_FOR_INPUT",
+      started_at: "2026-09-28T00:00:00Z",
+      updated_at: "2026-09-28T00:00:00Z",
+    };
+
+    render(
+      <StateProvider
+        initialState={
+          {
+            kanban: { tasks: [{ id: "task-1", title: "Review Contributor PR 3143" }] },
+            taskSessions: { items: { [sessionId]: senderSession } },
+          } as never
+        }
+      >
+        <ToastProvider>
+          <QueuedGhostMessage
+            entry={entry({
+              queued_by: "agent",
+              metadata: {
+                sender_task_id: "task-1",
+                sender_task_title: "Review Contributor PR 3143",
+                sender_session_id: sessionId,
+              },
+            })}
+            canEdit={false}
+            onSave={vi.fn()}
+            onRemove={vi.fn()}
+          />
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("sender-task-badge").textContent?.trim()).toBe("Luna");
+  });
+});
 describe("QueuedGhostMessage lease lifecycle", () => {
   it("leaves edit mode when its lease is lost", () => {
     const queuedEntry = entry({ queued_by: "user-1" });

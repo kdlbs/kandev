@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 
 const navigationMock = vi.hoisted(() => ({
   pathname: "/",

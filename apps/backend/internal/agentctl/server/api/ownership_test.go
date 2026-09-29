@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -261,10 +262,9 @@ func TestNonRenewingControlOperationsDoNotRenewOwnership(t *testing.T) {
 		}},
 		{"instance operation", func(t *testing.T) {
 			_, err := client.GetInstance(t.Context(), "no-such-instance")
-			// The not-found wording is the handler's 404, distinct from the
-			// "failed to get instance" a transport error produces, so this
-			// asserts the request was served rather than merely refused.
-			if err == nil || err.Error() != `instance "no-such-instance" not found` {
+			// Only the handler's 404 maps to this sentinel; a transport failure
+			// must not make the ownership assertion pass vacuously.
+			if !errors.Is(err, agentctl.ErrInstanceNotFound) {
 				t.Fatalf("GetInstance error = %v, want the handler's not-found response", err)
 			}
 		}},

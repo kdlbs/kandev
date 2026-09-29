@@ -230,20 +230,21 @@ func exactRunSessionEvent(data *AgentLifecycleData) bool {
 }
 
 type PromptUsageData struct {
-	AgentExecutionID string      `json:"agent_execution_id,omitempty"`
-	TaskID           string      `json:"task_id"`
-	SessionID        string      `json:"session_id"`
-	RunSessionID     string      `json:"run_session_id,omitempty"`
-	RunAttempt       int         `json:"run_attempt,omitempty"`
-	WorkspaceID      string      `json:"workspace_id,omitempty"`
-	AgentID          string      `json:"agent_id"`
-	AgentProfileID   string      `json:"agent_profile_id,omitempty"`
-	AgentType        string      `json:"agent_type"`
-	Model            string      `json:"model"`
-	Provider         string      `json:"provider"`
-	Usage            UsageTokens `json:"usage"`
-	TurnID           string      `json:"turn_id,omitempty"`
-	UsageEventID     string      `json:"usage_event_id,omitempty"`
+	AgentExecutionID string                          `json:"agent_execution_id,omitempty"`
+	TaskID           string                          `json:"task_id"`
+	SessionID        string                          `json:"session_id"`
+	RunSessionID     string                          `json:"run_session_id,omitempty"`
+	RunAttempt       int                             `json:"run_attempt,omitempty"`
+	WorkspaceID      string                          `json:"workspace_id,omitempty"`
+	AgentID          string                          `json:"agent_id"`
+	AgentProfileID   string                          `json:"agent_profile_id,omitempty"`
+	AgentType        string                          `json:"agent_type"`
+	Model            string                          `json:"model"`
+	Provider         string                          `json:"provider"`
+	Usage            UsageTokens                     `json:"usage"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
+	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -271,6 +272,7 @@ type UsageTokens struct {
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
 	ProviderReportedCostPresent  bool  `json:"provider_reported_cost_present,omitempty"`
 	Estimated                    bool  `json:"estimated,omitempty"`
+	PriceSuppressed              bool  `json:"price_suppressed,omitempty"`
 }
 
 // RegisterEventSubscribers subscribes to system events and queues runs.
@@ -384,15 +386,12 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	}
 
 	// Attribute to the agent that actually ran the turn, not the task's
-	// assignee — the two diverge for a reviewer/approver turn. The event
-	// carries the acting agent's own office identity directly
+	// assignee. The event carries the acting agent's office identity directly
 	// (execution.officeProfileID(), captured at launch before step/routing
-	// overrides mutate the profile). The session-row lookup only reflects
-	// the acting agent when features.officeSessionIdentity is on — off by
-	// default in every shipped profile, it stores the assignee for every
-	// participant's session — so it is kept only as a fallback for events
-	// published before this field existed. Final fallback is the assignee,
-	// mirroring handlePromptUsage's log-and-continue fallback below.
+	// overrides mutate the profile). The session-row lookup remains a fallback
+	// for events published before the agent identity field existed. Final
+	// fallback is the assignee, mirroring handlePromptUsage's log-and-continue
+	// fallback below.
 	authorID := fields.AssigneeAgentProfileID
 	if data.AgentProfileID != "" {
 		authorID = data.AgentProfileID
@@ -1294,6 +1293,11 @@ func (s *Service) queueTaskAssignedRun(
 	if fields == nil || !fields.IsFromOffice {
 		return nil
 	}
+	// The current step must accept an auto-started run before this wake is
+	// queued. See shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if !shared.IsAssignmentWakeEligible(ctx, s.logger, s.repo, s.workflowStepGetter, taskID, "event_subscribers.queue_task_assigned_run") {
+		return nil
+	}
 	fellBackToStoredRunner := false
 	if agentProfileID == "" && fallbackToStoredRunner {
 		agentProfileID = fields.AssigneeAgentProfileID
@@ -1309,7 +1313,20 @@ func (s *Service) queueTaskAssignedRun(
 	} else {
 		key = dedupkeys.AssignmentKey(taskID, agentProfileID, *assignmentGeneration)
 	}
-	return s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
+	err = s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
+	if err == nil {
+		return nil
+	}
+	// A confirmed operator pause is not a subscriber failure — record the
+	// occurrence so pause.Service.Resume or the recovery tick replays it
+	// once the workspace resumes (paused-assignment-replay), instead of
+	// the assignment silently going nowhere.
+	var pe *pausedQueueError
+	if errors.As(err, &pe) && pe.pause != nil {
+		s.RecordDeferredAssignment(ctx, taskID, pe.pause.ID)
+		return nil
+	}
+	return err
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues

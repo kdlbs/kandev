@@ -95,6 +95,7 @@ import type {
   QueueMetaUpdateOptions,
   QueueOperationToken,
   QueuedMessage,
+  TaskSessionHydrationEpoch,
 } from "./slices/session/types";
 // Combined AppState type
 export type AppState = KanbanSlice & {
@@ -161,8 +162,10 @@ export type AppState = KanbanSlice & {
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
   sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
+  usageInvalidation: (typeof defaultSessionRuntimeState)["usageInvalidation"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
+  backgroundWork: (typeof defaultSessionRuntimeState)["backgroundWork"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -491,7 +494,10 @@ export type AppState = KanbanSlice & {
   ) => void;
   setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
   setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
-  setTaskSession: (session: TaskSession) => void;
+  setTaskSession: (
+    session: TaskSession,
+    hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+  ) => void;
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
   setTaskSessionPendingAction: (
     sessionId: string,
@@ -503,7 +509,7 @@ export type AppState = KanbanSlice & {
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],
-    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+    hydrationEpochsAtRequestStart: Readonly<Record<string, TaskSessionHydrationEpoch>>,
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
@@ -575,7 +581,12 @@ export type AppState = KanbanSlice & {
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
+  setSessionMode: (
+    sessionId: string,
+    modeId: string,
+    availableModes?: SessionModeEntry[],
+    requestedModeId?: string,
+  ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
   setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
@@ -593,6 +604,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
@@ -612,6 +624,21 @@ export type AppState = KanbanSlice & {
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  setBackgroundWorkloads: (
+    sessionId: string,
+    workloads: import("@/lib/types/background-work").WorkloadRunObservation[],
+  ) => void;
+  updateBackgroundWorkload: (
+    sessionId: string,
+    workload: import("@/lib/types/background-work").WorkloadRunObservation,
+  ) => void;
+  appendBackgroundWorkloadOutput: (
+    sessionId: string,
+    chunk: import("@/lib/types/background-work").WorkloadOutputChunk,
+  ) => void;
+  setActiveBackgroundWorkload: (sessionId: string, workId: string) => void;
+  clearBackgroundWork: (sessionId: string) => void;
+  setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];

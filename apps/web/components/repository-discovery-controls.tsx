@@ -39,6 +39,8 @@ export function RepositoryDiscoveryControls({
       isLoading={discovery.isLoading || discovery.isRefreshing}
       discoveryRoots={discovery.rootStates.filter((root) => Boolean(root.id))}
       homeConfirmationRequired={discovery.homeConfirmationRequired}
+      onConfirmHomeDiscovery={actions.handleConfirmHomeDiscovery}
+      isConfirmingHomeDiscovery={actions.isConfirmingHomeDiscovery}
       onChooseDiscoveryRoot={actions.handleChooseDiscoveryRoot}
       onRefreshDiscovery={actions.refreshDiscovery}
       onReconnectDiscoveryRoot={actions.handleReconnectDiscoveryRoot}

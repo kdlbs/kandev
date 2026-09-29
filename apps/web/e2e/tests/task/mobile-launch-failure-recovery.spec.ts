@@ -91,6 +91,16 @@ test.describe("mobile task launch failure recovery", () => {
 
       const sharedError = testPage.getByTestId("task-shared-error");
       await expect(sharedError).toBeVisible({ timeout: 30_000 });
+      const mobileLayout = testPage.getByTestId("mobile-task-layout");
+      const fixedHeader = mobileLayout.locator(":scope > div.fixed.top-0");
+      const [headerBox, errorBox] = await Promise.all([
+        fixedHeader.boundingBox(),
+        sharedError.boundingBox(),
+      ]);
+      expect(headerBox).not.toBeNull();
+      expect(errorBox).not.toBeNull();
+      if (!headerBox || !errorBox) throw new Error("mobile shared-error geometry is unavailable");
+      expect(errorBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
       await testPage.getByTestId("task-shared-error-details").tap();
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1);
@@ -270,6 +280,7 @@ test.describe("mobile task launch failure recovery", () => {
     ).join("\n");
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "The agent could not start.",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -343,10 +354,10 @@ test.describe("mobile task launch failure recovery", () => {
     const initialScroll = await readTranscriptScrollState(transcript);
     expect(initialScroll.scrollHeight).toBeGreaterThan(initialScroll.clientHeight);
     expect(initialScroll.scrollTop).toBeGreaterThan(0);
-    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+    await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
 
     for (const testId of ["recovery-resume-button", "recovery-fresh-button"]) {
-      const button = failureRow.getByTestId(testId);
+      const button = testPage.getByTestId(testId);
       await expect(button).toBeVisible();
       await expect(button).toBeInViewport();
       const box = await button.boundingBox();
@@ -372,6 +383,7 @@ test.describe("mobile task launch failure recovery", () => {
 
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -416,6 +428,7 @@ test.describe("mobile task launch failure recovery", () => {
     const nextFailureCreatedAt = new Date(Date.now() + 4_000).toISOString();
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "The agent could not start.",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -458,7 +471,10 @@ test.describe("mobile task launch failure recovery", () => {
     });
     await expect(failureRows).toHaveCount(2);
     const currentFailureRow = failureRows.last();
-    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
     await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
 
     await testPage.reload();
@@ -466,7 +482,10 @@ test.describe("mobile task launch failure recovery", () => {
     const reloadedFailureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
     await expect(reloadedFailureRows).toHaveCount(2);
     await expect(reloadedFailureRows.first().getByTestId("recovery-resume-button")).toHaveCount(0);
-    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile bootstrap recovery presentation");
 
     await testPage.screenshot({

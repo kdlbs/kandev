@@ -57,6 +57,7 @@ type executorRunningStatusCASWriter interface {
 // Optional only for tests that don't exercise the persistence path.
 func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.runningWriter = w
+	m.wireKubernetesEnvironmentStore()
 }
 
 // buildRunningFromExecution maps an in-memory execution into the persistence
@@ -517,6 +518,10 @@ type executorRunningLister interface {
 	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
 }
 
+type pluginExecutorRunningLister interface {
+	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
 // ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
 // every live standalone executors_running row, read at startup step 3 before
 // any control-server contact, so the recovery guard can be taken against it
@@ -529,6 +534,16 @@ func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*mo
 		return nil, nil
 	}
 	return lister.ListExecutorsRunningLiveStandalone(ctx)
+}
+
+// ListLivePluginExecutorsRunning includes stopped inventory so callers can
+// distinguish a retained environment from an empty session record.
+func (m *Manager) ListLivePluginExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(pluginExecutorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningPluginRemote(ctx)
 }
 
 type executorRunningCASWriter interface {

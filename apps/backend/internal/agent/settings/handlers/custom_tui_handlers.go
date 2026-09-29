@@ -26,17 +26,21 @@ type createCustomTUIAgentRequest struct {
 	// Protocol is the runtime kandev drives the command with: empty (the
 	// default) for terminal passthrough, "acp" for ACP on stdin/stdout.
 	Protocol string `json:"protocol"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste"`
 }
 
 func (r createCustomTUIAgentRequest) toControllerRequest() controller.CreateCustomTUIAgentRequest {
 	return controller.CreateCustomTUIAgentRequest{
-		DisplayName: r.DisplayName,
-		Model:       r.Model,
-		Command:     r.Command,
-		Description: r.Description,
-		CommandArgs: r.CommandArgs,
-		MCPStrategy: r.MCPStrategy,
-		Protocol:    r.Protocol,
+		DisplayName:           r.DisplayName,
+		Model:                 r.Model,
+		Command:               r.Command,
+		Description:           r.Description,
+		CommandArgs:           r.CommandArgs,
+		MCPStrategy:           r.MCPStrategy,
+		Protocol:              r.Protocol,
+		DisableBracketedPaste: r.DisableBracketedPaste,
 	}
 }
 

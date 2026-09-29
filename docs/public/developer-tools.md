@@ -130,6 +130,9 @@ Closing the floating Settings panel preserves the conversation. To delete it, op
 
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
+Shared prompt reads and reference use are available to org members. Creating,
+editing, or deleting prompts requires `org.config.manage` permission.
+
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
 In the new task form, the same completion inserts an editable `@name` chip.
@@ -145,6 +148,11 @@ the canvas authoring workflow at launch. Editing the prompt changes later
 canvas tasks; a user prompt with the same name keeps its own content.
 
 Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
+
+Workflow-step launches, profile switches, context resets, and replacement
+launches keep one matching saved-prompt expansion in the stored message and
+agent prompt. A queued workflow prompt resolves references when it drains, and
+its recovery launch uses that same definition.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
@@ -205,7 +213,7 @@ re-picks their engine and language: preferences are not carried over.
 
 ## Files and editor integrations
 
-To open a task folder in your file manager, select **Open folder** beside the IDE control in the task toolbar. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
+To open a task folder in your file manager, open the **Open in editor** dropdown in the task toolbar and select **Open folder**. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
 
 This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
 
@@ -301,7 +309,11 @@ The status surface separates process startup, the LSP `initialize` request, and 
 
 Kandev does not impose an automatic initialization timeout or invent a percentage or ETA. Some valid project imports take several minutes, and LSP has no universal indexing-progress contract. When a server reports standard work-done progress, Kandev shows its title, message, percentage, and concurrent work-item count when available. Those values describe only the work item the server reported; its completion does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up, or stop it explicitly if the wait is unexpected.
 
-Each browser connection owns a language-server process; editors in one browser window share the connection for the same session and language. Kandev allows eight active connections by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. A request above that limit is rejected before it can start or resume the task host. Stopping a server, closing its connection, or stopping the task reaps the task-host process tree. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-connection limit before retrying.
+Task-owned browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` runtime flag remains as an operator kill switch; an explicit false override restores browser-owned cleanup. With continuity enabled, each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
+
+**Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. With continuity disabled by the kill switch, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
+
+During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; browser closes `1005` and `1006`, backend restart close `1001`, and backend transport close `4009` do not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**. Close `4010` means the task runtime stopped, so Kandev ends that lease without reconnecting it.
 
 ## Integrated terminal
 

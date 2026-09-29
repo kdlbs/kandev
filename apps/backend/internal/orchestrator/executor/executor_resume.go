@@ -318,13 +318,13 @@ func (e *Executor) resolvePRBaseForLaunch(
 		return nil
 	}
 	if err := resolved.Validate(); err != nil {
+		e.logger.Warn("live pull request base identity mismatch",
+			zap.String("task_repository_id", tr.ID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("mismatch_reason", string(prBaseMismatchInvalidResolvedBase)))
 		if expected == nil {
 			return NewPRBaseResolutionError(err, false, true)
 		}
-		e.logger.Debug("live pull request base identity did not match the task repository",
-			zap.String("task_id", tr.TaskID),
-			zap.Int("pr_number", info.PRNumber),
-			zap.Error(err))
 		return nil
 	}
 	attachedRepository, hasAttachedRepository := githubComparisonRepositoryFromRepository(repo)
@@ -333,14 +333,16 @@ func (e *Executor) resolvePRBaseForLaunch(
 	if info.RemoteContribution != nil {
 		headRepository, hasHeadRepository = normalizeGitHubComparisonRepository(info.RemoteContribution.SourceRepository)
 	}
-	if !validPRBaseIdentity(resolved, info.PRNumber, info.CheckoutBranch, expected,
-		attachedRepository, hasAttachedRepository, headRepository, hasHeadRepository, info.RemoteContribution != nil) {
+	validIdentity, mismatchReason := validPRBaseIdentity(resolved, info.PRNumber, info.CheckoutBranch, expected,
+		attachedRepository, hasAttachedRepository, headRepository, hasHeadRepository, info.RemoteContribution != nil)
+	if !validIdentity {
+		e.logger.Warn("live pull request base identity mismatch",
+			zap.String("task_repository_id", tr.ID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("mismatch_reason", string(mismatchReason)))
 		if expected == nil {
 			return NewPRBaseResolutionError(errors.New("pull request identity did not match the task repository binding"), false, true)
 		}
-		e.logger.Debug("live pull request base identity did not match the task repository",
-			zap.String("task_id", tr.TaskID),
-			zap.Int("pr_number", info.PRNumber))
 		return nil
 	}
 	if resolved.Target.TargetBranch != tr.BaseBranch {
@@ -403,20 +405,40 @@ func isUnusablePRBaseAssociation(err error) bool {
 	return errors.As(err, &invalidAssociation) && invalidAssociation.InvalidAssociation()
 }
 
+type prBaseIdentityMismatchReason string
+
+const (
+	prBaseMismatchPRNumber            prBaseIdentityMismatchReason = "pr_number_mismatch"
+	prBaseMismatchProvider            prBaseIdentityMismatchReason = "provider_mismatch"
+	prBaseMismatchKind                prBaseIdentityMismatchReason = "kind_mismatch"
+	prBaseMismatchHeadBranch          prBaseIdentityMismatchReason = "head_branch_mismatch"
+	prBaseMismatchRepositoryIdentity  prBaseIdentityMismatchReason = "repository_identity_missing"
+	prBaseMismatchHeadRepository      prBaseIdentityMismatchReason = "head_repository_mismatch"
+	prBaseMismatchTargetRepository    prBaseIdentityMismatchReason = "target_repository_mismatch"
+	prBaseMismatchCheckoutBranch      prBaseIdentityMismatchReason = "checkout_branch_required"
+	prBaseMismatchComparisonTarget    prBaseIdentityMismatchReason = "comparison_target_mismatch"
+	prBaseMismatchInvalidResolvedBase prBaseIdentityMismatchReason = "invalid_resolved_pr_base"
+)
+
 func validPRBaseIdentity(
 	base models.PRBase, number int, checkoutBranch string,
 	expected *models.ComparisonTarget,
 	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
 	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
 	contribution bool,
-) bool {
+) (bool, prBaseIdentityMismatchReason) {
 	target := base.Target
-	if target.Number != number || target.Provider != models.ComparisonTargetProviderGitHub ||
-		target.Kind != models.ComparisonTargetKindPullRequest {
-		return false
+	if target.Number != number {
+		return false, prBaseMismatchPRNumber
+	}
+	if target.Provider != models.ComparisonTargetProviderGitHub {
+		return false, prBaseMismatchProvider
+	}
+	if target.Kind != models.ComparisonTargetKindPullRequest {
+		return false, prBaseMismatchKind
 	}
 	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
-		return false
+		return false, prBaseMismatchHeadBranch
 	}
 	if expected != nil || contribution {
 		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
@@ -430,38 +452,49 @@ func validBoundPRBaseIdentity(
 	target models.ComparisonTarget, expected *models.ComparisonTarget,
 	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
 	headRepository models.ComparisonTargetRepository, hasHeadRepository, contribution bool,
-) bool {
+) (bool, prBaseIdentityMismatchReason) {
 	if !hasAttachedRepository || !hasHeadRepository ||
 		!models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
-		return false
+		if !hasAttachedRepository || !hasHeadRepository {
+			return false, prBaseMismatchRepositoryIdentity
+		}
+		return false, prBaseMismatchHeadRepository
 	}
 	if contribution && !models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
-		return false
+		return false, prBaseMismatchTargetRepository
 	}
 	if expected == nil {
-		return true
+		return true, ""
 	}
-	return expected.ChangeIdentityEqual(target) &&
-		expected.HeadBranch == target.HeadBranch &&
-		models.ComparisonTargetRepositoriesEqual(expected.HeadRepository, target.HeadRepository)
+	if !expected.ChangeIdentityEqual(target) || expected.HeadBranch != target.HeadBranch ||
+		!models.ComparisonTargetRepositoriesEqual(expected.HeadRepository, target.HeadRepository) {
+		return false, prBaseMismatchComparisonTarget
+	}
+	return true, ""
 }
 
 func validUnboundPRBaseIdentity(
 	target models.ComparisonTarget, checkoutBranch string,
 	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
 	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
-) bool {
+) (bool, prBaseIdentityMismatchReason) {
 	if !hasAttachedRepository || !hasHeadRepository {
-		return false
+		return false, prBaseMismatchRepositoryIdentity
 	}
 	if models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
 		if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, attachedRepository) {
-			return true
+			return true, ""
 		}
-		return checkoutBranch != ""
+		if checkoutBranch != "" {
+			return true, ""
+		}
+		return false, prBaseMismatchCheckoutBranch
 	}
 	// Fork-attached legacy tasks bind the attached repository to the PR head.
-	return models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository)
+	if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
+		return true, ""
+	}
+	return false, prBaseMismatchHeadRepository
 }
 
 func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.ComparisonTargetRepository, bool) {
@@ -931,6 +964,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
+		claimAgentStartAttempt(session)
 	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
@@ -952,6 +986,17 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
 	if updateErr != nil {
+		if startAgent && errors.Is(updateErr, errSessionAdvancedToRunning) {
+			if resp.PrepareResult == nil || !resp.PrepareResult.Success {
+				return nil
+			}
+			return e.repo.SetSessionMetadataKey(
+				ctx,
+				sessionID,
+				"prepare_result",
+				buildPrepareResultMetadata(resp.PrepareResult),
+			)
+		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -1070,10 +1115,6 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	if startAgent {
-		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
-	}
-
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	completedResume := options.AllowCompletedSessionResume &&
@@ -1138,7 +1179,7 @@ func (e *Executor) resumeSession(
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
-		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
 	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
@@ -1681,6 +1722,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 		return "", nil, nil, err
 	}
 	applyResumeRepositoryFlags(req, allRepos)
+	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
 		return "", existingEnv, nil, err
 	}
@@ -2346,6 +2388,7 @@ func (e *Executor) persistResumeStateWithOptions(
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
+		claimAgentStartAttempt(session)
 		if completedResume {
 			if session.Metadata == nil {
 				session.Metadata = make(map[string]interface{})
@@ -2465,7 +2508,7 @@ func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("session_state", string(session.State)))
-	}, false, true)
+	}, false, true, models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
 }
 
 func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) error {

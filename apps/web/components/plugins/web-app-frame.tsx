@@ -11,6 +11,7 @@ import {
   createWebAppStartupProbe,
   parseWebAppStartupResult,
   WEB_APP_STARTUP_TIMEOUT_MS,
+  type WebAppStartupFailureReason,
 } from "./web-app-startup";
 
 type WebAppFrameProps = {
@@ -20,7 +21,7 @@ type WebAppFrameProps = {
   title: string;
   className?: string;
   onLoad?: () => void;
-  onError?: () => void;
+  onError?: (reason: WebAppStartupFailureReason) => void;
 };
 
 type FrameState = "loading" | "ready" | "unavailable";
@@ -32,8 +33,70 @@ type WebAppFrameLifecycleProps = {
   iframeRef: IframeReference;
   sendAppearance: () => void;
   onLoad?: () => void;
-  onError?: () => void;
+  onError?: (reason: WebAppStartupFailureReason) => void;
 };
+
+type WebAppStartupOutcome =
+  | { result: "ready" }
+  | { result: "failed"; reason: WebAppStartupFailureReason };
+
+type StartupAttempt = {
+  nonce: string;
+  frameWindow: Window | null;
+  settled: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+function useWebAppStartupMessageListener({
+  runtimeUrl,
+  iframeRef,
+  attemptRef,
+  finishAttempt,
+}: {
+  runtimeUrl?: string | null;
+  iframeRef: IframeReference;
+  attemptRef: { current: StartupAttempt | null };
+  finishAttempt: (outcome: WebAppStartupOutcome) => void;
+}) {
+  useLayoutEffect(() => {
+    if (!runtimeUrl) return;
+    const attempt: StartupAttempt = {
+      nonce: createWebAppStartupNonce(),
+      frameWindow: null,
+      settled: false,
+      timer: null,
+    };
+    attemptRef.current = attempt;
+    attempt.timer = setTimeout(
+      () => finishAttempt({ result: "failed", reason: "timeout" }),
+      WEB_APP_STARTUP_TIMEOUT_MS,
+    );
+
+    const handleStartupMessage = (event: MessageEvent<unknown>) => {
+      if (attemptRef.current !== attempt || attempt.settled) return;
+      const currentFrameWindow = iframeRef.current?.contentWindow;
+      if (
+        !currentFrameWindow ||
+        attempt.frameWindow !== currentFrameWindow ||
+        event.source !== currentFrameWindow
+      ) {
+        return;
+      }
+      const result = parseWebAppStartupResult(event.data, attempt.nonce);
+      if (!result) return;
+      finishAttempt(
+        result.result === "ready" ? { result: "ready" } : { result: "failed", reason: result.code },
+      );
+    };
+    window.addEventListener("message", handleStartupMessage);
+    return () => {
+      window.removeEventListener("message", handleStartupMessage);
+      if (attempt.timer !== null) clearTimeout(attempt.timer);
+      attempt.timer = null;
+      if (attemptRef.current === attempt) attemptRef.current = null;
+    };
+  }, [finishAttempt, iframeRef, runtimeUrl]);
+}
 
 function useWebAppFrameLifecycle({
   runtimeUrl,
@@ -47,12 +110,7 @@ function useWebAppFrameLifecycle({
   const onLoadRef = useRef(onLoad);
   const onErrorRef = useRef(onError);
   const sendAppearanceRef = useRef(sendAppearance);
-  const attemptRef = useRef<{
-    nonce: string;
-    frameWindow: Window | null;
-    settled: boolean;
-    timer: ReturnType<typeof setTimeout> | null;
-  } | null>(null);
+  const attemptRef = useRef<StartupAttempt | null>(null);
 
   useEffect(() => {
     onLoadRef.current = onLoad;
@@ -70,7 +128,7 @@ function useWebAppFrameLifecycle({
     if (frameReadyRef.current) sendAppearance();
   }, [sendAppearance]);
 
-  const finishAttempt = useCallback((result: "ready" | "failed") => {
+  const finishAttempt = useCallback((outcome: WebAppStartupOutcome) => {
     const attempt = attemptRef.current;
     if (!attempt || attempt.settled) return;
     attempt.settled = true;
@@ -78,10 +136,10 @@ function useWebAppFrameLifecycle({
       clearTimeout(attempt.timer);
       attempt.timer = null;
     }
-    if (result === "failed") {
+    if (outcome.result === "failed") {
       frameReadyRef.current = false;
       setFrameState("unavailable");
-      onErrorRef.current?.();
+      onErrorRef.current?.(outcome.reason);
       return;
     }
     frameReadyRef.current = true;
@@ -93,39 +151,7 @@ function useWebAppFrameLifecycle({
     });
   }, []);
 
-  useLayoutEffect(() => {
-    if (!runtimeUrl) return;
-    const attempt = {
-      nonce: createWebAppStartupNonce(),
-      frameWindow: null as Window | null,
-      settled: false,
-      timer: null as ReturnType<typeof setTimeout> | null,
-    };
-    attemptRef.current = attempt;
-    attempt.timer = setTimeout(() => finishAttempt("failed"), WEB_APP_STARTUP_TIMEOUT_MS);
-
-    const handleStartupMessage = (event: MessageEvent<unknown>) => {
-      if (attemptRef.current !== attempt || attempt.settled) return;
-      const currentFrameWindow = iframeRef.current?.contentWindow;
-      if (
-        !currentFrameWindow ||
-        attempt.frameWindow !== currentFrameWindow ||
-        event.source !== currentFrameWindow
-      ) {
-        return;
-      }
-      const result = parseWebAppStartupResult(event.data, attempt.nonce);
-      if (!result) return;
-      finishAttempt(result.result);
-    };
-    window.addEventListener("message", handleStartupMessage);
-    return () => {
-      window.removeEventListener("message", handleStartupMessage);
-      if (attempt.timer !== null) clearTimeout(attempt.timer);
-      attempt.timer = null;
-      if (attemptRef.current === attempt) attemptRef.current = null;
-    };
-  }, [finishAttempt, iframeRef, runtimeUrl]);
+  useWebAppStartupMessageListener({ runtimeUrl, iframeRef, attemptRef, finishAttempt });
 
   const handleLoad = useCallback(() => {
     const attempt = attemptRef.current;
@@ -136,9 +162,7 @@ function useWebAppFrameLifecycle({
     frameWindow.postMessage(createWebAppStartupProbe(attempt.nonce), "*");
   }, [iframeRef]);
 
-  const handleError = useCallback(() => finishAttempt("failed"), [finishAttempt]);
-
-  return { frameState, handleLoad, handleError };
+  return { frameState, handleLoad };
 }
 
 /**
@@ -158,7 +182,7 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
     target.postMessage(resolveWebAppAppearance(document, resolvedTheme), "*");
   }, [resolvedTheme]);
 
-  const { frameState, handleLoad, handleError } = useWebAppFrameLifecycle({
+  const { frameState, handleLoad } = useWebAppFrameLifecycle({
     runtimeUrl,
     iframeRef,
     sendAppearance,
@@ -179,6 +203,10 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
       aria-busy={frameState === "loading"}
     >
       {runtimeUrl && frameState !== "unavailable" ? (
+        // No onError here: React never attaches a DOM "error" listener for iframe/object/embed
+        // (it only listens for "load"), so a document-load failure is unobservable from the
+        // frame element itself. It surfaces only through the guest's own postMessage handshake
+        // (the "document_error" reason) or the startup timeout.
         <iframe
           key={runtimeUrl}
           title={title}
@@ -189,7 +217,6 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
           loading="eager"
           className="block h-full min-h-0 w-full min-w-0 flex-1 border-0"
           onLoad={handleLoad}
-          onError={handleError}
         />
       ) : null}
       {frameState !== "ready" && (

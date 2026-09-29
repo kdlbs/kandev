@@ -1,8 +1,28 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { PluginRecord, PluginSettings, SyncResult } from "@/lib/types/plugins";
+import type {
+  PluginCapabilityApproval,
+  PluginCapabilityApprovalContext,
+  PluginRecord,
+  PluginSettings,
+  RevokePluginCapabilityApprovalInput,
+  SyncResult,
+  UpdatePluginCapabilityApprovalInput,
+} from "@/lib/types/plugins";
+import type { ManagedConversationDestinationOption } from "@/lib/types/automation";
 
 const BASE = "/api/plugins";
+
+export async function listManagedConversationDestinations(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<ManagedConversationDestinationOption[]> {
+  const response = await fetchJson<{ destinations?: ManagedConversationDestinationOption[] }>(
+    `${BASE}/workspaces/${encodeURIComponent(workspaceId)}/managed-conversation-destinations`,
+    options,
+  );
+  return response.destinations ?? [];
+}
 
 // listPlugins fetches every registered plugin (GET /api/plugins).
 export async function listPlugins(options?: ApiRequestOptions) {
@@ -129,10 +149,13 @@ export async function enablePlugin(id: string, options?: ApiRequestOptions) {
 
 // disablePlugin transitions a plugin to disabled (POST /api/plugins/:id/disable).
 export async function disablePlugin(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ disabled: boolean }>(`${BASE}/${encodeURIComponent(id)}/disable`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
-  });
+  return fetchJson<{ disabled: boolean; remote_resources_may_remain: boolean }>(
+    `${BASE}/${encodeURIComponent(id)}/disable`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST" },
+    },
+  );
 }
 
 // uninstallPlugin removes a plugin's registration (DELETE /api/plugins/:id).
@@ -185,6 +208,54 @@ export async function setPluginAutoUpdate(
       body: JSON.stringify({ auto_update: autoUpdate }),
     },
   });
+}
+
+export async function getPluginCapabilityApprovalContext(
+  pluginId: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<PluginCapabilityApprovalContext> {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<PluginCapabilityApprovalContext>(
+    `${BASE}/${encodeURIComponent(pluginId)}/capability-approvals?${query.toString()}`,
+    options,
+  );
+}
+
+export async function updatePluginCapabilityApproval(
+  pluginId: string,
+  input: UpdatePluginCapabilityApprovalInput,
+  options?: ApiRequestOptions,
+): Promise<PluginCapabilityApproval> {
+  return fetchJson<PluginCapabilityApproval>(
+    `${BASE}/${encodeURIComponent(pluginId)}/capability-approvals`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "PUT",
+        body: JSON.stringify(input),
+      },
+    },
+  );
+}
+
+export async function revokePluginCapabilityApproval(
+  pluginId: string,
+  input: RevokePluginCapabilityApprovalInput,
+  options?: ApiRequestOptions,
+): Promise<PluginCapabilityApproval> {
+  return fetchJson<PluginCapabilityApproval>(
+    `${BASE}/${encodeURIComponent(pluginId)}/capability-approvals`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "DELETE",
+        body: JSON.stringify(input),
+      },
+    },
+  );
 }
 
 // syncPlugins reconciles the plugin registry with the plugins directory on

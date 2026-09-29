@@ -121,5 +121,14 @@
   "newViewNumbered": "新しい表示 {{suffix}}",
   "untitledView": "名前なしビュー",
   "workspaceContextRefreshFailed": "タスクを更新できなかった。",
-  "workspaceContextAccessDenied": "このワークスペースへのアクセス権がなくなった。"
+  "workspaceContextAccessDenied": "このワークスペースへのアクセス権がなくなった。",
+  "continuedFrom": "{{title}} から続く",
+  "continuationLabel": "続き",
+  "selectedTaskCount_one": "{{count}} 件のタスクを選択中",
+  "selectedTaskCount_other": "{{count}} 件のタスクを選択中",
+  "clearSelection": "選択を解除",
+  "nextPage": "次へ",
+  "pageLoadFailed": "このページを読み込めませんでした。",
+  "pageStatus": "全 {{total}} ページ中 {{page}} ページ目",
+  "previousPage": "前へ"
 }

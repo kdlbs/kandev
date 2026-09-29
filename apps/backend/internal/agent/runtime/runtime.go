@@ -32,6 +32,19 @@ type OwnerAdmission = lifecycle.OwnerAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
+type AgentExecution = lifecycle.AgentExecution
+type CachedModeState = lifecycle.CachedModeState
+
+// ErrNoExecutionForSession reports that a session has no live execution.
+var ErrNoExecutionForSession = lifecycle.ErrNoExecutionForSession
+
+// SessionExecutionControl is the runtime seam for looking up an execution by
+// session and applying a provider-supported session mode.
+type SessionExecutionControl interface {
+	GetExecutionBySessionID(sessionID string) (*AgentExecution, bool)
+	GetModeStateForSession(sessionID string) *CachedModeState
+	SetSessionMode(ctx context.Context, executionID, acpSessionID, modeID string) error
+}
 
 const (
 	ExecutionOwnerTask = lifecycle.ExecutionOwnerTask
@@ -72,6 +85,9 @@ type Runtime interface {
 
 	// SetMcpMode swaps the MCP tool mode for a running execution.
 	SetMcpMode(ctx context.Context, executionID string, mode string) error
+
+	// ExecuteBackgroundWorkAction executes an action on a background workload in the running execution.
+	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
 }
 
 // LaunchSpec carries everything the runtime needs to start an agent.
@@ -180,6 +196,7 @@ type Backend interface {
 	StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error
 	GetExecution(executionID string) (*lifecycle.AgentExecution, bool)
 	SetMcpMode(ctx context.Context, executionID string, mode string) error
+	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
 }
 
 // Compile-time check: the lifecycle Manager satisfies Backend.

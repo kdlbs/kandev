@@ -71,12 +71,19 @@ export function TaskTopBarPluginActions(props: {
     };
   }, [presentation, sessionId, sessionIds, taskId, taskTitle, workspaceId]);
 
-  const content = <MemoizedPluginSlot name="chat-top-bar" slotProps={slotProps} />;
+  const actionSurface = useMemo(
+    () => ({ surface: "topbar" as const, presentation }),
+    [presentation],
+  );
+
+  const content = (
+    <MemoizedPluginSlot name="chat-top-bar" slotProps={slotProps} actionSurface={actionSurface} />
+  );
   if (presentation === "desktop") return content;
 
   return (
     <div
-      className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 overflow-x-clip [&>*]:min-w-0 [&>*]:max-w-full [&_[data-slot=button]]:!min-h-11 [&_[data-slot=button]]:!min-w-11 [&_[data-slot=button]]:!max-w-full [&_[data-slot=button]]:!whitespace-normal"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2 overflow-x-clip [&>*]:min-w-0 [&>*]:max-w-full [&_[data-slot=button]]:!min-h-11 [&_[data-slot=button]]:!min-w-11 [&_[data-slot=button]]:!max-w-full [&_[data-slot=button]]:!whitespace-normal"
       data-testid="mobile-chat-top-bar-plugin-actions"
     >
       {content}

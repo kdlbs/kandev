@@ -36,6 +36,7 @@
   "capabilityProbeFailed": "Probe failed. Check agent logs for details.",
   "capabilityProbing": "Checking agent capabilities…",
   "changeTierMappingsFirst": "Change these workspace tier mappings before deleting this profile.",
+  "cliFlagsGoToBridge": "CLI flags are appended to the launched ACP bridge process, not to the agent CLI it wraps.",
   "everythingInstalled": "Every available agent and tool is already installed.",
   "expandAgentProfiles": "Expand {{name}} profiles",
   "checkingAuthentication": "Checking authentication",
@@ -47,6 +48,9 @@
   "command": "Command",
   "commandPrefix": "Command prefix",
   "commandPrefixHelp": "Tokens prepended to the agent launch command, so it runs under a sandbox launcher (e.g. <0>{{example}}</0>). The value is shell-tokenised. Leave empty to run the agent directly. Applies to ACP sessions only; it has no effect when the profile uses TUI passthrough.",
+  "cursorMcpAuthDescription": "Reuse MCP sign-ins from other local Cursor projects. Applies on the next launch.",
+  "cursorMcpAuthDisabledNote": "Turning this off removes the shared link on the next launch. Running sessions keep credentials already loaded.",
+  "cursorMcpAuthLabel": "Share local Cursor MCP credentials",
   "commandPreview": "Command Preview",
   "commandPreviewHelp": "The CLI command that will be executed based on the current settings.",
   "commandRequired": "Command is required",
@@ -323,5 +327,8 @@
   "providerApiKeyLabel": "API key",
   "providerApiKeyHelp": "Kandev secret holding the bearer token sent to the provider. Leave unset for a router that needs no auth.",
   "providerModelSlash": "Remove the slash from the model name: an OpenAI-compatible provider expects a bare model id.",
-  "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider."
+  "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider.",
+  "nativeCodexUnavailableTitle": "Native Codex app server is unavailable",
+  "nativeCodexUnavailable": "This saved profile is preserved, but it cannot be edited, duplicated, enabled, or started while the Codex app-server feature is off. You can delete the profile or enable the feature in Settings.",
+  "nativeCodexUnavailableShort": "Feature off"
 }

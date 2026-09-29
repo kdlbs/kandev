@@ -342,6 +342,7 @@ func TestMockClient_Reset(t *testing.T) {
 
 	m.SetUser("custom")
 	m.AddPR(&PR{Number: 1, RepoOwner: "o", RepoName: "r", HeadBranch: "b"})
+	m.SetPRDetail("o", "r", 1, &PR{Number: 1, Title: "detail override"}, nil)
 	m.AddOrgs([]GitHubOrg{{Login: "org1"}})
 
 	m.Reset()

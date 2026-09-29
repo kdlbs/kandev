@@ -124,6 +124,12 @@ type activityCleanupBarrier struct {
 	maintenanceErr chan error
 }
 
+func (b *activityCleanupBarrier) CaptureArchiveSourceManifests(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	return (&recordingWorktreeCleanup{}).CaptureArchiveSourceManifests(ctx, worktrees)
+}
+
 type blockingResumeCleanupRepository struct {
 	repository.TaskResourceCleanupRepository
 	entered chan struct{}
@@ -383,6 +389,12 @@ func (c *cancellableCleanupBarrier) OnTaskDeleted(context.Context, string) error
 
 func (c *cancellableCleanupBarrier) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
 	return nil, nil
+}
+
+func (c *cancellableCleanupBarrier) CaptureArchiveSourceManifests(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	return (&recordingWorktreeCleanup{}).CaptureArchiveSourceManifests(ctx, worktrees)
 }
 
 func (c *cancellableCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*worktree.Worktree) error {
@@ -1066,6 +1078,11 @@ func TestPreparedCleanupIsNotRunnableUntilStarted(t *testing.T) {
 
 func TestCancelPreparedTaskResourceCleanupIgnoresCallerCancellation(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-prepared-cancel", WorkspaceID: "ws-1", Title: "Prepared cancel",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
 	operationID := "cascade_cancel:prepared-cancel"
 	if err := taskSvc.PrepareTaskResourceCleanup(context.Background(), "task-prepared-cancel",
 		models.TaskResourceCleanupTriggerCascadeDelete, operationID, true); err != nil {
@@ -1090,6 +1107,11 @@ func TestPrepareTaskResourceCleanupReadmitsCancelledIntent(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	taskSvc.StopTaskResourceCleanupWorker()
 	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-retry-cancelled", WorkspaceID: "ws-1", Title: "Retry cancelled",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
 	operationID := "cascade_archive:retry-cancelled-intent"
 	if err := taskSvc.PrepareTaskResourceCleanup(
 		ctx, "task-retry-cancelled", models.TaskResourceCleanupTriggerCascadeArchive,
@@ -1147,6 +1169,11 @@ func TestTaskResourceCleanupRetriesCompletionPersistenceFailure(t *testing.T) {
 }
 func TestCancelPreparedTaskResourceCleanupIgnoresExpiredDeadline(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-expired-deadline", WorkspaceID: "ws-1", Title: "Expired deadline",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
 	operationID := "cascade_cancel:expired-deadline"
 	if err := taskSvc.PrepareTaskResourceCleanup(context.Background(), "task-expired-deadline",
 		models.TaskResourceCleanupTriggerCascadeDelete, operationID, true); err != nil {

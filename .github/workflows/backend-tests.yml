@@ -92,6 +92,7 @@ jobs:
             apps/web/lib/settings-discovery/contract.generated.json
             apps/web/lib/settings-discovery/profile-contract.generated.json
             scripts/settings-contract-ci.test.mjs
+            scripts/check-agentctl-deps.sh
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
@@ -185,6 +186,10 @@ jobs:
 
       - name: Build
         run: go build -v ./cmd/kandev
+
+      - name: Guard agentctl dependency graph
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check-agentctl-deps.sh
 
       - name: Verify settings catalog contract
         working-directory: ${{ github.workspace }}
@@ -351,6 +356,7 @@ jobs:
           # to compiler/process lines and package-level pass/fail summaries.
           go test \
             -race \
+            -timeout 20m \
             -coverprofile="coverage-${SHARD_NUMBER}.out" \
             -covermode=atomic \
             -json \
@@ -725,6 +731,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test Windows isolated instance safety
+        working-directory: ${{ github.workspace }}
+        shell: cmd
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-instance.Tests.ps1
+
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -771,6 +782,9 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      - name: Test Cursor project slug path normalization
+        run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
 
       # Pure GOOS-branch logic (no syscalls), but it must actually observe
       # Windows to prove the unavailable branch, not just compile under it.

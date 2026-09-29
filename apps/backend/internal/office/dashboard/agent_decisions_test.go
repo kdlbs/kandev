@@ -53,11 +53,9 @@ func (s *spyDecisionDispatcher) EvaluateStepQuorum(
 	return engine.QuorumSnapshot{}, nil
 }
 
-// TestRecordAgentDecision_SessionIDNotForwardedWhenFlagOff is the default
-// (flag-off) case: even though the caller supplies a SessionID, the
-// dispatcher never sees it, so RecordDecision falls back to its existing
-// resolveActiveSessionID path — the pre-office-session-identity behavior.
-func TestRecordAgentDecision_SessionIDNotForwardedWhenFlagOff(t *testing.T) {
+// TestRecordAgentDecision_AlwaysForwardsCallingSession verifies that a
+// participant's decision is re-evaluated against the session that made it.
+func TestRecordAgentDecision_AlwaysForwardsCallingSession(t *testing.T) {
 	deps := newTestDeps(t)
 	insertTestTask(t, deps.db, "sid1", "ws-d", "SID1", "in_review", 2)
 	mustAddParticipant(t, deps, "sid1", "agent-1", models.ParticipantRoleApprover)
@@ -74,36 +72,8 @@ func TestRecordAgentDecision_SessionIDNotForwardedWhenFlagOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordAgentDecision: %v", err)
 	}
-	if spy.lastInput.SessionID != "" {
-		t.Errorf("SessionID = %q, want blank (flag is off)", spy.lastInput.SessionID)
-	}
-}
-
-// TestRecordAgentDecision_SessionIDForwardedWhenFlagOn proves that once
-// features.officeSessionIdentity is enabled, RecordAgentDecision forwards
-// the caller's own SessionID into RecordDecisionInput, so RecordDecision
-// re-evaluates against the decider's own session instead of the task's
-// most-recently-started ("active") one.
-func TestRecordAgentDecision_SessionIDForwardedWhenFlagOn(t *testing.T) {
-	deps := newTestDeps(t)
-	insertTestTask(t, deps.db, "sid2", "ws-d", "SID2", "in_review", 2)
-	mustAddParticipant(t, deps, "sid2", "agent-1", models.ParticipantRoleApprover)
-	spy := &spyDecisionDispatcher{role: models.ParticipantRoleApprover, participantID: "participant-1"}
-	deps.svc.SetWorkflowEngineDispatcher(spy)
-	deps.svc.SetOfficeSessionIdentity(true)
-
-	_, err := deps.svc.RecordAgentDecision(context.Background(), dashboard.RecordAgentDecisionInput{
-		TaskID:         "sid2",
-		AgentProfileID: "agent-1",
-		Decision:       engine.DecisionApproved,
-		Reason:         "lgtm",
-		SessionID:      "sess-caller",
-	})
-	if err != nil {
-		t.Fatalf("RecordAgentDecision: %v", err)
-	}
 	if spy.lastInput.SessionID != "sess-caller" {
-		t.Errorf("SessionID = %q, want sess-caller (flag is on)", spy.lastInput.SessionID)
+		t.Errorf("SessionID = %q, want sess-caller", spy.lastInput.SessionID)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -414,8 +416,9 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 
 // MoveTaskResult contains the result of a MoveTask operation.
 type MoveTaskResult struct {
-	Task         *models.Task
-	WorkflowStep *wfmodels.WorkflowStep
+	Task           *models.Task
+	WorkflowStep   *wfmodels.WorkflowStep
+	AlreadyApplied bool
 	// FromStepID and Transitioned are read off Task's own write-transaction
 	// result (Task.FromStepID / Task.WorkflowStepTransitionID != 0), not from
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
@@ -434,6 +437,8 @@ type MoveTaskResult struct {
 
 // MoveTaskOptions controls non-default move behavior for trusted callers.
 type MoveTaskOptions struct {
+	ExactOperation            *ExactTaskMoveOperation
+	AlreadyApplied            *bool
 	AllowActivePrimarySession bool
 	// AllowFailedToCompletedRecovery permits the trusted launch-recovery
 	// action to complete a failed task when it moves into a validated terminal
@@ -457,6 +462,10 @@ type MoveTaskOptions struct {
 	// StepHistoryActor identifies the caller. Agent moves must not inherit the
 	// owner identity that MCP uses for authorization.
 	StepHistoryActor wfmodels.StepTransitionActor
+	// CompletionOverride is a native human confirmation for this exact move.
+	// Its task, source/target steps, actor, and criteria revision are rechecked
+	// in the task repository's final completion transaction.
+	CompletionOverride *TaskCompletionMoveOverrideRequest
 	// ExpectedWorkflowID guards a caller that resolved "the task's current
 	// workflow" via a separate pre-read (rather than passing an explicit,
 	// intentional target workflow) against a concurrent reassignment landing
@@ -469,6 +478,19 @@ type MoveTaskOptions struct {
 	// target workflow step. They are persisted privately on a transient task
 	// marker and are never included in task.moved event payloads.
 	EntryOptions *workflowmove.EntryOptions
+	// WorkflowChange opts this single-task move into source/version checks and
+	// atomically replaces the task's destination workflow agent overrides.
+	WorkflowChange *models.WorkflowChangeRequest
+}
+
+// ExactTaskMoveOperation binds a move to the approved Host command and the
+// task version observed by the caller.
+type ExactTaskMoveOperation struct {
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	ClaimFence              taskrepo.TaskManagementClaimFence
 }
 
 // ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
@@ -511,6 +533,19 @@ type workflowMoveAdmissionWithStateRepository interface {
 		admittedState *v1.TaskState,
 		queueExitPending bool,
 		expectedWorkflowID string,
+	) (bool, error)
+}
+
+type workflowChangeAdmissionRepository interface {
+	UpdateTaskWithWorkflowChangeAdmissionAndState(
+		context.Context,
+		*models.Task,
+		string,
+		string,
+		int,
+		*v1.TaskState,
+		bool,
+		*models.WorkflowChangeSource,
 	) (bool, error)
 }
 
@@ -564,6 +599,9 @@ func (s *Service) MoveTaskWithOptions(
 	position int,
 	opts MoveTaskOptions,
 ) (*MoveTaskResult, error) {
+	if opts.ExactOperation != nil && opts.AlreadyApplied == nil {
+		opts.AlreadyApplied = new(bool)
+	}
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
@@ -582,10 +620,22 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
 			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
 	}
+	if opts.WorkflowChange != nil {
+		if err := validateWorkflowChangeSource(task, workflowID, workflowStepID, opts.WorkflowChange); err != nil {
+			return nil, err
+		}
+	}
 
 	targetStep, err := s.validateTaskMove(ctx, task, workflowID, workflowStepID, opts)
 	if err != nil {
 		return nil, err
+	}
+	var candidateOverrides *models.WorkflowAgentOverrides
+	if opts.WorkflowChange != nil {
+		candidateOverrides, err = s.prepareWorkflowChange(ctx, task, workflowID, workflowStepID, opts.WorkflowChange)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	oldWorkflowID := task.WorkflowID
@@ -628,8 +678,22 @@ func (s *Service) MoveTaskWithOptions(
 
 	if stepChanged && targetStep != nil && s.workflowMovePreflight != nil {
 		currentSession := s.resolvePrimaryOrActiveSession(ctx, id)
-		if err := s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep); err != nil {
-			return nil, fmt.Errorf("failed to preflight workflow move: %w", err)
+		var preflightErr error
+		if opts.WorkflowChange != nil {
+			preflight, ok := s.workflowMovePreflight.(WorkflowChangeMovePreflight)
+			if !ok {
+				return nil, fmt.Errorf("workflow change preflight does not accept candidate task state")
+			}
+			candidate := *task
+			candidate.WorkflowID = workflowID
+			candidate.WorkflowStepID = workflowStepID
+			candidate.WorkflowAgentOverrides = candidateOverrides
+			preflightErr = preflight.PreflightWorkflowStepChange(ctx, &candidate, currentSession, targetStep)
+		} else {
+			preflightErr = s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep)
+		}
+		if preflightErr != nil {
+			return nil, fmt.Errorf("failed to preflight workflow move: %w", preflightErr)
 		}
 	}
 	stateAfterAdmission := *task
@@ -641,6 +705,9 @@ func (s *Service) MoveTaskWithOptions(
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
+	if opts.WorkflowChange != nil {
+		task.WorkflowAgentOverrides = candidateOverrides
+	}
 	// A move naming the task's current step is not an arrival
 	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28): it keeps the position it
 	// already holds rather than the caller-supplied literal, which the
@@ -674,6 +741,7 @@ func (s *Service) MoveTaskWithOptions(
 		}
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+		delete(task.Metadata, models.MetaKeyManualMoveLifecyclePending)
 		delete(task.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
 		if !opts.PreserveDeferredLaunch {
 			models.DropWIPDeferredLaunch(task)
@@ -714,6 +782,19 @@ func (s *Service) MoveTaskWithOptions(
 	// board-move default, since the agent (not a board click) is what caused
 	// the move.
 	moveCtx := ctx
+	if opts.CompletionOverride != nil {
+		identity, ok := authn.IdentityFromContext(ctx)
+		if !ok || strings.TrimSpace(identity.UserID) == "" ||
+			opts.CompletionOverride.ExpectedRevision <= 0 || strings.TrimSpace(opts.CompletionOverride.Reason) == "" {
+			return nil, repoerrors.ErrTaskCompletionHumanConfirmationRequired
+		}
+		moveCtx = models.WithTaskCompletionMoveOverride(moveCtx, models.TaskCompletionMoveOverride{
+			TaskID: id, WorkspaceID: task.WorkspaceID, ExpectedRevision: opts.CompletionOverride.ExpectedRevision,
+			SourceWorkflowID: oldWorkflowID, SourceStepID: oldStepID,
+			TargetWorkflowID: workflowID, TargetStepID: workflowStepID,
+			ActorID: identity.UserID, Reason: strings.TrimSpace(opts.CompletionOverride.Reason),
+		})
+	}
 	if !steptelemetry.HasTrigger(moveCtx) {
 		actorKind, actorID := steptelemetry.HumanOrSystemActor(moveCtx)
 		moveCtx = steptelemetry.WithAttribution(moveCtx, steptelemetry.Attribution{
@@ -761,9 +842,12 @@ func (s *Service) MoveTaskWithOptions(
 		return s.rejectStrandedOptionedMove(ctx, task, resultFromWorkflowID)
 	}
 
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
-	if oldState != task.State {
-		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	alreadyApplied := opts.AlreadyApplied != nil && *opts.AlreadyApplied
+	if !alreadyApplied {
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
+		if oldState != task.State {
+			s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+		}
 	}
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter
@@ -807,6 +891,7 @@ func (s *Service) MoveTaskWithOptions(
 
 	result := &MoveTaskResult{
 		Task:                  task,
+		AlreadyApplied:        opts.AlreadyApplied != nil && *opts.AlreadyApplied,
 		FromStepID:            resultFromStepID,
 		Transitioned:          resultTransitioned,
 		WorkflowEntryIdentity: workflowEntryIdentity,
@@ -1323,6 +1408,21 @@ func (s *Service) updateMovedTask(
 // sites, since there is no admission decision to make when the step is
 // unchanged.
 func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions) (bool, error) {
+	if opts.ExactOperation != nil {
+		operationRepo, ok := s.tasks.(taskrepo.ExactTaskOperationRepository)
+		if !ok {
+			return false, errExactTaskUpdatesUnavailable
+		}
+		operation := opts.ExactOperation
+		alreadyApplied, err := operationRepo.UpdateTaskExactOperation(
+			ctx, task, operation.WorkspaceID, operation.ExpectedResourceVersion,
+			operation.OperationID, operation.PayloadDigest, operation.ClaimFence,
+		)
+		if err == nil && opts.AlreadyApplied != nil {
+			*opts.AlreadyApplied = alreadyApplied
+		}
+		return task.WIPAdmitted, err
+	}
 	if opts.ExpectedWorkflowID != nil {
 		// Same-step writes go through plain UpdateTask, which has no
 		// expected-workflow parameter (it is the general-purpose writer
@@ -1357,6 +1457,37 @@ func (s *Service) updateMovedTaskCrossStep(
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
 ) (bool, error) {
+	if opts.ExactOperation != nil {
+		operationRepo, ok := s.tasks.(taskrepo.ExactTaskMoveOperationRepository)
+		if !ok {
+			return false, errExactTaskUpdatesUnavailable
+		}
+		operation := opts.ExactOperation
+		expectedWorkflowID := ""
+		if opts.ExpectedWorkflowID != nil {
+			expectedWorkflowID = *opts.ExpectedWorkflowID
+		}
+		admitted, alreadyApplied, err := operationRepo.UpdateTaskWithWorkflowStepAdmissionExact(
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
+			admittedState, true, expectedWorkflowID,
+			operation.WorkspaceID, operation.ExpectedResourceVersion,
+			operation.OperationID, operation.PayloadDigest, operation.ClaimFence,
+		)
+		if err == nil && opts.AlreadyApplied != nil {
+			*opts.AlreadyApplied = alreadyApplied
+		}
+		return admitted, err
+	}
+	if opts.WorkflowChange != nil {
+		changeRepo, ok := s.tasks.(workflowChangeAdmissionRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow change admission repository unavailable for step %s", targetStep.ID)
+		}
+		return changeRepo.UpdateTaskWithWorkflowChangeAdmissionAndState(
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
+			admittedState, true, workflowChangeGuard(opts.WorkflowChange),
+		)
+	}
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)

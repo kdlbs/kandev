@@ -5,7 +5,11 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("@/components/folder-picker", () => ({
-  FolderPicker: () => <button type="button">Folder picker</button>,
+  FolderPicker: ({ onChange }: { onChange: (path: string) => void }) => (
+    <button type="button" onClick={() => onChange("/picked")}>
+      Folder picker
+    </button>
+  ),
 }));
 
 import { RepositoryDiscoveryRootControls } from "./repository-discovery-root-controls";
@@ -14,6 +18,7 @@ const baseProps = {
   isLoading: false,
   discoveryRoots: [],
   homeConfirmationRequired: false,
+  onConfirmHomeDiscovery: vi.fn(),
   onChooseDiscoveryRoot: vi.fn(),
   onRefreshDiscovery: vi.fn(),
   onReconnectDiscoveryRoot: vi.fn(),
@@ -59,5 +64,37 @@ describe("RepositoryDiscoveryRootControls", () => {
       (screen.getByRole("button", { name: "workspaces:refreshRepositories" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+  });
+
+  it("confirms Home directly without using the folder picker", () => {
+    render(
+      <RepositoryDiscoveryRootControls
+        {...baseProps}
+        homeConfirmationRequired
+        presentation="picker"
+      />,
+    );
+
+    screen.getByRole("button", { name: "workspaces:continueHomeDiscovery" }).click();
+
+    expect(baseProps.onConfirmHomeDiscovery).toHaveBeenCalledOnce();
+    expect(baseProps.onChooseDiscoveryRoot).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Home confirmation name stable and announces while saving", () => {
+    render(
+      <RepositoryDiscoveryRootControls
+        {...baseProps}
+        homeConfirmationRequired
+        isConfirmingHomeDiscovery
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "workspaces:continueHomeDiscovery",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("common:loading");
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AppSidebarWorkspaceActions } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { MainTopBarPluginActions } from "@/components/kanban/main-top-bar-plugin-actions";
@@ -10,6 +10,7 @@ import { NO_WORKSPACE_CONTEXT } from "@/lib/navigation/surface-policy";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 import { cn } from "@/lib/utils";
+import { PluginSlotPresence } from "./plugin-slot-presence";
 
 export type MobilePluginWorkspaceContext = {
   workspaceId?: string;
@@ -44,9 +45,12 @@ export function MobilePluginNavSection({
 }: MobilePluginNavSectionProps) {
   const { t } = useTranslation();
   const registry = usePluginRegistry();
+  const [renderedTaskPluginIds, setRenderedTaskPluginIds] = useState<string[]>([]);
+  const taskPluginIds = actions ? renderedTaskPluginIds : [];
   const { hasMainActions, hasSidebarActions } = workspaceSlotAvailability(
     registry,
     workspaceContext,
+    taskPluginIds,
   );
   const hasWorkspaceActions = hasMainActions || hasSidebarActions;
   // Resolved directly rather than through `useStaticDestinations`: this group's
@@ -70,22 +74,21 @@ export function MobilePluginNavSection({
       aria-label={t("common:plugins")}
     >
       <h3 className="text-sm font-medium">{t("common:plugins")}</h3>
-      {hasWorkspaceActions && workspaceContext && (
-        <div className="space-y-2" data-testid="mobile-plugin-workspace-actions">
-          {actions && <h4 className="text-xs text-muted-foreground">{t("common:workspace")}</h4>}
-          <WorkspacePluginControls
-            context={workspaceContext}
-            hasMainActions={hasMainActions}
-            hasSidebarActions={hasSidebarActions}
-          />
-        </div>
-      )}
-      {actions && (
-        <div className="space-y-2" data-testid="mobile-plugin-page-actions">
-          {hasWorkspaceActions && (
-            <h4 className="text-xs text-muted-foreground">{t("common:task")}</h4>
+      {(hasWorkspaceActions || actions) && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {hasWorkspaceActions && workspaceContext && (
+            <WorkspacePluginControls
+              context={workspaceContext}
+              hasMainActions={hasMainActions}
+              hasSidebarActions={hasSidebarActions}
+              excludePluginIds={taskPluginIds}
+            />
           )}
-          {actions}
+          {actions && (
+            <PluginSlotPresence name="chat-top-bar" onChange={setRenderedTaskPluginIds}>
+              {actions}
+            </PluginSlotPresence>
+          )}
         </div>
       )}
       {destinations.length > 0 && (
@@ -103,14 +106,22 @@ function WorkspacePluginControls({
   context,
   hasMainActions,
   hasSidebarActions,
+  excludePluginIds,
 }: {
   context: MobilePluginWorkspaceContext;
   hasMainActions: boolean;
   hasSidebarActions: boolean;
+  excludePluginIds: readonly string[];
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      {hasMainActions && <MainTopBarPluginActions {...context} presentation="mobile" />}
+      {hasMainActions && (
+        <MainTopBarPluginActions
+          {...context}
+          presentation="mobile"
+          excludePluginIds={excludePluginIds}
+        />
+      )}
       {hasSidebarActions && context.workspaceId && (
         <AppSidebarWorkspaceActions
           workspaceId={context.workspaceId}
@@ -125,9 +136,14 @@ function WorkspacePluginControls({
 function workspaceSlotAvailability(
   registry: ReturnType<typeof usePluginRegistry>,
   context?: MobilePluginWorkspaceContext,
+  excludePluginIds: readonly string[] = [],
 ) {
   return {
-    hasMainActions: !!context && registry.getSlotRegistrations("main-top-bar").length > 0,
+    hasMainActions:
+      !!context &&
+      registry
+        .getSlotRegistrations("main-top-bar")
+        .some(({ pluginId }) => !excludePluginIds.includes(pluginId)),
     hasSidebarActions:
       !!context?.workspaceId &&
       registry.getSlotRegistrations("sidebar-workspace-actions").length > 0,

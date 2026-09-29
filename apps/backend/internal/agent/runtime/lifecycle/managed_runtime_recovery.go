@@ -18,14 +18,15 @@ func onlineManagedRuntimeArgs(args []string, spec agents.ManagedNPMRuntimeSpec) 
 	}
 
 	for npxIndex, arg := range args {
-		if arg != "npx" || npxIndex+3 >= len(args) {
+		if arg != "npx" || npxIndex+5 >= len(args) {
 			continue
 		}
-		if args[npxIndex+1] != "--yes" || args[npxIndex+2] != "--prefer-offline" {
+		if args[npxIndex+1] != "--yes" || args[npxIndex+2] != "--prefer-offline" ||
+			args[npxIndex+3] != "--prefix" || args[npxIndex+4] != managedruntime.NPMProjectPrefix || npxIndex+5 >= len(args) {
 			continue
 		}
 
-		packageSpec := args[npxIndex+3]
+		packageSpec := args[npxIndex+5]
 		versionPrefix := packageName + "@"
 		if !strings.HasPrefix(packageSpec, versionPrefix) {
 			return nil, "", false

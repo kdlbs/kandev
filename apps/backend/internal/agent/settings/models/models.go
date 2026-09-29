@@ -50,6 +50,9 @@ type TUIConfigJSON struct {
 	// (registry.CustomAgentProtocol*). Empty — the value every row written
 	// before this field existed decodes to — means terminal passthrough.
 	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentProfile struct {
@@ -99,6 +102,9 @@ type AgentProfile struct {
 
 	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
 	CLIPassthrough bool `json:"cli_passthrough" db:"cli_passthrough"`
+
+	// CursorMCPAuthEnabled shares local Cursor MCP auth files for Cursor launches.
+	CursorMCPAuthEnabled bool `json:"cursor_mcp_auth_enabled" db:"cursor_mcp_auth_enabled"`
 
 	// Enabled gates the profile from new-work selection: when false, the
 	// profile is hidden from task/session creation pickers but keeps serving

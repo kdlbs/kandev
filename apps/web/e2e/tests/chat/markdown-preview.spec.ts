@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
@@ -488,12 +489,15 @@ test.describe("Markdown preview", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     fs.writeFileSync(path.join(repoDir, fileName), `${wrappedLine}\n`);
 
+    const gateway = watchWs(testPage);
+    const treeResponse = gateway.waitForResponse("workspace.tree.get");
     const { session, sessionId } = await seedTaskWithSession(
       testPage,
       apiClient,
       seedData,
       "Markdown Code Wrapped Comment Test",
     );
+    await treeResponse;
     await testPage.evaluate(
       ({ sid, pathName, codeContent }) => {
         window.sessionStorage.setItem(

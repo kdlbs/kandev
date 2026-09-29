@@ -18,6 +18,9 @@ describe("prepareResultToSessionState", () => {
         steps: [
           {
             name: "clone",
+            kind: "remote_helper_download",
+            remote_platform: "linux/amd64",
+            failure_code: "timeout",
             command: "git clone",
             status: "ok",
             output: "done",
@@ -39,6 +42,9 @@ describe("prepareResultToSessionState", () => {
       steps: [
         {
           name: "clone",
+          kind: "remote_helper_download",
+          remotePlatform: "linux/amd64",
+          failureCode: "timeout",
           command: "git clone",
           status: "ok",
           output: "done",

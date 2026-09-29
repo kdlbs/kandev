@@ -9,6 +9,7 @@ import {
   IconCheck,
   IconLoader2,
   IconPencil,
+  IconCopy,
 } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -18,8 +19,9 @@ import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import type { ChangedFile } from "./changes-panel-helpers";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TouchFileRowContent } from "./changes-panel-touch-file-row";
@@ -36,6 +38,9 @@ const splitPath = (path: string) => {
 export type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
+  /** Historical commit files share the Changes row anatomy without mutation controls. */
+  readOnly?: boolean;
+  testId?: string;
   isSelected?: boolean;
   /** True when this file's diff/editor tab is the currently active dockview panel. */
   isActive?: boolean;
@@ -59,16 +64,25 @@ export type FileRowProps = {
   indentPx?: number;
 };
 
-export type FileRowContentProps = FileRowProps & { folder: string; name: string };
+export type FileRowContentProps = FileRowProps & {
+  folder: string;
+  name: string;
+  onCopyPath: () => void;
+};
 
 export function FileRow(props: FileRowProps) {
-  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff } = props;
+  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff, readOnly } = props;
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const copyRepositoryPath = useCopyRepositoryPath();
   const touchMode = isMobile || !isFinePointer;
   const { folder, file: name } = splitPath(file.path);
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
+    if (readOnly) {
+      onOpenDiff(file.path);
+      return;
+    }
     const consumed = onSelect?.(file.path, e);
     if (!consumed) {
       if (getFileCategory(file.path) === "image") {
@@ -83,10 +97,18 @@ export function FileRow(props: FileRowProps) {
     }
   };
 
+  const handleCopyPath = () => {
+    void copyRepositoryPath(file.path);
+  };
+
   return (
     <li
-      data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
+      data-testid={props.testId ?? `file-row-${file.path.replace(/[/\\]/g, "-")}`}
       data-changes-file={file.path}
+      data-commit-file-entry={readOnly ? "true" : undefined}
+      data-file-path={file.path}
+      aria-label={readOnly ? file.path : undefined}
+      title={readOnly ? file.path : undefined}
       data-selected={isSelected ? "true" : "false"}
       data-active={isActive ? "true" : "false"}
       className={cn(
@@ -99,9 +121,9 @@ export function FileRow(props: FileRowProps) {
       onClick={handleClick}
     >
       {touchMode ? (
-        <TouchFileRowContent {...props} folder={folder} name={name} />
+        <TouchFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
       ) : (
-        <DesktopFileRowContent {...props} folder={folder} name={name} />
+        <DesktopFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
       )}
     </li>
   );
@@ -118,6 +140,8 @@ function DesktopFileRowContent({
   indentPx,
   folder,
   name,
+  onCopyPath,
+  readOnly,
 }: FileRowContentProps) {
   const showFolder = !treeMode && folder;
   return (
@@ -126,7 +150,8 @@ function DesktopFileRowContent({
         className="flex items-center gap-2 min-w-0"
         style={indentPx ? { paddingLeft: indentPx } : undefined}
       >
-        {treeMode ? (
+        {readOnly && <FileIcon fileName={name} className="size-4 shrink-0" />}
+        {!readOnly && treeMode && (
           <TreeModeFileActionSlot
             name={name}
             isPending={isPending}
@@ -136,7 +161,8 @@ function DesktopFileRowContent({
             onStage={onStage}
             onUnstage={onUnstage}
           />
-        ) : (
+        )}
+        {!readOnly && !treeMode && (
           <StageButton
             isPending={isPending}
             staged={file.staged}
@@ -159,21 +185,29 @@ function DesktopFileRowContent({
         </button>
       </div>
       <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
-        <FileRowStats file={file} />
-        <FileRowActions
-          path={file.path}
-          repo={file.repositoryName}
-          onDiscard={onDiscard}
-          onEditFile={onEditFile}
-        />
+        <FileRowStats file={file} readOnly={readOnly} />
+        {!readOnly && (
+          <FileRowActions
+            path={file.path}
+            repo={file.repositoryName}
+            onCopyPath={onCopyPath}
+            onDiscard={onDiscard}
+            onEditFile={onEditFile}
+          />
+        )}
       </div>
     </>
   );
 }
 
-function FileRowStats({ file }: { file: ChangedFile }) {
+function FileRowStats({ file, readOnly }: { file: ChangedFile; readOnly?: boolean }) {
   return (
-    <div className="flex items-center gap-2 justify-end transition-opacity pointer-events-none group-hover:opacity-0">
+    <div
+      className={cn(
+        "flex items-center gap-2 justify-end pointer-events-none",
+        !readOnly && "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
+      )}
+    >
       <LineStat added={file.plus} removed={file.minus} />
       <FileStatusIcon status={file.status} oldPath={file.oldPath} />
     </div>
@@ -285,11 +319,13 @@ function StageButton({
 function FileRowActions({
   path,
   repo,
+  onCopyPath,
   onDiscard,
   onEditFile,
 }: {
   path: string;
   repo?: string;
+  onCopyPath: () => void;
   onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
 }) {
@@ -297,7 +333,7 @@ function FileRowActions({
   return (
     <div
       data-testid="file-row-hover-actions"
-      className="flex items-center gap-1 justify-end transition-opacity opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+      className="flex items-center gap-1 justify-end transition-opacity opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -330,6 +366,22 @@ function FileRowActions({
           </button>
         </TooltipTrigger>
         <TooltipContent>{t("common:edit")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t("task:copyPath")}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopyPath();
+            }}
+          >
+            <IconCopy className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:copyPath")}</TooltipContent>
       </Tooltip>
     </div>
   );

@@ -6,101 +6,218 @@
     <meta name="color-scheme" content="light dark" />
     <title>Kandev</title>
     <style>
-      html,
-      body {
-        background: #f5f7f6;
+      :root {
+        --startup-bg: #fff;
+        --startup-dark-bg: #181818;
+        --startup-primary: oklch(0.51 0.23 277);
+        --startup-dark-primary: oklch(0.59 0.2 277);
+        color-scheme: light dark;
+        background: var(--startup-bg);
+        color: #181818;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       }
 
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --startup-bg: var(--startup-dark-bg);
+          --startup-primary: var(--startup-dark-primary);
+          color: #d4d4d4;
+        }
+      }
+
+      html,
       body {
+        background: var(--startup-bg);
         margin: 0;
         min-height: 100vh;
       }
 
       .startup-shell {
         align-items: center;
-        background: #f5f7f6;
+        background: var(--startup-bg);
         display: flex;
+        justify-content: center;
         min-height: 100vh;
+        overflow: auto;
         padding: 32px;
+      }
+
+      .startup-drag-region {
+        height: 40px;
+        left: 0;
+        position: absolute;
+        right: 0;
+        top: 0;
       }
 
       .startup-panel {
         align-items: center;
         display: flex;
+        flex-direction: column;
+        gap: 18px;
         justify-content: center;
-        margin: 0 auto;
-        min-height: 88px;
-        min-width: 88px;
+        margin: auto;
+        max-width: 640px;
+        min-height: 112px;
+        text-align: center;
+        width: 100%;
       }
 
-      .status-spinner {
-        animation: startup-spin 960ms linear infinite;
-        background:
-          linear-gradient(#f5f7f6, #f5f7f6) padding-box,
-          conic-gradient(from 0deg, #16875f, #c48a2a, #d8dfdc, #16875f) border-box;
-        border: 4px solid transparent;
-        border-radius: 999px;
-        height: 52px;
-        width: 52px;
+      .spinner-grid {
+        color: var(--startup-primary);
+        display: inline-grid;
+        flex: none;
+        gap: 0.15em;
+        grid-template-columns: repeat(3, 1fr);
+        height: 3em;
+        width: 3em;
       }
 
-      .startup-copy {
-        border: 0;
-        clip: rect(0 0 0 0);
-        display: block;
-        height: 1px;
-        margin: -1px;
-        overflow: hidden;
-        padding: 0;
-        position: absolute;
-        white-space: nowrap;
-        width: 1px;
+      .spinner-grid-cube {
+        animation: spinner-grid 1.3s ease-in-out infinite;
+        background: currentColor;
+        height: 100%;
+        width: 100%;
       }
 
-      @keyframes startup-spin {
-        to {
-          transform: rotate(360deg);
+      .spinner-grid-cube:nth-child(1),
+      .spinner-grid-cube:nth-child(5),
+      .spinner-grid-cube:nth-child(9) {
+        animation-delay: 0.2s;
+      }
+
+      .spinner-grid-cube:nth-child(2),
+      .spinner-grid-cube:nth-child(6) {
+        animation-delay: 0.3s;
+      }
+
+      .spinner-grid-cube:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+
+      .spinner-grid-cube:nth-child(4),
+      .spinner-grid-cube:nth-child(8) {
+        animation-delay: 0.1s;
+      }
+
+      .spinner-grid-cube:nth-child(7) {
+        animation-delay: 0s;
+      }
+
+      @keyframes spinner-grid {
+        0%,
+        70%,
+        100% {
+          transform: scale3d(0.5, 0.5, 1);
         }
-      }
-
-      @media (prefers-color-scheme: dark) {
-        html,
-        body {
-          background: #0f1413;
-        }
-
-        .startup-shell {
-          background: #0f1413;
-        }
-
-        .status-spinner {
-          background:
-            linear-gradient(#0f1413, #0f1413) padding-box,
-            conic-gradient(from 0deg, #2aa876, #d6a348, #27322e, #2aa876) border-box;
+        35% {
+          transform: scale3d(0, 0, 1);
         }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .status-spinner {
+        .spinner-grid-cube {
           animation: none;
         }
+      }
+
+      .startup-shell.is-failed .spinner-grid,
+      .startup-shell.is-conflict .spinner-grid {
+        display: none;
       }
     </style>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
-    <main
-      class="startup-shell"
-      aria-busy="true"
-      aria-live="polite"
-      aria-label="Kandev startup status"
-    >
-      <section class="startup-panel">
-        <div class="status-spinner" aria-hidden="true"></div>
+    <div class="startup-drag-region" data-startup-drag-region aria-hidden="true"></div>
+    <main id="startup-shell" class="startup-shell" aria-busy="true">
+      <section id="loading-state" class="startup-panel" aria-live="polite">
+        <span id="spinner-status" class="spinner-grid" data-testid="startup-spinner" role="status">
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+          <span class="spinner-grid-cube" aria-hidden="true"></span>
+        </span>
         <div class="startup-copy">
           <p class="eyebrow">Kandev</p>
-          <h1 id="status-title">Starting backend</h1>
-          <p id="status-detail">Preparing the local runtime and opening your workspace.</p>
+          <h1 id="status-title"></h1>
+          <p id="status-detail"></p>
+          <div id="temporary-home" hidden>
+            <span id="temporary-home-label"></span>
+            <code id="temporary-home-path"></code>
+            <p id="temporary-cleanup"></p>
+          </div>
+        </div>
+      </section>
+
+      <section id="conflict-panel" class="startup-panel conflict-panel" data-testid="startup-conflict" aria-live="assertive" hidden>
+        <header class="conflict-header">
+          <p class="eyebrow">Kandev</p>
+          <h1 id="conflict-title"></h1>
+        </header>
+        <p id="conflict-rule" class="conflict-rule" data-testid="conflict-rule"></p>
+        <p id="conflict-summary"></p>
+        <dl class="conflict-paths">
+          <div>
+            <dt id="conflict-target-label"></dt>
+            <dd><code id="conflict-target-path" data-testid="conflict-target-path"></code></dd>
+          </div>
+          <div id="database-path-row" hidden>
+            <dt id="database-path-label"></dt>
+            <dd><code id="database-path"></code></dd>
+          </div>
+          <div>
+            <dt id="storage-label"></dt>
+            <dd id="storage-kind"></dd>
+          </div>
+        </dl>
+        <details id="owner-details" class="technical-details" hidden>
+          <summary id="owner-label"></summary>
+          <dl>
+            <div id="owner-pid-row" hidden>
+              <dt id="pid-label"></dt>
+              <dd id="owner-pid"></dd>
+            </div>
+            <div id="owner-executable-row" hidden>
+              <dt id="executable-label"></dt>
+              <dd><code id="owner-executable"></code></dd>
+            </div>
+            <div id="owner-started-row" hidden>
+              <dt id="started-label"></dt>
+              <dd id="owner-started"></dd>
+            </div>
+          </dl>
+        </details>
+        <details id="diagnostic-details" class="technical-details" hidden>
+          <summary id="diagnostic-summary"></summary>
+          <pre id="diagnostic-output"></pre>
+        </details>
+        <section id="temporary-instance-section" class="temporary-instance-section" data-testid="temporary-instance-section">
+          <h2 id="temporary-heading"></h2>
+          <p id="temporary-warning"></p>
+          <button id="temporary-instance-button" data-testid="temporary-instance-button" type="button"></button>
+          <p id="temporary-action-feedback" aria-live="polite"></p>
+        </section>
+      </section>
+
+      <section id="failure-panel" class="startup-panel failure-panel" data-testid="startup-failure" aria-live="assertive" hidden>
+        <div class="startup-copy">
+          <p class="eyebrow">Kandev</p>
+          <h1 id="failure-title"></h1>
+          <pre id="failure-detail"></pre>
+          <div id="failure-home" hidden>
+            <span id="failure-home-label"></span>
+            <code id="failure-home-path"></code>
+          </div>
         </div>
       </section>
     </main>

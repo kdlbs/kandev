@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, resetSeedRepositoryCheckout, test, type SeedData } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { waitForHttp } from "../../helpers/causal-waits";
 import {
   GitHelper,
@@ -115,7 +117,15 @@ test.describe("Workspace file transfer", () => {
     // The dialog appears before anything is written.
     const dialog = testPage.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await waitForFiniteAnimations(dialog);
     await expect(dialog.getByText("taken.txt")).toBeVisible();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    const conflictChoices = dialog.getByRole("group").getByRole("button");
+    await expect(conflictChoices).toHaveCount(6);
+    // @covers AC-UI-CONTROL-SIZING-001.2
+    for (let index = 0; index < 6; index += 1) {
+      await expectControlHeight(conflictChoices.nth(index), 24);
+    }
 
     const uploaded = waitForHttp(testPage, "POST", UPLOAD_ROUTE, {
       predicate: (response) => response.status() === 201,

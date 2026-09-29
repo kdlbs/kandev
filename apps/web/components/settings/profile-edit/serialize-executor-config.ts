@@ -1,5 +1,7 @@
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { ExecutorType } from "@/lib/types/http";
+import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
+import { serializeAdditionalNetworks } from "@/components/settings/profile-edit/build-docker-network-config";
 
 export function getExecutorProfileRuntimeFlags(executorType: ExecutorType) {
   const isRemote =
@@ -35,6 +37,9 @@ export type ExecutorProfileConfigForm = {
   isSSH: boolean;
   sshShell: string;
   sshReclaimTaskDir: boolean;
+  primaryNetwork: string;
+  primaryGwPriority: string;
+  additionalNetworks: AdditionalNetworkRow[];
 };
 
 export function buildSaveConfig(
@@ -65,7 +70,25 @@ export function buildSaveConfig(
   );
   setTextConfig(config, "ssh_shell", form.isSSH ? form.sshShell.trim() : "");
   setBoolConfig(config, "ssh_reclaim_task_dir", form.isSSH, form.sshReclaimTaskDir);
+  applyDockerNetworkConfig(config, form);
   return config;
+}
+
+// applyDockerNetworkConfig writes the three network keys, or clears them.
+//
+// A gateway priority without a primary network is refused by the backend at
+// launch, so the editor drops it rather than saving a profile whose only
+// symptom is a failed launch.
+function applyDockerNetworkConfig(
+  config: Record<string, string>,
+  form: ExecutorProfileConfigForm,
+): void {
+  const primary = form.isDocker ? form.primaryNetwork.trim() : "";
+  setTextConfig(config, "docker_network", primary);
+  setTextConfig(config, "docker_network_gw_priority", primary ? form.primaryGwPriority.trim() : "");
+
+  const additional = form.isDocker ? serializeAdditionalNetworks(form.additionalNetworks) : [];
+  setJsonConfig(config, "docker_additional_networks", form.isDocker, additional);
 }
 
 function setJsonConfig(

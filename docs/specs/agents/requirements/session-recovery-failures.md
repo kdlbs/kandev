@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-09-18
+updated: 2026-09-20
 owners:
   - Kandev
 ---
@@ -42,7 +42,7 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.1:** When the same failure appears in automatic recovery, session state, and the transcript, the selected session shall show one active recovery card. An equivalent top banner, stopped-session warning, or synthetic agent error shall not repeat it.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.2:** The card shall show a localized cause summary, valid actions, and one initially collapsed details disclosure. Resume and restore causes shall have separate labels and bounded, sanitized details.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.3:** A failure before agent startup shall be described as startup or recovery failure. It shall not state that the agent encountered an error while working.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall show pending state on the error entry and disable equivalent actions. Successful resume shall retire its actions without removing history. Workspace-only success shall retain the stopped-agent notice.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall show pending state on the active recovery surface and disable equivalent actions. Successful resume shall retire its actions without removing history. Workspace-only success shall retain the stopped-agent notice.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.5:** Reload, reconnect, and reversed event order shall converge on the current failure. A stale attempt or unrelated historical error shall neither replace nor be hidden by that failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall show the session error at its chronological position in the transcript. Normal message scrolling shall govern initial placement, pagination, and new entries. Errors shall not force a separate scroll position. Recovery actions and the composer shall remain reachable on desktop and phone.
@@ -51,6 +51,34 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.8:** After manual or automatic recovery, the session error shall remain readable before later messages. It shall retain its original cause and occurrence time after reload.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.9:** Only the current unresolved failure shall offer recovery actions. Pending recovery shall not imply success. A later failure shall not reactivate controls on an older entry.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.10:** A recoverable failure that occurs after agent startup, such as a model provider rejecting a dispatched prompt, shall carry the same bounded, sanitized failure detail in its initially collapsed details disclosure as bootstrap and managed-runtime failures do. The detail shall be sanitized of URLs, credentials, and identifiers, and shall be omitted when sanitization leaves nothing usable, in which case the generic recovery card remains. This lets a user expand a short provider error, such as an invalid tool definition, without the raw detail appearing in the summary line.
+
+#### Presentation amendment (September 19)
+
+The following additions to requirement 006 were implemented in the initial pass.
+The September 20 fixture review exposed incomplete ownership across the stopped
+composer and specialized failures; the uniform recovery amendment below is implemented.
+They extend the existing recovery owner without changing recovery permissions,
+error scope, chronological history, or provider identity. Delivery is tracked in
+[Session error and recovery UI](../../../plans/session-error-recovery-ui/plan.md).
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.11:** When a send failure, startup failure, stopped notice, and unavailable workspace report the same correlated failure, the task view shall expose one active recovery control surface and one new-failure announcement. A dependent workspace pane shall retain a short unavailable state with a route to the owner. Independent failures and failures without trustworthy correlation shall remain distinct; equal text alone shall not suppress an error.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.12:** Each active failure shall show a localized title describing the failed operation, one short cause summary, and at most one recommended eligible recovery action. All eligible recovery actions shall be visible as individual buttons without an overflow menu: the recommended action first and alternatives following, using standard app button styling, wrapping on desktop and stacking on phones. Status-check retry, workspace restoration, session resume, runtime retry, branch recovery, and fresh start shall retain their distinct effects and existing confirmations. A non-retryable refusal shall explain its prerequisite instead of offering a retry that is known to fail.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.13:** Technical details shall be initially collapsed, operation-labelled, bounded, and copyable. Display and clipboard shall use the same sanitized content, excluding credential values, sensitive secret references, local paths, and private identifiers. Redaction shall precede truncation, retain safe cause distinctions, and never expose hidden raw text through accessible labels, tooltips, or clipboard fallbacks. Unusable details shall be omitted. Clipboard failure shall keep selectable sanitized text and announce failure without a raw fallback.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.14:** At desktop, resized pane, phone, and coarse-pointer tablet sizes, summaries and expanded diagnostics shall use the available content width, wrap readable words and unbroken tokens, and produce no horizontal document overflow. Text shall not occupy an icon-width column when content width is available. Historical session details shall share the transcript scroll owner. Active recovery details shall use the recovery surface scroll owner without a nested diagnostic scroller; shared task details shall retain their existing dialog or drawer scroll owner. Ordinary fine-pointer actions shall measure 28 pixels at standard font size; phone/coarse-pointer targets shall measure at least 44 pixels.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.15:** A new failure shall announce its short summary once without stealing typing focus or forcing transcript scrolling. Historical entries shall not announce on pagination or reload. Recovery pending and result states shall be accessible; keyboard and touch shall reach all eligible actions and details. Closing a recovery confirmation shall return focus to its initiating action, or a deterministic surviving recovery control if that action disappears. Labels, copy feedback, disabled reasons, and summaries shall update with the selected locale.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.16:** While recovery is pending, equivalent actions shall be disabled across all mounted consumers. Success shall retire only matching controls and retain history; workspace-only success shall not imply the agent resumed. A failed new attempt shall preserve its own cause and identity, with no stale completion clearing a successor failure. A missing profile, archive, branch-loss refusal, or unknown session status shall not enable a more permissive recovery path.
+
+#### Uniform recovery amendment (September 20)
+
+The user approved a common recovery layout after inspecting failed startup,
+interrupted-session, managed-runtime and provider-quota fixtures. This amendment
+changes active control placement while preserving chronological error history.
+Delivery is tracked by work order 03 in the existing implementation package.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.17:** When the selected session cannot accept messages because of an unresolved failure, one active recovery card shall replace the composer. Failed startup, interrupted-session recovery, runtime installation, and provider quota shall use the same title, cause, action, and details order and consistent amber warning styling, with spinner/status pending feedback and red failed-attempt text. The transcript shall retain a compact chronological error record without duplicate mutation controls. A session that can accept messages shall retain its usable composer; a historical error alone shall not block messaging.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.18:** Recovery choices shall retain existing capability and refusal checks. Runtime installation shall offer its runtime retry rather than generic resume. Quota failures shall retain provider/model/reset guidance and shall not offer unsupported model switching or a fabricated retry deadline. When no recovery operation is eligible, the card shall explain the prerequisite without an inert primary action. Archive and Delete shall remain available through the task menu, outside the recovery card.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.19:** Correlated dependent workspace panes shall navigate to the active recovery card instead of repeating its diagnostics or actions. Explicit navigation shall activate Chat and focus the card on desktop and phone. Unrelated task, workspace, or session failures shall retain their own scope and explanation. Pending recovery and a failed retry shall update the active card; successful agent recovery shall restore the composer with its draft and attachments intact. Workspace-only recovery shall not enable messaging or claim the agent resumed.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.20:** The active card shall keep title and actions reachable at narrow or short viewport sizes and enlarged text. Expanded details shall be bounded and wrapped within a single recovery-region scroll owner, never a nested preformatted-text scroller. Initial failure shall not steal focus or force transcript scrolling. A user-initiated successful recovery shall return focus to the restored composer only when focus belonged to the disappearing recovery controls; background recovery shall not move focus from unrelated content.
 
 ## Session error history amendment
 

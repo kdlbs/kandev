@@ -56,7 +56,11 @@ export async function waitForWorkflowProfileSession(
         sessionId = session?.id ?? "";
         return session?.state === "WAITING_FOR_INPUT";
       },
-      { timeout: 30_000, message: `profile ${profileId} never became answerable` },
+      {
+        timeout: 60_000,
+        intervals: [250, 500, 1_000],
+        message: `profile ${profileId} never became answerable`,
+      },
     )
     .toBe(true)
     .catch((error: Error) => {

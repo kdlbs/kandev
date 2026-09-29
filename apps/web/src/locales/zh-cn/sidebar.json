@@ -121,5 +121,14 @@
   "newViewNumbered": "新视图 {{suffix}}",
   "untitledView": "未命名视图",
   "workspaceContextRefreshFailed": "无法刷新任务。",
-  "workspaceContextAccessDenied": "您已无法访问此工作区。"
+  "workspaceContextAccessDenied": "您已无法访问此工作区。",
+  "continuedFrom": "从 {{title}} 继续",
+  "continuationLabel": "续",
+  "selectedTaskCount_one": "已选择 {{count}} 项任务",
+  "selectedTaskCount_other": "已选择 {{count}} 项任务",
+  "clearSelection": "清除选择",
+  "nextPage": "下一页",
+  "pageLoadFailed": "无法加载此页面。",
+  "pageStatus": "第 {{page}} 页，共 {{total}} 页",
+  "previousPage": "上一页"
 }

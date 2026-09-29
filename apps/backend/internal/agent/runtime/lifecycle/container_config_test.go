@@ -28,7 +28,6 @@ func newCMTest(t *testing.T) *ContainerManager {
 	}
 	return &ContainerManager{
 		logger:         log,
-		networkName:    "kandev",
 		commandBuilder: NewCommandBuilder(),
 	}
 }

@@ -1,7 +1,7 @@
 ---
 id: "01-bulk-color-editing"
 title: "Apply personal colors to multi-selected tasks"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -189,4 +189,6 @@ and mobile-sidebar-task-color-sync E2E.
 
 ## Results
 
-Pending. Record each command result and rendered phone comparison after execution.
+Implemented bulk manual colors across sidebar and board selection. A shared per-store mutation coordinator deduplicates IDs, sends sequential 500-ID patches, preserves overlapping newer edits, retains confirmed chunks after partial failure, and restores only unsaved owned entries. The desktop and phone pickers preserve selection, expose pending and retry feedback, and keep automatic-rule precedence.
+
+Verification passed: 50 focused Vitest tests; TypeScript typecheck; focused ESLint; complete i18n validation; 24 desktop Chromium E2E tests; 2 mobile Chrome E2E tests; 62 public-doc validator tests plus all 47 published pages; document catalog validation; 36 specification-linter tests; full specification lint; and `git diff --check`. PR remediation added regressions for in-flight optimistic colors, superseded save counts, focus restoration, the persistent live region, and cleared mobile action state. The inspected 393 px phone screenshot matched the planned inset drawer, labeled 44 px rows, single scrolling surface, focus-return behavior, and viewport containment.

@@ -270,22 +270,22 @@ describe("ExecutorSettingsButton Kubernetes disclosure", () => {
     expect(screen.queryByTestId("executor-settings-reset")).toBeNull();
   });
 
-  it("opens the same disclosure in a touch Drawer from a 44px trigger", async () => {
+  it("opens the same disclosure in a touch Drawer with touch-sized controls", async () => {
     mockEnv = KUBERNETES_ENV;
     mockTouchDrawer = true;
 
     renderButton();
     const trigger = screen.getByRole("button", { name: /executor settings/i });
-    expect(trigger.className).toContain("h-11");
-    expect(trigger.className).toContain("w-11");
+    expect(trigger.className).toContain("h-12");
+    expect(trigger.className).toContain("w-12");
     fireEvent.click(trigger);
 
     expect(await screen.findByTestId("executor-settings-drawer")).toBeTruthy();
     expect(await screen.findByText(POD_NAME)).toBeTruthy();
-    expect(screen.getByTestId("executor-settings-refresh").className).toContain("h-11");
-    expect(screen.getByTestId("executor-settings-refresh").className).toContain("w-11");
-    expect(screen.getByTestId("executor-settings-link").className).toContain("h-11");
-    expect(screen.getByTestId("executor-settings-link").className).toContain("w-11");
+    expect(screen.getByTestId("executor-settings-refresh").className).toContain("h-12");
+    expect(screen.getByTestId("executor-settings-refresh").className).toContain("w-12");
+    expect(screen.getByTestId("executor-settings-link").className).toContain("h-12");
+    expect(screen.getByTestId("executor-settings-link").className).toContain("w-12");
   });
 
   it("uses the Pod-off package when the exact Kubernetes row reports failure", async () => {

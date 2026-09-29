@@ -11,6 +11,7 @@ import {
   recoverRetentionStatusPolling,
   reloadRetentionWithFakeClock,
   resetRetention,
+  seedRetentionAnalysis,
   retentionStatus,
   RETENTION_ROUTE,
   runRetention,
@@ -21,6 +22,7 @@ import {
 test.describe("Tool payload retention", () => {
   test("recovers a status polling error without manual refresh", async ({ testPage: page }) => {
     await resetRetention(page);
+    await seedRetentionAnalysis(page);
     await page.goto(RETENTION_ROUTE);
     await reloadRetentionWithFakeClock(page);
     const removeStatusRoute = await failNextRetentionStatusRead(page);
@@ -33,6 +35,7 @@ test.describe("Tool payload retention", () => {
 
   test("preserves an action failure after status recovery", async ({ testPage: page }) => {
     await resetRetention(page);
+    await seedRetentionAnalysis(page);
     await page.goto(RETENTION_ROUTE);
     await reloadRetentionWithFakeClock(page);
     const removeStatusRoute = await failNextRetentionStatusRead(page);

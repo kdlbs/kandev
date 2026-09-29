@@ -6,7 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/runs/models"
 )
 
 // ResolveAgentProfileWorkspaceID returns the workspace_id for the given

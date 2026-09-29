@@ -169,6 +169,37 @@ Required structure: three visible tabs, expanded sections, concise row descripti
 Copy and ASCII spacing are illustrative. The work-order copy table is the English starting point.
 Maps to AC-UI-SETTINGS-COMPOSITION-002.1 through .6, -003.1 through .6, -004.1 through .5, and -005.1 through .7.
 
+### UI-08: Prompt usage help spacing, desktop and phone
+
+Entry: `/settings/prompts`, page loaded with custom prompts.
+
+```text
+Before, desktop:
+[ @name usage hint ]
+Custom prompts                                [Add prompt]
+
+After, desktop:
+[ @name usage hint ]
+
+Custom prompts                                [Add prompt]
+[ prompt list ]
+
+Before, phone:
+[ @name usage hint ]
+Custom prompts
+[Add prompt]
+
+After, phone:
+[ @name usage hint ]
+
+Custom prompts
+[Add prompt]
+[ prompt list ]
+```
+
+The page remains the single scroll owner. The 24px separation is required by the existing settings spacing contract. Phone keeps the existing stacked group action.
+This preview describes the affected region; other page content is omitted. Maps to AC-UI-SETTINGS-COMPOSITION-001.1.
+
 ## Tests and E2E
 
 Task 06 owns the exact commands and scenarios for the refinement.
@@ -186,8 +217,9 @@ The work order also requires every modified existing E2E consumer to run and rec
 - [x] [Task 05: System, account, and plugin settings](task-05-system-account.md)
 
 - [x] [Task 06: Concise help and header tabs](task-06-concise-help-and-tabs.md)
+- [x] [Task 07: Prompt usage help spacing](task-07-prompt-usage-spacing.md)
 
-Tasks 01 through 05 are complete. Task 06 follows them sequentially. No delegation is authorized.
+Tasks 01 through 06 are complete. Task 07 records the completed prompt-spacing follow-up.
 
 ## Verification results
 
@@ -284,3 +316,7 @@ Do not overlap these E2E commands or use worker overrides.
 - Shared spacing can affect specialized editors. Retain and document their inner geometry.
 - Brief descriptions can omit decision-critical exclusions. Keep those visible and move only secondary detail.
 - Existing E2E selectors reference card structure. Preserve semantic assertions and migrate affected selectors together.
+
+## Task 07 results
+
+The prompts page now applies the established 24px settings-group gap between its `@name` usage hint and Custom prompts group. A temporary capture produced desktop and phone screenshots; the capture spec was removed afterward. Commit hooks passed, and the PR body publishes the compressed screenshots from its orphan media ref.

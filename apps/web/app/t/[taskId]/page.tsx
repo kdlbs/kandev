@@ -7,6 +7,8 @@ import {
   fetchSessionDataForTask,
 } from "@/lib/ssr/session-page-state";
 import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
+import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
+import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-conversation";
 
 /**
  * `/t/:taskId` — canonical kanban task detail route.
@@ -44,18 +46,22 @@ export default async function TaskPage({
       {initialState ? (
         <StateHydrator initialState={initialState} sessionId={sessionId ?? undefined} />
       ) : null}
-      <KanbanTaskShell
-        task={task}
-        taskId={taskId}
-        sessionId={sessionId}
-        initialRepositories={extractInitialRepositories(initialState, task)}
-        initialScripts={extractInitialScripts(initialState, task)}
-        initialTerminals={initialTerminals}
-        defaultLayouts={defaultLayouts}
-        initialLayout={search.layout}
-        urlSimple={search.simple}
-        urlMode={search.mode}
-      />
+      {task && isDetachedManagedConversation(task) ? (
+        <RetainedManagedConversationTranscript task={task} sessionId={sessionId} />
+      ) : (
+        <KanbanTaskShell
+          task={task}
+          taskId={taskId}
+          sessionId={sessionId}
+          initialRepositories={extractInitialRepositories(initialState, task)}
+          initialScripts={extractInitialScripts(initialState, task)}
+          initialTerminals={initialTerminals}
+          defaultLayouts={defaultLayouts}
+          initialLayout={search.layout}
+          urlSimple={search.simple}
+          urlMode={search.mode}
+        />
+      )}
     </>
   );
 }

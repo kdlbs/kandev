@@ -138,6 +138,7 @@ const createTablesSQL = `
 		review_state TEXT NOT NULL DEFAULT '',
 		checks_state TEXT NOT NULL DEFAULT '',
 		mergeable_state TEXT NOT NULL DEFAULT '',
+		has_merge_conflicts BOOLEAN,
 		merge_queue_state TEXT NOT NULL DEFAULT '',
 		merge_queue_position INTEGER,
 		merge_queue_entry_id TEXT NOT NULL DEFAULT '',
@@ -596,6 +597,9 @@ func (s *Store) applyIdempotentSchemaColumns() error {
 		return err
 	}
 	if err := exec("github_task_prs.mergeable_state", `ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := exec("github_task_prs.has_merge_conflicts", `ALTER TABLE github_task_prs ADD COLUMN has_merge_conflicts BOOLEAN`); err != nil {
 		return err
 	}
 	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
@@ -1667,6 +1671,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			review_state TEXT NOT NULL DEFAULT '',
 			checks_state TEXT NOT NULL DEFAULT '',
 			mergeable_state TEXT NOT NULL DEFAULT '',
+			has_merge_conflicts BOOLEAN,
 			merge_queue_state TEXT NOT NULL DEFAULT '',
 			merge_queue_position INTEGER,
 			merge_queue_entry_id TEXT NOT NULL DEFAULT '',
@@ -1709,7 +1714,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 		`INSERT INTO github_task_prs_new (
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, head_sha, author_login, state, review_state, checks_state,
-			mergeable_state, merge_queue_state, merge_queue_position, merge_queue_entry_id, merge_queue_entry_head_sha,
+			mergeable_state, has_merge_conflicts, merge_queue_state, merge_queue_position, merge_queue_entry_id, merge_queue_entry_head_sha,
 			merge_queue_estimated_time_to_merge_seconds, merge_queue_last_removal_id, merge_queue_last_removed_at,
 			merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
 			review_count, pending_review_count, comment_count,
@@ -1718,7 +1723,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, COALESCE(head_sha, ''), author_login, state, review_state, checks_state,
-			mergeable_state, merge_queue_state, merge_queue_position, COALESCE(merge_queue_entry_id, ''), COALESCE(merge_queue_entry_head_sha, ''),
+			mergeable_state, has_merge_conflicts, merge_queue_state, merge_queue_position, COALESCE(merge_queue_entry_id, ''), COALESCE(merge_queue_entry_head_sha, ''),
 			merge_queue_estimated_time_to_merge_seconds, COALESCE(merge_queue_last_removal_id, ''), merge_queue_last_removed_at,
 			COALESCE(merge_queue_last_removal_reason, ''), COALESCE(merge_queue_last_removal_before_sha, ''),
 			review_count, pending_review_count, comment_count,
@@ -2757,7 +2762,7 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 // read working regardless of what the table has picked up beyond them.
 const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url,
 	pr_title, head_branch, base_branch, author_login, state, review_state, checks_state,
-	mergeable_state, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds, review_count, pending_review_count, required_reviews, comment_count,
+	mergeable_state, has_merge_conflicts, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds, review_count, pending_review_count, required_reviews, comment_count,
 	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
 	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
@@ -2769,7 +2774,7 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 // `gtp` alias, for queries that join github_task_prs against another table.
 const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repository_id, gtp.owner, gtp.repo,
 	gtp.pr_number, gtp.pr_url, gtp.pr_title, gtp.head_branch, gtp.base_branch, gtp.author_login,
-	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.merge_queue_state, gtp.merge_queue_position, gtp.merge_queue_estimated_time_to_merge_seconds, gtp.review_count,
+	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.has_merge_conflicts, gtp.merge_queue_state, gtp.merge_queue_position, gtp.merge_queue_estimated_time_to_merge_seconds, gtp.review_count,
 	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
 	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
 	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at,
@@ -2811,7 +2816,7 @@ func taskPRValues(tp *TaskPR) []any {
 	return []any{
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL,
 		tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin, tp.State, tp.ReviewState,
-		tp.ChecksState, tp.MergeableState, tp.MergeQueueState, tp.MergeQueuePosition,
+		tp.ChecksState, tp.MergeableState, tp.HasMergeConflicts, tp.MergeQueueState, tp.MergeQueuePosition,
 		tp.MergeQueueEstimatedTimeToMergeSeconds, tp.ReviewCount, tp.PendingReviewCount,
 		tp.RequiredReviews, tp.CommentCount, tp.UnresolvedReviewThreads, tp.ChecksTotal,
 		tp.ChecksPassing, tp.Additions, tp.Deletions, tp.CreatedAt, tp.MergedAt, tp.ClosedAt,
@@ -3087,7 +3092,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 
 	if _, err := tx.ExecContext(ctx, tx.Rebind(
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
-			head_branch = ?, base_branch = ?, head_sha = ?, author_login = ?, state = ?, mergeable_state = ?,
+			head_branch = ?, base_branch = ?, head_sha = ?, author_login = ?, state = ?, mergeable_state = ?, has_merge_conflicts = ?,
 			merge_queue_state = ?, merge_queue_position = ?, merge_queue_entry_id = ?, merge_queue_entry_head_sha = ?, merge_queue_estimated_time_to_merge_seconds = ?,
 			merge_queue_last_removal_id = ?, merge_queue_last_removed_at = ?, merge_queue_last_removal_reason = ?, merge_queue_last_removal_before_sha = ?,
 			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?,
@@ -3095,7 +3100,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
 		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, headSHA, pr.AuthorLogin,
-		pr.State, pr.MergeableState, queue.state, queue.position, queue.entryID, queue.entryHeadSHA, queue.estimate,
+		pr.State, effectivePRMergeableState(pr), observedTaskPRMergeConflict(outgoing.HasMergeConflicts, pr, pr.MergeableState), queue.state, queue.position, queue.entryID, queue.entryHeadSHA, queue.estimate,
 		queue.lastRemovalID, queue.lastRemovedAt, queue.lastRemovalReason, queue.lastRemovalBeforeSHA,
 		pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
 		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
@@ -3260,6 +3265,10 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus)
 	}
 	tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt =
 		resolveTaskPROutcomeFields(outgoing, status)
+	if status != nil && status.PR != nil {
+		tp.MergeableState = effectivePRMergeableState(status.PR)
+		tp.HasMergeConflicts = observedTaskPRMergeConflict(outgoing.HasMergeConflicts, status.PR, status.PR.MergeableState)
+	}
 	queueSource := tp
 	if outgoing.ID != "" {
 		queueSource = outgoing
@@ -3354,7 +3363,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?,
+		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?, has_merge_conflicts = ?,
 			head_sha = ?, merge_queue_state = ?, merge_queue_position = ?, merge_queue_entry_id = ?, merge_queue_entry_head_sha = ?, merge_queue_estimated_time_to_merge_seconds = ?,
 			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
 			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
@@ -3363,7 +3372,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
 			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?
 		WHERE id = ?`),
-		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.HeadSHA, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueEstimatedTimeToMergeSeconds,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.HasMergeConflicts, tp.HeadSHA, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueEstimatedTimeToMergeSeconds,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,

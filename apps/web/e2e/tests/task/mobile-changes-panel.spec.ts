@@ -95,6 +95,7 @@ test.describe("Mobile changes panel", () => {
     backend,
     prCapture,
   }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     const initialLayout = (await apiClient.getUserSettings()).settings.changes_panel_layout;
     try {
       await apiClient.saveUserSettings({ changes_panel_layout: "tree" });
@@ -163,6 +164,20 @@ test.describe("Mobile changes panel", () => {
           );
         }),
       ).toBe(true);
+
+      await more.tap();
+      const actionsMenu = testPage.getByRole("menu");
+      await waitForFiniteAnimations(actionsMenu);
+      const copyPath = actionsMenu.getByRole("menuitem", { name: "Copy path" });
+      await expect(copyPath).toBeVisible();
+      const copyPathBox = (await copyPath.boundingBox())!;
+      expect(copyPathBox.width).toBeGreaterThanOrEqual(44);
+      expect(copyPathBox.height).toBeGreaterThanOrEqual(44);
+      await copyPath.tap();
+      await expect
+        .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
+        .toBe(filePath);
+      await expect(testPage.locator("diffs-container")).toHaveCount(0);
 
       await apiClient.saveUserSettings({ changes_panel_layout: "flat" });
       await testPage.reload();
@@ -381,7 +396,11 @@ test.describe("Mobile changes panel", () => {
     await closeButton.tap();
 
     await expandSection(testPage, "commits-section");
-    await testPage.locator("[data-testid^='commit-row-']").first().tap();
+    await testPage
+      .locator("[data-testid^='commit-row-']")
+      .first()
+      .getByRole("button", { name: "Open commit" })
+      .tap();
     await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
     await closeButton.tap();
   });
@@ -674,7 +693,7 @@ test.describe("Mobile changes panel", () => {
     await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
-    await row.tap();
+    await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).tap();
 
     await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByLabel("Commit Changes").getByText(remoteMessage)).toBeVisible({

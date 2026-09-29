@@ -293,6 +293,14 @@ prove which cache generation is currently live.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 
+Archived Git worktrees use the task cleanup worker, not the optional storage schedule. A clean
+worktree can be removed during archive. A worktree with tracked or untracked Git changes remains
+on disk and gets a durable recheck after about 24 hours. The worker removes it after Git reports it
+clean, even when scheduled storage cleanup is disabled. Git-ignored files are outside this check.
+Active archived worktree paths protect their task workspace from storage quarantine and purge,
+including **Force clear all**. An older Kandev version can move an active worktree into quarantine.
+If this happens, choose **Restore** to return the workspace to its original path.
+
 The Workspaces policy includes an off-by-default **Remove dependencies from archived or deleted
 task workspaces** option. When enabled, a scheduled cleanup or the matching manual action can
 recursively remove only these directories from eligible, unprotected Kandev task workspaces:
@@ -313,11 +321,20 @@ Do not enable those rules on a daemon shared with unrelated workloads.
 
 ![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
+The Host tab reports capacity for the filesystem containing Kandev home and for the service's
+effective temporary folder. On Unix, it also reports `/tmp` when it resolves to a separate root.
+Capacity loads independently of the folder analysis and refreshes every 30 seconds while the Host
+tab is visible. A warning starts at 80% used; a critical warning starts at 90% used or when no space
+is available. Temporary-file operations can fail when this filesystem is full, even if task
+workspaces have free space. When Kandev can identify a shared filesystem, the page shows the
+relationship and does not add its capacity twice. These measurements do not change temporary
+directory or tool-cache settings.
+
 The Storage page also reports **System temporary folders** as a read-only footprint. It measures the
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path. The analysis rows use the measured byte
+no direct cleanup action. The analysis rows use the measured byte
 values to order categories from largest to smallest. A decorative bar compares each displayed
 measurement with the largest displayed measurement; zero measurements have an empty bar, and
 unknown or unavailable measurements have no bar. These bars compare footprints and do not change
@@ -328,6 +345,21 @@ A temporary-folder scan that reaches its deadline keeps the sampled bytes, parti
 skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
 other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
 is a final folder total.
+
+The expanded **System temporary folders** row can show up to 20 largest direct entries for each
+selected root. These sizes are apparent regular-file bytes, not allocated filesystem blocks. Sparse
+files, hard links, metadata, deleted open files, and reserved blocks can make them differ from the
+capacity measurement. Partial entries keep only their observed bytes; unreadable or unvisited usage
+is unknown and is not added to the displayed remainder. Names and sizes identify large paths, but
+do not identify a task or process. Temporary folders can also contain tool caches, browser profiles,
+archives, and test data.
+
+An entry is marked as registered only when its exact path matches this installation's artifact
+registry and its owner-only marker validates. Registration alone does not make a file eligible for
+cleanup. **Review Kandev cleanup** opens the existing registered-artifact row, where the current
+eligibility and confirmation rules remain in effect. It does not start cleanup or pass the selected
+entry to a delete action. Reported candidate bytes do not predict how much filesystem capacity
+cleanup will free.
 
 The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
 directory under the host temporary root. Each current file is registered in the Kandev database
@@ -465,6 +497,14 @@ Kandev keeps the current default and does not merge the databases. Use a
 verified snapshot or a later deliberate recovery procedure to reconcile them.
 
 Open **Settings > System > Data & Logs > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
+
+Logical storage totals are measured in the background and shown with their last
+measurement time. During the first scan, the page still shows database details
+and available maintenance actions. If a refresh fails, the last complete totals
+remain visible as stale; select **Retry measurement** when the page offers it.
+The logical snapshot is held by the backend for 15 minutes and is lost when the
+backend restarts. The page reports the metadata measurement time separately if
+the live metadata read could not refresh.
 
 - **Optimize** runs `PRAGMA optimize`. It is quick and updates planner statistics.
 - **Vacuum** runs `VACUUM`, compacts the file, and reports bytes reclaimed. It can need substantial temporary disk and can block writes, so run it during a quiet period.
@@ -693,7 +733,7 @@ When reporting an incident, record timestamp/timezone, Kandev version and commit
 
 **Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and the default `data/backups` directory. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. Backup files outside the resolved home are not included in the total. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
 
-Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive can remove a managed worktree directory, but it keeps the local task branch and environment identity. Delete can also remove the local task branch. Other cleanup can remove a container, delete the exact Kubernetes Pod and Kandev-managed PVC while retaining an existing claim, destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
+Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive removes a Git worktree only when Git reports it clean. A worktree with tracked or untracked Git changes stays on disk and receives a task-lifecycle recheck after about 24 hours. This recheck runs independently of the optional scheduled storage cleanup. When Git reports a worktree clean, Kandev removes its directory. Unpublished and ambiguous local branches remain. Kandev can remove an integrated managed branch. The environment identity remains for later recovery. Delete can also remove the local task branch. Other cleanup can remove a container, the exact Kubernetes Pod, and a Kandev-managed PVC. It keeps an existing claim. It can destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
 
 **Reset Environment** uses a separate teardown path. For Sprites, the current reset request can lose the profile credential context and report success while leaving the provider sandbox behind. After a Sprites reset, inspect **Settings > Executors > Sprites.dev** and explicitly destroy the old sandbox there if it remains. See [Executors](executors.md#spritesdev) for the executor-specific lifecycle.
 
@@ -777,11 +817,18 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode**: experimental, medium risk, and off in the production profile by default.
-- **Office session identity**: experimental, high risk, and on in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the Office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart. Disabling the toggle restores the pre-graduation runner-seat binding and task-active-session decision re-evaluation.
 - **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
 - **Unread divider**: a per-user setting at **Settings > Preferences > Task Behavior > Conversation**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
 - **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
+
+Office session identity is graduated and always active. Each Office participant
+uses its own task conversation, and an agent decision is evaluated against the
+calling session. A live `(task_id, agent_profile_id)` pair is guarded
+in-transaction on the Office session creation path; pre-existing duplicate rows
+are retained and resolved by selection. Two Kandev processes must not write
+the same SQLite file. Its runtime toggle and environment variable are retired,
+so old false values do not disable participant sessions.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 

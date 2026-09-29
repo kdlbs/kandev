@@ -7,11 +7,211 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/events"
 	eventbus "github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type lifecycleTaskEventPublisher struct {
+	eventBus eventbus.EventBus
+	err      error
+}
+
+func (p *lifecycleTaskEventPublisher) PublishTaskUpdated(
+	ctx context.Context,
+	task *models.Task,
+	_ ...string,
+) {
+	p.err = p.eventBus.Publish(ctx, events.TaskUpdated, eventbus.NewEvent(
+		events.TaskUpdated,
+		"lifecycle-test",
+		map[string]interface{}{
+			"task_id":      task.ID,
+			"workspace_id": task.WorkspaceID,
+			"created_at":   task.CreatedAt,
+			"updated_at":   task.UpdatedAt,
+		},
+	))
+}
+
+func (*lifecycleTaskEventPublisher) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
+}
+
+func (*lifecycleTaskEventPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
+
+func (p *lifecycleTaskEventPublisher) publish(t *testing.T, ctx context.Context, task *models.Task) {
+	t.Helper()
+	p.PublishTaskUpdated(ctx, task)
+	if p.err != nil {
+		t.Fatalf("publish task.updated: %v", p.err)
+	}
+}
+
+func loadProjectedTaskActivity(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID string) time.Time {
+	t.Helper()
+	summaries, err := repo.LoadTaskStatusSummaries(ctx, []string{taskID})
+	if err != nil {
+		t.Fatalf("load task status summary: %v", err)
+	}
+	summary := summaries[taskID]
+	if summary == nil || summary.LastActivityAt == nil {
+		t.Fatalf("task summary = %#v, want projected activity", summary)
+	}
+	return *summary.LastActivityAt
+}
+
+func seedCompletedLifecycleTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID, sessionID string) time.Time {
+	t.Helper()
+	seedSession(t, repo, taskID, sessionID, "step1")
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	if _, err := messagequeue.NewSQLiteRepository(queueDB, queueDB); err != nil {
+		t.Fatalf("initialize queue schema: %v", err)
+	}
+	if err := repo.SetTaskMetadataKey(ctx, taskID, models.MetaKeyManualMoveLifecycleCompleted, true); err != nil {
+		t.Fatalf("seed completed lifecycle marker: %v", err)
+	}
+	activityAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	if _, err := repo.DB().ExecContext(ctx,
+		"UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?", activityAt, activityAt, taskID); err != nil {
+		t.Fatalf("seed old task activity: %v", err)
+	}
+	return activityAt
+}
+
+func startLifecycleStatusProjector(
+	t *testing.T,
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	eventBus eventbus.EventBus,
+) {
+	t.Helper()
+	projectorCtx, cancel := context.WithCancel(ctx)
+	projector := statussummary.NewProjector(statussummary.ProjectorConfig{
+		Store:    repo,
+		EventBus: eventBus,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "ws1", nil
+		},
+	})
+	t.Cleanup(func() {
+		cancel()
+		projector.Close()
+	})
+	if err := projector.Start(projectorCtx); err != nil {
+		t.Fatalf("start task status projector: %v", err)
+	}
+}
+
+func assertReconstructedLifecycleActivity(
+	t *testing.T,
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	taskID string,
+	expected time.Time,
+) {
+	t.Helper()
+	activityByTask, err := repo.LoadTaskLastActivity(ctx, []string{taskID})
+	if err != nil {
+		t.Fatalf("reconstruct task activity after recovery: %v", err)
+	}
+	if got := activityByTask[taskID]; !got.Equal(expected) {
+		t.Fatalf("reconstructed activity after marker cleanup = %s, want %s", got, expected)
+	}
+}
+
+// TestRecoverTaskLifecycleTokenPreservesLastActivityDuringMarkerCleanup covers
+// AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9 through the real status projector.
+func TestRecoverTaskLifecycleTokenPreservesLastActivityDuringMarkerCleanup(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "completed-activity-task"
+	const sessionID = "completed-activity-session"
+	activityAt := seedCompletedLifecycleTask(t, ctx, repo, taskID, sessionID)
+	eventBus := eventbus.NewMemoryEventBus(testLogger())
+	t.Cleanup(eventBus.Close)
+	startLifecycleStatusProjector(t, ctx, repo, eventBus)
+
+	publisher := &lifecycleTaskEventPublisher{eventBus: eventBus}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetTaskEventPublisher(publisher)
+	svc.SetFeederPullReconciler(&countingFeederPullReconciler{})
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("load task before recovery: %v", err)
+	}
+	publisher.publish(t, ctx, task)
+	if got := loadProjectedTaskActivity(t, ctx, repo, taskID); !got.Equal(activityAt) {
+		t.Fatalf("projected activity before recovery = %s, want %s", got, activityAt)
+	}
+
+	svc.recoverTaskLifecycleToken(ctx, taskID)
+	if publisher.err != nil {
+		t.Fatalf("publish task.updated during recovery: %v", publisher.err)
+	}
+	stored, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("reload task after recovery: %v", err)
+	}
+	if !stored.UpdatedAt.Equal(activityAt) {
+		t.Fatalf("task updated_at after marker cleanup = %s, want unchanged %s", stored.UpdatedAt, activityAt)
+	}
+	if stored.State != task.State {
+		t.Fatalf("task state after marker cleanup = %q, want unchanged %q", stored.State, task.State)
+	}
+	if _, completed := stored.Metadata[models.MetaKeyManualMoveLifecycleCompleted]; completed {
+		t.Fatal("completed lifecycle marker was not cleared")
+	}
+	if got := loadProjectedTaskActivity(t, ctx, repo, taskID); !got.Equal(activityAt) {
+		t.Fatalf("projected activity after marker cleanup = %s, want unchanged %s", got, activityAt)
+	}
+	assertReconstructedLifecycleActivity(t, ctx, repo, taskID, activityAt)
+
+	stored.Title = "real task edit"
+	if err := repo.UpdateTask(ctx, stored); err != nil {
+		t.Fatalf("edit task after recovery: %v", err)
+	}
+	edited, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("reload edited task: %v", err)
+	}
+	publisher.publish(t, ctx, edited)
+	if got := loadProjectedTaskActivity(t, ctx, repo, taskID); !got.After(activityAt) {
+		t.Fatalf("projected activity after a genuine task edit = %s, want later than %s", got, activityAt)
+	}
+}
+
+func TestRecoverTaskLifecycleTokenTracksTaskUpdatedPublishFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "completed-publish-error-task"
+	const sessionID = "completed-publish-error-session"
+	seedCompletedLifecycleTask(t, ctx, repo, taskID, sessionID)
+	eventBus := eventbus.NewMemoryEventBus(testLogger())
+	t.Cleanup(eventBus.Close)
+
+	publisher := &lifecycleTaskEventPublisher{eventBus: eventBus}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetTaskEventPublisher(publisher)
+	svc.SetFeederPullReconciler(&countingFeederPullReconciler{})
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("load task before recovery: %v", err)
+	}
+	publisher.publish(t, ctx, task)
+	eventBus.Close()
+
+	svc.recoverTaskLifecycleToken(ctx, taskID)
+	if publisher.err == nil {
+		t.Fatal("recovery task.updated publication failure was not captured")
+	}
+}
 
 // TestStartDoesNotBlockOnLifecycleSweep is the regression test for the
 // ordering defect described in

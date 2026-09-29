@@ -11,6 +11,8 @@ function toProfile(payload: ExecutorProfilePayload): ExecutorProfile {
     name: payload.name,
     mcp_policy: payload.mcp_policy,
     config: payload.config,
+    secret_fields: payload.secret_fields,
+    provider: payload.provider,
     prepare_script: payload.prepare_script,
     cleanup_script: payload.cleanup_script,
     created_at: payload.created_at ?? new Date().toISOString(),

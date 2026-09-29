@@ -1,16 +1,18 @@
+import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Progress } from "@kandev/ui/progress";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconDatabase } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { formatNumber } from "@/lib/i18n/formats";
-import type { StorageDiskCapacityResponse } from "@/lib/types/system";
+import { formatDateTime, formatNumber } from "@/lib/i18n/formats";
+import type { StorageDiskCapacityResponse, StorageTemporaryDiskCapacity } from "@/lib/types/system";
 import { formatGigabytes } from "./storage-units";
 
 type Props = {
   disk: StorageDiskCapacityResponse | null;
   loading?: boolean;
   error?: string | null;
+  onViewTemporary?: () => void;
 };
 
 type Severity = "normal" | "warning" | "critical";
@@ -20,10 +22,29 @@ function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
-function severityForPercent(percent: number): Severity {
-  if (percent >= 90) return "critical";
+function severityForPercent(percent: number, availableBytes?: number): Severity {
+  if (availableBytes === 0 || percent >= 90) return "critical";
   if (percent >= 80) return "warning";
   return "normal";
+}
+
+function validCapacity(capacity: {
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+}): boolean {
+  return (
+    Number.isFinite(capacity.total_bytes) &&
+    capacity.total_bytes > 0 &&
+    Number.isFinite(capacity.used_bytes) &&
+    capacity.used_bytes >= 0 &&
+    Number.isFinite(capacity.available_bytes) &&
+    capacity.available_bytes >= 0 &&
+    capacity.available_bytes <= capacity.total_bytes &&
+    Number.isFinite(capacity.used_percent) &&
+    capacity.used_percent >= 0
+  );
 }
 
 function severityTextClassName(severity: Severity): string {
@@ -97,9 +118,11 @@ function AvailableDiskCard({
 }) {
   const { t } = useTranslation();
   const percent = clampPercent(disk.used_percent);
-  const severity = severityForPercent(percent);
+  const severity = severityForPercent(percent, disk.available_bytes);
   const percentLabel = formatNumber(percent, { maximumFractionDigits: 1 });
   const progressLabel = t("system:storageDiskProgressAria", { percent: percentLabel });
+  const timestamp = disk.observed_at ? formatDateTime(disk.observed_at) : null;
+  const stale = disk.stale === true || Boolean(error);
   return (
     <Card data-testid="storage-disk-capacity-card" data-severity={severity}>
       <CardHeader>
@@ -108,6 +131,14 @@ function AvailableDiskCard({
           {loading && <Spinner className="size-4" data-testid="storage-disk-spinner" />}
         </CardTitle>
         <CardDescription>{t("system:storageDiskDescription")}</CardDescription>
+        {stale && timestamp && (
+          <p
+            className="text-xs text-amber-700 dark:text-amber-300"
+            data-testid="storage-disk-stale"
+          >
+            {t("system:storageDiskStale", { at: timestamp })}
+          </p>
+        )}
         {error && (
           <p className="break-words text-xs text-destructive" data-testid="storage-disk-error">
             {t("system:storageSectionUnavailable")}: {error}
@@ -144,6 +175,14 @@ function AvailableDiskCard({
             {disk.path}
           </code>
         </div>
+        {timestamp && (
+          <p
+            className="break-words text-xs text-muted-foreground"
+            data-testid="storage-disk-observed-at"
+          >
+            {t("system:storageDiskObservedAt", { at: timestamp })}
+          </p>
+        )}
         {severity !== "normal" && (
           <p
             className={
@@ -163,8 +202,240 @@ function AvailableDiskCard({
   );
 }
 
-export function StorageDiskCapacityCard({ disk, loading, error }: Props) {
+function temporaryRelationship(t: (key: string) => string, root: StorageTemporaryDiskCapacity) {
+  if (root.shared_with_home === true) return t("system:storageTemporaryDiskSharedWithHome");
+  if (root.shared_with_home === false) return t("system:storageTemporaryDiskSeparateFromHome");
+  return t("system:storageTemporaryDiskRelationUnknown");
+}
+
+function TemporaryCapacityUsage({
+  usable,
+  percent,
+  severity,
+}: {
+  usable: boolean;
+  percent: number;
+  severity: Severity;
+}) {
+  const { t } = useTranslation();
+  return usable ? (
+    <span
+      className={severityTextClassName(severity)}
+      data-testid="storage-temporary-disk-used-percent"
+    >
+      {t("system:storageDiskUsed", {
+        percent: formatNumber(percent, { maximumFractionDigits: 1 }),
+      })}
+    </span>
+  ) : (
+    <span
+      className="text-sm text-muted-foreground"
+      data-testid="storage-temporary-disk-unavailable"
+    >
+      {t("system:storageTemporaryDiskUnavailable")}
+    </span>
+  );
+}
+
+function TemporaryCapacityMetrics({
+  root,
+  usable,
+  percent,
+  severity,
+}: {
+  root: StorageTemporaryDiskCapacity;
+  usable: boolean;
+  percent: number;
+  severity: Severity;
+}) {
+  const { t } = useTranslation();
+  if (!usable) return null;
+  return (
+    <>
+      <Progress
+        value={percent}
+        aria-label={t("system:storageDiskProgressAria", {
+          percent: formatNumber(percent, { maximumFractionDigits: 1 }),
+        })}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className={`mt-2 ${severityProgressClassName(severity)}`}
+      />
+      <p className="mt-2 text-xs text-muted-foreground">
+        {t("system:storageDiskCapacitySummary", {
+          available: formatGigabytes(root.available_bytes),
+          total: formatGigabytes(root.total_bytes),
+        })}
+      </p>
+    </>
+  );
+}
+
+function TemporaryCapacityDetails({
+  root,
+  usable,
+  severity,
+  timestamp,
+}: {
+  root: StorageTemporaryDiskCapacity;
+  usable: boolean;
+  severity: Severity;
+  timestamp: string | null;
+}) {
+  const { t } = useTranslation();
+  const stale = root.stale === true;
+  const staleMessage = timestamp
+    ? t("system:storageDiskStale", { at: timestamp })
+    : t("system:storageTemporaryDiskRefreshFailed");
+  return (
+    <>
+      <p className="mt-2 break-words text-xs text-muted-foreground">
+        {temporaryRelationship(t, root)}
+      </p>
+      {stale && (
+        <p
+          className="mt-2 break-words text-xs text-amber-700 dark:text-amber-300"
+          data-testid="storage-temporary-disk-stale"
+        >
+          {staleMessage}
+        </p>
+      )}
+      {usable && severity !== "normal" && (
+        <p
+          className={
+            severity === "critical"
+              ? "mt-2 text-xs text-red-600 dark:text-red-400"
+              : "mt-2 text-xs text-amber-600 dark:text-amber-400"
+          }
+          data-testid="storage-temporary-disk-warning"
+        >
+          {severity === "critical"
+            ? t("system:storageDiskCriticalWarning")
+            : t("system:storageDiskHighWarning")}
+          <span className="mt-1 block">{t("system:storageTemporaryDiskRisk")}</span>
+        </p>
+      )}
+      {root.warning && !root.stale && (
+        <p className="mt-2 break-words text-xs text-muted-foreground">
+          {t("system:storageTemporaryDiskUnavailable")}
+        </p>
+      )}
+      {timestamp && (
+        <p className="mt-2 break-words text-xs text-muted-foreground">
+          {t("system:storageDiskObservedAt", { at: timestamp })}
+        </p>
+      )}
+    </>
+  );
+}
+
+function TemporaryCapacityEntry({
+  root,
+  index,
+}: {
+  root: StorageTemporaryDiskCapacity;
+  index: number;
+}) {
+  const usable = root.available && validCapacity(root);
+  const percent = usable ? clampPercent(root.used_percent) : 0;
+  const severity = usable ? severityForPercent(percent, root.available_bytes) : "normal";
+  const timestamp = root.observed_at ? formatDateTime(root.observed_at) : null;
+  const names = [root.path, ...(root.aliases ?? []).filter((path) => path !== root.path)];
+  return (
+    <div
+      className="min-w-0 rounded-md border bg-background p-3"
+      data-testid={`storage-temporary-disk-capacity-${index}`}
+      data-severity={usable ? severity : "unavailable"}
+    >
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
+        <span
+          className="min-w-0 break-all font-mono text-xs"
+          data-testid="storage-temporary-disk-path"
+        >
+          {names.join(" · ")}
+        </span>
+        <TemporaryCapacityUsage usable={usable} percent={percent} severity={severity} />
+      </div>
+      <TemporaryCapacityMetrics root={root} usable={usable} percent={percent} severity={severity} />
+      <TemporaryCapacityDetails
+        root={root}
+        usable={usable}
+        severity={severity}
+        timestamp={timestamp}
+      />
+    </div>
+  );
+}
+
+function TemporaryDiskCapacityCard({
+  disk,
+  error,
+  onViewTemporary,
+}: {
+  disk: StorageDiskCapacityResponse;
+  error?: string | null;
+  onViewTemporary?: () => void;
+}) {
+  const { t } = useTranslation();
+  const roots = disk.temporary_roots;
+  const refreshFailed = Boolean(error || disk.temporary_roots_warning);
+  return (
+    <Card data-testid="storage-temporary-disk-capacity-card">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <IconDatabase className="size-4" /> {t("system:storageTemporaryCapacityTitle")}
+        </CardTitle>
+        <CardDescription>{t("system:storageTemporaryDiskRisk")}</CardDescription>
+      </CardHeader>
+      <CardContent className="min-w-0 space-y-3">
+        {refreshFailed && (
+          <p
+            className="text-xs text-amber-700 dark:text-amber-300"
+            data-testid="storage-temporary-disk-refresh-failed"
+          >
+            {t("system:storageTemporaryDiskRefreshFailed")}
+          </p>
+        )}
+        {!roots?.length && (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="storage-temporary-disk-unavailable"
+          >
+            {t("system:storageTemporaryDiskUnavailable")}
+          </p>
+        )}
+        {roots?.map((root, index) => (
+          <TemporaryCapacityEntry
+            key={`${root.requested_path}:${root.path}`}
+            root={root}
+            index={index}
+          />
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          className="h-7 min-h-7 w-full cursor-pointer px-3 text-xs md:w-auto max-md:h-11 max-md:min-h-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11"
+          onClick={onViewTemporary}
+          data-testid="storage-disk-view-temporary"
+        >
+          {t("system:storageTemporaryDiskViewEntries")}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function StorageDiskCapacityCard({ disk, loading, error, onViewTemporary }: Props) {
   if (!disk) return <LoadingDiskCard loading={loading} error={error} />;
-  if (!disk.available) return <UnavailableDiskCard disk={disk} />;
-  return <AvailableDiskCard disk={disk} loading={loading ?? false} error={error} />;
+  const homeAvailable = disk.available && validCapacity(disk);
+  return (
+    <div className="min-w-0 space-y-4">
+      {homeAvailable ? (
+        <AvailableDiskCard disk={disk} loading={loading ?? false} error={error} />
+      ) : (
+        <UnavailableDiskCard disk={disk} />
+      )}
+      <TemporaryDiskCapacityCard disk={disk} error={error} onViewTemporary={onViewTemporary} />
+    </div>
+  );
 }

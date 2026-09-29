@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -14,13 +16,16 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 )
 
 // httpTaskRepo extends the WS fixture with the paging and counting surfaces
 // the HTTP list/count routes need, recording the arguments they receive.
 type httpTaskRepo struct {
 	wsTaskRepo
+	taskrepository.TaskResourceCleanupRepository
 
 	listedWorkspaceID string
 	listedPage        int
@@ -35,6 +40,82 @@ type httpTaskRepo struct {
 	stepCountErr      error
 	countedWorkflowID string
 	countedStepID     string
+	cleanupJobs       []*models.TaskResourceCleanupJob
+	cleanupJobsByOp   map[string]*models.TaskResourceCleanupJob
+	sidebarPage       *models.SidebarTaskPageResult
+	sidebarWorkspace  string
+	sidebarQuery      models.SidebarTaskViewQuery
+	sidebarPrefs      models.SidebarTaskViewPreferences
+}
+
+func (r *httpTaskRepo) QuerySidebarTaskPage(
+	_ context.Context,
+	workspaceID string,
+	query models.SidebarTaskViewQuery,
+	prefs models.SidebarTaskViewPreferences,
+) (*models.SidebarTaskPageResult, error) {
+	r.sidebarWorkspace = workspaceID
+	r.sidebarQuery = query
+	r.sidebarPrefs = prefs
+	return r.sidebarPage, nil
+}
+
+type sidebarSettingsReader struct {
+	settings *usermodels.UserSettings
+	err      error
+}
+
+func (r sidebarSettingsReader) GetUserSettings(context.Context) (*usermodels.UserSettings, error) {
+	return r.settings, r.err
+}
+
+func (r *httpTaskRepo) CreateTaskResourceCleanupJob(
+	_ context.Context, job *models.TaskResourceCleanupJob,
+) error {
+	if r.cleanupJobsByOp == nil {
+		r.cleanupJobsByOp = make(map[string]*models.TaskResourceCleanupJob)
+	}
+	r.cleanupJobsByOp[job.OperationID] = job
+	return nil
+}
+
+func (r *httpTaskRepo) GetTaskResourceCleanupJobByOperationID(
+	_ context.Context, operationID string,
+) (*models.TaskResourceCleanupJob, error) {
+	return r.cleanupJobsByOp[operationID], nil
+}
+
+func (r *httpTaskRepo) UpdateTaskResourceCleanupSnapshot(
+	_ context.Context, operationID, snapshot string,
+) error {
+	if job := r.cleanupJobsByOp[operationID]; job != nil {
+		job.ResourceSnapshot = snapshot
+	}
+	return nil
+}
+
+func (r *httpTaskRepo) StartPreparedTaskResourceCleanupJob(
+	_ context.Context, id string,
+) (bool, error) {
+	for _, job := range r.cleanupJobsByOp {
+		if job.ID == id && job.State == models.TaskResourceCleanupStatePrepared {
+			job.State = models.TaskResourceCleanupStatePending
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *httpTaskRepo) ListTaskResourceCleanupJobs(
+	_ context.Context, taskID string,
+) ([]*models.TaskResourceCleanupJob, error) {
+	jobs := make([]*models.TaskResourceCleanupJob, 0, len(r.cleanupJobs))
+	for _, job := range r.cleanupJobs {
+		if job != nil && job.TaskID == taskID {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs, nil
 }
 
 func (r *httpTaskRepo) ListTasksByWorkspace(
@@ -70,8 +151,9 @@ func newHTTPTaskHandlers(t *testing.T, repo *httpTaskRepo) *TaskHandlers {
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
-		Reviews: repo,
+		Reviews: repo, ResourceCleanups: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorktreeCleanup(authzDeleteCleanup{})
 	return &TaskHandlers{service: svc, logger: log}
 }
 
@@ -139,6 +221,54 @@ func TestHTTPGetTaskDeniesForeignTask(t *testing.T) {
 	h.httpGetTask(ownerCtx)
 	require.Equal(t, http.StatusOK, ownerRec.Code)
 	require.Contains(t, ownerRec.Body.String(), "Victim", "the owner must still get their task")
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.5
+func TestHTTPGetArchiveSourceManifestDeniesForeignWorkspace(t *testing.T) {
+	repo := &httpTaskRepo{cleanupJobs: []*models.TaskResourceCleanupJob{{
+		ID: "cleanup-b", TaskID: "task-b",
+		ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-b","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-b","worktree_id":"wt-b","repository_id":"repo-b"}]}`,
+	}}}
+	h := newHTTPTaskHandlers(t, repo)
+
+	foreignCtx, foreignRec := taskRequestAs(t, "user-a", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(foreignCtx)
+	require.Equal(t, http.StatusNotFound, foreignRec.Code)
+	require.JSONEq(t, `{"error":"archive source manifest not found"}`, foreignRec.Body.String())
+
+	ownerCtx, ownerRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(ownerCtx)
+	require.Equal(t, http.StatusOK, ownerRec.Code)
+	require.Contains(t, ownerRec.Body.String(), `"worktree_id":"wt-b"`)
+
+	missingCtx, missingRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	newHTTPTaskHandlers(t, &httpTaskRepo{}).httpGetArchiveSourceManifest(missingCtx)
+	require.Equal(t, http.StatusNotFound, missingRec.Code)
+	require.JSONEq(t, `{"error":"archive source manifest not found"}`, missingRec.Body.String())
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.5
+func TestHTTPGetArchiveSourceManifestReturnsAllCleanupGenerations(t *testing.T) {
+	repo := &httpTaskRepo{cleanupJobs: []*models.TaskResourceCleanupJob{
+		{
+			ID: "cleanup-first", TaskID: "task-b",
+			ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-first","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-first","worktree_id":"wt-first","repository_id":"repo-b"}]}`,
+		},
+		{
+			ID: "cleanup-second", TaskID: "task-b",
+			ResourceSnapshot: `{"workspace_id":"ws-b","worktrees":[{"id":"wt-second","task_id":"task-b","repository_id":"repo-b"}],"archive_source_manifest":[{"task_id":"task-b","cleanup_job_id":"cleanup-second","worktree_id":"wt-second","repository_id":"repo-b"}]}`,
+		},
+	}}
+	h := newHTTPTaskHandlers(t, repo)
+	ownerCtx, ownerRec := taskRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/tasks/task-b/archive-source-manifest", "task-b")
+	h.httpGetArchiveSourceManifest(ownerCtx)
+	require.Equal(t, http.StatusOK, ownerRec.Code)
+	require.Contains(t, ownerRec.Body.String(), `"cleanup_job_id":"cleanup-first"`)
+	require.Contains(t, ownerRec.Body.String(), `"cleanup_job_id":"cleanup-second"`)
 }
 
 func TestHTTPGetTaskReturnsNotFoundForUnknownTask(t *testing.T) {
@@ -238,6 +368,70 @@ func TestHTTPListTasksByWorkspaceDeniesForeignWorkspace(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Empty(t, repo.listedWorkspaceID, "a denied list must not reach the repository")
+}
+
+func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing.T) {
+	repo := &httpTaskRepo{sidebarPage: &models.SidebarTaskPageResult{
+		QueryKey: "key", Page: 1, PageSize: 100, TotalTasks: 1, TotalVisibleTasks: 1,
+		Entries: []models.SidebarTaskPageEntry{{
+			Kind: "task", TaskID: "task-b", WIPQueuePosition: 3, WIPQueueTotal: 7, SubtaskCount: 4,
+		}},
+		Tasks: []*models.Task{{ID: "task-b", WorkspaceID: "ws-b", Title: "Mine"}},
+	}}
+	h := newHTTPTaskHandlers(t, repo)
+	h.SetSidebarTaskSettingsReader(sidebarSettingsReader{settings: &usermodels.UserSettings{
+		SidebarTaskPrefs: usermodels.SidebarTaskPrefs{PinnedTaskIDs: []string{"task-b"}, OrderedTaskIDs: []string{"task-b"}},
+	}})
+	c, rec := taskRequestAs(t, "", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"filters":[],"locale":"en"}`))
+
+	h.httpQuerySidebarTasks(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "ws-b", repo.sidebarWorkspace)
+	require.Equal(t, 1, repo.sidebarQuery.Page)
+	require.Equal(t, 100, repo.sidebarQuery.PageSize)
+	require.Equal(t, "updatedAt", repo.sidebarQuery.Sort.Key)
+	require.Equal(t, "desc", repo.sidebarQuery.Sort.Direction)
+	require.Equal(t, "none", repo.sidebarQuery.Group)
+	require.Equal(t, []string{"task-b"}, repo.sidebarPrefs.PinnedTaskIDs)
+	require.Contains(t, rec.Body.String(), `"query_key":"key"`)
+	require.Contains(t, rec.Body.String(), `"task":{"id":"task-b"`)
+	require.Contains(t, rec.Body.String(), `"wip_queue_position":3`)
+	require.Contains(t, rec.Body.String(), `"wip_queue_total":7`)
+	require.Contains(t, rec.Body.String(), `"subtask_count":4`)
+}
+
+func TestHTTPQuerySidebarTasksRejectsInvalidAndOversizedBodies(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown field": `{"filters":[],"locale":"en","arbitrary_sql":"1=1"}`,
+		"bad filter":    `{"filters":[{"dimension":"other","op":"is","value":"x"}],"locale":"en"}`,
+		"oversized":     `{"unused":"` + strings.Repeat("x", sidebarTaskRequestLimit) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &httpTaskRepo{}
+			h := newHTTPTaskHandlers(t, repo)
+			c, rec := taskRequestAs(t, "", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+			c.Request.Body = io.NopCloser(strings.NewReader(body))
+
+			h.httpQuerySidebarTasks(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Empty(t, repo.sidebarWorkspace, "invalid input must not reach the repository")
+		})
+	}
+}
+
+func TestHTTPQuerySidebarTasksDeniesForeignWorkspace(t *testing.T) {
+	repo := &httpTaskRepo{}
+	h := newHTTPTaskHandlers(t, repo)
+	c, rec := taskRequestAs(t, "user-a", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"locale":"en"}`))
+
+	h.httpQuerySidebarTasks(c)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Empty(t, repo.sidebarWorkspace, "a denied query must not reach the repository")
 }
 
 func TestHTTPGetWorkflowTaskCount(t *testing.T) {
@@ -372,13 +566,14 @@ func TestHTTPDeleteTaskDeletesAndReportsMissingTasks(t *testing.T) {
 	repo := &httpTaskRepo{}
 	h := newHTTPTaskHandlers(t, repo)
 
-	c, rec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/task-b", "task-b")
+	c, rec := taskRequestAs(t, "user-b", http.MethodDelete, "/api/v1/tasks/task-b", "task-b")
+	authorizeTaskDeletePreview(t, h, c, "task-b")
 	h.httpDeleteTask(c)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"success":true}`, rec.Body.String())
 	require.Equal(t, []string{"task-b"}, repo.deleted)
 
-	missingCtx, missingRec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/nope", "nope")
+	missingCtx, missingRec := taskRequestAs(t, "user-b", http.MethodDelete, "/api/v1/tasks/nope", "nope")
 	h.httpDeleteTask(missingCtx)
 	require.Equal(t, http.StatusNotFound, missingRec.Code)
 	require.JSONEq(t, `{"error":"task not deleted"}`, missingRec.Body.String())

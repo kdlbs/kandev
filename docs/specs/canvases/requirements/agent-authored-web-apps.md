@@ -257,7 +257,8 @@ blocked by permissions, invalid, or using a prior release.
 - **AC-CANVASES-AGENT-WEB-APPS-007.5:** A runtime URL or iframe load event
   alone shall not display Ready. Until the current frame acknowledges startup,
   the host shall display Loading. After 15 seconds without acknowledgement,
-  it shall show an unavailable state with Retry and Releases actions.
+  it shall show the `AC-CANVASES-AGENT-WEB-APPS-007.9` state with Retry and
+  Releases actions.
 - **AC-CANVASES-AGENT-WEB-APPS-007.6:** Retry, release replacement, token
   renewal, and canvas navigation shall ignore acknowledgements from previous
   frame attempts. An unavailable frame shall not cover recovery controls.
@@ -269,6 +270,18 @@ blocked by permissions, invalid, or using a prior release.
   once in plain language, identify newly requested access, and show exact
   external origins. Ordinary permission review shall not appear as a validation
   failure. Active and retained valid releases shall have distinct labels.
+
+- **AC-CANVASES-AGENT-WEB-APPS-007.9:** When a canvas application fails
+  startup acknowledgement with a valid active release, the host shall show a
+  runtime-startup-failure state attributing the failure to the application or
+  runtime, distinct from the release-unavailable state of
+  `AC-CANVASES-AGENT-WEB-APPS-007.1`.
+- **AC-CANVASES-AGENT-WEB-APPS-007.10:** The runtime-startup-failure
+  description shall distinguish at least three causes: guest-reported
+  `document_error`, an application unable to reach its runtime API, and
+  host-observed `timeout` without acknowledgement by the
+  `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. Pre-bootstrap failure uses
+  `timeout`. Unknown causes shall not blame releases.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-008: Bounded agent authoring
 

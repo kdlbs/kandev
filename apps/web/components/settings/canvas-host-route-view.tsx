@@ -18,6 +18,7 @@ import {
   MobileCanvasActions,
   type CanvasHostState,
 } from "./canvas-host-components";
+import type { WebAppStartupFailureReason } from "@/components/plugins/web-app-startup";
 import { canvasDataScope, type Canvas } from "@/lib/api/domains/canvas-api";
 
 type CanvasHostRouteViewProps = {
@@ -29,6 +30,7 @@ type CanvasHostRouteViewProps = {
   runtimeUrl: string | null;
   state: CanvasHostState;
   error: string | null;
+  runtimeFailureReason: WebAppStartupFailureReason | null;
   menuOpen: boolean;
   promotionOpen: boolean;
   workspaceDataOpen: boolean;
@@ -50,7 +52,7 @@ type CanvasHostRouteViewProps = {
   onRename: () => void;
   onSelectCanvas: (canvas: Canvas) => void;
   onRuntimeReady: () => void;
-  onRuntimeError: () => void;
+  onRuntimeError: (reason: WebAppStartupFailureReason) => void;
   onRetry: () => void;
   onPromotionCompleted: () => void;
   onChanged: () => void;
@@ -116,12 +118,20 @@ function CanvasHostRouteBody({
   state,
   runtimeUrl,
   error,
+  runtimeFailureReason,
   onRuntimeReady,
   onRuntimeError,
   onRetry,
 }: Pick<
   CanvasHostRouteViewProps,
-  "canvasId" | "runtimeUrl" | "state" | "error" | "onRuntimeReady" | "onRuntimeError" | "onRetry"
+  | "canvasId"
+  | "runtimeUrl"
+  | "state"
+  | "error"
+  | "runtimeFailureReason"
+  | "onRuntimeReady"
+  | "onRuntimeError"
+  | "onRetry"
 > & { title: string }) {
   return (
     <CanvasHostBody
@@ -130,6 +140,7 @@ function CanvasHostRouteBody({
       state={state}
       runtimeUrl={runtimeUrl}
       error={error}
+      runtimeFailureReason={runtimeFailureReason}
       onRuntimeReady={onRuntimeReady}
       onRuntimeError={onRuntimeError}
       onRetry={onRetry}
@@ -262,6 +273,7 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       state={props.state}
       runtimeUrl={props.runtimeUrl}
       error={props.error}
+      runtimeFailureReason={props.runtimeFailureReason}
       onRuntimeReady={props.onRuntimeReady}
       onRuntimeError={props.onRuntimeError}
       onRetry={props.onRetry}

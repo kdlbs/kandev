@@ -189,7 +189,7 @@ func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) 
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("unrelated cache entry was removed: %v", err)
 	}
-	want := []string{"npm", "config", "get", "cache"}
+	want := []string{"npm", "--prefix", "~/.kandev/managed-npm-runtime", "config", "get", "cache"}
 	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
 		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
 	}
@@ -344,12 +344,12 @@ func TestAgentUpdatePreviewResolvesTrustedCommandWithoutStartingAJob(t *testing.
 		t.Fatalf("versions = %q -> %q", preview.CurrentVersion, preview.TargetVersion)
 	}
 	wantCommand := []string{
-		"npm", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
+		"npm", "--prefix", "~/.kandev/managed-npm-runtime", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
 	}
 	if got := strings.Join(preview.Command, "\x00"); got != strings.Join(wantCommand, "\x00") {
 		t.Fatalf("command = %q, want %q", got, strings.Join(wantCommand, "\x00"))
 	}
-	if preview.CommandString != `npm exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
+	if preview.CommandString != `npm --prefix ~/.kandev/managed-npm-runtime exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
 		t.Fatalf("command string = %q", preview.CommandString)
 	}
 
@@ -596,11 +596,11 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	if updater.resolvedPackage != "@example/managed-acp" {
 		t.Fatalf("resolved package = %q", updater.resolvedPackage)
 	}
-	wantUpdate := "npm exec --yes --prefer-online --package=@example/managed-acp -- node -e "
+	wantUpdate := "npm --prefix ~/.kandev/managed-npm-runtime exec --yes --prefer-online --package=@example/managed-acp -- node -e "
 	if got := strings.Join(updater.runCommand, " "); got != wantUpdate {
 		t.Fatalf("update command = %q, want %q", got, wantUpdate)
 	}
-	wantRefresh := "npx --yes --prefer-offline @example/managed-acp@1.1.0 --acp"
+	wantRefresh := "npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime @example/managed-acp@1.1.0 --acp"
 	if got := strings.Join(updater.refreshCommand, " "); got != wantRefresh {
 		t.Fatalf("refresh command = %q, want %q", got, wantRefresh)
 	}
@@ -712,6 +712,38 @@ func TestAgentUpdateRepairsExecutionCacheAndRetriesOnce(t *testing.T) {
 	}
 	if updater.invalidateCalls != 1 || updater.invalidatePkg != managedRuntimeSpec().Package {
 		t.Fatalf("cache repair = %d calls for %q", updater.invalidateCalls, updater.invalidatePkg)
+	}
+}
+
+func TestAgentUpdateNpmReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "0.80.0"},
+		currentFound: true,
+		target:       "0.81.0",
+		runErr:       errors.New("exit status 1"),
+		updateOutput: "npm error code ETARGET\nnpm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.\n",
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:        "@agentclientprotocol/claude-agent-acp",
+		DefaultVersion: "0.81.0",
+		ACPArgs:        []string{"acp"},
+	}
+	job, err := store.Enqueue("claude-acp", spec)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
+	if !strings.Contains(final.Error, "release-age policy") {
+		t.Fatalf("Error = %q, want the npm release-age policy failure", final.Error)
+	}
+	if strings.Contains(final.Error, "12:28:47 PM") {
+		t.Fatalf("Error leaked the raw npm date: %q", final.Error)
+	}
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if updater.runCalls != 1 || updater.invalidateCalls != 0 || updater.refreshCalls != 0 {
+		t.Fatalf("policy failure calls: update=%d invalidation=%d refresh=%d, want 1, 0, 0", updater.runCalls, updater.invalidateCalls, updater.refreshCalls)
 	}
 }
 

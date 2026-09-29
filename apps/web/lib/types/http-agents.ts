@@ -47,6 +47,8 @@ export type TUIConfig = {
    * calls, models, and modes.
    */
   protocol?: CustomAgentProtocol;
+  /** Use paced unframed writes for TUIs that reject bracketed-paste markers. */
+  disable_bracketed_paste?: boolean;
 };
 
 /** One selectable MCP injection mechanism, served by the backend. */
@@ -299,6 +301,8 @@ export type ClarificationQuestion = {
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
 };
 
 // Each per-question chat message carries its own metadata. For multi-question

@@ -93,13 +93,17 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		cmdArgs = args[1:]
 	}
 	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
+	env := sanitizeEnvForAgent(req.InferenceConfig)
+	if err := managedruntime.PrepareNPMProjectPrefix(cmdArgs); err != nil {
+		return &PromptResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	}
 	// Use resolvedCmd (not args[0]) so the executable name the taint tracker
 	// sees is an allow-list literal, a validated command prefix, or the
 	// operator-registered command resolveSpawnCommand documents.
 	//nolint:gosec // resolvedCmd is an allow-list literal, a validated prefix, or an operator-registered command
 	cmd := exec.CommandContext(ctx, resolvedCmd, cmdArgs...)
 	cmd.Dir = workDir
-	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
 
 	// Same reasoning as the probe: without this the child's own account of why
@@ -490,6 +494,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
+	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
+		return &ProbeResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	}
 
 	e.logger.Info("starting ACP probe",
 		zap.String("agent_id", req.AgentID),
@@ -569,17 +576,25 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 
 func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailureCode {
 	packageSpec, ok := managedRuntimeProbePackageSpec(command)
-	if !ok || !npmresolution.MatchesExactPackage(stderr, packageSpec) {
+	if !ok {
+		return ""
+	}
+	if npmresolution.MatchesRawReleaseAgePolicy(stderr, packageSpec) {
+		return ProbeFailureManagedRuntimeNPMPolicy
+	}
+	if !npmresolution.MatchesExactPackage(stderr, packageSpec) {
 		return ""
 	}
 	return ProbeFailureManagedRuntimeNPMResolution
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	if len(command) < 4 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" {
+	// Accept only npx --yes --prefer-offline --prefix <fixed-prefix> <exact-spec>.
+	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
+		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
 		return "", false
 	}
-	packageSpec := command[3]
+	packageSpec := command[5]
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return "", false
 	}

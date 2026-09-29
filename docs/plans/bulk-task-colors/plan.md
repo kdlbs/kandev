@@ -1,27 +1,32 @@
 ---
-status: draft
+created: 2026-09-19
+status: implemented
+requirements:
+  - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-006
+system_design:
+  - ../../specs/ui/system-design/bulk-task-colors.md
+legacy_specs: []
 ---
 
 # Bulk task colors
 
 ## Outcome and scope
 
-Add personal Color actions to the sidebar bulk menu and board selection toolbar.
-Reuse existing palette, persistence, and automatic-rule precedence. Phone users
-perform the same operation from board selection. This package stops at design;
-implementation requires a later explicit request. No production code changed.
+Adds personal Color actions to the sidebar bulk menu and board selection toolbar.
+Reuses the existing palette, persistence, and automatic-rule precedence. Phone users
+perform the same operation from board selection. The implementation reuses the existing personal settings patch contract and preserves automatic-rule precedence.
 
 ## Sources
 
-- [Requirements](../../specs/ui/requirements/bulk-task-colors.md): REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-006, draft extension.
-- [System design](../../specs/ui/system-design/bulk-task-colors.md#bulk-manual-color-editing): draft bulk design extending the current personal-color contract.
+- [Requirements](../../specs/ui/requirements/bulk-task-colors.md): REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-006, active extension.
+- [System design](../../specs/ui/system-design/bulk-task-colors.md#bulk-manual-color-editing): current bulk design extending the current personal-color contract.
 - [ADR 0041](../../decisions/0041-backend-owned-portable-user-settings.md): reuse portable personal settings ownership; no new ADR needed.
 
 ## Work package
 
-| Order | Work order | Status | Dependencies |
-| --- | --- | --- | --- |
-| 1 | [Task 01: Bulk color editing](task-01-bulk-color-editing.md) | pending | None |
+| Order | Work order                                                   | Status | Dependencies |
+| ----- | ------------------------------------------------------------ | ------ | ------------ |
+| 1     | [Task 01: Bulk color editing](task-01-bulk-color-editing.md) | done   | None         |
 
 One vertical slice, sequential execution. No subagents are authorized.
 Estimated implementation and targeted checks: 3-5 hours, subject to E2E setup.
@@ -107,14 +112,8 @@ Validate phone geometry at 393px and toolbar composition on either side of
 
 ## Documentation
 
-/docs-maintainer assessment: this turn changes design only, so public docs stay
-unchanged. Implementation adds a short how-to section to the existing task guide
-chosen from docs/public after searching current task navigation documentation.
+Public docs updated: `docs/public/tasks-and-workflows.md` now explains desktop and phone bulk color selection, clearing, automatic-rule precedence, and retry behavior.
 
 ## Results
 
-Review remediation: add an explicit phone selection trigger and move the new
-contract into draft artifacts, preserving the shipped personal-color specs.
-Document catalog validation, all 36 specification-linter tests, full specification
-lint, and diff whitespace validation passed after these corrections.
-Implementation and rendered verification remain pending.
+Implemented the shared mutation coordinator, sidebar and board Color controls, and the phone-native selection and picker flow. Focused unit/component tests passed (50), desktop Playwright passed (24), and mobile Playwright passed (2). Typecheck, focused ESLint, i18n validation, public-doc validation (62 tests and 47 pages), document catalog validation, all 36 specification-linter tests, full specification lint, and diff whitespace validation passed. PR remediation added regressions for in-flight optimistic colors, superseded save counts, focus restoration, the persistent live region, and cleared mobile action state. The 393 px phone render matched the planned inset picker with labeled touch rows, safe containment, and no horizontal overflow.
