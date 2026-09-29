@@ -145,6 +145,92 @@ the same pattern as `hideSessionSelectors`, so every other chat is unchanged
   collapsing, so the proposal card ([proposals](proposals.md)) always renders.
 - Every string goes through `t()` in all shipped locales.
 
+### Activity display: exact rules
+
+These rules resolve what the bullets above leave open; each cites the
+acceptance criterion it serves.
+
+- **Turn and running.** A turn is the messages sharing one `turn_id`. A turn
+  is running while the conversation session's state is `RUNNING`, and ended
+  when the state leaves `RUNNING` for any reason (completed, stopped
+  `AC-COORDINATOR-COPILOT-004.5`, failed `AC-COORDINATOR-COPILOT-004.6`). The
+  status line is not shown while the state is `STARTING`; the start-up rows
+  stay visible then (`AC-COORDINATOR-COPILOT-006.4`).
+- **Per turn, not per group.** The view builds the chip itself, from the
+  turn's messages, when the opt-in prop is set. The default
+  `groupActivityMessages` (runs of two or more consecutive same-turn activity
+  messages) is not changed, so every other chat groups as today
+  (`AC-COORDINATOR-COPILOT-006.5`). Agent text between tool calls does not
+  split the turn: the chip holds every activity message of the turn (tool
+  calls of types `tool_call`, `tool_edit`, `tool_read`, `tool_execute`,
+  `tool_search`, plus `thinking`) except the exceptions below, and sits at the
+  position of the turn's first such message. Agent text, proposal cards and
+  permission rows render in transcript order around it.
+- **Never inside the chip** (`AC-COORDINATOR-COPILOT-006.3`,
+  `AC-COORDINATOR-COPILOT-006.6`): every `propose_task_kandev` call, whatever
+  its status, including a refused or errored one, which renders as it does
+  today (the card, or the plain row on error); and any tool call that has a
+  pending permission request, which renders as its own row with Approve and
+  Deny until the request is answered, after which it joins the chip if its
+  turn has ended. A permission request with no matching tool call renders on
+  its own as today.
+- **While the turn runs** (`AC-COORDINATOR-COPILOT-006.1`,
+  `AC-COORDINATOR-COPILOT-006.6`): every activity message of the running
+  turn is hidden, completed ones included, except the exceptions above. A
+  `propose_task_kandev` card appears as soon as its call returns.
+- **Chip content.** The count is the number of tool-call messages in the chip
+  (`thinking` messages are inside when expanded but not counted; a subagent
+  or rich-output message is never grouped, as today). A turn with no such
+  call, or only excepted calls, gets no chip. A turn with exactly one call
+  gets a chip with count 1. Expanding shows the turn's activity messages in
+  transcript order with the existing row components. When at least one call
+  in the chip ended in `error`, the chip label adds the failed count as text
+  ("2 failed"), so status is not carried by colour alone
+  (`AC-COORDINATOR-COPILOT-006.7`).
+- **Duration.** From `created_at` of the turn's first message to `created_at`
+  of its last message (any type, all with that `turn_id`), from the client's
+  loaded messages; it does not depend on `Turn` rows. Rounded down to whole
+  seconds, minimum `1s`; format `Ns` under a minute, `Nm Ss` under an hour,
+  `Nh Mm` beyond. A stopped or failed turn is measured to its last message.
+  A call left in a non-terminal status after the turn ended is shown in the
+  expanded rows with its status as stored, and is counted.
+- **Chip label.** `Checked {{count}} sources · {{duration}}` for a turn with
+  no failures, with `_one`/`_other` plurals (`Checked 1 source`); with
+  failures `... · {{failed}} failed` follows the duration. The chip is a
+  button with `aria-expanded`, collapsed by default. Its expanded state is
+  component state: it survives new messages and closing and reopening the
+  panel (whose content stays mounted), and resets on a page reload.
+- **Status line.** Rendered by the coordinator panel above the composer while
+  the state is `RUNNING`, replacing `MessageList`'s working indicator (the
+  opt-in prop turns that indicator off for the coordinator panel only).
+  Verb: the running tool call of the running turn with the latest
+  `created_at` (ties: the later message in transcript order); running means a
+  status other than `complete`, `error` or `cancelled`. The verb key is
+  `kandevToolStemOf(message)`; a non-Kandev tool, a missing stem or a stem not
+  in the table gives the generic verb. With no running tool call (thinking,
+  streaming the answer, between calls) the generic verb shows.
+
+  | Stem | Verb |
+  | --- | --- |
+  | `list_tasks` | Reading tasks |
+  | `get_task_conversation` | Reading a conversation |
+  | `list_workflows` | Checking workflows |
+  | `list_workflow_steps` | Checking workflow steps |
+  | `list_repositories` | Checking repositories |
+  | `get_coordinator_item` | Looking up an item |
+  | `propose_task` | Drafting a proposal |
+  | (anything else) | Working |
+
+  Elapsed seconds are `max(0, now - created_at)` of the running turn's first
+  message, floored, refreshed once a second, so a reload mid-turn continues
+  the count (`AC-COORDINATOR-COPILOT-002.4`); when the turn has no message yet
+  the count starts at the client's first sight of the running state. Format as
+  for the chip duration. The element is `role="status"` with
+  `aria-live="polite"`; the seconds sit in an `aria-hidden` span, so only a
+  change of verb is announced. It has no animation under
+  `prefers-reduced-motion`.
+- **Empty turn.** A turn with no activity messages renders no chip.
+
 ## Ask about this
 
 - The copilot store (`{coordinatorId, open, chip: {id, label, ref: {kind, id}} | null, draft}`,

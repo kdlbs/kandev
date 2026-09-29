@@ -15,6 +15,10 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-006.3
   - AC-COORDINATOR-COPILOT-006.4
   - AC-COORDINATOR-COPILOT-006.5
+  - AC-COORDINATOR-COPILOT-006.6
+  - AC-COORDINATOR-COPILOT-006.7
+  - AC-COORDINATOR-COPILOT-006.8
+  - AC-COORDINATOR-COPILOT-006.9
 system_design:
   - ../../specs/coordinator/system-design/copilot.md
   - ../../specs/coordinator/system-design/copilot-panel.md
@@ -33,7 +37,8 @@ row.
 ## In scope
 
 - `hideStartupRows` on `QuickChatSessionView`, backed by
-  `hideSuccessfulStartupRows` in `components/quick-chat/startup-rows.ts`.
+  `hideSuccessfulStartupRows` in `components/quick-chat/startup-rows.ts`:
+  already built; this task only verifies it and pins it with tests.
 - The status line above the composer: a fixed tool-name-to-verb table with a
   generic fallback, and the elapsed seconds.
 - The collapsed tool chip per finished turn, with `propose_task_kandev` calls
@@ -71,7 +76,9 @@ row.
   stays visible.
 - Start-up rows are hidden after a successful start and kept while starting or
   after a failed start.
-- Settings configuration chat and Quick Chat render as before.
+- Settings configuration chat, Quick Chat and the task page render as before.
+- A tool call awaiting permission stays visible with Approve and Deny while
+  the turn runs; a stopped or failed turn still collapses into a chip.
 
 ## Verification
 
