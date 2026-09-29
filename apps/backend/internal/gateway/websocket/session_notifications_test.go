@@ -117,7 +117,16 @@ func TestSessionStreamBroadcaster_Close(t *testing.T) {
 	}
 }
 
+type hasGetSessionID struct {
+	sessionID string
+}
+
+func (h hasGetSessionID) GetSessionID() string {
+	return h.sessionID
+}
+
 func TestExtractSessionID(t *testing.T) {
+
 	tests := []struct {
 		name     string
 		data     any
@@ -127,6 +136,16 @@ func TestExtractSessionID(t *testing.T) {
 			name:     "nil data",
 			data:     nil,
 			expected: "",
+		},
+		{
+			name:     "struct with GetSessionID",
+			data:     hasGetSessionID{sessionID: "session-struct-123"},
+			expected: "session-struct-123",
+		},
+		{
+			name:     "pointer with GetSessionID",
+			data:     &hasGetSessionID{sessionID: "session-ptr-123"},
+			expected: "session-ptr-123",
 		},
 		{
 			name: "map with session_id",

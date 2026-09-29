@@ -44,10 +44,12 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	}
 
 	if handler == nil {
-		// Auto-approve if no handler
-		if len(req.Options) > 0 {
-			return &PermissionResponse{OptionID: req.Options[0].OptionID}, nil
-		}
+		// A missing handler is a Kandev wiring failure, not a permission
+		// decision. Selecting req.Options[0] would approve or refuse depending
+		// on the provider's option order; cancel loudly instead.
+		a.logger.Warn("no permission handler installed, cancelling request",
+			zap.String("tool_call_id", req.ToolCallID),
+			zap.Int("option_count", len(req.Options)))
 		return &PermissionResponse{Cancelled: true}, nil
 	}
 

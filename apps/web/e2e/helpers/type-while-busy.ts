@@ -30,7 +30,12 @@ export async function waitForComposerQueueMode(
 export async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise<void> {
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await editor.scrollIntoViewIfNeeded();
+  // The busy state can arrive before the queue/steering input mode enables the
+  // editor. A click sent during that transition is discarded and cannot focus
+  // the composer, so wait for the editable state before attempting interaction.
+  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
   for (let attempt = 0; attempt < 3; attempt++) {
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 5_000 });
     const box = await editor.boundingBox();
     if (!box) throw new Error("Editor bounding box not found");
     await page.mouse.click(box.x + 20, box.y + box.height / 2);

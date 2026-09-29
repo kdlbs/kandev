@@ -217,6 +217,7 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 func TestArchiveUnarchiveResumeReactivatesLocalOnlyBranch(t *testing.T) {
 	ctx := context.Background()
 	svc, _, repo := createTestService(t)
+	svc.StopTaskResourceCleanupWorker()
 	const (
 		taskID        = "task-archive-resume"
 		sessionID     = "session-archive-resume"
@@ -270,6 +271,10 @@ func TestArchiveUnarchiveResumeReactivatesLocalOnlyBranch(t *testing.T) {
 	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	if err := svc.ArchiveTask(ctx, taskID); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
+	}
+	archiveJob := latestCleanupJob(t, repo, taskID, models.TaskResourceCleanupTriggerArchive)
+	if err := svc.processTaskResourceCleanupJob(ctx, archiveJob.ID); err != nil {
+		t.Fatalf("process archive cleanup: %v", err)
 	}
 	waitForCleanupDone(t, svc)
 

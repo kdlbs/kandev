@@ -319,6 +319,33 @@ func (u *capturingUpdater) SessionUpdate(_ context.Context, n acp.SessionNotific
 	return nil
 }
 
+func TestSetSessionModeReportsAndRetainsSelectedMode(t *testing.T) {
+	sid := acp.SessionId("session-mode-test")
+	updater := &capturingUpdater{anySeen: make(chan struct{}), textSeen: make(chan struct{})}
+	agent := &mockAgent{conn: updater, sessions: map[acp.SessionId]bool{sid: true}}
+	_, err := agent.SetSessionMode(context.Background(), acp.SetSessionModeRequest{
+		SessionId: sid, ModeId: "plan-mock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-updater.anySeen:
+	case <-time.After(time.Second):
+		t.Fatal("mode update was not reported")
+	}
+	updater.mu.Lock()
+	notes := append([]acp.SessionNotification(nil), updater.notes...)
+	updater.mu.Unlock()
+	if len(notes) != 1 || notes[0].Update.CurrentModeUpdate == nil ||
+		string(notes[0].Update.CurrentModeUpdate.CurrentModeId) != "plan-mock" {
+		t.Fatalf("mode updates = %+v", notes)
+	}
+	if got := agent.sessionModes[sid]; got != "plan-mock" {
+		t.Fatalf("stored mode = %q", got)
+	}
+}
+
 func (u *capturingUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{}, nil
 }

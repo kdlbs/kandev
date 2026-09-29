@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -860,6 +861,12 @@ func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessio
 	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)
 }
 
+// ForkSessionBySessionID asks an agent runtime with native fork support to
+// fork one of its completed provider turns.
+func (a *lifecycleAdapter) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	return a.mgr.ForkSessionBySessionID(ctx, sessionID, providerTurnID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
@@ -1520,7 +1527,7 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1529,8 +1536,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
+	if decision != nil {
+		metadata["permission_decision"] = decision
+		metadata["status"] = string(models.PermissionStatusApproved)
+	}
 
-	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+	request := &taskservice.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -1538,7 +1549,17 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		AuthorType:    "agent",
 		Type:          "permission_request",
 		Metadata:      metadata,
-	})
+	}
+	var msg *models.Message
+	var err error
+	if requestID == "" {
+		msg, err = a.svc.CreateMessage(ctx, request)
+	} else {
+		// A repeated bus delivery for one provider request must resolve to the
+		// same transcript row instead of creating duplicate audit entries.
+		messageID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("permission:"+taskID+":"+sessionID+":"+requestID)).String()
+		msg, err = a.svc.CreateMessageIdempotent(ctx, messageID, request)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -1572,6 +1593,19 @@ func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context
 // in the bundle is deleted so we don't leave a half-rendered group dangling in
 // the chat. Best-effort: if cleanup itself fails the caller still receives the
 // original error and the orphan messages stay (logged at warn-level).
+func clarificationQuestionData(question clarification.Question, options []interface{}) map[string]interface{} {
+	data := map[string]interface{}{
+		"id":      question.ID,
+		"title":   question.Title,
+		"prompt":  question.Prompt,
+		"options": options,
+	}
+	if question.AllowCustomText != nil {
+		data["allow_custom_text"] = *question.AllowCustomText
+	}
+	return data
+}
+
 func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
@@ -1585,12 +1619,7 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 			}
 		}
 
-		questionData := map[string]interface{}{
-			"id":      question.ID,
-			"title":   question.Title,
-			"prompt":  question.Prompt,
-			"options": options,
-		}
+		questionData := clarificationQuestionData(question, options)
 
 		metadata := map[string]interface{}{
 			"pending_id":     pendingID,

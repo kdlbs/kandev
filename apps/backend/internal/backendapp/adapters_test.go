@@ -12,6 +12,7 @@ import (
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
@@ -694,6 +695,27 @@ func TestMessageCreatorAdapter_StructFields(t *testing.T) {
 	}
 	if adapter.svc != nil {
 		t.Error("expected nil svc")
+	}
+}
+
+func TestClarificationQuestionDataPreservesCustomTextPolicy(t *testing.T) {
+	allowCustomText := false
+	question := clarification.Question{
+		ID:              "mode",
+		Title:           "Mode",
+		Prompt:          "Choose a mode",
+		AllowCustomText: &allowCustomText,
+	}
+
+	got := clarificationQuestionData(question, []interface{}{})
+	if got["allow_custom_text"] != false {
+		t.Fatalf("allow_custom_text = %#v, want false", got["allow_custom_text"])
+	}
+
+	question.AllowCustomText = nil
+	got = clarificationQuestionData(question, []interface{}{})
+	if _, ok := got["allow_custom_text"]; ok {
+		t.Fatalf("legacy question unexpectedly set allow_custom_text: %#v", got["allow_custom_text"])
 	}
 }
 

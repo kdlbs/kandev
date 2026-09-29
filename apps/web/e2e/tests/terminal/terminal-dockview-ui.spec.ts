@@ -235,8 +235,10 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await createTaskAndWait(apiClient, seedData, "Tab Badge UI");
-    const session = await openTask(testPage, "Tab Badge UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Tab Badge UI");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 

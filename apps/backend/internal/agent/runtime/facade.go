@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // Recovery stop reasons preserve runtime-specific teardown semantics through
@@ -161,6 +162,20 @@ func (f *facade) SetMcpMode(ctx context.Context, executionID string, mode string
 		return fmt.Errorf("runtime: executionID is required")
 	}
 	return f.backend.SetMcpMode(ctx, executionID, mode)
+}
+
+// ExecuteBackgroundWorkAction delegates to the backend.
+func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	if executionID == "" {
+		return streams.BackgroundWorkActionResponse{
+			Success: false,
+			WorkID:  req.WorkID,
+			RunID:   req.RunID,
+			Action:  req.Action,
+			Error:   "runtime: executionID is required",
+		}, nil
+	}
+	return f.backend.ExecuteBackgroundWorkAction(ctx, executionID, req)
 }
 
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend

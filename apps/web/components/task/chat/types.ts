@@ -340,6 +340,7 @@ export type MessageAction = {
   type: "archive_task" | "delete_task" | "ws_request";
   label: string;
   tooltip?: string;
+  tooltip_key?: string;
   variant?: "default" | "destructive";
   icon?: string;
   params?: Record<string, unknown>;

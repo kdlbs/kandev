@@ -256,6 +256,7 @@ func initCoreTaskServices(
 			TaskActivity:      repos.Task,
 			SubagentContexts:  repos.Task,
 			Usage:             repos.Task,
+			BackgroundWork:    repos.Task,
 			AgentProfiles:     repos.AgentSettings,
 			AgentProfileExecutorValidator: taskAgentExecutorCompatibilityValidator{
 				profiles:        repos.AgentSettings,

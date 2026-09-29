@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"go.uber.org/zap"
 )
 
 // ContractVersion is AC-5's per-row contract version: it advances only when
@@ -40,9 +41,10 @@ type Repository interface {
 // database work serially, off the publisher's own goroutine, so
 // occurred_at acquisition stays monotonic with arrival order.
 type Writer struct {
-	repo    Repository
-	pricing PricingLookup
-	log     *logger.Logger
+	repo     Repository
+	pricing  PricingLookup
+	log      *logger.Logger
+	eventBus bus.EventBus
 
 	events chan *usageEventPayload
 
@@ -106,6 +108,11 @@ func (w *Writer) Stop() {
 // subject (AC-24). Call after Start.
 func (w *Writer) Subscribe(eb bus.EventBus) error {
 	_, err := eb.Subscribe(events.BuildSessionPromptUsageWildcardSubject(), w.handleBusEvent)
+	if err == nil {
+		w.mu.Lock()
+		w.eventBus = eb
+		w.mu.Unlock()
+	}
 	return err
 }
 
@@ -190,9 +197,35 @@ func (w *Writer) processEvent(ctx context.Context, p *usageEventPayload) {
 	switch {
 	case err == nil:
 		w.recordWritten(event.CostSource, event.Provider)
+		w.publishUsageUpdated(ctx, event)
 	case errors.Is(err, sqliterepo.ErrDuplicateUsageEvent):
 		w.recordDropped(dropReasonDuplicate, p.TaskID)
 	default:
 		w.recordDropped(dropReasonError, p.TaskID)
+	}
+}
+
+func (w *Writer) publishUsageUpdated(ctx context.Context, event *models.TaskUsageEvent) {
+	if event == nil || event.SessionID == "" {
+		return
+	}
+	w.mu.Lock()
+	eb := w.eventBus
+	w.mu.Unlock()
+	if eb == nil {
+		return
+	}
+	data := map[string]string{
+		"task_id":        event.TaskID,
+		"session_id":     event.SessionID,
+		"turn_id":        event.TurnID,
+		"usage_event_id": event.UsageEventID,
+	}
+	subject := events.BuildSessionUsageUpdatedSubject(event.SessionID)
+	if err := eb.Publish(ctx, subject, bus.NewEvent(events.SessionUsageUpdated, "task-usage-writer", data)); err != nil && w.log != nil {
+		w.log.Warn("failed to publish committed usage invalidation",
+			zap.String("task_id", event.TaskID),
+			zap.String("session_id", event.SessionID),
+			zap.Error(err))
 	}
 }

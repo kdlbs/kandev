@@ -20,10 +20,8 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import {
-  SenderTaskBadge,
-  type SenderTaskInfo,
-} from "@/components/task/chat/messages/sender-task-badge";
+import { SenderTaskBadge } from "@/components/task/chat/messages/sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
@@ -245,7 +243,9 @@ function DisplayView({
       </span>
       <div className="flex-1 min-w-0 space-y-1">
         {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
-        {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
+        {senderTask && (
+          <SenderTaskBadge sender={senderTask} destinationTaskId={entry.task_id} size="xs" />
+        )}
         {visible && (
           <BoundedMessagePreview
             source={visible}
