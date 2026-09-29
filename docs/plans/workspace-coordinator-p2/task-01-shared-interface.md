@@ -22,6 +22,7 @@ acceptance_criteria:
   - AC-COORDINATOR-ACTIVITY-LOG-001.6
 system_design:
   - ../../specs/coordinator/system-design/coordinators.md
+  - ../../specs/coordinator/system-design/shared-interface.md
   - ../../specs/coordinator/system-design/permissions.md
   - ../../specs/coordinator/system-design/activity-log.md
   - ../../specs/coordinator/system-design/standing-orders.md
@@ -57,14 +58,15 @@ screen.
   coordinator delete and workspace-deletion transactions. Upgrade tests from
   the phase-1 schema on SQLite and PostgreSQL.
 - `policy.go`: `Policy`, `Setting`, `Action`, `PhaseOnePolicy`, `ParsePolicy`
-  (NULL and missing actions read as the phase-1 policy and `denied`),
+  (NULL reads as the phase-1 policy, a missing action as `denied`, per the
+  result table),
   `Allows`, `Validate`. `WatchSet` load. `Service.Policy(ctx, coordinatorID)`
   (the phase-3 read).
 - Coordinator GET and list carry `policy`, `policy_revision` and `watches`
   while `phase2` is on (`AC-COORDINATOR-PERMISSIONS-001.1`, `003.1`).
 - Proposals carry `kind` (existing rows `create_task`), `target_task_id`,
-  `standing_order_ids`, `starts_agent`, `outcome_json`
-  (`AC-COORDINATOR-PROPOSAL-KINDS-001.6`). The phase-1 list filter
+  `standing_order_ids`, `starts_agent` and `outcome` (the parsed
+  `outcome_json`; `AC-COORDINATOR-PROPOSAL-KINDS-001.6`). The phase-1 list filter
   `kind = 'create_task'` while `phase2` is off, applied also to `GET
   proposals/:pid`, approve and reject, so a non-create id is 404 and nothing
   is claimed or run (`AC-COORDINATOR-COORDINATORS-007.3`).
@@ -83,15 +85,23 @@ screen.
   so later work orders share one store surface. The exact Go signatures,
   the `coordinatorExec` transaction handle, `PolicyView`, `WatchSet`, the
   `NewService` option and the wire field names are fixed in the
-  [shared interface](../../specs/coordinator/system-design/coordinators.md#shared-interface)
+  [shared interface](../../specs/coordinator/system-design/shared-interface.md#shared-interface)
   section; implement them as written.
 - The `phase2` kind predicate on every store read a flag-off phase-1 path
   makes (list, by-id, decision-route read, startup pass, stale-claim sweep,
   `get_coordinator_item_kandev` by-id read), and `CountOpenProposals` with
-  `phase2` so the cap and `open_proposals` agree. Task 04 extends the sweep
+  `phase2` (also passed to `InsertProposal`) so the cap and
+  `open_proposals` agree. Task 04 extends the sweep
   for the other kinds and keeps the parameter.
 - Deletion order: children before the coordinator, with the per-coordinator
-  lock first on PostgreSQL, and `coordinator_activity(workspace_id)`.
+  lock first on PostgreSQL, and `coordinator_activity(workspace_id)`. Stall
+  rows are deleted only by `workspace_id` in workspace deletion.
+- `Store.withCoordinatorLock` (created here) and `QueryContext` on
+  `coordinatorExec`; the claim-fenced completion and failure writes take the
+  coordinator lock before `Record`.
+- `ActivityRow`, validation (`ErrInvalidActivity`), id and timestamp
+  assignment, 1,000-rune truncation and the `coordinator_activity_rows_total`
+  counter, all in `InsertActivity`.
 - Typed client `lib/api/domains/coordinator-api.ts`: types and functions for
   settings, activity, summary, undo, standing orders, goal and setup routes
   as the designs define them; with `phase2` off they are never called.
@@ -105,8 +115,9 @@ screen.
 
 ## Acceptance
 
-- With `phase2` off, every phase-1 test passes unchanged, and stored phase-2
-  data survives a flag off and on cycle.
+- With `phase2` off, every phase-1 test passes with no change other than the
+  added trailing `phase2=false` argument at its direct store call sites, and
+  stored phase-2 data survives a flag off and on cycle.
 - With `phase2` off, `GET`, approve and reject of a stored resume, message
   or move proposal return 404; its row, status and claim are unchanged and
   no executor runs.
@@ -132,8 +143,9 @@ package sources finds every `UPDATE coordinator_activity` setting only the
 undo-marker or count columns (`001.4`).
 
 Added tests: `ParsePolicy` on every row of its result table; `Allows` on an
-unknown action; `Service.Policy` with `phase2` on and off and for a missing
-coordinator; `LoadWatchSet` order, empty `selected`, missing coordinator and
+unknown action; `Service.Policy` with `phase2` on and off (revision 0 when off), for a
+missing coordinator and for an unreadable stored policy (full all-`denied`
+view, nil error); `LoadWatchSet` order, empty `selected`, missing coordinator and
 a failed query; `resetConversation` clears, increments and returns the old
 task id, the after-commit archive runs once and never with an empty id, a
 rolled-back transaction changes nothing, and it matches the phase-1 PATCH
@@ -142,7 +154,12 @@ end state; coordinator GET and list carry `policy`, `policy_revision` and
 policy as all `denied`; the flag-off cap and `open_proposals` cases and the
 flag-off sweep, startup-pass and by-id cases of the design; the four-case
 flag dependency and its client derivation; 25-vs-26 open counts on both
-sides; a refusal coordinator deleted mid-write writes nothing; refusal
+sides; a refusal coordinator deleted mid-write writes nothing; `RecordRefusal` with
+an empty reason code or an out-of-set class and `InsertActivity` with an
+invalid enum write nothing and return `ErrInvalidActivity`; a coordinator GET
+or list whose watch or policy read fails is 500; unknown `watch_scope` reads
+as `selected`; `ActiveGoal` and `LastMetGoal` for a missing coordinator return
+`nil, nil`; refusal
 cutoff at 59 and 61 seconds; a 1,001-rune detail stored as 1,000; delete
 ordering and concurrent `Record` against `DeleteCoordinator` on both
 dialects; a phase-1 statement set run against the phase-2 schema; the upgrade

@@ -92,7 +92,7 @@ to parse is treated as all `denied` and logged at error once per
 coordinator and revision; the settings GET returns it as all `denied`. The
 full result table, the `Allows` behaviour on an unknown action, where the
 log state lives and the `Service.Policy` return shape are in
-[coordinators](coordinators.md#shared-interface).
+[coordinators](shared-interface.md#shared-interface).
 
 `Validate(p Policy) error` returns a field error naming the action when an
 action is outside the six, a value is outside the three,
@@ -144,7 +144,7 @@ exactly once and the last committed save sets every member it sent
 
 `resetConversation(ctx, exec, coordinatorID)` in `internal/coordinator/service.go`
 (exact signature and after-commit archive in
-[coordinators](coordinators.md#shared-interface)) clears `conversation_task_id` and increments the phase-1 `config_revision`
+[coordinators](shared-interface.md#shared-interface)) clears `conversation_task_id` and increments the phase-1 `config_revision`
 in the caller's transaction, and after commit archives the old conversation
 task through the same path a context change uses
 ([coordinators](coordinators.md#routes)), including its
@@ -290,7 +290,7 @@ standing-order or goal action, so the allowlist refuses any such attempt
 
 `WatchSet` (`internal/coordinator/watches.go`) is loaded once per guard call
 (shape, order and error behaviour in
-[coordinators](coordinators.md#shared-interface)): `All bool` or a sorted set
+[coordinators](shared-interface.md#shared-interface)): `All bool` or a sorted set
 of workflow ids.
 
 | Call | Rule when not `All` |

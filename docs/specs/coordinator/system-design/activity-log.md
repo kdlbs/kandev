@@ -78,7 +78,7 @@ those two sets, and for every `DELETE FROM coordinator_activity` outside
 retention and the two deletion transactions. `Detail` is truncated on write
 to 1,000 runes (code points), without an ellipsis. `Service.Record` and
 `RecordRefusal` write nothing when `phase2` is false, and their signatures
-are in [coordinators](coordinators.md#shared-interface).
+are in [coordinators](shared-interface.md#shared-interface).
 
 ## Writes
 
