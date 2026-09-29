@@ -13,20 +13,21 @@ import (
 )
 
 type fakeUndoTasks struct {
-	tasks    map[string]*UndoTask
-	steps    map[string]*UndoStep
-	taskErr  error
-	stepErr  error
-	archived []string
-	moves    []fakeMove
-	archErr  error
-	moveErr  error
-	admitted bool
-	sessions bool
-	sessErr  error
-	onMove   func()
-	getTasks int
-	getSteps int
+	tasks     map[string]*UndoTask
+	steps     map[string]*UndoStep
+	taskErr   error
+	stepErr   error
+	archived  []string
+	moves     []fakeMove
+	archErr   error
+	moveErr   error
+	admitted  bool
+	sessions  bool
+	sessErr   error
+	onMove    func()
+	onArchive func()
+	getTasks  int
+	getSteps  int
 }
 
 type fakeMove struct {
@@ -36,6 +37,9 @@ type fakeMove struct {
 
 func (f *fakeUndoTasks) ArchiveTask(_ context.Context, id string) error {
 	f.archived = append(f.archived, id)
+	if f.onArchive != nil {
+		f.onArchive()
+	}
 	return f.archErr
 }
 

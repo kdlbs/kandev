@@ -91,6 +91,7 @@ type Service struct {
 	// undoTasks is the task-service seam undo and the activity list read
 	// through; nil until SetUndoDeps.
 	undoTasks UndoTaskService
+	undoLocks keyedLock
 
 	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
 	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
