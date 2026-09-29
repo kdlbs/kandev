@@ -91,6 +91,7 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load task: %v", err)
 	}
+
 	task.WorkflowStepID = stepReviewedID
 	task.State = v1.TaskStateCompleted
 	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
@@ -136,6 +137,62 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	}
 	if last.actorID != nil || last.sessionID != nil {
 		t.Fatalf("actor/session IDs = %v/%v, want NULL/NULL when sender session is absent", last.actorID, last.sessionID)
+	}
+}
+
+func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	now := time.Now().UTC()
+	_, err := sc.repo.UpsertExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
+		TaskID: "task-1", WorkspaceID: "ws1", AgentProfileID: profileReview, Generation: 1, ProfileRevision: now,
+	})
+	requireNoError(t, err)
+	_, err = sc.repo.ActivateExactProfileAssignment(sc.ctx, "task-1", 1)
+	requireNoError(t, err)
+	_, err = sc.repo.UpsertExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
+		TaskID: "task-1", WorkspaceID: "ws1", AgentProfileID: profileReview, Generation: 2, ProfileRevision: now,
+	})
+	requireNoError(t, err)
+	_, err = sc.repo.ActivateExactProfileAssignment(sc.ctx, "task-1", 2)
+	requireNoError(t, err)
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID: "task-1", WorkflowID: "wf1", WorkflowStepID: stepInProgressID, ExactProfileGeneration: 1,
+	})
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("stale exact generation moved task to %q, want %q", task.WorkflowStepID, stepInReviewID)
+	}
+}
+
+func TestPendingMove_ZeroGenerationIsDiscardedAfterExactAssignment(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	now := time.Now().UTC()
+	_, err := sc.repo.UpsertExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
+		TaskID: "task-1", WorkspaceID: "ws1", AgentProfileID: profileReview, Generation: 1, ProfileRevision: now,
+	})
+	requireNoError(t, err)
+	_, err = sc.repo.ActivateExactProfileAssignment(sc.ctx, "task-1", 1)
+	requireNoError(t, err)
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	requireNoError(t, err)
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID: "task-1", WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	})
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	requireNoError(t, err)
+	if task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("zero-generation pending move changed step to %q, want %q", task.WorkflowStepID, stepInReviewID)
 	}
 }
 
@@ -370,7 +427,7 @@ func buildPendingMoveScenarioWithQueue(t *testing.T, useSQLiteQueue bool) *pendi
 	stepGetter := newPendingMoveStepGetter()
 
 	if err := repo.CreateTask(ctx, &models.Task{
-		ID: "task-1", WorkflowID: "wf1", WorkflowStepID: stepInReviewID,
+		ID: "task-1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepInReviewID,
 		Title: "Test", Description: "Implement a python buggy fibonnacci",
 		State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

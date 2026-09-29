@@ -81,6 +81,9 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	return &AgentProfileInfo{
 		ProfileID:                  profile.ID,
 		ProfileName:                profile.Name,
+		WorkspaceID:                profile.WorkspaceID,
+		Enabled:                    profile.Enabled,
+		Revision:                   profile.UpdatedAt,
 		AgentID:                    agent.ID,
 		AgentName:                  agent.Name,
 		Model:                      model,

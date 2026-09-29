@@ -64,6 +64,8 @@ func TestListTaskSessions_ToolSchemaIsTaskIDOnly(t *testing.T) {
 	assert.Contains(t, tool.Tool.Description, "get_task_conversation_kandev")
 	assert.Contains(t, tool.Tool.Description, "message_task_kandev")
 	assert.Contains(t, tool.Tool.Description, "is_primary")
+	assert.Contains(t, tool.Tool.Description, "queue_incarnation_id")
+	assert.Contains(t, tool.Tool.Description, "actual model")
 }
 
 func TestListTaskSessions_ForwardsTaskIDAndBoundSession(t *testing.T) {

@@ -641,10 +641,18 @@ func (r *PluginRemoteExecutor) acquirePluginExecutorCleanupClaim(
 	if r.inventoryStore == nil {
 		return nil, errors.New("plugin executor inventory store is unavailable")
 	}
+	session, err := r.inventoryStore.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load plugin executor cleanup session: %w", err)
+	}
+	if session == nil || session.TaskID != taskID || session.QueueIncarnationID == "" {
+		return nil, errors.New("plugin executor cleanup session identity is unavailable")
+	}
 	request := models.TaskEnvironmentRecoveryClaimRequest{
 		TaskEnvironmentID: inventory.EnvironmentID, OwnerTaskID: taskID,
 		OwnershipGeneration: inventory.EnvironmentGeneration, SessionID: sessionID,
-		OperationID: inventory.OperationID + ":cleanup", ExecutorType: string(models.ExecutorTypePluginRemote),
+		SessionIncarnationID: session.QueueIncarnationID,
+		OperationID:          inventory.OperationID + ":cleanup", ExecutorType: string(models.ExecutorTypePluginRemote),
 		AllowCurrentSessionRuntime: true,
 	}
 	if job, ok := recoveryclaim.TaskCleanupJobFromContext(ctx); ok && job.TaskID == taskID {

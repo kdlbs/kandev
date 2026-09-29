@@ -135,7 +135,9 @@ func TestPluginExecutorPartialLaunch(t *testing.T) {
 		destroyResponse:   &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true},
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	runtime.SetRecoveryDependencies(nil, &pluginExecutorInventoryStoreFake{})
+	runtime.SetRecoveryDependencies(nil, &pluginExecutorInventoryStoreFake{session: &models.TaskSession{
+		ID: "session-plugin-1", TaskID: "task-plugin-1", QueueIncarnationID: "incarnation-plugin-1", State: models.TaskSessionStateRunning,
+	}})
 	runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, string, error) {
 		return nil, "", errors.New("unexpected agentctl client construction")
 	}

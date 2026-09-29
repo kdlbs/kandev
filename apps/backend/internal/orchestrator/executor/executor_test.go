@@ -651,6 +651,37 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_AdmissionRefusalPreventsProcessStart(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "new_workspace", true: "existing_workspace"}[existing], func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{ID: "session-admission-refusal", TaskID: "task-admission-refusal", AgentProfileID: "profile-1", State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now()}
+			repo.sessions[session.ID] = session
+			if existing {
+				repo.executorsRunning[session.ID] = &models.ExecutorRunning{ID: session.ID, SessionID: session.ID, TaskID: session.TaskID, AgentExecutionID: "exec-existing", Status: "ready"}
+			}
+			var processStarted atomic.Bool
+			manager := &mockAgentManager{startAgentProcessFunc: func(context.Context, string) error { processStarted.Store(true); return nil }}
+			if existing {
+				manager.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) { return "exec-existing", nil }
+				manager.setExecutionDescriptionFunc = func(context.Context, string, string) error { return nil }
+			} else {
+				manager.launchAgentFunc = func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
+				}
+			}
+			exec := newTestExecutor(t, manager, repo)
+			_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-admission-refusal"}, session.ID, LaunchOptions{AgentProfileID: session.AgentProfileID, StartAgent: true, OnExecutionAdmitted: func(string) error { return errors.New("stale exact admission") }})
+			if err == nil {
+				t.Fatal("LaunchPreparedSession succeeded after admission refusal")
+			}
+			if processStarted.Load() {
+				t.Fatal("StartAgentProcess ran after admission refusal")
+			}
+		})
+	}
+}
+
 func TestLaunchPreparedSessionFailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
 	tests := []struct {
 		name  string

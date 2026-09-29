@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -172,6 +173,41 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.delete_task", ws.ActionMCPDeleteTask)
 	assert.Equal(t, "mcp.archive_task", ws.ActionMCPArchiveTask)
 	assert.Equal(t, "mcp.update_task_state", ws.ActionMCPUpdateTaskState)
+	assert.Equal(t, "mcp.assign_exact_task_profile", ws.ActionMCPAssignExactTaskProfile)
+}
+
+func TestCoordinatorHandoffToolIsNotPublished(t *testing.T) {
+	backend := &testBackend{}
+	task := New(backend, "session", "task", 10005, newTestLogger(t), "", false, ModeTask)
+	assert.NotContains(t, task.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
+
+	coordinator := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask,
+			[]mcpprofile.Capability{mcpprofile.CapabilityExactTaskProfileAssignment}, nil))
+	assert.NotContains(t, coordinator.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
+}
+
+func TestAssignExactTaskProfileToolRequiresCoordinatorCapability(t *testing.T) {
+	backend := &testBackend{}
+	config := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeConfig)
+	external := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeExternal)
+	task := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeTask)
+
+	assert.NotContains(t, config.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.NotContains(t, external.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.NotContains(t, task.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+
+	coordinator := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask,
+			[]mcpprofile.Capability{mcpprofile.CapabilityExactTaskProfileAssignment}, nil))
+	assert.Contains(t, coordinator.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	properties := toolInputProperties(t, coordinator, "assign_exact_task_profile_kandev")
+	for _, field := range []string{
+		"task_id", "agent_profile_id", "expected_model", "expected_task_state",
+		"expected_workflow_step_id", "target_workflow_step_id", "expected_assignment_generation",
+	} {
+		assert.Contains(t, properties, field)
+	}
 }
 
 // --- Workflow handler tests ---

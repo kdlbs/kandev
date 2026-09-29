@@ -508,6 +508,26 @@ type executorRunningLister interface {
 	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
 }
 
+type exactProfileAttemptRecoveryReader interface {
+	GetCurrentExactProfileLaunchAttempt(context.Context, string, string) (*models.ExactProfileLaunchAttemptBinding, error)
+}
+
+func (m *Manager) recoveredExactProfileLaunchAttempt(ctx context.Context, execution *AgentExecution) *models.ExactProfileLaunchAttemptBinding {
+	reader, ok := m.runningWriter.(exactProfileAttemptRecoveryReader)
+	if !ok || execution == nil {
+		return nil
+	}
+	binding, err := reader.GetCurrentExactProfileLaunchAttempt(ctx, execution.TaskID, execution.SessionID)
+	if err != nil || binding == nil || binding.ExecutionID != execution.ID {
+		return nil
+	}
+	frozen, err := cloneExactProfileLaunchAttempt(binding, execution.ID)
+	if err != nil {
+		return nil
+	}
+	return frozen
+}
+
 type pluginExecutorRunningLister interface {
 	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
 }

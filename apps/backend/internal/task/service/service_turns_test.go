@@ -834,6 +834,7 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 		ID:                 "session-1",
 		TaskID:             "task-123",
 		TaskEnvironmentID:  "env-123",
+		QueueIncarnationID: "incarnation-workspace-info",
 		AgentProfileID:     "profile-1",
 		ExecutionProfileID: "claude-opus",
 		ExecutorProfileID:  "executor-profile-1",
@@ -875,6 +876,9 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 	if info.SessionID != "session-1" {
 		t.Errorf("expected SessionID 'session-1', got %q", info.SessionID)
+	}
+	if info.SessionIncarnationID != "incarnation-workspace-info" {
+		t.Errorf("expected SessionIncarnationID 'incarnation-workspace-info', got %q", info.SessionIncarnationID)
 	}
 	if info.TaskEnvironmentID != "env-123" {
 		t.Errorf("expected TaskEnvironmentID 'env-123', got %q", info.TaskEnvironmentID)

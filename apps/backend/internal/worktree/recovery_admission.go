@@ -58,15 +58,16 @@ type ManagedCloneRelocationProof struct {
 // its complete canonical repository inventory. An empty inventory is a
 // deliberate no-op and never triggers filesystem or Git inspection.
 type RecoveryAdmissionRequest struct {
-	TaskID              string
-	SessionID           string
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	ExecutorType        string
-	OperationID         string
-	RelocateDirty       bool
-	Slots               []RecoverySlot
+	TaskID               string
+	SessionID            string
+	SessionIncarnationID string
+	TaskEnvironmentID    string
+	OwnerTaskID          string
+	OwnershipGeneration  int64
+	ExecutorType         string
+	OperationID          string
+	RelocateDirty        bool
+	Slots                []RecoverySlot
 }
 
 // RecoveryAdmission retains the environment authority and per-worktree locks
@@ -258,7 +259,7 @@ func (m *Manager) admitRecovery(
 		req.ExecutorType != string(models.ExecutorTypeWorktree) || len(req.Slots) == 0 {
 		return nil, nil
 	}
-	if req.TaskID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.OwnershipGeneration <= 0 {
+	if req.TaskID == "" || req.OwnerTaskID == "" || req.SessionID == "" || req.SessionIncarnationID == "" || req.OwnershipGeneration <= 0 {
 		return nil, recoveryAdmissionError(req, "recovery request identity is incomplete")
 	}
 	req.RelocateDirty = req.RelocateDirty || dirtyCloneRelocationAllowed(ctx)
@@ -366,18 +367,19 @@ func (m *Manager) acquireRecoveryClaim(
 		return nil, err
 	}
 	claim, err := claimStore.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
-		TaskEnvironmentID:   req.TaskEnvironmentID,
-		OwnerTaskID:         req.OwnerTaskID,
-		OwnershipGeneration: req.OwnershipGeneration,
-		SessionID:           req.SessionID,
-		OperationID:         operationID,
-		ExecutorType:        req.ExecutorType,
+		TaskEnvironmentID:    req.TaskEnvironmentID,
+		OwnerTaskID:          req.OwnerTaskID,
+		OwnershipGeneration:  req.OwnershipGeneration,
+		SessionID:            req.SessionID,
+		SessionIncarnationID: req.SessionIncarnationID,
+		OperationID:          operationID,
+		ExecutorType:         req.ExecutorType,
 		// A waiting-for-input session may still have a live agent process.
 		// Relocation must wait until every runtime consumer has stopped.
 		AllowCurrentSessionRuntime: false,
 	})
 	if err != nil {
-		return nil, recoveryAdmissionError(*req, err.Error())
+		return nil, recoveryAdmissionErrorWithCause(*req, err)
 	}
 	return claim, nil
 }
@@ -802,11 +804,16 @@ func (slot RecoverySlot) WorktreePath() string {
 func recoveryClaimMatchesRequest(claim *models.TaskEnvironmentRecoveryClaim, req RecoveryAdmissionRequest) bool {
 	return claim != nil && claim.TaskEnvironmentID == req.TaskEnvironmentID && claim.OwnerTaskID == req.OwnerTaskID &&
 		claim.OwnershipGeneration == req.OwnershipGeneration && claim.SessionID == req.SessionID &&
+		claim.SessionIncarnationID == req.SessionIncarnationID &&
 		claim.ExecutorType == req.ExecutorType && (req.OperationID == "" || claim.OperationID == req.OperationID)
 }
 
 func recoveryAdmissionError(req RecoveryAdmissionRequest, reason string) error {
 	return &WorktreeRecoveryError{TaskID: req.TaskID, State: "admission", Reason: reason}
+}
+
+func recoveryAdmissionErrorWithCause(req RecoveryAdmissionRequest, cause error) error {
+	return &WorktreeRecoveryError{TaskID: req.TaskID, State: "admission", Reason: cause.Error(), Cause: cause}
 }
 
 func recoverySlotError(taskID, checkout, reason string) error {

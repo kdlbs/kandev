@@ -138,6 +138,11 @@ type Repository struct {
 	// step instead of returning as if there were none. Nil in production
 	// and in every test but the one that sets it.
 	taskRowReconfirmHook func()
+	// exactProfileReceiptLegacyFallbackHook pauses a legacy receipt lookup
+	// after it has locked the session and confirmed no attempt binding. It is
+	// test-only and proves a successor bind cannot interleave with fallback.
+	exactProfileReceiptLegacyFallbackHook func()
+	exactProfileReceiptCurrentLookupHook  func()
 	// agentPlanUpsertAfterRead is a test-only synchronization seam used to
 	// pause a plan upsert while its identity lock and transaction are held.
 	agentPlanUpsertAfterRead func()

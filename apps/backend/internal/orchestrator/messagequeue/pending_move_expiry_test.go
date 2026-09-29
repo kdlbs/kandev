@@ -89,7 +89,7 @@ func TestRepository_ListPendingMoves(t *testing.T) {
 				sessionID string
 				move      PendingMove
 			}{
-				{"sess-a", PendingMove{MoveID: "m-a", TaskID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-blocked", Position: 2, QueuedAt: queuedAt, Actor: "agent", SenderSessionID: "sender-a"}},
+				{"sess-a", PendingMove{MoveID: "m-a", TaskID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-blocked", Position: 2, QueuedAt: queuedAt, Actor: "agent", SenderSessionID: "sender-a", ExactProfileGeneration: 7}},
 				{"sess-b", PendingMove{MoveID: "m-b", TaskID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-work", QueuedAt: queuedAt}},
 				{"sess-c", PendingMove{MoveID: "m-c", TaskID: "task-2", WorkflowID: "wf-1", WorkflowStepID: "step-qa", QueuedAt: queuedAt}},
 			}
@@ -120,7 +120,7 @@ func TestRepository_ListPendingMoves(t *testing.T) {
 				if got.MoveID != entry.move.MoveID || got.TaskID != entry.move.TaskID ||
 					got.WorkflowID != entry.move.WorkflowID || got.WorkflowStepID != entry.move.WorkflowStepID ||
 					got.Position != entry.move.Position || got.Actor != entry.move.Actor ||
-					got.SenderSessionID != entry.move.SenderSessionID {
+					got.SenderSessionID != entry.move.SenderSessionID || got.ExactProfileGeneration != entry.move.ExactProfileGeneration {
 					t.Fatalf("session %s round-tripped as %+v, want %+v", entry.sessionID, got, entry.move)
 				}
 				if !got.QueuedAt.Equal(entry.move.QueuedAt) {

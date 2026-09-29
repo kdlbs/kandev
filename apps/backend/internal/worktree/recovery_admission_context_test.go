@@ -11,12 +11,13 @@ import (
 
 func TestAdmitRecoveryReusesOwningAdmissionFromContext(t *testing.T) {
 	claim := &models.TaskEnvironmentRecoveryClaim{
-		TaskEnvironmentID:   "environment-admission-context",
-		OwnerTaskID:         "task-admission-context",
-		OwnershipGeneration: 1,
-		SessionID:           "session-admission-context",
-		OperationID:         "operation-admission-context",
-		ExecutorType:        string(models.ExecutorTypeWorktree),
+		TaskEnvironmentID:    "environment-admission-context",
+		OwnerTaskID:          "task-admission-context",
+		OwnershipGeneration:  1,
+		SessionID:            "session-admission-context",
+		SessionIncarnationID: "incarnation-admission-context",
+		OperationID:          "operation-admission-context",
+		ExecutorType:         string(models.ExecutorTypeWorktree),
 	}
 	releaseCalls := 0
 	owner := &RecoveryAdmission{
@@ -36,7 +37,8 @@ func TestAdmitRecoveryReusesOwningAdmissionFromContext(t *testing.T) {
 	manager := &Manager{store: store}
 	request := RecoveryAdmissionRequest{
 		TaskID: "task-admission-context", SessionID: "session-admission-context",
-		TaskEnvironmentID: "environment-admission-context", OwnerTaskID: "task-admission-context",
+		SessionIncarnationID: "incarnation-admission-context",
+		TaskEnvironmentID:    "environment-admission-context", OwnerTaskID: "task-admission-context",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		OperationID: "operation-admission-context", Slots: []RecoverySlot{{
 			WorktreeID: "worktree-admission-context", RepositoryID: "repository-admission-context",

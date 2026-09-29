@@ -24,6 +24,11 @@ The package started as a design handoff against PR head
 are now present locally. Work-order status and verification gaps remain tracked
 below.
 
+The branch also retains `cfd6bdf65ae6f631d7701c105791a099c0325cc3`
+(`fix(agentctl): allow guarded ACP inference`) as the authorized prerequisite
+in its preserved lineage. It is not part of the recovery implementation, and
+this package does not rewrite or duplicate that prerequisite.
+
 ## Scope
 
 ### In scope
@@ -76,13 +81,23 @@ Each numeric criterion belongs to
 Task 03 owns cross-layer evidence from selected launch through durable inventory
 and lifecycle request. A helper-only test does not prove production wiring.
 
+### Session-incarnation admission evidence
+
+Recovery authority is additionally bound to the durable session incarnation.
+Task 03 records the task-service projection and both executor and lifecycle
+admission boundaries, so a caller cannot accidentally omit the identity after it
+has been read from `task_sessions`.
+
 ## End-to-end evidence
 
 The worktree recovery suites use real Git checkouts. The executor integration tests
 exercise the production launch and resume wiring with a recording admission
-boundary and assert the selected durable slot identity. A full cross-layer test
-that combines a real SQLite claim, real Git recovery, and lifecycle runtime startup
-is still a verification gap.
+boundary and assert the selected durable slot identity. The lifecycle adapter
+fixture additionally combines a real SQLite claim, two temporary Git repositories,
+the registered worktree preparer, and the final runtime seam. It covers successful
+recovery, later preparation failure, live-consumer refusal, requester-identity
+refusal, current-session creating-environment materialization, and an existing
+environment with missing worktree identity.
 
 This change does not modify rendered UI. Existing launch and resume error surfaces
 remain the presentation contract. No layout preview or artificial browser test is
@@ -92,12 +107,14 @@ required for the backend-only change.
 
 - [x] [Task 01: Scope recovery admission](task-01-scope-admission.md)
 - [ ] [Task 02: Claim recovery authority](task-02-claim-authority.md)
-- [ ] [Task 03: Prove recovery integration](task-03-prove-integration.md)
+- [x] [Task 03: Prove recovery integration](task-03-prove-integration.md)
 
 ## Verification results
 
-Implementation checks pass locally. The PostgreSQL concurrency check and a full
-real-Git-to-lifecycle integration test remain outstanding.
+Implementation checks pass locally. The non-skipped PostgreSQL concurrency
+receipt is preserved. The real Git-to-lifecycle integration fixtures pass in
+normal and race-enabled runs. External CI, a real runtime-process exercise, and
+deployment validation remain outside this local evidence.
 
 Design-package checks on 2026-09-10:
 

@@ -156,6 +156,7 @@
       "sources": [
         "apps/backend/internal/orchestrator/task_operations.go",
         "apps/backend/internal/mcp/handlers/config_task_handlers.go",
+        "apps/backend/internal/mcp/handlers/exact_profile_assignment.go",
         "apps/backend/internal/mcp/handlers/stop_task.go",
         "apps/backend/internal/mcp/server/handlers.go",
         "apps/backend/internal/mcp/server/server.go",
@@ -169,6 +170,7 @@
         "apps/backend/internal/orchestrator/task_operations_test.go",
         "apps/backend/internal/orchestrator/coordinator_stop_test.go",
         "apps/backend/internal/mcp/handlers/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/exact_profile_assignment_test.go",
         "apps/backend/internal/mcp/handlers/stop_task_test.go",
         "apps/backend/internal/mcp/server/handlers_test.go",
         "apps/backend/internal/mcp/server/server_test.go",
@@ -184,6 +186,7 @@
         "add_task_dependency_kandev",
         "add_workspace_sources_kandev",
         "archive_task_kandev",
+        "assign_exact_task_profile_kandev",
         "create_task_kandev",
         "delete_task_kandev",
         "list_tasks_kandev",

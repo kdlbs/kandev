@@ -51,7 +51,8 @@ func TestAdmitRecoveryReconcilesPublishedRelocationClaimAfterRestart(t *testing.
 	const operationID = "123e4567-e89b-12d3-a456-426614174000"
 	claim := &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: "env-restart", OwnerTaskID: "task-restart", OwnershipGeneration: 1,
-		SessionID: "session-restart", OperationID: operationID, ExecutorType: string(models.ExecutorTypeWorktree),
+		SessionID: "session-restart", SessionIncarnationID: "incarnation-restart",
+		OperationID: operationID, ExecutorType: string(models.ExecutorTypeWorktree),
 	}
 	record := managedCloneRelocationRecord{
 		OperationID: operationID, TaskID: "task-restart", EnvironmentID: claim.TaskEnvironmentID,
@@ -76,8 +77,9 @@ func TestAdmitRecoveryReconcilesPublishedRelocationClaimAfterRestart(t *testing.
 		t.Fatal(err)
 	}
 	admission, err := manager.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
-		TaskID: wt.TaskID, SessionID: claim.SessionID, TaskEnvironmentID: claim.TaskEnvironmentID,
-		OwnerTaskID: claim.OwnerTaskID, OwnershipGeneration: claim.OwnershipGeneration,
+		TaskID: wt.TaskID, SessionID: claim.SessionID, SessionIncarnationID: claim.SessionIncarnationID,
+		TaskEnvironmentID: claim.TaskEnvironmentID,
+		OwnerTaskID:       claim.OwnerTaskID, OwnershipGeneration: claim.OwnershipGeneration,
 		ExecutorType: claim.ExecutorType, Slots: []RecoverySlot{{
 			WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, BranchSlug: wt.BranchSlug,
 			RepositoryPath: destination, CloneRelocation: &ManagedCloneRelocationProof{
@@ -144,7 +146,8 @@ func TestAdmitRecoveryResumesPreparedRelocationAfterRestart(t *testing.T) {
 	replacement := original + ".relocated-" + operationID[:8]
 	claim := &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: "env-restart-prepared", OwnerTaskID: "task-restart-prepared",
-		OwnershipGeneration: 1, SessionID: "session-restart-prepared", OperationID: operationID,
+		OwnershipGeneration: 1, SessionID: "session-restart-prepared",
+		SessionIncarnationID: "incarnation-restart-prepared", OperationID: operationID,
 		ExecutorType: string(models.ExecutorTypeWorktree),
 	}
 	worktree := &Worktree{
@@ -172,8 +175,9 @@ func TestAdmitRecoveryResumesPreparedRelocationAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission, err := manager.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
-		TaskID: claim.OwnerTaskID, SessionID: claim.SessionID, TaskEnvironmentID: claim.TaskEnvironmentID,
-		OwnerTaskID: claim.OwnerTaskID, OwnershipGeneration: claim.OwnershipGeneration,
+		TaskID: claim.OwnerTaskID, SessionID: claim.SessionID, SessionIncarnationID: claim.SessionIncarnationID,
+		TaskEnvironmentID: claim.TaskEnvironmentID,
+		OwnerTaskID:       claim.OwnerTaskID, OwnershipGeneration: claim.OwnershipGeneration,
 		ExecutorType: claim.ExecutorType, Slots: []RecoverySlot{{
 			WorktreeID: worktree.ID, RepositoryID: worktree.RepositoryID, BranchSlug: worktree.BranchSlug,
 			RepositoryPath: destination, CloneRelocation: &ManagedCloneRelocationProof{

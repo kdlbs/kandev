@@ -469,6 +469,9 @@ type RemoteStatusPollRequest struct {
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
 	ProfileID                  string
+	WorkspaceID                string
+	Revision                   time.Time
+	Enabled                    bool
 	ProfileName                string
 	AgentID                    string
 	AgentName                  string
@@ -503,6 +506,9 @@ type LaunchAgentRequest struct {
 	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	AgentProfileID         string
+	ExactProfile           bool
+	ExactProfileModel      string
+	ExactProfileRevision   int64
 	TurnID                 string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
@@ -672,20 +678,26 @@ const McpModeOffice = mcpmode.Office
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
 
+var ErrExactAttemptAdmission = errors.New("exact launch attempt admission refused")
+
 // McpModeManagedConversation selects the isolated managed-conversation MCP surface.
 const McpModeManagedConversation = "managed-conversation"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	ExecutorID           string
-	TurnID               string
+	AgentProfileID         string
+	ExactProfile           bool
+	ExactProfileGeneration int64
+	ExactProfileRevision   int64
+	ExactProfileModel      string
+	OfficeAgentProfileID   string
+	ExecutorID             string
+	TurnID                 string
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
-	OnExecutionAdmitted func(executionID string)
+	OnExecutionAdmitted func(executionID string) error
 	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
 	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
 	// closes that ownership when delivery fails before acceptance.

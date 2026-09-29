@@ -10,6 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResolveTaskSessionMCPProfile_GrantsExactProfileOnlyToCanonicalCoordinator(t *testing.T) {
+	t.Setenv("KANDEV_COORDINATOR_TASK_ID", "coordinator")
+	repo := newMockRepository()
+	repo.tasks["coordinator"] = &models.Task{ID: "coordinator", WorkspaceID: "workspace"}
+	repo.sessions["session"] = &models.TaskSession{ID: "session", TaskID: "coordinator"}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), "coordinator", repo.sessions["session"], false)
+	require.NoError(t, err)
+	require.True(t, profile.HasCapability(mcpprofile.CapabilityExactTaskProfileAssignment))
+
+	t.Setenv("KANDEV_COORDINATOR_TASK_ID", "another-task")
+	profile, err = exec.resolveTaskSessionMCPProfile(context.Background(), "coordinator", repo.sessions["session"], false)
+	require.NoError(t, err)
+	require.False(t, profile.HasCapability(mcpprofile.CapabilityExactTaskProfileAssignment))
+}
+
 func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *testing.T) {
 	tests := []struct {
 		name               string

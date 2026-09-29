@@ -1,7 +1,7 @@
 ---
 id: "03-prove-integration"
 title: "Prove recovery integration"
-status: in_progress
+status: completed
 wave: 3
 depends_on:
   - "02-claim-authority"
@@ -42,6 +42,8 @@ Complete public guidance only after the compatibility contract has executable ev
 - Final public documentation for automatic recovery eligibility, retained files,
   branch naming, staging limits, busy refusal, and per-slot partial success.
 - Accurate requirement, design, ADR, and work-order statuses.
+- Session-incarnation projection from the task service through executor and
+  lifecycle recovery admission.
 
 ## Out of scope
 
@@ -107,8 +109,23 @@ Do not promote a draft design solely because its document linter passes.
 The production executor launch and resume paths now call selected-environment
 admission after executor selection. `TestWorktreeRecoveryLaunchIntegration` and
 `TestWorktreeRecoveryResumeIntegration` pass and assert the selected task,
-environment, owner generation, executor, and repository slot. The full
-orchestrator/worktree and lifecycle packages pass, and existing real-Git
-worktree recovery tests pass. The integration tests use a recording admission
-boundary rather than combining real SQLite recovery publication with lifecycle
-runtime startup, so this work order remains in progress.
+environment, owner generation, executor, and repository slot. The lifecycle
+adapter fixture adds the complete local boundary: real SQLite task and worktree
+stores, two temporary Git repositories, real selected recovery admission, the
+registered `WorktreePreparer`, and the final runtime seam. Its normal and
+race-enabled runs cover replacement, retained replacement after later preparation
+failure, live-consumer and requester-identity refusal, current-session creating
+materialization, and refusal of an existing environment with missing worktree
+identity. External CI, a real runtime process, and deployment remain separate
+operational validation.
+
+### Session-incarnation recovery admission, 2026-09-21
+
+`GetWorkspaceInfoForSession` now has an explicit assertion that it projects the
+durable `QueueIncarnationID`. The selected-worktree launch and resume integration
+fixture carries a nonempty incarnation and asserts that the captured
+`RecoveryAdmissionRequest` retains it. The lifecycle test carries a matching
+durable claim through `admitWorkspaceRecovery`, so the real worktree manager
+verifies the request's session incarnation. These focused assertions preserve
+the recovery claim's session-incarnation fence across every production admission
+path.

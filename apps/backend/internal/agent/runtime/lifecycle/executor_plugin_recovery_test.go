@@ -258,7 +258,7 @@ func TestPluginExecutorPreHandshakeRecoveryCleansKnownResources(t *testing.T) {
 			}}
 			store := &pluginExecutorInventoryStoreFake{
 				record:  pluginExecutorRecoveryRecord(t, phase, resource),
-				session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+				session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
 			}
 			store.record.TransientAuthToken = ""
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
@@ -289,7 +289,7 @@ func TestPluginExecutorPreHandshakeUnknownDestroyRetainsCleanupInventory(t *test
 	}}
 	store := &pluginExecutorInventoryStoreFake{
 		record:  pluginExecutorRecoveryRecord(t, "bootstrapping", resource),
-		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
 	}
 	store.record.TransientAuthToken = ""
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
@@ -369,7 +369,7 @@ func TestPluginExecutorResetCleanupUsesTaskClaim(t *testing.T) {
 	}}
 	store := &pluginExecutorInventoryStoreFake{
 		record:  pluginExecutorRecoveryRecord(t, "ready", resource),
-		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", QueueIncarnationID: "incarnation-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
@@ -384,7 +384,7 @@ func TestPluginExecutorResetCleanupUsesTaskClaim(t *testing.T) {
 	if operations.destroyRequest == nil || operations.destroyRequest.GetResource().GetResourceHandle() != "resource-recovery" {
 		t.Fatalf("destroy request = %#v", operations.destroyRequest)
 	}
-	if store.claimRequest.CleanupJobID != "reset-job-plugin-recovery" || !store.claimRequest.AllowCurrentSessionRuntime {
+	if store.claimRequest.CleanupJobID != "reset-job-plugin-recovery" || !store.claimRequest.AllowCurrentSessionRuntime || store.claimRequest.SessionIncarnationID != "incarnation-plugin-recovery" {
 		t.Fatalf("cleanup claim request = %+v", store.claimRequest)
 	}
 	if store.record == nil || store.record.ResumeToken != "resume-preserved" {

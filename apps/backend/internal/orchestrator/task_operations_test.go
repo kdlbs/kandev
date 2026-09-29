@@ -7757,9 +7757,13 @@ type sessionUpdatingAgentManager struct {
 	sessionID     string
 	taskID        string
 	onStartCalled *bool
+	beforeStart   func()
 }
 
 func (m *sessionUpdatingAgentManager) StartAgentProcess(_ context.Context, _ string) error {
+	if m.beforeStart != nil {
+		m.beforeStart()
+	}
 	*m.onStartCalled = true
 	// Simulate the agent starting by transitioning session to WAITING_FOR_INPUT
 	ctx := context.Background()

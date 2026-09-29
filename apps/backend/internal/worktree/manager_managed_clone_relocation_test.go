@@ -31,18 +31,20 @@ func (s *managedCloneRelocationStore) AcquireTaskEnvironmentRecoveryClaim(
 	if s.claim != nil {
 		if s.claim.TaskEnvironmentID == req.TaskEnvironmentID && s.claim.OwnerTaskID == req.OwnerTaskID &&
 			s.claim.OwnershipGeneration == req.OwnershipGeneration && s.claim.SessionID == req.SessionID &&
+			s.claim.SessionIncarnationID == req.SessionIncarnationID &&
 			s.claim.OperationID == req.OperationID && s.claim.ExecutorType == req.ExecutorType {
 			return s.claim, nil
 		}
 		return nil, errRecoveryOperationClaimed
 	}
 	s.claim = &models.TaskEnvironmentRecoveryClaim{
-		TaskEnvironmentID:   req.TaskEnvironmentID,
-		OwnerTaskID:         req.OwnerTaskID,
-		OwnershipGeneration: req.OwnershipGeneration,
-		SessionID:           req.SessionID,
-		OperationID:         req.OperationID,
-		ExecutorType:        req.ExecutorType,
+		TaskEnvironmentID:    req.TaskEnvironmentID,
+		OwnerTaskID:          req.OwnerTaskID,
+		OwnershipGeneration:  req.OwnershipGeneration,
+		SessionID:            req.SessionID,
+		SessionIncarnationID: req.SessionIncarnationID,
+		OperationID:          req.OperationID,
+		ExecutorType:         req.ExecutorType,
 	}
 	return s.claim, nil
 }
@@ -136,7 +138,8 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 	}
 
 	recoveryRequest := RecoveryAdmissionRequest{
-		TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
+		TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "incarnation-1",
+		TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		Slots: []RecoverySlot{{
 			WorktreeID: "wt-legacy", RepositoryID: "repo-1", BranchSlug: "branch-1", RepositoryPath: destinationClone,
@@ -220,7 +223,8 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 		t.Fatalf("remove obsolete source clone: %v", err)
 	}
 	resumeAdmission, err := mgr.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
-		TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
+		TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "incarnation-1",
+		TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		Slots: []RecoverySlot{{
 			WorktreeID: replacement.ID, RepositoryID: "repo-1", BranchSlug: "branch-1", RepositoryPath: destinationClone,
@@ -284,7 +288,8 @@ func TestManagerAdmitRecoveryRefusesDirtyManagedCloneWorktree(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	_, err = mgr.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
-		TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
+		TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "incarnation-1",
+		TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		Slots: []RecoverySlot{{
 			WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, BranchSlug: wt.BranchSlug,
@@ -384,7 +389,8 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	ctx := WithDirtyCloneRelocation(context.Background())
 	ctx = WithManagedCloneRelocationAuthorization(ctx, func(context.Context) error { return nil })
 	request := RecoveryAdmissionRequest{
-		TaskID: "task-dirty", SessionID: "session-dirty", TaskEnvironmentID: "env-dirty", OwnerTaskID: "task-dirty",
+		TaskID: "task-dirty", SessionID: "session-dirty", SessionIncarnationID: "incarnation-dirty",
+		TaskEnvironmentID: "env-dirty", OwnerTaskID: "task-dirty",
 		OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		Slots: []RecoverySlot{{
 			WorktreeID: wt.ID, RepositoryID: wt.RepositoryID, BranchSlug: wt.BranchSlug, RepositoryPath: destinationClone,
@@ -595,8 +601,9 @@ func TestAdmitRecoveryDoesNotPartiallyRelocateMultiRepositoryInventory(t *testin
 		t.Fatal(err)
 	}
 	_, err = manager.AdmitRecovery(context.Background(), RecoveryAdmissionRequest{
-		TaskID: "task-partial", SessionID: "session-partial", TaskEnvironmentID: "env-partial",
-		OwnerTaskID: "task-partial", OwnershipGeneration: 1,
+		TaskID: "task-partial", SessionID: "session-partial", SessionIncarnationID: "incarnation-partial",
+		TaskEnvironmentID: "env-partial",
+		OwnerTaskID:       "task-partial", OwnershipGeneration: 1,
 		ExecutorType: string(models.ExecutorTypeWorktree), Slots: slots,
 	})
 	if err == nil {

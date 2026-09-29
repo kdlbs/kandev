@@ -97,9 +97,14 @@ func TestPluginExecutorPostgresCleanupClaim(t *testing.T) {
 	if err := repo.CheckpointPluginExecutorInventory(ctx, running); err != nil {
 		t.Fatalf("checkpoint ready plugin inventory: %v", err)
 	}
+	session, err := repo.GetTaskSession(ctx, running.SessionID)
+	if err != nil {
+		t.Fatalf("load plugin session for cleanup claim: %v", err)
+	}
 	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
 		TaskEnvironmentID: "environment-plugin-executor-inventory", OwnerTaskID: running.TaskID,
-		OwnershipGeneration: 7, SessionID: running.SessionID, OperationID: "operation-pg-cleanup",
+		OwnershipGeneration: 7, SessionID: running.SessionID, SessionIncarnationID: session.QueueIncarnationID,
+		OperationID:  "operation-pg-cleanup",
 		ExecutorType: string(models.ExecutorTypePluginRemote), AllowCurrentSessionRuntime: true,
 	})
 	if err != nil {
