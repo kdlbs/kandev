@@ -815,8 +815,9 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
 	}
 
+	turnID := s.getActiveTurnID(data.TaskSessionID)
+	permissionStored := false
 	if s.messageCreator != nil {
-		turnID := s.getActiveTurnID(data.TaskSessionID)
 		attempts := 0
 		var err error
 	permissionWrite:
@@ -870,6 +871,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 				return
 			}
 		} else {
+			permissionStored = true
 			s.logger.Debug("created permission request message",
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID))
@@ -905,6 +907,10 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 	}
 	if autoApproved {
 		return
+	}
+
+	if permissionStored && s.unattendedPermissionHandler != nil {
+		s.unattendedPermissionHandler(ctx, data.TaskID, data.TaskSessionID, data.PendingID, turnID)
 	}
 
 	// Automation tasks are hidden from the kanban, so there is no UI for the

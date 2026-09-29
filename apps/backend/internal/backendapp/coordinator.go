@@ -125,6 +125,7 @@ func registerCoordinatorRoutes(p routeParams) {
 		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.taskSvc, p.services.Workflow, p.log),
 	}
 	if svc.Phase3Enabled() {
+		wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}

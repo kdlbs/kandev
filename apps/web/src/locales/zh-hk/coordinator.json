@@ -393,5 +393,9 @@
   "controlErrorInvalidScope": "請選擇監視所有看板，還是隻監視所選看板。",
   "controlErrorActionMissing": "每個操作都需要一個設定。請為每一行選擇一項。",
   "controlErrorDuplicateBoard": "有一個看板被列出了兩次。請將其中一份移出範圍。",
-  "controlErrorUnknownAction": "請求中包含不存在的操作。請刷新頁面後重新開始。"
+  "controlErrorUnknownAction": "請求中包含不存在的操作。請刷新頁面後重新開始。",
+  "containmentFixChangedSinceLaunch": "請與此協調器開始新的對話，使其按目前設定啓動。",
+  "containmentFixUnreadable": "Kandev 無法讀取此設定。請檢查相關設定後重試。",
+  "containmentFixUnverifiedSource": "此協調器的對話任務帶有 Kandev 無法驗證的儲存庫綁定。請從任務中移除該綁定，或使用沒有綁定的協調器。",
+  "containmentFixCredentialSource": "請從此協調器的執行器設定檔和代理程式設定檔的環境中移除 Kandev 權杖。發現：{{source}}。"
 }

@@ -35,6 +35,10 @@ type Store struct {
 	// FOR UPDATE) and before the merge/validate/update steps. nil in
 	// production; only tests in this package set it.
 	afterLock func(ctx context.Context)
+
+	// afterUnattendedLookup is a test-only hook run between RecordUnattendedDenial's
+	// turn lookup and its write transaction. nil in production.
+	afterUnattendedLookup func()
 }
 
 // NewStore creates the coordinator store and initializes its schema.

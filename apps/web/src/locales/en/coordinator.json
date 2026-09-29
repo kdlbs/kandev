@@ -393,5 +393,9 @@
   "controlErrorInvalidScope": "Choose whether to watch every board or only selected boards.",
   "controlErrorActionMissing": "Every action needs a setting. Choose one for each row.",
   "controlErrorDuplicateBoard": "A board is listed twice. Take one copy out of scope.",
-  "controlErrorUnknownAction": "The request names an action that does not exist. Reload the page and start again."
+  "controlErrorUnknownAction": "The request names an action that does not exist. Reload the page and start again.",
+  "containmentFixChangedSinceLaunch": "Start a new conversation with this coordinator so it launches with the current settings.",
+  "containmentFixUnreadable": "Kandev could not read this setting. Check the profile and try again.",
+  "containmentFixUnverifiedSource": "This coordinator's conversation task carries a repository binding that Kandev cannot verify. Remove the binding from the task, or use a coordinator without one.",
+  "containmentFixCredentialSource": "Remove Kandev tokens from this coordinator's executor and agent profile environment. Found: {{source}}."
 }
