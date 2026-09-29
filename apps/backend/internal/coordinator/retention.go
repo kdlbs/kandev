@@ -4,7 +4,17 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"go.uber.org/zap"
 )
+
+const (
+	activityRetentionInterval = 24 * time.Hour
+	activityRetentionAge      = 400 * 24 * time.Hour
+)
+
+// activityRetentionBatch is the number of rows one delete transaction removes.
+var activityRetentionBatch = 500
 
 // DeleteActivityBatch deletes up to limit rows created before cutoff, oldest
 // first, in its own transaction, and reports how many it removed.
@@ -19,4 +29,63 @@ func (s *Store) DeleteActivityBatch(ctx context.Context, cutoff time.Time, limit
 		return 0, fmt.Errorf("delete coordinator activity batch: %w", err)
 	}
 	return n, nil
+}
+
+// StartActivityRetention starts the daily retention ticker and runs one pass
+// at once in its own goroutine, so readiness never waits on it. It does
+// nothing while phase 2 is off, and a running ticker never re-reads the flag.
+// Both goroutines end when ctx is cancelled.
+func (s *Service) StartActivityRetention(ctx context.Context) {
+	if !s.phase2 {
+		return
+	}
+	ticker := time.NewTicker(activityRetentionInterval)
+	s.startActivityRetention(ctx, ticker.C, ticker.Stop)
+}
+
+func (s *Service) startActivityRetention(ctx context.Context, tick <-chan time.Time, stopTicker func()) {
+	s.retentionWG.Add(2)
+	go func() {
+		defer s.retentionWG.Done()
+		s.runActivityRetention(ctx)
+	}()
+	go func() {
+		defer s.retentionWG.Done()
+		defer stopTicker()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick:
+				s.runActivityRetention(ctx)
+			}
+		}
+	}()
+}
+
+// WaitActivityRetentionStopped blocks until the retention goroutines have
+// exited after their context was cancelled.
+func (s *Service) WaitActivityRetentionStopped() { s.retentionWG.Wait() }
+
+// runActivityRetention deletes rows older than the retention age in batches.
+// A run that starts while another is in progress returns at once; a batch
+// error is logged and ends the run, and the next run retries.
+func (s *Service) runActivityRetention(ctx context.Context) {
+	if !s.retentionRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.retentionRunning.Store(false)
+	cutoff := s.store.now().UTC().Add(-activityRetentionAge)
+	for ctx.Err() == nil {
+		n, err := s.store.DeleteActivityBatch(ctx, cutoff, activityRetentionBatch)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.logger.Warn("activity retention batch failed", zap.Error(err))
+			}
+			return
+		}
+		if n < int64(activityRetentionBatch) {
+			return
+		}
+	}
 }

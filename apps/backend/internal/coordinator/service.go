@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -92,6 +93,9 @@ type Service struct {
 	// through; nil until SetUndoDeps.
 	undoTasks UndoTaskService
 	undoLocks keyedLock
+
+	retentionWG      sync.WaitGroup
+	retentionRunning atomic.Bool
 
 	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
 	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
