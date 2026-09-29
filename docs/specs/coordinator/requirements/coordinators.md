@@ -258,8 +258,9 @@ chose.
 - **AC-COORDINATOR-COORDINATORS-008.1:** While the phase-2 flag is on, **+ Add
   coordinator** shall open a setup with the steps Who runs it, What it
   watches, What it is for, What it knows, What it may do and Review, with the
-  step list visible, **Back** and **Next** on each step, and the current step
-  marked.
+  step list visible and the current step marked by more than colour. Steps 1
+  to 5 shall have **Next** and, from step 2, **Back**; Review shall have
+  **Back** and **Finish** and no **Next**.
 - **AC-COORDINATOR-COORDINATORS-008.2:** Who runs it shall ask for the name,
   agent profile and executor under the phase-1 rules; What it watches shall
   offer the Watches choice of
@@ -281,6 +282,12 @@ chose.
 - **AC-COORDINATOR-COORDINATORS-008.5:** When a manager leaves the setup before
   Finish, nothing shall be created. The setup shall be available only to
   managers.
+- **AC-COORDINATOR-COORDINATORS-008.6:** If the setup request is refused
+  because a chosen value is invalid, the system shall create nothing and
+  the page shall return to the step that holds the value, with the value
+  kept and the error shown beside it; if the request fails for any other
+  reason, the page shall stay on Review with every value kept and show that
+  nothing was created.
 
 ### REQ-COORDINATOR-COORDINATORS-009: Configure sections and list summary
 

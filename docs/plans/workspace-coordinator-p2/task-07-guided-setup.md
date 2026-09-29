@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-008.3
   - AC-COORDINATOR-COORDINATORS-008.4
   - AC-COORDINATOR-COORDINATORS-008.5
+  - AC-COORDINATOR-COORDINATORS-008.6
 system_design:
   - ../../specs/coordinator/system-design/coordinators.md
 ---
