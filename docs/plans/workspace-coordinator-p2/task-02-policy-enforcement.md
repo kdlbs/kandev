@@ -46,32 +46,46 @@ refused log rows, workflow-deletion handling and the approve re-check.
 
 ## In scope
 
-- `GET` and `PUT .../settings` with validation (`automatic_not_available`,
-  stop denied-only, Watches 1 to 50, duplicates, foreign workflows), the
-  locked save, the equal-save no-op, `policy_revision` and
+- `GET` and `PUT .../settings` with validation and the design's closed set of
+  400 codes and `field` values (`automatic_not_available`, stop denied-only,
+  Watches 1 to 50, duplicates, foreign workflows, `null` members as absent,
+  workflow ids read before the lock), the locked save, the equal-save no-op,
+  the PUT returning the coordinator DTO, `policy_revision` and
   `resetConversation` (`001.2` to `001.5`, `003.2`, `004.1`, `004.2`).
 - `toolprofile.go` `ToolNames(policy, phase2)` (`002.1`).
 - `CoordinatorToolPolicy` in `internal/mcp/profile` with marshal, parse and
   validate; stamping at conversation-task creation; transport through the
   executor's coordinator branch, `buildLaunchMetadata` strip-and-re-set, and
-  `mcpHandlerFor` parse; refusing the `kandev.coordinator_` metadata prefix
-  on HTTP and MCP task create and update (`002.3`).
-- `registerCoordinatorTools` from the bound names; agentctl
-  `CoordinatorToolNames` for auto-approval by full qualified name (`002.4`).
-- Guard: bound-list check, live `Allows` for propose actions, the Watches
-  filter per tool, `RecordRefusal` with reason codes, the unchanged refusal
-  text, and no settings-shaped action on the surface (`002.2`, `002.5`,
-  `003.3`).
-- Workflow-deleted subscriber (`003.5` backend half; the Configure notice
-  and the Needs you notice are task 06's).
-- Approve re-check 409 `policy_denied` in the phase-1 approve route
-  (`002.6`; the card copy is task 09's).
+  `mcpHandlerFor` parse; `sameProfile` comparing the binding; refusing the
+  `kandev.coordinator_` metadata prefix in the task service's `CreateTask`
+  and `UpdateTask`, so HTTP, MCP and WebSocket `task.create` and
+  `task.update` all inherit it, with `AllowReservedMetadata` for the
+  coordinator service (`002.3`).
+- `registerCoordinatorTools` from the bound names, registering each bound
+  name that has a handler in the tool catalog (`ToolForAction`'s table); in
+  this task's wave that is the phase-1 seven, and tasks 03 and 04 add their
+  tools' rows and handlers. Agentctl `CoordinatorToolNames` carries every
+  bound name for auto-approval by full qualified name (`002.4`).
+- Guard: the design's ordered checks 0 to 4 and result table, with
+  `ToolForAction`, bound-list check, live `Allows` for propose actions, the
+  Watches filter per tool, `RecordRefusal` with reason codes and ids taken
+  from the principal, the unchanged refusal text, and no settings-shaped
+  action on the surface (`002.2`, `002.5`, `003.3`).
+- The effective watch set (stored ids naming an existing workflow, hidden
+  included; settings DTOs list only effective ids) and the best-effort
+  workflow-deleted subscriber (`003.5` backend half; the Configure notice and
+  the Needs you notice are task 06's). No reconcile or startup pass.
+- Approve re-check 409 `policy_denied` in the phase-1 approve route, on new
+  claims only and only with the flag on (`002.6`; the card copy is task 09's;
+  task 04 adds the kind-specific cases).
 - Flag-off behaviour: phase-1 tools, ignored bindings and stored policy,
   unregistered phase-2 routes (`AC-COORDINATOR-COORDINATORS-007.2`, `007.4`;
   the web half of `007.2` is each UI task's flag-off test).
-- `001.4`: a test that no registered action, route or proposal kind merges
-  or targets a `CompleteTaskOnEnter` step (the kind validators are task 04's;
-  this task's test walks the registry).
+- `001.4`: a test that walks the coordinator tool catalog, the guard
+  allowlist, the settings and proposal routes and the settings validator and
+  asserts none of them names an action, route or field that merges a pull
+  request or moves a task to a `CompleteTaskOnEnter` step. The walk over the
+  proposal-kind registry is task 04's, where the registry exists.
 
 ## Out of scope
 
@@ -80,17 +94,21 @@ refused log rows, workflow-deletion handling and the approve re-check.
 
 ## Acceptance
 
-- The session's registered tools, the auto-approved names and the bound list
-  are the same set, and equal `ToolNames(policy)`.
+- The auto-approved names equal the bound list; the registered tools equal
+  the bound names that have a catalog handler; and the bound list equals
+  `ToolNames(policy, true)` of the policy as read at conversation open (the
+  phase-1 seven for a conversation with no binding). Task 04 asserts full
+  registered equals bound once every tool has landed.
 - A setting tightened mid-conversation refuses the next call and logs it.
 - A forged or unparsable binding refuses every action.
 
 ## Verification
 
-Write the interleaving table first, before code: a policy save racing an
-in-flight coordinator call, for a tightening and a loosening; an approve
-racing a save that denies its action; a save racing a conversation open.
-Each row names the order of the two operations and the expected result.
+Write the interleaving table first, before code: it is the design's
+[Interleavings](../../specs/coordinator/system-design/permissions.md#interleavings)
+table, rows 1 to 9, 10a and 10b, one test per row, each asserting the stated result
+(including that row 2 leaves a pending proposal whose approve is 409
+`policy_denied`, and that row 5 executes). Commit it failing, then the code.
 
 ```bash
 make -C apps/backend test PKG=./internal/coordinator/...
@@ -110,9 +128,16 @@ design's Guard table: an unparsable binding (`binding_invalid`), an action
 outside the bound names sent straight to the coordinator MCP endpoint
 (`not_in_profile`), and a bound propose action whose stored setting was
 changed to Denied after binding (`policy_denied`), each asserting one
-`refused` row with its class; unwatched reads and propose targets assert
-no row. A Playwright spec with the mock agent sets Message to Denied, opens
-a conversation and asserts `propose_message_kandev` is not registered for
+`refused` row with its class; an action outside the phase-1 allowlist sent
+by a coordinator principal asserts one `not_in_profile` row with class
+`unknown`; a binding-invalid call writes its row with the principal's
+coordinator and workspace ids; a failed policy read refuses and writes no
+row; an invalid payload keeps the 400 and writes no row; unwatched reads and propose targets assert
+no row. Store tests assert a stored id whose workflow was deleted (hidden
+workflows still count) is omitted from the GET and PUT DTOs, from an
+all-deleted `selected` set (the "watches no board" state), and that a PUT
+dropping it succeeds. A Playwright spec with the mock agent sets Create a task to Denied, opens
+a conversation and asserts `propose_task_kandev` is not registered for
 the session, the mock's call to it creates no proposal, and no refused row
 is written (the call never reaches the guard, `002.2`).
 

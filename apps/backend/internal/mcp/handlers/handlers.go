@@ -763,8 +763,15 @@ func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*w
 			if err != nil {
 				return nil, err
 			}
+			filter, err := h.coordinatorWatchFilter(ctx)
+			if err != nil {
+				return nil, err
+			}
 			dtos := make([]dto.WorkflowDTO, 0, len(workflows))
 			for _, w := range workflows {
+				if filter != nil && !filter.Contains(w.ID) {
+					continue
+				}
 				dtos = append(dtos, dto.FromWorkflow(w))
 			}
 			return dto.ListWorkflowsResponse{Workflows: dtos, Total: len(dtos)}, nil
@@ -1139,6 +1146,7 @@ func classifyCreateTaskError(err error) string {
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		errors.Is(err, service.ErrExternalIDInvalid),
+		errors.Is(err, service.ErrReservedMetadata),
 		// A reference the caller supplied that does not resolve is a
 		// validation failure, not an internal one. Classifying it as
 		// INTERNAL_ERROR discarded err.Error() and left the caller with a

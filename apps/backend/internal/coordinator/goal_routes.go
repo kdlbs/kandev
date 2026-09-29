@@ -30,7 +30,7 @@ func (h *Handlers) readBody(c *gin.Context) ([]byte, bool) {
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxGoalBodyBytes))
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+		c.JSON(http.StatusRequestEntityTooLarge, NewErrorResponse("request body too large"))
 		return nil, false
 	}
 	if err != nil {

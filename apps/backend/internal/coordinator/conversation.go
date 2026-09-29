@@ -46,6 +46,7 @@ func (e *ProfileUnavailableError) Error() string {
 type ConversationTaskManager interface {
 	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
 	DeleteTask(ctx context.Context, id string) error
 	ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*taskmodels.Task, error)
@@ -134,22 +135,31 @@ func (s *Service) OpenConversation(ctx context.Context, workspaceID, coordinator
 		}
 	}
 
-	// Step 3: create a new ephemeral conversation task.
+	// Step 3: create a new ephemeral conversation task, bound to its tool list.
+	metadata := map[string]interface{}{
+		taskmodels.MetaKeyCoordinatorID:     coordinatorID,
+		taskmodels.MetaKeyAgentProfileID:    found.AgentProfileID,
+		taskmodels.MetaKeyExecutorProfileID: found.ExecutorProfileID,
+	}
+	if err := s.stampToolPolicy(metadata, found, ""); err != nil {
+		return nil, err
+	}
 	created, err := s.conversationTasks.CreateTask(ctx, &taskservice.CreateTaskRequest{
-		WorkspaceID: workspaceID,
-		Title:       "Coordinator: " + found.Name,
-		IsEphemeral: true,
-		Origin:      taskmodels.TaskOriginCoordinator,
-		Metadata: map[string]interface{}{
-			taskmodels.MetaKeyCoordinatorID:     coordinatorID,
-			taskmodels.MetaKeyAgentProfileID:    found.AgentProfileID,
-			taskmodels.MetaKeyExecutorProfileID: found.ExecutorProfileID,
-		},
+		WorkspaceID:           workspaceID,
+		Title:                 "Coordinator: " + found.Name,
+		IsEphemeral:           true,
+		Origin:                taskmodels.TaskOriginCoordinator,
+		Metadata:              metadata,
+		AllowReservedMetadata: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create conversation task: %w", err)
 	}
 	newTaskID := created.Task.ID
+	if err := s.bindConversationTask(ctx, created.Task, found, metadata); err != nil {
+		s.deleteConversationTaskBestEffort(ctx, newTaskID)
+		return nil, fmt.Errorf("bind conversation task: %w", err)
+	}
 
 	// Step 4: commit the new task as current, or resolve the race.
 	ok, err := s.store.SetConversationTaskID(ctx, coordinatorID, newTaskID, staleTaskID, found.ConfigRevision)

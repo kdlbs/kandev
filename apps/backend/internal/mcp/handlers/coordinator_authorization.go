@@ -3,8 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/coordinator"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -69,6 +75,22 @@ func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Mess
 	if !isCoordinator {
 		return nil, msg, nil
 	}
+	return h.authorizeCoordinatorSurface(ctx, principal, msg)
+}
+
+// authorizeCoordinatorSurface runs the checks for a coordinator principal
+// once the reserved-name and principal-only refusals have passed: the phase-2
+// policy checks, the fixed surface allowlist, then payload, reference and
+// watch checks.
+func (h *Handlers) authorizeCoordinatorSurface(
+	ctx context.Context, principal mcpscope.Principal, msg *ws.Message,
+) (*ws.Message, *ws.Message, error) {
+	phase2 := h.coordinatorSvc != nil && h.coordinatorSvc.Phase2()
+	if phase2 && principal.WorkspaceID != "" {
+		if refused, response, err := h.authorizeCoordinatorPolicy(ctx, principal, msg); refused {
+			return response, nil, err
+		}
+	}
 	if _, allowed := coordinatorSurfaceActions[msg.Action]; !allowed {
 		return coordinatorUnknownAction(msg)
 	}
@@ -85,7 +107,147 @@ func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Mess
 	if !h.authorizeCoordinatorReferenceFields(ctx, principal, msg.Action, fields) {
 		return coordinatorNotFound(msg)
 	}
+	if phase2 && !h.coordinatorWatchesFields(ctx, principal, msg.Action, fields) {
+		return coordinatorNotFound(msg)
+	}
 	return nil, msg, nil
+}
+
+// phaseOneToolNames is the tool list of a conversation that has no binding.
+var phaseOneToolNames = coordinator.ToolNames(coordinator.PhaseOnePolicy(), false)
+
+// actionClass is the activity class a refused request is recorded under: the
+// policy action of a propose tool, otherwise unknown.
+func actionClass(action string) coordinator.Action {
+	if tool, ok := coordinator.ToolForAction(action); ok {
+		if class, isPropose := coordinator.ProposeActionFor(tool); isPropose {
+			return class
+		}
+	}
+	return coordinator.ActionUnknown
+}
+
+// authorizeCoordinatorPolicy runs the phase-2 checks that precede payload
+// validation: the bound tool list is resolved and valid, names the requested
+// tool, and, for a propose tool, the coordinator's live policy still allows
+// the action. Every refusal but a failed read records one activity row under
+// the principal's own ids; a failed read fails closed without a row.
+func (h *Handlers) authorizeCoordinatorPolicy(
+	ctx context.Context, principal mcpscope.Principal, msg *ws.Message,
+) (bool, *ws.Message, error) {
+	class := actionClass(msg.Action)
+	names, valid := coordinatorBoundNames(ctx, principal)
+	if !valid {
+		return h.refuseCoordinator(ctx, principal, msg, class, "binding_invalid")
+	}
+	tool, hasTool := coordinator.ToolForAction(msg.Action)
+	if !hasTool || !slices.Contains(names, tool) {
+		return h.refuseCoordinator(ctx, principal, msg, class, "not_in_profile")
+	}
+	action, isPropose := coordinator.ProposeActionFor(tool)
+	if !isPropose {
+		return false, nil, nil
+	}
+	allowed, err := h.coordinatorSvc.ActionAllowed(ctx, principal.CoordinatorID, action)
+	if err != nil {
+		h.logger.Error("coordinator policy read failed; refusing", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		response, _, respErr := coordinatorNotFound(msg)
+		return true, response, respErr
+	}
+	if !allowed {
+		return h.refuseCoordinator(ctx, principal, msg, class, "policy_denied")
+	}
+	return false, nil, nil
+}
+
+// coordinatorBoundNames resolves the tool list the conversation is bound to.
+// A conversation with no binding uses the phase-1 seven; a binding that is
+// required but absent, invalid, or issued for a different identity is not
+// valid.
+func coordinatorBoundNames(ctx context.Context, principal mcpscope.Principal) ([]string, bool) {
+	execution, ok := streams.MCPExecutionContextFromContext(ctx)
+	if !ok {
+		return nil, false
+	}
+	binding := execution.CoordinatorToolPolicy
+	if binding == nil {
+		return phaseOneToolNames, !execution.CoordinatorToolPolicyRequired
+	}
+	if !coordinatorBindingMatches(binding, principal) {
+		return nil, false
+	}
+	return binding.ToolNames, true
+}
+
+func coordinatorBindingMatches(binding *mcpprofile.CoordinatorToolPolicy, principal mcpscope.Principal) bool {
+	return binding.Validate() == nil &&
+		binding.CoordinatorID == principal.CoordinatorID &&
+		binding.WorkspaceID == principal.WorkspaceID &&
+		binding.ConversationTaskID == principal.CallerTaskID
+}
+
+func (h *Handlers) refuseCoordinator(
+	ctx context.Context, principal mcpscope.Principal, msg *ws.Message, class coordinator.Action, reason string,
+) (bool, *ws.Message, error) {
+	if err := h.coordinatorSvc.RecordRefusal(ctx, principal.CoordinatorID, principal.WorkspaceID, class, reason); err != nil {
+		h.logger.Error("coordinator refusal not recorded",
+			zap.String("coordinator_id", principal.CoordinatorID), zap.String("reason", reason), zap.Error(err))
+	}
+	response, _, err := coordinatorUnknownAction(msg)
+	return true, response, err
+}
+
+// coordinatorWatchesFields applies the effective watch set to the workflow a
+// read names, directly or through its task (a stall item names its task by
+// id). A read naming neither is not filtered here. A task without a workflow
+// is never watched, and a failed read fails closed.
+func (h *Handlers) coordinatorWatchesFields(
+	ctx context.Context, principal mcpscope.Principal, action string, fields map[string]json.RawMessage,
+) bool {
+	if action == coordinator.ActionProposeTask {
+		return true
+	}
+	workflowID := jsonStringField(fields, "workflow_id")
+	taskID := jsonStringField(fields, "task_id")
+	if action == coordinator.ActionGetItem && jsonStringField(fields, coordinatorItemFieldKind) == coordinatorItemKindStall {
+		taskID = strings.TrimSpace(jsonStringField(fields, "id"))
+	}
+	if taskID == "" && workflowID == "" {
+		return true
+	}
+	if taskID != "" {
+		task, err := h.taskSvc.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			return false
+		}
+		workflowID = task.WorkflowID
+	}
+	return h.coordinatorWatchesWorkflow(ctx, principal, workflowID)
+}
+
+// coordinatorWatchesWorkflow reports whether the workflow is in the
+// coordinator's effective watch set; an unreadable set refuses.
+func (h *Handlers) coordinatorWatchesWorkflow(ctx context.Context, principal mcpscope.Principal, workflowID string) bool {
+	set, err := h.coordinatorSvc.EffectiveWatchSet(ctx, principal.CoordinatorID)
+	if err != nil {
+		h.logger.Error("coordinator watch set read failed; refusing", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		return false
+	}
+	return set.Contains(workflowID)
+}
+
+// coordinatorWatchFilter is the effective watch set a coordinator principal's
+// enumerating read is filtered by, or nil when the read is not filtered.
+func (h *Handlers) coordinatorWatchFilter(ctx context.Context) (*coordinator.WatchSet, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || !principal.IsCoordinator() || h.coordinatorSvc == nil || !h.coordinatorSvc.Phase2() {
+		return nil, nil
+	}
+	set, err := h.coordinatorSvc.EffectiveWatchSet(ctx, principal.CoordinatorID)
+	if err != nil {
+		return nil, err
+	}
+	return &set, nil
 }
 
 // authorizeCoordinatorReferenceFields checks the workspace_id, workflow_id

@@ -178,6 +178,14 @@ func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *c
 		subs = append(subs, sub)
 	}
 
+	if svc.Phase2Enabled() {
+		if sub, err := coordinator.SubscribeWorkflowDeleted(eventBus, svc, log); err != nil {
+			log.Error("failed to subscribe coordinator to workflow.deleted", zap.Error(err))
+		} else {
+			subs = append(subs, sub)
+		}
+	}
+
 	return func(ctx context.Context, _ time.Time) {
 		go func() {
 			<-ctx.Done()

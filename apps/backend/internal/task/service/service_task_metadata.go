@@ -50,6 +50,7 @@ func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	} else {
 		delete(updated, models.MetaKeyHandoffs)
 	}
+	restoreReservedMetadata(updated, existing)
 	return updated
 }
 

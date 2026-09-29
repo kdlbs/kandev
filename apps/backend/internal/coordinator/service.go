@@ -116,6 +116,10 @@ type Service struct {
 	// policyErrLogged holds one entry per "coordinatorID:policy_revision" whose
 	// unreadable stored policy has been logged.
 	policyErrLogged sync.Map
+
+	// afterApproveRecheck is a test-only hook run between the approve policy
+	// re-check and the claim.
+	afterApproveRecheck func()
 }
 
 // ServiceOption configures optional Service behavior.

@@ -5,62 +5,82 @@ import (
 	"encoding/json"
 
 	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// registerCoordinatorTools composes the fixed seven-tool coordinator surface
-// (docs/specs/coordinator/system-design/copilot-tools.md#tool-surface,
-// AC-COORDINATOR-COPILOT-003.1): the five existing read tools, reused
-// unchanged from the kanban/configuration registrations, plus
-// propose_task_kandev and get_coordinator_item_kandev. Additive rather than
-// subtractive (unlike registerAutomationTools), since the coordinator
-// surface does not start from the ~30-tool kanban bundle.
+// registerCoordinatorTools registers each tool the session's bound list names
+// that has a handler in this build; a bound name with no handler is skipped.
+// Read tools reuse the kanban/configuration registrations unchanged, so the
+// surface is additive rather than subtractive.
 func (s *Server) registerCoordinatorTools() {
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows_kandev",
-			mcp.WithDescription("List all workflows in a workspace."),
-			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
-		),
-		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps_kandev",
-			mcp.WithDescription("List all workflow steps in a workflow."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-		),
-		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_repositories_kandev",
-			mcp.WithDescription("List repositories in a workspace. Use this to find a repository_id for propose_task_kandev when the proposed task should target a specific codebase."),
-			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
-		),
-		s.wrapHandler("list_repositories_kandev", s.listRepositoriesHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-		),
-		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("get_task_conversation_kandev",
-			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
-			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
-			mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
-			mcp.WithString("after", mcp.Description("Optional cursor message ID to fetch messages after this ID")),
-			mcp.WithString("sort", mcp.Description("Optional sort order: asc or desc")),
-			mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{typeKey: stringType})),
-		),
-		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
-	)
-	s.registerProposeTaskTool()
-	s.registerGetCoordinatorItemTool()
-	s.registerListCoordinatorActivityTool()
+	catalog := s.coordinatorToolCatalog()
+	for _, name := range mcpprofile.BoundCoordinatorToolNames(s.profile) {
+		if register, ok := catalog[name]; ok {
+			register()
+		}
+	}
+}
+
+// coordinatorToolCatalog maps a coordinator tool name to its registration.
+func (s *Server) coordinatorToolCatalog() map[string]func() {
+	return map[string]func(){
+		"list_workflows_kandev": func() {
+			s.mcpServer.AddTool(
+				mcp.NewTool("list_workflows_kandev",
+					mcp.WithDescription("List all workflows in a workspace."),
+					mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+				),
+				s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
+			)
+		},
+		"list_workflow_steps_kandev": func() {
+			s.mcpServer.AddTool(
+				mcp.NewTool("list_workflow_steps_kandev",
+					mcp.WithDescription("List all workflow steps in a workflow."),
+					mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+				),
+				s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
+			)
+		},
+		"list_repositories_kandev": func() {
+			s.mcpServer.AddTool(
+				mcp.NewTool("list_repositories_kandev",
+					mcp.WithDescription("List repositories in a workspace. Use this to find a repository_id for propose_task_kandev when the proposed task should target a specific codebase."),
+					mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+				),
+				s.wrapHandler("list_repositories_kandev", s.listRepositoriesHandler()),
+			)
+		},
+		"list_tasks_kandev": func() {
+			s.mcpServer.AddTool(
+				mcp.NewTool("list_tasks_kandev",
+					mcp.WithDescription("List all tasks in a workflow."),
+					mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+				),
+				s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
+			)
+		},
+		"get_task_conversation_kandev": func() {
+			s.mcpServer.AddTool(
+				mcp.NewTool("get_task_conversation_kandev",
+					mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
+					mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+					mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
+					mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
+					mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
+					mcp.WithString("after", mcp.Description("Optional cursor message ID to fetch messages after this ID")),
+					mcp.WithString("sort", mcp.Description("Optional sort order: asc or desc")),
+					mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{typeKey: stringType})),
+				),
+				s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
+			)
+		},
+		"propose_task_kandev":              s.registerProposeTaskTool,
+		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
+		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
+	}
 }
 
 func (s *Server) registerProposeTaskTool() {

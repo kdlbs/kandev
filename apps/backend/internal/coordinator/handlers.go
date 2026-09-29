@@ -54,6 +54,8 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 		workspace.GET("/coordinators/:cid/activity", h.httpListActivity)
 		workspace.GET("/coordinators/:cid/activity/summary", h.httpActivitySummary)
 		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
+		workspace.GET("/coordinators/:cid/settings", h.httpGetSettings)
+		workspace.PUT("/coordinators/:cid/settings", h.httpPutSettings)
 	}
 }
 
@@ -284,9 +286,15 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	var fieldErr *FieldError
 	var conflictErr *ProposalConflictError
 	var undoErr *UndoRefusal
+	var settingsErr *SettingsError
+	var deniedErr *PolicyDeniedError
 	switch {
 	case errors.As(err, &undoErr):
 		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
+	case errors.As(err, &settingsErr):
+		c.JSON(http.StatusBadRequest, gin.H{"error": settingsErr.Message, "field": settingsErr.Field, "code": settingsErr.Code})
+	case errors.As(err, &deniedErr):
+		c.JSON(http.StatusConflict, gin.H{"error": "policy_denied", "action": deniedErr.Action})
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
 	case errors.Is(err, ErrGoalConflict):
