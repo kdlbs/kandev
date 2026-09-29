@@ -12,16 +12,16 @@ func startTaskUsageWriter(
 	eventBus bus.EventBus,
 	log *logger.Logger,
 	addCleanup func(func() error),
-) error {
+) (*taskusage.Writer, error) {
 	writer := taskusage.NewWriter(repo, pricing, log)
 	writer.Start()
 	if err := writer.Subscribe(eventBus); err != nil {
 		writer.Stop()
-		return err
+		return nil, err
 	}
 	addCleanup(func() error {
 		writer.Stop()
 		return nil
 	})
-	return nil
+	return writer, nil
 }

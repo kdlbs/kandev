@@ -251,7 +251,7 @@ Each tick:
    by coordinator id:
    - coordinators with `autonomy_enabled = 1`;
    - coordinators with a `coordinator_unattended_turns` row that has
-     `outcome IS NULL`, or `finished_at` in the last 10 minutes;
+     `outcome IS NULL`, or `finished_at` in the last 11 minutes;
    - coordinators with at least one `coordinator_proposals` row with
      `claimed_automatically = 1` ([automatic](automatic.md#lowering)).
 
@@ -264,7 +264,7 @@ Each tick:
    1. message recovery for its open turn with `message_id` null
       ([Finding the turn's message](#finding-the-turns-message));
    2. missed-settle re-derivation for its open turn ([Turn end](#turn-end)),
-      then the per-turn cost recompute for its turns settled in the last 10
+      then the per-turn cost recompute for its turns settled in the last 11
       minutes ([spend](spend.md#per-turn-cost));
    3. the ceiling check `CheckCeiling` of [spend](spend.md#stopping) for its
       open turn, if any, including a row with `stop_requested_at` set;
@@ -289,7 +289,7 @@ With autonomy off, an open turn therefore keeps the 60-second ceiling bound of
 `AC-COORDINATOR-SPEND-003.2`, the `stop_failing` state of
 `AC-COORDINATOR-SPEND-003.4`, and the recovery of a missed settle. No wake is
 recorded for it and nothing is delivered after it ends. Once its turns are
-settled and past the 10-minute recompute, and it has no automatic claim, the
+settled and past the 11-minute recompute, and it has no automatic claim, the
 coordinator leaves the visit set.
 
 ### Stall currency

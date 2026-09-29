@@ -976,6 +976,14 @@ type UsageEventReader interface {
 	ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error)
 }
 
+// UsageSpendReader sums ledger cost for the coordinator spend measurement. It
+// is separate from UsageRepository so aggregate-only readers remain
+// compatible.
+type UsageSpendReader interface {
+	SumUsageForTasks(ctx context.Context, taskIDs []string, from, to time.Time) (models.UsageSum, error)
+	SumUsageForTurn(ctx context.Context, sessionID, turnID string, notAfter time.Time) (int64, error)
+}
+
 // BackgroundWorkRepository stores the background workload and run inspection projection.
 type BackgroundWorkRepository interface {
 	UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error

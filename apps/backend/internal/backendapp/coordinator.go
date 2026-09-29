@@ -14,8 +14,10 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	taskusage "github.com/kandev/kandev/internal/task/usage"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
@@ -138,6 +140,7 @@ func registerCoordinatorRoutes(p routeParams) {
 				return nil
 			})
 		}
+		wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
 		for _, register := range phase3Registrations() {
 			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
 		}
@@ -327,3 +330,23 @@ func registerCoordinatorWakeState(_ *gin.Engine, eventBus bus.EventBus, svc *coo
 // and backstop, set by registerCoordinatorRoutes before the phase 3
 // registrations run.
 var coordinatorWakeSources coordinator.WakeSources
+
+// wireCoordinatorSpend gives the coordinator its usage ledger reader, active
+// turn reader and turn canceller, and registers the ceiling check as the usage
+// writer's post-commit observer. A missing dependency leaves the operation
+// that needs it failing closed, so a nil argument is tolerated.
+func wireCoordinatorSpend(writer *taskusage.Writer, svc *coordinator.Service, taskSvc *taskservice.Service, orch *orchestrator.Service) {
+	var ledger coordinator.SpendLedger
+	var turns coordinator.ActiveTurnReader
+	if taskSvc != nil {
+		ledger, turns = taskSvc, taskSvc
+	}
+	var canceller coordinator.TurnCanceller
+	if orch != nil {
+		canceller = orch
+	}
+	svc.SetSpendDeps(ledger, turns, canceller)
+	if writer != nil {
+		writer.SetRecordedObserver(svc.ObserveUsage)
+	}
+}

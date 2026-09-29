@@ -14,5 +14,9 @@ type RepositoryPreparationError = lifecycle.RepositoryPreparationError
 // the provider failed to acknowledge the cancellation within its bound.
 var ErrCancelEscalated = lifecycle.ErrCancelEscalated
 
+// ErrPromptActivityNotOwned reports that a cancellation snapshot no longer
+// belongs to the execution's current prompt.
+var ErrPromptActivityNotOwned = lifecycle.ErrPromptActivityNotOwned
+
 // ErrVirtualProfile marks a logical routing profile that has no concrete execution profile.
 var ErrVirtualProfile = lifecycle.ErrVirtualProfile

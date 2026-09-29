@@ -65,8 +65,8 @@ func TestStartTaskUsageWriter_PublishesIntoRepository(t *testing.T) {
 	addCleanup := func(cleanup func() error) {
 		cleanups = append(cleanups, cleanup)
 	}
-	if err := startTaskUsageWriter(repo, nil, eventBus, nil, addCleanup); err != nil {
-		t.Fatalf("startTaskUsageWriter: %v", err)
+	if w, err := startTaskUsageWriter(repo, nil, eventBus, nil, addCleanup); err != nil || w == nil {
+		t.Fatalf("startTaskUsageWriter: writer=%v err=%v", w, err)
 	}
 	t.Cleanup(func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {

@@ -70,10 +70,13 @@ same usage ledger the task cost display uses.
   archived by a conversation reset, and over no other task.
 - **AC-COORDINATOR-SPEND-002.2:** When the window holds an unpriced event, or
   the read fails, the spend shall not be measurable, and admission shall hold
-  unattended turns with reason `spend_unmeasured`.
+  unattended turns with reason `spend_unmeasured`. A failed read of the
+  7-day mean shall not make spend unmeasurable.
 - **AC-COORDINATOR-SPEND-002.3:** Each unattended turn shall record its own
-  cost, the sum of the conversation session's usage events between the turn's
-  start and end.
+  cost, the sum of the priced usage events the conversation session recorded
+  for that turn, including every event whose `occurred_at` is no later than
+  ten minutes after the turn was settled, and no event of another turn on the
+  same session.
 
 ### REQ-COORDINATOR-SPEND-003: Stopping at the ceiling
 
@@ -94,6 +97,10 @@ failure is shown to the manager rather than hidden.
   cancel that turn as a manager's Stop would, and record its outcome as
   `stopped_at_ceiling`. The backstop pass shall apply the same check, so a
   missed usage notification delays the stop by at most one backstop period.
+  When the cancel fails, the turn shall stay open and the cancel shall be
+  retried at the next usage notification or backstop pass whatever the spend
+  then reads; when the unattended turn has already ended, or the session is
+  running another turn, nothing shall be cancelled.
 - **AC-COORDINATOR-SPEND-003.3:** An attended turn shall never be cancelled or
   refused because of the ceiling, including a manager message that starts on
   the session between the ceiling check and the cancel.
