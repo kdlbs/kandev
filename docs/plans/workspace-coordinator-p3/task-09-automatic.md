@@ -124,6 +124,11 @@ Merge           Cannot be raised
   24 hours stays `pending` with the limit note, also when earlier automatic
   approvals ended `failed`; a failed approval is left `failed` for a manager
   and keeps its `automatic_at` through stale-claim recovery.
+- An automatic approval written inside a propose call while an unattended turn
+  is open carries its `unattended_turn_id` (from task 05's
+  `currentUnattendedTurn`, not from the actor); the same approval outside a
+  turn, or while a manager's request is open, carries none
+  (`AC-COORDINATOR-INTEGRATION-004.1`).
 - With the raiser deleted, disabled or no longer a manager, the proposal stays
   `pending` with the unavailable note, nothing is claimed or counted, and the
   class is lowered with its reason; a raiser check error leaves it `pending`

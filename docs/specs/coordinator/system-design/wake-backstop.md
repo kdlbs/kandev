@@ -101,6 +101,8 @@ Each tick:
    1. message recovery for its open turn with `message_id` null
       ([Finding the turn's message](wake.md#finding-the-turns-message));
    2. missed-settle re-derivation for its open turn ([Turn end](wake.md#turn-end)),
+      only when the row's `session_turn_id` is non-null (a row with it null is
+      left to step 1 and the two-minute `send_failed` rule),
       then the per-turn cost recompute for its turns settled in the last 11
       minutes ([spend](spend.md#per-turn-cost));
    3. the ceiling check `CheckCeiling` of [spend](spend.md#stopping) for its

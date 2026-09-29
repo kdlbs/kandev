@@ -53,21 +53,27 @@ creates, archives or repoints a conversation.
 ## In scope
 
 - `internal/coordinator/admission.go`: `Admit` with the eight checks in order,
-  calling task 02's `Check` and task 03's `Spend`
+  calling task 02's `Check` and task 03's `Spend`, through two
+  coordinator-side interfaces (a session snapshot reader and a message finder)
+  and with a `CREATED` primary session held as `conversation_unavailable`
+  (detail `session_not_started`)
   ([Admission](../../specs/coordinator/system-design/wake.md#admission)).
 - `internal/coordinator/delivery.go`: `Deliver` under a keyed mutex, `Kick`
-  on a coalescing bounded worker, the per-kind episode re-check of every
+  on a coalescing one-goroutine-per-coordinator worker (Start/Stop, goleak; a
+  kick during a run re-runs once; no timer for a hold) the per-kind episode re-check of every
   pending wake at the step 2 read
   ([Episode recheck](../../specs/coordinator/system-design/wake.md#episode-recheck))
   and the 20-wake batch, the step 3 transaction under `WithWakeLock` (re-read
   autonomy, insert the turn row, mark wakes, roll back when none changed),
   the send through a new exported orchestrator entry point beside `PromptTask`
-  (it stores the message in the `afterClaim` seam with
-  `metadata.coordinator_wake_turn_id`, author type `user`; never the message
-  queue), the lookup
+  (it stores the message under a generated UUID id in the
+  `afterDispatchAdmission` seam with `CreateUserMessageIdempotent`,
+  `metadata.coordinator_wake_turn_id`, the claimed turn id, author type
+  `user`; never the message queue), the lookup
   of the turn's stored message by that key, and the `send_failed` rollback
   only for a refusal before dispatch (`ErrAgentPromptInProgress`,
-  `ErrSessionNotPromptable`, invalid request)
+  `ErrSessionNotPromptable`, invalid request, the exported store-failure
+  sentinel of that seam)
   ([Delivery](../../specs/coordinator/system-design/wake.md#delivery)).
 - `internal/coordinator/turns.go`: `session_turn_id` from the stored
   message, turn end on `turn.completed` for that turn id, the backstop's
@@ -90,7 +96,9 @@ creates, archives or repoints a conversation.
   principal writes (the propose handlers and `RecordRefusal`), and the
   refusal coalescing key including `unattended_turn_id`
   ([Log rows](../../specs/coordinator/system-design/integration.md#log-rows)).
-  The column and values come from task 01; the copy is task 08's.
+  The column, read columns and values come from task 01; task 05 adds the
+  `InsertActivity` write of `unattended_turn_id`; the copy is task 08's. The
+  automatic-approval stamp is task 09's.
 - Instructions, orders and goal: delivery adds none to the wake message;
   `MarkApplied` stays where phase 2 runs it
   ([Instructions](../../specs/coordinator/system-design/integration.md#instructions-orders-and-goal)).
@@ -168,16 +176,19 @@ creates, archives or repoints a conversation.
 - A wake whose task left the watch set after it was stored is `superseded` at
   the next delivery; a failed watch read leaves it `pending`
   (`AC-COORDINATOR-INTEGRATION-002.2`).
-- A proposal, a refusal and an automatic approval written while the turn is
-  open carry its `unattended_turn_id`; the same writes by a manager's
+- A proposal and a refusal written while the turn is open carry its `unattended_turn_id`; the same writes by a manager's
   request while it is open, and any write outside a turn, carry none; a
-  failed turn read stamps nothing; two refusals coalesce only when their turn
+  failed turn read stamps nothing (the automatic-approval row is covered by
+  task 09); two refusals coalesce only when their turn
   ids match (`AC-COORDINATOR-INTEGRATION-004.1`).
 - The turn carries the session's instructions with no second copy in the wake
   message; a proposal citing a standing order marks it applied in its own
   transaction and a turn that proposes nothing marks none; after a
   conversation reset the next turn is held `no_conversation` until a manager
   opens the copilot (`AC-COORDINATOR-INTEGRATION-005.1` to `005.3`).
+- A `CREATED` primary session is held `conversation_unavailable` with detail
+  `session_not_started`, and a store failure at the dispatch boundary
+  settles `send_failed` with the wakes back to `pending`.
 - A `WAITING_FOR_INPUT` session with no live execution gets the same result
   from delivery as from a manager's message through `PromptTask` (a resumed
   turn, or a refusal that returns the wakes to `pending`).
