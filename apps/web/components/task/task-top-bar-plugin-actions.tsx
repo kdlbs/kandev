@@ -71,7 +71,14 @@ export function TaskTopBarPluginActions(props: {
     };
   }, [presentation, sessionId, sessionIds, taskId, taskTitle, workspaceId]);
 
-  const content = <MemoizedPluginSlot name="chat-top-bar" slotProps={slotProps} />;
+  const actionSurface = useMemo(
+    () => ({ surface: "topbar" as const, presentation }),
+    [presentation],
+  );
+
+  const content = (
+    <MemoizedPluginSlot name="chat-top-bar" slotProps={slotProps} actionSurface={actionSurface} />
+  );
   if (presentation === "desktop") return content;
 
   return (

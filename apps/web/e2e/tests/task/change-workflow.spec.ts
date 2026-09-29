@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import {
@@ -19,7 +20,7 @@ test.describe("Change workflow", () => {
       "External move target",
     );
     const analysis = await apiClient.createWorkflowStep(destination.id, "Analysis", 0);
-    await apiClient.createWorkflowStep(destination.id, "Implement", 1);
+    const implement = await apiClient.createWorkflowStep(destination.id, "Implement", 1);
     const task = await apiClient.createTask(seedData.workspaceId, "External workflow move task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -37,7 +38,27 @@ test.describe("Change workflow", () => {
       "aria-current",
       "step",
     );
-    await expect(stepper.getByTestId("workflow-step-Implement")).toBeVisible();
+    const fullImplementStep = stepper.getByTestId("workflow-step-Implement");
+    const compactStepper = stepper.getByTestId("workflow-stepper-minimal");
+    await expect
+      .poll(
+        async () => (await fullImplementStep.count()) > 0 || (await compactStepper.count()) > 0,
+        { timeout: 15_000, message: "the destination workflow stepper did not render" },
+      )
+      .toBe(true);
+    if (await fullImplementStep.count()) {
+      await expect(fullImplementStep).toBeVisible();
+    } else {
+      // The responsive top bar can collapse the stepper under shard viewport
+      // pressure. The same step list is then available from its disclosure.
+      await expect(compactStepper).toBeVisible();
+      await compactStepper.hover();
+      const disclosure = testPage.getByTestId("workflow-step-disclosure");
+      await expect(disclosure).toBeVisible();
+      await expect(
+        disclosure.getByTestId(`workflow-step-disclosure-row-${implement.id}`),
+      ).toBeVisible();
+    }
   });
 
   test("updates the open task stepper after changing workflow and preserves its context", async ({
@@ -74,8 +95,10 @@ test.describe("Change workflow", () => {
     await expect(testPage.getByTestId("task-topbar")).toBeVisible();
     const taskUrl = testPage.url();
     await testPage.getByTestId("task-topbar-actions-menu").click();
-    await expect(testPage.getByRole("menuitem", { name: "Change workflow..." })).toBeVisible();
-    await testPage.getByRole("menuitem", { name: "Change workflow..." }).click();
+    // The menu label follows the current product wording, while this stable
+    // test id identifies the single-task workflow action across both labels.
+    await expect(testPage.getByTestId("task-context-change-workflow")).toBeVisible();
+    await testPage.getByTestId("task-context-change-workflow").click();
 
     const previewChanges: Array<Record<string, unknown>> = [];
     testPage.on("request", (request) => {
@@ -129,10 +152,34 @@ test.describe("Change workflow", () => {
     await waitForWorkflowStep(apiClient, task.id, fixture.prStep.id);
     await expect(testPage).toHaveURL(taskUrl);
     const stepper = testPage.getByTestId("workflow-stepper");
-    await expect(stepper.getByTestId("workflow-step-Analysis")).toBeVisible();
-    await expect(stepper.getByTestId("workflow-step-Implement")).toBeVisible();
-    await expect(stepper.getByTestId("workflow-step-Review")).toBeVisible();
     await expect(stepper.getByTestId("workflow-step-PR")).toHaveAttribute("aria-current", "step");
+    const destinationSteps = [
+      { id: fixture.analysisStep.id, name: "Analysis" },
+      { id: fixture.implementStep.id, name: "Implement" },
+      { id: fixture.reviewStep.id, name: "Review" },
+      { id: fixture.prStep.id, name: "PR" },
+    ];
+    const analysisStep = stepper.getByTestId("workflow-step-Analysis");
+    if ((await analysisStep.count()) > 0) {
+      await expect(analysisStep).toBeVisible();
+      await expect(stepper.getByTestId("workflow-step-Implement")).toBeVisible();
+      await expect(stepper.getByTestId("workflow-step-Review")).toBeVisible();
+    } else {
+      const compactTrigger = stepper.getByTestId("workflow-stepper-minimal");
+      await expect(compactTrigger).toBeVisible();
+      await compactTrigger.hover();
+      const disclosure = testPage.getByTestId("workflow-step-disclosure");
+      await expect(disclosure).toBeVisible();
+      for (const step of destinationSteps) {
+        const row = disclosure.getByTestId(`workflow-step-disclosure-row-${step.id}`);
+        await expect(row).toBeVisible();
+        await expect(row).toContainText(step.name);
+      }
+      await expect(
+        disclosure.getByTestId(`workflow-step-disclosure-row-${fixture.prStep.id}`),
+      ).toHaveAttribute("aria-current", "step");
+      await testPage.keyboard.press("Escape");
+    }
     if (prCapture.capturing) {
       await testPage.evaluate(async () => {
         await Promise.all(
@@ -155,6 +202,20 @@ test.describe("Change workflow", () => {
     );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
     const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      existingSessionId,
+      "source workflow session must settle before cleanup",
+      30_000,
+    );
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      destinationSessionId,
+      "destination workflow session must settle before cleanup",
+      30_000,
+    );
     expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
     expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
     const changed = await apiClient.getTask(task.id);

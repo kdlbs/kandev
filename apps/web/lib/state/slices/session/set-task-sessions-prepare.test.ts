@@ -40,7 +40,16 @@ describe("setTaskSessionsForTask prepare backfill", () => {
     const session = makeSession("s1", {
       prepare_result: {
         status: "completed",
-        steps: [{ name: "clone", status: "ok", started_at: TS }],
+        steps: [
+          {
+            name: "clone",
+            kind: "remote_helper_download",
+            remote_platform: "linux/amd64",
+            failure_code: "timeout",
+            status: "ok",
+            started_at: TS,
+          },
+        ],
       },
     });
 
@@ -49,7 +58,16 @@ describe("setTaskSessionsForTask prepare backfill", () => {
     const prepare = store.getState().prepareProgress.bySessionId["s1"];
     expect(prepare).toBeDefined();
     expect(prepare.status).toBe("completed");
-    expect(prepare.steps).toEqual([{ name: "clone", status: "ok", startedAt: TS }]);
+    expect(prepare.steps).toEqual([
+      {
+        name: "clone",
+        kind: "remote_helper_download",
+        remotePlatform: "linux/amd64",
+        failureCode: "timeout",
+        status: "ok",
+        startedAt: TS,
+      },
+    ]);
   });
 
   it("does not create an entry for sessions without prepare_result", () => {

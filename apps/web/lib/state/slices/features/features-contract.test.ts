@@ -16,6 +16,10 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
+  it("omits retired Office session identity from frontend defaults", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("officeSessionIdentity");
+  });
+
   it("keeps browser-owned LSP continuity disabled by default", () => {
     expect(defaultFeatureFlags.lspBrowserContinuity).toBe(false);
   });
@@ -26,6 +30,10 @@ describe("feature flag repository contract", () => {
 
   it("keeps canvases disabled by default", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
+  });
+
+  it("omits the graduated remote executor plugins flag", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("remoteExecutorPlugins");
   });
 
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {

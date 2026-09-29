@@ -19,8 +19,9 @@ import (
 const discoveryRefreshAge = 30 * time.Minute
 
 var (
-	ErrDesktopDiscoveryUnavailable = errors.New("desktop discovery roots are unavailable")
-	ErrInvalidDiscoveryRoot        = errors.New("invalid discovery root")
+	ErrDesktopDiscoveryUnavailable    = errors.New("desktop discovery roots are unavailable")
+	ErrHomeDiscoveryConfirmationStale = errors.New("home discovery confirmation is no longer pending")
+	ErrInvalidDiscoveryRoot           = errors.New("invalid discovery root")
 )
 
 const (
@@ -474,6 +475,12 @@ func (s *Service) discoveryRootStates(ctx context.Context, roots []string) ([]mo
 // caller can offer recovery without treating an inaccessible folder as a
 // malformed request.
 func (s *Service) AddDesktopDiscoveryRoot(ctx context.Context, path string) (*models.DesktopDiscoveryRoot, error) {
+	s.discoveryRootMutationMu.Lock()
+	defer s.discoveryRootMutationMu.Unlock()
+	return s.addDesktopDiscoveryRoot(ctx, path)
+}
+
+func (s *Service) addDesktopDiscoveryRoot(ctx context.Context, path string) (*models.DesktopDiscoveryRoot, error) {
 	if !s.discoveryConfig.DesktopRuntime || s.desktopRootStore == nil {
 		return nil, ErrDesktopDiscoveryUnavailable
 	}
@@ -515,9 +522,77 @@ func (s *Service) AddDesktopDiscoveryRoot(ctx context.Context, path string) (*mo
 	return s.getRequiredDesktopDiscoveryRoot(ctx, canonical)
 }
 
+// ConfirmHomeDesktopDiscovery saves the backend's canonical Home after an
+// explicit user confirmation. It accepts no path from the caller. Repeating a
+// completed confirmation returns the saved Home root without starting a scan.
+func (s *Service) ConfirmHomeDesktopDiscovery(ctx context.Context) (*models.DesktopDiscoveryRoot, error) {
+	s.discoveryRootMutationMu.Lock()
+	defer s.discoveryRootMutationMu.Unlock()
+
+	if !s.discoveryConfig.DesktopRuntime || s.desktopRootStore == nil || len(s.discoveryConfig.Roots) > 0 {
+		return nil, ErrDesktopDiscoveryUnavailable
+	}
+	migration, err := s.desktopRootStore.GetDesktopDiscoveryMigration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pending := migration != nil && migration.HomeConfirmationRequired
+	roots, err := s.desktopRootStore.ListDesktopDiscoveryRoots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("could not determine the backend Home directory: %w", err)
+	}
+	canonicalHome, err := canonicalDiscoveryRoot(home)
+	if err != nil {
+		return nil, fmt.Errorf("could not resolve the backend Home directory: %w", err)
+	}
+	root, err := s.desktopRootStore.GetDesktopDiscoveryRoot(ctx, canonicalHome)
+	if err != nil {
+		return nil, err
+	}
+	if savedRoot, confirmed, err := s.confirmedHomeDiscoveryRoot(ctx, root, pending); err != nil {
+		return nil, err
+	} else if confirmed {
+		return savedRoot, nil
+	}
+	if !pending {
+		return nil, ErrHomeDiscoveryConfirmationStale
+	}
+	if root == nil && len(roots) > 0 {
+		return nil, ErrHomeDiscoveryConfirmationStale
+	}
+	return s.addDesktopDiscoveryRoot(ctx, canonicalHome)
+}
+
+func (s *Service) confirmedHomeDiscoveryRoot(
+	ctx context.Context,
+	root *models.DesktopDiscoveryRoot,
+	pending bool,
+) (*models.DesktopDiscoveryRoot, bool, error) {
+	if root == nil || root.State == models.DesktopDiscoveryRootReconnectRequired {
+		return nil, false, nil
+	}
+	if pending {
+		if err := s.clearHomeConfirmation(ctx); err != nil {
+			return nil, false, err
+		}
+		s.invalidateDiscoveryCache()
+	}
+	return root, true, nil
+}
+
 // ReconnectDesktopDiscoveryRoot replaces the path for an inaccessible root,
 // then performs one immediate scan under the new user-selected path.
 func (s *Service) ReconnectDesktopDiscoveryRoot(ctx context.Context, oldPath, newPath string) (*models.DesktopDiscoveryRoot, error) {
+	s.discoveryRootMutationMu.Lock()
+	defer s.discoveryRootMutationMu.Unlock()
+	return s.reconnectDesktopDiscoveryRoot(ctx, oldPath, newPath)
+}
+
+func (s *Service) reconnectDesktopDiscoveryRoot(ctx context.Context, oldPath, newPath string) (*models.DesktopDiscoveryRoot, error) {
 	if !s.discoveryConfig.DesktopRuntime || s.desktopRootStore == nil {
 		return nil, ErrDesktopDiscoveryUnavailable
 	}
@@ -534,7 +609,7 @@ func (s *Service) ReconnectDesktopDiscoveryRoot(ctx context.Context, oldPath, ne
 		return nil, err
 	}
 	if old == nil {
-		return s.AddDesktopDiscoveryRoot(ctx, canonical)
+		return s.addDesktopDiscoveryRoot(ctx, canonical)
 	}
 	conflict, err := s.desktopRootStore.GetDesktopDiscoveryRoot(ctx, canonical)
 	if err != nil {
@@ -577,11 +652,30 @@ func (s *Service) getRequiredDesktopDiscoveryRoot(
 	return root, nil
 }
 
-func normalizeDiscoveryRootLookupPath(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
+func expandDiscoveryRootPath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
 		return "", fmt.Errorf("%w: path is required", ErrInvalidDiscoveryRoot)
 	}
-	abs, err := filepath.Abs(filepath.Clean(path))
+	if trimmed == "~" || strings.HasPrefix(trimmed, "~"+string(os.PathSeparator)) || strings.HasPrefix(trimmed, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("%w: could not resolve home directory: %v", ErrInvalidDiscoveryRoot, err)
+		}
+		if trimmed == "~" {
+			return home, nil
+		}
+		return filepath.Join(home, trimmed[2:]), nil
+	}
+	return trimmed, nil
+}
+
+func normalizeDiscoveryRootLookupPath(path string) (string, error) {
+	trimmed, err := expandDiscoveryRootPath(path)
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(filepath.Clean(trimmed))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidDiscoveryRoot, err)
 	}
@@ -592,6 +686,8 @@ func normalizeDiscoveryRootLookupPath(path string) (string, error) {
 }
 
 func (s *Service) RemoveDesktopDiscoveryRoot(ctx context.Context, path string) error {
+	s.discoveryRootMutationMu.Lock()
+	defer s.discoveryRootMutationMu.Unlock()
 	if !s.discoveryConfig.DesktopRuntime || s.desktopRootStore == nil {
 		return ErrDesktopDiscoveryUnavailable
 	}
@@ -656,10 +752,11 @@ func discoveryFailureCode(err error) string {
 }
 
 func canonicalDiscoveryRoot(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("%w: path is required", ErrInvalidDiscoveryRoot)
+	trimmed, err := expandDiscoveryRootPath(path)
+	if err != nil {
+		return "", err
 	}
-	abs, err := filepath.Abs(filepath.Clean(path))
+	abs, err := filepath.Abs(filepath.Clean(trimmed))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidDiscoveryRoot, err)
 	}

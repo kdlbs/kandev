@@ -8,7 +8,7 @@ import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-a
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useSubtaskCountState, type SubtaskCountResult } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
-import { getCleanupSummary, type CleanupSummary } from "./task-cleanup-summary";
+import { getArchiveCleanupSummary, type CleanupSummary } from "./task-cleanup-summary";
 import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
@@ -86,7 +86,7 @@ function ArchiveConfirmCopy({
   confirmTestId: string;
 }) {
   const { t } = useTranslation();
-  const cleanup = getCleanupSummary(executorType);
+  const cleanup = getArchiveCleanupSummary(executorType);
   const description = (
     <ArchiveDescription taskTitle={taskTitle} cleanup={cleanup} taskIsInFlight={isInFlight} />
   );
@@ -136,7 +136,7 @@ function ArchiveConfirmPopover({
   confirmTestId: string;
 }) {
   const { t } = useTranslation();
-  const cleanup = getCleanupSummary(executorType);
+  const cleanup = getArchiveCleanupSummary(executorType);
   return (
     <ActionConfirmPopover
       open={open}

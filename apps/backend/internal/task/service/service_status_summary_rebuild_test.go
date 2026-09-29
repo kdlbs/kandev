@@ -326,6 +326,44 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	}
 }
 
+func TestReconcileTaskStatusSummariesRebuildsCompletionGate(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if _, err := repo.SetTaskCompletionCriteria(ctx, models.TaskCompletionCriteriaChange{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, ActorKind: "human", ActorID: "user-1",
+		Criteria: []models.TaskCompletionCriterion{{
+			ID: "tests", Description: "Required tests pass",
+			EvidenceSubject: models.TaskCompletionEvidenceSubject{Kind: models.TaskCompletionEvidenceArtifact, ID: "run-1"},
+		}},
+	}); err != nil {
+		t.Fatalf("set completion criteria: %v", err)
+	}
+	svc.statusSummaries = repo
+
+	summaries, err := svc.ReconcileTaskStatusSummaries(ctx, []*models.Task{task}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	got := summaries[task.ID]
+	if got == nil || got.CompletionGate == nil {
+		t.Fatalf("repaired completion gate summary is missing: %+v", got)
+	}
+	if *got.CompletionGate != (statussummary.CompletionGateSummary{
+		Revision: 1, CriteriaCount: 1, VerifiedCount: 0, BlockerCount: 1, Blocked: true,
+	}) {
+		t.Fatalf("completion gate summary = %+v", got.CompletionGate)
+	}
+	persisted, err := repo.LoadTaskStatusSummaries(ctx, []string{task.ID})
+	if err != nil || persisted[task.ID] == nil || persisted[task.ID].CompletionGate == nil || *persisted[task.ID].CompletionGate != *got.CompletionGate {
+		t.Fatalf("persisted completion gate = %+v err=%v", persisted[task.ID], err)
+	}
+}
+
 func TestReconcileTaskStatusSummariesUsesNewestSnapshotOncePerSharedEnvironment(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	svc.statusSummaries = repo

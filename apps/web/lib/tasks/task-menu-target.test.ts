@@ -58,6 +58,30 @@ describe("task menu eligibility", () => {
       workspaceId: "workspace",
     });
   });
+  it("uses snapshot workflow identity when the task projection omits its workflow ID", () => {
+    const store = fixture();
+    store.setState((state) => ({
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          ...state.kanbanMulti.snapshots,
+          workflow: {
+            ...state.kanbanMulti.snapshots.workflow,
+            tasks: state.kanbanMulti.snapshots.workflow.tasks.map((task) => ({
+              ...task,
+              workflowId: undefined,
+            })),
+          },
+        },
+      },
+    }));
+
+    expect(resolveTaskMenuTarget(store.getState(), identity)).toMatchObject({
+      id: "A",
+      workflowId: "workflow",
+      workspaceId: "workspace",
+    });
+  });
   it.each(["workspace", "missing", "archived", "workflow"] as const)(
     "fails closed on %s loss",
     (loss) => {

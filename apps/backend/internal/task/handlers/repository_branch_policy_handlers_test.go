@@ -60,6 +60,10 @@ func initBranchPolicyGitRepository(t *testing.T) string {
 	t.Helper()
 	repositoryPath := filepath.Join(t.TempDir(), "repository")
 	require.NoError(t, os.MkdirAll(repositoryPath, 0o755))
+	realPath, err := filepath.EvalSymlinks(repositoryPath)
+	if err == nil {
+		repositoryPath = realPath
+	}
 	runGit := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)

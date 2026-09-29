@@ -64,6 +64,7 @@ describe("useUpdateAvailableToast", () => {
       expect.objectContaining({
         title: UPDATE_TITLE,
         description: expect.stringContaining(UPDATE_VERSION),
+        placement: "top",
       }),
     );
     expect(mockNativeShow).not.toHaveBeenCalled();

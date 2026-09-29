@@ -474,20 +474,22 @@ func TestBuildTaskPRFromRequestCopiesWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
+func TestEnsureMockPRForRequestCopiesMergeableAndConflictState(t *testing.T) {
 	mock := NewMockClient()
 	controller := &MockController{mock: mock}
+	hasConflicts := true
 	req := &associateTaskPRRequest{
-		Owner:          "testorg",
-		Repo:           "testrepo",
-		PRNumber:       102,
-		PRURL:          "https://github.com/testorg/testrepo/pull/102",
-		PRTitle:        "Ready to ship",
-		HeadBranch:     "feat/ready",
-		BaseBranch:     "main",
-		AuthorLogin:    "test-user",
-		State:          "open",
-		MergeableState: "clean",
+		Owner:             "testorg",
+		Repo:              "testrepo",
+		PRNumber:          102,
+		PRURL:             "https://github.com/testorg/testrepo/pull/102",
+		PRTitle:           "Ready to ship",
+		HeadBranch:        "feat/ready",
+		BaseBranch:        "main",
+		AuthorLogin:       "test-user",
+		State:             "open",
+		MergeableState:    "clean",
+		HasMergeConflicts: &hasConflicts,
 	}
 
 	controller.ensureMockPRForRequest(context.Background(), req, time.Now().UTC())
@@ -501,5 +503,8 @@ func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
 	}
 	if pr.MergeableState != "clean" {
 		t.Fatalf("MergeableState = %q, want clean", pr.MergeableState)
+	}
+	if !pr.HasMergeConflictsObserved || pr.HasMergeConflicts == nil || !*pr.HasMergeConflicts {
+		t.Fatalf("HasMergeConflicts observation = (%v, %v), want explicit true", pr.HasMergeConflicts, pr.HasMergeConflictsObserved)
 	}
 }

@@ -194,6 +194,7 @@ function InstalledAgentsSection({
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
+  const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
 
   // One ranked list rather than "detected, then the rest". Two groups meant an
   // agent the scan misses always sorted below every detected one — which put
@@ -255,6 +256,7 @@ function InstalledAgentsSection({
             agent={agent}
             savedAgent={savedAgentsByName.get(agent.name)}
             displayName={resolveDisplayName(agent.name)}
+            profileCreationDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
             {...(detected
               ? {
                   capabilityStatus: resolveCapabilityStatus(agent.name),

@@ -14,6 +14,19 @@ describe("extractKandevArgs", () => {
       }),
     ).toEqual(argumentsValue);
   });
+
+  it("unwraps args from the persisted Cursor ACP MCP envelope", () => {
+    const argsValue = { version: 1, title: "Build health", blocks: [] };
+    expect(
+      extractKandevArgs({
+        raw_input: {
+          providerIdentifier: "kandev",
+          toolName: "show_rich_output_kandev",
+          args: argsValue,
+        },
+      }),
+    ).toEqual(argsValue);
+  });
 });
 
 describe("extractKandevStem", () => {
@@ -27,6 +40,12 @@ describe("extractKandevStem", () => {
 
   it("handles the dotted Codex ACP title fallback", () => {
     expect(extractKandevStem("mcp.kandev.show_rich_output_kandev")).toBe("show_rich_output");
+  });
+
+  it("handles the Cursor ACP title fallback only for suffixed Kandev tools", () => {
+    expect(extractKandevStem("kandev: show_rich_output_kandev")).toBe("show_rich_output");
+    expect(extractKandevStem("kandev: Edit")).toBeNull();
+    expect(extractKandevStem("kandev: mcp__github__list_issues_kandev")).toBeNull();
   });
 
   it("handles a bare suffix-only name", () => {

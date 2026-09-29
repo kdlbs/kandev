@@ -74,6 +74,9 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
 
+	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
+	taskRuntimeFences taskRuntimeOwnershipFences
+
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
 
@@ -243,7 +246,10 @@ type Manager struct {
 	// environment so user shell terminals can be given the same profile env
 	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
 	// terminal inherits only the backend process environment.
-	executorProfileReader ExecutorProfileReader
+	executorProfileReader       ExecutorProfileReader
+	pluginExecutorProfileLoader PluginExecutorProfileLoader
+	pluginExecutorCallbackMu    sync.Mutex
+	pluginExecutorCallbacks     map[string]*ExecutorCreateRequest
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
@@ -548,6 +554,14 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.setMCPHandler(handler)
+}
+
+// MCPHandlerFor returns the execution-bound MCP handler for one execution's stream.
+func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	if m == nil || m.streamManager == nil {
+		return nil
+	}
+	return m.streamManager.mcpHandlerFor(execution)
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP

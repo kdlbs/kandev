@@ -275,7 +275,7 @@ func (s *Service) resolveExecutorForProfile(ctx context.Context, executorProfile
 		}
 		return nil, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil {
 		if errors.Is(err, models.ErrExecutorNotFound) {
 			return nil, ErrExecutorProfileInvalid
@@ -283,6 +283,9 @@ func (s *Service) resolveExecutorForProfile(ctx context.Context, executorProfile
 		return nil, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
 	}
 	if executor.Status != models.ExecutorStatusActive {
+		return nil, ErrExecutorProfileInvalid
+	}
+	if err := s.ValidateExecutorProfileAdmission(ctx, executorProfileID); err != nil {
 		return nil, ErrExecutorProfileInvalid
 	}
 	return executor, nil

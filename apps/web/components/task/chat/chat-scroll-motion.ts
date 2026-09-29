@@ -6,13 +6,14 @@ export type ScrollMotion = {
 };
 
 const activeMotions = new WeakMap<HTMLElement, ScrollMotion>();
-const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+const EARLIER_SCROLL_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+const SCROLL_INTENT_THRESHOLD_PX = 6;
 
 export function cancelChatScrollMotion(element: HTMLElement): void {
   activeMotions.get(element)?.cancel();
 }
 
-function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () => void {
+export function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () => void {
   const onKey = (event: KeyboardEvent) => {
     const target = event.target;
     if (
@@ -24,13 +25,47 @@ function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () 
         ))
     )
       return;
-    if (SCROLL_KEYS.has(event.key)) interrupt();
+    if (EARLIER_SCROLL_KEYS.has(event.key) || (event.key === " " && event.shiftKey)) interrupt();
   };
-  const onPointer = (event: PointerEvent) => {
+  let scrollbarPointerId: number | null = null;
+  let scrollbarPointerY: number | undefined;
+  const clearScrollbarPointer = () => {
+    scrollbarPointerId = null;
+    scrollbarPointerY = undefined;
+  };
+  const onPointerDown = (event: PointerEvent) => {
+    clearScrollbarPointer();
     if (event.target !== element || element.offsetWidth <= element.clientWidth) return;
     const bounds = element.getBoundingClientRect();
-    const left = bounds.left + element.clientLeft;
-    if (event.clientX < left || event.clientX >= left + element.clientWidth) interrupt();
+    const contentLeft = bounds.left + element.clientLeft;
+    const contentRight = contentLeft + element.clientWidth;
+    if (event.clientX >= contentLeft && event.clientX < contentRight) return;
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    if (maxScrollTop <= 0) return;
+    const thumbHeight = (element.clientHeight * element.clientHeight) / element.scrollHeight;
+    const thumbTravel = Math.max(0, element.clientHeight - thumbHeight);
+    const thumbTop =
+      bounds.top + element.clientTop + (element.scrollTop / maxScrollTop) * thumbTravel;
+    if (event.clientY < thumbTop) {
+      interrupt();
+      return;
+    }
+    if (event.clientY <= thumbTop + thumbHeight) {
+      scrollbarPointerId = event.pointerId;
+      scrollbarPointerY = event.clientY;
+    }
+  };
+  const onPointerMove = (event: PointerEvent) => {
+    if (scrollbarPointerId !== event.pointerId || scrollbarPointerY === undefined) return;
+    const movingUp = scrollbarPointerY - event.clientY >= SCROLL_INTENT_THRESHOLD_PX;
+    scrollbarPointerY = event.clientY;
+    if (movingUp) {
+      clearScrollbarPointer();
+      interrupt();
+    }
+  };
+  const onPointerEnd = (event: PointerEvent) => {
+    if (scrollbarPointerId === event.pointerId) clearScrollbarPointer();
   };
   let touchY: number | undefined;
   const onTouchStart = (event: TouchEvent) => {
@@ -41,20 +76,29 @@ function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () 
   };
   const onTouchMove = (event: TouchEvent) => {
     const y = event.touches[0]?.clientY;
-    if (touchY === undefined || y === undefined || Math.abs(y - touchY) < 6) return;
+    if (touchY === undefined || y === undefined || y - touchY < SCROLL_INTENT_THRESHOLD_PX) return;
     touchY = undefined;
     interrupt();
   };
-  element.addEventListener("wheel", interrupt, { passive: true });
-  element.addEventListener("pointerdown", onPointer, { passive: true });
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey && event.deltaY < 0) interrupt();
+  };
+  element.addEventListener("wheel", onWheel, { passive: true });
+  element.addEventListener("pointerdown", onPointerDown, { passive: true });
+  element.addEventListener("pointermove", onPointerMove, { passive: true });
+  element.ownerDocument.defaultView?.addEventListener("pointerup", onPointerEnd);
+  element.ownerDocument.defaultView?.addEventListener("pointercancel", onPointerEnd);
   element.addEventListener("touchstart", onTouchStart, { passive: true });
   element.addEventListener("touchmove", onTouchMove, { passive: true });
   element.addEventListener("touchend", onTouchEnd);
   element.addEventListener("touchcancel", onTouchEnd);
   element.addEventListener("keydown", onKey);
   return () => {
-    element.removeEventListener("wheel", interrupt);
-    element.removeEventListener("pointerdown", onPointer);
+    element.removeEventListener("wheel", onWheel);
+    element.removeEventListener("pointerdown", onPointerDown);
+    element.removeEventListener("pointermove", onPointerMove);
+    element.ownerDocument.defaultView?.removeEventListener("pointerup", onPointerEnd);
+    element.ownerDocument.defaultView?.removeEventListener("pointercancel", onPointerEnd);
     element.removeEventListener("touchstart", onTouchStart);
     element.removeEventListener("touchmove", onTouchMove);
     element.removeEventListener("touchend", onTouchEnd);

@@ -15,6 +15,7 @@ import {
 import { syncQuickChatFromTaskEvent } from "@/lib/ws/handlers/quick-chat";
 import {
   archivedTaskWorkspaceId,
+  bumpSidebarTaskQueryRevision,
   findArchivedTaskInCache,
   removeTaskFromActiveKanbans,
   removeTaskFromBothKanbans,
@@ -197,24 +198,21 @@ function upsertArchivedTaskInCache(
   };
   const items = sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
   const existing = items.find((item) => item.id === task.id);
-  const merged = mergeTaskUpdate(existing, task, payload);
-  const revisions = sidebarArchivedTasks.revisionByWorkspaceId ?? {};
-  return {
-    ...state,
-    sidebarArchivedTasks: {
-      ...sidebarArchivedTasks,
-      itemsByWorkspaceId: {
-        ...sidebarArchivedTasks.itemsByWorkspaceId,
-        [workspaceId]: existing
-          ? items.map((item) => (item.id === task.id ? merged : item))
-          : [...items, merged],
-      },
-      revisionByWorkspaceId: {
-        ...revisions,
-        [workspaceId]: (revisions[workspaceId] ?? 0) + 1,
-      },
-    },
-  };
+  const next = existing
+    ? {
+        ...state,
+        sidebarArchivedTasks: {
+          ...sidebarArchivedTasks,
+          itemsByWorkspaceId: {
+            ...sidebarArchivedTasks.itemsByWorkspaceId,
+            [workspaceId]: items.map((item) =>
+              item.id === task.id ? mergeTaskUpdate(item, task, payload) : item,
+            ),
+          },
+        },
+      }
+    : state;
+  return next;
 }
 
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
@@ -355,17 +353,23 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   }
 
   store.setState((state) =>
-    applyTaskUpdatedCache({
-      state,
-      taskId,
-      workflowId: message.payload.workflow_id,
-      oldWorkflowId: message.payload.old_workflow_id,
-      payload: message.payload,
-      isArchivedUpdate,
-      partialArchivedTask,
-      archivedAt,
-      archivedWorkspaceId,
-    }),
+    bumpSidebarTaskQueryRevision(
+      applyTaskUpdatedCache({
+        state,
+        taskId,
+        workflowId: message.payload.workflow_id,
+        oldWorkflowId: message.payload.old_workflow_id,
+        payload: message.payload,
+        isArchivedUpdate,
+        partialArchivedTask,
+        archivedAt,
+        archivedWorkspaceId,
+      }),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
   );
 
   store.getState().reconcileWorkflowSessionFocus?.(taskId);
@@ -391,7 +395,13 @@ function handleTaskUpsert(
 
   const beforeState = store.getState();
   store.setState((state) =>
-    upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+    bumpSidebarTaskQueryRevision(
+      upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
   );
   logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
@@ -446,9 +456,15 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 
       store.setState((state) =>
-        clearDeletedTaskWalkthrough(
-          clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
-          deletedId,
+        bumpSidebarTaskQueryRevision(
+          clearDeletedTaskWalkthrough(
+            clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
+            deletedId,
+          ),
+          message.payload.workspace_id ??
+            archivedTaskWorkspaceId(state, message.payload) ??
+            state.workspaces?.activeId ??
+            undefined,
         ),
       );
 

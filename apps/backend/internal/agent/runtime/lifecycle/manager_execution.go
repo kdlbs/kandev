@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -176,7 +177,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
 	}
-	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
+	if err := validateWorkspaceInfoForRecoveryPreflight(ctx, info); err != nil {
 		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 	if info.SessionID == "" {
@@ -357,7 +358,7 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}
-	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
+	if err := validateWorkspaceInfoForRecoveryPreflight(ctx, info); err != nil {
 		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 
@@ -414,42 +415,112 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 // the selected Git checkout. Remote executors validate inside their backend
 // and are intentionally excluded from host filesystem inspection.
 func validateWorkspaceInfoForExecution(ctx context.Context, info *WorkspaceInfo) error {
+	return validateWorkspaceInfo(ctx, info, false)
+}
+
+// validateWorkspaceInfoForRecoveryPreflight defers only a possible managed
+// clone mismatch until the selected worktree recovery admission runs. The
+// execution boundary always calls validateWorkspaceInfoForExecution after
+// admission and remains fail-closed when recovery is unavailable or skipped.
+func validateWorkspaceInfoForRecoveryPreflight(ctx context.Context, info *WorkspaceInfo) error {
+	return validateWorkspaceInfo(ctx, info, true)
+}
+
+func validateWorkspaceInfo(ctx context.Context, info *WorkspaceInfo, deferManagedCloneMismatch bool) error {
 	if info == nil || len(info.WorkspaceRepositories) == 0 || models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
 		return nil
 	}
+	// The default local executor is persisted with an empty type, so ownership
+	// requires an exact type match while allowing that legacy default value.
 	if info.TaskEnvironmentID != "" &&
 		(info.ValidatedTaskEnvironmentID == "" || info.ValidatedTaskEnvironmentID != info.TaskEnvironmentID ||
-			info.ValidatedExecutorType == "" || info.ValidatedExecutorType != info.ExecutorType) {
+			info.ValidatedExecutorType != info.ExecutorType) {
 		return fmt.Errorf("%w: workspace environment ownership was not validated for this launch", models.ErrWorkspaceReuseUnsafe)
 	}
 	if info.WorkspacePath == "" {
 		return ErrSessionWorkspaceNotReady
 	}
 	for index, repository := range info.WorkspaceRepositories {
-		candidate := info.WorkspacePath
-		if index > 0 {
-			candidate = filepath.Join(info.WorkspacePath, repository.RepoName)
-		} else if len(info.WorkspaceRepositories) > 1 {
-			// Multi-repository worktree layouts use a task root. Local layouts
-			// may use the primary repository itself as the root, so prefer the
-			// root when it validates and otherwise try its named child.
-			expected := localWorkspaceExpectedRepository(info, repository)
-			if validateLocalRepositoryWorkspace(ctx, candidate, expected) != nil {
-				candidate = filepath.Join(info.WorkspacePath, repository.RepoName)
-			}
-		}
-		if err := validateLocalRepositoryWorkspace(ctx, candidate, localWorkspaceExpectedRepository(info, repository)); err != nil {
+		if err := validateWorkspaceRepositoryInfo(ctx, info, index, repository, deferManagedCloneMismatch); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func localWorkspaceExpectedRepository(info *WorkspaceInfo, repository WorkspaceRepositorySpec) string {
-	if info != nil && (info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == legacyExecutorTypeLocalPC || info.ExecutorType == string(models.ExecutorTypeWorktree)) {
-		return repository.RepositoryPath
+func validateWorkspaceRepositoryInfo(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	index int,
+	repository WorkspaceRepositorySpec,
+	deferManagedCloneMismatch bool,
+) error {
+	candidate := workspaceRepositoryCandidate(ctx, info, index, repository)
+	expected := localWorkspaceExpectedRepository(info, repository)
+	err := validateLocalRepositoryWorkspace(ctx, candidate, expected)
+	if err == nil || managedCloneMismatchCanDefer(ctx, info, repository, candidate, deferManagedCloneMismatch) {
+		return nil
 	}
-	return ""
+	return err
+}
+
+func workspaceRepositoryCandidate(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	index int,
+	repository WorkspaceRepositorySpec,
+) string {
+	switch {
+	case info.ExecutorType == string(models.ExecutorTypeWorktree) && repository.WorktreePath != "":
+		return repository.WorktreePath
+	case index > 0:
+		if info.ExecutorType != string(models.ExecutorTypeWorktree) {
+			if _, err := localGitTopLevel(ctx, info.WorkspacePath); err == nil {
+				// Local multi-repository sessions keep the primary checkout as
+				// WorkspacePath and attach secondary repositories independently.
+				return repository.RepositoryPath
+			}
+		}
+		return filepath.Join(info.WorkspacePath, repository.RepoName)
+	case len(info.WorkspaceRepositories) > 1:
+		// Multi-repository worktree layouts use a task root. Local layouts
+		// may use the primary repository as the root, so try its child only
+		// when the root does not validate.
+		if validateLocalRepositoryWorkspace(ctx, info.WorkspacePath, localWorkspaceExpectedRepository(info, repository)) == nil {
+			return info.WorkspacePath
+		}
+		return filepath.Join(info.WorkspacePath, repository.RepoName)
+	default:
+		return info.WorkspacePath
+	}
+}
+
+func managedCloneMismatchCanDefer(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	repository WorkspaceRepositorySpec,
+	candidate string,
+	deferManagedCloneMismatch bool,
+) bool {
+	if !deferManagedCloneMismatch || info.ExecutorType != string(models.ExecutorTypeWorktree) ||
+		repository.WorktreeID == "" || repository.CloneRelocation == nil {
+		return false
+	}
+	_, err := localGitTopLevel(ctx, candidate)
+	return err == nil
+}
+
+func localWorkspaceExpectedRepository(info *WorkspaceInfo, repository WorkspaceRepositorySpec) string {
+	if info == nil {
+		return ""
+	}
+	switch info.ExecutorType {
+	// An empty type is the persisted default-local executor for pre-profile tasks.
+	case "", string(models.ExecutorTypeLocal), legacyExecutorTypeLocalPC, string(models.ExecutorTypeWorktree):
+		return repository.RepositoryPath
+	default:
+		return ""
+	}
 }
 
 // GetExecutionIDForSession returns the execution ID for a session from the in-memory
@@ -803,6 +874,9 @@ func (m *Manager) createExecutionWithMode(
 			}
 		}()
 	}
+	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
+		return nil, fmt.Errorf("%w: repository workspace failed post-recovery validation", models.ErrWorkspaceReuseUnsafe)
+	}
 	inputs, err := m.prepareExecutionCreation(operationCtx, taskID, info, agentLaunch)
 	if err != nil {
 		return nil, err
@@ -816,6 +890,13 @@ func (m *Manager) createExecutionWithMode(
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(operationCtx)
 	defer launchCancel()
+	// The orphan sweep holds this task's exclusive fence from its final state
+	// read through the remote stop. Keep resume, controller creation, and row
+	// persistence inside the matching shared fence so an inventoried PID
+	// cannot be reused between that read and its stop signal.
+	releaseRuntimeFence := m.taskRuntimeFences.acquireCreation(taskID)
+	defer releaseRuntimeFence()
+
 	if err := resumeRemoteInstancePreflight(launchCtx, inputs.runtime, inputs.preparation.request); err != nil {
 		return nil, err
 	}
@@ -1045,6 +1126,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			WorkspacePath:                  info.WorkspacePath,
 			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
+			CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,
@@ -1063,6 +1145,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		profileInfo: profileInfo,
 	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
+	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
 }
 
@@ -1243,10 +1326,11 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 			continue
 		}
 		slots = append(slots, worktree.RecoverySlot{
-			WorktreeID:     repository.WorktreeID,
-			RepositoryID:   repository.RepositoryID,
-			BranchSlug:     repository.BranchSlug,
-			RepositoryPath: repository.RepositoryPath,
+			WorktreeID:      repository.WorktreeID,
+			RepositoryID:    repository.RepositoryID,
+			BranchSlug:      repository.BranchSlug,
+			RepositoryPath:  repository.RepositoryPath,
+			CloneRelocation: repository.CloneRelocation,
 		})
 	}
 	if len(slots) == 0 {
@@ -1265,6 +1349,7 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 	if err != nil {
 		return nil, err
 	}
+	info.WorktreeRecoveryAdmitted = true
 	for _, slot := range request.Slots {
 		if slot.Worktree == nil {
 			continue
@@ -1273,6 +1358,10 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 			repository := &info.WorkspaceRepositories[index]
 			if repository.RepositoryID == slot.Worktree.RepositoryID && repository.BranchSlug == slot.Worktree.BranchSlug {
 				repository.WorktreeID = slot.Worktree.ID
+				repository.WorktreePath = slot.Worktree.Path
+				repository.WorktreeBranch = slot.Worktree.Branch
+				repository.WorktreeSourceClonePath = slot.Worktree.SourceClonePath
+				repository.WorktreeSourceCommonDir = slot.Worktree.SourceCommonDir
 				if repository.RepositoryPath == "" {
 					repository.RepositoryPath = slot.Worktree.RepositoryPath
 				}

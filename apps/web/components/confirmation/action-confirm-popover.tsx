@@ -239,7 +239,7 @@ function ActionConfirmPopoverContent({
           type="button"
           variant="outline"
           disabled={disabled}
-          className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
+          className="px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
           onClick={onCancel}
         >
           {cancelLabel}
@@ -250,7 +250,7 @@ function ActionConfirmPopoverContent({
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
           disabled={confirmDisabled}
-          className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
+          className="px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
           onClick={onConfirm}
         >
           {confirmLabel}

@@ -23,7 +23,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const sessionModelConfigKey = "model"
+const (
+	sessionModelConfigKey   = "model"
+	codexAppServerAgentType = "codex-app-server"
+)
 
 // usageEventIDNamespace seeds the deterministic UUID usageEventIDFor derives
 // for a prompt-usage completion. Arbitrary but fixed — any stable value
@@ -80,6 +83,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	terminalCompleteStream := false
+	var observedOutput, observedEffect bool
 
 	if eventType == agentEventComplete {
 		if marker, ok := s.terminalExecutionMarker(sessionID, payload.ExecutionID); ok {
@@ -97,10 +101,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// discard a late subagent frame before its durable context is recorded.
 		// This guard runs before the event-type switch below, so handler-level
 		// recording alone would not cover the production dispatch path.
-		if eventType == agentEventToolCall || eventType == agentEventToolUpdate {
+		if eventType == agentEventToolCall || eventType == agentEventToolUpdate || eventType == streams.EventTypeUsageObservation {
 			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		}
-		return
+		if eventType != streams.EventTypeUsageObservation {
+			return
+		}
 	}
 	switch eventType {
 	case "message_streaming":
@@ -112,9 +118,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.SessionID,
 				eventExecutionID,
 				payload.Data.PromptGeneration,
+				payload.AgentType,
 				payload.Data.Text,
 			)
 		} else {
+			observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 			s.observePromptAttempt(
 				payload.SessionID,
 				eventExecutionID,
@@ -124,6 +132,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			)
 		}
 	case "thinking_streaming":
+		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
@@ -132,6 +141,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
+		observedEffect = true
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
@@ -139,6 +149,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			false,
 			true,
 		)
+	}
+	if observedOutput || observedEffect {
+		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
+			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
+			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
+		}, true)
 	}
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
@@ -213,6 +229,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
+	case streams.EventTypeBackgroundWorkUpdated:
+		s.handleBackgroundWorkUpdatedEvent(ctx, payload)
+
+	case streams.EventTypeBackgroundWorkOutput:
+		s.handleBackgroundWorkOutputEvent(ctx, payload)
 
 	case streams.EventTypeForegroundIdle:
 		if !s.foregroundIdleOwnsCurrentPrompt(payload) {
@@ -221,12 +242,16 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldProviderIdle)
 
 	case streams.EventTypeBackgroundComplete:
+		s.recordBackgroundWorkObservationFromToolPayload(ctx, payload)
 		value := s.backgroundCompletionActivityValue(ctx, sessionID)
 		if publication, changed := s.completeBackgroundWorkSnapshot(
 			sessionID, payload.ExecutionID, payload.Data.ToolCallID, value,
 		); changed {
 			s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
 		}
+
+	case streams.EventTypeUsageObservation:
+		s.publishNativeUsageObservation(ctx, payload)
 
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
@@ -241,6 +266,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleAgentLogEvent(ctx, payload)
 
 	case streams.EventTypeTurnStarted:
+		s.persistNativeCodexTurnID(ctx, payload)
 		// D3: the single turn boundary for the whole feature. Clearing here,
 		// on the same ordered stream consumer that applies the attestation
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
@@ -258,6 +284,35 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func (s *Service) persistNativeCodexTurnID(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if !s.config.CodexAppServerEnabled || s.repo == nil || s.turnService == nil || payload == nil || payload.Data == nil {
+		return
+	}
+	providerTurnID := strings.TrimSpace(payload.Data.OperationID)
+	if providerTurnID == "" || payload.SessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil || session.AgentProfileSnapshot["agent_id"] != codexAppServerAgentType {
+		return
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to resolve active Kandev turn for native Codex turn",
+			zap.String("session_id", payload.SessionID), zap.Error(err))
+		return
+	}
+	if turn == nil {
+		return
+	}
+	if err := s.turnService.PatchTurnMetadata(ctx, payload.SessionID, turn.ID, map[string]interface{}{
+		models.TurnMetaKeyCodexNativeTurnID: providerTurnID,
+	}); err != nil {
+		s.logger.Warn("failed to persist native Codex turn identity",
+			zap.String("session_id", payload.SessionID), zap.String("turn_id", turn.ID), zap.Error(err))
 	}
 }
 
@@ -422,6 +477,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		failure := watcher.AgentEventData{
 			TaskID:           taskID,
 			SessionID:        sessionID,
+			OwnerKind:        string(payload.OwnerKind),
 			AgentExecutionID: executionID,
 			AgentID:          payload.AgentID,
 			AgentProfileID:   payload.AgentProfileID,
@@ -433,7 +489,10 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			failure.ErrorMessage = payload.Data.Text
 		}
 		failure = s.withPromptAttemptEvidence(failure)
-		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
+		result := s.routeDynamicAgentFailureWithEvidence(
+			ctx, failure, classifyKanbanFailure(failure), nil, true,
+		)
+		if result.handled && !result.manualRecovery {
 			return
 		}
 	}
@@ -601,6 +660,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	// a telemetry row) — use the non-creating lookup here even though
 	// message creation above may have legitimately started one already.
 	s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
+	s.recordBackgroundWorkObservationFromToolPayload(ctx, payload)
 
 	ownership := toolOwnershipForeground
 	if payload.Data.ParentToolCallID != "" {
@@ -818,6 +878,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	// Background-work bookkeeping runs regardless of message persistence so
 	// accounting remains available even when no messageCreator is wired.
 	s.trackBackgroundToolUpdate(ctx, payload, ownership)
+	s.recordBackgroundWorkObservationFromToolPayload(ctx, payload)
 
 	s.persistToolUpdateMessage(ctx, payload)
 }
@@ -1406,6 +1467,7 @@ func (s *Service) transitionBootstrapFailure(
 	taskID, sessionID, agentExecutionID string,
 	expectedState models.TaskSessionState,
 	expectedStamp string,
+	expectedStartAttemptID string,
 	errorValue models.LastAgentError,
 ) (bool, models.TaskSessionState, error) {
 	if s.messageQueue != nil {
@@ -1422,6 +1484,7 @@ func (s *Service) transitionBootstrapFailure(
 					agentExecutionID,
 					expectedState,
 					expectedStamp,
+					expectedStartAttemptID,
 					errorValue,
 				)
 				return err
@@ -1430,21 +1493,30 @@ func (s *Service) transitionBootstrapFailure(
 		}
 	}
 
-	committer, ok := s.repo.(bootstrapFailureCommitter)
-	if !ok {
-		return false, expectedState, fmt.Errorf(
-			"bootstrap failure requires an execution-fenced repository commit",
+	var changed bool
+	var updatedAt time.Time
+	var err error
+	if expectedStartAttemptID != "" {
+		committer, ok := s.repo.(bootstrapFailureAttemptCommitter)
+		if !ok {
+			return false, expectedState, fmt.Errorf(
+				"bootstrap failure requires a startup-attempt-fenced repository commit",
+			)
+		}
+		changed, updatedAt, err = committer.CommitBootstrapFailureIfCurrentAttempt(
+			ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, expectedStartAttemptID, errorValue,
+		)
+	} else {
+		committer, ok := s.repo.(bootstrapFailureCommitter)
+		if !ok {
+			return false, expectedState, fmt.Errorf(
+				"bootstrap failure requires an execution-fenced repository commit",
+			)
+		}
+		changed, updatedAt, err = committer.CommitBootstrapFailureIfCurrentExecution(
+			ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, errorValue,
 		)
 	}
-	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
-		ctx,
-		taskID,
-		sessionID,
-		agentExecutionID,
-		expectedState,
-		expectedStamp,
-		errorValue,
-	)
 	if err != nil || !changed {
 		return changed, expectedState, err
 	}
@@ -1657,6 +1729,26 @@ type bootstrapFailureCommitter interface {
 		expectedStamp string,
 		errorValue models.LastAgentError,
 	) (changed bool, updatedAt time.Time, err error)
+}
+
+type bootstrapFailureAttemptCommitter interface {
+	CommitBootstrapFailureIfCurrentAttempt(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		expectedStartAttemptID string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
+type startAttemptSessionUpdater interface {
+	UpdateTaskSessionIfCurrentStateWithStartAttempt(
+		context.Context,
+		*models.TaskSession,
+		models.TaskSessionState,
+		string,
+	) (bool, error)
 }
 
 type conditionalTaskSessionStateUpdater interface {
@@ -2277,7 +2369,17 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) error {
-	changed, err := s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	var changed bool
+	var err error
+	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
+		updater, ok := s.repo.(startAttemptSessionUpdater)
+		if !ok {
+			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
+		}
+		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
+	} else {
+		changed, err = s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	}
 	if err != nil {
 		return err
 	}
@@ -2293,6 +2395,24 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	}
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
+	}
+	if latest.State == models.TaskSessionStateRunning {
+		return fmt.Errorf(
+			"session %s state advanced from %s to %s before full-row persistence: %w",
+			session.ID,
+			expected,
+			latest.State,
+			errors.Join(executor.ErrExecutionAlreadyRunning, executor.ErrSessionAdvancedToRunning),
+		)
+	}
+	if latest.State == models.TaskSessionStateStarting {
+		return fmt.Errorf(
+			"session %s state changed from %s to %s before full-row persistence: %w",
+			session.ID,
+			expected,
+			latest.State,
+			executor.ErrExecutionAlreadyRunning,
+		)
 	}
 	return fmt.Errorf(
 		"session %s state changed from %s to %s before full-row persistence",
@@ -3400,6 +3520,18 @@ func usageEventIDFor(sessionID, executionID string, promptGeneration uint64) str
 	return uuid.NewSHA1(usageEventIDNamespace, []byte(name)).String()
 }
 
+func nativeUsageEventIDFor(sessionID string, observation *streams.NativeUsageObservation) string {
+	if sessionID == "" || observation == nil || observation.ProviderThreadID == "" || observation.ProviderTurnID == "" {
+		return uuid.New().String()
+	}
+	identity := observation.ProviderResponseID
+	if identity == "" {
+		identity = observation.Source
+	}
+	name := fmt.Sprintf("native\x00%s\x00%s\x00%s\x00%s", sessionID, observation.ProviderThreadID, observation.ProviderTurnID, identity)
+	return uuid.NewSHA1(usageEventIDNamespace, []byte(name)).String()
+}
+
 // publishPromptUsage broadcasts prompt token usage to the WebSocket for the
 // frontend and to the office cost subscriber. Model and agent type (CLI
 // engine slug) come from payload first; when absent (which is the common
@@ -3448,6 +3580,76 @@ func (s *Service) publishPromptUsage(
 	}
 	subject := events.BuildSessionPromptUsageSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
+}
+
+func (s *Service) publishNativeUsageObservation(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if !nativeUsageObservationReady(s, payload) {
+		return
+	}
+	observation := payload.Data.UsageObservation
+	turnID, session, agentType, ok := s.resolveNativeUsageObservation(ctx, payload)
+	if !ok {
+		return
+	}
+	usage := *payload.Data.Usage
+	usage.PriceSuppressed = usage.PriceSuppressed || observation.PriceSuppressed
+	model := observation.Model
+	if model == "" && observation.Scope != "child" {
+		model = payload.Data.CurrentModelID
+	}
+	eventPayload := lifecycle.SessionPromptUsageEventPayload{
+		TaskID:           payload.TaskID,
+		SessionID:        payload.SessionID,
+		AgentID:          payload.AgentID,
+		AgentProfileID:   session.AgentProfileID,
+		AgentType:        agentType,
+		Model:            model,
+		Usage:            &usage,
+		UsageObservation: observation,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+		TurnID:           turnID,
+		UsageEventID:     nativeUsageEventIDFor(payload.SessionID, observation),
+	}
+	subject := events.BuildSessionPromptUsageSubject(payload.SessionID)
+	if err := s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload)); err != nil {
+		s.logger.Warn("failed to publish native usage observation",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("provider_thread_id", observation.ProviderThreadID),
+			zap.Error(err))
+	}
+}
+
+func nativeUsageObservationReady(s *Service, payload *lifecycle.AgentStreamEventPayload) bool {
+	return s != nil && s.eventBus != nil && payload != nil && payload.Data != nil &&
+		payload.Data.UsageObservation != nil && payload.Data.Usage != nil && payload.SessionID != ""
+}
+
+func (s *Service) resolveNativeUsageObservation(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) (string, *models.TaskSession, string, bool) {
+	observation := payload.Data.UsageObservation
+	turnID := payload.Data.TurnID
+	if turnID == "" {
+		turnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
+	}
+	if turnID == "" || observation.ProviderThreadID == "" || observation.ProviderTurnID == "" {
+		return "", nil, "", false
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil || session.TaskID != payload.TaskID {
+		s.logger.Warn("skipping native usage observation with unresolved session ownership",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+		return "", nil, "", false
+	}
+	_, agentType := resolvePromptUsageLabels(payload, session)
+	return turnID, session, agentType, true
 }
 
 func resolvePromptUsageLabels(
@@ -3712,12 +3914,13 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	}
 
 	eventPayload := lifecycle.SessionModeEventPayload{
-		TaskID:         payload.TaskID,
-		SessionID:      sessionID,
-		AgentID:        payload.AgentID,
-		CurrentModeID:  payload.Data.CurrentModeID,
-		AvailableModes: payload.Data.AvailableModes,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		TaskID:          payload.TaskID,
+		SessionID:       sessionID,
+		AgentID:         payload.AgentID,
+		CurrentModeID:   payload.Data.CurrentModeID,
+		AvailableModes:  payload.Data.AvailableModes,
+		RequestedModeID: payload.Data.RequestedModeID,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildSessionModeSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModeChanged, "orchestrator", eventPayload))

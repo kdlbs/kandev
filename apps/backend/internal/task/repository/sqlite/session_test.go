@@ -1831,6 +1831,36 @@ func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) 
 	require.Empty(t, stored.ExecutorID)
 }
 
+func TestUpdateTaskSessionIfCurrentSnapshotRejectsSameStateProgress(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-snapshot-cas", "session-snapshot-cas", "turn-snapshot-cas")
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "session-snapshot-cas", map[string]interface{}{"owner": "original"}))
+	stale, err := repo.GetTaskSession(ctx, "session-snapshot-cas")
+	require.NoError(t, err)
+	expectedUpdatedAt := stale.UpdatedAt
+	require.False(t, expectedUpdatedAt.IsZero())
+
+	winner, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	winner.AgentProfileID = "winning-profile"
+	require.NoError(t, repo.UpdateTaskSession(ctx, winner))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, stale.ID, map[string]interface{}{"owner": "winning-launch"}))
+
+	stale.AgentProfileID = "original-profile"
+	changed, err := repo.UpdateTaskSessionIfCurrentSnapshot(
+		ctx, stale, stale.State, expectedUpdatedAt, map[string]interface{}{"owner": "original"},
+	)
+	require.NoError(t, err)
+	require.False(t, changed, "a same-state row update must supersede snapshot rollback")
+
+	stored, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	require.Equal(t, stale.State, stored.State)
+	require.Equal(t, "winning-profile", stored.AgentProfileID)
+	require.Equal(t, "winning-launch", stored.Metadata["owner"])
+}
+
 func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

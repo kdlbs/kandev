@@ -1,3 +1,5 @@
+import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/model-hydration";
+import { resolveTaskRoute } from "@/lib/routing/resolve-task-route";
 import {
   fetchWorkflowSnapshot,
   fetchTask,
@@ -295,123 +297,6 @@ function buildSessionState(p: BuildSessionPageStateParams) {
   };
 }
 
-/** Returns the value narrowed to its string-valued entries, or undefined when none qualify. */
-function stringMap(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const entries = Object.entries(value).filter(
-    (entry): entry is [string, string] => typeof entry[1] === "string",
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-/** Returns the value as a plain record when it is a non-array object; otherwise undefined. */
-function objectMap(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-/** Returns the value when it is a string; otherwise undefined. */
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-/** Filters an array down to its plain-object items, or returns [] for non-arrays. */
-function objectList(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    : [];
-}
-
-/** Maps a raw ACP model record to the display shape, defaulting missing strings to "". */
-function mapSessionModel(model: Record<string, unknown>) {
-  return {
-    modelId: stringValue(model.model_id) ?? "",
-    name: stringValue(model.name) ?? "",
-    description: stringValue(model.description),
-    usageMultiplier: stringValue(model.usage_multiplier),
-  };
-}
-
-/**
- * Maps a raw ACP config option, preferring the runtime (or override) value over
- * the option's own current_value and defaulting type to "select" when absent.
- */
-function mapSessionConfigOption(
-  option: Record<string, unknown>,
-  runtimeOptions: Record<string, string>,
-) {
-  const id = stringValue(option.id) ?? "";
-  return {
-    type: stringValue(option.type) ?? "select",
-    id,
-    name: stringValue(option.name) ?? "",
-    description: stringValue(option.description),
-    currentValue: runtimeOptions[id] ?? stringValue(option.current_value) ?? "",
-    category: stringValue(option.category),
-    options: Array.isArray(option.options)
-      ? (option.options as { value: string; name: string; description?: string }[])
-      : undefined,
-  };
-}
-
-/**
- * Extracts the ACP model-state snapshot, runtime config, and overrides from a
- * session's metadata; returns {} when the session or its snapshot is missing.
- */
-function sessionModelHydrationMetadata(session: TaskSession | null) {
-  if (!session) return {};
-  const snapshot = objectMap(session.metadata?.acp_model_state);
-  if (!snapshot) return {};
-  return {
-    session,
-    snapshot,
-    runtime: objectMap(session.metadata?.runtime_config),
-    overrides: objectMap(session.metadata?.runtime_config_overrides),
-  };
-}
-
-/**
- * Builds the sessionModels slice (current model, available models, config
- * options) for a session from its ACP hydration metadata; {} when nothing
- * resolvable exists.
- */
-function buildSessionModelsState(session: TaskSession | null) {
-  const metadata = sessionModelHydrationMetadata(session);
-  if (!metadata.session || !metadata.snapshot) return {};
-  const { snapshot, runtime, overrides } = metadata;
-  const runtimeOptions = {
-    ...stringMap(runtime?.config_options),
-    ...stringMap(overrides?.config_options),
-  };
-  const currentModelId =
-    stringValue(overrides?.model) ??
-    stringValue(runtime?.model) ??
-    stringValue(snapshot.current_model_id) ??
-    "";
-  const models = objectList(snapshot.models)
-    .map(mapSessionModel)
-    .filter((model) => !!model.modelId);
-  const configOptions = objectList(snapshot.config_options)
-    .map((option) => mapSessionConfigOption(option, runtimeOptions))
-    .filter((option) => !!option.id);
-  if (!currentModelId && models.length === 0 && configOptions.length === 0) return {};
-
-  return {
-    sessionModels: {
-      bySessionId: {
-        [metadata.session.id]: {
-          currentModelId,
-          models,
-          configOptions,
-          configOptionsSettled: snapshot.config_options_settled === true,
-          configBaseline: stringMap(metadata.session.metadata?.acp_config_baseline),
-        },
-      },
-    },
-  };
-}
-
 /** Builds the prepareProgress slice from each session's prepare metadata; {} when none exists. */
 function buildPrepareProgressState(allSessions: TaskSession[]) {
   const bySessionId: Record<string, SessionPrepareState> = {};
@@ -462,25 +347,18 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
  * seeding task-only data when no session exists yet and otherwise enriching via
  * the shared optional-hydration pipeline.
  */
-export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
-  const [task, allSessionsResponse] = await Promise.all([
-    fetchTask(taskId, { cache: "no-store" }),
-    listTaskSessions(taskId, { cache: "no-store" }),
-  ]);
-  const sessions = allSessionsResponse.sessions ?? [];
-
-  const sessionId = task.primary_session_id ?? sessions[0]?.id;
+export async function fetchSessionDataForTask(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<FetchedSessionData> {
+  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
+    taskId,
+    requestedSessionId,
+  );
   if (!sessionId) {
-    // No sessions yet — fetch task/workspace data so the store is seeded and
-    // the auto-start hook can fire immediately without a client-side crash.
     return fetchTaskDataOnly(task, allSessionsResponse);
   }
 
-  // Refetch the active session via the single-session endpoint to get
-  // agent_profile_snapshot, which the list endpoint strips. See
-  // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
-  // All remaining enrichment shares this deadline so no optional request can
-  // extend route loading beyond the configured bound.
   const optionalHydration = beginOptionalHydration();
   const { fetchTaskSession } = await import("@/lib/api");
   const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
@@ -493,6 +371,28 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
     activeSessionResponse,
     optionalHydration,
   );
+}
+
+/** Client navigation leaves optional enrichment to the mounted domain hooks. */
+export async function fetchTaskNavigationData(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<FetchedSessionData> {
+  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
+    taskId,
+    requestedSessionId,
+  );
+  return {
+    task,
+    sessionId: sessionId ?? null,
+    initialState: buildSessionPageState({
+      task,
+      sessionId: sessionId ?? null,
+      allSessions: allSessionsResponse.sessions,
+      activeSession: null,
+    }),
+    initialTerminals: [],
+  };
 }
 
 /**

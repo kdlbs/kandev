@@ -18,6 +18,7 @@
   "attachmentPreviewAlt": "Preview",
   "attachmentPreviewFullAlt": "Full size preview",
   "attachmentUploadFailed": "Attachment upload failed",
+  "attachmentWorkspaceUnavailable": "Could not find this task's workspace. Your files are kept in the draft.",
   "attachmentUploadPending": "Uploading attachment…",
   "attachmentUploadPendingSubmit": "Finish uploading attachments before sending.",
   "chatTabName": "Chat {{index}}",

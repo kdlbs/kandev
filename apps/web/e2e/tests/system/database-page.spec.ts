@@ -1,4 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import {
+  DATABASE_SETTINGS_ROUTE,
+  expectDatabaseControls,
+  routeDatabaseStatsSequence,
+} from "../../helpers/database-stats";
 
 test.describe("System Database page", () => {
   test("renders database stats and exposes maintenance buttons", async ({ testPage }) => {
@@ -63,5 +68,47 @@ test.describe("System Database page", () => {
 
     await testPage.getByTestId("system-factory-reset-button").click();
     await expect(testPage.getByTestId("system-factory-reset-dialog")).toBeVisible();
+  });
+
+  test("keeps metadata through reloads and recovers a stale logical snapshot", async ({
+    testPage,
+  }) => {
+    const scenario = await routeDatabaseStatsSequence(testPage);
+    try {
+      await testPage.goto(DATABASE_SETTINGS_ROUTE);
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "Measuring logical totals",
+      );
+      await expectDatabaseControls(testPage);
+
+      scenario.showRefreshing();
+      await testPage.reload();
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "Updating",
+      );
+      await expectDatabaseControls(testPage);
+
+      scenario.showStale();
+      await testPage.reload();
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "These values may be stale",
+      );
+      await expect(testPage.getByTestId("system-db-metadata-stale")).toBeVisible();
+      await expectDatabaseControls(testPage);
+
+      scenario.recover();
+      const retryRequest = testPage.waitForRequest(
+        (request) =>
+          request.url().includes("/api/v1/system/database/refresh") && request.method() === "POST",
+      );
+      await testPage.getByTestId("system-db-logical-stats-retry").click();
+      await retryRequest;
+      await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
+        "Logical totals measured at",
+      );
+      await expectDatabaseControls(testPage);
+    } finally {
+      await scenario.remove();
+    }
   });
 });

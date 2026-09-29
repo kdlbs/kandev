@@ -9,6 +9,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -105,6 +106,15 @@ func (f *fakeBackend) GetExecution(executionID string) (*lifecycle.AgentExecutio
 func (f *fakeBackend) SetMcpMode(_ context.Context, executionID, mode string) error {
 	f.mcpCalls = append(f.mcpCalls, mcpCall{executionID: executionID, mode: mode})
 	return f.mcpErr
+}
+
+func (f *fakeBackend) ExecuteBackgroundWorkAction(_ context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	return streams.BackgroundWorkActionResponse{
+		Success: true,
+		WorkID:  req.WorkID,
+		RunID:   req.RunID,
+		Action:  req.Action,
+	}, nil
 }
 
 func newFakeBackend() *fakeBackend {

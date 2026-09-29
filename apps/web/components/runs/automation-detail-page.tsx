@@ -241,7 +241,7 @@ function ActivityView({
           <Button
             variant="destructive"
             size="sm"
-            className="min-h-11 shrink-0 cursor-pointer"
+            className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 shrink-0 cursor-pointer"
             onClick={() => void handleStop()}
             disabled={stopping}
             data-testid="automation-stop-run"

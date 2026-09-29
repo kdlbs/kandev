@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -41,6 +42,10 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 	}
 	if status, ok := repositorySelectionHTTPStatus(err); ok {
 		c.JSON(status, taskErrorBody(err))
+		return
+	}
+	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
 		return
 	}
 	if isNotFound(err) {
@@ -140,6 +145,12 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 	switch {
 	case isClientDisconnect(err):
 		abortClientDisconnect(c)
+	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_criteria_conflict"})
+	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_human_confirmation_required"})
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
 	case isMoveConflict(err):
@@ -256,7 +267,8 @@ func isValidationError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) {
+	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) ||
+		errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) {
 		return true
 	}
 	if errors.Is(err, service.ErrInvalidWorkflowChange) {

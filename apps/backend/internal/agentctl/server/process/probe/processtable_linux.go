@@ -94,7 +94,62 @@ func linuxBootTime() (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse /proc/uptime: %w", err)
 	}
-	return time.Now().Add(-time.Duration(uptimeSeconds * float64(time.Second))), nil
+	now := time.Now()
+	uptime := time.Duration(uptimeSeconds * float64(time.Second))
+	bootTime := linuxBootTimeForClock(now, uptime, linuxStatBootTime(), linuxPID1StartTime())
+	return bootTime, nil
+}
+
+// linuxBootTimeForClock normally anchors process start ticks to /proc/uptime.
+// Some container time namespaces virtualize /proc/uptime while
+// /proc/<pid>/stat's starttime remains measured from the host boot. In that
+// case, /proc/stat's whole-second btime is used only to detect the namespace
+// offset; adding PID 1's start tick restores the sub-second precision of the
+// uptime and process start tick sources.
+func linuxBootTimeForClock(now time.Time, uptime time.Duration, wallBootTime time.Time, pid1StartTime time.Duration) time.Time {
+	bootTime := now.Add(-uptime)
+	if wallBootTime.IsZero() || pid1StartTime <= 5*time.Second {
+		return bootTime
+	}
+	wallUptime := now.Sub(wallBootTime)
+	namespaceOffset := wallUptime - uptime
+	if absoluteDuration(namespaceOffset-pid1StartTime) > 2*time.Second {
+		return bootTime
+	}
+	return now.Add(-(uptime + pid1StartTime))
+}
+
+func absoluteDuration(value time.Duration) time.Duration {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func linuxStatBootTime() time.Time {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return time.Time{}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "btime ") {
+			continue
+		}
+		seconds, err := strconv.ParseInt(strings.TrimPrefix(line, "btime "), 10, 64)
+		if err != nil {
+			return time.Time{}
+		}
+		return time.Unix(seconds, 0)
+	}
+	return time.Time{}
+}
+
+func linuxPID1StartTime() time.Duration {
+	info, ok, err := readLinuxProcessStat(1, time.Time{})
+	if err != nil || !ok {
+		return 0
+	}
+	return info.StartTime.Sub(time.Time{})
 }
 
 // readLinuxStatFields reads and tokenizes /proc/<pid>/stat, returning the

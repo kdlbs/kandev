@@ -25,6 +25,7 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			reviewState:           input.ReviewState,
 			checksState:           input.ChecksState,
 			mergeableState:        input.MergeableState,
+			hasMergeConflicts:     input.HasMergeConflicts,
 			mergeQueueState:       input.MergeQueueState,
 			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
 			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
@@ -52,6 +53,11 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	for _, key := range keys {
 		observation := state.prs[key]
 		summary.Count++
+		if strings.EqualFold(observation.state, prStateOpen) &&
+			((observation.hasMergeConflicts != nil && *observation.hasMergeConflicts) ||
+				(observation.hasMergeConflicts == nil && strings.EqualFold(observation.mergeableState, "dirty"))) {
+			summary.HasMergeConflicts = true
+		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
 			if observation.autoFixEnabled {

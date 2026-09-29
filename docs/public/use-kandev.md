@@ -48,6 +48,11 @@ kandev
 Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
 is still needed for the agent CLIs Kandev installs through its own interface.
 
+Stable package-manager and Desktop installs use the standard runtime. Local work starts without a
+remote-helper download. A remote task needs outbound HTTPS to `github.com` and
+`release-assets.githubusercontent.com` the first time it uses a remote platform. See the [CLI guide](cli.md#release-archive)
+for the full offline command-line archive and the [Desktop guide](desktop-app.md) for its network limits.
+
 Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
 `main` without changing a global installation, launch the package once from the npm-only `nightly`
 tag:
@@ -89,7 +94,7 @@ Kandev creates these records when no prior workspace or executor configuration e
 - A Local Docker executor configured with the platform's default Docker host. The record is created even when no usable Docker daemon is available; task launch still requires one.
 - A disabled Sprites executor entry.
 
-The first-run dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
+When its browser-local completion marker is unset, the first-run dialog opens on screens 768 CSS pixels wide or larger. A phone visit opens the normal page and leaves the marker untouched, so the tour can appear on a later larger-screen visit. The dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. Its Executors step presents informational cards for Local, Worktree, Local Docker, Sprites.dev, SSH, and Kubernetes. It recommends Worktree for existing Git repositories and summarizes each option's setup needs. Configure profiles in **Settings > Executors**, then choose one when starting a task. See [Executors](executors.md) for setup and trust-boundary details. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
 
 </details>
 
@@ -104,6 +109,14 @@ From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar al
 settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
 configuration content.
+
+Workspace managers can enable **Suspend idle ACP agents** in **Settings > Workspaces > Overview**.
+The policy is off by default and keeps a saved timeout of 120 minutes. When enabled, Kandev may
+stop an idle agent process after that timeout while preserving the task, workspace, and conversation.
+Opening the task or sending it a message resumes the same conversation. The agent can be suspended
+again after a new idle interval. The policy applies to ACP agents and uses activity Kandev can
+observe; provider-internal work that is not reported to Kandev may not prevent suspension. It does
+not apply to passthrough terminal sessions or manually stopped sessions.
 
 ## Customize the sidebar
 

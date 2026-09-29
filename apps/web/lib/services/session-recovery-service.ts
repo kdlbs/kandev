@@ -7,7 +7,16 @@ export type SessionRecoveryAction =
   | "resume"
   | "resume_new_branch"
   | "fresh_start"
-  | "runtime_retry";
+  | "runtime_retry"
+  | "relocate_and_resume";
+
+const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
+
+export type ManagedCloneRelocationRecoveryDetails = WebSocketRequestErrorDetails & {
+  kind: "managed_clone_relocation_required" | "managed_clone_relocation_stale";
+  error_stamp?: string;
+  recovery_action?: "relocate_and_resume";
+};
 
 export type BranchRecoveryDetails = WebSocketRequestErrorDetails & {
   kind: "branch_unrecoverable";
@@ -74,6 +83,19 @@ export function sessionRecoveryGuardMessage(
   return t("task:sessionRecoveryGuardUnstoppable");
 }
 
+export function managedCloneRelocationRecoveryDetails(
+  error: unknown,
+): ManagedCloneRelocationRecoveryDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (
+    error.details.kind !== "managed_clone_relocation_required" &&
+    error.details.kind !== "managed_clone_relocation_stale"
+  ) {
+    return null;
+  }
+  return error.details as ManagedCloneRelocationRecoveryDetails;
+}
+
 /** Resolves a thrown request failure to a user-facing message, preferring the
  *  recovery guard's translated reason over the raw backend/transport text. */
 export function resolveRequestErrorMessage(
@@ -98,7 +120,11 @@ export async function requestSessionRecover(
   sessionId: string,
   action: SessionRecoveryAction,
   failureMessage: string,
+  errorStamp?: string | null,
 ): Promise<void> {
+  if (action === "relocate_and_resume" && !errorStamp) {
+    throw new Error(failureMessage);
+  }
   const client = getWebSocketClient();
   if (!client) throw new Error(failureMessage);
   const response = await client.request<RecoveryResponse>(
@@ -107,8 +133,9 @@ export async function requestSessionRecover(
       task_id: taskId,
       session_id: sessionId,
       action,
+      ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
     },
-    30_000,
+    action === "relocate_and_resume" ? MANAGED_CLONE_RELOCATION_TIMEOUT_MS : 30_000,
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;

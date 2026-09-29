@@ -267,6 +267,22 @@ type Adapter struct {
 	// frontend mode selector can render available options.
 	availableModes []streams.SessionModeInfo
 
+	// currentModeID is the mode the agent last reported, from session
+	// creation/load or a current_mode_update. SetMode compares against it
+	// rather than echoing the requested mode.
+	currentModeID string
+	// modeSessionID and modeObservationGeneration identify reports from the
+	// active provider session. SetMode captures the generation before its RPC
+	// and accepts only a later report from that session.
+	modeSessionID             string
+	modeObservationGeneration uint64
+	// modeObserved closes on each mode report so a waiter can settle.
+	modeObserved chan struct{}
+	// A timed-out set_mode can report after the next request starts. ACP mode
+	// reports have no request ID, so that next request cannot claim the report.
+	modeOutcomeUncertain bool
+	modeChangeActive     bool
+
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
 	// event emitted after SetModel succeeds so the frontend doesn't lose
@@ -283,6 +299,7 @@ type Adapter struct {
 	sessionTransitionMu sync.Mutex
 	sessionCleanupDone  chan struct{}
 	sessionCleanupWg    sync.WaitGroup
+	modeChangeMu        sync.Mutex
 	configChangeMu      sync.Mutex
 	configGeneration    uint64
 	contextSamples      map[string]contextWindowSample
@@ -345,6 +362,7 @@ type promptTurnState struct {
 	evidenceMu        sync.Mutex
 	codexSystemError  bool
 	codexCapacity     bool
+	codexUsageLimit   *streams.ProviderError
 	cursorRetriable   bool
 	cursorRetriableAt time.Time
 	allowHandoff      bool
@@ -370,6 +388,31 @@ func (t *promptTurnState) codexCapacityFailure() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError && t.codexCapacity
+}
+
+func (t *promptTurnState) observeCodexUsageLimit(providerError streams.ProviderError) {
+	if t == nil || !providerError.Valid() {
+		return
+	}
+	t.evidenceMu.Lock()
+	if t.codexUsageLimit == nil {
+		copy := providerError
+		t.codexUsageLimit = &copy
+	}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexUsageLimitFailure() (*streams.ProviderError, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.codexUsageLimit == nil {
+		return nil, false
+	}
+	copy := *t.codexUsageLimit
+	return &copy, true
 }
 
 func (t *promptTurnState) hasCodexSystemError() bool {

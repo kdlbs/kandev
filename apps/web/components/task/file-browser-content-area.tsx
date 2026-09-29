@@ -60,6 +60,7 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
   }
   const loadStateResult = renderSessionOrLoadState({
     isSessionFailed: props.isSessionFailed,
+    sessionId: props.sessionId,
     sessionError: props.sessionError,
     loadState: props.loadState,
     isLoadingTree: props.isLoadingTree,

@@ -1,4 +1,4 @@
-# agentctl — HTTP server, adapters, ACP protocol
+# agentctl — HTTP server, adapters, agent protocols
 
 Scoped guidance for `apps/backend/internal/agentctl/`. Higher-level backend architecture is in `apps/backend/AGENTS.md`.
 
@@ -61,7 +61,7 @@ GitHub PR and GitLab MR URLs trigger backend association callbacks. Azure PR URL
 
 Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - `AgentAdapter` interface defines `Connect()`, `Initialize()`, `NewSession()`, `LoadSession()`, `Prompt()`, `Cancel()`, `Updates()`, `Close()`, among others
-- Transports: `acp` (all supported agent CLIs speak ACP), `shared` (cross-transport helpers). Only the ACP protocol is supported; non-ACP variants were removed in the ACP-first migration
+- Transports: `acp`, `codexappserver` (native Codex app-server), and `shared` (cross-transport helpers). The native Codex transport is experimental and uses the versioned schema under `pkg/codexappserver/schema/`; do not infer support for other native provider protocols from its protocol types.
 - `process.Manager` owns subprocess, wires stdio to adapter
 - `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
 
@@ -195,6 +195,31 @@ ordering.
 
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
+
+## Permission auto-approval has one carrier
+
+`auto_approve` on an agent profile reaches agentctl through
+`CreateInstanceRequest.AutoApprovePermissions` (and its explicit
+`AutoApprovePermissionsOverride`), which `applyApprovalOverrides` resolves onto
+`config.InstanceConfig.AutoApprovePermissions`. `process.Manager` reads that one
+field. `AGENTCTL_AUTO_APPROVE_PERMISSIONS` exists for tests and container
+bootstrap only; an explicit request override wins over it.
+
+The `/agent/configure` request still accepts an `approval_policy` string so an
+older backend can configure a newer agentctl, but nothing reads it. It was
+transmitted, stored and logged for years while no code path consulted it, which
+made the wire contract actively misleading during a permission investigation. Do
+not reintroduce a second permission field here.
+
+## Standalone instance port leases
+
+`instance.PortAllocator` reservations are `PortLease` values containing the
+owner, port, and allocator-local generation. Release and mark-unavailable must
+compare the full lease. A pre-registration instance remains in the manager's
+provisional map until its listener and process resources stop successfully;
+failed cleanup keeps the bundle and lease for a serialized retry, and the same
+instance ID cannot bind another listener while that bundle remains. Shutdown
+drains in-flight cleanup and retries retained bundles before returning.
 
 ## Env stripping for credential-mode agents (`StripEnv`)
 

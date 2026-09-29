@@ -3,7 +3,6 @@ import type { SystemSlice, SystemSliceState } from "./types";
 
 export const defaultSystemState: SystemSliceState = {
   system: {
-    info: null,
     diskUsage: null,
     database: null,
     retention: null,
@@ -16,6 +15,7 @@ export const defaultSystemState: SystemSliceState = {
       overview: null,
       analysisRevision: 0,
       disk: null,
+      diskIdentity: null,
       runs: [],
       quarantine: [],
     },
@@ -33,10 +33,6 @@ export const createSystemSlice: StateCreator<
   SystemSlice
 > = (set: ImmerSet, _get, _api) => ({
   ...defaultSystemState,
-  setSystemInfo: (info) =>
-    set((draft) => {
-      draft.system.info = info;
-    }),
   setSystemDiskUsage: (usage) =>
     set((draft) => {
       draft.system.diskUsage = usage;
@@ -81,9 +77,10 @@ export const createSystemSlice: StateCreator<
     set((draft) => {
       draft.system.storage.analysisRevision += 1;
     }),
-  setSystemStorageDisk: (disk) =>
+  setSystemStorageDisk: (disk, identity) =>
     set((draft) => {
       draft.system.storage.disk = disk;
+      draft.system.storage.diskIdentity = identity;
     }),
   setSystemStorageRuns: (runs) =>
     set((draft) => {

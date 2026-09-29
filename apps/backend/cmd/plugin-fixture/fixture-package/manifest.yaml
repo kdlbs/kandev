@@ -24,19 +24,72 @@ runtime:
     windows-amd64: "server/plugin-windows-amd64.exe"
 
 capabilities:
-  api_read: ["messages"]
+  api_read: ["messages", "managed_agent_conversations", "tasks", "sessions", "interactions", "automations"]
   events: ["task.created"]
-  api_write: ["tasks"]
+  api_write: ["tasks", "managed_agent_conversations", "execution", "interactions", "automations"]
   agent_invoke: true
   state: true
   secrets: true
   user_state: true
+  executor_provider: true
 
 # These provider-neutral declarations keep the package fixture useful as a
 # second-provider contract: the labels and canned data resemble a Bitbucket
 # pull-request integration, while the host only sees generic provider IDs,
 # authenticated actions, and composer source descriptors.
 repository_providers: ["fixture-source-control"]
+
+executor_providers:
+  - key: "remote-sandbox"
+    display_name: "Fixture Remote Sandbox"
+    description: "A bounded remote environment used to verify provider profiles."
+    localized_messages:
+      display_name: providerDisplayName
+      description: providerDescription
+      region: profileRegion
+      region_description: profileRegionDescription
+      credential: profileCredential
+      credential_description: profileCredentialDescription
+      workspace_label: profileWorkspaceLabel
+      workspace_label_description: profileWorkspaceLabelDescription
+    contract_version: 1
+    supported_state_versions: [1]
+    profile_schema:
+      type: object
+      required: [region]
+      properties:
+        region:
+          type: string
+          title: Region
+          description: Select the environment region.
+          enum: [eu-west-1, us-east-1]
+        credential:
+          type: string
+          title: Credential
+          description: The credential is stored as a secret and never returned by profile reads.
+          secret: true
+        image:
+          type: string
+          title: Image
+        workspace_label:
+          type: string
+          title: Environment label with additional context for long names
+          description: A long optional label that verifies narrow form layouts.
+    resource_state_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        instance_id:
+          type: string
+    capabilities:
+      terminal: true
+      files: true
+      git: true
+      embedded_editor: true
+      preview: true
+      reattach: true
+      retention: bounded
+      maximum_lifetime_seconds: 28800
 
 actions:
   - key: "connection-status"
@@ -60,6 +113,42 @@ actions:
   - key: "watch-create-task"
     scope: "workspace"
     max_body_bytes: 4096
+  - key: "exact-task-create"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "task-tree-delete"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-ensure"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-status"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-inputs"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-enqueue"
+    scope: "workspace"
+    max_body_bytes: 65536
+  - key: "managed-conversation-cancel"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-pause"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-resume"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-recover"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-permission-response"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "managed-conversation-clarification-response"
+    scope: "workspace"
+    max_body_bytes: 16384
 
 reference_sources:
   - source: "fixture-pull-requests"

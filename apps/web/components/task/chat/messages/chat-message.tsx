@@ -9,7 +9,8 @@ import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
-import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
+import { SenderTaskBadge } from "./sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   WorkflowStepMessageBadge,
@@ -139,12 +140,14 @@ function parseUserMessageMetadata(comment: Message) {
 }
 
 function UserContextBadges({
+  destinationTaskId,
   hasPlanMode,
   hasReviewComments,
   contextFiles,
   senderTask,
   workflowMessage,
 }: {
+  destinationTaskId: string;
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
@@ -163,7 +166,7 @@ function UserContextBadges({
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
-      {senderTask && <SenderTaskBadge sender={senderTask} />}
+      {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
           <IconWand size={10} /> {t("task:planMode")}
@@ -294,6 +297,7 @@ function UserMessageContent({
     <div className="flex justify-end w-full overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
         <UserContextBadges
+          destinationTaskId={comment.task_id}
           hasPlanMode={hasPlanMode}
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}

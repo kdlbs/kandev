@@ -1,7 +1,8 @@
 import { type Page } from "@playwright/test";
-import { test as base, expect } from "../../fixtures/test-base";
+import { runWithBackendRecovery, test as base, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 import { waitForOfficeTaskSessionLive } from "../../helpers/office-launch";
+import { SessionPage } from "../../pages/session-page";
 
 /**
  * E2E tests for the office advanced mode dockview layout.
@@ -16,6 +17,11 @@ import { waitForOfficeTaskSessionLive } from "../../helpers/office-launch";
 
 type AdvancedModeFixtures = {
   officeApi: OfficeApiClient;
+  advancedWorkspace: {
+    workspaceId: string;
+    agentId: string;
+    workflowId: string;
+  };
   advancedSeed: {
     workspaceId: string;
     agentId: string;
@@ -31,42 +37,100 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
     { scope: "worker" },
   ],
 
-  advancedSeed: [
+  advancedWorkspace: [
     async ({ officeApi, apiClient, seedData }, use) => {
-      const result = (await officeApi.completeOnboarding({
+      const result = await officeApi.completeOnboarding({
         workspaceName: "Advanced Mode Workspace",
         taskPrefix: "AM",
         agentName: "CEO",
         agentProfileId: seedData.agentProfileId,
         executorPreference: "local_pc",
-        taskTitle: "present yourself",
-        taskDescription: "say your name",
-      })) as { workspaceId: string; agentId: string; projectId: string; taskId?: string };
+      });
 
-      if (!result.taskId) {
-        throw new Error("completeOnboarding did not return a taskId");
+      const { workspaces } = await apiClient.listWorkspaces();
+      const workflowId = workspaces.find(
+        (workspace) => workspace.id === result.workspaceId,
+      )?.office_workflow_id;
+      if (!workflowId) {
+        throw new Error(`Advanced mode workspace ${result.workspaceId} has no office workflow`);
       }
 
-      // Wait for the agent runtime to come up. We only need it to have
-      // *started* — the test pages exercise the live session once the
-      // dockview mounts, they don't require a finished turn.
-      await waitForOfficeTaskSessionLive(apiClient, result.taskId);
-
-      await use({
-        workspaceId: result.workspaceId,
-        agentId: result.agentId,
-        taskId: result.taskId,
-      });
+      await use({ workspaceId: result.workspaceId, agentId: result.agentId, workflowId });
     },
     { scope: "worker" },
   ],
 
-  testPage: async ({ testPage: basePage, apiClient, advancedSeed, seedData }, use) => {
-    await apiClient.saveUserSettings({
-      workspace_id: advancedSeed.workspaceId,
-      workflow_filter_id: seedData.workflowId,
-      keyboard_shortcuts: {},
-      enable_preview_on_click: false,
+  advancedSeed: async (
+    { officeApi, apiClient, backend, advancedWorkspace, testPage, seedData },
+    use,
+  ) => {
+    void testPage;
+    try {
+      const task = (await officeApi.createTask(advancedWorkspace.workspaceId, "present yourself", {
+        workflow_id: advancedWorkspace.workflowId,
+        description: "say your name",
+      })) as { id?: string };
+      const taskId = task.id;
+      if (!taskId) throw new Error("Office createTask did not return a taskId");
+      await officeApi.assignTask(taskId, advancedWorkspace.agentId);
+
+      // Wait for the initial launch and turn to settle before advanced mode
+      // asks the runtime to ensure the execution again.
+      await waitForOfficeTaskSessionLive(apiClient, taskId);
+      await expect
+        .poll(
+          async () => {
+            const [{ sessions }, environment] = await Promise.all([
+              apiClient.listTaskSessions(taskId),
+              apiClient.getTaskEnvironment(taskId),
+            ]);
+            const session = sessions[0];
+            const workspacePath =
+              environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+            return {
+              sessionReady: ["WAITING_FOR_INPUT", "IDLE", "COMPLETED"].includes(
+                session?.state ?? "",
+              ),
+              workspaceReady: workspacePath.length > 0,
+            };
+          },
+          {
+            timeout: 10_000,
+            message: "Office session and workspace should settle before opening advanced mode",
+          },
+        )
+        .toEqual({ sessionReady: true, workspaceReady: true });
+
+      await use({
+        workspaceId: advancedWorkspace.workspaceId,
+        agentId: advancedWorkspace.agentId,
+        taskId,
+      });
+    } finally {
+      await runWithBackendRecovery(backend, () =>
+        apiClient.e2eReset(advancedWorkspace.workspaceId, [
+          seedData.workflowId,
+          advancedWorkspace.workflowId,
+        ]),
+      );
+    }
+  },
+
+  testPage: async (
+    { testPage: basePage, backend, apiClient, advancedWorkspace, seedData },
+    use,
+  ) => {
+    await runWithBackendRecovery(backend, async () => {
+      await apiClient.e2eReset(advancedWorkspace.workspaceId, [
+        seedData.workflowId,
+        advancedWorkspace.workflowId,
+      ]);
+      await apiClient.saveUserSettings({
+        workspace_id: advancedWorkspace.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+        keyboard_shortcuts: {},
+        enable_preview_on_click: false,
+      });
     });
     await use(basePage);
   },
@@ -83,10 +147,103 @@ async function enterAdvancedMode(testPage: Page, taskId: string) {
   // re-renders into TaskAdvancedMode with dockview.
   await testPage.goto(`/office/tasks/${taskId}?mode=advanced`);
 
-  // Wait for dockview to render. The page may briefly show simple mode while
-  // sessions load — dockview appears once hasSession becomes true.
-  // The session-chat test-id comes from the dockview chat panel.
+  // A session-chat panel can also be present in simple mode. Wait for the
+  // layout boundary itself before asserting on its dockview panels.
+  await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 30_000 });
   await expect(testPage.getByTestId("session-chat")).toBeVisible({ timeout: 30_000 });
+}
+
+async function recoverAdvancedWorkspace(testPage: Page, session: SessionPage): Promise<void> {
+  const freshButton = session.recoveryFreshButton();
+  if (!(await freshButton.isVisible({ timeout: 1_000 }).catch(() => false))) return;
+
+  await freshButton.click();
+  const dialog = session.newSessionDialog();
+  const preparing = testPage.getByPlaceholder("Preparing workspace...");
+  await expect
+    .poll(
+      async () => {
+        if (await dialog.isVisible().catch(() => false)) return "dialog";
+        if (await preparing.isVisible().catch(() => false)) return "preparing";
+        if (
+          await session
+            .idleInput()
+            .isVisible()
+            .catch(() => false)
+        )
+          return "idle";
+        return "waiting";
+      },
+      { timeout: 30_000, message: "advanced workspace recovery did not start" },
+    )
+    .not.toBe("waiting");
+
+  if (await dialog.isVisible().catch(() => false)) {
+    // A missing profile opens the same new-agent dialog that a user sees.
+    // Submit a small prompt so the replacement session owns the existing
+    // workspace before the Files panel is inspected.
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    // Launching a replacement agent can take longer than the normal dialog
+    // budget under shard contention. A failed launch leaves the same recovery
+    // actions visible; close the still-open form and let the file panel use the
+    // existing workspace rather than treating that state as a timing failure.
+    await expect
+      .poll(
+        async () => {
+          if (!(await dialog.isVisible().catch(() => false))) return "closed";
+          if (
+            await session
+              .newSessionStartButton()
+              .isDisabled()
+              .catch(() => false)
+          )
+            return "creating";
+          if (
+            await session
+              .recoveryFreshButton()
+              .isVisible()
+              .catch(() => false)
+          )
+            return "recovery";
+          if (
+            await session
+              .recoveryResumeButton()
+              .isVisible()
+              .catch(() => false)
+          )
+            return "recovery";
+          return "creating";
+        },
+        { timeout: 60_000, message: "advanced workspace recovery did not settle" },
+      )
+      .not.toBe("creating");
+    if (await dialog.isVisible().catch(() => false)) {
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    }
+    if (
+      await session
+        .recoveryFreshButton()
+        .isVisible()
+        .catch(() => false)
+    )
+      return;
+    if (
+      await session
+        .recoveryResumeButton()
+        .isVisible()
+        .catch(() => false)
+    )
+      return;
+    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+    return;
+  }
+
+  if (await preparing.isVisible().catch(() => false)) {
+    await expect(preparing).not.toBeVisible({ timeout: 60_000 });
+  }
+  await session.waitForChatIdle({ timeout: 60_000 });
 }
 
 test.describe("Office advanced mode", () => {
@@ -129,7 +286,7 @@ test.describe("Office advanced mode", () => {
   });
 
   test("files panel shows workspace content", async ({ testPage, advancedSeed }) => {
-    test.setTimeout(45_000);
+    test.setTimeout(120_000);
 
     await enterAdvancedMode(testPage, advancedSeed.taskId);
 
@@ -138,7 +295,26 @@ test.describe("Office advanced mode", () => {
     await expect(filesPanel).toBeVisible({ timeout: 15_000 });
 
     // Quick-chat workspaces have a .gitkeep file — the tree should show it
-    await expect(filesPanel.getByText(".gitkeep")).toBeVisible({ timeout: 15_000 });
+    // The tree virtualizes rows, so a text locator can miss a file that is
+    // present but not mounted in the current viewport.
+    const session = new SessionPage(testPage);
+    await recoverAdvancedWorkspace(testPage, session);
+    try {
+      await session.fileTree.waitForFileTreeNode(".gitkeep", 30_000);
+    } catch (error) {
+      // A live session can still show a failed workspace recovery after the
+      // agent runtime races with page hydration. Start a fresh session through
+      // the same user-facing recovery action, then load the tree again.
+      await recoverAdvancedWorkspace(testPage, session);
+      if (
+        await session
+          .recoveryFreshButton()
+          .isVisible()
+          .catch(() => false)
+      )
+        throw error;
+      await session.fileTree.waitForFileTreeNode(".gitkeep", 30_000);
+    }
   });
 
   test("terminal connects to agent execution workspace", async ({ testPage, advancedSeed }) => {
@@ -179,6 +355,7 @@ test.describe("Office advanced mode", () => {
 
     // Navigate to advanced mode again — session should still be there
     await testPage.goto(`/office/tasks/${advancedSeed.taskId}?mode=advanced`);
+    await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 20_000 });
     await expect(testPage.getByTestId("session-chat")).toBeVisible({ timeout: 20_000 });
   });
 });

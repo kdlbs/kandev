@@ -7,6 +7,7 @@ import {
   createWorkflowAgentProfiles,
   waitForWorkflowProfileSession,
 } from "./workflow-agent-switch-helpers";
+import { waitForWorkflowMoveLifecycle } from "../task/task-workflow-agent-overrides-helpers";
 import { seedMoveOverrideFixture } from "./workflow-step-move-overrides-helpers";
 import {
   applyHarmlessPreviewUpdate,
@@ -189,6 +190,7 @@ test.describe("Workflow move preview", () => {
     );
     const initialSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
     await apiClient.moveTask(task.id, workflow.id, bridge.id);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
     await waitForWorkflowProfileSession(apiClient, task.id, profileB.id);
 
     await testPage.goto(`/t/${task.id}`);
@@ -206,6 +208,7 @@ test.describe("Workflow move preview", () => {
     );
     await returnPreview.popover.getByTestId("workflow-step-move-here").click();
     await returnMove;
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
     await expect
       .poll(() => apiClient.getTask(task.id).then((current) => current.primary_session_id))
       .toBe(initialSessionId);
@@ -221,6 +224,7 @@ test.describe("Workflow move preview", () => {
     );
     await freshPreview.popover.getByTestId("workflow-step-move-here").click();
     await freshMove;
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
     const freshSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileC.id);
     expect(freshSessionId).not.toBe(initialSessionId);
   });

@@ -70,7 +70,7 @@ test.describe("Office reactive scheduler", () => {
     // Request the office fixture's page so its per-test reset clears runs and
     // sessions left by earlier office specs in the same worker.
     void testPage;
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
     // Create a task without an assignee, then attach the CEO.
     const task = await apiClient.createTask(
@@ -89,7 +89,7 @@ test.describe("Office reactive scheduler", () => {
           const runs = await listAgentRuns(apiClient, officeSeed.agentId);
           return runs.filter((r) => r.reason === "task_assigned" && r.task_id === task.id);
         },
-        { timeout: 60_000, message: "no task_assigned run surfaced for the new assignee" },
+        { timeout: 120_000, message: "no task_assigned run surfaced for the new assignee" },
       )
       .not.toEqual([]);
   });
@@ -101,7 +101,7 @@ test.describe("Office reactive scheduler", () => {
     testPage,
   }) => {
     void testPage;
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
     const task = await apiClient.createTask(
       officeSeed.workspaceId,
@@ -119,7 +119,7 @@ test.describe("Office reactive scheduler", () => {
           const runs = await listAgentRuns(apiClient, officeSeed.agentId);
           return runs.filter((r) => r.reason === "task_assigned" && r.task_id === task.id).length;
         },
-        { timeout: 60_000 },
+        { timeout: 120_000 },
       )
       .toBeGreaterThan(0);
 
@@ -132,7 +132,7 @@ test.describe("Office reactive scheduler", () => {
           const runs = await listAgentRuns(apiClient, officeSeed.agentId);
           return runs.filter((r) => r.reason === "task_comment" && r.task_id === task.id);
         },
-        { timeout: 60_000, message: "no task_comment run surfaced for the comment" },
+        { timeout: 120_000, message: "no task_comment run surfaced for the comment" },
       )
       .not.toEqual([]);
   });

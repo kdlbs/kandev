@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
-import { workflowId } from "@/lib/types/ids";
+import { sessionId, workflowId } from "@/lib/types/ids";
 import type { Task } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
@@ -40,7 +40,11 @@ vi.mock("@/lib/api/domains/user-shell-api", () => ({
   fetchTerminals: vi.fn(),
 }));
 
-import { fetchSessionDataForTask, OPTIONAL_HYDRATION_TIMEOUT_MS } from "./session-page-state";
+import {
+  fetchTaskNavigationData,
+  fetchSessionDataForTask,
+  OPTIONAL_HYDRATION_TIMEOUT_MS,
+} from "./session-page-state";
 
 const NOW = "2026-07-16T12:00:00Z";
 const TASK_ID = "task-1";
@@ -115,6 +119,39 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(initialState.workspaces?.items[0]?.office_workflow_id).toBe("workflow-office");
   });
 
+  it("hydrates the requested session only when it belongs to the route task", async () => {
+    const primary = makeSession();
+    const requested = { ...makeSession(), id: sessionId("session-requested") };
+    mocks.fetchTask.mockResolvedValue(makeTask({ primary_session_id: sessionId(primary.id) }));
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [primary, requested], total: 2 });
+    mocks.fetchTaskSession.mockResolvedValue({ session: requested });
+
+    const result = await fetchSessionDataForTask(TASK_ID, requested.id);
+
+    expect(mocks.fetchTaskSession).toHaveBeenCalledWith(requested.id, { cache: "no-store" });
+    expect(result.sessionId).toBe(requested.id);
+  });
+
+  it("rejects a requested session that is not in the route task's session list", async () => {
+    const primary = makeSession();
+    mocks.fetchTask.mockResolvedValue(makeTask({ primary_session_id: sessionId(primary.id) }));
+    mocks.listTaskSessions.mockResolvedValue({
+      sessions: [
+        primary,
+        { ...makeSession(), id: sessionId("other-task-session"), task_id: "task-other" },
+      ],
+      total: 2,
+    });
+    mocks.fetchTaskSession.mockResolvedValue({ session: primary });
+
+    const result = await fetchSessionDataForTask(TASK_ID, sessionId("other-task-session"));
+
+    expect(mocks.fetchTaskSession).toHaveBeenCalledWith(primary.id, { cache: "no-store" });
+    expect(result.sessionId).toBe(primary.id);
+  });
+});
+
+describe("fetchSessionDataForTask per-turn hydration", () => {
   it("hydrates persisted per-turn runtime configuration after a page reload", async () => {
     const session = makeSession();
     const runtimeConfigSnapshot = {
@@ -178,7 +215,9 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(hydratedState.turns.loadedBySession[SESSION_ID]).toBeUndefined();
     expect(hydratedState.turns.loadedBySession).toEqual({});
   });
+});
 
+describe("fetchSessionDataForTask model hydration", () => {
   it("hydrates the persisted model selector before the first render", async () => {
     const session = {
       ...makeSession(),
@@ -392,5 +431,40 @@ describe("fetchSessionDataForTask timeout behavior", () => {
       String(message).includes("optional workspaces"),
     );
     expect(workspaceWarnings).toHaveLength(1);
+  });
+});
+
+describe("fetchTaskNavigationData", () => {
+  it("hydrates only essential task/session state without optional boot requests", async () => {
+    const session = makeSession();
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session] });
+    const result = await fetchTaskNavigationData(TASK_ID);
+    expect(result.sessionId).toBe(SESSION_ID);
+    expect(result.initialState.taskSessions?.items[SESSION_ID]).toEqual(session);
+    expect(result.initialState.taskSessionsByTask?.loadedByTaskId[TASK_ID]).toBe(true);
+    expect(result.initialState.messages).toBeUndefined();
+    expect(result.initialState.turns).toBeUndefined();
+    for (const [name, mock] of Object.entries(mocks)) {
+      if (name === "fetchTask" || name === "listTaskSessions") continue;
+      expect(mock, name).not.toHaveBeenCalled();
+    }
+  });
+
+  it("ignores a requested session owned by another task", async () => {
+    const session = makeSession();
+    mocks.listTaskSessions.mockResolvedValue({
+      sessions: [{ ...session, id: "foreign-session", task_id: "foreign-task" }, session],
+    });
+    const result = await fetchTaskNavigationData(TASK_ID, "foreign-session");
+    expect(result.sessionId).toBe(SESSION_ID);
+    expect(Object.keys(result.initialState.taskSessions!.items)).toEqual([SESSION_ID]);
+  });
+
+  it("keeps a sessionless task sessionless without waiting for enrichment", async () => {
+    const result = await fetchTaskNavigationData(TASK_ID);
+    expect(result.sessionId).toBeNull();
+    expect(result.initialState.taskSessionsByTask?.itemsByTaskId[TASK_ID]).toEqual([]);
+    expect(result.initialState.messages).toBeUndefined();
+    expect(mocks.listAgents).not.toHaveBeenCalled();
   });
 });

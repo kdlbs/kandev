@@ -20,6 +20,7 @@ remains authoritative for task data and permissions.
 ## Requirements
 
 - [Agent-authored web-app canvases](requirements/agent-authored-web-apps.md)
+- [Canvas default availability](requirements/default-availability.md)
 - [Task canvas workspace data preview](requirements/task-canvas-workspace-preview.md)
 - [Canvas marketplace and sharing](requirements/marketplace-sharing.md)
 - [Deprecated collaborative canvases](requirements/collaborative-canvases.md)
@@ -27,6 +28,7 @@ remains authoritative for task data and permissions.
 ## System design
 
 - [Agent-authored web-app canvases](system-design/agent-authored-web-apps.md)
+- [Canvas default availability](system-design/default-availability.md)
 - [Task canvas workspace data preview](system-design/task-canvas-workspace-preview.md)
 - [Canvas marketplace and sharing](system-design/marketplace-sharing.md)
 - [Superseded collaborative canvases](system-design/collaborative-canvases.md)
