@@ -2,8 +2,8 @@
 
 /**
  * The status row above the chat composer: todos, the autopilot / dependency /
- * PR / MR chips, the queue chip, archive banners, transcript navigation, and
- * the proceed button.
+ * PR / MR chips, the queue chip, archive banners, right-hand chat controls,
+ * and the proceed button.
  *
  * Split out of `chat-input-area.tsx`, which was at its 600-line limit. The row
  * is a self-contained unit: it reads the task and session ids and renders
@@ -21,6 +21,7 @@ import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
+import { ConversationUsageDisplay } from "@/components/task/chat/conversation-usage-display";
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
@@ -102,20 +103,22 @@ function getRightControlVisibility({
   showThreadsLink: boolean;
 }) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  const showConversationUsage = !!taskId && !!sessionId;
   const showRightControls =
     (showAutoScrollControl && !!sessionId) ||
+    showConversationUsage ||
     canShare ||
     showThreadsLink ||
     !!showScrollToLastPrompt ||
     !!showScrollToStart ||
     !!showJumpToLatest;
-  return { canShare, showRightControls };
+  return { canShare, showConversationUsage, showRightControls };
 }
 
 /**
  * Row above the composer showing todo progress, PR/CI status chips,
- * merged/closed PR banners, the auto-scroll toggle + Share (right-aligned),
- * and a "move to next step" action when the workflow allows it.
+ * merged/closed PR banners, the right-aligned chat controls, and a "move to
+ * next step" action when the workflow allows it.
  */
 export type ChatStatusBarProps = {
   todoItems: TodoDisplayItem[];
@@ -159,8 +162,22 @@ export function ComposerCIStatus({
   );
 }
 
+function ChatStatusBarArchiveBanners({ taskId }: { taskId: string | null }) {
+  if (!taskId) return null;
+  return (
+    <>
+      {/* Distinct keys remount each banner on task switch and avoid a duplicate-sibling-key collision. */}
+      <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />
+      <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />
+    </>
+  );
+}
+
 function ChatStatusBarRightControls({
   canShare,
+  showAutoScrollControl,
+  showConversationUsage,
+  showThreadsLink,
   taskId,
   sessionId,
   showJumpToLatest,
@@ -181,11 +198,19 @@ function ChatStatusBarRightControls({
   | "lastPromptScrollDirection"
   | "showScrollToStart"
   | "onScrollToStart"
-> & { canShare: boolean }) {
+> & {
+  canShare: boolean;
+  showAutoScrollControl: boolean;
+  showConversationUsage: boolean;
+  showThreadsLink: boolean;
+}) {
   return (
-    <div className="ml-auto flex shrink-0 items-center gap-1.5">
-      <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />
-      {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
+    <div
+      data-testid="chat-status-bar-right-controls"
+      className="ml-auto flex shrink-0 items-center gap-1.5 empty:hidden"
+    >
+      {showThreadsLink && <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />}
+      {showAutoScrollControl && sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
       <TranscriptNavGroup
         canShare={canShare}
         taskId={taskId}
@@ -197,6 +222,11 @@ function ChatStatusBarRightControls({
         lastPromptScrollDirection={lastPromptScrollDirection}
         showScrollToStart={showScrollToStart}
         onScrollToStart={onScrollToStart}
+        usageControl={
+          showConversationUsage && taskId && sessionId ? (
+            <ConversationUsageDisplay taskId={taskId} sessionId={sessionId} />
+          ) : null
+        }
       />
     </div>
   );
@@ -239,7 +269,7 @@ export function ChatStatusBar({
     const goal = getAgentGoal(activeGoalMetadata);
     return goal?.status === "active" ? goal : null;
   }, [activeGoalMetadata]);
-  const { canShare, showRightControls } = getRightControlVisibility({
+  const { canShare, showConversationUsage, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
     sessionState,
@@ -274,14 +304,13 @@ export function ChatStatusBar({
       {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
       <BackgroundWorkChip sessionId={sessionId} />
       {queueChip}
-      {/* Distinct per-banner keys: the key remounts the banner on task switch
-          so its dismissed state re-initialises, and keeping the two suffixes
-          different avoids a duplicate-sibling-key collision. */}
-      {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
-      {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
+      <ChatStatusBarArchiveBanners taskId={taskId} />
       {showRightControls && (
         <ChatStatusBarRightControls
           canShare={canShare}
+          showAutoScrollControl={showAutoScrollControl}
+          showConversationUsage={showConversationUsage}
+          showThreadsLink={showThreadsLink}
           taskId={taskId}
           sessionId={sessionId}
           showJumpToLatest={showJumpToLatest}

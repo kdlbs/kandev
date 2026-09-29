@@ -11,12 +11,22 @@ test("shows usage in the mobile drawer with touch-sized controls", async ({
   test.setTimeout(60_000);
   await openConversationUsageTask(testPage, apiClient, seedData, "Mobile conversation usage");
 
-  const trigger = testPage.getByTestId("conversation-usage-trigger");
+  const statusBar = testPage.getByTestId("chat-status-bar");
+  const trigger = statusBar.getByTestId("conversation-usage-trigger");
   await expect(trigger).toBeVisible({ timeout: 15_000 });
+  await expect(testPage.getByTestId("conversation-usage-trigger")).toHaveCount(1);
+  await expect(trigger).toHaveAccessibleName("Usage");
+  await expect(trigger).toHaveText("");
   const triggerBox = await trigger.boundingBox();
   expect(triggerBox).not.toBeNull();
   expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
   expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+  const statusBarBox = await statusBar.boundingBox();
+  expect(statusBarBox).not.toBeNull();
+  expect(triggerBox!.x).toBeGreaterThanOrEqual(statusBarBox!.x - 1);
+  expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(
+    statusBarBox!.x + statusBarBox!.width + 1,
+  );
   await trigger.tap();
 
   const drawerScroll = testPage.getByTestId("conversation-usage-drawer");
