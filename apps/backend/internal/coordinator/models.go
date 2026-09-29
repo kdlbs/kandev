@@ -16,6 +16,18 @@ import (
 // The dispatch site is owned by a later work package.
 const ActionProposeTask = mcpcontract.ActionProposeTask
 
+// ActionApproveProposal, ActionRejectProposal and DecisionActions re-export
+// mcpcontract's reserved decision action names
+// (docs/specs/coordinator/system-design/proposals.md#security) for callers
+// that already import this package.
+const (
+	ActionApproveProposal = mcpcontract.ActionApproveProposal
+	ActionRejectProposal  = mcpcontract.ActionRejectProposal
+)
+
+// DecisionActions is mcpcontract.DecisionActions, re-exported.
+var DecisionActions = mcpcontract.DecisionActions
+
 // Coordinator is a workspace's coordinator configuration.
 type Coordinator struct {
 	ID                 string

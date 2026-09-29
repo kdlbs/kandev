@@ -27,6 +27,12 @@ var coordinatorSurfaceActions = map[string]struct{}{
 // fixed coordinator surface: a coordinator principal may call only the six
 // allowlisted actions, each scoped to its own workspace, and
 // coordinator.propose_task may only be called by a coordinator principal.
+// Before either of those checks, the reserved decision action names
+// (coordinator.DecisionActions) are refused for a coordinator principal or an
+// unresolved (no) principal, per
+// docs/specs/coordinator/system-design/proposals.md#security; an ordinary
+// principal is left untouched here and reaches the dispatcher, which answers
+// the same unregistered action as unknown.
 //
 // Cross-workspace checks on coordinator.propose_task's own workflow_id,
 // step_id, repository_id and source_task_id fields are deliberately left to
@@ -37,6 +43,9 @@ func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Mess
 	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
 	isCoordinator := hasPrincipal && principal.IsCoordinator()
 
+	if _, reserved := coordinator.DecisionActions[msg.Action]; reserved && (isCoordinator || !hasPrincipal) {
+		return coordinatorUnknownAction(msg)
+	}
 	if msg.Action == coordinator.ActionProposeTask && !isCoordinator {
 		return coordinatorUnknownAction(msg)
 	}
