@@ -22,6 +22,7 @@ system_design:
   - ../../specs/coordinator/system-design/copilot.md
   - ../../specs/coordinator/system-design/coordinators.md
   - ../../specs/coordinator/system-design/proposals.md
+  - ../../specs/coordinator/system-design/proposal-cards.md
 ---
 
 # Task 12: Maintainer Review Follow-ups (WP-4f)
