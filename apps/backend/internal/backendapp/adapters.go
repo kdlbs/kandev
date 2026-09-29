@@ -1561,6 +1561,25 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	return err
 }
 
+// CreateLifecycleSessionMessage persists a message in an already-completed
+// lifecycle-only turn.
+func (a *messageCreatorAdapter) CreateLifecycleSessionMessage(
+	ctx context.Context,
+	taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
 func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
 	metadata := map[string]interface{}{

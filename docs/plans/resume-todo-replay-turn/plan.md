@@ -47,8 +47,9 @@ not change resume scheduling.
 
 ### In scope
 
-- Resolve the todo message's turn without creating one.
-- Regression tests for the no-active-turn and active-turn cases.
+- Resolve the todo message's turn without creating one; persist out-of-turn
+  todo reports in an already-completed lifecycle-only turn.
+- Regression tests for the no-active-turn, active-turn, and replay-then-step-change cases.
 
 ### Out of scope
 
@@ -61,19 +62,24 @@ not change resume scheduling.
 
 Follow the [system design](../../specs/tasks/system-design/workflow-explicit-completion-signal.md)
 section "Resume replay turn ownership". In `persistTodoMessage`, replace
-`getActiveTurnID` with `currentTurnIDForSession` and return early when it is
-empty. `handleSessionTodosEvent` keeps publishing `SessionTodosUpdated` first.
+`getActiveTurnID` with `currentTurnIDForSession`. With no active turn, write the
+message through a new `MessageCreator.CreateLifecycleSessionMessage`, backed by
+the task service's existing `CompletedTurn` request field. The first review
+revision skipped persistence instead; review pointed out that a client opened
+later would then fall back to an older persisted list.
+`handleSessionTodosEvent` keeps publishing `SessionTodosUpdated` first.
 
 ## Tests
 
 | Acceptance | Regression evidence |
 | --- | --- |
-| 004.1 | `event_handlers_streaming_test.go:TestReplayedTodosWithoutActiveTurnDoNotCreateTurn` |
+| 004.1 | `event_handlers_streaming_test.go:TestTodosWithoutActiveTurnPersistInCompletedLifecycleTurn` |
 | 004.2 | `event_handlers_streaming_test.go:TestTodosAttachToExistingActiveTurn` |
-| 004.3 | Follows from 004.1: with no open turn, `startTurnForSessionWithOwnershipChecked` creates one stamped by `CreateTurnWithStepStamp`, already covered by the turn stamp tests |
+| 004.3 | `event_handlers_streaming_test.go:TestTodoReplayBeforeStepChangeLetsNextPromptStartCurrentStepTurn` |
 
 All short suffixes refer to `AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.*`.
-The 004.1 test failed on the unmodified code (one open turn) and passes with the fix.
+On the unmodified code, the replay left one open turn, and the next prompt
+adopted it with the earlier step's stamp. Both tests pass with the fix.
 
 ## Work orders
 

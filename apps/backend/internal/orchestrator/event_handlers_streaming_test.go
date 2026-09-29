@@ -291,6 +291,23 @@ func (m *serviceBackedMessageCreator) CreateSessionMessageIdempotent(
 	return err
 }
 
+func (m *serviceBackedMessageCreator) CreateLifecycleSessionMessage(
+	ctx context.Context,
+	taskID, content, sessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := m.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	ctx context.Context,
 	taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string,
@@ -1227,7 +1244,7 @@ func TestResumedSessionStatusUsesExistingActiveTurn(t *testing.T) {
 	require.Equal(t, "Session resumed", messages[0].Content)
 }
 
-func TestReplayedTodosWithoutActiveTurnDoNotCreateTurn(t *testing.T) {
+func TestTodosWithoutActiveTurnPersistInCompletedLifecycleTurn(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task1", "session1", "step1")
@@ -1245,10 +1262,40 @@ func TestReplayedTodosWithoutActiveTurnDoNotCreateTurn(t *testing.T) {
 		[]streams.PlanEntry{{Description: "fix blockers", Status: agentEventCompleted}})
 
 	require.Zero(t, openTurnCount(t, repo, "session1"),
-		"a todo replay on resume must not open a prompt-less turn that the next prompt would adopt")
+		"a todo report outside a turn must not leave an open turn for the next prompt to adopt")
 	messages, err := repo.ListMessages(ctx, "session1")
 	require.NoError(t, err)
-	require.Empty(t, messages, "a todo replay without an active turn must not persist a message")
+	require.Len(t, messages, 1, "a todo report outside a turn must stay durable")
+	require.Equal(t, string(models.MessageTypeTodo), string(messages[0].Type))
+	turn, err := repo.GetTurn(ctx, messages[0].TurnID)
+	require.NoError(t, err)
+	require.NotNil(t, turn.CompletedAt, "the todo message's turn must already be completed")
+	require.Equal(t, true, turn.Metadata[models.TurnMetaKeyLifecycleOnly])
+}
+
+func TestTodoReplayBeforeStepChangeLetsNextPromptStartCurrentStepTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step-review")
+
+	messages := newServiceBackedMessageCreator(repo)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = messages.svc
+	svc.messageCreator = messages
+
+	svc.persistTodoMessage(ctx, "task1", "session1",
+		[]streams.PlanEntry{{Description: "earlier work", Status: agentEventCompleted}})
+
+	task, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-work"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	turnID, created := svc.startTurnForSessionWithOwnership(ctx, "session1")
+	require.True(t, created, "the next prompt must start its own turn, not adopt one from the replay")
+	turn, err := repo.GetTurn(ctx, turnID)
+	require.NoError(t, err)
+	require.Equal(t, "step-work", turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart])
 }
 
 func TestTodosAttachToExistingActiveTurn(t *testing.T) {

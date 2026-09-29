@@ -105,8 +105,9 @@ and makes every completion attempt in it stale.
 
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.1:** When an agent reports
   its todo list while the session has no active turn, as it does when a resumed
-  session replays state before any prompt, the system does not create a turn and
-  does not persist a todo message. The live todo update is still broadcast.
+  session replays state before any prompt, the system does not start or leave an
+  open turn. The todo message is persisted in an already-completed lifecycle-only
+  turn, so the latest list stays durable. The live todo update is still broadcast.
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.2:** When the session has an
   active turn, a todo report is persisted as a todo message attached to that turn.
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.3:** After such a replay, the

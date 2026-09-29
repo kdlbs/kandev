@@ -101,10 +101,13 @@ workflow prompt. Every completion attempt in that turn then carried the old
 launch stamp and was rejected as stale.
 
 `persistTodoMessage` resolves the turn through `currentTurnIDForSession`,
-which never creates one. With no active turn the todo message is not persisted.
-The `SessionTodosUpdated` bus event is still published, so live clients keep
-the current list. The same rule already applies to the "Session resumed"
-status message in `handleSessionStatusEvent`.
+which never creates one. Inside an active turn the todo message attaches to it.
+Without one, the message goes through `MessageCreator.CreateLifecycleSessionMessage`,
+which uses the task service's `CompletedTurn` path: a new lifecycle-only turn
+that is completed on insert, the same mechanism as the resume boot message.
+The list stays durable, so a client that loads later still gets the latest
+todos, and no active turn exists for a later prompt to adopt. The
+`SessionTodosUpdated` bus event is still published first for live clients.
 
 This keeps `workflow_step_id_at_start` immutable and leaves the mismatch guard
 unchanged. It removes a source of prompt-less turns; it does not suppress
@@ -134,8 +137,10 @@ step returns `advances:false` with a `note`; a step that fails to resolve
 omits both fields.
 
 Orchestrator tests cover resume replay ownership with the SQLite-backed task
-service: a todo report without an active turn creates neither a turn nor a
-message, and a todo report with an active turn attaches to it.
+service: a todo report without an active turn is stored in a completed
+lifecycle-only turn and leaves no open turn; a todo report with an active turn
+attaches to it; and after a replay and a step change, the next prompt starts a
+new turn stamped with the current step.
 
 ## Related decisions and contracts
 
