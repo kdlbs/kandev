@@ -48,6 +48,11 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.POST("/coordinators/:cid/proposals/:pid/approve", h.httpApproveProposal)
 	workspace.POST("/coordinators/:cid/proposals/:pid/reject", h.httpRejectProposal)
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
+	if svc.phase2 {
+		workspace.GET("/coordinators/:cid/activity", h.httpListActivity)
+		workspace.GET("/coordinators/:cid/activity/summary", h.httpActivitySummary)
+		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
+	}
 }
 
 // coordinatorDTO builds the coordinator wire shape, adding the phase-2 policy
@@ -276,7 +281,10 @@ func (h *Handlers) httpListStalls(c *gin.Context) {
 func (h *Handlers) respondError(c *gin.Context, err error) {
 	var fieldErr *FieldError
 	var conflictErr *ProposalConflictError
+	var undoErr *UndoRefusal
 	switch {
+	case errors.As(err, &undoErr):
+		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
 	case errors.As(err, &conflictErr):
