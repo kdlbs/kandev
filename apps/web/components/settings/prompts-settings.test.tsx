@@ -22,6 +22,7 @@ vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => ({ prompts: { items: mocks.prompts } }) }),
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({ prompts: { items: mocks.prompts }, setPrompts: mocks.setPrompts }),
 }));
@@ -275,9 +276,11 @@ describe("PromptsSettings deletion requests", () => {
 
 describe("PromptsSettings coordinated creation", () => {
   it("treats an opened create form as a dirty route draft", () => {
-    expect(getPromptDraftMeta([], null, true, { name: "", content: "" })).toEqual({
+    expect(
+      getPromptDraftMeta([], null, true, { name: "", content: "", allowAgentEdits: false }),
+    ).toEqual({
       isDirty: true,
-      revision: 'new:{"name":"","content":""}',
+      revision: 'new:{"name":"","content":"","allowAgentEdits":false}',
     });
   });
 

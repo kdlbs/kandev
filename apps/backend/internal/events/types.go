@@ -1,6 +1,9 @@
 // Package events provides event types and utilities for the Kandev event system.
 package events
 
+// PromptsChanged invalidates instance-wide saved prompt caches without carrying content.
+const PromptsChanged = "prompts.changed"
+
 // Event types for tasks
 const (
 	TaskCreated       = "task.created"

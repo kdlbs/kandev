@@ -249,7 +249,7 @@ func (s *settingsOperations) updatePrompt(ctx context.Context, id string, change
 	if err := decodeOptionalChange(changes, "content", &content); err != nil {
 		return nil, err
 	}
-	return s.deps.prompts.UpdatePrompt(ctx, id, name, content)
+	return s.deps.prompts.UpdatePromptForAgent(ctx, id, name, content)
 }
 
 func (s *settingsOperations) readEditor(ctx context.Context, id string) (any, error) {
