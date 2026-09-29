@@ -147,8 +147,11 @@ phase-2 flag on:
 The list orders `created_at DESC, id DESC`. `limit` is an integer from 1
 to 50, 50 when absent; anything else, including empty, is 400 naming
 `limit` (`002.7`). The route reads `limit + 1` rows and returns
-`next_cursor` only when the extra row exists, else null. The cursor is an
-opaque base64 of `(created_at, id)`, bound to nothing else, so it works with
+`next_cursor` only when the extra row exists, else null. The cursor is the
+unpadded base64url of the JSON `{"t": created_at as RFC 3339 with nanoseconds
+in UTC, "i": id}`, bound to nothing else (a value that is not valid base64url,
+not that JSON or has an unparsable `t` is 400 naming `before`; an empty or
+repeated `before` or `limit` is 400 naming the field), so it works with
 any `class` and `limit`; the next page is `WHERE (created_at, id) < (?, ?)`
 written as the expanded comparison for SQLite. Coalescing changes only
 `updated_at` and `refusal_count`, so it never reorders a page. `class`
@@ -163,8 +166,12 @@ row has a `target_task_id`, a move row's proposal exists and its
 `outcome_json` parses with both `from_step_id` and `to_step_id`; the page's
 move proposals are read in one query by id), `actor_name` resolved from `actor_user_id` through the user
 service at read time, and `undone_by_name` resolved from `undone_by` the
-same way (null while `undone_by` is null); a missing user reads as "A
-former member".
+same way (null while the id is null). The row also carries `actor_missing` and
+`undone_by_missing`, true only when the id is set and the user no longer
+exists (the name is then null); the client shows the translated "A former
+member" for them, so the server sends no display text. When the user service
+fails, the names are null and the flags false for that page, a warn is
+logged and the list still returns.
 
 ## Undo
 
@@ -178,26 +185,36 @@ former member".
    `approved`, class not `create_task` or `move`, a move whose outcome
    has `noop: true`, or not readable per `003.9`: 409 `not_undoable`.
    `undone_at` set: 409 `already_undone`.
-2. **Create.** Call `ArchiveTask(target_task_id)`. `ErrTaskAlreadyArchived`
+2. **Create.** Call `ArchiveTask(target_task_id)`, which also stops any
+   agent working on the task (the dialog says so). `ErrTaskAlreadyArchived`
    and not found count as done. Any other error: 500, nothing written.
 3. **Move.** Read the task and the proposal's `outcome_json.from_step_id`
    and `to_step_id` ([proposal kinds](proposal-kinds.md#approve)), then
-   check in this order, stopping at the first that applies:
+   check in this order, stopping at the first that applies (`003.7`); a
+   `GetTask` or step read error that is not a not-found is 500 with nothing
+   written, and a not-found task is `archived`:
    1. task archived, or not found: 409 `undo_conflict` reason `archived`;
    2. task on `from_step_id` (a retry after a failed step 4, or a person
       who moved it back): counts as reversed; skip the call and go to
       step 4;
-   3. task on `to_step_id`: when `from_step_id` no longer exists, 409
-      `undo_conflict` reason `step_deleted`; otherwise
+   3. task on `to_step_id`. Read the from step through the seam (`GetStep`),
+      then: from step not found, 409 `undo_conflict` reason `step_deleted`;
+      from step completing on enter, `step_done`; any session of the task
+      starting or running (seam `HasActiveSession`, the same two states the
+      task service blocks moves on), `agent_running`. Otherwise call
       `MoveTaskWithOptions(task, workflow, from_step_id, 0, opts)` with
-      `opts.ExpectedWorkflowID` = the workflow just read and
-      `opts.EntryOptions.SkipStepPrompt` = true, so the step is entered
-      without its prompt and no agent starts (`003.8`). The task service
-      refuses the move while a session is starting or running (its
-      session-blocked error): 409 `undo_conflict` reason `agent_running`,
-      row left undoable. A workflow-resolution conflict is 409
-      `undo_conflict` reason `moved`. Any other error is 500 with nothing
-      written;
+      `opts.ExpectedWorkflowID` = the workflow just read, and
+      `opts.EntryOptions.SkipStepPrompt` = true only when the from step
+      auto-starts an agent (a step that does not needs no option: no prompt
+      runs, and the task service refuses entry options for a step with no
+      auto-start and no session), so no agent starts (`003.8`). Results:
+      `ErrWIPLimitExceeded`, 409 reason `step_full`; the move accepted but the
+      task queued behind the step's limit (result `WIPAdmitted` false), counts
+      as moved back and step 4 runs; `ErrWorkflowResolutionConflict` or
+      `ErrMoveConflict`, 409 reason `moved`; a session-blocked refusal that the
+      pre-check missed (a session started in the window, reported by the task
+      service as an unsentineled error) is not classified and, like any other
+      error, is 500 with nothing written, so a retry re-checks;
    4. any other step: 409 `undo_conflict` reason `moved`.
 
    The observed step is not fenced against a person moving the task in
@@ -210,7 +227,8 @@ former member".
    An outcome with `noop: true` was rejected as `not_undoable` in step 1.
 4. In one `withCoordinatorLock` transaction: `UPDATE ... SET undone_at=now,
    undone_by=? WHERE id=? AND undone_at IS NULL` (`undone_by` NULL with
-   authentication off); zero rows is 409 `already_undone`; one row inserts the
+   authentication off); zero rows matched is 409 `already_undone` when the row still exists and 404
+when retention has deleted it meanwhile (the reversal stands); one row inserts the
    `undone` row with `undo_of_id` (`actor_user_id` NULL likewise). A
    coordinator deleted between the reversal and this step makes the lock
    return not found: 404, the reversal stands and nothing else is written.
@@ -243,8 +261,12 @@ resume is `not_undoable`; the UI shows "No undo" (`003.1`).
 `internal/coordinator/undo.go` defines the one interface undo uses, which task
 04 reuses: `ArchiveTask(ctx, id)`, `GetTask(ctx, id)` (archived time,
 workflow id, workflow step id), `MoveTaskWithOptions(ctx, id, workflowID,
-stepID, position, opts)` and `StepExists(ctx, stepID)`. The backend wiring
-adapts the task service; tests use a fake.
+stepID, position, opts)` (returning whether the task was admitted),
+`GetStep(ctx, stepID)` (workflow id, auto-start, completes-on-enter, or
+`ErrStepNotFound`) and `HasActiveSession(ctx, taskID)`. The backend wiring
+adapts the task service for the first four and the workflow service's
+`GetStep` (mapping `ErrWorkflowStepNotFound` to `ErrStepNotFound`) and the
+task's session list for the last two; tests use a fake.
 
 ## Read tool
 
@@ -291,14 +313,14 @@ days through the same service function ([goals](goals.md#baselines)).
 
 ## Retention
 
-While `features.coordinatorPhase2` is on, a daily ticker started with the
+While `features.coordinatorPhase2` is on, a ticker of a fixed 24-hour interval, started with the
 other coordinator background work (and one run in the startup pass, in its
 own goroutine so it never delays readiness)
 deletes `created_at < cutoff` in batches of 500 selected
 `ORDER BY created_at, id LIMIT 500`, each batch its own short transaction, so
 a proposal write waits for at most one batch. The cutoff (now minus 400 days)
 is computed once per run. Runs never overlap: a run that starts while
-another is in progress returns at once. It stops on context cancel. A batch error is logged at warn and the run ends; the next
+another is in progress returns at once. It stops on context cancel, and between batches when the flag reads off. A batch error is logged at warn and the run ends; the next
 run retries (`005.1`). With the flag off neither the ticker nor the startup
 run starts, so no row is deleted by age while phase-2 data is kept
 ([coordinators](coordinators.md#phase-2), `AC-COORDINATOR-COORDINATORS-007.3`);
@@ -312,12 +334,16 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
 
 - Loads the first page on mount; **Load more** appends by cursor; a
   `coordinator.updated` event refetches the first page and merges by id.
-- A class filter select (All plus the six classes); `?class=` in the URL
-  preselects it, which May do's link uses.
+- A class filter select (All, the six classes and "Unknown action"); `?class=`
+  in the URL preselects it, which May do's link uses; an unrecognised value
+  selects All.
 - Columns When, Action, Action class, How it was authorised, Undo, as in
   `AC-COORDINATOR-ACTIVITY-LOG-002.4`. How it was authorised shows
-  "Requires approval" or "Denied", plus "Approved by <name>", "with edits",
-  "x N".
+  "Requires approval" or "Denied", plus "Approved by <name>" ("Approved" when
+  the actor is null and not missing, "Approved by A former member" when
+  `actor_missing`), "with edits", "x N". A refused row's Action cell shows the
+  reason text of its `reason_code` (`002.4`), keyed by code in all six
+  locales, with "Refused." plus the code for a code with no text.
 - Undo column: **Undo** for managers on rows with `undoable` true; "No undo"
   on every row whose action class is `message` or `resume`, whatever its
   outcome (`proposed`, `approved`, `rejected`, `failed` or `refused`), and
@@ -329,11 +355,14 @@ groups, fed by `hooks/domains/coordinator/use-activity.ts`:
   (`003.1`). The 409 `undo_conflict` message shows inline by its `reason`:
   "It has moved since" for `moved` and `archived`, "An agent is working on
   it. Stop it, then undo." for `agent_running`, "The step it came from no
-  longer exists." for `step_deleted` (`003.7`). "Undone by" shows "Undone,
+  longer exists." for `step_deleted`, "The step it came from is now a
+  finishing step." for `step_done`, "The step it came from is full." for
+  `step_full` (`003.7`). A 404 from undo shows "This action is no longer
+  listed." and refetches. "Undone by" shows "Undone,
   <time>" when `undone_by_name` is null because `undone_by` is null.
   Undo first opens a confirmation dialog titled "Undo this?" whose text
   names the effect: for a created task "The task <identifier> will be
-  archived.", for a move "The task <identifier> will move back to
+  archived. Any agent working on it will be stopped.", for a move "The task <identifier> will move back to
   <from step name>." It has two buttons, **Undo** and **Cancel**, with
   Cancel focused on open. Cancel or Escape closes it and sends nothing;
   Undo sends the request and closes it, and the outcomes below apply.

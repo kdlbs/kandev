@@ -105,7 +105,15 @@ undo is `not_undoable` (`003.9`); `limit` 0, 51, empty and `abc`, an empty
 page has a null `next_cursor`; a refusal publishes `coordinator.updated`; a
 second undo waiting on the row mutex returns the context error when its
 request ends; retention runs never overlap and the delete-scan test admits
-`retention.go`.
+`retention.go`; undo of a move runs the `003.7` checks in order (a task on
+the from step is moved back with no call; `step_done`, `step_full`,
+`agent_running` and `step_deleted` leave the row undoable; a WIP-queued task
+counts as moved back; `SkipStepPrompt` is set only for an auto-start step);
+undo of a create archives a task with a running agent; a row deleted by
+retention mid-undo is 404; cursor validation, repeated `limit`/`before`/`days`
+and empty `days` are 400; a failing user service leaves the list served with
+null names; an unset actor with an existing user names it and a missing user
+sets `actor_missing`; retention stops between batches when the flag turns off.
 
 ## Likely files
 

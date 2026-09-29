@@ -104,12 +104,22 @@ Mockup:
 - **AC-COORDINATOR-ACTIVITY-LOG-002.3:** The section shall offer a filter by
   action class, including All; the route shall accept at most one action
   class and refuse any other value with 400. An absent or empty `class`
-  means All; a repeated `class` is refused with 400 naming `class`.
+  means All; a repeated `class` is refused with 400 naming `class`. The
+  filter offers All, the six classes and "Unknown action" (`unknown`), so a
+  refused call that named no known action can be found; an unrecognised
+  `?class=` value in the page address selects All.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.4:** Each row shall show the relative time
   (exact time on hover), the action's detail with the target task's
   identifier linking to the task, the action class, the outcome with "with
   edits" when edited and "x N" when a refusal repeated, and the actor's name
-  for approved, rejected and undone rows.
+  for approved, rejected and undone rows. With no person recorded
+  (authentication off) the outcome shows alone ("Approved", "Rejected",
+  "Undone"); when the recorded person no longer exists it shows "A former
+  member". A refused row shows, in place of a detail, the reason text of its
+  code: `binding_invalid` "Its tool settings could not be read.",
+  `not_in_profile` "It called something it is not allowed to use.",
+  `policy_denied` "A manager has set this action to Denied."; any other code
+  shows "Refused." followed by the code.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.5:** With no row, the section shall say "It
   has not done anything yet."; with no row for the chosen filter, it shall
   say that nothing matches the filter.
@@ -118,8 +128,9 @@ Mockup:
   value (0, negative, above 50, empty, not an integer) with 400 naming
   `limit`. It shall return `next_cursor` only when at least one older row
   exists, so the last page has a null cursor. A cursor shall be valid with
-  any `class` and `limit`; one that does not parse is refused with 400
-  naming `before`.
+  any `class` and `limit`; one that does not parse, is empty or is repeated
+  is refused with 400 naming `before`; a repeated `limit` is refused with 400
+  naming `limit`.
 - **AC-COORDINATOR-ACTIVITY-LOG-002.6:** A reader shall see the section
   without Undo controls. The list shall update when a `coordinator.updated`
   event arrives for the coordinator.
@@ -137,7 +148,8 @@ Mockup:
   create, the system shall first archive the created task, and then, in one
   transaction, mark the row undone with `undone_at` and `undone_by` and write
   an `undone` row pointing to it. A created task already archived shall
-  count as archived. When that transaction fails after the reversal, the
+  count as archived. Archiving stops any agent working on the task, and the
+  confirmation says so. When that transaction fails after the reversal, the
   undo shall return the error and the row shall stay undoable; a retry shall
   find the reversal already done and only mark the row.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.3:** When a manager undoes an approved
@@ -147,15 +159,23 @@ Mockup:
   left, unarchived, shall count as moved back. When the task is in any other
   step or was archived, the system shall refuse with 409 `undo_conflict` and
   the row shall say "It has moved since".
-- **AC-COORDINATOR-ACTIVITY-LOG-003.7:** When the task to move back has an
-  agent session that is starting or running, or the step it left no longer
-  exists, undo shall refuse with 409 `undo_conflict` carrying the reason
-  `agent_running` or `step_deleted`, change nothing and leave the row
-  undoable. The 409 `undo_conflict` of `AC-COORDINATOR-ACTIVITY-LOG-003.3`
-  carries the reason `moved` (or `archived` when the task was archived). The
-  row shall say "It has moved since" for `moved` and `archived`, "An agent is
-  working on it. Stop it, then undo." for `agent_running` and "The step it
-  came from no longer exists." for `step_deleted`.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.7:** The checks of an undo of a move run in
+  this order and the first that applies decides: the task is archived or
+  missing (`archived`); the task is already in the step it left (counts as
+  moved back, no refusal); the task is in the step it was moved to, and then
+  the step it left no longer exists (`step_deleted`), that step is now a
+  completing step (`step_done`), the task has an agent session that is
+  starting or running (`agent_running`), or that step is at its task limit
+  and refuses the task (`step_full`); the task is in any other step
+  (`moved`). Each refusal is 409 `undo_conflict` carrying that reason,
+  changes nothing and leaves the row undoable. A pending move on the task
+  also refuses with `moved`. The row shall say "It has moved since" for
+  `moved` and `archived`, "An agent is working on it. Stop it, then undo."
+  for `agent_running`, "The step it came from no longer exists." for
+  `step_deleted`, "The step it came from is now a finishing step." for
+  `step_done` and "The step it came from is full." for `step_full`. When the
+  step it left queues the task because it is at its limit, the task counts as
+  moved back.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.8:** Moving a task back shall not start an
   agent: the move enters the step without running its prompt, so the task
   lands idle in the step it left.
@@ -168,13 +188,15 @@ Mockup:
 - **AC-COORDINATOR-ACTIVITY-LOG-003.4:** Undoing a row that is already undone,
   or two undos at once, shall reverse the action at most once; the second
   shall return 409 `already_undone`. Undoing a row that is not undoable shall
-  return 409 `not_undoable`.
+  return 409 `not_undoable`. Undoing a row retention has deleted meanwhile
+  shall return 404, with the reversal standing.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.5:** A reader's undo shall be refused with
   403 and change nothing.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.6:** An undone row shall show "Undone by
   <name>, <relative time>" in place of Undo, or "Undone, <relative time>"
   when no person is recorded (authentication is off) and "Undone by A former
-  member, <relative time>" when the recorded person no longer exists.
+  member, <relative time>" when the recorded person no longer exists; the row's outcome text follows
+  `AC-COORDINATOR-ACTIVITY-LOG-002.4`.
 
 ### REQ-COORDINATOR-ACTIVITY-LOG-004: The coordinator reads its log
 
@@ -201,7 +223,8 @@ Mockup:
 
 - **AC-COORDINATOR-ACTIVITY-LOG-005.1:** While the phase-2 flag is on, at
   startup and once a day, the system shall delete activity rows older than
-  400 days, in batches of 500 rows, each batch in its own short transaction. While the flag is off no row is deleted by age
+  400 days, in batches of 500 rows, each batch in its own short transaction. The run repeats every 24 hours from startup and stops between batches when
+  the flag turns off. While the flag is off no row is deleted by age
   (`AC-COORDINATOR-COORDINATORS-007.3`). Rows of a deleted coordinator shall
   be deleted with it, whatever the flag.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.2:** The system shall return, for a
@@ -211,7 +234,8 @@ Mockup:
   subset of `approved`), `rejected`, `failed`, `refused` (summing refusal
   counts) and `undone` (counted under the action class of the row undone), and the earliest row time the coordinator
   has. The class `unknown` shall appear only when it has a row created in the
-  window. A window outside 1 to 90 shall be refused with 400.
+  window. A window outside 1 to 90, empty, repeated or not an integer shall be refused
+  with 400 naming `days`.
 - **AC-COORDINATOR-ACTIVITY-LOG-005.3:** Any workspace member shall read the
   log and the summary; neither shall be available for another workspace's
   coordinator.
