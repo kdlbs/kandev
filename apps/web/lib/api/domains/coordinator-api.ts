@@ -635,3 +635,32 @@ export function putCoordinatorSettings(
     options,
   );
 }
+
+// Mirrors internal/coordinator/setup.go's body: one request creates the
+// coordinator with its policy, Watches and optional goal, or none of them.
+export type SetupCoordinatorRequest = {
+  name: string;
+  agent_profile_id: string;
+  executor_profile_id: string;
+  context: string;
+  watches: { scope: "all" | "selected"; workflow_ids?: string[] };
+  policy: { actions: Record<ControlAction, ControlSetting> };
+  goal?: {
+    name: string;
+    due_on: string | null;
+    criteria: Array<{ text: string }>;
+  };
+};
+
+export function setupCoordinator(
+  workspaceId: string,
+  req: SetupCoordinatorRequest,
+  options?: ApiRequestOptions,
+): Promise<Coordinator> {
+  return mutate<Coordinator>(
+    workspacePath(workspaceId, "/coordinators/setup"),
+    "POST",
+    req,
+    options,
+  );
+}

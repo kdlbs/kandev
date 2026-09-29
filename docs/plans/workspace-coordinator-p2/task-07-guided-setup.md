@@ -1,7 +1,7 @@
 ---
 id: "07-guided-setup"
 title: "Guided setup"
-status: pending
+status: done
 wave: 6
 depends_on:
   - "06-may-do-watches"
@@ -56,6 +56,25 @@ coordinator, settings, Watches and goal in one transaction through
 - Finish banners: nothing created when the server answered, could not
   confirm when no answer arrived (`008.6`).
 
+## Round 4 decision
+
+The conductor settled the round 4 gaps from what already shipped:
+
+- Copy: every code task 06 maps reuses task 06's sentence. `invalid_scope`,
+  `action_missing`, `watches_duplicate` and `unknown_action` have one plain
+  sentence each, in the same style, saying what to change (no "save again"),
+  in the six locales and without an em dash.
+- Field paths are exactly those task 02's backend returns: `watches` for
+  Watches codes and `policy.actions.<action>` for policy codes.
+- An extra action key follows task 02's backend: 400 `unknown_action`, field
+  `policy.actions.<key>`; the page shows it in the policy line above the rows.
+- After a 400 the step stays invalid, with its message shown, until the user
+  edits a field the error names (Next disabled, no check mark).
+- A blank criterion row is treated as task 11's goal editor treats it: it is a
+  value, so the goal is present and the blank text is invalid.
+- Context is trimmed before it is judged: whitespace-only counts as empty and
+  Review shows "Not set".
+
 ## Out of scope
 
 - Editing after creation (the sections of tasks 06 and 11 own it).
@@ -95,7 +114,7 @@ make -C apps/backend test PKG=./internal/coordinator/...
 cd apps/web && pnpm test -- app/settings/workspace/\[id\]/coordinators/new
 cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/guided-setup.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/guided-setup.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-guided-setup.spec.ts
 ```
 
 Backend: a setup with an invalid goal is 400 and inserts nothing; a

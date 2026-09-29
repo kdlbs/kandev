@@ -58,25 +58,23 @@ function Counts({
   );
 }
 
+export type MayDoActivity = {
+  workspaceId: string;
+  coordinatorId: string;
+  counts: ActionCounts | null;
+  status: string;
+};
+
 type RowProps = {
   action: ControlAction;
   value: ControlSetting;
   disabled: boolean;
   onChange: (value: ControlSetting) => void;
-  reviewHref: string;
-  counts: ActionCounts | null;
-  countsStatus: string;
+  activity?: MayDoActivity;
+  errorMessage?: string;
 };
 
-function ActionRow({
-  action,
-  value,
-  disabled,
-  onChange,
-  reviewHref,
-  counts,
-  countsStatus,
-}: RowProps) {
+function ActionRow({ action, value, disabled, onChange, activity, errorMessage }: RowProps) {
   const { t } = useTranslation();
   const stopLocked = action === "stop";
   const name = `may-do-${action}`;
@@ -84,13 +82,19 @@ function ActionRow({
     <div className="space-y-2 py-3" data-testid={`may-do-row-${action}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-medium">{t(ACTION_LABEL[action])}</span>
-        <AppLink
-          href={reviewHref}
-          className="cursor-pointer text-xs underline"
-          data-testid={`may-do-review-${action}`}
-        >
-          {t("coordinator:mayDoReviewLast30")}
-        </AppLink>
+        {activity && (
+          <AppLink
+            href={linkToCoordinatorActivityClass(
+              activity.workspaceId,
+              activity.coordinatorId,
+              action,
+            )}
+            className="cursor-pointer text-xs underline"
+            data-testid={`may-do-review-${action}`}
+          >
+            {t("coordinator:mayDoReviewLast30")}
+          </AppLink>
+        )}
       </div>
       <RadioGroup
         value={value === "automatic" ? "denied" : value}
@@ -121,7 +125,64 @@ function ActionRow({
           {t("coordinator:mayDoStartAgentNote")}
         </p>
       )}
-      <Counts action={action} counts={counts} status={countsStatus} />
+      {errorMessage && (
+        <p role="alert" className="text-xs text-destructive" data-testid={`may-do-error-${action}`}>
+          {errorMessage}
+        </p>
+      )}
+      {activity && <Counts action={action} counts={activity.counts} status={activity.status} />}
+    </div>
+  );
+}
+
+export type MayDoRowsProps = {
+  actions: Record<ControlAction, ControlSetting>;
+  canManage: boolean;
+  onChange: (action: ControlAction, value: ControlSetting) => void;
+  activity?: MayDoActivity;
+  rowErrors?: Partial<Record<ControlAction, string>>;
+  errorMessage?: string | null;
+  freshConversationNote?: boolean;
+};
+
+export function MayDoRows({
+  actions,
+  canManage,
+  onChange,
+  activity,
+  rowErrors,
+  errorMessage,
+  freshConversationNote = false,
+}: MayDoRowsProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2" data-testid="may-do-section">
+      {errorMessage && (
+        <p role="alert" className="text-sm text-destructive" data-testid="may-do-error">
+          {errorMessage}
+        </p>
+      )}
+      <div className="divide-y">
+        {CONTROL_ACTIONS.map((action) => (
+          <ActionRow
+            key={action}
+            action={action}
+            value={actions[action]}
+            disabled={!canManage}
+            onChange={(next) => onChange(action, next)}
+            activity={activity}
+            errorMessage={rowErrors?.[action]}
+          />
+        ))}
+      </div>
+      <div className="space-y-1 pt-3 text-sm" data-testid="may-do-always-human">
+        <p className="font-medium">{t("coordinator:mayDoAlwaysHuman")}</p>
+        <p className="text-muted-foreground">{t("coordinator:mayDoMergePr")}</p>
+        <p className="text-muted-foreground">{t("coordinator:mayDoMoveToDone")}</p>
+      </div>
+      {freshConversationNote && (
+        <p className="text-xs text-muted-foreground">{t("coordinator:mayDoFreshConversation")}</p>
+      )}
     </div>
   );
 }
@@ -151,7 +212,7 @@ export function MayDoSection({
   }
 
   return (
-    <div className="space-y-2" data-testid="may-do-section">
+    <div className="space-y-2">
       {summary.status === "error" && (
         <div className="flex items-center gap-2 text-sm" data-testid="may-do-summary-failed">
           {t("coordinator:mayDoSummaryFailed")}
@@ -160,26 +221,13 @@ export function MayDoSection({
           </Button>
         </div>
       )}
-      <div className="divide-y">
-        {CONTROL_ACTIONS.map((action) => (
-          <ActionRow
-            key={action}
-            action={action}
-            value={draft.actions[action]}
-            disabled={!canManage}
-            onChange={(next) => control.setAction(action, next)}
-            reviewHref={linkToCoordinatorActivityClass(workspaceId, coordinatorId, action)}
-            counts={summary.counts}
-            countsStatus={summary.status}
-          />
-        ))}
-      </div>
-      <div className="space-y-1 pt-3 text-sm" data-testid="may-do-always-human">
-        <p className="font-medium">{t("coordinator:mayDoAlwaysHuman")}</p>
-        <p className="text-muted-foreground">{t("coordinator:mayDoMergePr")}</p>
-        <p className="text-muted-foreground">{t("coordinator:mayDoMoveToDone")}</p>
-      </div>
-      <p className="text-xs text-muted-foreground">{t("coordinator:mayDoFreshConversation")}</p>
+      <MayDoRows
+        actions={draft.actions}
+        canManage={canManage}
+        onChange={control.setAction}
+        activity={{ workspaceId, coordinatorId, counts: summary.counts, status: summary.status }}
+        freshConversationNote
+      />
     </div>
   );
 }

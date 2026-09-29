@@ -5,9 +5,14 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
-import { MAX_WATCHED_BOARDS, switchOffWatches } from "@/lib/coordinators/control-draft";
+import {
+  MAX_WATCHED_BOARDS,
+  switchOffWatches,
+  type WatchesDraft,
+} from "@/lib/coordinators/control-draft";
 import {
   useWorkspaceBoards,
+  type BoardsStatus,
   type WorkspaceBoard,
 } from "@/hooks/domains/coordinator/use-workspace-boards";
 import type { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
@@ -65,42 +70,43 @@ function BoardRow({
   );
 }
 
-export function WatchesSection({ workspaceId, canManage, control }: WatchesSectionProps) {
+export type WatchesFieldsProps = {
+  watches: WatchesDraft;
+  boards: WorkspaceBoard[];
+  boardsStatus: BoardsStatus;
+  onBoardsRetry: () => void;
+  canManage: boolean;
+  onChange: (next: WatchesDraft) => void;
+  errorMessage?: string | null;
+};
+
+export function WatchesFields({
+  watches,
+  boards,
+  boardsStatus,
+  onBoardsRetry,
+  canManage,
+  onChange,
+  errorMessage,
+}: WatchesFieldsProps) {
   const { t } = useTranslation();
-  const { draft, status, retry, setWatches } = control;
-  const boardsRead = useWorkspaceBoards(workspaceId, draft !== null);
-
-  if (!draft) {
-    if (status === "error") {
-      return (
-        <div className="flex items-center gap-2 text-sm" data-testid="watches-load-failed">
-          {t("coordinator:watchesLoadFailed")}
-          <Button variant="outline" size="sm" className="cursor-pointer" onClick={retry}>
-            {t("coordinator:tryAgain")}
-          </Button>
-        </div>
-      );
-    }
-    return <Skeleton className="h-32 w-full" data-testid="watches-loading" />;
-  }
-
-  const { scope, workflowIds } = draft.watches;
-  const boards = boardsRead.boards;
+  const { scope, workflowIds } = watches;
   const selected = new Set(workflowIds);
   const atCap = workflowIds.length >= MAX_WATCHED_BOARDS;
   const lastBoard = workflowIds.length <= 1;
 
   const toggleAll = (watchAll: boolean) => {
-    if (watchAll) return setWatches({ scope: "all", workflowIds });
+    if (watchAll) return onChange({ scope: "all", workflowIds });
     const off = switchOffWatches(boards.map((b) => b.id));
-    if (off.ok) setWatches(off.watches);
+    if (off.ok) onChange(off.watches);
   };
   const toggleBoard = (id: string) => {
     const next = selected.has(id) ? workflowIds.filter((x) => x !== id) : [...workflowIds, id];
-    setWatches({ scope: "selected", workflowIds: next });
+    onChange({ scope: "selected", workflowIds: next });
   };
 
-  const noBoards = boardsRead.status === "ready" && boards.length === 0;
+  const noBoards = boardsStatus === "ready" && boards.length === 0;
+  const cannotSwitchOff = scope === "all" && (boardsStatus !== "ready" || noBoards);
   return (
     <div className="space-y-3" data-testid="watches-section">
       <div className="flex items-center justify-between gap-2">
@@ -110,10 +116,15 @@ export function WatchesSection({ workspaceId, canManage, control }: WatchesSecti
         <Switch
           id="watches-all"
           checked={scope === "all"}
-          disabled={!canManage || (scope === "all" && (boardsRead.status !== "ready" || noBoards))}
+          disabled={!canManage || cannotSwitchOff}
           onCheckedChange={toggleAll}
         />
       </div>
+      {errorMessage && (
+        <p role="alert" className="text-sm text-destructive" data-testid="watches-error">
+          {errorMessage}
+        </p>
+      )}
       {scope === "all" && (
         <p className="text-xs text-muted-foreground">{t("coordinator:watchesAllHelp")}</p>
       )}
@@ -122,10 +133,10 @@ export function WatchesSection({ workspaceId, canManage, control }: WatchesSecti
           {t("coordinator:watchesNoBoardsToChoose")}
         </p>
       )}
-      {boardsRead.status === "error" && (
+      {boardsStatus === "error" && (
         <div className="flex items-center gap-2 text-sm" data-testid="watches-boards-failed">
           {t("coordinator:watchesBoardsFailed")}
-          <Button variant="outline" size="sm" className="cursor-pointer" onClick={boardsRead.retry}>
+          <Button variant="outline" size="sm" className="cursor-pointer" onClick={onBoardsRetry}>
             {t("coordinator:tryAgain")}
           </Button>
         </div>
@@ -154,5 +165,36 @@ export function WatchesSection({ workspaceId, canManage, control }: WatchesSecti
         </>
       )}
     </div>
+  );
+}
+
+export function WatchesSection({ workspaceId, canManage, control }: WatchesSectionProps) {
+  const { t } = useTranslation();
+  const { draft, status, retry, setWatches } = control;
+  const boardsRead = useWorkspaceBoards(workspaceId, draft !== null);
+
+  if (!draft) {
+    if (status === "error") {
+      return (
+        <div className="flex items-center gap-2 text-sm" data-testid="watches-load-failed">
+          {t("coordinator:watchesLoadFailed")}
+          <Button variant="outline" size="sm" className="cursor-pointer" onClick={retry}>
+            {t("coordinator:tryAgain")}
+          </Button>
+        </div>
+      );
+    }
+    return <Skeleton className="h-32 w-full" data-testid="watches-loading" />;
+  }
+
+  return (
+    <WatchesFields
+      watches={draft.watches}
+      boards={boardsRead.boards}
+      boardsStatus={boardsRead.status}
+      onBoardsRetry={boardsRead.retry}
+      canManage={canManage}
+      onChange={setWatches}
+    />
   );
 }
