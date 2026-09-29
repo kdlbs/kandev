@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
+  useCopilotDraftsSwept,
   useCopilotEntry,
   useCopilotStore,
   type CopilotChip,
@@ -14,6 +15,17 @@ import {
   type UseCopilotOpenSequenceResult,
 } from "@/hooks/domains/coordinator/use-copilot-open-sequence";
 import type { ConversationResponse } from "@/lib/api/domains/coordinator-api";
+import {
+  setChatDraftAttachments,
+  setChatDraftContent,
+  setChatDraftText,
+} from "@/lib/local-storage";
+
+function clearComposerDrafts(sessionId: string) {
+  setChatDraftText(sessionId, "");
+  setChatDraftContent(sessionId, null);
+  setChatDraftAttachments(sessionId, []);
+}
 
 export type UseCoordinatorCopilotResult = {
   /** `features.coordinator` and `workspace.manage` together; the caller
@@ -129,6 +141,8 @@ export function useCoordinatorCopilot(
   const removeChipAction = useCopilotStore((s) => s.removeChip);
   const removeEntry = useCopilotStore((s) => s.removeEntry);
   const clearChipAndDraft = useCopilotStore((s) => s.clearChipAndDraft);
+  const markDraftsSwept = useCopilotStore((s) => s.markDraftsSwept);
+  const draftsSwept = useCopilotDraftsSwept(coordinatorId);
 
   const [pendingDraft, setPendingDraft] = useState<string | undefined>(undefined);
   const [askKey, setAskKey] = useState(0);
@@ -170,6 +184,17 @@ export function useCoordinatorCopilot(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- openSequence.open reads workspaceId/effectiveId itself; including the whole object would re-open on every state transition.
   }, [entry.open, entry.chip]);
+
+  // A slot that was reset (another path or coordinator) must not resurrect the
+  // composer text typed in an earlier slot lifetime; the sweep runs once per
+  // slot, before the composer mounts on the ready session.
+  const readySessionId =
+    openSequence.state.kind === "ready" ? openSequence.state.session.session_id : null;
+  useEffect(() => {
+    if (!readySessionId || draftsSwept) return;
+    clearComposerDrafts(readySessionId);
+    markDraftsSwept(coordinatorId);
+  }, [readySessionId, draftsSwept, coordinatorId, markDraftsSwept]);
 
   useEffect(() => {
     if (openSequence.state.kind === "gone") clearChipAndDraft(coordinatorId);

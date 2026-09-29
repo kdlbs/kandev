@@ -2,6 +2,7 @@ import { act, cleanup, render, renderHook, waitFor } from "@testing-library/reac
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import type { Coordinator, ConversationResponse } from "@/lib/api/domains/coordinator-api";
+import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
 
 const mocks = vi.hoisted(() => ({
   useFeature: vi.fn(),
@@ -629,5 +630,35 @@ describe("useCoordinatorCopilot - keyed remount across a coordinator switch", ()
     });
 
     expect(latest?.routeSession).toEqual(sessionFor("coord-c"));
+  });
+});
+
+describe("useCoordinatorCopilot - stored composer draft sweep", () => {
+  beforeEach(() => {
+    mocks.useCopilotOpenSequence.mockReturnValue(
+      openSequenceMock({ kind: "ready", session: conversation }),
+    );
+    setChatDraftText(conversation.session_id, "left over from a reset slot");
+  });
+
+  afterEach(() => setChatDraftText(conversation.session_id, ""));
+
+  it("clears the stored draft once when the ready session first appears for a slot", () => {
+    act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
+    renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
+
+    expect(getChatDraftText(conversation.session_id)).toBe("");
+    expect(useCopilotStore.getState().draftsSwept).toBe(true);
+  });
+
+  it("keeps text typed after the sweep across a close and reopen of the same slot", () => {
+    act(() => useCopilotStore.getState().setOpen(COORDINATOR_ID, true));
+    const { result } = renderHook(() => useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true));
+    setChatDraftText(conversation.session_id, "typed after");
+
+    act(() => result.current.handleOpenChange(false));
+    act(() => result.current.handleOpenChange(true));
+
+    expect(getChatDraftText(conversation.session_id)).toBe("typed after");
   });
 });

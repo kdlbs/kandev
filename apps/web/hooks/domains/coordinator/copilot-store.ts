@@ -41,7 +41,8 @@ type CopilotStoreState = CopilotSlot & {
   /** Keeps the slot only while `coordinatorId` is the coordinator it belongs
    *  to; any other coordinator, or null for a non-coordinator path, resets it. */
   keepOnlyFor: (coordinatorId: string | null) => void;
-  /** Records that the stored draft text for the slot was cleared. */
+  /** Records that the stored draft text was cleared, when the slot belongs to
+   *  `coordinatorId`; never takes the slot over. */
   markDraftsSwept: (coordinatorId: string) => void;
 };
 
@@ -91,7 +92,7 @@ export const useCopilotStore = create<CopilotStoreState>()((set, get) => ({
       state.coordinatorId === null || state.coordinatorId === coordinatorId ? state : INITIAL_SLOT,
     ),
   markDraftsSwept: (coordinatorId) =>
-    set((state) => ({ ...slotFor(state, coordinatorId), draftsSwept: true })),
+    set((state) => (state.coordinatorId === coordinatorId ? { draftsSwept: true } : state)),
 }));
 
 /** Reactive entry read for `coordinatorId`, for components; `getEntry` above

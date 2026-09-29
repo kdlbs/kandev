@@ -1,100 +1,119 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageChatbot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { ChatPopoverShell } from "@/components/config-chat/chat-popover-shell";
+import { RightSidePanel } from "@/components/right-side-panel";
 import { useCoordinatorCopilot } from "./use-coordinator-copilot";
+import { useCopilotPanelWidth } from "./use-copilot-panel-width";
 import { CoordinatorCopilotBody } from "./coordinator-copilot-body";
+import { CoordinatorCopilotHeader } from "./coordinator-copilot-header";
 
 export type CoordinatorCopilotProps = {
   workspaceId: string;
   coordinatorId: string;
   coordinatorName: string;
   canManage: boolean;
+  /** The screen content the panel sits beside. */
+  children: ReactNode;
 };
 
 /**
- * The coordinator copilot launcher and popover, mounted on both Coordinator
- * screens for the viewed coordinator
- * (docs/specs/coordinator/system-design/copilot-popover.md#popover). Renders
- * nothing, and issues no request, unless `features.coordinator` is on and
- * the viewer holds `workspace.manage`.
+ * The coordinator copilot launcher and right-side panel, wrapped around the
+ * viewed coordinator's screen content
+ * (docs/specs/coordinator/system-design/copilot-popover.md#popover). The
+ * panel and launcher render only when `features.coordinator` is on and the
+ * viewer holds `workspace.manage`; the content always renders.
  */
 export function CoordinatorCopilot({
   workspaceId,
   coordinatorId,
   coordinatorName,
   canManage,
+  children,
 }: CoordinatorCopilotProps) {
   const { t } = useTranslation();
   const copilot = useCoordinatorCopilot(workspaceId, coordinatorId, canManage);
-  // Set right before closing the popover to navigate a chat card's Edit/Reject
-  // to its Needs-you deep link (proposal-cards.md#cards "Forms and
-  // navigation"): Radix's default `onCloseAutoFocus` would otherwise return
-  // focus to the launcher button once the popover unmounts, racing with (and
-  // sometimes winning against) the deep-linked form's own auto-focus. Escape
-  // and the header Close button call `handleOpenChange` directly and never
-  // set this, so they keep the default return-to-launcher focus (AC .004.7).
-  const suppressCloseAutoFocusRef = useRef(false);
+  const { widthPx, updateWidth } = useCopilotPanelWidth();
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  // Set by Close, Escape and the backdrop so the launcher, which is hidden while
+  // the panel is open, takes focus back once it remounts. A chat card's
+  // Edit/Reject closes through `onClosePopover` without setting it, leaving the
+  // deep-linked form's own auto-focus uncontested.
+  const returnFocusRef = useRef(false);
 
-  if (!copilot.enabled) return null;
+  const { handleOpenChange } = copilot;
+  const closeAndReturnFocus = useCallback(() => {
+    returnFocusRef.current = true;
+    handleOpenChange(false);
+  }, [handleOpenChange]);
+
+  const showPanel = copilot.enabled && copilot.open;
+  useEffect(() => {
+    if (showPanel || !returnFocusRef.current) return;
+    returnFocusRef.current = false;
+    launcherRef.current?.focus();
+  }, [showPanel]);
 
   const launcherLabel = copilot.launcher.busy
     ? t("coordinator:copilotLauncherBusy", { name: coordinatorName })
     : t("coordinator:copilotLauncherIdle", { name: coordinatorName });
 
   return (
-    <ChatPopoverShell
-      open={copilot.open}
-      onOpenChange={copilot.handleOpenChange}
-      testId="coordinator-copilot-popover"
-      icon={<IconMessageChatbot className="h-4 w-4 shrink-0 text-muted-foreground" />}
-      title={t("coordinator:copilotTitle", { name: coordinatorName })}
-      closeLabel={t("coordinator:copilotClose")}
-      onCloseAutoFocus={(event) => {
-        if (!suppressCloseAutoFocusRef.current) return;
-        suppressCloseAutoFocusRef.current = false;
-        event.preventDefault();
-      }}
-      trigger={
-        <Tooltip open={copilot.open ? false : undefined}>
+    <>
+      <RightSidePanel
+        open={showPanel}
+        onClose={closeAndReturnFocus}
+        widthPx={widthPx}
+        onWidthChange={updateWidth}
+        backdropLabel={t("coordinator:copilotClose")}
+        mainSizing="fluid"
+        mobileFullScreen
+        closeOnEscape
+        panelTestId="coordinator-copilot-popover"
+        main={children}
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <CoordinatorCopilotHeader
+            coordinatorName={coordinatorName}
+            busy={copilot.launcher.busy}
+            onClose={closeAndReturnFocus}
+          />
+          <CoordinatorCopilotBody
+            workspaceId={workspaceId}
+            coordinatorId={coordinatorId}
+            state={copilot.openSequence.state}
+            routeSession={copilot.routeSession}
+            chip={copilot.chip}
+            pendingDraft={copilot.pendingDraft}
+            askKey={copilot.askKey}
+            onRetry={copilot.openSequence.retry}
+            onRemoveChip={copilot.removeChip}
+            onSuggest={copilot.suggest}
+            onClosePopover={() => copilot.handleOpenChange(false)}
+          />
+        </div>
+      </RightSidePanel>
+      {copilot.enabled && !copilot.open && (
+        <Tooltip>
           <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                size="icon"
-                className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 size-12 max-md:size-12 [@media(pointer:coarse)]:size-12 cursor-pointer rounded-full shadow-lg"
-                aria-label={launcherLabel}
-                data-testid="coordinator-copilot-launcher"
-                data-busy={copilot.launcher.busy}
-              >
-                <IconMessageChatbot className="h-6 w-6" />
-              </Button>
-            </PopoverTrigger>
+            <Button
+              ref={launcherRef}
+              size="icon"
+              className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 size-12 max-md:size-12 [@media(pointer:coarse)]:size-12 cursor-pointer rounded-full shadow-lg"
+              aria-label={launcherLabel}
+              data-testid="coordinator-copilot-launcher"
+              data-busy={copilot.launcher.busy}
+              onClick={() => copilot.handleOpenChange(true)}
+            >
+              <IconMessageChatbot className="h-6 w-6" />
+            </Button>
           </TooltipTrigger>
           <TooltipContent side="left">{launcherLabel}</TooltipContent>
         </Tooltip>
-      }
-    >
-      <CoordinatorCopilotBody
-        workspaceId={workspaceId}
-        coordinatorId={coordinatorId}
-        state={copilot.openSequence.state}
-        routeSession={copilot.routeSession}
-        chip={copilot.chip}
-        pendingDraft={copilot.pendingDraft}
-        askKey={copilot.askKey}
-        onRetry={copilot.openSequence.retry}
-        onRemoveChip={copilot.removeChip}
-        onSuggest={copilot.suggest}
-        onClosePopover={() => {
-          suppressCloseAutoFocusRef.current = true;
-          copilot.handleOpenChange(false);
-        }}
-      />
-    </ChatPopoverShell>
+      )}
+    </>
   );
 }

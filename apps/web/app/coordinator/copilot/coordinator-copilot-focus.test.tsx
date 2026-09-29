@@ -1,26 +1,23 @@
 import type { ReactNode } from "react";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { OpenSequenceState } from "@/hooks/domains/coordinator/use-copilot-open-sequence";
 
 const useCoordinatorCopilot = vi.hoisted(() => vi.fn());
-const shellProps = vi.hoisted(() => ({
-  current: undefined as Record<string, unknown> | undefined,
-}));
 const bodyProps = vi.hoisted(() => ({ current: undefined as Record<string, unknown> | undefined }));
 
 vi.mock("./use-coordinator-copilot", () => ({ useCoordinatorCopilot }));
 
-// Mocked so the test can invoke `onCloseAutoFocus` and `onClosePopover` directly,
-// isolating the suppressCloseAutoFocusRef wiring in CoordinatorCopilot from Radix's
-// actual popover lifecycle (exercised instead by e2e/tests/coordinator/proposals.spec.ts
-// AC .005.6 and copilot.spec.ts AC .004.7).
-vi.mock("@/components/config-chat/chat-popover-shell", () => ({
-  ChatPopoverShell: (props: Record<string, unknown>) => {
-    shellProps.current = props;
-    return props.children as ReactNode;
-  },
+// The panel is reduced to "main + children while open" so the test isolates the
+// launcher focus-return wiring in CoordinatorCopilot from layout and breakpoints.
+vi.mock("@/components/right-side-panel", () => ({
+  RightSidePanel: (props: { open: boolean; main: ReactNode; children: ReactNode }) => (
+    <>
+      {props.main}
+      {props.open ? props.children : null}
+    </>
+  ),
 }));
 
 vi.mock("./coordinator-copilot-body", () => ({
@@ -33,6 +30,7 @@ vi.mock("./coordinator-copilot-body", () => ({
 import { CoordinatorCopilot } from "./coordinator-copilot";
 
 const WORKSPACE_ID = "ws-1";
+const LAUNCHER_ID = "coordinator-copilot-launcher";
 const COORDINATOR_ID = "coord-1";
 const COORDINATOR_NAME = "Backend coordinator";
 
@@ -53,21 +51,19 @@ function mockController(overrides: Partial<ReturnType<typeof useCoordinatorCopil
   });
 }
 
-function renderCopilot() {
-  return render(
+function tree() {
+  return (
     <TooltipProvider delayDuration={0}>
       <CoordinatorCopilot
         workspaceId={WORKSPACE_ID}
         coordinatorId={COORDINATOR_ID}
         coordinatorName={COORDINATOR_NAME}
         canManage
-      />
-    </TooltipProvider>,
+      >
+        <div data-testid="screen" />
+      </CoordinatorCopilot>
+    </TooltipProvider>
   );
-}
-
-function fakeEvent() {
-  return { preventDefault: vi.fn() } as unknown as Event;
 }
 
 beforeEach(() => {
@@ -76,46 +72,55 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  shellProps.current = undefined;
   bodyProps.current = undefined;
   vi.clearAllMocks();
 });
 
-describe("CoordinatorCopilot - close-auto-focus suppression", () => {
-  it("suppresses onCloseAutoFocus once after onClosePopover, then reverts to default", () => {
-    renderCopilot();
-    const onClosePopover = bodyProps.current?.onClosePopover as () => void;
-    const onCloseAutoFocus = shellProps.current?.onCloseAutoFocus as (event: Event) => void;
-
-    onClosePopover();
-
-    const firstEvent = fakeEvent();
-    onCloseAutoFocus(firstEvent);
-    expect(firstEvent.preventDefault).toHaveBeenCalledTimes(1);
-
-    // Consumed once: a later close (Escape/header-Close) does not suppress.
-    const secondEvent = fakeEvent();
-    onCloseAutoFocus(secondEvent);
-    expect(secondEvent.preventDefault).not.toHaveBeenCalled();
-  });
-
-  it("does not suppress onCloseAutoFocus for Escape/header-Close (no prior onClosePopover)", () => {
-    renderCopilot();
-    const onCloseAutoFocus = shellProps.current?.onCloseAutoFocus as (event: Event) => void;
-
-    const event = fakeEvent();
-    onCloseAutoFocus(event);
-    expect(event.preventDefault).not.toHaveBeenCalled();
-  });
-
-  it("calls handleOpenChange(false) when onClosePopover runs", () => {
+describe("CoordinatorCopilot - launcher focus return", () => {
+  it("returns focus to the launcher after the header Close button closes the panel", () => {
     const handleOpenChange = vi.fn();
     mockController({ handleOpenChange });
-    renderCopilot();
+    const { rerender } = render(tree());
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(handleOpenChange).toHaveBeenCalledWith(false);
+
+    mockController({ handleOpenChange, open: false });
+    rerender(tree());
+    expect(document.activeElement).toBe(screen.getByTestId(LAUNCHER_ID));
+  });
+
+  it("does not move focus to the launcher when onClosePopover closes the panel", () => {
+    const handleOpenChange = vi.fn();
+    mockController({ handleOpenChange });
+    const { rerender } = render(tree());
     const onClosePopover = bodyProps.current?.onClosePopover as () => void;
 
     onClosePopover();
-
     expect(handleOpenChange).toHaveBeenCalledWith(false);
+
+    mockController({ handleOpenChange, open: false });
+    rerender(tree());
+    expect(document.activeElement).not.toBe(screen.getByTestId(LAUNCHER_ID));
+  });
+
+  it("hides the launcher while open and marks it busy when closed and running", () => {
+    const { rerender } = render(tree());
+    expect(screen.queryByTestId(LAUNCHER_ID)).toBeNull();
+
+    mockController({
+      open: false,
+      launcher: { coordinator: null, loading: false, busy: true, gone: false },
+    });
+    rerender(tree());
+    expect(screen.getByTestId(LAUNCHER_ID).getAttribute("data-busy")).toBe("true");
+  });
+
+  it("shows the busy status in the header while open", () => {
+    mockController({
+      launcher: { coordinator: null, loading: false, busy: true, gone: false },
+    });
+    render(tree());
+    expect(screen.getByTestId("coordinator-copilot-busy")).toBeTruthy();
   });
 });

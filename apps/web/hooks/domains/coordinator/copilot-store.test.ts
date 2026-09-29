@@ -149,4 +149,12 @@ describe("copilot store slot ownership", () => {
     useCopilotStore.getState().setOpen("coord-2", true);
     expect(useCopilotStore.getState().draftsSwept).toBe(false);
   });
+
+  it("markDraftsSwept from a non-owning coordinator never takes over the slot", () => {
+    useCopilotStore.getState().setOpen("coord-2", true);
+    useCopilotStore.getState().markDraftsSwept("coord-1");
+    expect(useCopilotStore.getState().coordinatorId).toBe("coord-2");
+    expect(useCopilotStore.getState().open).toBe(true);
+    expect(useCopilotStore.getState().draftsSwept).toBe(false);
+  });
 });
