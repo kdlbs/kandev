@@ -19,14 +19,16 @@ system_design:
 
 ## Summary
 
-Make Usage a compact, icon-only status-row action beside transcript navigation. Remove its transcript-footer mount while retaining the current data and desktop/phone disclosures.
+Make Usage a compact, icon-only status-row action beside transcript navigation. Remove its transcript-footer mount while retaining the current data and desktop/phone disclosures, including access from an archived transcript's read-only banner.
 
 ## In scope
 
 - Mount `ConversationUsageDisplay` once through the composer status-row controls and preserve its selected task/session identity.
 - Remove the footer mount, render only the stats icon, and keep a localized accessible name and desktop tooltip.
-- Preserve desktop popover, phone drawer, focus return, pending/error states, and responsive reachability.
-- Update focused component and desktop/mobile E2E coverage for the new placement and icon geometry.
+- Preserve the desktop popover, phone drawer, focus return, pending/error states, and responsive reachability. Close the tooltip while the desktop popover is open.
+- Retain Usage access in the read-only archived transcript banner beside Jump to latest.
+- Keep the proceed action right-aligned when Usage returns no control.
+- Update focused component and desktop/mobile E2E coverage for the new placement, archived access, and icon geometry.
 
 ## Out of scope
 
@@ -34,9 +36,9 @@ Make Usage a compact, icon-only status-row action beside transcript navigation. 
 
 ## Acceptance
 
-1. A selected session with usage shows exactly one icon-only Usage control in the row above the composer; no Usage control or blank space remains in the transcript footer.
-2. Desktop keyboard users and phone touch users can open the existing details, close them, and return focus to the icon. Missing, loading, error, and session-switch states retain the current usage semantics.
-3. The desktop icon aligns with its compact neighbors; the phone/coarse-pointer hit target is at least 44 by 44 CSS pixels, and the row has no horizontal overflow.
+1. A selected session with usage shows exactly one icon-only Usage control in the row above the composer; an archived transcript retains the control in its read-only banner. No second control or empty gap appears in the transcript footer.
+2. Desktop keyboard users and phone touch users can open the existing details, close them, and return focus to the icon. The desktop tooltip closes while its popover is open. Missing, loading, error, and session-switch states retain the current usage semantics.
+3. The desktop icon aligns with its compact neighbors; the phone/coarse-pointer hit target is at least 44 by 44 CSS pixels; the proceed action stays right-aligned when Usage is empty; and the row has no horizontal overflow.
 
 ## ASCII UI preview
 
@@ -57,11 +59,14 @@ Run from the repository root after installing `apps/` dependencies in a fresh wo
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm test -- components/task/chat/message-list-footer.test.tsx components/task/chat/chat-status-bar.test.tsx components/task/chat/conversation-usage-display.test.tsx)
+(cd apps/web && pnpm test -- components/task/chat/chat-status-bar.test.tsx components/task/chat/conversation-usage-display.test.tsx)
 (cd apps/web && pnpm run typecheck)
 make build-web
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/conversation-usage.spec.ts)
 (cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-conversation-usage.spec.ts)
+(cd apps/web && pnpm run lint)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
@@ -71,6 +76,7 @@ git diff --check
 - `apps/web/components/task/chat/chat-status-bar.tsx`
 - `apps/web/components/task/chat/transcript-nav-group.tsx`
 - `apps/web/components/task/chat/conversation-usage-display.tsx`
+- `apps/web/components/task/task-chat-panel.tsx`
 - Corresponding component tests and `apps/web/e2e/tests/chat/{conversation-usage,mobile-conversation-usage}.spec.ts`
 
 ## Dependencies
@@ -93,4 +99,6 @@ None.
 
 ## Results
 
-Done. The focused component suite passed 16 tests across three files. `pnpm run typecheck` and `make build-web` passed. The desktop Chromium E2E passed with an exact 24 by 24 CSS pixel trigger, accessible label, tooltip, keyboard disclosure, and focus return. A second Chromium case at a 500px fine-pointer viewport passed with a 44 by 44 target and the phone drawer. The mobile Chrome E2E passed with a trigger of at least 44 by 44 CSS pixels, drawer access, focus return, row containment, and no horizontal page overflow. The mobile screenshot confirmed the existing inset drawer and its single scroll owner. `git diff --check` passed.
+Initial implementation validation passed. The focused component suite passed 16 tests across three files; web typecheck and `make build-web` passed. Desktop Chromium verified the 24px desktop trigger, accessible tooltip, keyboard disclosure, and focus return. The 500px fine-pointer case verified the 44px phone drawer. Mobile Chrome verified the touch-sized trigger, drawer, focus return, row containment, and no horizontal overflow. `git diff --check` passed.
+
+PR fixup validation passed: the focused component suite passed 11 tests across two files, including the shared coarse-pointer drawer policy and proceed alignment when Usage returns null. Web typecheck and lint passed, as did `make build-web`. Desktop Chromium passed all three tests, covering the desktop popover, 500px fine-pointer drawer, keyboard and pointer tooltip dismissal, and archived access. Mobile Chrome passed both tests, including archived drawer access. `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed. Desktop and mobile screenshots were recaptured and visually inspected.

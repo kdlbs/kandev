@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 import { openConversationUsageTask } from "./conversation-usage-helpers";
 
 test("shows turn and session usage in the desktop popover", async ({
@@ -29,6 +30,7 @@ test("shows turn and session usage in the desktop popover", async ({
 
   const popover = testPage.getByTestId("conversation-usage-popover");
   await expect(popover).toBeVisible();
+  await expect(tooltip).toBeHidden();
   await expect(popover.getByTestId("usage-turn-summary")).toContainText("1,200");
   await expect(popover).toContainText("Estimated cost");
   await expect(popover).toContainText("$1.23");
@@ -45,6 +47,7 @@ test("shows turn and session usage in the desktop popover", async ({
   await expect(tooltip).toHaveText("Usage");
   await trigger.click();
   await expect(popover).toBeVisible();
+  await expect(tooltip).toBeHidden();
   await prCapture.screenshot("conversation-usage-desktop", {
     caption: "Desktop composer status row with the usage entry point",
   });
@@ -82,4 +85,32 @@ test("uses a touch-sized Usage drawer at a narrow fine-pointer viewport", async 
   await expect(drawer).toBeVisible();
   await expect(drawer).toContainText("1,200");
   await expect(testPage.getByTestId("conversation-usage-popover")).toHaveCount(0);
+});
+
+test("keeps Usage available in the archived transcript banner", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(60_000);
+  const { taskId } = await openConversationUsageTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Archived conversation usage",
+  );
+  await apiClient.archiveTask(taskId);
+  await testPage.goto(`/t/${taskId}`);
+  await new SessionPage(testPage).waitForLoad();
+
+  await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible();
+  const archivedFooter = testPage.getByTestId("archived-chat-footer");
+  const trigger = archivedFooter.getByTestId("conversation-usage-trigger");
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAccessibleName("Usage");
+  await trigger.click();
+
+  const popover = testPage.getByTestId("conversation-usage-popover");
+  await expect(popover).toBeVisible();
+  await expect(popover.getByTestId("usage-turn-summary")).toContainText("1,200");
 });

@@ -1,5 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { SessionPage } from "../../pages/session-page";
 import { openConversationUsageTask } from "./conversation-usage-helpers";
 
 test("shows usage in the mobile drawer with touch-sized controls", async ({
@@ -49,4 +50,36 @@ test("shows usage in the mobile drawer with touch-sized controls", async ({
 
   await drawerScroll.getByRole("button", { name: "Close" }).first().tap();
   await expect(trigger).toBeFocused();
+});
+
+test("keeps Usage available in the archived mobile transcript", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(60_000);
+  const { taskId } = await openConversationUsageTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Archived mobile conversation usage",
+  );
+  await apiClient.archiveTask(taskId);
+  await testPage.goto(`/t/${taskId}`);
+  await new SessionPage(testPage).waitForLoad();
+
+  await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible();
+  const archivedFooter = testPage.getByTestId("archived-chat-footer");
+  const trigger = archivedFooter.getByTestId("conversation-usage-trigger");
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAccessibleName("Usage");
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox).not.toBeNull();
+  expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
+  expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+  await trigger.tap();
+
+  const drawer = testPage.getByTestId("conversation-usage-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByTestId("usage-turn-summary")).toContainText("1,200");
 });

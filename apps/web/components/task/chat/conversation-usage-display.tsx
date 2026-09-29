@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { DrawerClose } from "@kandev/ui/drawer";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConversationUsage } from "@/hooks/domains/session/use-conversation-usage";
 import type { UsageResponse, UsageTokenBreakdown, UsageTurn } from "@/lib/types/conversation-usage";
@@ -348,8 +349,9 @@ export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsag
   const { t } = useTranslation();
   const label = t("task:conversationUsage.open");
   const [open, setOpen] = useState(false);
-  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
-  const touch = isMobile || !isFinePointer;
+  const { isMobile } = useResponsiveBreakpoint();
+  const touchDrawer = useTouchDrawer();
+  const touch = isMobile || touchDrawer;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const usage = useConversationUsage(taskId ?? null, sessionId);
   const hasUsage = (usage.totals?.event_count ?? 0) > 0;
@@ -411,7 +413,7 @@ export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsag
   }
 
   return (
-    <Tooltip>
+    <Tooltip open={open ? false : undefined}>
       <Popover open={open} onOpenChange={setOpen}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>{trigger}</PopoverTrigger>

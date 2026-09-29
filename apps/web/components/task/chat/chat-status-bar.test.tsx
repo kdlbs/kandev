@@ -51,7 +51,9 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/components/task/workflow-move-proceed-button", () => ({
-  WorkflowMoveProceedButton: () => null,
+  WorkflowMoveProceedButton: ({ className, testId }: { className?: string; testId?: string }) => (
+    <button className={className} data-testid={testId} />
+  ),
 }));
 
 vi.mock("@/components/github/pr-status-chip", () => ({ PRStatusChip: () => null }));
@@ -176,5 +178,21 @@ describe("conversation usage status control", () => {
     const controls = screen.getByTestId("chat-status-bar-right-controls");
     expect(controls.childElementCount).toBe(0);
     expect(controls.className).toContain("empty:hidden");
+  });
+
+  it("keeps the proceed action right-aligned when Usage has no content", () => {
+    usageDisplay.visible = false;
+    renderStatus({
+      taskId: "task-1",
+      sessionId: "session-1",
+      nextStepName: "Review",
+    });
+
+    const actions = screen.getByTestId("chat-status-bar-actions");
+    const proceed = screen.getByTestId("proceed-next-step");
+    expect(actions.className).toContain("ml-auto");
+    expect(actions.contains(proceed)).toBe(true);
+    expect(proceed.className).toContain("h-6");
+    expect(proceed.className).not.toContain("ml-auto");
   });
 });

@@ -12,7 +12,7 @@ legacy_specs: []
 
 ## Overview
 
-Move the existing conversation Usage disclosure from the transcript footer into the status row above the composer. Show only its stats icon in that row. Preserve its usage data, visibility conditions, desktop popover, and phone drawer.
+Move the existing conversation Usage disclosure from the transcript footer into the status row above the composer. Show only its stats icon in that row. Preserve its usage data, visibility conditions, desktop popover, phone drawer, and archived-transcript access.
 
 The costs system owns this placement because the control is the entry point for its built-in conversation usage display. Desktop Approve/Deny buttons already retain their pre-PR compact styling; this package does not change permission actions.
 
@@ -23,7 +23,8 @@ The costs system owns this placement because the control is the entry point for 
 - Mount one Usage entry point beside Threads, transcript navigation, and Share when a task session is selected.
 - Remove the footer entry point and its reserved space.
 - Keep the localized accessible name, desktop tooltip, keyboard focus behavior, and phone drawer with a touch-sized trigger. The phone path applies at the `isMobile` breakpoint even when the pointer is fine; coarse pointers retain the drawer at wider breakpoints.
-- Keep missing, pending, error, and session-switch behavior without an empty toolbar gap or horizontal overflow.
+- Keep missing, pending, error, and session-switch behavior without an empty toolbar gap or horizontal overflow; keep the proceed action aligned when Usage returns no control.
+- Retain the Usage entry point in the read-only banner when a transcript is archived and has no composer status row.
 
 ### Out of scope
 
@@ -34,7 +35,7 @@ The costs system owns this placement because the control is the entry point for 
 
 `MessageListFooter` currently mounts `ConversationUsageDisplay` after the transcript. Remove that mount and pass the existing task/session IDs from `ChatStatusBar` to one Usage control in its right-hand icon cluster. Keep the control's `useConversationUsage` hook and `conversation-usage-trigger` test ID. Update right-control visibility so the Usage component mounts for a selected task session even before other optional controls appear, while an empty result leaves no visible spacer.
 
-Render `IconChartBar` alone. Reuse the localized `task:conversationUsage.open` label for `aria-label` and the fine-pointer tooltip. Match the neighboring compact icon controls on desktop; retain a 44px trigger on phone and coarse pointers. Keep the existing popover and `MobilePickerSheet` content and focus return. The phone status row can wrap at group boundaries while remaining within the viewport.
+Render `IconChartBar` alone. Reuse the localized `task:conversationUsage.open` label for `aria-label` and the fine-pointer tooltip, and close that tooltip while the popover is open. Match the neighboring compact icon controls on desktop; use `isMobile || useTouchDrawer()` for the 44px trigger and drawer path. Keep the existing popover and `MobilePickerSheet` content and focus return. The active status row can wrap at group boundaries while remaining within the viewport. In archived transcripts, mount the same control beside Jump to latest in the read-only banner. Keep the proceed action in the right-aligned action group when the Usage component returns null.
 
 No backend, feature-flag, translation-catalog, or permission-row changes are needed.
 
@@ -61,14 +62,14 @@ The icon and neighboring actions remain reachable if the row wraps. The phone st
 
 ## Tests
 
-- `components/task/chat/chat-status-bar.test.tsx`: a selected task/session passes its identity to the status-row Usage control; the empty right-control wrapper has no children and collapses.
-- `components/task/chat/conversation-usage-display.test.tsx`: the desktop trigger is icon-only, keeps the localized accessible name, and retains the touch drawer behavior.
+- `components/task/chat/chat-status-bar.test.tsx`: a selected task/session passes its identity to the status-row Usage control; the empty right-control wrapper has no children and collapses; the proceed action stays right-aligned when Usage returns null.
+- `components/task/chat/conversation-usage-display.test.tsx`: the desktop trigger is icon-only, keeps the localized accessible name, and retains the phone-breakpoint and shared touch-drawer behavior.
 - Existing footer tests retain coverage of footer status and recovery behavior. The desktop and mobile E2E tests verify the single Usage trigger is in the status row, so no footer duplicate remains.
 
 ## E2E tests
 
-- `tests/chat/conversation-usage.spec.ts` (Chromium): confirm the single icon lives in the status row, measures 24 by 24 CSS pixels on desktop, shows the Usage tooltip on hover and focus, opens the desktop popover by keyboard, and returns focus after closing. At a 500px fine-pointer viewport, confirm the trigger measures at least 44 by 44 and opens the phone drawer.
-- `tests/chat/mobile-conversation-usage.spec.ts` (mobile Chrome): confirm the icon is in the composer status row, measures at least 44 by 44 CSS pixels, opens the same drawer, returns focus, stays within the row, and does not create horizontal page overflow.
+- `tests/chat/conversation-usage.spec.ts` (Chromium): confirm the single icon lives in the status row, measures 24 by 24 CSS pixels on desktop, shows the Usage tooltip on hover and focus, hides it when the popover opens by keyboard, and returns focus after closing. At a 500px fine-pointer viewport, confirm the trigger measures at least 44 by 44 and opens the phone drawer. In archived mode, verify Usage remains available in the read-only banner.
+- `tests/chat/mobile-conversation-usage.spec.ts` (mobile Chrome): confirm the icon is in the composer status row, measures at least 44 by 44 CSS pixels, opens the same drawer, returns focus, stays within the row, and does not create horizontal page overflow. Also verify archived mobile transcripts retain the drawer action.
 
 ## Work orders
 
@@ -76,7 +77,9 @@ The icon and neighboring actions remain reachable if the row wraps. The phone st
 
 ## Verification results
 
-Passed. The focused component suite passed 16 tests across three files, web typecheck passed, and `make build-web` succeeded. The desktop Chromium Usage E2E passed both the 24px desktop popover and the 500px fine-pointer phone drawer; the mobile Chrome test passed with a 44px target and the existing inset drawer behavior. `git diff --check` passed. A phone screenshot confirmed the existing inset drawer layout and single scroll owner.
+Initial implementation: the focused component suite passed 16 tests across three files, web typecheck passed, and `make build-web` succeeded. Desktop Chromium passed both the 24px desktop popover and the 500px fine-pointer phone drawer; mobile Chrome passed with a 44px target and the existing inset drawer behavior. A phone screenshot confirmed the existing inset drawer layout and single scroll owner.
+
+PR fixup passed: regression coverage now includes the shared coarse-pointer drawer policy, keyboard and pointer tooltip dismissal, proceed alignment when Usage returns null, and active/archived desktop and mobile access. Desktop Chromium passed 3 tests and mobile Chrome passed 2 tests. Focused component tests passed 11 tests across 2 files; web typecheck and lint passed; `make build-web` succeeded; docs catalog validation, spec lint, and `git diff --check` passed. Desktop and mobile screenshots were recaptured and visually inspected.
 
 ## Risks
 

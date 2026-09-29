@@ -173,21 +173,7 @@ function ChatStatusBarArchiveBanners({ taskId }: { taskId: string | null }) {
   );
 }
 
-function ChatStatusBarRightControls({
-  canShare,
-  showAutoScrollControl,
-  showConversationUsage,
-  showThreadsLink,
-  taskId,
-  sessionId,
-  showJumpToLatest,
-  onJumpToLatest,
-  showScrollToLastPrompt,
-  onScrollToLastPrompt,
-  lastPromptScrollDirection,
-  showScrollToStart,
-  onScrollToStart,
-}: Pick<
+type ChatStatusBarRightControlsProps = Pick<
   ChatStatusBarProps,
   | "taskId"
   | "sessionId"
@@ -203,11 +189,27 @@ function ChatStatusBarRightControls({
   showAutoScrollControl: boolean;
   showConversationUsage: boolean;
   showThreadsLink: boolean;
-}) {
+};
+
+function ChatStatusBarRightControls({
+  canShare,
+  showAutoScrollControl,
+  showConversationUsage,
+  showThreadsLink,
+  taskId,
+  sessionId,
+  showJumpToLatest,
+  onJumpToLatest,
+  showScrollToLastPrompt,
+  onScrollToLastPrompt,
+  lastPromptScrollDirection,
+  showScrollToStart,
+  onScrollToStart,
+}: ChatStatusBarRightControlsProps) {
   return (
     <div
       data-testid="chat-status-bar-right-controls"
-      className="ml-auto flex shrink-0 items-center gap-1.5 empty:hidden"
+      className="flex shrink-0 items-center gap-1.5 empty:hidden"
     >
       {showThreadsLink && <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />}
       {showAutoScrollControl && sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
@@ -228,6 +230,44 @@ function ChatStatusBarRightControls({
           ) : null
         }
       />
+    </div>
+  );
+}
+
+function ChatStatusBarActions({
+  rightControlProps,
+  showRightControls,
+  showProceed,
+  nextStepName,
+  previewTarget,
+  onProceed,
+  isMoving,
+}: {
+  rightControlProps: ChatStatusBarRightControlsProps;
+  showRightControls: boolean;
+  showProceed: boolean;
+  nextStepName: string | null;
+  previewTarget?: WorkflowMovePreviewTarget;
+  onProceed: ChatStatusBarProps["onProceed"];
+  isMoving: boolean;
+}) {
+  if (!showRightControls && !(showProceed && nextStepName)) return null;
+  return (
+    <div
+      data-testid="chat-status-bar-actions"
+      className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5"
+    >
+      {showRightControls && <ChatStatusBarRightControls {...rightControlProps} />}
+      {showProceed && nextStepName && (
+        <WorkflowMoveProceedButton
+          previewTarget={previewTarget}
+          nextStepName={nextStepName}
+          onProceed={onProceed}
+          isMoving={isMoving}
+          className="h-6"
+          testId="proceed-next-step"
+        />
+      )}
     </div>
   );
 }
@@ -279,6 +319,21 @@ export function ChatStatusBar({
     showJumpToLatest,
     showThreadsLink,
   });
+  const rightControlProps = {
+    canShare,
+    showAutoScrollControl,
+    showConversationUsage,
+    showThreadsLink,
+    taskId,
+    sessionId,
+    showJumpToLatest,
+    onJumpToLatest,
+    showScrollToLastPrompt,
+    onScrollToLastPrompt,
+    lastPromptScrollDirection,
+    showScrollToStart,
+    onScrollToStart,
+  };
   if (
     !shouldRenderChatStatusBar({
       hasTask: !!taskId,
@@ -305,33 +360,15 @@ export function ChatStatusBar({
       <BackgroundWorkChip sessionId={sessionId} />
       {queueChip}
       <ChatStatusBarArchiveBanners taskId={taskId} />
-      {showRightControls && (
-        <ChatStatusBarRightControls
-          canShare={canShare}
-          showAutoScrollControl={showAutoScrollControl}
-          showConversationUsage={showConversationUsage}
-          showThreadsLink={showThreadsLink}
-          taskId={taskId}
-          sessionId={sessionId}
-          showJumpToLatest={showJumpToLatest}
-          onJumpToLatest={onJumpToLatest}
-          showScrollToLastPrompt={showScrollToLastPrompt}
-          onScrollToLastPrompt={onScrollToLastPrompt}
-          lastPromptScrollDirection={lastPromptScrollDirection}
-          showScrollToStart={showScrollToStart}
-          onScrollToStart={onScrollToStart}
-        />
-      )}
-      {showProceed && nextStepName && (
-        <WorkflowMoveProceedButton
-          previewTarget={previewTarget}
-          nextStepName={nextStepName}
-          onProceed={onProceed}
-          isMoving={isMoving}
-          className={`${showRightControls ? "" : "ml-auto "}h-6`}
-          testId="proceed-next-step"
-        />
-      )}
+      <ChatStatusBarActions
+        rightControlProps={rightControlProps}
+        showRightControls={showRightControls}
+        showProceed={showProceed}
+        nextStepName={nextStepName}
+        previewTarget={previewTarget}
+        onProceed={onProceed}
+        isMoving={isMoving}
+      />
     </div>
   );
 }

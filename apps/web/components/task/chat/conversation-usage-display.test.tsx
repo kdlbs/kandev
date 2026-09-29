@@ -6,6 +6,7 @@ import type { SessionUsageTotals, UsageTurn } from "@/lib/types/conversation-usa
 const mocks = vi.hoisted(() => ({
   isMobile: false,
   isFinePointer: true,
+  touchDrawer: false,
   loadTurnDetail: vi.fn(),
   usage: null as unknown,
 }));
@@ -15,6 +16,9 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
     isMobile: mocks.isMobile,
     isFinePointer: mocks.isFinePointer,
   }),
+}));
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => mocks.touchDrawer,
 }));
 vi.mock("@/hooks/domains/session/use-conversation-usage", () => ({
   useConversationUsage: () =>
@@ -125,6 +129,7 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.isMobile = false;
   mocks.isFinePointer = true;
+  mocks.touchDrawer = false;
   mocks.usage = null;
 });
 
@@ -143,8 +148,12 @@ describe("ConversationUsageDisplay", () => {
   });
 
   it("opens the touch drawer with the latest usage and requests persisted response detail", () => {
-    mocks.isFinePointer = false;
-    render(<ConversationUsageDisplay taskId="task-1" sessionId="session-1" />);
+    mocks.touchDrawer = true;
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
     const trigger = screen.getByTestId("conversation-usage-trigger");
 
     expect(trigger.className).toContain("h-11");
@@ -175,11 +184,27 @@ describe("ConversationUsageDisplay", () => {
 
     expect(screen.getByRole("dialog", { name: "Conversation usage" })).toBeTruthy();
   });
+
+  it("uses the shared touch drawer policy for a coarse pointer outside the phone breakpoint", () => {
+    mocks.touchDrawer = true;
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Usage" });
+    expect(trigger.className).toContain("h-11");
+    expect(trigger.className).toContain("w-11");
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "Conversation usage" })).toBeTruthy();
+  });
 });
 
 describe("ConversationUsageDisplay refreshed usage", () => {
   it("keeps the refreshed latest turn ahead of stale loaded detail", () => {
-    mocks.isFinePointer = false;
+    mocks.touchDrawer = true;
     const makeTurn = (turnId: string, tokens: number): UsageTurn => {
       const breakdown = {
         input_tokens: tokens,
@@ -245,7 +270,11 @@ describe("ConversationUsageDisplay refreshed usage", () => {
       loadTurnDetail: mocks.loadTurnDetail,
     };
 
-    render(<ConversationUsageDisplay taskId="task-1" sessionId="session-1" />);
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
     fireEvent.click(screen.getByTestId("conversation-usage-trigger"));
 
     const summary = screen.getByTestId("usage-turn-summary").textContent;
