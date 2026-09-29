@@ -61,9 +61,10 @@ creates, archives or repoints a conversation.
   ([Episode recheck](../../specs/coordinator/system-design/wake.md#episode-recheck))
   and the 20-wake batch, the step 3 transaction under `WithWakeLock` (re-read
   autonomy, insert the turn row, mark wakes, roll back when none changed),
-  the send through `orchestrator.Service.PromptTask` directly (extended with
-  an options value for the system author and
-  `metadata.coordinator_wake_turn_id`; never the message queue), the lookup
+  the send through a new exported orchestrator entry point beside `PromptTask`
+  (it stores the message in the `afterClaim` seam with
+  `metadata.coordinator_wake_turn_id`, author type `user`; never the message
+  queue), the lookup
   of the turn's stored message by that key, and the `send_failed` rollback
   only for a refusal before dispatch (`ErrAgentPromptInProgress`,
   `ErrSessionNotPromptable`, invalid request)

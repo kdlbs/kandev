@@ -247,11 +247,21 @@ ceiling-releasing turn end, and each backstop tick.
    an autonomy-off PATCH that commits first makes this step roll back, and one
    that commits after it finds a running turn (`AC-COORDINATOR-WAKE-004.3`).
 4. Build the turn message ([Transcript](#transcript)) and send it through the
-   orchestrator's direct prompt path (`orchestrator.Service.PromptTask`,
-   extended with an options value carrying the coordinator's system author
-   and `metadata.coordinator_wake_turn_id` set to the turn row id, and no tool
-   or binding option: the session keeps its bound tool list,
-   [integration](integration.md#tool-list)). Delivery
+   orchestrator's direct prompt path: a new exported entry point beside
+   `orchestrator.Service.PromptTask` (which takes no options and stores no
+   message; the message handler stores a manager's message first) that runs
+   `promptTask` with `dispatchOnly=true` and the unexported
+   `promptTaskOptions` (`orchestrator/task_operations.go`). Its exported
+   options value carries `metadata.coordinator_wake_turn_id` set to the turn
+   row id and `onAccepted`, and no tool or binding option: the session keeps
+   its bound tool list, [integration](integration.md#tool-list)). The entry
+   point stores the message itself through the `afterClaim` seam of
+   `promptTaskOptions`, which runs after admission and the foreground claim
+   and before dispatch, with the claimed turn id and
+   `MessageCreator.CreateUserMessage`, so a send refused before the claim
+   stores no message and a failed store rolls the claim back and dispatches
+   nothing. The stored message has `author_type` `user` (there is no system
+   author type) and is marked only by that metadata key. Delivery
    never uses the message queue (`orchestrator/messagequeue`), so a wake
    message is never queued behind another turn: admission check 7 ran in
    step 1, and a manager message that made the session busy since then makes
@@ -267,8 +277,8 @@ ceiling-releasing turn end, and each backstop tick.
    did not, `session_turn_id` with the same conditional update. On a send error, [find the turn's message](#finding-the-turns-message):
    when found, record it as on success, because the prompt was sent. When it
    is not found and the error is a refusal before dispatch
-   (`ErrAgentPromptInProgress`, `ErrSessionNotPromptable`, or an invalid
-   request), in one transaction set the turn `outcome='send_failed'`,
+   (`ErrAgentPromptInProgress`, `ErrSessionNotPromptable`, an invalid
+   request, or the message-persistence failure of `afterClaim`), in one transaction set the turn `outcome='send_failed'`,
    `finished_at`, and return its wakes to `pending` with `turn_id` null; the
    next trigger holds at admission with `conversation_busy` until the session
    is idle. Any other error (timeout, cancelled context, transport) leaves the
@@ -446,8 +456,10 @@ every wake insert, delivery, turn settle and autonomy PATCH that changes
 - Only the PATCH route writes `autonomy_enabled`; it requires
   `workspace.manage` and the MCP guard refuses every settings action for a
   coordinator principal.
-- The turn message is authored by the system, not by a user, so it cannot be
-  confused with a manager's message; the no-turn-start table in
+- The turn message is stored with `author_type` `user` and marked by
+  `metadata.coordinator_wake_turn_id` alone, because the message model has no
+  system author; the web renderer and the turn lookup key on that marker, so
+  it is not confused with a manager's message there. The no-turn-start table in
   `internal/coordinator/no_turn_start_test.go` gains exactly one allowed path,
   `Deliver` with admission passed, and every other row stays.
 
