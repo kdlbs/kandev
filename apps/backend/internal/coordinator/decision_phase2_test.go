@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -111,5 +112,30 @@ func TestReject_Phase2OnDeletedCoordinatorIs404(t *testing.T) {
 	}
 	if _, err := svc.claimRaceResult(context.Background(), "ws-1", c.ID, p.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestApprove_Phase2ApprovedRowDetailIsTheProposalTitle(t *testing.T) {
+	store, c, svc := phase2Fixture(t, true)
+	p := insertKind(t, store, c, ProposalKindCreateTask)
+	if _, err := svc.ApproveProposal(context.Background(), "ws-1", c.ID, p.ID, ApproveProposalRequest{}); err != nil {
+		t.Fatalf("ApproveProposal: %v", err)
+	}
+	rows := listActivity(t, store, c.ID)
+	if len(rows) != 1 || rows[0].Detail != sampleSpec().Title {
+		t.Fatalf("rows = %+v, want detail %q", rows, sampleSpec().Title)
+	}
+}
+
+func TestApprove_Phase2EditedApprovedRowDetailIsTheFinalTitle(t *testing.T) {
+	store, c, svc := phase2Fixture(t, true)
+	p := insertKind(t, store, c, ProposalKindCreateTask)
+	edits := ApproveProposalRequest{ApproveFieldTitle: json.RawMessage(`"Edited title"`)}
+	if _, err := svc.ApproveProposal(context.Background(), "ws-1", c.ID, p.ID, edits); err != nil {
+		t.Fatalf("ApproveProposal: %v", err)
+	}
+	rows := listActivity(t, store, c.ID)
+	if len(rows) != 1 || !rows[0].Edited || rows[0].Detail != "Edited title" {
+		t.Fatalf("rows = %+v", rows)
 	}
 }
