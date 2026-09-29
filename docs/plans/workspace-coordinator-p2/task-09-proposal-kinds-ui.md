@@ -169,3 +169,14 @@ a unit test in `send-back-form.test.tsx`, `use-stall-resume.test.ts` or
 - **R4-05 Announce and focus.** AC 005.2 is conditioned on the phase-2 flag.
   The session read retries after a failure. Closing the form returns focus to
   the Send it back trigger, matching WP-5b's card and task 08's rows.
+
+## E2E waiver
+
+The stall Resume flow has no Playwright spec. A real `task.stalled` needs the
+one-minute sweep to cross a 75 s threshold and land between one and two
+thresholds (about 120 s per run, see `stall.spec.ts`), and a seeded
+execution-less session cannot be resumed by a real agent process. The card's
+Resume is covered by `use-stall-resume.test.ts` (lock, sequence and tombstones,
+launch body dispositions, timeout outcome) and the card tests. Message Edit
+then approve, Send it back, move approve, reject offer and the phone variants
+of the message card and Ready to merge row are covered end to end.
