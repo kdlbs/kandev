@@ -243,6 +243,8 @@
   "sectionStandingOrdersHelp": "Rules the coordinator follows in every conversation.",
   "sectionGoal": "Goal",
   "sectionGoalHelp": "The milestone this coordinator's list is ranked against.",
+  "sectionAutonomy": "Autonomy",
+  "sectionAutonomyHelp": "Let the coordinator act on its own within a spending ceiling.",
   "standingOrdersEmpty": "There are no standing orders yet.",
   "standingOrderNumber": "Standing order {{number}}",
   "standingOrderAdded": "Added {{date}}",

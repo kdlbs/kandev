@@ -116,19 +116,21 @@ func (s *Store) initSchema() error {
 
 // coordinatorRow is the DB scan target for coordinators.
 type coordinatorRow struct {
-	ID                 string         `db:"id"`
-	WorkspaceID        string         `db:"workspace_id"`
-	Name               string         `db:"name"`
-	AgentProfileID     string         `db:"agent_profile_id"`
-	ExecutorProfileID  string         `db:"executor_profile_id"`
-	Context            string         `db:"context"`
-	ConversationTaskID sql.NullString `db:"conversation_task_id"`
-	ConfigRevision     int64          `db:"config_revision"`
-	CreatedAt          time.Time      `db:"created_at"`
-	UpdatedAt          time.Time      `db:"updated_at"`
-	PolicyJSON         sql.NullString `db:"policy_json"`
-	PolicyRevision     int            `db:"policy_revision"`
-	WatchScope         string         `db:"watch_scope"`
+	ID                  string         `db:"id"`
+	WorkspaceID         string         `db:"workspace_id"`
+	Name                string         `db:"name"`
+	AgentProfileID      string         `db:"agent_profile_id"`
+	ExecutorProfileID   string         `db:"executor_profile_id"`
+	Context             string         `db:"context"`
+	ConversationTaskID  sql.NullString `db:"conversation_task_id"`
+	ConfigRevision      int64          `db:"config_revision"`
+	CreatedAt           time.Time      `db:"created_at"`
+	UpdatedAt           time.Time      `db:"updated_at"`
+	PolicyJSON          sql.NullString `db:"policy_json"`
+	PolicyRevision      int            `db:"policy_revision"`
+	WatchScope          string         `db:"watch_scope"`
+	AutonomyEnabled     bool           `db:"autonomy_enabled"`
+	CostCeilingSubcents sql.NullInt64  `db:"cost_ceiling_subcents"`
 }
 
 func (r *coordinatorRow) toCoordinator() *Coordinator {
@@ -144,6 +146,11 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 		UpdatedAt:         r.UpdatedAt,
 		PolicyRevision:    r.PolicyRevision,
 		WatchScope:        r.WatchScope,
+		AutonomyEnabled:   r.AutonomyEnabled,
+	}
+	if r.CostCeilingSubcents.Valid {
+		v := r.CostCeilingSubcents.Int64
+		c.CostCeilingSubcents = &v
 	}
 	if r.PolicyJSON.Valid {
 		raw := r.PolicyJSON.String
@@ -156,7 +163,7 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 	return c
 }
 
-const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, policy_json, policy_revision, watch_scope`
+const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, policy_json, policy_revision, watch_scope, autonomy_enabled, cost_ceiling_subcents`
 
 // insertCoordinatorColumns lists the columns CreateCoordinator writes; the policy columns
 // keep their defaults.
@@ -303,6 +310,9 @@ func (s *Store) DeleteCoordinator(ctx context.Context, workspaceID, id string) e
 			return fmt.Errorf("lock coordinator for delete: %w", err)
 		}
 	}
+	if err := deleteCoordinatorPhase3Rows(ctx, tx, "= ?", id); err != nil {
+		return err
+	}
 	for _, table := range coordinatorOwnedTables {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE coordinator_id = ? AND workspace_id = ?`),
 			id, workspaceID); err != nil {
@@ -342,6 +352,24 @@ type CoordinatorPatch struct {
 	AgentProfileID    *string
 	ExecutorProfileID *string
 	Context           *string
+
+	// AutonomyEnabled is the phase 3 autonomy switch; nil leaves it unchanged.
+	AutonomyEnabled *bool
+	// CeilingSet marks CostCeilingSubcents as sent: a nil value with CeilingSet
+	// clears the ceiling, and CeilingSet false leaves it unchanged.
+	CeilingSet          bool
+	CostCeilingSubcents *int64
+}
+
+// PatchResult is the committed outcome of a coordinator PATCH.
+type PatchResult struct {
+	Coordinator *Coordinator
+	// ClearedConversationTaskID is the previous conversation task id when the
+	// PATCH cleared it, nil otherwise.
+	ClearedConversationTaskID *string
+	// AutonomyChanged is true when autonomy_enabled or cost_ceiling_subcents
+	// differs from the row the PATCH read.
+	AutonomyChanged bool
 }
 
 // PatchValidator is invoked once inside the PATCH transaction with the
@@ -360,6 +388,16 @@ type PatchValidator func(ctx context.Context, merged *Coordinator) error
 // differs from the row read under the lock, conversation_task_id is cleared;
 // its previous value is returned only when it was non-nil.
 func (s *Store) PatchCoordinator(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*Coordinator, *string, error) {
+	res, err := s.PatchCoordinatorResult(ctx, workspaceID, id, patch, validate)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res.Coordinator, res.ClearedConversationTaskID, nil
+}
+
+// PatchCoordinatorResult is PatchCoordinator returning the full PatchResult,
+// including whether the autonomy settings changed.
+func (s *Store) PatchCoordinatorResult(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*PatchResult, error) {
 	if dialect.IsPostgres(s.db.DriverName()) {
 		return s.patchCoordinatorPostgres(ctx, workspaceID, id, patch, validate)
 	}
@@ -369,15 +407,15 @@ func (s *Store) PatchCoordinator(ctx context.Context, workspaceID, id string, pa
 // patchCoordinatorSQLite takes the single writer lock up front with BEGIN
 // IMMEDIATE, before any read, so a competing PATCH serializes rather than
 // racing the read.
-func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*Coordinator, *string, error) {
+func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*PatchResult, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("acquire writer connection: %w", err)
+		return nil, fmt.Errorf("acquire writer connection: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return nil, nil, fmt.Errorf("begin immediate: %w", err)
+		return nil, fmt.Errorf("begin immediate: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -393,24 +431,24 @@ func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id stri
 		s.afterLock(ctx)
 	}
 
-	updated, cleared, err := s.patchCoordinatorBody(ctx, conn, func(q string) string { return q }, workspaceID, id, patch, validate, false, nil)
+	result, err := s.patchCoordinatorBody(ctx, conn, func(q string) string { return q }, workspaceID, id, patch, validate, false, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return nil, nil, fmt.Errorf("commit patch coordinator: %w", err)
+		return nil, fmt.Errorf("commit patch coordinator: %w", err)
 	}
 	committed = true
-	return updated, cleared, nil
+	return result, nil
 }
 
 // patchCoordinatorPostgres acquires the lock via SELECT ... FOR UPDATE inside
 // patchCoordinatorBody: on PostgreSQL that statement is what acquires the
 // row lock, so afterLock fires right after it returns (see the passed hook).
-func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*Coordinator, *string, error) {
+func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*PatchResult, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("begin patch coordinator: %w", err)
+		return nil, fmt.Errorf("begin patch coordinator: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -419,24 +457,30 @@ func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id st
 			s.afterLock(ctx)
 		}
 	}
-	updated, cleared, err := s.patchCoordinatorBody(ctx, tx, s.db.Rebind, workspaceID, id, patch, validate, true, hook)
+	result, err := s.patchCoordinatorBody(ctx, tx, s.db.Rebind, workspaceID, id, patch, validate, true, hook)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, fmt.Errorf("commit patch coordinator: %w", err)
+		return nil, fmt.Errorf("commit patch coordinator: %w", err)
 	}
-	return updated, cleared, nil
+	return result, nil
 }
 
 // patchCoordinatorBody reads the row under lock, merges the patch, validates,
 // stamps updated_at with the store's clock, and writes the update. hookAfterRead
 // is called right after the row read succeeds (used only by the PostgreSQL
 // path, where that read is what acquires the lock); pass nil otherwise.
-func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, rebind func(string) string, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, forUpdate bool, hookAfterRead func()) (*Coordinator, *string, error) {
+func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, rebind func(string) string, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, forUpdate bool, hookAfterRead func()) (*PatchResult, error) {
+	turningAutonomyOff := patch.AutonomyEnabled != nil && !*patch.AutonomyEnabled
+	if turningAutonomyOff {
+		if err := s.takeWakeLock(ctx, exec, id); err != nil {
+			return nil, err
+		}
+	}
 	row, err := lockedCoordinatorRow(ctx, exec, rebind, workspaceID, id, forUpdate)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if hookAfterRead != nil {
 		hookAfterRead()
@@ -445,7 +489,7 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 	merged := mergeCoordinatorPatch(row, patch)
 	if validate != nil {
 		if err := validate(ctx, merged); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -463,19 +507,58 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 
 	now := s.now()
 	_, err = exec.ExecContext(ctx, rebind(`
-		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, updated_at = ?
+		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, autonomy_enabled = ?, cost_ceiling_subcents = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?`),
 		merged.Name, merged.AgentProfileID, merged.ExecutorProfileID, merged.Context,
-		nullableString(newConversationTaskID), newConfigRevision, now, row.ID, row.WorkspaceID)
+		nullableString(newConversationTaskID), newConfigRevision,
+		autonomyColumn(merged.AutonomyEnabled), nullableInt64(merged.CostCeilingSubcents), now, row.ID, row.WorkspaceID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("update coordinator: %w", err)
+		return nil, fmt.Errorf("update coordinator: %w", err)
+	}
+	if turningAutonomyOff {
+		if _, err := exec.ExecContext(ctx, rebind(`
+			UPDATE coordinator_wakes SET status = 'superseded', updated_at = ?
+			WHERE coordinator_id = ? AND status = 'pending'`), now, row.ID); err != nil {
+			return nil, fmt.Errorf("supersede pending wakes: %w", err)
+		}
 	}
 
 	merged.ConversationTaskID = newConversationTaskID
 	merged.ConfigRevision = newConfigRevision
 	merged.CreatedAt = row.CreatedAt
 	merged.UpdatedAt = now
-	return merged, clearedConversationTaskID, nil
+	return &PatchResult{
+		Coordinator:               merged,
+		ClearedConversationTaskID: clearedConversationTaskID,
+		AutonomyChanged:           autonomySettingsChanged(row, merged),
+	}, nil
+}
+
+// autonomySettingsChanged reports whether the merged autonomy switch or
+// ceiling differs from the row the PATCH read.
+func autonomySettingsChanged(row *coordinatorRow, merged *Coordinator) bool {
+	if row.AutonomyEnabled != merged.AutonomyEnabled {
+		return true
+	}
+	if row.CostCeilingSubcents.Valid != (merged.CostCeilingSubcents != nil) {
+		return true
+	}
+	return merged.CostCeilingSubcents != nil && *merged.CostCeilingSubcents != row.CostCeilingSubcents.Int64
+}
+
+// autonomyColumn renders the autonomy switch as its 0/1 column value.
+func autonomyColumn(on bool) int {
+	if on {
+		return 1
+	}
+	return 0
+}
+
+func nullableInt64(v *int64) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *v, Valid: true}
 }
 
 // lockedCoordinatorRow reads a coordinator row by (id, workspace_id) on the
@@ -489,7 +572,8 @@ func lockedCoordinatorRow(ctx context.Context, exec coordinatorExec, rebind func
 	err := exec.QueryRowContext(ctx, rebind(query), id, workspaceID).Scan(
 		&row.ID, &row.WorkspaceID, &row.Name, &row.AgentProfileID, &row.ExecutorProfileID,
 		&row.Context, &row.ConversationTaskID, &row.ConfigRevision, &row.CreatedAt, &row.UpdatedAt,
-		&row.PolicyJSON, &row.PolicyRevision, &row.WatchScope)
+		&row.PolicyJSON, &row.PolicyRevision, &row.WatchScope,
+		&row.AutonomyEnabled, &row.CostCeilingSubcents)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -514,6 +598,12 @@ func mergeCoordinatorPatch(row *coordinatorRow, patch CoordinatorPatch) *Coordin
 	}
 	if patch.Context != nil {
 		merged.Context = *patch.Context
+	}
+	if patch.AutonomyEnabled != nil {
+		merged.AutonomyEnabled = *patch.AutonomyEnabled
+	}
+	if patch.CeilingSet {
+		merged.CostCeilingSubcents = patch.CostCeilingSubcents
 	}
 	return merged
 }

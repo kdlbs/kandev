@@ -41,6 +41,7 @@ const (
 const (
 	activityDetailMaxRunes = 1000
 	refusalCoalesceWindow  = 60 * time.Second
+	activityReadColumns    = activityColumns + `, unattended_turn_id`
 	activityColumns        = `id, coordinator_id, workspace_id, action_class, outcome, "authorization", target_task_id, proposal_id, actor_user_id, reason_code, detail, edited, refusal_count, undone_at, undone_by, undo_of_id, created_at, updated_at`
 )
 
@@ -74,6 +75,10 @@ type ActivityRow struct {
 	UndoOfID      *string               `db:"undo_of_id" json:"undo_of_id"`
 	CreatedAt     time.Time             `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time             `db:"updated_at" json:"updated_at"`
+
+	// UnattendedTurnID is set by reads only and is serialized by ActivityItem
+	// while phase 3 is effective.
+	UnattendedTurnID *string `db:"unattended_turn_id" json:"-"`
 }
 
 // RefusalRecorder records a refused coordinator action, coalescing repeats.

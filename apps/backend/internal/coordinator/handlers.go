@@ -63,6 +63,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 // and watch fields while the flag is on.
 func (h *Handlers) coordinatorDTO(ctx context.Context, c *Coordinator) (*CoordinatorDTO, error) {
 	dto := NewCoordinatorDTO(c)
+	if h.service.phase3 {
+		dto.WithAutonomy(c)
+	}
 	if !h.service.phase2 {
 		return dto, nil
 	}

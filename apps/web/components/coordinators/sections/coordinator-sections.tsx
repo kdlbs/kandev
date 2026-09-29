@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useCoordinatorSection } from "@/hooks/domains/coordinator/use-coordinator-section";
 import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
+import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
 import { GoalSection } from "./goal-section";
 import { ControlError } from "./control-error";
@@ -12,7 +13,7 @@ import { WatchesSection } from "./watches-section";
 import { SectionsRow, type CoordinatorSectionEntry } from "./sections-row";
 import { StandingOrdersSection } from "./standing-orders-section";
 
-const SLUGS = ["identity", "watches", "may-do", "standing-orders", "goal"];
+const BASE_SLUGS = ["identity", "watches", "may-do", "standing-orders", "goal"];
 
 type CoordinatorSectionsProps = {
   workspaceId: string;
@@ -30,7 +31,10 @@ export function CoordinatorSections({
 }: CoordinatorSectionsProps) {
   const { t } = useTranslation();
   const control = useControlDraft({ workspaceId, coordinatorId, canManage });
-  const { selectSection } = useCoordinatorSection(SLUGS);
+  const phase3 = useCoordinatorPhase3Effective();
+  const { selectSection } = useCoordinatorSection(
+    phase3 ? [...BASE_SLUGS, "autonomy"] : BASE_SLUGS,
+  );
   const stored = control.stored?.watches;
   const entries: CoordinatorSectionEntry[] = [
     {
@@ -91,6 +95,14 @@ export function CoordinatorSections({
       ),
     },
   ];
+  if (phase3) {
+    entries.push({
+      slug: "autonomy",
+      label: t("coordinator:sectionAutonomy"),
+      help: t("coordinator:sectionAutonomyHelp"),
+      render: () => null,
+    });
+  }
   return (
     <>
       <WatchesNoneNotice

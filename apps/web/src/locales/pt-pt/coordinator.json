@@ -243,6 +243,8 @@
   "sectionStandingOrdersHelp": "Regras que o coordenador segue em todas as conversas.",
   "sectionGoal": "Objetivo",
   "sectionGoalHelp": "O marco face ao qual a lista deste coordenador é ordenada.",
+  "sectionAutonomy": "Autonomia",
+  "sectionAutonomyHelp": "Permite que o coordenador aja por conta própria dentro de um limite de gastos.",
   "standingOrdersEmpty": "Ainda não há ordens permanentes.",
   "standingOrderNumber": "Ordem permanente {{number}}",
   "standingOrderAdded": "Adicionada em {{date}}",

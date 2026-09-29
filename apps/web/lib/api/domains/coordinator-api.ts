@@ -37,6 +37,10 @@ export type Coordinator = {
   policy?: { actions: Record<string, string> };
   policy_revision?: number;
   watches?: { scope: "all" | "selected"; workflow_ids: string[] };
+  // Present only while features.coordinatorPhase3 is effective. The ceiling is
+  // a dollar string with two decimals, or null when unset.
+  autonomy_enabled?: boolean;
+  cost_ceiling_usd?: string | null;
   // Present only on the list route while features.coordinatorPhase2 is on.
   summary?: CoordinatorSummary;
 };

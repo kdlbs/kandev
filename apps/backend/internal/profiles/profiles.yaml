@@ -146,6 +146,14 @@ features:
     dev:  "false"
     e2e:  "true"
 
+  # Coordinator autonomy (phase 3): unattended wakes, the spend ceiling and
+  # the automatic decision classes. Only effective together with
+  # KANDEV_FEATURES_COORDINATOR and KANDEV_FEATURES_COORDINATOR_PHASE2.
+  KANDEV_FEATURES_COORDINATOR_PHASE3:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

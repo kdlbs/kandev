@@ -9,7 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
-// DeleteWorkspaceState deletes a workspace's coordinators, proposals and
+// DeleteWorkspaceState deletes a workspace's coordinators, proposals, phase 3 rows and
 // stall records in one transaction (docs/specs/coordinator/system-design/
 // coordinators.md#workspace-deletion). Deleting zero rows is success, so a
 // redelivered workspace.deleted event is harmless.
@@ -24,6 +24,9 @@ func (s *Store) DeleteWorkspaceState(ctx context.Context, workspaceID string) er
 		if err := lockWorkspaceCoordinators(ctx, tx, workspaceID); err != nil {
 			return err
 		}
+	}
+	if err := deleteCoordinatorPhase3Rows(ctx, tx, "IN (SELECT id FROM coordinators WHERE workspace_id = ?)", workspaceID); err != nil {
+		return err
 	}
 	for _, table := range []string{"coordinator_watches", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"} {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE workspace_id = ?`), workspaceID); err != nil {

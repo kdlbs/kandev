@@ -1,7 +1,7 @@
 ---
 id: "01-flag-schema-settings"
 title: "Phase 3 flag, schema and autonomy settings"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -177,3 +177,24 @@ cd apps/web && pnpm run typecheck && pnpm test -- lib/api/domains/coordinator-ap
 
 - Postgres partial index syntax differs from SQLite: covered by the store's
   upgrade conformance on both dialects.
+
+## Build results
+
+Files changed: the flag (`config.go`, `runtimeflags/registry.go`, `profiles.yaml`, web `features/types.ts`), the six phase 3 tables and columns (`store_phase2_schema.go`, `requiredstores/catalog.go`), settings and wake code under `internal/coordinator/` (`autonomy_settings.go`, `store_wake.go`, `store.go`, `service.go`, `dto.go`, `handlers.go`, `activity*.go`, `events.go`, `models.go`, `store_workspace_delete.go`), wiring in `backendapp/coordinator.go` and `services.go`, and the web hook, Autonomy section entry and six locales.
+
+Conductor rulings applied: R3-1 (`WithPhase3` and `Phase3Enabled`, wired beside `WithPhase2`; `phase3Effective` is the single AND of the three flags), R3-2 (eight package-level `registerCoordinator*` vars, appended only when phase 3 is effective), R3-3 (`Service.PruneWakeState` returns `(turns, wakes)` and is called by the wake hook only through the Service; a prune failure is logged and does not block startup), R3-4, R3-5, R3-6.
+
+R3-4 correction for wake.md: the wake lock takes `pg_advisory_xact_lock` then the row `FOR UPDATE` on Postgres. On SQLite `lockCoordinatorRow` keeps its existing behavior (no `FOR UPDATE`; `BEGIN IMMEDIATE` provides the serialisation), so wake.md's SQLite statement is wrong. To port to #4044.
+
+Deviation: `coordinator_activity.unattended_turn_id` is applied through a new `phase2LateColumnMigrations` step (after `phase2TablesSQL`, before `phase2IndexesSQL`) instead of the column list, because on a phase 1 database the table does not exist until the tables step.
+
+Column definitions come from the specs; where silent they match phase 2's nearest column.
+
+E2E decision: none added. The only UI change is an empty Autonomy entry behind a default-off flag; it is covered by the editor-page and hook Vitest tests.
+
+Receipts:
+- `go test -race ./internal/coordinator/...` (SQLite) and the Postgres legs (`KANDEV_TEST_POSTGRES_DSN`, throwaway instance): pass.
+- `go test -race ./internal/backendapp/... ./internal/persistence/... ./internal/runtimeflags/... ./internal/profiles/... ./internal/mcp/...`: pass, including `storeconformance` and the Postgres boot test. Two backendapp startup-conflict tests fail only when `TMPDIR` is not the resolved `/private/var/...` path (macOS symlink) and pass with it.
+- `go run ./cmd/sqlguard ./internal` and `golangci-lint` on the touched packages: clean.
+- `internal/common/config` `TestConfigSourceLoadsStableYAMLFields` (`launcher.healthTimeoutMs = 600000`) fails identically on the merge-base; pre-existing, not touched here.
+- `pnpm run typecheck`, Vitest for components/coordinators and the new hook, `pnpm run i18n:check` and `i18n:ratchet`: pass.

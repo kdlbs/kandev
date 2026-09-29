@@ -19,6 +19,22 @@ var phase2ColumnMigrations = []struct{ name, stmt string }{
 	{"coordinator_proposals.standing_order_ids", `ALTER TABLE coordinator_proposals ADD COLUMN standing_order_ids TEXT NOT NULL DEFAULT '[]'`},
 	{"coordinator_proposals.starts_agent", `ALTER TABLE coordinator_proposals ADD COLUMN starts_agent {{boolean}} NOT NULL DEFAULT FALSE`},
 	{"coordinator_proposals.outcome_json", `ALTER TABLE coordinator_proposals ADD COLUMN outcome_json TEXT`},
+	{"coordinators.autonomy_enabled", `ALTER TABLE coordinators ADD COLUMN autonomy_enabled INTEGER NOT NULL DEFAULT 0`},
+	{"coordinators.cost_ceiling_subcents", `ALTER TABLE coordinators ADD COLUMN cost_ceiling_subcents BIGINT`},
+	{"coordinator_proposals.reply_text", `ALTER TABLE coordinator_proposals ADD COLUMN reply_text TEXT`},
+	{"coordinator_proposals.reply_delivered_at", `ALTER TABLE coordinator_proposals ADD COLUMN reply_delivered_at {{timestamp}}`},
+	{"coordinator_proposals.reply_delivery_claimed_at", `ALTER TABLE coordinator_proposals ADD COLUMN reply_delivery_claimed_at {{timestamp}}`},
+	{"coordinator_proposals.in_reply_to", `ALTER TABLE coordinator_proposals ADD COLUMN in_reply_to TEXT`},
+	{"coordinator_proposals.decided_automatically", `ALTER TABLE coordinator_proposals ADD COLUMN decided_automatically INTEGER NOT NULL DEFAULT 0`},
+	{"coordinator_proposals.claimed_automatically", `ALTER TABLE coordinator_proposals ADD COLUMN claimed_automatically INTEGER NOT NULL DEFAULT 0`},
+	{"coordinator_proposals.automatic_at", `ALTER TABLE coordinator_proposals ADD COLUMN automatic_at {{timestamp}}`},
+}
+
+// phase2LateColumnMigrations add columns to tables phase2TablesSQL creates, so
+// they run after it: coordinator_activity does not exist on a phase 1 database
+// until then.
+var phase2LateColumnMigrations = []struct{ name, stmt string }{
+	{"coordinator_activity.unattended_turn_id", `ALTER TABLE coordinator_activity ADD COLUMN unattended_turn_id TEXT`},
 }
 
 // phase2TablesSQL creates the phase-2 tables. Indexes over columns added by
@@ -81,6 +97,78 @@ const phase2TablesSQL = `
 		created_at {{timestamp}} NOT NULL,
 		updated_at {{timestamp}} NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_wakes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		episode_key TEXT NOT NULL,
+		status TEXT NOT NULL,
+		turn_id TEXT,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_unattended_turns (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		conversation_task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		message_id TEXT,
+		session_turn_id TEXT,
+		wake_count INTEGER NOT NULL,
+		denied_permissions INTEGER NOT NULL DEFAULT 0,
+		start_ceiling_subcents BIGINT NOT NULL,
+		stop_requested_at {{timestamp}},
+		outcome TEXT,
+		cost_subcents BIGINT,
+		started_at {{timestamp}} NOT NULL,
+		finished_at {{timestamp}}
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_unattended_denials (
+		turn_id TEXT NOT NULL,
+		pending_id TEXT NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (turn_id, pending_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_class_reviews (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		class TEXT NOT NULL,
+		reviewed_by TEXT NOT NULL,
+		reviewed_at {{timestamp}} NOT NULL,
+		window_start {{timestamp}} NOT NULL,
+		window_end {{timestamp}} NOT NULL,
+		row_count INTEGER NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_pending_changes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		proposal_id TEXT NOT NULL UNIQUE,
+		field TEXT NOT NULL,
+		base_value TEXT NOT NULL,
+		new_value TEXT NOT NULL,
+		status TEXT NOT NULL,
+		decided_by TEXT,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_class_changes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		class TEXT NOT NULL,
+		from_value TEXT NOT NULL,
+		to_value TEXT NOT NULL,
+		changed_by TEXT,
+		reason TEXT,
+		changed_at {{timestamp}} NOT NULL
+	);
 `
 
 const phase2IndexesSQL = `
@@ -97,6 +185,13 @@ const phase2IndexesSQL = `
 	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_history ON coordinator_goals(coordinator_id, created_at, id);
 	CREATE UNIQUE INDEX IF NOT EXISTS coordinator_proposals_open_target ON coordinator_proposals(coordinator_id, kind, target_task_id)
 		WHERE kind <> 'create_task' AND status IN ('pending','approving','failed');
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_wakes_episode ON coordinator_wakes(coordinator_id, task_id, kind, episode_key);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_wakes_status ON coordinator_wakes(coordinator_id, status, created_at, id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_unattended_turns_open ON coordinator_unattended_turns(coordinator_id) WHERE outcome IS NULL;
+	CREATE INDEX IF NOT EXISTS idx_coordinator_unattended_turns_started ON coordinator_unattended_turns(coordinator_id, started_at, id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_class_reviews_class ON coordinator_class_reviews(coordinator_id, class, reviewed_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_pending_changes_status ON coordinator_pending_changes(coordinator_id, status, created_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_class_changes_class ON coordinator_class_changes(coordinator_id, class, changed_at DESC);
 `
 
 // migratePhase2 applies the additive phase-2 schema: column migrations,
@@ -110,6 +205,11 @@ func (s *Store) migratePhase2(migrate *db.MigrateLogger) error {
 	}
 	if _, err := s.db.Exec(dialect.MustRenderSchema(driver, phase2TablesSQL)); err != nil {
 		return fmt.Errorf("coordinator phase 2 tables: %w", err)
+	}
+	for _, m := range phase2LateColumnMigrations {
+		if err := migrate.Apply(m.name, dialect.MustRenderSchema(driver, m.stmt)); err != nil {
+			return fmt.Errorf("coordinator phase 2 column %s: %w", m.name, err)
+		}
 	}
 	if _, err := s.db.Exec(dialect.MustRenderSchema(driver, phase2IndexesSQL)); err != nil {
 		return fmt.Errorf("coordinator phase 2 indexes: %w", err)

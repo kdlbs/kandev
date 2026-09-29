@@ -304,6 +304,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase3",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE3",
+			Kind:        KindFeature,
+			Label:       "Coordinator autonomy",
+			Description: "Lets a coordinator run unattended within a spend ceiling and decide chosen proposal classes automatically. Requires Workspace coordinators and Coordinator control.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Lets a coordinator start turns and decide proposals without a human present, bounded by a spend ceiling and " +
+				"the permissions granted. Autonomy stays off per coordinator until enabled. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase3 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase3 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

@@ -32,6 +32,7 @@ func initCoordinatorWiring(
 	agentProfiles settingsstore.Repository,
 	enabled bool,
 	phase2 bool,
+	phase3 bool,
 	log *logger.Logger,
 ) (*coordinator.Service, error) {
 	store, storeErr := coordinator.NewStore(dbPool.Writer(), dbPool.Reader())
@@ -43,10 +44,18 @@ func initCoordinatorWiring(
 	}
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
-	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2))
+	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2),
+		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3)))
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
 	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
+}
+
+// phase3Effective is the single source for the phase 3 gate: the autonomy
+// surface exists only when coordinator, coordinator phase 2 and coordinator
+// phase 3 are all on.
+func phase3Effective(coordinatorOn, phase2, phase3 bool) bool {
+	return coordinatorOn && phase2 && phase3
 }
 
 // coordinatorStandingInstructionsReader closes over svc to build the
@@ -114,6 +123,11 @@ func registerCoordinatorRoutes(p routeParams) {
 		registerCoordinatorConversation(p.router, p.eventBus, svc, p.log),
 		registerCoordinatorSubscribers(p.router, p.eventBus, svc, p.log),
 		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.taskSvc, p.services.Workflow, p.log),
+	}
+	if svc.Phase3Enabled() {
+		for _, register := range phase3Registrations() {
+			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
+		}
 	}
 	runCoordinatorBackgroundPass(p.ctx, t0, hooks)
 }
@@ -230,5 +244,57 @@ func registerCoordinatorDecisions(
 		svc.StartupRecoveryPass(ctx, t0)
 		svc.StartApprovalSweep(ctx)
 		svc.StartActivityRetention(ctx)
+	}
+}
+
+// coordinatorRegistration is the shape shared by the phase 3 registration
+// functions: each registers its routes and subscriptions and returns the hook
+// that runs in the startup background pass.
+type coordinatorRegistration = func(*gin.Engine, bus.EventBus, *coordinator.Service, *logger.Logger) func(context.Context, time.Time)
+
+func noopCoordinatorHook(*gin.Engine, bus.EventBus, *coordinator.Service, *logger.Logger) func(context.Context, time.Time) {
+	return func(context.Context, time.Time) {}
+}
+
+// Phase 3 registration functions, one per work package. They are package
+// variables so tests can swap them; each later work package replaces its
+// no-op default.
+var (
+	registerCoordinatorContainment  coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorSpend        coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorWake         coordinatorRegistration = registerCoordinatorWakeState
+	registerCoordinatorDelivery     coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorRelay        coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorReply        coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorAutomatic    coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorImprovements coordinatorRegistration = noopCoordinatorHook
+)
+
+func phase3Registrations() []coordinatorRegistration {
+	return []coordinatorRegistration{
+		registerCoordinatorContainment,
+		registerCoordinatorSpend,
+		registerCoordinatorWake,
+		registerCoordinatorDelivery,
+		registerCoordinatorRelay,
+		registerCoordinatorReply,
+		registerCoordinatorAutomatic,
+		registerCoordinatorImprovements,
+	}
+}
+
+// registerCoordinatorWakeState returns the startup hook that prunes wake
+// state. A prune failure is logged and never blocks startup.
+func registerCoordinatorWakeState(_ *gin.Engine, _ bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	return func(ctx context.Context, _ time.Time) {
+		turns, wakes, err := svc.PruneWakeState(ctx, time.Now().UTC())
+		if err != nil {
+			log.Warn("coordinator wake state pruning failed", zap.Error(err))
+			return
+		}
+		if turns > 0 || wakes > 0 {
+			log.Info("coordinator wake state pruning complete",
+				zap.Int64("turns", turns), zap.Int64("wakes", wakes))
+		}
 	}
 }

@@ -64,7 +64,8 @@ func tableColumns(t *testing.T, conn *sqlx.DB, table string) []string {
 func endSchema(t *testing.T, conn *sqlx.DB) string {
 	t.Helper()
 	var b strings.Builder
-	for _, table := range []string{"coordinators", "coordinator_proposals", "coordinator_watches", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"} {
+	for _, table := range []string{"coordinators", "coordinator_proposals", "coordinator_watches", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals",
+		"coordinator_wakes", "coordinator_unattended_turns", "coordinator_unattended_denials", "coordinator_class_reviews", "coordinator_pending_changes", "coordinator_class_changes"} {
 		b.WriteString(table + ": " + strings.Join(tableColumns(t, conn, table), "|") + "\n")
 	}
 	return b.String()
