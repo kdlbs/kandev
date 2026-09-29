@@ -8,6 +8,7 @@ import { Spinner } from "@kandev/ui/spinner";
 import { Textarea } from "@kandev/ui/textarea";
 import type { ApproveProposalEdits } from "@/lib/api/domains/coordinator-api";
 import type { EditFormServerError } from "./edit-form";
+import { LONG_TEXT_FIELD_CLASS } from "@/components/coordinators/long-text-field";
 
 export const MAX_MESSAGE_CODE_POINTS = 4000;
 
@@ -52,6 +53,7 @@ export function MessageEditForm({
           <FieldLabel htmlFor={fieldId}>{t("coordinator:editMessageLabel")}</FieldLabel>
           <Textarea
             id={fieldId}
+            className={LONG_TEXT_FIELD_CLASS}
             ref={areaRef}
             value={value}
             disabled={busy}
