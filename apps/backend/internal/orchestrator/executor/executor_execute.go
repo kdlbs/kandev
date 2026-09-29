@@ -1903,7 +1903,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if hasRunning {
 		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 			launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-			opts.OnExecutionAdmitted, opts.RefuseIfAgentRunning, opts.TurnID,
+			opts.OnExecutionAdmitted, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+			opts.RefuseIfAgentRunning, opts.TurnID,
 		)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
 			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
@@ -1941,6 +1942,14 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+	}
+	if startAgent && (prompt != "" || len(opts.Attachments) > 0) {
+		if err := e.registerInitialPromptDispatchCallbacks(
+			resp.AgentExecutionID, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+		); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
+			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
+		}
 	}
 	if startAgent && opts.OnExecutionAdmitted != nil {
 		opts.OnExecutionAdmitted(resp.AgentExecutionID)
@@ -2610,7 +2619,9 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),
 	}
-	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, nil, false, turnIDs...)
+	return e.startAgentOnExistingWorkspaceWithRequest(
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, false, turnIDs...,
+	)
 }
 
 func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
@@ -2622,6 +2633,8 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	onInitialPromptAccepted func(string),
+	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,
 	turnIDs ...string,
 ) (*TaskExecution, error) {
@@ -2702,6 +2715,13 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			zap.Error(err))
 		return nil, err
 	}
+	if prompt != "" || len(request.Attachments) > 0 {
+		if err := e.registerInitialPromptDispatchCallbacks(
+			executionID, onInitialPromptAccepted, onInitialPromptFailed,
+		); err != nil {
+			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
+		}
+	}
 
 	execution := &TaskExecution{
 		TaskID:           task.ID,
@@ -2725,6 +2745,31 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		zap.String("agent_execution_id", executionID))
 
 	return execution, nil
+}
+
+func (e *Executor) registerInitialPromptDispatchCallbacks(
+	executionID string,
+	onAccepted func(string),
+	onFailure func(),
+) error {
+	if onAccepted == nil && onFailure == nil {
+		return nil
+	}
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot register initial prompt dispatch callbacks")
+	}
+	return registrar.RegisterInitialPromptDispatchCallbacks(
+		executionID,
+		func() {
+			if onAccepted != nil {
+				onAccepted(executionID)
+			}
+		},
+		onFailure,
+	)
 }
 
 func executorRunningStatusMayOwnAgent(status string) bool {

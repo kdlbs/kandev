@@ -62,16 +62,25 @@ func (a *mockAgent) handleDynamicUnclassifiedFallback(
 		return acp.PromptResponse{}, nil, false
 	}
 
-	counterSessionID := acp.SessionId(extractRegexMatch(sessionIDRegex, prompt))
-	if counterSessionID == "" {
-		counterSessionID = sid
-	}
 	a.mu.Lock()
 	if a.dynamicFallbackCounterSessions == nil {
 		a.dynamicFallbackCounterSessions = make(map[acp.SessionId]acp.SessionId)
 	}
+	counterSessionID := a.dynamicFallbackCounterSessions[sid]
+	if counterSessionID == "" {
+		if raw, err := os.ReadFile(dynamicUnclassifiedFallbackBindingPath(sid)); err == nil {
+			counterSessionID = acp.SessionId(strings.TrimSpace(string(raw)))
+		}
+	}
+	if counterSessionID == "" {
+		counterSessionID = acp.SessionId(extractRegexMatch(sessionIDRegex, prompt))
+		if counterSessionID == "" {
+			counterSessionID = sid
+		}
+	}
 	a.dynamicFallbackCounterSessions[sid] = counterSessionID
 	a.mu.Unlock()
+	_ = os.WriteFile(dynamicUnclassifiedFallbackBindingPath(sid), []byte(counterSessionID), 0o600)
 	attempt := nextDynamicUnclassifiedFallbackAttempt(counterSessionID)
 	if attempt <= scenario.failures {
 		e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
@@ -94,8 +103,17 @@ func (a *mockAgent) handleDynamicUnclassifiedFallback(
 	}
 
 	_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(counterSessionID))
+	_ = os.Remove(dynamicUnclassifiedFallbackBindingPath(sid))
+	a.mu.Lock()
+	delete(a.dynamicFallbackCounterSessions, sid)
+	a.mu.Unlock()
 	(&emitter{ctx: ctx, conn: a.conn, sid: sid}).text(dynamicUnclassifiedFallbackSuccess)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+func dynamicUnclassifiedFallbackBindingPath(sid acp.SessionId) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
+	return filepath.Join(os.TempDir(), "kandev-mock-dynamic-unclassified-"+safe+".session")
 }
 
 func dynamicUnclassifiedFallbackCounterPath(sid acp.SessionId) string {

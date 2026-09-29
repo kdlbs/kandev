@@ -153,6 +153,8 @@ The implementation package and its work orders are complete. Review remediation 
 
 The three reported routing defects are fixed and covered by orchestrator-level regressions. Manual `action_required` recovery now reaches the existing terminal cleanup and managed-input settlement path while preserving its durable streak. A current classified failure resets the streak before ineligible fallback gates. Workflow evidence now carries workflow ID and step revision; the SQLite route-claim and detached-launch fences revalidate that snapshot with task/session ownership under the workflow-step and task locks.
 
+Final PR fixup exposed and fixed one production wiring gap in recovery ownership: `lifecycleAdapter` did not forward the lifecycle manager's initial-prompt dispatch callbacks. Automatic successor startup now registers its acceptance/failure callbacks through the adapter, and a compile-time interface assertion pins that capability.
+
 Passed after remediation:
 
 - `(cd apps/backend && go test ./internal/agent/runtime/dynamic ./internal/task/repository/sqlite ./internal/orchestrator -run '^(TestRecordRouteDecisionClaimsInitialGenerationAndWritesAttemptAtomically|TestUnclassifiedWorkflowContextFencedAtRouteClaim|TestUnclassifiedWorkflowStepRevisionFencedAtRouteClaim|TestUnclassifiedWorkflowContextFencedBeforeDetachedLaunch|TestDynamicUnclassifiedStreakResetsAfterClassifiedNonFallbackFailure|TestHandleAgentFailedManualDynamicRecoveryRunsTerminalCleanup|TestPersistPendingDynamicRecoveryLeavesTurnForTerminalFailureCleanup)$' -count=1)`.
@@ -163,6 +165,8 @@ Passed after remediation:
 - `git diff --check`; changed Go files pass `gofmt` inspection.
 
 The first full tagged test pass hit a lifecycle cache-prune temporary-directory cleanup race. The isolated test passed, and the full tagged suite passed on rerun. The final build and race-filtered suite also passed after the last runtime changes. The step-revision barrier regression and its race-enabled run passed afterward.
+
+After the adapter forwarding fix and prompt-setup refactor, backendapp tests, the focused orchestrator cancellation/ownership regressions, and the full executor package passed. The changed-package hook caught two existing-workspace executor tests that needed nil values for the new optional callbacks; their call sites were updated. `make -C apps/backend build && make -C apps/backend e2e-plugin-package` passed. The final host E2E reruns against that rebuilt backend passed: desktop with the `chromium` project and the `uses repeated safe failures` filter (38.0 seconds), and mobile with the `mobile-chrome` project (15.6 seconds). Both used the existing current production Vite assets.
 
 Session-open recovery also rejects a dynamic session while its route is pending or action-required, and generic session resume serializes against manual route actions. The tagged orchestrator suite passed with `TestResumeTaskSession_DynamicRouteActionOwnsRecovery` and the route-state eligibility cases. Final desktop and mobile browser reruns passed. One additional desktop run timed out waiting for the successor message; the unchanged immediate rerun passed in 36 seconds.
 

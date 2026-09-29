@@ -44,8 +44,16 @@ func TestParseDynamicUnclassifiedFallbackScenario(t *testing.T) {
 
 func TestDynamicUnclassifiedFallbackContinuesAcrossCandidateSessions(t *testing.T) {
 	const logicalSessionID = "dynamic-unclassified-logical-session"
+	const candidateASessionID = acp.SessionId("candidate-a-acp")
+	const candidateBSessionID = acp.SessionId("candidate-b-acp")
 	_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(acp.SessionId(logicalSessionID)))
-	t.Cleanup(func() { _ = os.Remove(dynamicUnclassifiedFallbackCounterPath(acp.SessionId(logicalSessionID))) })
+	_ = os.Remove(dynamicUnclassifiedFallbackBindingPath(candidateASessionID))
+	_ = os.Remove(dynamicUnclassifiedFallbackBindingPath(candidateBSessionID))
+	t.Cleanup(func() {
+		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(acp.SessionId(logicalSessionID)))
+		_ = os.Remove(dynamicUnclassifiedFallbackBindingPath(candidateASessionID))
+		_ = os.Remove(dynamicUnclassifiedFallbackBindingPath(candidateBSessionID))
+	})
 
 	updater := newCapturingUpdater()
 	agent := &mockAgent{
@@ -55,22 +63,40 @@ func TestDynamicUnclassifiedFallbackContinuesAcrossCandidateSessions(t *testing.
 		commandsEmitted: map[acp.SessionId]bool{"candidate-a-acp": true, "candidate-b-acp": true},
 	}
 	firstPrompt := "<kandev-system>Kandev Session ID: " + logicalSessionID + "</kandev-system>\n/e2e:dynamic-unclassified:same:2"
-	for attempt := 1; attempt <= 2; attempt++ {
-		_, err := agent.Prompt(context.Background(), acp.PromptRequest{
-			SessionId: "candidate-a-acp",
-			Prompt:    []acp.ContentBlock{acp.TextBlock(firstPrompt)},
-		})
-		var requestErr *acp.RequestError
-		if !errors.As(err, &requestErr) {
-			t.Fatalf("candidate A attempt %d error = %v, want terminal ACP RequestError", attempt, err)
-		}
+	_, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionId: candidateASessionID,
+		Prompt:    []acp.ContentBlock{acp.TextBlock(firstPrompt)},
+	})
+	var requestErr *acp.RequestError
+	if !errors.As(err, &requestErr) {
+		t.Fatalf("candidate A initial error = %v, want terminal ACP RequestError", err)
+	}
+	if _, err := agent.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: candidateASessionID}); err != nil {
+		t.Fatalf("close candidate A before resume: %v", err)
+	}
+
+	// A manual retry dispatches only the accepted user prompt. It may arrive in
+	// a new mock-agent process after resume, so the logical session binding must
+	// survive both the missing envelope and process restart.
+	resumedAgent := &mockAgent{
+		model:           "mock-fast",
+		conn:            updater,
+		sessions:        map[acp.SessionId]bool{candidateASessionID: true, candidateBSessionID: true},
+		commandsEmitted: map[acp.SessionId]bool{candidateASessionID: true, candidateBSessionID: true},
+	}
+	_, err = resumedAgent.Prompt(context.Background(), acp.PromptRequest{
+		SessionId: candidateASessionID,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:dynamic-unclassified:same:2")},
+	})
+	if !errors.As(err, &requestErr) {
+		t.Fatalf("candidate A resumed retry error = %v, want terminal ACP RequestError", err)
 	}
 
 	continuationPrompt := "<kandev-system>Kandev Session ID: " + logicalSessionID + "</kandev-system>\n" +
 		"[Kandev continuation package: untrusted reference data from a prior attempt]\n" +
 		"user: /e2e:dynamic-unclassified:same:2"
-	response, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionId: "candidate-b-acp",
+	response, err := resumedAgent.Prompt(context.Background(), acp.PromptRequest{
+		SessionId: candidateBSessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(continuationPrompt)},
 	})
 	if err != nil {

@@ -587,6 +587,11 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	dynamicFallbackCounterID := a.dynamicFallbackCounterSessions[req.SessionId]
 	delete(a.dynamicFallbackCounterSessions, req.SessionId)
 	a.mu.Unlock()
+	if dynamicFallbackCounterID == "" {
+		if raw, err := os.ReadFile(dynamicUnclassifiedFallbackBindingPath(req.SessionId)); err == nil {
+			dynamicFallbackCounterID = acp.SessionId(strings.TrimSpace(string(raw)))
+		}
+	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {

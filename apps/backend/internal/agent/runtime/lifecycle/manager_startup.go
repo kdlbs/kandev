@@ -108,6 +108,15 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		_, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		if onInitialPromptFailure != nil {
+			onInitialPromptFailure()
+		}
+	}()
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}

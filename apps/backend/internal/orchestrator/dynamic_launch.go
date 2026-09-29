@@ -1181,6 +1181,7 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		return
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
+	ctx = withCancelInFlightGuardHeld(ctx)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return
@@ -1553,6 +1554,14 @@ func promptUnclassifiedAttemptID(data watcher.AgentEventData) string {
 
 type dynamicRelaunchOutcome uint8
 
+type dynamicRelaunchLaunchMode uint8
+
+const (
+	dynamicRelaunchLaunchModePrepared dynamicRelaunchLaunchMode = iota
+	dynamicRelaunchLaunchModeCreated
+	dynamicRelaunchLaunchModePrompt
+)
+
 const (
 	dynamicRelaunchFailed dynamicRelaunchOutcome = iota
 	dynamicRelaunchDeferred
@@ -1632,7 +1641,7 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
 		)
 	}()
 
-	task, session, prompt, ok := s.prepareDynamicRelaunchAfterFailure(ctx, data)
+	task, session, prompt, launchMode, ok := s.prepareDynamicRelaunchAfterFailure(ctx, data, origin)
 	if !ok {
 		return dynamicRelaunchFailed
 	}
@@ -1644,35 +1653,49 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
 			return dynamicRelaunchFailed
 		}
 	}
-	return s.launchPreparedDynamicRelaunch(ctx, data, task, session, prompt, executionProfileID, seam5Res)
+	return s.launchPreparedDynamicRelaunch(
+		ctx, data, task, session, prompt, executionProfileID, launchMode, origin, seam5Res,
+	)
 }
 
 func (s *Service) prepareDynamicRelaunchAfterFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
-) (*v1.Task, *models.TaskSession, capturedPrompt, bool) {
+	origin launchOrigin,
+) (*v1.Task, *models.TaskSession, capturedPrompt, dynamicRelaunchLaunchMode, bool) {
 	prompt, ok := s.dynamicRelaunchPrompt(ctx, data.SessionID)
 	if !ok {
-		return nil, nil, capturedPrompt{}, false
+		return nil, nil, capturedPrompt{}, dynamicRelaunchLaunchModePrepared, false
 	}
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {
-		return nil, nil, capturedPrompt{}, false
+		return nil, nil, capturedPrompt{}, dynamicRelaunchLaunchModePrepared, false
 	}
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil || session == nil {
-		return nil, nil, capturedPrompt{}, false
+		return nil, nil, capturedPrompt{}, dynamicRelaunchLaunchModePrepared, false
+	}
+	isOfficeTask, officeErr := s.lookupOfficeTask(ctx, data.TaskID)
+	launchMode := dynamicRelaunchLaunchModeCreated
+	if officeErr != nil || isOfficeTask {
+		launchMode = dynamicRelaunchLaunchModePrepared
+	} else if origin == launchOriginManual {
+		launchMode = dynamicRelaunchLaunchModePrompt
 	}
 	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
-		return nil, nil, capturedPrompt{}, false
+		return nil, nil, capturedPrompt{}, launchMode, false
 	}
-	if !s.resetDynamicRelaunchSession(ctx, data.SessionID) {
-		return nil, nil, capturedPrompt{}, false
+	targetState := models.TaskSessionStateWaitingForInput
+	if launchMode != dynamicRelaunchLaunchModePrompt {
+		targetState = models.TaskSessionStateCreated
+	}
+	if !s.resetDynamicRelaunchSession(ctx, data.SessionID, targetState) {
+		return nil, nil, capturedPrompt{}, launchMode, false
 	}
 	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
-	return task, session, prompt, true
+	return task, session, prompt, launchMode, true
 }
 
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
@@ -1691,7 +1714,11 @@ func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecu
 	return false
 }
 
-func (s *Service) resetDynamicRelaunchSession(ctx context.Context, sessionID string) bool {
+func (s *Service) resetDynamicRelaunchSession(
+	ctx context.Context,
+	sessionID string,
+	targetState models.TaskSessionState,
+) bool {
 	// Reload immediately before the reset: StopExecution is I/O and a
 	// coordinator stop can commit a terminal state while it runs. A stale
 	// pre-stop snapshot would let this write resurrect a session the user
@@ -1705,7 +1732,7 @@ func (s *Service) resetDynamicRelaunchSession(ctx context.Context, sessionID str
 		return false
 	}
 	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
-		ctx, sessionID, preResetState.State, models.TaskSessionStateCreated, "",
+		ctx, sessionID, preResetState.State, targetState, "",
 	)
 	return err == nil && changed
 }
@@ -1717,37 +1744,119 @@ func (s *Service) launchPreparedDynamicRelaunch(
 	session *models.TaskSession,
 	prompt capturedPrompt,
 	executionProfileID string,
+	launchMode dynamicRelaunchLaunchMode,
+	origin launchOrigin,
 	seam5Res *sessionKeyedCeilingReservation,
 ) dynamicRelaunchOutcome {
-	officeAgentProfileID := data.AgentProfileID
-	if officeAgentProfileID == "" {
-		officeAgentProfileID = session.AgentProfileID
-	}
-	isOfficeTask, officeErr := s.lookupOfficeTask(ctx, data.TaskID)
-	if officeErr == nil && !isOfficeTask {
-		_, err := s.StartCreatedSession(
-			ctx, data.TaskID, data.SessionID, session.AgentProfileID,
-			prompt.text, true, prompt.planMode, true, prompt.attachments, nil,
+	switch launchMode {
+	case dynamicRelaunchLaunchModePrompt:
+		_, err := s.promptTask(
+			ctx,
+			data.TaskID,
+			data.SessionID,
+			prompt.text,
+			"",
+			prompt.planMode,
+			prompt.attachments,
+			true,
+			origin,
+			promptTaskOptions{allowRouteActionPrompt: true},
+		)
+		if err != nil {
+			return dynamicRelaunchFailed
+		}
+		if session != nil {
+			s.markDynamicRouteActive(context.WithoutCancel(ctx), data.SessionID, session.RouteGeneration)
+		}
+		seam5Res.consume()
+		return dynamicRelaunchSucceeded
+	case dynamicRelaunchLaunchModeCreated:
+		_, err := s.startDynamicRelaunchCreatedSession(
+			ctx, data.TaskID, session, prompt,
 		)
 		if err != nil {
 			return dynamicRelaunchFailed
 		}
 		seam5Res.consume()
 		return dynamicRelaunchSucceeded
-	}
-	_, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
-		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: officeAgentProfileID,
-		ExecutorID:           "",
-		Prompt:               prompt.text,
-		StartAgent:           true,
-		McpMode:              executor.McpModeOffice,
-	})
-	if err != nil {
+	case dynamicRelaunchLaunchModePrepared:
+		officeAgentProfileID := data.AgentProfileID
+		if officeAgentProfileID == "" {
+			officeAgentProfileID = session.AgentProfileID
+		}
+		_, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
+			AgentProfileID:       executionProfileID,
+			OfficeAgentProfileID: officeAgentProfileID,
+			ExecutorID:           "",
+			Prompt:               prompt.text,
+			StartAgent:           true,
+			McpMode:              executor.McpModeOffice,
+		})
+		if err != nil {
+			return dynamicRelaunchFailed
+		}
+		seam5Res.consume()
+		return dynamicRelaunchSucceeded
+	default:
 		return dynamicRelaunchFailed
 	}
-	seam5Res.consume()
-	return dynamicRelaunchSucceeded
+}
+
+func (s *Service) startDynamicRelaunchCreatedSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt capturedPrompt,
+) (*executor.TaskExecution, error) {
+	attempt, owner, err := s.beginResumeAttempt(ctx, taskID, session.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !owner {
+		return nil, fmt.Errorf("%w: dynamic successor startup is already owned", ErrResumeAttemptCancelled)
+	}
+	defer attempt.finish(s.resumeAttemptStore())
+
+	registry := s.resumeAttemptStore()
+	launchCtx := cancellableResumeContext(attempt)
+	execution, err := s.startCreatedSession(
+		launchCtx, taskID, session.ID, session.AgentProfileID,
+		prompt.text, true, prompt.planMode, true, prompt.attachments, nil, "", startCreatedSessionOptions{
+			beforeInitialPromptDispatch: func() error {
+				if !registry.holdForInitialPrompt(attempt) {
+					return ErrResumeAttemptCancelled
+				}
+				return nil
+			},
+			onExecutionAdmitted: func(executionID string) {
+				attempt.setExecutionID(executionID)
+				if s.validateResumeAttempt(attempt) != nil {
+					go s.cleanupCancelledResumeAttempt(attempt)
+				}
+			},
+			onInitialPromptAccepted: func(executionID string) {
+				if s.acceptResumeAttemptAtPromptAcceptance(executionID, attempt) {
+					registry.finishAfterInitialPromptAcceptance(attempt)
+				}
+			},
+			onInitialPromptFailed: func() {
+				registry.abortInitialPromptHold(attempt)
+			},
+		},
+	)
+	if execution != nil {
+		attempt.setExecutionID(execution.AgentExecutionID)
+	} else {
+		registry.releaseInitialPromptHold(attempt)
+	}
+	if err != nil {
+		registry.abortInitialPromptHold(attempt)
+	}
+	if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
+		s.cleanupCancelledResumeAttempt(attempt)
+		return nil, attemptErr
+	}
+	return execution, err
 }
 
 // dynamicRelaunchPrompt prefers the in-memory prompt cache for an automatic

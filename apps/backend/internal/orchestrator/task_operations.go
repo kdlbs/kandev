@@ -624,6 +624,10 @@ type startCreatedSessionOptions struct {
 	lifecycleLockHeld           bool
 	refuseIfAgentRunning        bool
 	initialCreatePrompt         bool
+	beforeInitialPromptDispatch func() error
+	onExecutionAdmitted         func(executionID string)
+	onInitialPromptAccepted     func(executionID string)
+	onInitialPromptFailed       func()
 	skipTaskDescriptionFallback bool
 	promptAlreadyComposed       bool
 	retryPrompt                 string
@@ -955,6 +959,12 @@ func (s *Service) startCreatedSession(
 		McpMode:              mcpMode,
 		Attachments:          attachments,
 		TurnID:               initialTurnID,
+		OnExecutionAdmitted:  options.onExecutionAdmitted,
+	}
+	if err := s.configureInitialPromptDispatch(
+		ctx, sessionID, initialTurnID, initialTurnCreated, effectivePrompt, attachments, options, &launchOptions,
+	); err != nil {
+		return nil, err
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
@@ -992,6 +1002,31 @@ func (s *Service) startCreatedSession(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+func (s *Service) configureInitialPromptDispatch(
+	ctx context.Context,
+	sessionID, turnID string,
+	turnCreated bool,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	options startCreatedSessionOptions,
+	launchOptions *executor.LaunchOptions,
+) error {
+	if prompt == "" && len(attachments) == 0 {
+		return nil
+	}
+	if options.beforeInitialPromptDispatch != nil {
+		if err := options.beforeInitialPromptDispatch(); err != nil {
+			if turnCreated {
+				s.completeTurnIfCurrent(ctx, sessionID, turnID)
+			}
+			return err
+		}
+	}
+	launchOptions.OnInitialPromptAccepted = options.onInitialPromptAccepted
+	launchOptions.OnInitialPromptFailed = options.onInitialPromptFailed
+	return nil
 }
 
 // wrapCreatedSessionPrompt adds the first-turn context for a prepared session.
@@ -5916,6 +5951,9 @@ type promptTaskOptions struct {
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
+	// allowRouteActionPrompt permits the prompt owned by a route action while
+	// ordinary prompts remain blocked until that action releases its lock.
+	allowRouteActionPrompt bool
 	// onAccepted runs at the agentctl acceptance boundary, before PromptTask
 	// waits for the turn to finish. Automation callers use it to bind durable
 	// attempt identity to the exact turn.
@@ -5961,6 +5999,8 @@ type promptTaskOptions struct {
 	// and destination that admitted it.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
 }
+
+type allowRouteActionPromptClaim struct{}
 
 type promptDispatchOutcome struct {
 	mu             sync.Mutex
@@ -6908,7 +6948,8 @@ func (s *Service) claimDispatchAndAcquireGuard(
 		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
 		options.reserveTurnUntilDispatch, options.promptDispatchRecovery,
 		options.afterClaim, foregroundClaim, options.expectedCurrentTurnID,
-		options.requireNonterminalSession, resumeAttempt, admissionGuard, options.expectedSessionIdentity,
+		options.requireNonterminalSession, resumeAttempt, admissionGuard,
+		options.allowRouteActionPrompt, options.expectedSessionIdentity,
 	)
 	if err != nil {
 		if errors.Is(err, ErrResumeAttemptCancelled) {
@@ -7251,7 +7292,7 @@ func (s *Service) claimPromptDispatch(
 	return s.claimPromptDispatchWithResumeAttempt(
 		ctx, taskID, sessionID, claimEntryID, lifecyclePrompt,
 		reserveTurnUntilDispatch, promptDispatchRecovery, afterClaim, foregroundClaim,
-		expectedCurrentTurnID, requireNonterminalSession, nil, nil, expectedIdentities...,
+		expectedCurrentTurnID, requireNonterminalSession, nil, nil, false, expectedIdentities...,
 	)
 }
 
@@ -7267,6 +7308,7 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 	requireNonterminalSession bool,
 	resumeAttempt *resumeAttempt,
 	admissionGuard *lockedCancelInFlightGuard,
+	allowRouteActionPrompt bool,
 	expectedIdentities ...*messagequeue.QueueSessionIdentity,
 ) (*models.TaskSession, promptClaimRollback, error) {
 	claimCtx := ctx
@@ -7288,6 +7330,9 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 	}
 	if resumeAttempt != nil {
 		claimArgs = append(claimArgs, resumeAttempt)
+	}
+	if allowRouteActionPrompt {
+		claimArgs = append(claimArgs, allowRouteActionPromptClaim{})
 	}
 	claimed, previousState, turnID, createdTurn, reservedTurn, dispatchGuardRelease, err := s.claimSessionRunningForPrompt(
 		claimCtx, taskID, sessionID, claimEntryID, reserveTurnUntilDispatch,
@@ -7694,6 +7739,7 @@ func (s *Service) claimSessionRunningForPrompt(
 		expectedIdentity *messagequeue.QueueSessionIdentity
 		startupAttempt   *resumeAttempt
 		admissionGuard   *lockedCancelInFlightGuard
+		allowRouteAction bool
 	)
 	for _, arg := range optionalClaimArgs {
 		switch value := arg.(type) {
@@ -7705,6 +7751,8 @@ func (s *Service) claimSessionRunningForPrompt(
 			startupAttempt = value
 		case *lockedCancelInFlightGuard:
 			admissionGuard = value
+		case allowRouteActionPromptClaim:
+			allowRouteAction = true
 		}
 	}
 	if admissionGuard == nil {
@@ -7732,7 +7780,9 @@ func (s *Service) claimSessionRunningForPrompt(
 	if err := s.validateResumeAttempt(startupAttempt); err != nil {
 		return nil, "", "", false, nil, nil, err
 	}
-	if s.isRouteActionInFlight(sessionID) {
+	// Only a route action's own prompt dispatch may cross its route lock;
+	// unrelated prompts remain blocked until that action releases the lock.
+	if s.isRouteActionInFlight(sessionID) && !allowRouteAction {
 		return nil, "", "", false, nil, nil, fmt.Errorf("%w, route action is in progress", ErrAgentPromptInProgress)
 	}
 	if expectedCurrentTurnID != "" {
@@ -8777,6 +8827,20 @@ type lockedCancelInFlightGuard struct {
 	mutex      *sync.Mutex
 	releaseRef func()
 	locked     bool
+}
+
+type cancelInFlightGuardHeldContextKey struct{}
+
+func withCancelInFlightGuardHeld(ctx context.Context) context.Context {
+	return context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, true)
+}
+
+func cancelInFlightGuardHeld(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	held, _ := ctx.Value(cancelInFlightGuardHeldContextKey{}).(bool)
+	return held
 }
 
 func (s *Service) lockCancelInFlightGuard(sessionID string) *lockedCancelInFlightGuard {

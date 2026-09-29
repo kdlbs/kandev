@@ -313,6 +313,7 @@ var _ interface {
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 	PreparePassthroughRunning(sessionID string) (func(), error)
+	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -632,6 +633,12 @@ func (a *lifecycleAdapter) SetMcpMode(ctx context.Context, executionID string, m
 // The command is built internally based on the instance's agent profile.
 func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceID string) error {
 	return a.mgr.StartAgentProcess(ctx, agentInstanceID)
+}
+
+// RegisterInitialPromptDispatchCallbacks forwards initial prompt acceptance
+// to orchestrator owners that must keep a launch attempt active until dispatch.
+func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
 }
 
 func (a *lifecycleAdapter) IsAgentCommandConfigured(agentInstanceID string) bool {
