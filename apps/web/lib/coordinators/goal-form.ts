@@ -49,15 +49,35 @@ export function buildPutGoalRequest(
   return goalId ? { goal_id: goalId, ...request } : request;
 }
 
-// A refetch or toggle response updates only the done state of saved
-// criteria; every unsaved edit in the form is kept.
-export function withServerDoneStates(form: GoalFormState, goal: Goal): GoalFormState {
+// A refetch updates only the done state of saved criteria that have no toggle
+// in flight; every unsaved edit in the form is kept.
+export function withServerDoneStates(
+  form: GoalFormState,
+  goal: Goal,
+  skip: ReadonlySet<string> = new Set(),
+): GoalFormState {
   const doneById = new Map(goal.criteria.map((c) => [c.id, c.done]));
   return {
     ...form,
     criteria: form.criteria.map((c) =>
-      c.id && doneById.has(c.id) ? { ...c, done: doneById.get(c.id) as boolean } : c,
+      c.id && !skip.has(c.id) && doneById.has(c.id)
+        ? { ...c, done: doneById.get(c.id) as boolean }
+        : c,
     ),
+  };
+}
+
+// A toggle response settles only the criterion it was sent for.
+export function withCriterionDoneState(
+  form: GoalFormState,
+  goal: Goal,
+  criterionId: string,
+): GoalFormState {
+  const done = goal.criteria.find((c) => c.id === criterionId)?.done;
+  if (done === undefined) return form;
+  return {
+    ...form,
+    criteria: form.criteria.map((c) => (c.id === criterionId ? { ...c, done } : c)),
   };
 }
 

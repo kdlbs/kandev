@@ -16,9 +16,9 @@ export function useStandingOrders(workspaceId: string, coordinatorId: string) {
   const sequenceRef = useRef(0);
   const loadedRef = useRef(false);
 
-  const reload = useCallback(() => {
+  const reload = useCallback((): Promise<void> => {
     const sequence = ++sequenceRef.current;
-    listStandingOrders(workspaceId, coordinatorId)
+    return listStandingOrders(workspaceId, coordinatorId)
       .then((response) => {
         if (sequence !== sequenceRef.current) return;
         loadedRef.current = true;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { ApiError } from "@/lib/api/client";
@@ -22,16 +22,9 @@ type StandingOrdersSectionProps = {
   canManage: boolean;
 };
 
-function useOrderActions(
-  workspaceId: string,
-  coordinatorId: string,
-  orders: StandingOrder[],
-  reload: () => void,
-) {
+function useOrderActions(workspaceId: string, coordinatorId: string, reload: () => Promise<void>) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
-  const ordersRef = useRef(orders);
-  ordersRef.current = orders;
 
   const setOrderBusy = (id: string, on: boolean) =>
     setBusy((prev) => {
@@ -53,8 +46,8 @@ function useOrderActions(
       else if (notFound) toast.error(t("coordinator:standingOrderUndoNotFound"));
       else toast.error(t("coordinator:standingOrderUndoFailed"));
     } finally {
+      await reload();
       setOrderBusy(id, false);
-      reload();
     }
   };
 
@@ -63,18 +56,15 @@ function useOrderActions(
     setOrderBusy(order.id, true);
     try {
       await retireStandingOrder(workspaceId, coordinatorId, order.id);
-      const stillListed = ordersRef.current.some((item) => item.id === order.id);
-      if (stillListed) {
-        toast.success(t("coordinator:standingOrderRetired", { number: order.number }), {
-          duration: UNDO_MS,
-          action: { label: t("coordinator:standingOrderUndo"), onClick: () => void undo(order.id) },
-        });
-      }
+      toast.success(t("coordinator:standingOrderRetired", { number: order.number }), {
+        duration: UNDO_MS,
+        action: { label: t("coordinator:standingOrderUndo"), onClick: () => void undo(order.id) },
+      });
     } catch {
       toast.error(t("coordinator:standingOrderRetireFailed"));
     } finally {
+      await reload();
       setOrderBusy(order.id, false);
-      reload();
     }
   };
 
@@ -88,7 +78,7 @@ export function StandingOrdersSection({
 }: StandingOrdersSectionProps) {
   const { t } = useTranslation();
   const { orders, status, reload, retry } = useStandingOrders(workspaceId, coordinatorId);
-  const { busy, retire } = useOrderActions(workspaceId, coordinatorId, orders, reload);
+  const { busy, retire } = useOrderActions(workspaceId, coordinatorId, reload);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   if (status === "loading") {

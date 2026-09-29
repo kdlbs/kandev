@@ -214,6 +214,11 @@ describe("GoalSection saving", () => {
   });
 });
 
+const STATE_ATTR = "data-state";
+const CHECKED = "checked";
+const CRITERION_1 = "Exit criterion 1 done";
+const CRITERION_2 = "Exit criterion 2 done";
+
 describe("GoalSection toggles and completion", () => {
   it("toggles a saved criterion immediately, queues a second click and lets the last response win", async () => {
     getMock.mockResolvedValue(response(goal()));
@@ -221,7 +226,7 @@ describe("GoalSection toggles and completion", () => {
     toggleMock.mockImplementation(() => new Promise<Goal>((r) => resolvers.push(r)));
     renderSection();
     await screen.findByTestId("goal-name");
-    const box = screen.getByLabelText("Exit criterion 1 done");
+    const box = screen.getByLabelText(CRITERION_1);
     fireEvent.click(box);
     fireEvent.click(box);
     fireEvent.click(box);
@@ -235,8 +240,76 @@ describe("GoalSection toggles and completion", () => {
         goal({ criteria: [{ id: "k1", text: "Docs", done: true }, goal().criteria[1]] }),
       ),
     );
-    expect(box.getAttribute("data-state")).toBe("checked");
+    expect(box.getAttribute(STATE_ATTR)).toBe(CHECKED);
     expect(contributor?.isDirty).toBe(false);
+  });
+
+  it("keeps a criterion's optimistic state when another criterion's stale response arrives last", async () => {
+    getMock.mockResolvedValue(
+      response(
+        goal({
+          criteria: [
+            { id: "k1", text: "Docs", done: false },
+            { id: "k2", text: "Tests", done: false },
+          ],
+        }),
+      ),
+    );
+    const resolvers: Record<string, (g: Goal) => void> = {};
+    toggleMock.mockImplementation(
+      (...a: unknown[]) => new Promise<Goal>((r) => (resolvers[a[2] as string] = r)),
+    );
+    renderSection();
+    await screen.findByTestId("goal-name");
+    const one = screen.getByLabelText(CRITERION_1);
+    const two = screen.getByLabelText(CRITERION_2);
+    fireEvent.click(one);
+    fireEvent.click(two);
+    const both = goal({
+      criteria: [
+        { id: "k1", text: "Docs", done: true },
+        { id: "k2", text: "Tests", done: true },
+      ],
+    });
+    const onlyOne = goal({
+      criteria: [
+        { id: "k1", text: "Docs", done: true },
+        { id: "k2", text: "Tests", done: false },
+      ],
+    });
+    await act(async () => resolvers.k2(both));
+    await act(async () => resolvers.k1(onlyOne));
+    expect(one.getAttribute(STATE_ATTR)).toBe(CHECKED);
+    expect(two.getAttribute(STATE_ATTR)).toBe(CHECKED);
+  });
+});
+
+describe("GoalSection toggle failures", () => {
+  it("toasts and reloads when a toggle fails, then accepts another click", async () => {
+    getMock.mockImplementation(() => Promise.resolve(response(goal())));
+    toggleMock.mockRejectedValueOnce(new ApiError("e", 500, {}));
+    renderSection();
+    await screen.findByTestId("goal-name");
+    const box = screen.getByLabelText(CRITERION_1);
+    fireEvent.click(box);
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Could not save the goal. Try again."),
+    );
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(box.getAttribute(STATE_ATTR)).toBe("unchecked"));
+    toggleMock.mockResolvedValue(goal());
+    fireEvent.click(box);
+    await waitFor(() => expect(toggleMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("stays silent when a toggle is answered 404 and reloads", async () => {
+    getMock.mockResolvedValue(response(goal()));
+    toggleMock.mockRejectedValueOnce(new ApiError("nf", 404, {}));
+    renderSection();
+    await screen.findByTestId("goal-name");
+    fireEvent.click(screen.getByLabelText(CRITERION_1));
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+    expect(toastError).not.toHaveBeenCalled();
   });
 
   it("disables the checkbox of an unsaved criterion", async () => {

@@ -51,7 +51,9 @@ describe("useStandingOrders", () => {
       .mockReturnValueOnce(new Promise((resolve) => (resolveOld = resolve)))
       .mockResolvedValueOnce({ orders: [order("new", 1)] });
     const { result } = renderHook(() => useStandingOrders("ws-1", "c-1"));
-    act(() => result.current.reload());
+    act(() => {
+      void result.current.reload();
+    });
     await waitFor(() => expect(result.current.orders[0]?.id).toBe("new"));
     await act(async () => resolveOld({ orders: [order("old", 1)] }));
     expect(result.current.orders[0]?.id).toBe("new");
@@ -62,7 +64,9 @@ describe("useStandingOrders", () => {
     const { result } = renderHook(() => useStandingOrders("ws-1", "c-1"));
     await waitFor(() => expect(result.current.status).toBe("ready"));
     listMock.mockRejectedValueOnce(new Error("boom"));
-    act(() => result.current.reload());
+    act(() => {
+      void result.current.reload();
+    });
     await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
     expect(result.current.status).toBe("ready");
     expect(result.current.orders).toHaveLength(1);

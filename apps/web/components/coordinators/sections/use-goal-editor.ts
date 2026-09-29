@@ -12,6 +12,7 @@ import {
   EMPTY_GOAL_FORM,
   goalFormFromGoal,
   isGoalFormDirty,
+  withCriterionDoneState,
   withServerDoneStates,
   type GoalFormState,
 } from "@/lib/coordinators/goal-form";
@@ -32,7 +33,10 @@ function isStaleCriterionId(error: GoalFieldError): boolean {
 // Mirrors the stored goal into the form: a different goal (or a forced
 // reload) replaces it, a clean form follows the server, and a dirty form only
 // takes the server's done states.
-function useAdoptedGoalForm(data: GoalResponse | null) {
+function useAdoptedGoalForm(
+  data: GoalResponse | null,
+  inFlight: React.MutableRefObject<Set<string>>,
+) {
   const active = data?.active ?? null;
   const [form, setForm] = useState<GoalFormState>(EMPTY_GOAL_FORM);
   const [saved, setSaved] = useState<GoalFormState>(EMPTY_GOAL_FORM);
@@ -57,10 +61,10 @@ function useAdoptedGoalForm(data: GoalResponse | null) {
       return;
     }
     if (active) {
-      setForm((f) => withServerDoneStates(f, active));
-      setSaved((f) => withServerDoneStates(f, active));
+      setForm((f) => withServerDoneStates(f, active, inFlight.current));
+      setSaved((f) => withServerDoneStates(f, active, inFlight.current));
     }
-  }, [data, active]);
+  }, [data, active, inFlight]);
 
   return { form, setForm, saved, setSaved, forceAdoptRef };
 }
@@ -81,7 +85,8 @@ export function useGoalEditor({ workspaceId, coordinatorId, canManage, data, rel
   const [fieldError, setFieldError] = useState<GoalFieldError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { form, setForm, saved, setSaved, forceAdoptRef } = useAdoptedGoalForm(data);
+  const inFlight = useRef(new Set<string>());
+  const { form, setForm, saved, setSaved, forceAdoptRef } = useAdoptedGoalForm(data, inFlight);
 
   const conflict = useCallback(() => {
     forceAdoptRef.current = true;
@@ -157,7 +162,11 @@ export function useGoalEditor({ workspaceId, coordinatorId, canManage, data, rel
     },
   });
 
-  const toggles = useCriterionToggles(workspaceId, coordinatorId, setForm, setSaved, reload);
+  const toggles = useCriterionToggles(
+    { workspaceId, coordinatorId, reload, inFlight },
+    setForm,
+    setSaved,
+  );
 
   return {
     active,
@@ -174,16 +183,20 @@ export function useGoalEditor({ workspaceId, coordinatorId, canManage, data, rel
   };
 }
 
+type ToggleContext = {
+  workspaceId: string;
+  coordinatorId: string;
+  reload: () => void;
+  inFlight: React.MutableRefObject<Set<string>>;
+};
+
 function useCriterionToggles(
-  workspaceId: string,
-  coordinatorId: string,
+  { workspaceId, coordinatorId, reload, inFlight: running }: ToggleContext,
   setForm: React.Dispatch<React.SetStateAction<GoalFormState>>,
   setSaved: React.Dispatch<React.SetStateAction<GoalFormState>>,
-  reload: () => void,
 ) {
   const { t } = useTranslation();
   const desired = useRef(new Map<string, boolean>());
-  const running = useRef(new Set<string>());
 
   const drain = async (criterionId: string) => {
     if (running.current.has(criterionId)) return;
@@ -194,8 +207,8 @@ function useCriterionToggles(
         desired.current.delete(criterionId);
         const goal = await setGoalCriterionDone(workspaceId, coordinatorId, criterionId, want);
         if (desired.current.has(criterionId)) continue;
-        setForm((f) => withServerDoneStates(f, goal));
-        setSaved((f) => withServerDoneStates(f, goal));
+        setForm((f) => withCriterionDoneState(f, goal, criterionId));
+        setSaved((f) => withCriterionDoneState(f, goal, criterionId));
       }
     } catch (error) {
       desired.current.delete(criterionId);

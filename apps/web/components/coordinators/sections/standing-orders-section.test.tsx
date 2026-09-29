@@ -23,12 +23,14 @@ vi.mock("@/hooks/domains/coordinator/use-standing-orders", async () => {
         status: "loading",
       });
       const reload = React.useCallback(() => {
-        Promise.resolve(listMock()).then(
+        return Promise.resolve(listMock()).then(
           (orders) => setState({ orders, status: "ready" }),
           () => setState((prev) => (prev.status === "ready" ? prev : { ...prev, status: "error" })),
         );
       }, []);
-      React.useEffect(() => reload(), [reload]);
+      React.useEffect(() => {
+        void reload();
+      }, [reload]);
       return { ...state, reload, retry: reload };
     },
   };
@@ -131,6 +133,26 @@ describe("StandingOrdersSection", () => {
     fireEvent.click(button);
     expect(retireMock).toHaveBeenCalledTimes(1);
     await act(async () => resolve({ ...order("a", 1, "One"), number: null }));
+  });
+});
+
+describe("StandingOrdersSection retire single-flight", () => {
+  it("keeps Retire disabled until the list reloads so a second click sends no request and no second toast", async () => {
+    listMock.mockResolvedValueOnce([order("a", 1, "One")]);
+    retireMock.mockResolvedValue({ ...order("a", 1, "One"), number: null });
+    renderSection();
+    await screen.findByText("One");
+    let release: (v: unknown[]) => void = () => {};
+    listMock.mockReturnValue(new Promise((r) => (release = r)));
+    const button = screen.getByTestId(RETIRE) as HTMLButtonElement;
+    fireEvent.click(button);
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1));
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(retireMock).toHaveBeenCalledTimes(1);
+    await act(async () => release([]));
+    await waitFor(() => expect(screen.queryByText("One")).toBeNull());
+    expect(toastSuccess).toHaveBeenCalledTimes(1);
   });
 
   it("shows an error toast without Undo when retire fails and keeps the list", async () => {

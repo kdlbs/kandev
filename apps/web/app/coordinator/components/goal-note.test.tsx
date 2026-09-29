@@ -108,4 +108,18 @@ describe("GoalNote", () => {
     expect(text).toContain('"Ship the billing beta" was met on ');
     expect(screen.getByTestId(ACTION).textContent).toBe("Set the next goal");
   });
+
+  it("shows a reader the met state without the next-goal action", () => {
+    show(
+      {
+        active: null,
+        last_met: goal({ status: "met", met_at: "2026-09-25T12:00:00Z" }),
+        measures: null,
+      },
+      "ready",
+      false,
+    );
+    expect(screen.getByTestId("goal-note").textContent).toContain("was met on");
+    expect(screen.queryByTestId(ACTION)).toBeNull();
+  });
 });
