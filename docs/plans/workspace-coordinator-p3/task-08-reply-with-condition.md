@@ -155,9 +155,14 @@ Returned with your condition: Only if ...   Reply saved, not delivered [Send aga
   naming `kind` and writes nothing; delivery text titles are `spec_json.title`
   for `create_task` and `Resume|Message|Move task <task_id>` for the others;
   the queue entry, not the message, carries `user_message_recorded`; delivery
-  runs under a 30-second deadline detached from the client; a reply sent from a
+  runs under a 20-second deadline detached from the client; a reply sent from a
   Needs you item stays rendered from the response with **Send again** on a
   failed delivery.
+- **Send again** by a different manager stores the message authored by the
+  row's `decided_by`; a Needs you item sending a reply is held (not counted)
+  and shows the returned state until it is released; a saved reply whose
+  request hit a network error shows "Your reply may not have been saved" and
+  the next refresh shows it `returned`.
 - A failed delivery answers the reply and deliver routes with 200 and the
   proposal with `reply_delivered_at` null, never a 5xx; with phase 3 off both
   routes are 404 and the DTO omits `reply_text`, `reply_delivered_at` and

@@ -22,8 +22,8 @@ coordinator reads the pending bundle or permission for one task and the card
 resolves it through the existing clarification resolver and permission
 response path, unchanged. Replying with a condition adds one proposal status,
 four columns, two routes (reply and deliver) and one tool argument to the proposal design
-of [proposals](proposals.md). Nothing in this design touches the Inbox's rows,
-count or tabs (D14), or the clarification and permission contracts.
+of [proposals](proposals.md). Nothing here touches the Inbox's rows, count or tabs (D14), or the
+clarification and permission contracts.
 
 ## Requirement mapping
 
@@ -54,8 +54,7 @@ otherwise) returns:
   returns 200 with `session_id` empty and both fields `null`. A task whose
   primary session is completed, failed or cancelled returns 200 with both
   `null`, because both reads below exclude those states
-  (`nonTerminalSessionPredicate`). No archive filter is added: an archived
-  session that is not in one of those states is read like any other.
+  (`nonTerminalSessionPredicate`). No archive filter is added.
 - `clarification` is the one answerable bundle of that session. The query is
   `ListUnresolvedClarificationBundles` (`task/repository/sqlite/
   clarification_bundle_query.go`), which owns "answerable" for the Inbox; it
@@ -65,19 +64,16 @@ otherwise) returns:
   `Unscoped: true`, `SessionID` set, `Sidecar` nil (no per-user dismiss or
   snooze applies to a relay read) and `Limit: 1`. Its existing order,
   `created_at ASC, pending_id ASC`, decides which bundle wins when a session
-  has several: the oldest. The bundle query itself applies the session's
-  current-turn authority and the non-terminal predicate, so an unresolved
-  clarification from an earlier turn is not answerable and not returned, the
-  same scope the permission read has. The bundle's `messages` and `context` are hydrated
+  has several: the oldest. The bundle query applies the session's
+  current-turn authority and the non-terminal predicate, so an earlier turn's
+  clarification is not returned, the same scope the permission read has. The bundle's `messages` and `context` are hydrated
   by the Inbox's own hydration. That hydration is a method on the unexported
-  `*Handlers`, so it is extracted, not wrapped: the message lookup
-  (`FindMessagesByPendingIDs`), `orderInboxMessages`, `inboxBundleContext` and
-  `renderInboxMessages` move into one exported package-level function in
-  `internal/clarification` taking the bundle store and one summary, which the
-  Inbox method then calls. The coordinator's relay handler takes only that
-  store, never a second `Handlers`. The shape is exactly
-  `ClarificationInboxBundle.messages` and `context`; the task title and
-  session state enrichment stay in the Inbox method; the Inbox's routes,
+  `*Handlers`, so it is extracted, not wrapped: `FindMessagesByPendingIDs`,
+  `orderInboxMessages`, `inboxBundleContext` and `renderInboxMessages` move
+  into one exported function in `internal/clarification` taking the bundle
+  store and one summary, which the Inbox method then calls; the relay handler
+  takes only that store. The shape is exactly
+  `ClarificationInboxBundle.messages` and `context`; the Inbox's routes,
   responses and tests are unchanged.
   `null` when there is no bundle or hydration yields no messages.
 - `permission` is read with `ListPendingInteractions` (task repository) for
@@ -95,14 +91,13 @@ otherwise) returns:
   action details in metadata). `null` when there is none.
 - A task whose `pending_action` comes from a non-primary session shows
   `clarification: null` and `permission: null`, so its item keeps the phase 1
-  text and **Open task**; answering another session's request from here is not
-  offered.
+  text and **Open task**.
 - A read error is 500, counted in `coordinator_relay_read_failed_total`; a
   404 is not counted. The card treats every non-200 as "no answer available"
   (`AC-COORDINATOR-RELAY-001.4`).
 
 The route works whether or not the Needs-you Inbox flag is on: it calls the
-repository query directly, not the flag-gated Inbox handler.
+repository query directly.
 
 ## Question card
 
@@ -122,18 +117,17 @@ repository query directly, not the flag-gated Inbox handler.
   `task.status_summary.updated` arrives for the task and each time **Answer
   here** is clicked to expand. Only the newest request issued for a task
   applies: a response for an older request is dropped. Expanding renders the
-  last resolved bundle at once and fires the expand read. The expand read is
-  the only read that can collapse the card, and only if it resolves before
-  the manager has typed or chosen anything in the panel; from the first
-  keystroke or choice on, the card is "engaged" and every read, including an
-  expand read still in flight, is ignored for the rest of that expansion.
+  last resolved bundle at once and fires the expand read. Only that read can
+  collapse the card, and only if it resolves before the manager has typed or
+  chosen anything; from the first keystroke or choice on, the card is
+  "engaged" and every read, including one in flight, is ignored for the rest
+  of that expansion.
   While the card is expanded and not engaged, an expand read returning a null
   field or a non-200 collapses the card to the phase 1 text, and one returning
   a different `pending_id` replaces the bundle. Engaged or not, a read
   returning the same `pending_id` never replaces the rendered messages or
   discards entered input (the rendered snapshot is kept). A read fired by
-  `task.status_summary.updated` while the card is expanded changes nothing
-  except that it never collapses the card. While engaged, the
+  `task.status_summary.updated` never collapses an expanded card. While engaged, the
   next submit reaches the resolver's own lost or no-longer-active outcome. A
   collapsed card whose read failed makes no other retry; the next event or
   expand repeats the read.
@@ -141,8 +135,8 @@ repository query directly, not the flag-gated Inbox handler.
   or its labelled toggle, state per `pending_id`). That collapse is a nested
   state, not the item's: the item stays expanded, the entered answer is kept,
   reads are handled exactly as above, and the item collapses only through
-  **Answer here** or an outcome in the table below. The card adds no control
-  for it and does not disable it.
+  **Answer here** or an outcome in the table below. The card neither adds a control
+  for it nor disables it.
   Readers and phase-3-off clients make no relay read and keep the phase 1 text
   and **Open task**.
 - An expanded item is held. The expanded state, the card kind chosen at
@@ -160,32 +154,30 @@ repository query directly, not the flag-gated Inbox handler.
   permission response path), whose own lost, no-longer-active or stale outcome
   applies; when the viewer is no longer allowed, the endpoint's refusal is a
   failed outcome. Expanding again requires manager and phase 3.
-- When an outcome collapses the card, the item's cached relay result is
-  discarded and one fresh relay read is issued at once (latest request wins);
-  until it resolves with an answerable item the item shows the phase 1 text
-  and **Open task**, so **Answer here** never reappears on the answered
-  request.
+- When an outcome collapses the card, its cached relay result is discarded and
+  one fresh read is issued (latest wins); until it resolves with an answerable
+  item the phase 1 text and **Open task** show, so **Answer here** never
+  reappears on the answered request.
 - **Answer here** renders `ClarificationPanelSection` with `pending`, the
-  bundle `messages`, `maxHeightVh={50}` and an `onOutcome` handler, as
-  `needs-you-inbox-row.tsx` does. Submission therefore goes through
+  bundle `messages`, `maxHeightVh={50}` and an `onOutcome` handler, as the
+  Inbox row does. Submission therefore goes through
   `use-clarification-group.ts` to `POST /api/v1/clarification/:id/respond`
   and the shared `Resolver.ResolveBundle`. The component's own submit control
-  is disabled while a submission is in flight, so one click sends one request;
-  The component's own retry banner (`task:retry`, `data-testid`
-  `clarification-retry`) shows on a failed submit and replays its last action,
+  is disabled while a submission is in flight, so one click sends one request.
+  The component's own retry banner (`task:retry`, `clarification-retry`) shows on a failed submit and replays its last action,
   the answer or the skip, for the same `pending_id` without rereading the
   bundle; the card adds no retry control of its own. The card passes the
-  props the Inbox row passes: `pending`, `messages`, `maxHeightVh`,
-  `onOutcome`, a no-op `onResolved` and the item's root element as
-  `shortcutScopeRef`, and passes neither `onLateAnswer` nor `lateAnswerState`.
+  props the Inbox row passes (`pending`, `messages`, `maxHeightVh`,
+  `onOutcome`, a no-op `onResolved`, the item root as `shortcutScopeRef`) and
+  neither `onLateAnswer` nor `lateAnswerState`.
 - Outcomes, from the component's `onOutcome`:
 
   | Outcome | Card |
   | --- | --- |
-  | recorded | collapse; when answering reveals another pending action on the task the item follows the next `task.status_summary.updated` or list refresh and is a new item state, never a card switch inside the same expansion; the item leaves when `task.status_summary.updated` clears `pending_action`; if that event is missed the item leaves at the next Needs you list refresh |
-  | lost to another caller | collapse; toast with the Inbox row's existing copy: `needsYouInbox:anotherCallerRejected` when the winner's status is `rejected`, else `needsYouInbox:anotherCallerResolved` (including when the status is absent), with the bundle's first question text as `{question}`, or `needsYouInbox:questionFromAgent` when that text is empty (the Inbox row's fallback); no new copy |
-  | no longer active | collapse; toast `needsYouInbox:bundleNoLongerActive` with the same `{question}` and fallback; no new copy |
-  | late message admitted | not reachable on this card: the component reports it only when `onLateAnswer` is passed and the card passes none; no handler branch is required |
+  | recorded | collapse; another pending action on the task shows as a new item state at the next `task.status_summary.updated` or list refresh, never a card switch inside the expansion; the item leaves when that event clears `pending_action`, or at the next list refresh if it is missed |
+  | lost to another caller | collapse; the Inbox row's toast: `needsYouInbox:anotherCallerRejected` when the winner's status is `rejected`, else `needsYouInbox:anotherCallerResolved`, with the first question text as `{question}` (`needsYouInbox:questionFromAgent` when empty); no new copy |
+  | no longer active | collapse; toast `needsYouInbox:bundleNoLongerActive`, same `{question}`; no new copy |
+  | late message admitted | not reachable: the card passes no `onLateAnswer` |
   | failed | stay expanded with the answer kept; the component's Retry (see above) |
 
 - A relay read with `clarification: null`, or a failed read, shows the phase
@@ -218,13 +210,11 @@ repository query directly, not the flag-gated Inbox handler.
   `summarizePermissionAction(metadata.action_details, title)` from
   `components/task/chat/messages/permission-action-summary.ts`, which picks the
   first non-empty, non-title value of `description`, the `raw_input` pick,
-  `command`, `path`, `cwd` and truncates it; it is exported for the card, shown
-  in the chat's `permission-action-detail` element, and absent when it returns
-  null, and resolves through the same `permission.respond` WebSocket
+  `command`, `path`, `cwd` and truncates it; it is exported for the card and
+  absent when it returns null, and resolves through the same `permission.respond` WebSocket
   request `use-permission-handlers.ts` sends, with the message's `task_id`,
-  `session_id`, `request_id` and `pending_id`. The backend's existing handler
-  records the `PermissionResolutionAudit` with source `web` and the browser
-  identity.
+  `session_id`, `request_id` and `pending_id`; the existing handler records
+  the audit.
 - The extraction `apps/web/lib/permissions/respond.ts` carries three things
   from `use-permission-handlers.ts`, exported for both callers: the request
   builder, `isStalePermissionResponse`, and the option-to-request mapping.
@@ -248,10 +238,9 @@ repository query directly, not the flag-gated Inbox handler.
   and `common:` keys, so the card adds no new copy for them.
 - A missing `request_id` on the message, or no WebSocket client, keeps the
   card expanded and shows the failed-response toast (`task:permissionResponseFailed`)
-  with **Try again** available; unlike the chat, the card never returns
-  silently. The relay read never returns a message without `request_id` or
-  `pending_id`, so the first case is reachable only if the message changes
-  between the read and the click.
+  with **Try again** available; the card never returns silently. The relay
+  read never returns a message without `request_id` or `pending_id`, so the
+  first case needs the message to change between the read and the click.
 - While a response is in flight every option button is disabled. **Try
   again** resends the option last chosen; the card does not reread the
   permission before retrying.
@@ -259,13 +248,12 @@ repository query directly, not the flag-gated Inbox handler.
   with the toast `task:permissionRequestNoLongerAvailable` (the chat's
   existing copy); any other error keeps the card expanded with the toast
   `task:permissionResponseFailed` and **Try again**. A timeout is a non-stale
-  error: if the timed-out send had in fact been recorded, Try again returns a
+  error: if the timed-out send had been recorded, Try again returns a
   stale-response error and the card collapses with the no-longer-available
-  toast, which is accepted (the answer was recorded once, and the resend
-  changes nothing). A success collapses the card; the item
-  leaves when `task.status_summary.updated` clears `pending_action`, or at the
-  next list refresh.
-- The chat's behaviour is unchanged and pinned by its existing tests.
+  toast, which is accepted. A success collapses the card; the item leaves when
+  `task.status_summary.updated` clears `pending_action`, or at the next list
+  refresh.
+- The chat's behaviour is unchanged.
 
 ## Reply store
 
@@ -281,9 +269,11 @@ repository query directly, not the flag-gated Inbox handler.
 The time of a reply is the row's `updated_at`, which the reply's update sets;
 no decided-at column is added. The proposal DTO carries `reply_text`,
 `reply_delivered_at` and `in_reply_to` only while phase 3 is effective, and
-omits all three otherwise (the `CoordinatorPhase3` pattern); a `returned` row
-read while phase 3 is off shows status `returned` with none of them, and its
-card is settled with no **Send again**.
+omits all three otherwise; a `returned` row
+read while phase 3 is off shows status `returned` with none of them; its
+card is settled, shows the text-less line "Returned with your condition" (the
+same string as the prefix of the phase 3 line, without the reply text) and no
+**Send again**.
 
 `status` gains `returned`, a settled status set only from `pending`. It is
 not open, so it does not count toward the 25, does not hold its task's
@@ -309,55 +299,55 @@ answer 404 otherwise, as the relay read does.
    status is not `pending` (a `failed` proposal included), return 409 with the
    current proposal, before validating the text.
 3. Trim; empty or over 2,000 characters is 400 naming `text`. A character is a
-   Unicode code point, counted the same way by the server and by the card's
-   counter. A proposal whose `kind` has no registered delivery text (see
+   Unicode code point, on the server and in the card's counter. A proposal whose `kind` has no registered delivery text (see
    [Reply delivery](#reply-delivery) step 3) is refused with 400 naming `kind`
-   and nothing is written; this check runs after the status check of step 2 and
-   before the text validation.
+   and nothing is written; this check runs after step 2's status check and before
+   the text validation.
 4. In one coordinator-locked transaction, `UPDATE coordinator_proposals SET
    status='returned', reply_text=?, decided_by=?, updated_at=? WHERE id=? AND
    status='pending'` and, when it matched, the `returned` activity row
    ([integration](integration.md#log-rows)). Zero rows: re-read and return 409
-   with the current proposal. This is the same single conditional update
-   approve's claim and reject use, so a reply racing either leaves one
-   winner.
+   with the current proposal. This is the conditional update approve's claim and reject use, so a reply
+   racing either leaves one winner.
 5. Publish `coordinator.updated`, then run [Reply delivery](#reply-delivery)
    and return 200 with the proposal as read after delivery. A failed delivery
    is not an HTTP error: the reply is saved, so the response is 200 with
    `reply_delivered_at` null, which the card renders as "Reply saved, not
    delivered" with **Send again**. Only a failure to read or write the
-   proposal itself (steps 2 and 4's status update) is a 500.
+   proposal itself (steps 2 and 4's status update) is a 500. When only the
+   re-read after delivery fails, the reply is saved: the response is 200 with
+   the proposal as the reply's own update left it (`returned`, `reply_text`
+   set, `reply_delivered_at` null) and a warn log names the proposal id; the
+   next `coordinator.updated` or refresh corrects the card.
 
 `POST .../proposals/:pid/reply/deliver` (`workspace.manage`) re-runs delivery
 for a `returned` proposal whose `reply_delivered_at` is null and never changes
 `status`. Any proposal that is not `returned` is 409 with the current proposal;
 a `returned` proposal whose `reply_delivered_at` is already set is 200 with the
-current proposal and sends nothing, whether the pre-read or step 1 sees it. The
-message is authored by the manager whose request stores it, which for **Send
-again** may differ from the manager who replied; the delivery key still makes
-it once. It runs delivery steps 1 to 4
-whatever `reply_delivery_claimed_at` holds, so after a crash between step 1
-and step 4 **Send again** delivers. When step 1 changes no row because a
-concurrent delivery has meanwhile set `reply_delivered_at`, it returns 200
-with the current proposal and sends nothing; when another delivery is still
-running, both reach step 3 and exactly one message is stored. Like the reply
-route, a delivery that fails (conversation open, `ErrQueueFull`, a repository
-error) returns 200 with the proposal and `reply_delivered_at` null, never a 5xx;
-`ErrQueueFull` and the other failures differ only in the warn log. 404
-covers an absent proposal or one of another coordinator.
+current proposal and sends nothing, whether the pre-read or step 1 sees it.
+The message is authored by the manager who replied (the row's `decided_by`),
+whoever presses **Send again**, matching "from the replying manager". A failed first read
+of the proposal is a 500 with nothing changed; a failed re-read after delivery
+follows the reply route's rule. It runs delivery steps 1 to 4 whatever
+`reply_delivery_claimed_at` holds, so after a crash between step 1 and step 4
+**Send again** delivers; when another delivery is still running, both reach
+step 3 and exactly one message is stored. A delivery that fails (conversation
+open, `ErrQueueFull`, a repository error) returns 200 with
+`reply_delivered_at` null, never a 5xx. 404 covers an absent proposal or one of
+another coordinator.
 
 ## Reply delivery
 
 Delivery is exactly one conditional insert keyed by the proposal. The reply's
 delivery key is `coordinator-reply:<proposal_id>` (`task_session_messages.id` is an unbounded `TEXT` primary key; the
-128-character check applies only to the client-supplied `client_message_id`,
-which this path does not use), used as both the message id and the queue entry
-id; the primary key decides uniqueness, so at-most-once needs no lookup or
-cancellation.
+128-character check applies only to `client_message_id`, which this path does
+not use), used as both the message id and the queue entry id; the primary key
+decides uniqueness, so at-most-once needs no lookup.
 
 Delivery runs synchronously inside the request, under a context detached from
-the client's cancellation (so a disconnect leaves no half-finished delivery), with a 30-second deadline
-(`context.WithTimeout`) covering steps 1 to 4; a deadline expiry is a delivery
+the client's cancellation (so a disconnect leaves no half-finished delivery), with a 20-second deadline
+(`context.WithTimeout`, below the 30-second default `server.writeTimeout` so the
+response is written before the server's write timeout) covering steps 1 to 4; a deadline expiry is a delivery
 failure like any other error before step 3 commits.
 
 1. Record the attempt: `UPDATE coordinator_proposals SET
@@ -377,39 +367,33 @@ failure like any other error before step 3 commits.
    id). Phase 3 adds a plain variant without plan-comment refs,
    `CreateQueuedMessageOnce(ctx, id, req, queued, maxPerSession) (message,
    created bool, err)` (in `internal/task/service`, beside
-   `CreateQueuedMessageIdempotent`, with `maxPerSession` from the queue's
+   `CreateQueuedMessageIdempotent`, with `maxPerSession` from
    `MaxQueuedPromptsPerSession()` as the composer passes it), whose message insert is `INSERT ... ON CONFLICT (id)
    DO NOTHING`: one affected row inserts the queue entry with the same id,
    commits and returns `created = true`; zero affected rows inserts nothing,
    rolls back and returns the stored message with `created = false`. The
-   message is authored by the requesting manager with
+   message is authored by the replying manager (`decided_by`) with
    `metadata.coordinator_reply_proposal_id` set to the proposal id, and its
    queue entry carries `user_message_recorded` in the queue entry metadata (where
    the composer sets it), so its dispatch is an attended turn start
    (`REQ-COORDINATOR-COPILOT-002`). Then delivery calls the orchestrator's
-   `NotifyQueuedUserPrompt(taskID, sessionID)`, the same kick the composer
-   uses: a promptable session drains the entry at once, and a running
-   session drains it when its turn ends, as any queued manager message
-   does. The queue removes an entry when it dispatches it, so it dispatches once. The agent-facing
-   text depends on the proposal's `kind`, and `<title>` is built on the
+   `NotifyQueuedUserPrompt(taskID, sessionID)`, the composer's kick: a promptable
+   session drains the entry at once, a running one when its turn ends. The agent-facing text depends on the proposal's `kind`, and `<title>` is built on the
    server from the stored `spec_json` alone, in English (agent-facing text is
    not localized), with no task or step lookup: for `create_task` it is
    `spec_json.title`; for the other kinds it is `Resume task <task_id>`,
    `Message task <task_id>` or `Move task <task_id>` with `spec_json.task_id`,
-   so a task or step that no longer exists changes nothing. For `create_task`: `Reply to your
+   so a missing task or step changes nothing. For `create_task`: `Reply to your
    proposal "<title>" (proposal <id>): <reply text>. If you still think the
    work is needed, propose it again with in_reply_to set to <id>.` For
    `message`, `move` and `resume`: `Reply to your <kind> proposal "<title>"
    (proposal <id>): <reply text>. If you still think it is needed, send a new
    <kind> proposal that meets the condition.` where `<kind>` is the literal
    `message`, `move` or `resume`; these kinds take no `in_reply_to`, so their
-   cards never show "Revised after your reply". The delivery text of the
-   `improvement` kind is added by the improvements work
-   ([improvements](improvements.md#tool)): `Reply to your improvement
-   "<title>" (proposal <id>): <reply text>. If you still think a change is
-   needed, propose a new improvement.` An improvement card never shows
-   "Revised after your reply". A kind with no text registered is not
-   replyable and its card shows no **Reply with a condition**.
+   cards never show "Revised after your reply". The `improvement` text is added
+   by the improvements work ([improvements](improvements.md#tool)). A kind with
+   no text registered is not replyable and its card shows no **Reply with a
+   condition**.
 4. Finalise: when step 3 returned a message, `created` or not, `UPDATE ...
    SET reply_delivered_at = ?, reply_delivery_claimed_at = NULL WHERE id = ?
    AND reply_delivered_at IS NULL`, because the reply is in the conversation.
@@ -420,11 +404,10 @@ failure like any other error before step 3 commits.
    reply_delivery_claimed_at = NULL WHERE id = ? AND reply_delivered_at IS
    NULL`, leaving `reply_delivered_at` null; the card shows "Reply saved, not
    delivered" with **Send again**, which runs steps 1 to 4 again.
-   `NotifyQueuedUserPrompt(ctx, taskID, sessionID)` returns nothing. A dispatch that fails after the commit
-   (each path logs its own failure) does not undo the delivery:
-   `reply_delivered_at` stays set, and the entry stays queued and drains at
-   the session's next idle point, the queue's existing restart drain, or the
-   notify of a later message on that session.
+   `NotifyQueuedUserPrompt` returns nothing. A dispatch that fails after the
+   commit does not undo the delivery: `reply_delivered_at` stays set and the
+   entry stays queued, draining at the session's next idle point, the queue's
+   restart drain, or a later notify.
 
 Two deliveries that overlap in any order, including a slow one still running
 when a later **Send again** starts, reach step 3 at most once each; exactly one
@@ -433,10 +416,10 @@ other returns the stored message and records the delivery. A crash after step 3
 commits and before step 4 leaves `reply_delivered_at` null, so the card shows
 "Reply saved, not delivered"; **Send again** at once gets `created = false`,
 kicks the queue again and records the delivery, storing and dispatching
-nothing new. When the conversation was replaced in between, the key still
-names the proposal, so the reply stays in the earlier transcript and is not
-sent again; the manager can repeat it in the new conversation by hand. A crash inside step 3's transaction commits
-nothing, so Send again stores the reply once.
+nothing new. When the conversation was replaced in between, the reply stays in
+the earlier transcript and is not sent again; the manager can repeat it by
+hand. A crash inside step 3's transaction commits nothing, so Send again
+stores the reply once.
 
 ## Revised proposals
 
@@ -468,25 +451,46 @@ nothing, so Send again stores the reply once.
 ## Cards
 
 The two surfaces are the Needs you item and the copilot chat card; both render
-`ProposalCard`. A `returned` proposal leaves Needs you, which lists
-`status=pending` only, so the copilot chat card, which attaches to the proposal
-by its id and reads its current status, is the durable place that shows
-"Returned with your condition" and **Send again**; no proposals list under
-`status=all` is added by this design. When a reply is sent from a Needs you
-item, that item stays rendered from the reply response, showing the returned
-state and, on a failed delivery, "Reply saved, not delivered" with **Send
-again**, until the list next refreshes or the manager navigates away, after
-which the copilot chat card is where **Send again** is found. A 409 or a 404
-from **Send again** shows the current state as approve does.
+`ProposalCard`. A `returned` proposal leaves Needs you (`status=pending` only),
+so the chat card, which reads the proposal by id, is the durable place that
+shows "Returned with your condition" and **Send again**; no `status=all` list
+is added. When a reply is sent from a Needs you
+item, the item is held: the Needs you inputs hook keeps an in-memory set of
+held proposal ids, adds the id when that item's reply request starts, and
+renders the held item from the latest row the card has (the reply response or
+a later merge) although the classification drops `returned` rows. It shows the
+returned state and, on a failed delivery, "Reply saved, not delivered" with
+**Send again**. It is released when the manager navigates away or the list
+remounts or refreshes, and never counts toward Needs you counts, tabs or
+badges. After release the copilot chat card is where **Send again** is found.
+
+**Reply outcomes.** The acting card locks as a decision does while its reply
+or deliver request is in flight, and applies the decision outcomes of
+[proposal-cards](proposal-cards.md) (409, 403 and 404 rows unchanged) with
+these differences:
+
+- 200: the card renders from the returned proposal, delivered, or "Reply saved,
+  not delivered" with **Send again** when `reply_delivered_at` is null.
+- 400 naming `text`: the form stays open with the typed text and the `error`
+  renders in an inline `role="alert"` under the textarea, focus moving to it.
+  400 naming `kind`: the form closes and a toast says "This proposal cannot be
+  replied to."
+- Network error or 5xx on the reply route: the form stays open with its text
+  and a toast says "Could not reach Kandev. Your reply may not have been saved.
+  Check this proposal and try again." A reply that did land shows on the next
+  `coordinator.updated` or refresh, and a second **Send reply** on it is a 409.
+- Network error or 5xx on the deliver route: a toast says "Could not reach
+  Kandev. Try again."; **Send again** stays and the store is unchanged.
 
 The **Reply with a condition** control is added to `ProposalCard` for
 `pending` proposals (not `failed`) whose `kind` has registered delivery text
 (`create_task`, `message`, `move` and `resume`; not `improvement` until the
 improvements work registers its text), for managers, while phase 3 is effective: a
-textarea (2,000 characters counted as Unicode code points, counter), **Send reply** disabled until the
-trimmed text is non-empty, and **Cancel** returning focus to the control. On
-the chat card it opens in place, unlike Edit, because it has one field. A 409
-shows the current state as approve does.
+textarea with no `maxLength` (so a paste is never silently cut), whose counter
+shows the trimmed length in Unicode code points out of 2,000 and turns to the
+error style past the limit, **Send reply** disabled until the trimmed text is
+1 to 2,000 code points, and **Cancel** returning focus to the control. On
+the chat card it opens in place, unlike Edit, because it has one field. See the outcomes table above for a rejected request.
 
 ## Security
 
