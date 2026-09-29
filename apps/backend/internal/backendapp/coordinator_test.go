@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
@@ -50,7 +51,7 @@ func TestInitCoordinatorWiring_DisabledBuildsStoreOnly(t *testing.T) {
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestInitCoordinatorWiring_EnabledBuildsService(t *testing.T) {
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestInitCoordinatorWiring_StoreErrorPropagates(t *testing.T) {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, false, newTestLogger())
 	if err == nil {
 		t.Fatal("expected an error when the coordinator store fails to initialize")
 	}
@@ -117,7 +118,7 @@ func TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator(t
 		t.Fatalf("CreateCoordinator: %v", err)
 	}
 
-	content, err := coordinatorStandingInstructionsReader(svc)(ctx, seed.ID, "Acme Workspace", "ws-1")
+	content, err := coordinatorStandingInstructionsReader(svc, newTestLogger())(ctx, seed.ID, "Acme Workspace", "ws-1")
 	if err != nil {
 		t.Fatalf("reader unexpected error: %v", err)
 	}
@@ -127,6 +128,104 @@ func TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator(t
 		}
 	}
 }
+
+type allowAllAuthorizer struct{}
+
+func (allowAllAuthorizer) AuthorizeWorkspaceScope(context.Context, string, authz.Scope) error {
+	return nil
+}
+
+// TestCoordinatorStandingInstructionsReader_AppendsStandingOrders verifies the
+// orders section follows the base block after one blank line only while phase
+// 2 is on, and that an unreadable orders table drops that section alone.
+func TestCoordinatorStandingInstructionsReader_AppendsStandingOrders(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	ctx := context.Background()
+	seed := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", Context: "ctx"}
+	if err := store.CreateCoordinator(ctx, seed); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	on := coordinator.NewService(store, coordinator.NewValidator(nil, nil), allowAllAuthorizer{}, newTestLogger(), coordinator.WithPhase2(true))
+	off := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
+	if _, err := on.AddStandingOrder(ctx, "ws-1", seed.ID, coordinator.AddStandingOrderInput{Text: "Prefer small cards."}); err != nil {
+		t.Fatalf("AddStandingOrder: %v", err)
+	}
+	build := func(svc *coordinator.Service) string {
+		content, err := coordinatorStandingInstructionsReader(svc, newTestLogger())(ctx, seed.ID, "Acme", "ws-1")
+		if err != nil {
+			t.Fatalf("reader: %v", err)
+		}
+		return content
+	}
+	base := build(off)
+	if strings.Contains(base, "<standing-orders>") {
+		t.Fatalf("flag off added the orders section:\n%s", base)
+	}
+	withOrders := build(on)
+	if !strings.HasPrefix(withOrders, base+"\n\nStanding orders from this workspace's managers.") || !strings.Contains(withOrders, "Prefer small cards.") {
+		t.Fatalf("orders section not appended after a blank line:\n%s", withOrders)
+	}
+	if _, err := pool.Writer().Exec(`DROP TABLE coordinator_standing_orders`); err != nil {
+		t.Fatal(err)
+	}
+	if got := build(on); got != base+"\n\n"+noGoalSection {
+		t.Fatalf("failed orders read changed the rest of the block:\n%s", got)
+	}
+}
+
+const noGoalSection = "No goal is set for this coordinator."
+
+// TestCoordinatorStandingInstructionsReader_AppendsGoal verifies the goal
+// section follows the orders only while phase 2 is on, shows the active goal
+// and that an unreadable goal drops that section alone.
+func TestCoordinatorStandingInstructionsReader_AppendsGoal(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	if _, err := pool.Writer().Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, workflow_id TEXT, state TEXT,
+		archived_at DATETIME, is_ephemeral INTEGER NOT NULL DEFAULT 0, origin TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	seed := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", Context: "ctx"}
+	if err := store.CreateCoordinator(ctx, seed); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	on := coordinator.NewService(store, coordinator.NewValidator(nil, nil), allowAllAuthorizer{}, newTestLogger(), coordinator.WithPhase2(true))
+	off := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
+	build := func(svc *coordinator.Service) string {
+		content, err := coordinatorStandingInstructionsReader(svc, newTestLogger())(ctx, seed.ID, "Acme", "ws-1")
+		if err != nil {
+			t.Fatalf("reader: %v", err)
+		}
+		return content
+	}
+	base := build(off)
+	if got := build(on); got != base+"\n\n"+noGoalSection {
+		t.Fatalf("no goal:\n%s", got)
+	}
+	if _, err := on.PutGoal(ctx, "ws-1", seed.ID, []byte(`{"name":"Ship","due_on":"2026-10-31","criteria":[{"text":"a"}]}`)); err != nil {
+		t.Fatalf("PutGoal: %v", err)
+	}
+	want := base + "\n\n" + coordinator.GoalSection(&coordinator.Goal{Name: "Ship", DueOn: ptr("2026-10-31"), Criteria: []coordinator.GoalCriterion{{Text: "a"}}})
+	if got := build(on); got != want || build(off) != base {
+		t.Fatalf("active goal:\n%s", got)
+	}
+	if _, err := pool.Writer().Exec(`DROP TABLE coordinator_goals`); err != nil {
+		t.Fatal(err)
+	}
+	if got := build(on); got != base {
+		t.Fatalf("failed goal read changed the rest of the block:\n%s", got)
+	}
+}
+
+func ptr(s string) *string { return &s }
 
 // TestCoordinatorStandingInstructionsReader_PropagatesLookupFailure verifies
 // an unknown coordinator id surfaces as an error rather than empty content,
@@ -139,7 +238,7 @@ func TestCoordinatorStandingInstructionsReader_PropagatesLookupFailure(t *testin
 	}
 	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
 
-	_, err = coordinatorStandingInstructionsReader(svc)(context.Background(), "missing", "Acme Workspace", "ws-1")
+	_, err = coordinatorStandingInstructionsReader(svc, newTestLogger())(context.Background(), "missing", "Acme Workspace", "ws-1")
 	if err == nil {
 		t.Fatal("expected an error for an unknown coordinator id")
 	}
@@ -189,7 +288,7 @@ func TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister(t *testing.T) 
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -256,7 +355,7 @@ func TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows(t *testing
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -315,7 +414,7 @@ func TestRegisterCoordinatorSubscribers_WiresStallSubscriptionAndPruneHook(t *te
 	pool := newCoordinatorTestPool(t)
 	log := newTestLogger()
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, log)
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, false, log)
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -413,7 +512,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
-	svc, err := initCoordinatorWiring(ctx, pool, tracker, harness.taskSvc, harness.workflowSvc, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(ctx, pool, tracker, harness.taskSvc, harness.workflowSvc, nil, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -440,7 +539,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 		CoordinatorID: coord.ID,
 		Spec:          coordinator.ProposalSpec{Title: "Proposed task", WorkflowID: workflowID, StepID: stepID},
 	}
-	if err := store.InsertProposal(ctx, proposal); err != nil {
+	if err := store.InsertProposal(ctx, proposal, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	staleClaimedAt := now.Add(-10 * time.Minute)
@@ -452,7 +551,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 	hook := registerCoordinatorDecisions(gin.New(), nil, svc, harness.taskSvc, harness.workflowSvc, newTestLogger())
 	hook(ctx, now)
 
-	got, err := store.GetProposal(ctx, workspaceID, coord.ID, proposal.ID)
+	got, err := store.GetProposal(ctx, workspaceID, coord.ID, proposal.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -468,5 +567,25 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 	}
 	if task.Title != "Proposed task" {
 		t.Errorf("Task.Title = %q, want %q", task.Title, "Proposed task")
+	}
+}
+
+func TestInitCoordinatorWiring_Phase2FollowsBothFlags(t *testing.T) {
+	cases := []struct {
+		enabled, phase2, wantSvc bool
+	}{{false, false, false}, {false, true, false}, {true, false, true}, {true, true, true}}
+	for _, tc := range cases {
+		tracker := newCoordinatorTestTracker(t)
+		pool := newCoordinatorTestPool(t)
+		svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, tc.enabled, tc.phase2, newTestLogger())
+		if err != nil {
+			t.Fatalf("initCoordinatorWiring: %v", err)
+		}
+		if (svc != nil) != tc.wantSvc {
+			t.Fatalf("enabled=%v phase2=%v: service present = %v", tc.enabled, tc.phase2, svc != nil)
+		}
+		if svc != nil && svc.Phase2Enabled() != tc.phase2 {
+			t.Fatalf("enabled=%v phase2=%v: Phase2Enabled = %v", tc.enabled, tc.phase2, svc.Phase2Enabled())
+		}
 	}
 }

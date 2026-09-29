@@ -999,6 +999,7 @@ type GitLabCredentialResolver interface {
 type CoordinatorLookup interface {
 	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
 	CoordinatorProfilesReady(ctx context.Context, coordinatorID string) (bool, error)
+	Phase2Enabled() bool
 }
 
 // Executor manages agent execution for tasks

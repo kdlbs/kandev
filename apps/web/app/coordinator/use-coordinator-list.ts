@@ -19,7 +19,7 @@ export type UseCoordinatorListResult = {
  * #routes-and-sidebar, #screens).
  */
 export function useCoordinatorList(workspaceId: string | null): UseCoordinatorListResult {
-  const [coordinators, setCoordinators] = useState<Coordinator[] | undefined>(undefined);
+  const [result, setResult] = useState<{ workspaceId: string; coordinators: Coordinator[] }>();
   const [error, setError] = useState(false);
   const seqRef = useRef(0);
 
@@ -28,7 +28,7 @@ export function useCoordinatorList(workspaceId: string | null): UseCoordinatorLi
     listCoordinators(ws)
       .then((res) => {
         if (seqRef.current !== seq) return;
-        setCoordinators(res.coordinators);
+        setResult({ workspaceId: ws, coordinators: res.coordinators });
         setError(false);
       })
       .catch(() => {
@@ -38,7 +38,8 @@ export function useCoordinatorList(workspaceId: string | null): UseCoordinatorLi
   }, []);
 
   useEffect(() => {
-    setCoordinators(undefined);
+    seqRef.current += 1;
+    setResult(undefined);
     setError(false);
     if (!workspaceId) return;
     read(workspaceId);
@@ -49,5 +50,7 @@ export function useCoordinatorList(workspaceId: string | null): UseCoordinatorLi
     read(workspaceId);
   }, [workspaceId, read]);
 
+  const coordinators =
+    result && result.workspaceId === workspaceId ? result.coordinators : undefined;
   return { coordinators, error, retry };
 }

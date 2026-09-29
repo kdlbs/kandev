@@ -997,6 +997,22 @@
     ],
     "mcpTools": [
       {
+        "tool": "propose_resume_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_message_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_move_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "list_coordinator_activity_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
         "tool": "get_coordinator_item_kandev",
         "reason": "Workspace coordinator tool behind features.coordinator, off in prod and dev; documented when the feature is promoted."
       },

@@ -36,9 +36,10 @@ function matchesWorkspace(
   return read?.workspaceId === workspaceId;
 }
 
-function toAttentionTask(task: Task): AttentionTask {
+function toAttentionTask(task: Task, workflowId: string): AttentionTask {
   return {
     id: task.id,
+    workflowId,
     title: task.title,
     identifier: task.identifier,
     state: task.state,
@@ -94,6 +95,7 @@ function useCoordinatorTasksFromActiveCache(workspaceId: string | null): UseCoor
       for (const task of snapshot.tasks) {
         flattened.push({
           id: task.id,
+          workflowId,
           title: task.title,
           identifier: task.identifier,
           state: task.state,
@@ -211,7 +213,7 @@ async function fetchDirectTasksState(workspaceId: string): Promise<DirectTasksSt
       if (task.is_ephemeral) continue;
       const stepName = stepNameById.get(task.workflow_step_id);
       if (!stepName) continue;
-      tasks.push(toAttentionTask(task));
+      tasks.push(toAttentionTask(task, workflow.id));
       stepNameByTaskId.set(task.id, stepName);
     }
   }

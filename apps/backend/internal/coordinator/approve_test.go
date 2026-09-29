@@ -53,7 +53,7 @@ func approveFixture(t *testing.T) (*Store, *Coordinator, *fakeDecisionTaskServic
 func insertProposal(t *testing.T, store *Store, c *Coordinator, spec ProposalSpec) *Proposal {
 	t.Helper()
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: c.WorkspaceID, Spec: spec}
-	if err := store.InsertProposal(context.Background(), p); err != nil {
+	if err := store.InsertProposal(context.Background(), p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	return p
@@ -110,7 +110,7 @@ func TestApproveProposal_ForbiddenRequiresManageScope(t *testing.T) {
 	}
 	assertLastScope(t, svc, authz.ScopeWorkspaceManage)
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -314,7 +314,7 @@ func TestApproveProposal_EditNullFieldReturns400(t *testing.T) {
 	_, err := svc.ApproveProposal(context.Background(), "ws-1", c.ID, p.ID, edits)
 	assertFieldError(t, err, "title")
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -502,7 +502,7 @@ func TestApproveProposal_EditWorkflowChangedCrossWorkspaceRejectedBeforeStepGrap
 		t.Fatalf("ListStepsByWorkflow calls = %d, want 0 (workspace ownership must be checked before the step-graph read)", steps.calls)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -593,7 +593,7 @@ func TestApproveProposal_CreateSettleOtherErrorPropagatesAndLeavesApproving(t *t
 		t.Fatalf("err = %v, want a plain error, not a conflict", err)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}

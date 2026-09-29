@@ -82,7 +82,7 @@ function CoordinatorScreenList({
       {/* Full width under the topbar, not inside the content column: the
           derived-facts caption sits beside the counts, which only fits when
           the strip spans the window (mockup v2.1 `.strip`). */}
-      {!tasksHardFailed && (
+      {!tasksHardFailed && !attention.watchSetUnavailable && (
         <div className="bg-background sticky top-0 z-10 border-b px-4">
           <CountStrip
             classification={attention.classification}

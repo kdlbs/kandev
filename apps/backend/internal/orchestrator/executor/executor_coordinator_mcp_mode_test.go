@@ -18,11 +18,14 @@ type fakeCoordinatorLookup struct {
 	lookupErr     error
 	profilesReady bool
 	profilesErr   error
+	phase2        bool
 }
 
 func (f fakeCoordinatorLookup) CoordinatorForConversationTask(context.Context, string) (string, bool, error) {
 	return f.coordinatorID, f.ok, f.lookupErr
 }
+
+func (f fakeCoordinatorLookup) Phase2Enabled() bool { return f.phase2 }
 
 func (f fakeCoordinatorLookup) CoordinatorProfilesReady(context.Context, string) (bool, error) {
 	return f.profilesReady, f.profilesErr

@@ -29,7 +29,7 @@ func TestRejectProposal_ForbiddenRequiresManageScope(t *testing.T) {
 	}
 	assertLastScope(t, svc, authz.ScopeWorkspaceManage)
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -166,7 +166,7 @@ func TestRejectProposal_ReasonTooLongReturns400(t *testing.T) {
 	_, err := svc.RejectProposal(context.Background(), "ws-1", c.ID, p.ID, RejectProposalRequest{Reason: &reason})
 	assertFieldError(t, err, "reason")
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}

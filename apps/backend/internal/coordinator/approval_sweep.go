@@ -83,7 +83,7 @@ func (s *Service) runApprovalSweepPass(ctx context.Context, cutoff time.Time) {
 			s.afterSweepPass()
 		}
 	}()
-	rows, err := s.store.ListApprovingClaimedBefore(ctx, cutoff)
+	rows, err := s.store.ListApprovingClaimedBefore(ctx, cutoff, true)
 	if err != nil {
 		s.logger.Warn("approval sweep: discovery query failed", zap.Error(err))
 		return

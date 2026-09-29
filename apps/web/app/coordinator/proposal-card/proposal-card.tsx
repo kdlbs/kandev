@@ -5,11 +5,17 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { CardDescription } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
-import type {
-  ApproveProposalEdits,
-  Proposal,
-  ProposalSpec,
+import {
+  isCreateTaskProposal,
+  type ApproveProposalEdits,
+  type CreateTaskProposal,
+  type KindProposal,
+  type MessageSpec,
+  type ProposalSpec,
+  type StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
+import type { AttentionTask } from "@/lib/coordinator/attention";
+import type { StandingOrder } from "@/lib/api/domains/coordinator-api";
 import {
   useProposalDecision,
   type ProposalDecisionOutcome,
@@ -25,14 +31,20 @@ import {
 import { useToast } from "@/components/toast-provider";
 import { useNowTick } from "../use-now-tick";
 import { EditForm, type EditFormServerError } from "./edit-form";
+import { KindBody } from "./kind-body";
+import { MessageEditForm } from "./message-edit-form";
+import { kindApprovedToast, kindFailureText, policyLineText } from "./outcome-copy";
+import { usePhase2CardContext } from "./phase2-context";
 import { RejectForm } from "./reject-form";
+import { ShapedBy } from "./shaped-by";
 import { useApprovedCardLabel } from "./use-approved-card-label";
+import { useTargetTask } from "./use-target-task";
 
 export type ProposalCardVariant = "full" | "compact";
 export type ProposalCardForm = "edit" | "reject";
 
 export type ProposalCardProps = {
-  proposal: Proposal;
+  proposal: StoredProposal;
   /** "full" is the Needs-you card (description, attribution, policy line, inline forms); "compact" is the chat card. */
   variant: ProposalCardVariant;
   canManage: boolean;
@@ -40,6 +52,8 @@ export type ProposalCardProps = {
   coordinatorId: string;
   workflowNameById: Map<string, string>;
   stepNameByWorkflowStep: Map<string, string>;
+  /** Open tasks of the workspace, for a resume, message or move card's target; absent on the compact chat card, which reads the task itself. */
+  openTasksById?: Map<string, AttentionTask>;
   /** Required for the "full" variant's "Proposed by" line. */
   coordinatorName?: string;
   /** Opens this form immediately (the Needs-you deep link from a chat card's Edit/Reject). */
@@ -70,17 +84,90 @@ type OutcomeContext = {
   computeNeedsYouCount?: () => number;
   setServerError: (error: EditFormServerError | null) => void;
   setOpenForm: (form: ProposalCardForm | null) => void;
-  resolveCardLabel: (proposal: Proposal) => Promise<string>;
+  resolveCardLabel: (proposal: StoredProposal) => Promise<string>;
+  /** The target task label of a resume, message or move card. */
+  targetLabel: string;
+  setPolicyDenied: (denied: boolean) => void;
+  offerReject?: (offer: { proposalId: string; reason: string }) => void;
 };
 
-async function toastApproved(proposal: Proposal, ctx: OutcomeContext) {
-  const spec = effectiveProposalSpec(proposal);
-  const step = resolveStepName(spec, ctx.stepNameByWorkflowStep);
-  const card = await ctx.resolveCardLabel(proposal);
+async function toastApproved(proposal: StoredProposal, ctx: OutcomeContext) {
+  let title: string;
+  if (isCreateTaskProposal(proposal)) {
+    const step = resolveStepName(effectiveProposalSpec(proposal), ctx.stepNameByWorkflowStep);
+    const card = await ctx.resolveCardLabel(proposal);
+    title = ctx.t("coordinator:toastApproved", { card, step });
+  } else {
+    title = kindApprovedToast(
+      proposal,
+      ctx.targetLabel,
+      kindStepName(proposal, ctx.stepNameByWorkflowStep),
+      ctx.t,
+    );
+  }
   ctx.toast({
-    title: ctx.t("coordinator:toastApproved", { card, step }),
+    title,
     description: nextLine(ctx.t, ctx.computeNeedsYouCount),
     variant: "success",
+  });
+}
+
+const ACTIONABLE: ReadonlySet<StoredProposal["status"]> = new Set(["pending", "failed"]);
+
+function splitProposal(proposal: StoredProposal) {
+  const createProposal: CreateTaskProposal | null = isCreateTaskProposal(proposal)
+    ? proposal
+    : null;
+  const kindProposal: KindProposal | null = createProposal ? null : (proposal as KindProposal);
+  const kindSpec = kindProposal ? (kindProposal.final_spec ?? kindProposal.spec) : null;
+  return { createProposal, kindProposal, kindSpec };
+}
+
+function messageTextOf(kindSpec: KindProposal["spec"] | null): string {
+  return kindSpec ? ((kindSpec as MessageSpec).text ?? "") : "";
+}
+
+function cardStatusLine(
+  proposal: StoredProposal,
+  kindProposal: KindProposal | null,
+  approvedLabel: string,
+  t: TFn,
+  now: number,
+): string {
+  if (proposal.status === "approved") return approvedStatusLine(approvedLabel, t);
+  if (proposal.status === "failed" && kindProposal) return kindFailureText(kindProposal, t);
+  return proposalStatusLine(proposal, t, now);
+}
+
+function editableForm(
+  createProposal: unknown,
+  kindProposal: KindProposal | null,
+): "create" | "message" | null {
+  if (createProposal) return "create";
+  return kindProposal?.kind === "message" ? "message" : null;
+}
+
+function kindStepName(proposal: KindProposal, names: Map<string, string>): string {
+  if (proposal.kind !== "move") return "";
+  const spec = proposal.final_spec ?? proposal.spec;
+  return names.get(`${spec.workflow_id}:${spec.to_step_id}`) ?? spec.to_step_id;
+}
+
+function toastRejected(proposalId: string, rejectReason: string | undefined, ctx: OutcomeContext) {
+  const { t, toast, computeNeedsYouCount } = ctx;
+  const reason = rejectReason?.trim();
+  const offer = ctx.offerReject && reason ? { proposalId, reason } : null;
+  toast({
+    title: offer ? t("coordinator:toastRejectedOffer") : t("coordinator:toastRejected"),
+    description: nextLine(t, computeNeedsYouCount),
+    variant: "success",
+    ...(offer && {
+      duration: 10_000,
+      action: {
+        label: t("coordinator:toastRejectedOfferAction"),
+        onClick: () => ctx.offerReject?.(offer),
+      },
+    }),
   });
 }
 
@@ -94,8 +181,9 @@ function applyDecisionOutcome(
   outcome: ProposalDecisionOutcome,
   plainApprove: boolean,
   ctx: OutcomeContext,
+  rejectReason?: string,
 ) {
-  const { t, toast, variant, computeNeedsYouCount, setServerError, setOpenForm } = ctx;
+  const { t, toast, variant, setServerError, setOpenForm } = ctx;
   switch (outcome.kind) {
     case "decided": {
       setServerError(null);
@@ -104,11 +192,7 @@ function applyDecisionOutcome(
       if (outcome.proposal.status === "approved") {
         void toastApproved(outcome.proposal, ctx);
       } else if (outcome.proposal.status === "rejected") {
-        toast({
-          title: t("coordinator:toastRejected"),
-          description: nextLine(t, computeNeedsYouCount),
-          variant: "success",
-        });
+        toastRejected(outcome.proposal.id, rejectReason, ctx);
       }
       return;
     }
@@ -118,6 +202,11 @@ function applyDecisionOutcome(
       // compact chat card keeps its buttons visible and surfaces the error
       // via serverError-driven copy, since it has no inline form surface.
       if (plainApprove && variant === "full") setOpenForm("edit");
+      return;
+    case "policy_denied":
+      setOpenForm(null);
+      setServerError(null);
+      ctx.setPolicyDenied(true);
       return;
     case "conflict":
       setOpenForm(null);
@@ -137,8 +226,8 @@ function applyDecisionOutcome(
 
 /** True only for a remote decision arriving while this card's own form is open and it isn't the one deciding it. */
 function shouldForceCloseForm(
-  prevStatus: Proposal["status"],
-  status: Proposal["status"],
+  prevStatus: StoredProposal["status"],
+  status: StoredProposal["status"],
   hasOpenForm: boolean,
   busy: boolean,
 ): boolean {
@@ -153,7 +242,10 @@ type ProposalCardActionsProps = {
   busy: boolean;
   isStaleApproving: boolean;
   workspaceId: string;
-  effSpec: ProposalSpec;
+  editable: "create" | "message" | null;
+  createSpec: ProposalSpec | null;
+  messageText: string;
+  policyDenied: boolean;
   serverError: EditFormServerError | null;
   approveButtonRef: RefObject<HTMLButtonElement | null>;
   editButtonRef: RefObject<HTMLButtonElement | null>;
@@ -167,13 +259,12 @@ type ProposalCardActionsProps = {
   onCancelReject: () => void;
 };
 
-/** Approve/Edit/Reject buttons, or whichever form is open. Split out to keep ProposalCard's own branching low. */
-function ProposalCardActions(props: ProposalCardActionsProps) {
+function ActionButtons(props: ProposalCardActionsProps) {
   const { t } = useTranslation();
-  if (!props.showActions) return null;
-  if (props.isStaleApproving) {
-    return (
-      <div className="flex flex-wrap gap-2">
+  const mayApprove = !props.policyDenied || props.isStaleApproving;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {mayApprove && (
         <Button
           ref={props.approveButtonRef}
           size="sm"
@@ -182,24 +273,40 @@ function ProposalCardActions(props: ProposalCardActionsProps) {
           className="min-h-11 sm:min-h-0"
         >
           {props.busy && <Spinner aria-hidden className="mr-1.5" />}
-          {t("coordinator:retry")}
+          {props.isStaleApproving ? t("coordinator:retry") : t("coordinator:approve")}
         </Button>
-      </div>
-    );
-  }
-  if (props.variant === "full" && props.openForm === "edit") {
-    return (
-      <EditForm
-        workspaceId={props.workspaceId}
-        spec={props.effSpec}
-        busy={props.busy}
-        serverError={props.serverError}
-        onApprove={props.onApproveWithEdits}
-        onCancel={props.onCancelEdit}
-      />
-    );
-  }
-  if (props.variant === "full" && props.openForm === "reject") {
+      )}
+      {mayApprove && props.editable && !props.isStaleApproving && (
+        <Button
+          ref={props.editButtonRef}
+          size="sm"
+          variant="outline"
+          disabled={props.busy}
+          onClick={props.onEditClick}
+          className="min-h-11 sm:min-h-0"
+        >
+          {t("coordinator:edit")}
+        </Button>
+      )}
+      {!props.isStaleApproving && (
+        <Button
+          ref={props.rejectButtonRef}
+          size="sm"
+          variant="outline"
+          disabled={props.busy}
+          onClick={props.onRejectClick}
+          className="min-h-11 sm:min-h-0"
+        >
+          {t("coordinator:reject")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function OpenForm(props: ProposalCardActionsProps) {
+  if (props.variant !== "full") return null;
+  if (props.openForm === "reject") {
     return (
       <RejectForm
         busy={props.busy}
@@ -209,40 +316,99 @@ function ProposalCardActions(props: ProposalCardActionsProps) {
       />
     );
   }
-  if (props.openForm) return null;
+  if (props.editable === "message") {
+    return (
+      <MessageEditForm
+        text={props.messageText}
+        busy={props.busy}
+        serverError={props.serverError}
+        onApprove={props.onApproveWithEdits}
+        onCancel={props.onCancelEdit}
+      />
+    );
+  }
+  if (props.editable === "create" && props.createSpec) {
+    return (
+      <EditForm
+        workspaceId={props.workspaceId}
+        spec={props.createSpec}
+        busy={props.busy}
+        serverError={props.serverError}
+        onApprove={props.onApproveWithEdits}
+        onCancel={props.onCancelEdit}
+      />
+    );
+  }
+  return null;
+}
+
+/** Approve/Edit/Reject buttons, or whichever form is open. */
+function ProposalCardActions(props: ProposalCardActionsProps) {
+  if (!props.showActions) return null;
+  if (props.isStaleApproving) return <ActionButtons {...props} />;
+  if (props.openForm) return <OpenForm {...props} />;
+  return <ActionButtons {...props} />;
+}
+
+type CardBodyProps = {
+  proposal: StoredProposal;
+  variant: ProposalCardVariant;
+  createProposal: CreateTaskProposal | null;
+  createSpec: ProposalSpec | null;
+  kindProposal: KindProposal | null;
+  specLabel: string | null;
+  openTasksById?: Map<string, AttentionTask>;
+  stepNameByWorkflowStep: Map<string, string>;
+  coordinatorName?: string;
+  orders: StandingOrder[] | undefined;
+  policyDenied: boolean;
+  serverError: EditFormServerError | null;
+};
+
+function CardBody(props: CardBodyProps) {
+  const { t } = useTranslation();
+  const { proposal, variant, createProposal, createSpec, kindProposal } = props;
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button
-        ref={props.approveButtonRef}
-        size="sm"
-        disabled={props.busy}
-        onClick={props.onApproveClick}
-        className="min-h-11 sm:min-h-0"
-      >
-        {props.busy && <Spinner aria-hidden className="mr-1.5" />}
-        {t("coordinator:approve")}
-      </Button>
-      <Button
-        ref={props.editButtonRef}
-        size="sm"
-        variant="outline"
-        disabled={props.busy}
-        onClick={props.onEditClick}
-        className="min-h-11 sm:min-h-0"
-      >
-        {t("coordinator:edit")}
-      </Button>
-      <Button
-        ref={props.rejectButtonRef}
-        size="sm"
-        variant="outline"
-        disabled={props.busy}
-        onClick={props.onRejectClick}
-        className="min-h-11 sm:min-h-0"
-      >
-        {t("coordinator:reject")}
-      </Button>
-    </div>
+    <>
+      {createSpec && (
+        <>
+          <p className="text-sm font-medium">{createSpec.title}</p>
+          {variant === "full" && <CardDescription>{createSpec.description}</CardDescription>}
+          <CardDescription>{props.specLabel}</CardDescription>
+        </>
+      )}
+      {kindProposal && (
+        <KindBody
+          proposal={kindProposal}
+          openTasksById={props.openTasksById}
+          stepNameByWorkflowStep={props.stepNameByWorkflowStep}
+        />
+      )}
+      {createProposal && createProposal.starts_agent === true && (
+        <CardDescription>{t("coordinator:startsAgentLine")}</CardDescription>
+      )}
+      {variant === "full" && (
+        <>
+          <CardDescription>
+            {t("coordinator:proposedBy", { name: props.coordinatorName ?? "" })}
+          </CardDescription>
+          <CardDescription>
+            {kindProposal ? policyLineText(proposal, t) : t("coordinator:policyProposeOnly")}
+          </CardDescription>
+          <ShapedBy ids={proposal.standing_order_ids} orders={props.orders} />
+        </>
+      )}
+      {props.policyDenied && (
+        <p role="alert" className="text-destructive text-xs/relaxed font-normal">
+          {t("coordinator:policyDeniedLine")}
+        </p>
+      )}
+      {variant === "compact" && props.serverError && (
+        <p role="alert" className="text-destructive text-xs/relaxed font-normal">
+          {props.serverError.message}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -255,6 +421,7 @@ export function ProposalCard({
   coordinatorId,
   workflowNameById,
   stepNameByWorkflowStep,
+  openTasksById,
   coordinatorName,
   autoOpenForm,
   onAutoFormOpened,
@@ -270,6 +437,10 @@ export function ProposalCard({
   const [serverError, setServerError] = useState<EditFormServerError | null>(null);
   const [pendingFocusReturn, setPendingFocusReturn] = useState<ProposalCardForm | null>(null);
   const { label: cardLabel, resolveLabel: resolveCardLabel } = useApprovedCardLabel(proposal);
+  const phase2 = usePhase2CardContext();
+  const [policyDenied, setPolicyDenied] = useState(false);
+  const { createProposal, kindProposal, kindSpec } = splitProposal(proposal);
+  const target = useTargetTask(kindSpec?.task_id ?? "", kindSpec ? openTasksById : new Map());
   const approveButtonRef = useRef<HTMLButtonElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const rejectButtonRef = useRef<HTMLButtonElement>(null);
@@ -325,6 +496,9 @@ export function ProposalCard({
     setServerError,
     setOpenForm,
     resolveCardLabel,
+    targetLabel: target.label,
+    setPolicyDenied,
+    offerReject: phase2.offerReject,
   };
 
   async function handleApprove(edits?: ApproveProposalEdits) {
@@ -334,7 +508,7 @@ export function ProposalCard({
 
   async function handleReject(reason?: string) {
     const outcome = await decision.reject(reason);
-    applyDecisionOutcome(outcome, false, outcomeCtx);
+    applyDecisionOutcome(outcome, false, outcomeCtx, reason);
   }
 
   function openOrNavigateToForm(form: ProposalCardForm) {
@@ -346,17 +520,21 @@ export function ProposalCard({
     setOpenForm(form);
   }
 
-  const effSpec = effectiveProposalSpec(proposal);
+  const createSpec = createProposal ? effectiveProposalSpec(createProposal) : null;
+  const editable = editableForm(createProposal, kindProposal);
   const isStaleApproving =
     proposal.status === "approving" && isApprovalClaimStale(proposal.claimed_at, now);
-  const statusLine =
-    proposal.status === "approved"
-      ? approvedStatusLine(cardLabel, t)
-      : proposalStatusLine(proposal, t, now);
-  const showActions =
-    canManage &&
-    (proposal.status === "pending" || proposal.status === "failed" || isStaleApproving);
-  const label = workflowStepLabel(effSpec, workflowNameById, stepNameByWorkflowStep);
+  const statusLine = cardStatusLine(
+    proposal,
+    kindProposal,
+    kindProposal ? target.label : cardLabel,
+    t,
+    now,
+  );
+  const showActions = canManage && (ACTIONABLE.has(proposal.status) || isStaleApproving);
+  const label = createSpec
+    ? workflowStepLabel(createSpec, workflowNameById, stepNameByWorkflowStep)
+    : null;
 
   return (
     <div className="space-y-2" data-testid={`proposal-card-${proposal.id}`}>
@@ -364,22 +542,20 @@ export function ProposalCard({
         {decision.busy ? t("coordinator:proposalWorking") : statusLine}
       </div>
       <p className="text-sm">{statusLine}</p>
-      <p className="text-sm font-medium">{effSpec.title}</p>
-      {variant === "full" && <CardDescription>{effSpec.description}</CardDescription>}
-      <CardDescription>{label}</CardDescription>
-      {variant === "full" && (
-        <>
-          <CardDescription>
-            {t("coordinator:proposedBy", { name: coordinatorName ?? "" })}
-          </CardDescription>
-          <CardDescription>{t("coordinator:policyProposeOnly")}</CardDescription>
-        </>
-      )}
-      {variant === "compact" && openForm === null && serverError && (
-        <p role="alert" className="text-destructive text-xs/relaxed font-normal">
-          {serverError.message}
-        </p>
-      )}
+      <CardBody
+        proposal={proposal}
+        variant={variant}
+        createProposal={createProposal}
+        createSpec={createSpec}
+        kindProposal={kindProposal}
+        specLabel={label}
+        openTasksById={openTasksById}
+        stepNameByWorkflowStep={stepNameByWorkflowStep}
+        coordinatorName={coordinatorName}
+        orders={phase2.orders}
+        policyDenied={policyDenied}
+        serverError={openForm === null ? serverError : null}
+      />
       <ProposalCardActions
         showActions={showActions}
         openForm={openForm}
@@ -387,7 +563,10 @@ export function ProposalCard({
         busy={decision.busy}
         isStaleApproving={isStaleApproving}
         workspaceId={workspaceId}
-        effSpec={effSpec}
+        editable={editable}
+        createSpec={createSpec}
+        messageText={messageTextOf(kindSpec)}
+        policyDenied={policyDenied}
         serverError={serverError}
         approveButtonRef={approveButtonRef}
         editButtonRef={editButtonRef}

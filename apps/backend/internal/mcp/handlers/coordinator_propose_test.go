@@ -206,3 +206,25 @@ func TestHandleProposeTask_CapReachedMapsToValidation(t *testing.T) {
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
+
+func TestHandleProposeKind_PhaseTwoOffIsUnknownAction(t *testing.T) {
+	h, c, _ := newProposeTaskTestHandlers(t)
+	ctx := coordinatorPrincipalContext(c.ID)
+	for action, kind := range map[string]string{
+		coordinator.ActionProposeResume:  coordinator.ProposalKindResume,
+		coordinator.ActionProposeMessage: coordinator.ProposalKindMessage,
+		coordinator.ActionProposeMove:    coordinator.ProposalKindMove,
+	} {
+		resp, err := h.proposeKindHandler(kind)(ctx, makeWSMessage(t, action, map[string]interface{}{"task_id": "t"}))
+		require.NoError(t, err)
+		assertWSError(t, resp, ws.ErrorCodeUnknownAction)
+	}
+}
+
+func TestHandleProposeKind_NonCoordinatorPrincipalForbidden(t *testing.T) {
+	h, _, _ := newProposeTaskTestHandlers(t)
+	resp, err := h.proposeKindHandler(coordinator.ProposalKindMove)(context.Background(),
+		makeWSMessage(t, coordinator.ActionProposeMove, map[string]interface{}{"task_id": "t"}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+}

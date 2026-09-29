@@ -40,6 +40,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	dockerremote "github.com/kandev/kandev/internal/dockerremote"
@@ -2189,6 +2190,11 @@ func registerMCPAndDebugRoutes(
 
 	if p.services.Coordinator != nil {
 		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
+			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
+			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},
+			Messenger: mcpHandlers,
+		})
 	}
 
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)

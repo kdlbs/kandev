@@ -159,3 +159,7 @@ func TestPatchCoordinator_Postgres_SameFieldDeterministicOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordRefusal_Postgres_ConcurrentMakesOneRow(t *testing.T) {
+	assertConcurrentRefusalsCoalesce(t, newTestStorePostgres(t))
+}

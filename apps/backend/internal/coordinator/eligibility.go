@@ -19,18 +19,27 @@ func EligibleStep(steps []StepNode, stepID string) bool {
 	if !ok {
 		return false
 	}
-	if candidate.AutoStartOnEnter {
+	if StartsAgentOnEnter(steps, stepID) {
 		return false
 	}
 	if !candidate.IsStart && !candidate.AllowManualMove {
 		return false
 	}
-	for _, step := range steps {
-		if step.AutoStartOnEnter && feedsInto(byID, step.PullFromStepID, stepID) {
-			return false
-		}
-	}
 	return true
+}
+
+// EligibleStartingStep is EligibleStep with the agent-starting clauses
+// relaxed: the step exists, is the start step or allows manual moves, and does
+// not complete the task on enter. It is used only while start_agent needs
+// approval, and the caller stores StartsAgentOnEnter for the disclosure.
+func EligibleStartingStep(steps []StepNode, stepID string) bool {
+	for _, step := range steps {
+		if step.ID != stepID {
+			continue
+		}
+		return !step.CompletesOnEnter && (step.IsStart || step.AllowManualMove)
+	}
+	return false
 }
 
 // feedsInto reports whether target is reachable from fromStepID by walking
@@ -51,6 +60,25 @@ func feedsInto(byID map[string]StepNode, fromStepID, target string) bool {
 			return false
 		}
 		fromStepID = step.PullFromStepID
+	}
+	return false
+}
+
+// StartsAgentOnEnter reports whether entering stepID starts an agent: the step
+// auto-starts one on enter, or it feeds, directly or through pull_from_step_id
+// links, a step that does. An unknown stepID does not start one.
+func StartsAgentOnEnter(steps []StepNode, stepID string) bool {
+	byID := make(map[string]StepNode, len(steps))
+	for _, step := range steps {
+		byID[step.ID] = step
+	}
+	if candidate, ok := byID[stepID]; ok && candidate.AutoStartOnEnter {
+		return true
+	}
+	for _, step := range steps {
+		if step.AutoStartOnEnter && feedsInto(byID, step.PullFromStepID, stepID) {
+			return true
+		}
 	}
 	return false
 }

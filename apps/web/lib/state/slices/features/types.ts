@@ -18,6 +18,7 @@ export const defaultFeatureFlags = {
   needsYouInbox: false,
   agentSurvival: false,
   coordinator: false,
+  coordinatorPhase2: false,
   codexAppServer: false,
   agentBackgroundWork: false,
 } as const;

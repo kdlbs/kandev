@@ -34,11 +34,28 @@ vi.mock("./coordinator-route-content", () => ({
   },
 }));
 
+let phase2On = false;
+vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => phase2On }));
+vi.mock("./components/goal-note", () => ({
+  GoalNote: (props: { coordinatorId: string; canManage: boolean }) => (
+    <div data-testid="goal-note-stub" data-manage={String(props.canManage)}>
+      {props.coordinatorId}
+    </div>
+  ),
+}));
+
+vi.mock("@/hooks/domains/coordinator/use-standing-orders", () => ({
+  useStandingOrders: () => ({ orders: [], status: "ready", reload: vi.fn() }),
+}));
+
 import { NeedsYouPageClient } from "./needs-you-page-client";
 
 const TIMESTAMP = "2026-09-27T00:00:00Z";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  phase2On = false;
+});
 
 function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
   return {
@@ -74,6 +91,11 @@ function readyContextWith(needsYou: NeedsYouItem[], canManage = false): Coordina
       stepNameByWorkflowStep: new Map(),
       openTasksById: new Map(),
       prsByTaskId: new Map(),
+      watchSetUnavailable: false,
+      watchSet: undefined,
+      tasks: [],
+      loadedAt: 1,
+      error: false,
       tasksNeverLoaded: false,
       inputs: [
         { kind: "tasks", error: false, loadedAt: 1 },
@@ -326,5 +348,86 @@ describe("NeedsYouPageClient - focus after a decision", () => {
     );
 
     expect(document.activeElement?.id).toBe(needsYouItemHeadingId("t-2"));
+  });
+});
+
+describe("NeedsYouPageClient: goal note", () => {
+  it("renders no goal note while the phase-2 flag is off", () => {
+    readyContext = readyContextWith([]);
+    render(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+    expect(screen.queryByTestId("goal-note-stub")).toBeNull();
+  });
+
+  it("renders the goal note above the body, empty state included, when the flag is on", () => {
+    phase2On = true;
+    readyContext = readyContextWith([], true);
+    render(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+    const note = screen.getByTestId("goal-note-stub");
+    expect(note.textContent).toBe("co-1");
+    expect(note.dataset.manage).toBe("true");
+    expect(document.getElementById(NEEDS_YOU_EMPTY_HEADING_ID)).toBeTruthy();
+  });
+});
+
+describe("NeedsYouPageClient: stall actions", () => {
+  function stallItem(): NeedsYouItem {
+    return {
+      kind: "stall",
+      id: "t-9",
+      task: {
+        id: "t-9",
+        title: "Stuck task",
+        identifier: "KAN-9",
+        statusSummary: { primary_session: { id: "s-9", state: "FAILED" } },
+      },
+      stall: {
+        task_id: "t-9",
+        stalled_for_ms: 1,
+        last_event_at: TIMESTAMP,
+        detected_at: TIMESTAMP,
+      },
+      referenceTimeMs: 0,
+      ageMs: 0,
+    } as NeedsYouItem;
+  }
+
+  function renderStall(canManage: boolean) {
+    readyContext = readyContextWith([stallItem()], canManage);
+    render(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+  }
+
+  it("shows Resume, Open task and Show the evidence on a stall card with the flag on for a manager", () => {
+    phase2On = true;
+    renderStall(true);
+    expect(screen.getByRole("button", { name: /^Resume/ })).not.toBeNull();
+    expect(screen.getByText("Open task")).not.toBeNull();
+    expect(screen.getByText("Show the evidence")).not.toBeNull();
+  });
+
+  it("shows no Resume with the flag off or for a reader", () => {
+    renderStall(true);
+    expect(screen.queryByRole("button", { name: /^Resume/ })).toBeNull();
+    cleanup();
+    phase2On = true;
+    renderStall(false);
+    expect(screen.queryByRole("button", { name: /^Resume/ })).toBeNull();
   });
 });

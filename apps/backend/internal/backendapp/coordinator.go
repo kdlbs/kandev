@@ -31,6 +31,7 @@ func initCoordinatorWiring(
 	workflowSvc *workflowservice.Service,
 	agentProfiles settingsstore.Repository,
 	enabled bool,
+	phase2 bool,
 	log *logger.Logger,
 ) (*coordinator.Service, error) {
 	store, storeErr := coordinator.NewStore(dbPool.Writer(), dbPool.Reader())
@@ -42,8 +43,9 @@ func initCoordinatorWiring(
 	}
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
-	svc := coordinator.NewService(store, validator, taskSvc, log)
+	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2))
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
+	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
 }
 
@@ -57,13 +59,29 @@ func initCoordinatorWiring(
 // coordinator.StandingInstructions.
 func coordinatorStandingInstructionsReader(
 	svc *coordinator.Service,
+	log *logger.Logger,
 ) func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error) {
 	return func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error) {
 		name, coordinatorContext, err := svc.CoordinatorStandingInstructionsData(ctx, coordinatorID)
 		if err != nil {
 			return "", err
 		}
-		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext), nil
+		var sections []string
+		orders, orderErr := svc.StandingOrdersInstructionSection(ctx, coordinatorID)
+		if orderErr != nil {
+			log.Warn("standing orders unreadable; instructions built without them",
+				zap.String("coordinator_id", coordinatorID), zap.Error(orderErr))
+		} else {
+			sections = append(sections, orders)
+		}
+		goal, goalErr := svc.GoalInstructionSection(ctx, coordinatorID)
+		if goalErr != nil {
+			log.Warn("goal unreadable; instructions built without it",
+				zap.String("coordinator_id", coordinatorID), zap.Error(goalErr))
+		} else {
+			sections = append(sections, goal)
+		}
+		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext, sections...), nil
 	}
 }
 
@@ -160,6 +178,14 @@ func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *c
 		subs = append(subs, sub)
 	}
 
+	if svc.Phase2Enabled() {
+		if sub, err := coordinator.SubscribeWorkflowDeleted(eventBus, svc, log); err != nil {
+			log.Error("failed to subscribe coordinator to workflow.deleted", zap.Error(err))
+		} else {
+			subs = append(subs, sub)
+		}
+	}
+
 	return func(ctx context.Context, _ time.Time) {
 		go func() {
 			<-ctx.Done()
@@ -203,5 +229,6 @@ func registerCoordinatorDecisions(
 	return func(ctx context.Context, t0 time.Time) {
 		svc.StartupRecoveryPass(ctx, t0)
 		svc.StartApprovalSweep(ctx)
+		svc.StartActivityRetention(ctx)
 	}
 }
