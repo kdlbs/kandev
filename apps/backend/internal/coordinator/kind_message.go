@@ -26,9 +26,19 @@ func (k *messageKind) Kind() string             { return ProposalKindMessage }
 func (k *messageKind) Action() Action           { return ActionMessage }
 func (k *messageKind) ReRunsOnStaleClaim() bool { return false }
 
-// checkMessageText trims text and refuses one that is empty or too long.
+// stripSystemTags removes every system-block delimiter, repeating until none
+// can be reassembled from the remainder.
+func stripSystemTags(v string) string {
+	for strings.Contains(v, sysprompt.TagStart) || strings.Contains(v, sysprompt.TagEnd) {
+		v = strings.ReplaceAll(strings.ReplaceAll(v, sysprompt.TagStart, ""), sysprompt.TagEnd, "")
+	}
+	return v
+}
+
+// checkMessageText strips system-block delimiters, trims, and refuses text
+// that is empty or too long. The result is the text stored and delivered.
 func checkMessageText(text string) (string, error) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := strings.TrimSpace(stripSystemTags(text))
 	if trimmed == "" || utf8.RuneCountInString(trimmed) > maxMessageTextRunes {
 		return "", &FieldError{Field: fieldText, Message: "text must be 1 to 4000 characters"}
 	}
@@ -60,6 +70,13 @@ func (k *messageKind) ValidateEdits(base, edits json.RawMessage) (json.RawMessag
 	trimmed, err := checkMessageText(text)
 	if err != nil {
 		return nil, err
+	}
+	var stored messageSpec
+	if err := json.Unmarshal(base, &stored); err != nil {
+		return nil, err
+	}
+	if stored.Text == trimmed {
+		return base, nil
 	}
 	var spec map[string]json.RawMessage
 	if err := json.Unmarshal(base, &spec); err != nil {
@@ -127,8 +144,7 @@ func coordinatorMessagePrompt(claim Claim, text string) string {
 
 // safeAttribution keeps a value from closing the system block early.
 func safeAttribution(v string) string {
-	v = strings.ReplaceAll(v, "</kandev-system>", "")
-	if v == "" {
+	if v = strings.TrimSpace(stripSystemTags(v)); v == "" {
 		return "a manager"
 	}
 	return v

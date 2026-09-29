@@ -61,7 +61,7 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
-	proposal, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	proposal, err := s.readForApprove(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +89,21 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	default:
 		return nil, fmt.Errorf("coordinator: proposal %s has unknown status %q", proposalID, proposal.Status)
 	}
+}
+
+// readForApprove reads the proposal an approve targets. With phase 2 off only
+// create_task rows are visible, except an approving row of another kind: its
+// claim may be stale and must settle whatever the flag says.
+func (s *Service) readForApprove(ctx context.Context, workspaceID, coordinatorID, proposalID string) (*Proposal, error) {
+	p, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if s.phase2 || !errors.Is(err, ErrNotFound) {
+		return p, err
+	}
+	p, err = s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	if err != nil || p.Status != ProposalStatusApproving || p.Kind == "" || p.Kind == ProposalKindCreateTask {
+		return nil, ErrNotFound
+	}
+	return p, nil
 }
 
 // carriesApproveEdits reports whether edits has at least one of the five
@@ -301,7 +316,11 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 // request's inline stale re-claim (cutoff = now - 2 minutes) and the startup
 // recovery pass (cutoff = T0, task 08).
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
-	if row, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true); err == nil && row.Kind != "" && row.Kind != ProposalKindCreateTask {
+	row, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	if err != nil {
+		return nil, err
+	}
+	if row.Kind != "" && row.Kind != ProposalKindCreateTask {
 		exec := s.kindExecutor(row.Kind)
 		if exec == nil {
 			s.logger.Error("unknown_kind", zap.String("proposal_id", proposalID), zap.String("kind", row.Kind))

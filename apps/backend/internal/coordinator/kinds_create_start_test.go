@@ -139,3 +139,27 @@ func TestApproveProposal_StartsAgentRefusedWhileStartAgentDenied(t *testing.T) {
 		t.Fatal("no create may run after a policy refusal")
 	}
 }
+
+func TestProposeTask_FlagOffIgnoresStandingOrderIDs(t *testing.T) {
+	f := startFixture(t, "denied")
+	f.svc.phase2 = false
+	ctx := context.Background()
+	order, err := f.svc.AddStandingOrder(ctx, f.workspaceID, f.coordinator.ID, AddStandingOrderInput{Text: "Prefer small tasks"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := f.baseRequest()
+	req.StandingOrderIDs = []string{"a", "a", "missing"}
+	if _, _, err = f.svc.ProposeTask(ctx, f.coordinator.ID, req); err != nil {
+		t.Fatalf("flag off must ignore standing_order_ids, got %v", err)
+	}
+	req.StandingOrderIDs = []string{order.ID}
+	p, _, err := f.svc.ProposeTask(ctx, f.coordinator.ID, req)
+	if err != nil || len(p.StandingOrderIDs) != 0 {
+		t.Fatalf("p=%+v err=%v, want no stored citation", p, err)
+	}
+	orders, _ := f.svc.ListStandingOrders(ctx, f.workspaceID, f.coordinator.ID, false)
+	if len(orders) != 1 || orders[0].LastAppliedAt != nil {
+		t.Fatalf("orders = %+v, want last_applied_at untouched with the flag off", orders)
+	}
+}

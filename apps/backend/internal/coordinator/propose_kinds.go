@@ -188,27 +188,34 @@ func (s *Service) proposeTarget(ctx context.Context, c *Coordinator, taskID stri
 	}
 	t, err := tasks.GetTarget(ctx, taskID)
 	if errors.Is(err, ErrTaskNotFound) {
-		return nil, &FieldError{Field: fieldTaskID, Message: "task not found"}
+		return nil, notFoundTarget()
 	}
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case t.WorkspaceID != c.WorkspaceID:
-		return nil, &FieldError{Field: fieldTaskID, Message: "task not found in this workspace"}
-	case t.ArchivedAt != nil:
-		return nil, &FieldError{Field: fieldTaskID, Message: "task is archived"}
-	case t.Origin == string(taskmodels.TaskOriginCoordinator):
-		return nil, &FieldError{Field: fieldTaskID, Message: "task is a coordinator conversation"}
+	if t.WorkspaceID != c.WorkspaceID {
+		return nil, notFoundTarget()
 	}
 	set, err := s.EffectiveWatchSet(ctx, c.ID)
 	if err != nil {
 		return nil, fmt.Errorf("read watch set: %w", err)
 	}
 	if !set.Contains(t.WorkflowID) {
-		return nil, &FieldError{Field: fieldTaskID, Message: "task's workflow is outside this coordinator's watches"}
+		return nil, notFoundTarget()
+	}
+	switch {
+	case t.ArchivedAt != nil:
+		return nil, &FieldError{Field: fieldTaskID, Message: "task is archived"}
+	case t.Origin == string(taskmodels.TaskOriginCoordinator):
+		return nil, &FieldError{Field: fieldTaskID, Message: "task is a coordinator conversation"}
 	}
 	return t, nil
+}
+
+// notFoundTarget is the single answer for a missing, foreign or unwatched task,
+// so a caller cannot tell them apart.
+func notFoundTarget() error {
+	return &FieldError{Field: fieldTaskID, Message: "task not found"}
 }
 
 func parseArgs(args json.RawMessage, into any) error {

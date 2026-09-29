@@ -150,27 +150,36 @@ func TestMoveExecute_FromStepWriteFencedNoMove(t *testing.T) {
 	p := f.insertMove(t)
 	f.undo.onGetStep = func() { f.svc.runApprovalSweepPass(context.Background(), time.Now().Add(time.Hour)) }
 	got, err := f.approve(p, nil)
-	if err != nil || got.Status != ProposalStatusFailed || len(f.undo.moves) != 0 {
-		t.Fatalf("got=%+v err=%v moves=%d, want failed and no move call", got, err, len(f.undo.moves))
+	if err != nil || got.Status != ProposalStatusFailed || len(f.undo.moves) != 0 || f.errorOf(t, p.ID) != "outcome_unknown" {
+		t.Fatalf("got=%+v err=%v moves=%d error=%q, want failed outcome_unknown and no move call", got, err, len(f.undo.moves), f.errorOf(t, p.ID))
 	}
 }
 
 func TestExecuteDeadline(t *testing.T) {
-	f := newKindsFixture(t)
-	f.svc.executeTimeout = 20 * time.Millisecond
-	f.undo.onMove = func() { time.Sleep(60 * time.Millisecond) }
-	p := f.insertMove(t)
-	got, err := f.approve(p, nil)
-	if err != nil || got.Status != ProposalStatusApproved {
-		t.Fatalf("nil error after the deadline: got=%+v err=%v, want approved", got, err)
+	cases := []struct {
+		name       string
+		hold       func(ctx context.Context) error
+		wantStatus ProposalStatus
+		wantErr    string
+	}{
+		{"nil error after the deadline", func(ctx context.Context) error { <-ctx.Done(); return nil }, ProposalStatusApproved, ""},
+		{"deadline error", func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }, ProposalStatusFailed, "outcome_unknown"},
+		{"other error after the deadline", func(ctx context.Context) error { <-ctx.Done(); return errors.New("connection reset") }, ProposalStatusFailed, "outcome_unknown"},
 	}
-	f.undo.onMove = func() { time.Sleep(60 * time.Millisecond) }
-	f.undo.moveErr = errors.New("connection reset")
-	f.undo.tasks["task-0"].WorkflowStepID = "step-1"
-	p2 := f.insertMove(t)
-	got, err = f.approve(p2, nil)
-	if err != nil || got.Status != ProposalStatusFailed || f.errorOf(t, p2.ID) != "outcome_unknown" {
-		t.Fatalf("got=%+v err=%v error=%q, want failed outcome_unknown", got, err, f.errorOf(t, p2.ID))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newKindsFixture(t)
+			f.svc.executeTimeout = 20 * time.Millisecond
+			f.undo.onMoveCtx = tc.hold
+			p := f.insertMove(t)
+			got, err := f.approve(p, nil)
+			if err != nil || got.Status != tc.wantStatus {
+				t.Fatalf("got=%+v err=%v, want %s", got, err, tc.wantStatus)
+			}
+			if tc.wantErr != "" && f.errorOf(t, p.ID) != tc.wantErr {
+				t.Fatalf("error = %q, want %q", f.errorOf(t, p.ID), tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -201,18 +210,24 @@ func TestResumeExecute(t *testing.T) {
 
 func TestResumeExecute_ReturnsAtDeadlineAndLateResultWritesNothing(t *testing.T) {
 	f := newKindsFixture(t)
+	fenced, warned := f.watchFenced(t)
 	f.svc.executeTimeout = 20 * time.Millisecond
-	res := &fakeResumer{started: true, release: make(chan struct{}), done: make(chan struct{})}
+	res := &fakeResumer{started: true, release: make(chan struct{})}
 	f.svc.SetKindDeps(KindDeps{Tasks: &fakeKindTasks{target: idleSession()}, Resumer: res})
 	p := f.insertKind(t, ProposalKindResume, `{"task_id":"task-0"}`)
 	got, err := f.approve(p, nil)
 	if err != nil || got.Status != ProposalStatusFailed || *got.Error != "outcome_unknown" {
 		t.Fatalf("got=%+v err=%v, want failed outcome_unknown", got, err)
 	}
+	before := f.outcomeOf(t, p.ID)
 	close(res.release)
-	<-res.done
-	if statusOf(t, f.store, p.ID) != string(ProposalStatusFailed) {
-		t.Fatal("late launch result changed a settled row")
+	select {
+	case <-warned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the abandoned launch never reported its fenced result")
+	}
+	if fenced.Load() != 1 || statusOf(t, f.store, p.ID) != string(ProposalStatusFailed) || f.errorOf(t, p.ID) != "outcome_unknown" || f.outcomeOf(t, p.ID) != before {
+		t.Fatalf("late launch result changed a settled row: warnings=%d status=%q error=%q outcome=%q", fenced.Load(), statusOf(t, f.store, p.ID), f.errorOf(t, p.ID), f.outcomeOf(t, p.ID))
 	}
 }
 

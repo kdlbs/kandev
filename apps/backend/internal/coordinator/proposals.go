@@ -86,6 +86,9 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 	if err != nil {
 		return nil, 0, err
 	}
+	if !s.phase2 {
+		req.StandingOrderIDs = nil
+	}
 	if err := checkOrderIDsShape(req.StandingOrderIDs); err != nil {
 		return nil, 0, err
 	}
