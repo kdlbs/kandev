@@ -21,18 +21,36 @@ export function shapedByLabels(ids: string[] | undefined, orders: StandingOrder[
 function ShapedByLabel({ order }: { order: StandingOrder }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const active = order.retired_at === null && order.number !== null;
   const text = active
     ? t("coordinator:shapedByOrder", { number: order.number })
     : t("coordinator:shapedByRetired");
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setPinned(false);
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
           className="cursor-pointer text-xs/relaxed underline decoration-dotted"
           onMouseEnter={() => setOpen(true)}
-          onMouseLeave={() => setOpen(false)}
+          onMouseLeave={() => {
+            if (!pinned) setOpen(false);
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            if (open && !pinned) {
+              setPinned(true);
+              return;
+            }
+            setOpen(!open);
+            setPinned(!open);
+          }}
         >
           {text}
         </button>

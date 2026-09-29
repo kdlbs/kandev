@@ -44,6 +44,10 @@ vi.mock("./components/goal-note", () => ({
   ),
 }));
 
+vi.mock("@/hooks/domains/coordinator/use-standing-orders", () => ({
+  useStandingOrders: () => ({ orders: [], status: "ready", reload: vi.fn() }),
+}));
+
 import { NeedsYouPageClient } from "./needs-you-page-client";
 
 const TIMESTAMP = "2026-09-27T00:00:00Z";
@@ -374,5 +378,56 @@ describe("NeedsYouPageClient: goal note", () => {
     expect(note.textContent).toBe("co-1");
     expect(note.dataset.manage).toBe("true");
     expect(document.getElementById(NEEDS_YOU_EMPTY_HEADING_ID)).toBeTruthy();
+  });
+});
+
+describe("NeedsYouPageClient: stall actions", () => {
+  function stallItem(): NeedsYouItem {
+    return {
+      kind: "stall",
+      id: "t-9",
+      task: {
+        id: "t-9",
+        title: "Stuck task",
+        identifier: "KAN-9",
+        statusSummary: { primary_session: { id: "s-9", state: "FAILED" } },
+      },
+      stall: {
+        task_id: "t-9",
+        stalled_for_ms: 1,
+        last_event_at: TIMESTAMP,
+        detected_at: TIMESTAMP,
+      },
+      referenceTimeMs: 0,
+      ageMs: 0,
+    } as NeedsYouItem;
+  }
+
+  function renderStall(canManage: boolean) {
+    readyContext = readyContextWith([stallItem()], canManage);
+    render(
+      <ToastProvider>
+        <TooltipProvider>
+          <NeedsYouPageClient workspaceId="ws-1" coordinatorId="co-1" />
+        </TooltipProvider>
+      </ToastProvider>,
+    );
+  }
+
+  it("shows Resume, Open task and Show the evidence on a stall card with the flag on for a manager", () => {
+    phase2On = true;
+    renderStall(true);
+    expect(screen.getByRole("button", { name: /^Resume/ })).not.toBeNull();
+    expect(screen.getByText("Open task")).not.toBeNull();
+    expect(screen.getByText("Show the evidence")).not.toBeNull();
+  });
+
+  it("shows no Resume with the flag off or for a reader", () => {
+    renderStall(true);
+    expect(screen.queryByRole("button", { name: /^Resume/ })).toBeNull();
+    cleanup();
+    phase2On = true;
+    renderStall(false);
+    expect(screen.queryByRole("button", { name: /^Resume/ })).toBeNull();
   });
 });

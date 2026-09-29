@@ -27,14 +27,21 @@ function Probe() {
   return null;
 }
 
-function mount(proposalsKey = "a", stallIds: string[] = []) {
-  const tree = (key: string, ids: string[]) => (
-    <Phase2PageProvider workspaceId="w" coordinatorId="c" proposalsKey={key} liveStallTaskIds={ids}>
+function mount(proposalsKey = "a", stallIds: string[] = [], loaded = true) {
+  const tree = (key: string, ids: string[], inputsLoaded: boolean) => (
+    <Phase2PageProvider
+      workspaceId="w"
+      coordinatorId="c"
+      proposalsKey={key}
+      liveStallTaskIds={ids}
+      inputsLoaded={inputsLoaded}
+    >
       <Probe />
     </Phase2PageProvider>
   );
-  const view = render(tree(proposalsKey, stallIds));
-  return (key: string, ids: string[]) => view.rerender(tree(key, ids));
+  const view = render(tree(proposalsKey, stallIds, loaded));
+  return (key: string, ids: string[], inputsLoaded = true) =>
+    view.rerender(tree(key, ids, inputsLoaded));
 }
 
 beforeEach(() => {
@@ -69,6 +76,15 @@ describe("Phase2PageProvider", () => {
     expect(ordersState.value.reload).not.toHaveBeenCalled();
     rerender("b", []);
     expect(ordersState.value.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not prune held Resumes while the page inputs are still loading", () => {
+    const rerender = mount("a", [], false);
+    expect(pruneMock).not.toHaveBeenCalled();
+    rerender("a", [], false);
+    expect(pruneMock).not.toHaveBeenCalled();
+    rerender("a", ["t-1"], true);
+    expect(pruneMock).toHaveBeenLastCalledWith(new Set(["t-1"]));
   });
 
   it("prunes held Resumes to the stalls now on the page", () => {

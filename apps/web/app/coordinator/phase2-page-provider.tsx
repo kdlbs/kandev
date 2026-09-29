@@ -13,6 +13,8 @@ type Phase2PageProviderProps = {
   proposalsKey: string;
   /** Task ids of the stalls now on the page; a held Resume of any other task is dropped. */
   liveStallTaskIds: string[];
+  /** False until every page input has loaded; the stall list is not authoritative before then. */
+  inputsLoaded: boolean;
   children: ReactNode;
 };
 
@@ -26,6 +28,7 @@ export function Phase2PageProvider({
   coordinatorId,
   proposalsKey,
   liveStallTaskIds,
+  inputsLoaded,
   children,
 }: Phase2PageProviderProps) {
   const { orders, status, reload } = useStandingOrders(workspaceId, coordinatorId, {
@@ -42,8 +45,9 @@ export function Phase2PageProvider({
 
   const stallKey = liveStallTaskIds.join("\n");
   useEffect(() => {
+    if (!inputsLoaded) return;
     pruneStallResumes(new Set(stallKey ? stallKey.split("\n") : []));
-  }, [stallKey]);
+  }, [stallKey, inputsLoaded]);
 
   const value = useMemo(
     () => ({

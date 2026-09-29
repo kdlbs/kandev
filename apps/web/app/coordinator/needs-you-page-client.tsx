@@ -31,12 +31,14 @@ function MaybePhase2({
   workspaceId,
   coordinatorId,
   items,
+  inputsLoaded,
   children,
 }: {
   enabled: boolean;
   workspaceId: string;
   coordinatorId: string;
   items: NeedsYouItem[];
+  inputsLoaded: boolean;
   children: React.ReactNode;
 }) {
   if (!enabled) return <>{children}</>;
@@ -46,6 +48,7 @@ function MaybePhase2({
       coordinatorId={coordinatorId}
       proposalsKey={proposalsKey(items)}
       liveStallTaskIds={stallTaskIds(items)}
+      inputsLoaded={inputsLoaded}
     >
       {children}
     </Phase2PageProvider>
@@ -76,6 +79,7 @@ export function NeedsYouPageClient({ workspaceId, coordinatorId }: NeedsYouPageC
           workspaceId={workspaceId}
           coordinatorId={coordinator.id}
           items={attention.classification.needsYou}
+          inputsLoaded={allInputsLoaded(attention.inputs)}
         >
           {phase2 && (
             <GoalNote

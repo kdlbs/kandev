@@ -121,7 +121,7 @@ cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/coordinator/mobile
 
 E2E: the mock agent proposes a message; Edit, approve, and assert the task's
 conversation holds the edited text; a move proposal approves and the task
-changes step; a stalled task shows Resume and resumes; a PR-ready task sends
+changes step; a PR-ready task sends
 back a note; reject with a reason, choose Make it a standing order, save and
 assert the order in Configure.
 
@@ -179,4 +179,6 @@ execution-less session cannot be resumed by a real agent process. The card's
 Resume is covered by `use-stall-resume.test.ts` (lock, sequence and tombstones,
 launch body dispositions, timeout outcome) and the card tests. Message Edit
 then approve, Send it back, move approve, reject offer and the phone variants
-of the message card and Ready to merge row are covered end to end.
+of the message card and Ready to merge row are covered end to end. The
+flag-on stall card showing Resume, Open task and Show the evidence is asserted at
+page level in `needs-you-page-client.test.tsx`.

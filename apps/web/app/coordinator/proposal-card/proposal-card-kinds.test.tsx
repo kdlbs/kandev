@@ -225,14 +225,42 @@ describe("kind cards: Shaped by", () => {
     expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
     fireEvent.mouseLeave(label);
     await waitFor(() => expect(screen.queryByText(ORDER_TEXT)).toBeNull());
-    label.focus();
-    fireEvent.keyDown(label, { key: "Enter" });
     fireEvent.click(label);
     expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
     fireEvent.click(label);
     await waitFor(() => expect(screen.queryByText(ORDER_TEXT)).toBeNull());
     fireEvent.click(label);
     expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
+  });
+
+  it("keeps the order text open when a tap or click follows the hover, and closes on the next click", async () => {
+    renderCard(
+      row("resume", { standing_order_ids: ["o2"] }),
+      {},
+      { enabled: true, orders: [order("o2", 2, ORDER_TEXT)], offerReject: undefined },
+    );
+    const label = screen.getByRole("button", { name: /Shaped by/ });
+    fireEvent.mouseEnter(label);
+    expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
+    fireEvent.click(label);
+    fireEvent.mouseLeave(label);
+    expect(screen.getByText(ORDER_TEXT)).not.toBeNull();
+    fireEvent.click(label);
+    await waitFor(() => expect(screen.queryByText(ORDER_TEXT)).toBeNull());
+  });
+
+  it("opens on keyboard activation with no pointer events and closes on Escape", async () => {
+    renderCard(
+      row("resume", { standing_order_ids: ["o2"] }),
+      {},
+      { enabled: true, orders: [order("o2", 2, ORDER_TEXT)], offerReject: undefined },
+    );
+    const label = screen.getByRole("button", { name: /Shaped by/ });
+    label.focus();
+    fireEvent.click(label);
+    expect(await screen.findByText(ORDER_TEXT)).not.toBeNull();
+    fireEvent.keyDown(document.activeElement ?? label, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText(ORDER_TEXT)).toBeNull());
   });
 
   it("shows no label while the orders are unloaded, and the compact card omits Policy and Shaped by", () => {
