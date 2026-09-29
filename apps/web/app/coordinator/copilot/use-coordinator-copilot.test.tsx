@@ -1,6 +1,6 @@
 import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
+import { createCopilotStore, useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
 import type { Coordinator, ConversationResponse } from "@/lib/api/domains/coordinator-api";
 import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
@@ -719,5 +719,19 @@ describe("useCoordinatorCopilot - stored composer draft sweep", () => {
     act(() => result.current.handleOpenChange(true));
 
     expect(getChatDraftText(conversation.session_id)).toBe("typed after");
+  });
+});
+
+describe("useCoordinatorCopilot - injected store", () => {
+  it("reads and writes the given store and leaves the singleton alone", () => {
+    const store = createCopilotStore();
+    const { result } = renderHook(() =>
+      useCoordinatorCopilot(WORKSPACE_ID, COORDINATOR_ID, true, store),
+    );
+
+    act(() => result.current.handleOpenChange(true));
+
+    expect(store.getState().getEntry(COORDINATOR_ID).open).toBe(true);
+    expect(useCopilotStore.getState().getEntry(COORDINATOR_ID).open).toBe(false);
   });
 });
