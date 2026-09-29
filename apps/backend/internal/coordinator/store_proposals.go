@@ -270,7 +270,7 @@ func (s *Store) GetProposal(ctx context.Context, workspaceID, coordinatorID, id 
 type ListProposalsStatus int
 
 const (
-	// ListProposalsPending returns only pending proposals, oldest first,
+	// ListProposalsPending returns every open proposal, oldest first,
 	// unbounded (docs/specs/coordinator/system-design/proposals.md#routes).
 	ListProposalsPending ListProposalsStatus = iota
 	// ListProposalsAll returns every proposal, newest first, capped at 50.
@@ -283,8 +283,12 @@ func (s *Store) ListProposals(ctx context.Context, workspaceID, coordinatorID st
 	args := []any{coordinatorID, workspaceID}
 	switch status {
 	case ListProposalsPending:
-		query += ` AND status = ? ORDER BY created_at ASC, id ASC`
-		args = append(args, string(ProposalStatusPending))
+		placeholders := make([]string, len(openProposalStatuses))
+		for i, proposalStatus := range openProposalStatuses {
+			placeholders[i] = "?"
+			args = append(args, string(proposalStatus))
+		}
+		query += ` AND status IN (` + strings.Join(placeholders, ",") + `) ORDER BY created_at ASC, id ASC`
 	case ListProposalsAll:
 		query += ` ORDER BY created_at DESC, id DESC LIMIT 50`
 	}

@@ -271,6 +271,11 @@ func (s *Store) DeleteCoordinator(ctx context.Context, workspaceID, id string) e
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if _, err := lockedCoordinatorRow(
+		ctx, tx, tx.Rebind, workspaceID, id, dialect.IsPostgres(s.db.DriverName()),
+	); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM coordinator_proposals WHERE coordinator_id = ? AND workspace_id = ?`),
 		id, workspaceID); err != nil {
