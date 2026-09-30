@@ -99,6 +99,9 @@ describe("useTaskDetails reconnect refresh", () => {
       updated_at: "2026-07-19T00:00:00Z",
     };
     const fetchTask = vi.spyOn(api, "fetchTask").mockResolvedValue(movedTask);
+    const listTaskSessions = vi
+      .spyOn(api, "listTaskSessions")
+      .mockResolvedValue({ sessions: [], total: 0 });
     const wrapper = createStateWrapper({
       tasks: { activeTaskId: TASK_A },
       connection: { status: "disconnected" },
@@ -129,6 +132,7 @@ describe("useTaskDetails reconnect refresh", () => {
     act(() => result.current.store.getState().setConnectionStatus("connected"));
 
     await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_A, { cache: "no-store" }));
+    expect(listTaskSessions).toHaveBeenCalledWith(TASK_A, { cache: "no-store" });
     await waitFor(() => {
       expect(result.current.details.task).toMatchObject({
         workflow_id: "workflow-destination",

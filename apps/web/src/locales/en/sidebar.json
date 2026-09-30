@@ -130,5 +130,12 @@
   "nextPage": "Next",
   "pageLoadFailed": "Could not load this page.",
   "pageStatus": "Page {{page}} of {{total}}",
-  "previousPage": "Previous"
+  "previousPage": "Previous",
+  "queryRefreshing": "Updating tasks...",
+  "queryRefreshFailed": "Tasks could not be refreshed.",
+  "queryInvalid": "This task view could not be loaded. Check its filters and view settings.",
+  "filterListLimit": "Filter {{filter}} has too many selections. Select up to {{limit}}.",
+  "filterValueLimit": "A value in filter {{filter}} is too long. Use at most {{limit}} bytes.",
+  "filterInvalid": "Filter {{filter}} is invalid. Check its value and operator.",
+  "filterCountLimit": "This view has too many filters. Use at most {{limit}}."
 }

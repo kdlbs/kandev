@@ -1587,13 +1587,18 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// transition here avoids gratuitous flicker (REVIEW → SCHEDULING →
 	// IN_PROGRESS → REVIEW for a single comment-reply cycle) and matches
 	// the user's mental model.
+	var schedulingClaim *taskSchedulingClaim
+	dynamicResolutionSucceeded := false
 	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
-	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
-		s.logger.Warn("failed to update task state to SCHEDULING",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+	} else {
+		schedulingClaim = s.beginTaskScheduling(ctx, taskID)
+		if schedulingClaim != nil {
+			defer func() {
+				s.finishTaskScheduling(ctx, taskID, schedulingClaim, dynamicResolutionSucceeded)
+			}()
+		}
 	}
 
 	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
@@ -1773,6 +1778,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
 			return nil, err
 		}
+	}
+	if schedulingClaim != nil {
+		dynamicResolutionSucceeded = true
 	}
 	// Dynamic resolution updates the session snapshot after the initial
 	// passthrough check. Use the concrete candidate's snapshot for prompt
@@ -2293,6 +2301,89 @@ func applyResolvedExecution(session *models.TaskSession, resolved agentruntime.P
 			session.AgentProfileSnapshot["agent_name"] = resolved.AgentName
 		}
 		session.IsPassthrough = resolved.Profile.CLIPassthrough
+	}
+}
+
+type taskSchedulingClaim struct {
+	previousState v1.TaskState
+	inFlight      int
+	committed     bool
+	restore       bool
+}
+
+// beginTaskScheduling records all overlapping starts that temporarily move a
+// task to SCHEDULING. A failed start restores the prior state only after every
+// overlapping start fails. One successful profile resolution commits the
+// transition and prevents a later failed start from undoing it.
+func (s *Service) beginTaskScheduling(ctx context.Context, taskID string) *taskSchedulingClaim {
+	if taskID == "" {
+		return nil
+	}
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
+	currentTask, err := s.taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to read task before SCHEDULING transition",
+			zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+	if currentTask == nil {
+		return nil
+	}
+	previousState := currentTask.State
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to update task state to SCHEDULING",
+			zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+
+	if s.taskSchedulingClaims == nil {
+		s.taskSchedulingClaims = make(map[string]*taskSchedulingClaim)
+	}
+	claim := s.taskSchedulingClaims[taskID]
+	if claim == nil {
+		claim = &taskSchedulingClaim{
+			previousState: previousState,
+			restore:       previousState != "" && previousState != v1.TaskStateScheduling,
+		}
+		s.taskSchedulingClaims[taskID] = claim
+	}
+	claim.inFlight++
+	return claim
+}
+
+func (s *Service) finishTaskScheduling(
+	ctx context.Context, taskID string, claim *taskSchedulingClaim, resolved bool,
+) {
+	if taskID == "" || claim == nil {
+		return
+	}
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
+	if resolved {
+		claim.committed = true
+	}
+	claim.inFlight--
+	if claim.inFlight > 0 {
+		return
+	}
+	delete(s.taskSchedulingClaims, taskID)
+	if claim.committed || !claim.restore {
+		return
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx, taskID, claim.previousState, []v1.TaskState{v1.TaskStateScheduling},
+	)
+	if err != nil {
+		s.logger.Warn("failed to restore task state after launch setup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if updated {
+		s.logger.Info("restored task state after launch setup failed",
+			zap.String("task_id", taskID), zap.String("state", string(claim.previousState)))
 	}
 }
 

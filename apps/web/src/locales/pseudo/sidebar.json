@@ -130,5 +130,12 @@
   "nextPage": "Ńēxţ",
   "pageLoadFailed": "Ćōũĺď ńōţ ĺōàď ţĥĩś ƥàĝē.",
   "pageStatus": "Ƥàĝē {{page}} ōƒ {{total}}",
-  "previousPage": "Ƥŕēvĩōũś"
+  "previousPage": "Ƥŕēvĩōũś",
+  "queryRefreshing": "Ũƥďàţĩńĝ ţàśķś...",
+  "queryRefreshFailed": "Ţàśķś ćōũĺď ńōţ ƀē ŕēƒŕēśĥēď.",
+  "queryInvalid": "Ţĥĩś ţàśķ vĩēŵ ćōũĺď ńōţ ƀē ĺōàďēď. Ćĥēćķ ĩţś ƒĩĺţēŕś àńď vĩēŵ śēţţĩńĝś.",
+  "filterListLimit": "Ƒĩĺţēŕ {{filter}} ĥàś ţōō ḿàńŷ śēĺēćţĩōńś. Śēĺēćţ ũƥ ţō {{limit}}.",
+  "filterValueLimit": "À vàĺũē ĩń ƒĩĺţēŕ {{filter}} ĩś ţōō ĺōńĝ. Ũśē àţ ḿōśţ {{limit}} ƀŷţēś.",
+  "filterInvalid": "Ƒĩĺţēŕ {{filter}} ĩś ĩńvàĺĩď. Ćĥēćķ ĩţś vàĺũē àńď ōƥēŕàţōŕ.",
+  "filterCountLimit": "Ţĥĩś vĩēŵ ĥàś ţōō ḿàńŷ ƒĩĺţēŕś. Ũśē àţ ḿōśţ {{limit}}."
 }

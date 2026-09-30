@@ -305,6 +305,7 @@
   "executorConfigurationSaved": "Executor configuration saved",
   "executorPreference": "Executor preference",
   "executorType": "Executor Type",
+  "executionProfile": "Execution profile",
   "existingConfigurationFound": "Existing configuration found",
   "expand": "Expand",
   "export": "Export",

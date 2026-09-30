@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,23 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 	}
 	if len(errorValue.RecoveryActions) != 0 {
 		t.Fatalf("recovery actions = %#v, want no retry actions", errorValue.RecoveryActions)
+	}
+}
+
+func TestMainCheckoutInspectionTimeoutRemainsRetryable(t *testing.T) {
+	inspectionErr := fmt.Errorf("git inspection timed out: %w", context.DeadlineExceeded)
+	classification := classifyLaunchFailure(inspectionErr)
+	if classification.noRetry {
+		t.Fatal("inspection timeout was classified as a no-retry metadata refusal")
+	}
+	if classification.code != models.LaunchErrorCategoryGenericLaunchFailure {
+		t.Fatalf("classification code = %q, want generic launch failure", classification.code)
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	persisted := exec.buildLastAgentError(context.Background(), "task-1", "task-repo-1", inspectionErr)
+	if len(persisted.RecoveryActions) != 1 || persisted.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
+		t.Fatalf("persisted recovery actions = %#v, want ordinary retry action", persisted.RecoveryActions)
 	}
 }
 

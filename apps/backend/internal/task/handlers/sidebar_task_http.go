@@ -50,11 +50,14 @@ type sidebarTaskPageEntryResponse struct {
 func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	query, malformed, validationErr := decodeSidebarTaskQuery(c)
 	if malformed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sidebar query"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sidebar query", "error_code": "sidebar_query_invalid",
+			"details": gin.H{"reason": "malformed_query"}})
 		return
 	}
 	if validationErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+		var details *models.SidebarQueryValidationError
+		errors.As(validationErr, &details)
+		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error(), "error_code": "sidebar_query_invalid", "details": details})
 		return
 	}
 

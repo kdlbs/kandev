@@ -106,10 +106,14 @@ current preload columns rehydrate authoritative compact status. A column that
 was offscreen performs the same refresh when it later re-enters preload.
 
 `pending_action_revision` keeps the existing epoch and sequence comparison.
-Older cross-channel events cannot overwrite a newer list or event projection.
-A missing event can temporarily leave cached offscreen status stale, but the
-client does not repair it with a detail subscription. Re-entry list hydration
-is the repair boundary.
+The revision is reserved before a projection read starts, so an older delayed
+snapshot cannot replace a newer event projection. Full-session snapshots
+retain the revision while `pending_action` is unchanged; if a newer projection
+has already completed, the snapshot returns that newer projection. This also
+keeps conditional full-session responses stable between no-op reads. A missing
+event can temporarily leave cached offscreen status stale, but the client does
+not repair it with a detail subscription. Re-entry list hydration is the
+repair boundary.
 
 If a new session emits `session.state_changed` before its task-session list is
 loaded, the current event upsert path seeds the compact row and invalidates a
