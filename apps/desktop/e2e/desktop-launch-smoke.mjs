@@ -59,6 +59,11 @@ export const READY_REQUESTED_TIMEOUT_MS = 60_000;
 export const ROOT_REQUESTED_TIMEOUT_MS = 60_000;
 
 export function parseProcessStatuses(output) {
+  if (output instanceof Error) {
+    if (output.status === 1 && !String(output.stdout ?? "").trim()) return [];
+    throw output;
+  }
+
   const rows = output.trim().split(/\r?\n/).filter(Boolean);
   return rows.map((row) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(row);
@@ -640,11 +645,16 @@ async function waitForProcessExit(pid, timeoutMs) {
 }
 
 function readChildProcessStatuses(parentPid) {
-  const output = execFileSync(
-    "ps",
-    ["-o", "pid=,ppid=,stat=", "--ppid", String(parentPid)],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-  );
+  let output;
+  try {
+    output = execFileSync(
+      "ps",
+      ["-o", "pid=,ppid=,stat=", "--ppid", String(parentPid)],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch (error) {
+    return parseProcessStatuses(error);
+  }
   return parseProcessStatuses(output);
 }
 

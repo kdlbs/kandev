@@ -175,13 +175,14 @@ Implementation checks on 2026-10-01:
 - `(cd apps/desktop/src-tauri && cargo test --locked --features desktop-runtime --lib)`: passed, 109 tests.
 - `(cd apps/desktop/src-tauri && cargo test --locked --features desktop-runtime --lib backend::tests)`: passed, 51 tests.
 - `(cd apps/desktop/src-tauri && cargo check --locked --features desktop-runtime --bin kandev-desktop)`: passed.
-- `node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs`: passed, 23 tests.
+- `node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs`: passed, 24 tests, including the empty-output `ps` exit-1 regression.
 - `(cd apps && pnpm --filter @kandev/desktop e2e)`: passed. The Linux smoke observed conflict launcher PID `2837251`, temporary GUI PIDs `2842565` and `2847817`, reaped the closed child within the one-second check, and confirmed the sibling backend stayed healthy.
 - `python3 scripts/list-docs.py validate`: passed, with 338 decisions and 1,275 specifications.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
 - Post-review fixture verification on Linux: `cargo test --locked --lib child_process::tests` passed, 5 tests; source inspection confirmed both Unix live-child fixtures use `/bin/sleep`.
 - Native macOS Help-menu, SPA external-link, and multi-window acceptance: pending a macOS host.
+- PR fixup rerun: `(cd apps && pnpm --filter @kandev/desktop e2e)` passed. The conflict launcher PID was `3261479` with temporary GUI PIDs `3262949` and `3267663`; the smoke verified the closed child's disappearance while the sibling backend and conflict launcher stayed active.
 
 Investigation and package checks on 2026-09-30:
 

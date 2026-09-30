@@ -114,8 +114,12 @@ If macOS evidence is unavailable, keep that acceptance pending.
 
 Implemented the temporary-window command helper with the existing executable, internal argument, null streams, authorization, and error contract. It uses Task 01's exact-child wait worker. Added 17-child reaping coverage, a parent-exit survival and responsiveness test, and Linux PID checks in the two-window smoke.
 
-Validation passed: `cargo fmt --all -- --check`, `cargo test --locked --lib child_process::tests`, `cargo test --locked --features desktop-runtime --lib backend::tests`, `node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs`, and `pnpm --filter @kandev/desktop e2e` from `apps/`.
+Validation passed: `cargo fmt --all -- --check`, `cargo test --locked --lib child_process::tests`, `cargo test --locked --features desktop-runtime --lib backend::tests`, `node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs` (24 tests), and `pnpm --filter @kandev/desktop e2e` from `apps/`.
+
+The smoke regression covers GNU `ps` returning status 1 with empty output when a launcher has no children. It treats that result as an empty child list and propagates other process-query failures.
 
 The Linux smoke observed conflict launcher PID `2837251` and temporary GUI PIDs `2842565` and `2847817`. After the first GUI window closed, its child process disappeared from the launcher process list within the one-second check; the sibling window and backend stayed active.
 
 Native macOS multi-window acceptance remains pending; this implementation host is Linux. Documentation validation results are recorded in [the implementation plan](plan.md#verification-results).
+
+PR fixup validation reran the desktop E2E smoke successfully with conflict launcher PID `3261479` and GUI PIDs `3262949` and `3267663`.
