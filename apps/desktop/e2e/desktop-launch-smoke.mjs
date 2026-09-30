@@ -58,6 +58,15 @@ export const HEALTH_REQUESTED_TIMEOUT_MS = 90_000;
 export const READY_REQUESTED_TIMEOUT_MS = 60_000;
 export const ROOT_REQUESTED_TIMEOUT_MS = 60_000;
 
+export function parseProcessStatuses(output) {
+  const rows = output.trim().split(/\r?\n/).filter(Boolean);
+  return rows.map((row) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(row);
+    if (!match) throw new Error("ps returned an invalid process status row");
+    return { pid: Number(match[1]), parentPid: Number(match[2]), state: match[3] };
+  });
+}
+
 // Only run the CLI behavior when this file is executed directly (`node desktop-launch-smoke.mjs`
 // or the fake-runtime re-exec below) — not when desktop-launch-smoke.test.mjs imports it.
 const isEntryPoint = resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url);
@@ -414,10 +423,24 @@ async function runConflictRecoverySmoke() {
     }
     failIfLauncherExited();
 
+    const firstGuiPid = first.parentPid;
+    const secondGuiPid = second.parentPid;
+    assertLiveDesktopChild(launcher.pid, firstGuiPid, "first temporary window");
+    assertLiveDesktopChild(launcher.pid, secondGuiPid, "second temporary window");
+    process.stdout.write(
+      `Desktop child-reaping smoke: conflict launcher PID ${launcher.pid}; temporary GUI PIDs ${firstGuiPid} and ${secondGuiPid}.\n`,
+    );
+
     await sendX11(inputHelper, "quit", first.parentPid);
     await waitForX11WindowGone(inputHelper, first.parentPid, 15_000);
-    await waitForPathRemoval(first.home, 15_000);
+    await waitForCondition(
+      () => !readChildProcessStatuses(launcher.pid).some((process) => process.pid === firstGuiPid),
+      1_000,
+      `temporary GUI child ${firstGuiPid} to be reaped by conflict launcher ${launcher.pid}`,
+    );
     failIfLauncherExited();
+    assertLiveDesktopChild(launcher.pid, secondGuiPid, "remaining temporary window");
+    await waitForPathRemoval(first.home, 15_000);
     const healthyResponse = await fetch(`${second.origin}/health`);
     if (
       !healthyResponse.ok ||
@@ -614,6 +637,22 @@ async function sendX11(inputHelper, command, pid) {
 
 async function waitForProcessExit(pid, timeoutMs) {
   await waitForCondition(() => !processIsRunning(pid), timeoutMs, `process ${pid} to exit`);
+}
+
+function readChildProcessStatuses(parentPid) {
+  const output = execFileSync(
+    "ps",
+    ["-o", "pid=,ppid=,stat=", "--ppid", String(parentPid)],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  return parseProcessStatuses(output);
+}
+
+function assertLiveDesktopChild(parentPid, childPid, label) {
+  const child = readChildProcessStatuses(parentPid).find((process) => process.pid === childPid);
+  if (!child || child.parentPid !== parentPid || child.state.startsWith("Z")) {
+    throw new Error(`${label} PID ${childPid} is not a live child of conflict launcher ${parentPid}`);
+  }
 }
 
 async function waitForPathRemoval(path, timeoutMs) {
