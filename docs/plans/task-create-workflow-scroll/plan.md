@@ -186,6 +186,14 @@ Review remediation is complete. The phone case performs a down swipe to the bott
 - The managed phone task preview suite passed both tests after backend, Vite, and fixture-plugin builds.
 - `git diff --check` passed after the remediation.
 
+Review follow-up confirmed the worker fixture's existing workflow precedes the
+ten scenario-created workflows. Both tests now include that workflow in preview
+response and rendered-content readiness checks, and assert that the selected
+endpoint IDs match the actual first and last rendered buttons. The endpoint
+assertion failed with the prior scenario-only filter, which chose Preview
+Kanban instead of the rendered first row. After correction, targeted ESLint and
+both managed suites passed again, with 2 tests passing in each suite.
+
 ## Risks
 
 - Direct `scrollTop` writes can pass while modal event handling blocks real user input.

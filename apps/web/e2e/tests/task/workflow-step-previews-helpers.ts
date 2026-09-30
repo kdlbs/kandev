@@ -278,18 +278,18 @@ export async function getWorkflowPickerEndOptions(
   optionList: Locator,
   workflows: WorkflowStepPreviewScenario["allWorkflows"],
 ): Promise<{ first: Locator; last: Locator }> {
-  const workflowIds = workflows.map(({ id }) => id);
+  const expectedIds = workflows.map(({ id }) => id);
   const renderedIds = await optionList
     .locator("button[data-testid^='workflow-option-select-']")
-    .evaluateAll((buttons, wantedIds) => {
-      const wanted = new Set(wantedIds);
-      return buttons
+    .evaluateAll((buttons) =>
+      buttons
         .map((button) =>
           button.getAttribute("data-testid")?.slice("workflow-option-select-".length),
         )
-        .filter((id): id is string => Boolean(id && wanted.has(id)));
-    }, workflowIds);
-  expect(renderedIds).toHaveLength(workflows.length);
+        .filter((id): id is string => Boolean(id)),
+    );
+  expect(renderedIds).toHaveLength(expectedIds.length);
+  expect(renderedIds).toEqual(expect.arrayContaining(expectedIds));
   return {
     first: optionList.getByTestId(`workflow-option-select-${renderedIds[0]!}`),
     last: optionList.getByTestId(`workflow-option-select-${renderedIds.at(-1)!}`),

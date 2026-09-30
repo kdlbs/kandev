@@ -149,3 +149,12 @@ Verification from the repository root:
 During implementation, the new fixture first exposed its hard-coded `Backlog` starting-step assumption, and the short desktop viewport showed that a long end option can be taller than the list. The fixture now selects its configured first stage, and end-option checks measure the visible intersection and verify a real hit within it.
 
 Review remediation closed the false-positive upward-scroll path and the preview-loading race on reopened pickers. The final managed test runs above passed.
+
+The follow-up review found that the worker fixture's existing workflow
+(`E2E Workflow`) appears before the ten scenario-created options. Preview
+readiness now includes that fixture workflow, and both tests assert that endpoint
+locators match the actual first and last rendered buttons. A targeted RED run
+failed at that assertion with the old scenario-only endpoint filter. After the
+fix, targeted ESLint and both managed desktop and phone suites passed; each
+suite ran 2 tests successfully, including backend, Vite, and fixture-plugin
+builds.

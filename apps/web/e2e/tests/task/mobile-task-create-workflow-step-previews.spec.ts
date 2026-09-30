@@ -208,6 +208,14 @@ test("touch scrolls ten workflow options and selects either end", async ({
     extraWorkflowCount: 7,
     longWorkflowSteps: true,
   });
+  const pickerWorkflows = [
+    {
+      id: seedData.workflowId,
+      name: "E2E Workflow",
+      stepNames: seedData.steps.map(({ name }) => name),
+    },
+    ...scenario.allWorkflows,
+  ];
 
   try {
     for (const workflow of scenario.allWorkflows) {
@@ -231,18 +239,23 @@ test("touch scrolls ten workflow options and selects either end", async ({
     await description.fill("Reach both ends of every long workflow preview.");
     const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
     await workflowSelector.scrollIntoViewIfNeeded();
-    const previewResponses = armWorkflowStepPreviewResponses(testPage, scenario.allWorkflows);
+    const previewResponses = armWorkflowStepPreviewResponses(testPage, pickerWorkflows);
     await workflowSelector.tap();
 
     const popover = testPage.getByTestId("workflow-selector-popover");
     await expect(popover).toBeVisible();
-    await expectWorkflowStepPreviewsLoaded(testPage, scenario.allWorkflows, previewResponses);
-    const { optionList } = await expectWorkflowPickerOverflow(testPage, scenario.allWorkflows);
+    await expectWorkflowStepPreviewsLoaded(testPage, pickerWorkflows, previewResponses);
+    const { optionList } = await expectWorkflowPickerOverflow(testPage, pickerWorkflows);
     const { first, last } = await getWorkflowPickerEndOptions(
       testPage,
       optionList,
-      scenario.allWorkflows,
+      pickerWorkflows,
     );
+    const renderedWorkflowOptionIds = await optionList
+      .locator("button[data-testid^='workflow-option-select-']")
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-testid")));
+    expect(await first.getAttribute("data-testid")).toBe(renderedWorkflowOptionIds[0]);
+    expect(await last.getAttribute("data-testid")).toBe(renderedWorkflowOptionIds.at(-1));
 
     const selectedBefore = await optionList
       .locator("button[aria-pressed='true']")
@@ -278,10 +291,7 @@ test("touch scrolls ten workflow options and selects either end", async ({
     await expect(title).toHaveValue("Keep the phone draft while scrolling");
     await expectTaskDescription(description, "Reach both ends of every long workflow preview.");
 
-    const reopenedPreviewResponses = armWorkflowStepPreviewResponses(
-      testPage,
-      scenario.allWorkflows,
-    );
+    const reopenedPreviewResponses = armWorkflowStepPreviewResponses(testPage, pickerWorkflows);
     await workflowSelector.tap();
     await expect(popover).toBeVisible();
     await expectWorkflowStepPreviewsLoaded(

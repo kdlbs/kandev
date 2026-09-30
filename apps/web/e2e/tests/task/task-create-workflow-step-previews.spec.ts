@@ -173,6 +173,14 @@ test("scrolls ten workflow options in both directions without losing the task dr
     extraWorkflowCount: 7,
     longWorkflowSteps: true,
   });
+  const pickerWorkflows = [
+    {
+      id: seedData.workflowId,
+      name: "E2E Workflow",
+      stepNames: seedData.steps.map(({ name }) => name),
+    },
+    ...scenario.allWorkflows,
+  ];
 
   try {
     for (const workflow of scenario.allWorkflows) {
@@ -190,18 +198,23 @@ test("scrolls ten workflow options in both directions without losing the task dr
     await title.fill("Preserve the task draft while scrolling");
     await description.fill("Review every long workflow preview before choosing.");
     const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
-    const previewResponses = armWorkflowStepPreviewResponses(testPage, scenario.allWorkflows);
+    const previewResponses = armWorkflowStepPreviewResponses(testPage, pickerWorkflows);
     await workflowSelector.click();
 
     const popover = testPage.getByTestId("workflow-selector-popover");
     await expect(popover).toBeVisible();
-    await expectWorkflowStepPreviewsLoaded(testPage, scenario.allWorkflows, previewResponses);
-    const { optionList } = await expectWorkflowPickerOverflow(testPage, scenario.allWorkflows);
+    await expectWorkflowStepPreviewsLoaded(testPage, pickerWorkflows, previewResponses);
+    const { optionList } = await expectWorkflowPickerOverflow(testPage, pickerWorkflows);
     const { first, last } = await getWorkflowPickerEndOptions(
       testPage,
       optionList,
-      scenario.allWorkflows,
+      pickerWorkflows,
     );
+    const renderedWorkflowOptionIds = await optionList
+      .locator("button[data-testid^='workflow-option-select-']")
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-testid")));
+    expect(await first.getAttribute("data-testid")).toBe(renderedWorkflowOptionIds[0]);
+    expect(await last.getAttribute("data-testid")).toBe(renderedWorkflowOptionIds.at(-1));
     const selectedBefore = await optionList
       .locator("button[aria-pressed='true']")
       .getAttribute("data-testid");
@@ -212,11 +225,11 @@ test("scrolls ten workflow options in both directions without losing the task dr
       { width: 1280, height: 600 },
     ]) {
       await testPage.setViewportSize(viewport);
-      await expectWorkflowPickerOverflow(testPage, scenario.allWorkflows);
+      await expectWorkflowPickerOverflow(testPage, pickerWorkflows);
       await expectSmallAndDiagonalWorkflowWheelDeltas(
         testPage,
         optionList,
-        scenario.allWorkflows.map(({ id }) => id),
+        pickerWorkflows.map(({ id }) => id),
       );
       await wheelWorkflowOptionListToBoundary(testPage, optionList, "down");
       await expectWorkflowOptionVisibleAndHitTestable(testPage, optionList, last);
@@ -243,17 +256,10 @@ test("scrolls ten workflow options in both directions without losing the task dr
     await testPage.keyboard.press("Escape");
     await expect(popover).toHaveCount(0);
     await expect(workflowSelector).toBeFocused();
-    const keyboardPreviewResponses = armWorkflowStepPreviewResponses(
-      testPage,
-      scenario.allWorkflows,
-    );
+    const keyboardPreviewResponses = armWorkflowStepPreviewResponses(testPage, pickerWorkflows);
     await workflowSelector.press("Enter");
     await expect(popover).toBeVisible();
-    await expectWorkflowStepPreviewsLoaded(
-      testPage,
-      scenario.allWorkflows,
-      keyboardPreviewResponses,
-    );
+    await expectWorkflowStepPreviewsLoaded(testPage, pickerWorkflows, keyboardPreviewResponses);
     await optionList.evaluate((element) => {
       element.scrollTop = 0;
     });
@@ -280,7 +286,7 @@ test("scrolls ten workflow options in both directions without losing the task dr
 
     const lastSelectionPreviewResponses = armWorkflowStepPreviewResponses(
       testPage,
-      scenario.allWorkflows,
+      pickerWorkflows,
     );
     await workflowSelector.press("Enter");
     await expect(popover).toBeVisible();
