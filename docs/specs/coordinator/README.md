@@ -25,6 +25,10 @@ with Undo, and the copilot on every workspace page.
 Phase 3 (autonomy, behind `features.coordinatorPhase3`) lets a manager turn on
 unattended turns for one coordinator: it is woken by episodes on its own tasks,
 within a containment check and a cost ceiling.
+Phase 3.1 (Record and measure, behind `features.coordinatorPhase31`, recording
+ships ahead of it) records every turn, grades outcomes and manager overrides,
+adds a replay harness and a shadow dream report that changes nothing, a Pause
+control, and Watches by project.
 
 ## Terms
 
@@ -53,6 +57,14 @@ within a containment check and a cost ceiling.
   observation for a coordinated workspace.
 - **Copilot:** the chat panel on the right side of the Coordinator screens,
   backed by the coordinator's conversation session.
+- **Turn ledger:** the per-coordinator record of every turn with its stamp,
+  board snapshot and call digest.
+- **Shadow dream:** a periodic bounded episode with no write tools that reports
+  suggested changes to the coordinator's own instructions; a manager rates
+  them; nothing is applied.
+- **Pause:** a manager-set state that stops the coordinator acting on its own
+  and keeps its queue.
+- **Project:** a repository set or repository a coordinator's Watches list.
 - **Autonomy:** a per-coordinator setting that allows unattended turns.
 - **Wake:** a durable record of one episode on one of the coordinator's own
   tasks (a question, permission, stall, error or completion) waiting to be
@@ -127,3 +139,5 @@ The system is new and has no legacy sources.
 - [Coordinator phase 2 implementation plan](../../plans/workspace-coordinator-p2/plan.md)
 - [Coordinator phase 3: autonomy](../../decisions/2026-09-29-coordinator-phase-3-autonomy.md)
 - [Coordinator phase 3 implementation plan](../../plans/workspace-coordinator-p3/plan.md)
+- [Coordinator phase 3.1: record and measure](../../decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md)
+- [Coordinator phase 3.1 implementation plan](../../plans/workspace-coordinator-p3-1/plan.md)
