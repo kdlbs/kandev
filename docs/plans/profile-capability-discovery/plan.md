@@ -204,7 +204,7 @@ Implementation and documentation checks passed. The commands and detailed counts
 - Public documentation validation passed. The catalog contains 330 decisions and 1248 specifications; specification lint tests passed, 36 tests.
 - PR documentation coverage and `git diff --check` passed.
 
-The requirement is active and the system design is current. All implementation files remain uncommitted.
+The requirement is active and the system design is current. Implementation is committed and under review in PR #4070.
 
 ## Remaining boundary
 
