@@ -51,6 +51,7 @@ const (
 	CapabilityChecksRead           GitHubAppCapability = "checks_read"
 	CapabilityStatusesRead         GitHubAppCapability = "statuses_read"
 	CapabilityActionsRead          GitHubAppCapability = "actions_read"
+	CapabilityActionsWrite         GitHubAppCapability = "actions_write"
 	CapabilityBranchProtectionRead GitHubAppCapability = "branch_protection_read"
 	CapabilityMembersRead          GitHubAppCapability = "members_read"
 	CapabilityWorkflowsWrite       GitHubAppCapability = "workflows_write"
@@ -58,10 +59,17 @@ const (
 
 // InstallationToken is a short-lived token minted for one App installation.
 type InstallationToken struct {
-	Token       string
-	ExpiresAt   time.Time
-	Permissions InstallationPermissions
-	Principal   TokenPrincipal
+	Token        string
+	ExpiresAt    time.Time
+	Permissions  InstallationPermissions
+	Repositories []InstallationTokenRepository
+	Principal    TokenPrincipal
+}
+
+// InstallationTokenRepository is GitHub's returned access scope for a token.
+type InstallationTokenRepository struct {
+	ID       int64  `json:"id"`
+	FullName string `json:"full_name"`
 }
 
 // AppInstallation is verified installation metadata returned by GitHub.
@@ -247,9 +255,10 @@ func (c *AppClient) MintInstallationToken(
 		Repositories []string                `json:"repositories,omitempty"`
 	}{Permissions: permissions, Repositories: repositories}
 	var response struct {
-		Token       string            `json:"token"`
-		ExpiresAt   time.Time         `json:"expires_at"`
-		Permissions map[string]string `json:"permissions"`
+		Token        string                        `json:"token"`
+		ExpiresAt    time.Time                     `json:"expires_at"`
+		Permissions  map[string]string             `json:"permissions"`
+		Repositories []InstallationTokenRepository `json:"repositories"`
 	}
 	if err := c.appRequest(
 		ctx,
@@ -264,15 +273,42 @@ func (c *AppClient) MintInstallationToken(
 		return InstallationToken{}, errors.New("GitHub returned an empty installation token")
 	}
 	return InstallationToken{
-		Token:       response.Token,
-		ExpiresAt:   response.ExpiresAt,
-		Permissions: permissionLevels(response.Permissions),
+		Token:        response.Token,
+		ExpiresAt:    response.ExpiresAt,
+		Permissions:  permissionLevels(response.Permissions),
+		Repositories: response.Repositories,
 		Principal: TokenPrincipal{
 			Kind:           TokenCredentialInstallation,
 			PrincipalID:    fmt.Sprintf("installation:%d", installationID),
 			InstallationID: installationID,
 		},
 	}, nil
+}
+
+// RevokeInstallationToken invalidates this exact installation token.
+// Provider response bodies and transport errors are deliberately not surfaced:
+// either can echo bearer material into logs higher in the call stack.
+func (c *AppClient) RevokeInstallationToken(ctx context.Context, token string) error {
+	if token == "" {
+		return errors.New("installation token is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		strings.TrimRight(c.baseURL, "/")+"/installation/token", nil)
+	if err != nil {
+		return errors.New("build installation token revocation request")
+	}
+	req.Header.Set("Accept", githubAccept)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return errors.New("installation token revocation request failed")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("installation token revocation unconfirmed: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (c *AppClient) appRequest(ctx context.Context, method, path string, body, out any) error {
@@ -358,7 +394,7 @@ func CapabilitiesForPermissions(permissions InstallationPermissions) map[GitHubA
 	grant("issues", CapabilityIssueRead, CapabilityIssueWrite)
 	grant("checks", CapabilityChecksRead, "")
 	grant("statuses", CapabilityStatusesRead, "")
-	grant("actions", CapabilityActionsRead, "")
+	grant("actions", CapabilityActionsRead, CapabilityActionsWrite)
 	grant("administration", CapabilityBranchProtectionRead, "")
 	grant("members", CapabilityMembersRead, "")
 	if permissions["workflows"] == PermissionWrite {

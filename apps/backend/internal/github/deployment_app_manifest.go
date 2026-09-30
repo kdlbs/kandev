@@ -229,7 +229,7 @@ func BuildDeploymentAppManifest(
 			},
 			Public: false,
 			DefaultPermissions: map[string]string{
-				"actions": "read", "administration": "read", "checks": "read",
+				"actions": "write", "administration": "read", "checks": "read",
 				"contents": "write", "issues": "write", "members": "read",
 				"metadata": "read", "pull_requests": "write", "statuses": "read",
 				"workflows": "write",

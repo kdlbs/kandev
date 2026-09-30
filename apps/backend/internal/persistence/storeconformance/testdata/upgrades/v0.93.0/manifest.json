@@ -91,6 +91,7 @@
     "plugin-user-state",
     "canvas",
     "github",
+    "provider-access",
     "gitlab",
     "jira",
     "linear",

@@ -187,7 +187,9 @@ func (r *CredentialResolver) resolveAtEpoch(
 func validCredentialPurpose(purpose CredentialPurpose) bool {
 	switch purpose {
 	case CredentialPurposeAutomation, CredentialPurposePersonalRead,
-		CredentialPurposePersonalWrite, CredentialPurposeGitTransport:
+		CredentialPurposePersonalWrite, CredentialPurposeGitTransport,
+		CredentialPurposeScopedActionsWrite, CredentialPurposeScopedActionsRerun,
+		CredentialPurposeScopedActionsDispatch:
 		return true
 	default:
 		return false
@@ -253,6 +255,10 @@ func (r *CredentialResolver) resolveAutomation(
 	connection *WorkspaceConnection,
 	epoch credentialCacheEpoch,
 ) (*ResolvedCredential, error) {
+	if (req.Purpose == CredentialPurposeScopedActionsWrite || req.Purpose == CredentialPurposeScopedActionsRerun || req.Purpose == CredentialPurposeScopedActionsDispatch) &&
+		connection.Source != ConnectionSourceGitHubAppInstallation {
+		return nil, ErrGitHubCapabilityDenied
+	}
 	if connection.Status != ConnectionStatusActive {
 		return nil, ErrGitHubConnectionInvalid
 	}
@@ -518,6 +524,7 @@ var allGitHubCapabilities = []GitHubAppCapability{
 	CapabilityChecksRead,
 	CapabilityStatusesRead,
 	CapabilityActionsRead,
+	CapabilityActionsWrite,
 	CapabilityBranchProtectionRead,
 	CapabilityMembersRead,
 	CapabilityWorkflowsWrite,

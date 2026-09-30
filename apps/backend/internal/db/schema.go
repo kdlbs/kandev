@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // SchemaQuerier is the subset of sqlx database and transaction methods used
@@ -86,6 +87,19 @@ func TableColumns(conn SchemaQuerier, table string) (map[string]bool, error) {
 		return nil, err
 	}
 	return columns, nil
+}
+
+// SQLiteTableSQL returns SQLite's stored CREATE statement for table. Callers
+// must keep SQLite-only rebuild migrations behind this dialect boundary.
+func SQLiteTableSQL(conn SchemaQuerier, table string) (string, error) {
+	if isPostgresSchema(conn) {
+		return "", fmt.Errorf("SQLite table schema is unavailable for driver %q", conn.DriverName())
+	}
+	var schema string
+	if err := conn.QueryRow(conn.Rebind(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`), table).Scan(&schema); err != nil {
+		return "", err
+	}
+	return schema, nil
 }
 
 // ColumnExists reports whether table declares column. Missing tables and

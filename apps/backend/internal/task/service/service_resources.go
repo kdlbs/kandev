@@ -409,6 +409,13 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	}
 	cleanups = append(cleanups, taskCleanups...)
 
+	if s.providerAccessCleanup != nil {
+		if err := s.providerAccessCleanup.CleanupWorkspaceProviderAccess(ctx, workspace.ID); err != nil {
+			cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+			return fmt.Errorf("fence workspace provider access: %w", errors.Join(err, cancelErr))
+		}
+	}
+
 	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow

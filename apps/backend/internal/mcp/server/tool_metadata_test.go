@@ -69,6 +69,7 @@ func TestCoreToolRiskAnnotations(t *testing.T) {
 		{name: "archive_task_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: false},
 		{name: "delete_task_kandev", readOnly: false, destructive: true, idempotent: false, openWorld: false},
 		{name: "stop_task_kandev", readOnly: false, destructive: true, idempotent: true, openWorld: false},
+		{name: "request_fresh_ci_run_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: true},
 		{name: "add_workspace_sources_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: true},
 	}
 	for _, tt := range tests {

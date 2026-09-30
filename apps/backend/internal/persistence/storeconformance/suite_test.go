@@ -21,7 +21,7 @@ func TestAdapterIDsMatchExpectedCatalogSet(t *testing.T) {
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
 		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
 		"plugin-marketplace": {}, "plugin-settings": {}, "plugin-state": {},
-		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},
+		"plugin-user-state": {}, "prompts": {}, "provider-access": {}, "quick-terminal": {}, "runtime-flags": {},
 		"schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},
 		"task": {}, "task-share": {}, "telemetry-contract": {}, "terminal": {},
 		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {},

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -325,6 +326,73 @@ func newACTestService() (*AgentConversationService, acTestDeps) {
 	svc := NewAgentConversationService(deps.tasks, deps.sess, deps.profiles, deps.state, deps.eventer)
 	svc.SetDispatcher(deps.dispatcher)
 	return svc, deps
+}
+
+func TestVerifyManagedSessionRejectsForeignAndTerminalIdentity(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+	desc, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := func(pluginID, workspaceID, conversationKey, taskID, sessionID string) bool {
+		t.Helper()
+		ok, err := svc.VerifyManagedSession(ctx, pluginID, workspaceID, conversationKey, taskID, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if !verify("plugin-coordinator", "ws-1", "coordinator", desc.TaskID, desc.SessionID) {
+		t.Fatal("current managed session was denied")
+	}
+	for _, changed := range []struct {
+		name string
+		args [5]string
+	}{
+		{"plugin", [5]string{"other-plugin", "ws-1", "coordinator", desc.TaskID, desc.SessionID}},
+		{"workspace", [5]string{"plugin-coordinator", "ws-2", "coordinator", desc.TaskID, desc.SessionID}},
+		{"conversation", [5]string{"plugin-coordinator", "ws-1", "other", desc.TaskID, desc.SessionID}},
+		{"task", [5]string{"plugin-coordinator", "ws-1", "coordinator", "other-task", desc.SessionID}},
+		{"session", [5]string{"plugin-coordinator", "ws-1", "coordinator", desc.TaskID, "other-session"}},
+	} {
+		t.Run(changed.name, func(t *testing.T) {
+			if verify(changed.args[0], changed.args[1], changed.args[2], changed.args[3], changed.args[4]) {
+				t.Fatal("foreign managed-session selector was accepted")
+			}
+		})
+	}
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateStarting, models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle,
+	} {
+		deps.sess.setState(desc.SessionID, state)
+		if !verify("plugin-coordinator", "ws-1", "coordinator", desc.TaskID, desc.SessionID) {
+			t.Fatalf("nonterminal session %q was denied", state)
+		}
+	}
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted, models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		deps.sess.setState(desc.SessionID, state)
+		if verify("plugin-coordinator", "ws-1", "coordinator", desc.TaskID, desc.SessionID) {
+			t.Fatalf("terminal session %q was accepted", state)
+		}
+	}
+	deps.sess.setState(desc.SessionID, models.TaskSessionStateRunning)
+	deps.tasks.tasks[0].Metadata[metaKeyManagedByPlugin] = "other-plugin"
+	if verify("plugin-coordinator", "ws-1", "coordinator", desc.TaskID, desc.SessionID) {
+		t.Fatal("altered owner metadata was accepted")
+	}
+	deps.tasks.tasks[0].Metadata[metaKeyManagedByPlugin] = "plugin-coordinator"
+	now := time.Now()
+	deps.tasks.tasks[0].ArchivedAt = &now
+	if verify("plugin-coordinator", "ws-1", "coordinator", desc.TaskID, desc.SessionID) {
+		t.Fatal("archived managed task was accepted")
+	}
 }
 
 // ── Ensure tests ────────────────────────────────────────────────────────

@@ -103,7 +103,7 @@ func TestAppClient_MintInstallationTokenScopesPermissions(t *testing.T) {
 		if err := json.Unmarshal(body, &requestBody); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		responseBody := `{"token":"ghs_install","expires_at":"` + expires.Format(time.RFC3339) + `","permissions":{"contents":"write","pull_requests":"write"}}`
+		responseBody := `{"token":"ghs_install","expires_at":"` + expires.Format(time.RFC3339) + `","permissions":{"contents":"write","pull_requests":"write"},"repositories":[{"id":44,"full_name":"owner/widgets"}]}`
 		return &http.Response{
 			StatusCode: http.StatusCreated,
 			Header:     make(http.Header),
@@ -132,9 +132,40 @@ func TestAppClient_MintInstallationTokenScopesPermissions(t *testing.T) {
 	if token.Principal.Kind != TokenCredentialInstallation || token.Principal.InstallationID != 77 {
 		t.Fatalf("principal = %+v", token.Principal)
 	}
+	if len(token.Repositories) != 1 || token.Repositories[0].ID != 44 ||
+		token.Repositories[0].FullName != "owner/widgets" {
+		t.Fatalf("returned token repositories = %+v", token.Repositories)
+	}
 	gotRepositories, ok := requestBody["repositories"].([]any)
 	if !ok || len(gotRepositories) != 1 || gotRepositories[0] != "widgets" {
 		t.Fatalf("request repositories = %#v", requestBody["repositories"])
+	}
+}
+
+func TestAppClient_RevokeInstallationTokenUsesExactBearerAndRedactsFailures(t *testing.T) {
+	_, pemBytes := testAppPrivateKey(t)
+	client, err := NewAppClient(123, pemBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.baseURL = "https://api.test"
+	const secret = "ghs_secret_never_log"
+	status := http.StatusNoContent
+	client.httpClient.Transport = appRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/installation/token" ||
+			r.Header.Get("Authorization") != "Bearer "+secret {
+			t.Fatalf("unexpected revocation request: %s %s", r.Method, r.URL.Path)
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(
+			strings.NewReader("provider echoed " + secret))}, nil
+	})
+	if err := client.RevokeInstallationToken(context.Background(), secret); err != nil {
+		t.Fatal(err)
+	}
+	status = http.StatusServiceUnavailable
+	err = client.RevokeInstallationToken(context.Background(), secret)
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("unconfirmed revocation error = %v", err)
 	}
 }
 

@@ -1667,6 +1667,52 @@ func (s *AgentConversationService) findManagedConversation(ctx context.Context, 
 	return found, nil
 }
 
+// VerifyManagedSession reads the current backing task and its primary session
+// for an exact plugin conversation. A selector from a plugin cannot establish
+// ownership or session liveness on its own.
+func (s *AgentConversationService) VerifyManagedSession(
+	ctx context.Context, pluginID, workspaceID, conversationKey, taskID, sessionID string,
+) (bool, error) {
+	if !completeManagedSessionSelectors(pluginID, workspaceID, conversationKey, taskID, sessionID) {
+		return false, nil
+	}
+	task, err := s.findManagedConversation(ctx, pluginID, workspaceID, conversationKey)
+	if err != nil || task == nil {
+		return false, err
+	}
+	if !matchingManagedTask(task, taskID, pluginID) {
+		return false, nil
+	}
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
+	if err != nil || primary == nil {
+		return false, err
+	}
+	if primary.ID != sessionID || primary.TaskID != task.ID || !primary.IsPrimary {
+		return false, nil
+	}
+	return liveManagedSession(primary.State), nil
+}
+
+func completeManagedSessionSelectors(pluginID, workspaceID, conversationKey, taskID, sessionID string) bool {
+	return pluginID != "" && workspaceID != "" && conversationKey != "" && taskID != "" && sessionID != ""
+}
+
+func matchingManagedTask(task *models.Task, taskID, pluginID string) bool {
+	return task.ID == taskID && task.IsEphemeral && task.ArchivedAt == nil &&
+		task.Metadata[metaKeyManagedByPlugin] == pluginID
+}
+
+func liveManagedSession(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCreated, models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle:
+		return true
+	default:
+		return false
+	}
+}
+
 // listManagedConversations returns all managed conversations matching the
 // given (pluginID, workspaceID, conversationKey).
 func (s *AgentConversationService) listManagedConversations(ctx context.Context, pluginID, workspaceID, conversationKey string) ([]*models.Task, error) {

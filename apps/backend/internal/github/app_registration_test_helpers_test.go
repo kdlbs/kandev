@@ -20,7 +20,7 @@ func testManifestConversion(t *testing.T, ownerLogin, ownerType string) Manifest
 		ClientID: "Iv1.client", ClientSecret: "generated-client",
 		WebhookSecret: "generated-webhook", PrivateKeyPEM: string(privateKey),
 		Permissions: map[string]string{
-			"actions": "read", "administration": "read", "checks": "read",
+			"actions": "write", "administration": "read", "checks": "read",
 			"contents": "write", "issues": "write", "members": "read",
 			"metadata": "read", "pull_requests": "write", "statuses": "read",
 			"workflows": "write",
