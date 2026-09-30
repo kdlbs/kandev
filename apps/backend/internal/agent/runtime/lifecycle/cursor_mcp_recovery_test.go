@@ -48,37 +48,46 @@ func TestCursorMCPRecoveryUnavailableSentinelRemainsDistinct(t *testing.T) {
 }
 
 func TestCursorMCPRecoverySnapshotReplacesOnlyTheRetriedServer(t *testing.T) {
-	manager, eventBus := newPrepareEventsTestManager(t, "cursor-recovery-profile")
-	execution := &AgentExecution{
-		TaskID: "task-mcp", SessionID: "session-mcp", WorkspacePath: "/workspace",
-		PrepareResult: &EnvPrepareResult{Success: false, Steps: []PrepareStep{
-			{Name: "Environment", Kind: "executor_environment", Status: PrepareStepCompleted},
-			{Name: "Discovery A", Kind: PrepareStepKindAgentMCPDiscovery, MCPServerID: "server-a", Status: PrepareStepCompleted},
-			{Name: "Selection A", Kind: PrepareStepKindAgentMCPSelection, MCPServerID: "server-a", Status: PrepareStepCompleted},
-			{Name: "Verification A", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-a", Status: PrepareStepFailed},
-			{Name: "Verification B", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-b", Status: PrepareStepFailed},
-		}},
-	}
-	recorder := manager.newPreparationAttemptRecorder(execution.TaskID, execution.SessionID)
-	seedCursorMCPRecoverySteps(execution, recorder, "server-a")
-	appendCursorMCPProgress(recorder, "server-a", PrepareStepKindAgentMCPApproval, PrepareStepCompleted, "", nil, nil)
-	appendCursorMCPProgress(recorder, "server-a", PrepareStepKindAgentMCPVerification, PrepareStepCompleted, "", nil, nil)
+	for _, success := range []bool{true, false} {
+		t.Run(map[bool]string{true: "optional MCP failures", false: "fatal environment failure"}[success], func(t *testing.T) {
+			environmentStatus := PrepareStepCompleted
+			if !success {
+				environmentStatus = PrepareStepFailed
+			}
+			manager, eventBus := newPrepareEventsTestManager(t, "cursor-recovery-profile")
+			execution := &AgentExecution{
+				TaskID: "task-mcp", SessionID: "session-mcp", WorkspacePath: "/workspace",
+				PrepareResult: &EnvPrepareResult{Success: success, Steps: []PrepareStep{
+					{Name: "Environment", Kind: "executor_environment", Status: environmentStatus},
+					{Name: "Discovery A", Kind: PrepareStepKindAgentMCPDiscovery, MCPServerID: "server-a", Status: PrepareStepCompleted},
+					{Name: "Selection A", Kind: PrepareStepKindAgentMCPSelection, MCPServerID: "server-a", Status: PrepareStepCompleted},
+					{Name: "Verification A", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-a", Status: PrepareStepFailed},
+					{Name: "Verification B", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-b", Status: PrepareStepFailed},
+				}},
+			}
+			recorder := manager.newPreparationAttemptRecorder(execution.TaskID, execution.SessionID)
+			seedCursorMCPRecoverySteps(execution, recorder, "server-a")
+			appendCursorMCPProgress(recorder, "server-a", PrepareStepKindAgentMCPApproval, PrepareStepCompleted, "", nil, nil)
+			appendCursorMCPProgress(recorder, "server-a", PrepareStepKindAgentMCPVerification, PrepareStepCompleted, "", nil, nil)
 
-	manager.publishExecutionPrepareCompleted(execution, recorder, nil)
+			manager.publishExecutionPrepareCompleted(execution, recorder, nil)
 
-	require.True(t, execution.PrepareResult.Success)
-	steps := execution.PrepareResult.Steps
-	requirePrepareStep(t, steps, "Environment")
-	requirePrepareStep(t, steps, "Discovery A")
-	requirePrepareStep(t, steps, "Selection A")
-	requirePrepareStep(t, steps, "Verification B")
-	for _, step := range steps {
-		require.NotEqual(t, "Verification A", step.Name)
+			require.Equal(t, success, execution.PrepareResult.Success)
+			steps := execution.PrepareResult.Steps
+			require.Equal(t, environmentStatus, steps[0].Status)
+			requirePrepareStep(t, steps, "Environment")
+			requirePrepareStep(t, steps, "Discovery A")
+			requirePrepareStep(t, steps, "Selection A")
+			requirePrepareStep(t, steps, "Verification B")
+			for _, step := range steps {
+				require.NotEqual(t, "Verification A", step.Name)
+			}
+			completed := prepareCompletedPayloads(eventBus)
+			require.Len(t, completed, 1)
+			require.Equal(t, success, completed[0].Success)
+			requirePrepareStep(t, completed[0].Steps, "Verification B")
+		})
 	}
-	completed := prepareCompletedPayloads(eventBus)
-	require.Len(t, completed, 1)
-	require.True(t, completed[0].Success)
-	requirePrepareStep(t, completed[0].Steps, "Verification B")
 }
 
 func TestCursorMCPRecoverySeedsAllPersistedStepsWhenResultIsNotLoaded(t *testing.T) {

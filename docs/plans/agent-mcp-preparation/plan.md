@@ -222,3 +222,33 @@ Latest-base `pnpm run typecheck`, `pnpm run lint` and `pnpm run i18n:check` pass
 Harness tests (19), specification-linter tests (36), full harness/specification
 lint and the documentation catalog (334 decisions, 1264 specs) also passed.
 Remote checks and reviews still require fresh evidence after delivery.
+
+
+An additional pushed-head CI failure on 2026-09-30 was reproduced in
+`TestCursorMCPRecoverySnapshotReplacesOnlyTheRetriedServer`. Its fixture marked
+a completed environment plus only optional MCP failures as overall failure,
+then expected recovery to overwrite that outcome. The corrected test preserves
+the executor outcome in two cases: optional MCP failures with overall success,
+and a fatal environment failure that remains failed after retry. Both retain
+unrelated server rows and replace only the retried server's approval/verification.
+This correction changes tests only, with no further production behavior change.
+
+Focused recovery/preparation race tests passed on the host:
+
+```bash
+cd apps/backend
+go test -race ./internal/agent/runtime/lifecycle -run 'TestCursorMCP|TestRetryCursorMCP|TestPreparationAttempt|TestExecutionPrepareCompletion|TestLaunch_.*(Prepare|Promot)|TestPromotion|TestCursorPassthroughStartAndResumePublishAfterMCPPreparation' -count=1
+```
+
+The complete lifecycle package passed in Linux with the race detector
+(181.406s). From the repository root:
+
+```bash
+docker run --rm --platform linux/amd64 \
+  -v "$PWD:/workspace" -v kandev-gocache:/gocache -v kandev-gomod:/go/pkg/mod \
+  -e GOCACHE=/gocache -w /workspace/apps/backend \
+  ghcr.io/kdlbs/kandev-ci:build-latest \
+  bash -lc 'git config --global --add safe.directory /workspace && go test -race ./internal/agent/runtime/lifecycle -count=1'
+```
+
+Fresh remote CI/review evidence is required after this test-only delivery.
