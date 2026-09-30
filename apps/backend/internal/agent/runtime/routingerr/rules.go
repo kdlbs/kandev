@@ -36,6 +36,9 @@ var providerRules = map[string][]rule{
 	},
 	"opencode-acp": {
 		mustRule("opencode.stderr.usage_limit.v1", `(?i)\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		// Explicit credit exhaustion takes precedence over generic payment wording.
+		mustRule("opencode.stderr.credit.v1", `(?i)\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("opencode.stderr.subscription.v1", `(?i)\bpayment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", `(?i)quota`, CodeQuotaLimited, ConfMedium),
 		mustRule("opencode.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),

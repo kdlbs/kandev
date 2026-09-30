@@ -8,9 +8,9 @@ export class FileTreePage {
     private readonly activeChat: () => Locator,
   ) {}
 
-  /** Find a tree node by its data-path attribute. */
+  /** Find a tree node inside the Files panel by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
-    return this.page.locator(
+    return this.files.locator(
       `[data-testid="file-tree-node"][data-path=${JSON.stringify(nodePath)}]:visible`,
     );
   }

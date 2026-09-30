@@ -390,10 +390,6 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if worktreeBranch != "" {
 		metadata[MetadataKeyWorktreeBranch] = worktreeBranch
 	}
-	// Pass repo info for remote executors (Sprites, remote docker, etc.)
-	if req.RepositoryPath != "" {
-		metadata[MetadataKeyRepositoryPath] = req.RepositoryPath
-	}
 	if req.SetupScript != "" {
 		metadata[MetadataKeySetupScript] = req.SetupScript
 	}
@@ -404,7 +400,37 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 		metadata[MetadataKeyBaseBranches] = branches
 	}
 	setSelectedCheckoutMetadata(req, metadata)
+	applyTrustedRepositoryContextToMetadata(metadata, req)
 	return metadata
+}
+
+func applyTrustedRepositoryContextToMetadata(metadata map[string]interface{}, req *LaunchRequest) {
+	delete(metadata, MetadataKeyRepositoryConfigured)
+	delete(metadata, MetadataKeyRepositoryPath)
+	specs := req.RepoSpecs()
+	metadata[MetadataKeyRepositoryConfigured] = len(specs) > 0
+	if len(specs) > 0 && specs[0].RepositoryPath != "" {
+		metadata[MetadataKeyRepositoryPath] = specs[0].RepositoryPath
+	}
+}
+
+// applyLaunchRepositoryContextToExecution refreshes trusted source identity
+// during promotion when the launch request carries repository specs. A
+// workspace-only promotion without specs retains its existing trusted context.
+func applyLaunchRepositoryContextToExecution(execution *AgentExecution, req *LaunchRequest) {
+	if execution == nil || req == nil {
+		return
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		return
+	}
+	execution.setMetadataValue(MetadataKeyRepositoryConfigured, true)
+	if specs[0].RepositoryPath == "" {
+		execution.deleteMetadataValues(MetadataKeyRepositoryPath)
+		return
+	}
+	execution.setMetadataValue(MetadataKeyRepositoryPath, specs[0].RepositoryPath)
 }
 
 // collectComparisonTargets projects the validated per-repository comparison
@@ -976,32 +1002,109 @@ func mergeRouteOverrideEnv(req *LaunchRequest) error {
 
 // newProgressCallback builds a PrepareProgressCallback that publishes progress events for a task/session.
 func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressCallback {
+	return m.newProgressCallbackForPreparation(taskID, sessionID, "", time.Time{})
+}
+
+func (m *Manager) newProgressCallbackForPreparation(taskID, sessionID, preparationID string, preparationStartedAt time.Time) PrepareProgressCallback {
 	return func(step PrepareStep, stepIndex int, totalSteps int) {
 		m.eventPublisher.PublishPrepareProgress(sessionID, &PrepareProgressEventPayload{
-			TaskID:         taskID,
-			SessionID:      sessionID,
-			StepName:       step.Name,
-			StepKind:       step.Kind,
-			RemotePlatform: step.RemotePlatform,
-			FailureCode:    step.FailureCode,
-			StepCommand:    step.Command,
-			StepIndex:      stepIndex,
-			TotalSteps:     totalSteps,
-			Status:         string(step.Status),
-			Output:         step.Output,
-			Error:          step.Error,
-			Warning:        step.Warning,
-			WarningDetail:  step.WarningDetail,
-			StartedAt:      step.StartedAt,
-			EndedAt:        step.EndedAt,
+			TaskID:               taskID,
+			SessionID:            sessionID,
+			PreparationID:        preparationID,
+			PreparationStartedAt: preparationStartedAtString(preparationStartedAt),
+			StepName:             step.Name,
+			StepKind:             step.Kind,
+			MCPProvider:          step.MCPProvider,
+			MCPServerID:          step.MCPServerID,
+			RemotePlatform:       step.RemotePlatform,
+			FailureCode:          step.FailureCode,
+			StepCommand:          step.Command,
+			StepIndex:            stepIndex,
+			TotalSteps:           totalSteps,
+			Status:               string(step.Status),
+			Output:               step.Output,
+			Error:                step.Error,
+			Warning:              step.Warning,
+			WarningDetail:        step.WarningDetail,
+			StartedAt:            step.StartedAt,
+			EndedAt:              step.EndedAt,
+			Timestamp:            time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	}
 }
 
+func preparationStartedAtString(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func mergePreparationAttemptResult(result *EnvPrepareResult, recorder *prepareProgressRecorder, workspacePath string) *EnvPrepareResult {
+	if recorder == nil {
+		return result
+	}
+	if result == nil {
+		result = &EnvPrepareResult{Success: true}
+	}
+	result.PreparationID = recorder.preparationID
+	result.PreparationStartedAt = recorder.preparationStartedAt
+	if workspacePath != "" {
+		result.WorkspacePath = workspacePath
+	}
+	result.Steps = recorder.Steps()
+	if !recorder.preparationStartedAt.IsZero() {
+		result.Duration = time.Since(recorder.preparationStartedAt)
+	}
+	return result
+}
+
+func persistedEnvironmentPrepareSteps(metadata map[string]interface{}) []PrepareStep {
+	steps := persistedPrepareSteps(metadata)
+	filtered := make([]PrepareStep, 0, len(steps))
+	for _, step := range steps {
+		if strings.HasPrefix(step.Kind, "agent_mcp_") {
+			continue
+		}
+		filtered = append(filtered, step)
+	}
+	return filtered
+}
+
+func persistedPrepareSteps(metadata map[string]interface{}) []PrepareStep {
+	value, exists := metadata["prepare_result"]
+	if !exists || value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var stored struct {
+		Steps []PrepareStep `json:"steps"`
+	}
+	if json.Unmarshal(data, &stored) != nil {
+		return nil
+	}
+	return append([]PrepareStep(nil), stored.Steps...)
+}
+
+func (m *Manager) newPreparationAttemptRecorder(taskID, sessionID string) *prepareProgressRecorder {
+	preparationID := uuid.NewString()
+	startedAt := time.Now().UTC()
+	recorder := newPrepareProgressRecorder(m.newProgressCallbackForPreparation(taskID, sessionID, preparationID, startedAt))
+	recorder.preparationID = preparationID
+	recorder.preparationStartedAt = startedAt
+	return recorder
+}
+
 type prepareProgressRecorder struct {
-	mu       sync.Mutex
-	steps    []PrepareStep
-	callback PrepareProgressCallback
+	mu                   sync.Mutex
+	steps                []PrepareStep
+	seededSteps          int
+	callback             PrepareProgressCallback
+	preparationID        string
+	preparationStartedAt time.Time
 }
 
 func newPrepareProgressRecorder(callback PrepareProgressCallback) *prepareProgressRecorder {
@@ -1015,6 +1118,46 @@ func (r *prepareProgressRecorder) Callback(offset int) PrepareProgressCallback {
 		if r.callback != nil {
 			r.callback(step, absoluteIndex, totalSteps+offset)
 		}
+	}
+}
+
+func (r *prepareProgressRecorder) AppendStep(step PrepareStep) int {
+	r.mu.Lock()
+	index := len(r.steps)
+	r.steps = append(r.steps, step)
+	total := len(r.steps)
+	callback := r.callback
+	r.mu.Unlock()
+	if callback != nil {
+		callback(step, index, total)
+	}
+	return index
+}
+
+func (r *prepareProgressRecorder) SeedSteps(steps []PrepareStep) {
+	if len(steps) == 0 {
+		return
+	}
+	r.mu.Lock()
+	if len(r.steps) == 0 {
+		r.steps = append(r.steps, steps...)
+		r.seededSteps = len(r.steps)
+	}
+	r.mu.Unlock()
+}
+
+func (r *prepareProgressRecorder) UpdateStep(index int, step PrepareStep) {
+	r.mu.Lock()
+	if index < 0 || index >= len(r.steps) {
+		r.mu.Unlock()
+		return
+	}
+	r.steps[index] = step
+	total := len(r.steps)
+	callback := r.callback
+	r.mu.Unlock()
+	if callback != nil {
+		callback(step, index, total)
 	}
 }
 
@@ -1036,6 +1179,12 @@ func (r *prepareProgressRecorder) Len() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.steps)
+}
+
+func (r *prepareProgressRecorder) CurrentLen() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.steps) - r.seededSteps
 }
 
 func (r *prepareProgressRecorder) Steps() []PrepareStep {
@@ -1467,7 +1616,7 @@ func (m *Manager) launchApplyPrepareResult(
 }
 
 func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvPrepareResult, recorder *prepareProgressRecorder, workspacePath string, success bool, err error) {
-	if req.ACPSessionID != "" && !shouldPrepareEnvironment(req) {
+	if req.ACPSessionID != "" && !shouldPrepareEnvironment(req) && recorder.CurrentLen() == 0 {
 		return
 	}
 
@@ -1477,14 +1626,22 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 	}
 
 	payload := &PrepareCompletedEventPayload{
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		Success:       success,
-		WorkspacePath: workspacePath,
-		Steps:         steps,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		PreparationID:        recorder.preparationID,
+		PreparationStartedAt: preparationStartedAtString(recorder.preparationStartedAt),
+		Success:              success,
+		WorkspacePath:        workspacePath,
+		Steps:                steps,
 	}
 	if result != nil {
 		payload.DurationMs = result.Duration.Milliseconds()
+		if payload.PreparationID == "" {
+			payload.PreparationID = result.PreparationID
+		}
+		if payload.PreparationStartedAt == "" {
+			payload.PreparationStartedAt = preparationStartedAtString(result.PreparationStartedAt)
+		}
 		if payload.WorkspacePath == "" {
 			payload.WorkspacePath = result.WorkspacePath
 		}
@@ -1492,8 +1649,40 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 	if err != nil {
 		payload.Success = false
 		payload.ErrorMessage = err.Error()
+		if result != nil {
+			result.Success = false
+			result.ErrorMessage = err.Error()
+		}
 	}
 	m.eventPublisher.PublishPrepareCompleted(req.SessionID, payload)
+}
+
+func (m *Manager) publishExecutionPrepareCompleted(execution *AgentExecution, recorder *prepareProgressRecorder, err error) {
+	if execution == nil || recorder == nil || (recorder.CurrentLen() == 0 && execution.PrepareResult == nil) {
+		return
+	}
+	result := mergePreparationAttemptResult(execution.PrepareResult, recorder, execution.WorkspacePath)
+	execution.PrepareResult = result
+	payload := &PrepareCompletedEventPayload{
+		TaskID:               execution.TaskID,
+		SessionID:            execution.SessionID,
+		ExecutionID:          execution.ID,
+		PreparationID:        recorder.preparationID,
+		PreparationStartedAt: preparationStartedAtString(recorder.preparationStartedAt),
+		Success:              result.Success,
+		DurationMs:           result.Duration.Milliseconds(),
+		WorkspacePath:        result.WorkspacePath,
+		Steps:                recorder.Steps(),
+	}
+	if err != nil {
+		payload.Success = false
+		payload.ErrorMessage = err.Error()
+		result.Success = false
+		result.ErrorMessage = err.Error()
+		execution.PrepareResult = result
+	}
+	m.eventPublisher.PublishPrepareCompleted(execution.SessionID, payload)
+	execution.prepareProgressRecorder = nil
 }
 
 // Launch launches a new agent for a task. Concurrent calls for the same
@@ -1654,6 +1843,13 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			execution.isResumedSession = true
 		}
 		execution.IsPassthrough = req.IsPassthrough
+		applyLaunchRepositoryContextToExecution(execution, req)
+		progressRecorder := m.newPreparationAttemptRecorder(execution.TaskID, execution.SessionID)
+		if execution.PrepareResult != nil {
+			progressRecorder.SeedSteps(persistedEnvironmentPrepareSteps(map[string]interface{}{
+				"prepare_result": SerializePrepareResult(execution.PrepareResult),
+			}))
+		}
 		execution.TaskScope = req.TaskScope
 		execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 		if !req.IsPassthrough {
@@ -1661,7 +1857,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			if executorType == "" {
 				executorType = execution.ExecutorType
 			}
-			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig, profileInfo, executorType); err != nil {
+			if err := m.materializeRuntimeProjectMCPWithPreparation(sharedCtx, execution, agentConfig, profileInfo, executorType, progressRecorder); err != nil {
+				m.publishExecutionPrepareCompleted(execution, progressRecorder, err)
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
 				execution.AgentArgs = nil
@@ -1670,6 +1867,12 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 				execution.IsPassthrough = false
 				return nil, err
 			}
+			if progressRecorder.CurrentLen() > 0 {
+				execution.PrepareResult = mergePreparationAttemptResult(execution.PrepareResult, progressRecorder, execution.WorkspacePath)
+				m.publishExecutionPrepareCompleted(execution, progressRecorder, nil)
+			}
+		} else {
+			execution.prepareProgressRecorder = progressRecorder
 		}
 		// Workspace-only executions can be created from a session row that stores
 		// the task assignee. The launch request carries the acting Office identity,
@@ -1744,7 +1947,10 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			return nil, err
 		}
 	}
-	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
+	progressRecorder := m.newPreparationAttemptRecorder(req.TaskID, req.SessionID)
+	if req.ACPSessionID != "" && !shouldPrepareEnvironment(req) {
+		progressRecorder.SeedSteps(persistedEnvironmentPrepareSteps(req.Metadata))
+	}
 
 	// Compose the request before preparation so setup scripts receive the same
 	// final snapshot that the runtime, agent, shell, and terminal will use.
@@ -1776,6 +1982,8 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			zap.String("session_id", req.SessionID))
 	}
 	if prepResult != nil {
+		prepResult.PreparationID = progressRecorder.preparationID
+		prepResult.PreparationStartedAt = progressRecorder.preparationStartedAt
 		progressRecorder.Merge(prepResult.Steps)
 		if err := m.launchApplyPrepareResult(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
@@ -1832,11 +2040,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		shipRemoteCopyfilesForLaunch(ctx, m.logger, &reqWithWorktree, execInstance.Client, runtimeProgress, progressRecorder)
 	}
 
-	if prepResult != nil {
-		prepResult.Steps = progressRecorder.Steps()
-	}
-	m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, true, nil)
-
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
 	execution, err := m.buildExecutionFromInstance(ctx, req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
@@ -1855,13 +2058,22 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		if execInstance != nil && execInstance.Client != nil {
 			execInstance.Client.Close()
 		}
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
 	if !reqWithWorktree.IsPassthrough {
-		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig, profileInfo, reqWithWorktree.ExecutorType); err != nil {
+		if err := m.materializeRuntimeProjectMCPWithPreparation(ctx, execution, agentConfig, profileInfo, reqWithWorktree.ExecutorType, progressRecorder); err != nil {
+			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 			m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "project MCP materialization failed")
 			return nil, err
 		}
+	}
+	prepResult = mergePreparationAttemptResult(prepResult, progressRecorder, workspacePath)
+	execution.PrepareResult = prepResult
+	if reqWithWorktree.IsPassthrough {
+		execution.prepareProgressRecorder = progressRecorder
+	} else {
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, prepResult == nil || prepResult.Success, nil)
 	}
 
 	// Track + persist + publish. Returns the rollback error if Add lost a race.
@@ -2578,7 +2790,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
 	}
-	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
+	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)

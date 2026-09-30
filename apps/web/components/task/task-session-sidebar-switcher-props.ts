@@ -44,7 +44,7 @@ export function buildTaskSwitcherProps(args: {
   workspaceContextAccessDenied: boolean;
   workspaceContextLoadErrorLabel: string;
   workspaceContextAccessDeniedLabel: string;
-  retryWorkspaceContext: () => void;
+  retryWorkspaceContext: (() => void) | undefined;
   totalTaskCount: number;
   selection: ReturnType<typeof useSidebarSelection>;
 }): TaskSwitcherComponentProps {
@@ -108,8 +108,8 @@ function resolveSidebarRetry(args: {
   archivedError: string | null;
   retryArchivedTasks: () => void;
   workspaceContextError: WorkspaceContextReadError | null;
-  retryWorkspaceContext: () => void;
-}): () => void {
+  retryWorkspaceContext: (() => void) | undefined;
+}): (() => void) | undefined {
   if (args.workspaceContextError) return args.retryWorkspaceContext;
   return args.retryArchivedTasks;
 }

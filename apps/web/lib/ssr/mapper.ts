@@ -167,6 +167,13 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       isLoading: false,
       steps: snapshot.steps.map(snapshotWorkflowStep),
       tasks,
+      taskCoverage: snapshot.task_coverage
+        ? {
+            ...snapshot.task_coverage,
+            complete:
+              snapshot.task_coverage.complete && tasks.length === snapshot.task_coverage.total,
+          }
+        : undefined,
     },
   };
 }

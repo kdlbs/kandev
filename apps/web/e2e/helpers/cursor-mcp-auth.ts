@@ -12,6 +12,7 @@ export async function createCursorMcpAuthFixture(apiClient: ApiClient) {
   if (!profile) throw new Error("Cursor MCP auth fixture has no seeded profile");
 
   return {
+    agentId: agent.id,
     agentName: agent.name,
     profileId: profile.id,
     async dispose() {

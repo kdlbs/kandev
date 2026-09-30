@@ -11,7 +11,11 @@ import {
 import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { routeMainWebSocketWithQueueAdmissionDrops } from "../../helpers/ws-drop";
-import { openQuickChatWithAgent, sendQuickChatMessage } from "./quick-chat-helpers";
+import {
+  openQuickChatSetup,
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+} from "./quick-chat-helpers";
 import { SessionPage } from "../../pages/session-page";
 
 registerSeparateQueueRows(test);
@@ -102,7 +106,8 @@ test.describe("queue admission reliability", () => {
   }) => {
     test.setTimeout(120_000);
     const drops = await routeMainWebSocketWithQueueAdmissionDrops(testPage);
-    const dialog = await openQuickChatWithAgent(testPage);
+    const dialog = await openQuickChatSetup(testPage);
+    await startQuickChatFromSetup(dialog, testPage);
     await sendQuickChatMessage(dialog, testPage, "/sleep 30");
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       {

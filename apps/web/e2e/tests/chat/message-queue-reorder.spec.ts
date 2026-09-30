@@ -92,7 +92,7 @@ async function expectRelativeOrder(panel: Locator, ...contents: string[]): Promi
 }
 
 test.describe("Queue reorder", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("drag-and-drop reorders queued messages and persists the order", async ({
     testPage,
@@ -183,7 +183,8 @@ test.describe("Queue reorder", () => {
     const handle = rowHandle(panel, "reorder first");
     const row = handle.locator("xpath=..");
     await handle.focus();
-    await testPage.keyboard.press("Space");
+    await expect(handle).toBeFocused();
+    await handle.press("Space");
     await expect(row).toHaveClass(/opacity-40/, { timeout: 5_000 });
     // dnd-kit announces every resolved drag target in its accessibility live
     // region. That makes the two internal steps below observable rather than
@@ -200,11 +201,11 @@ test.describe("Queue reorder", () => {
     await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
     const targetBeforeArrow = await announcedTarget();
 
-    await testPage.keyboard.press("ArrowDown");
+    await handle.press("ArrowDown");
     // The arrow has resolved the next droppable once the announced target changes.
     await expect.poll(announcedTarget, { timeout: 5_000 }).not.toBe(targetBeforeArrow);
 
-    await testPage.keyboard.press("Space");
+    await handle.press("Space");
     await expect(row).not.toHaveClass(/opacity-40/, { timeout: 5_000 });
 
     await expectRelativeOrder(panel, "reorder second", "reorder first");

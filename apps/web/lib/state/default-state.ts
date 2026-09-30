@@ -449,6 +449,8 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     workflows: { ...defaultState.workflows, ...initialState.workflows },
     workspaceContextRead: {
       ...defaultState.workspaceContextRead,
+      workspaceId: initialState.workspaces?.activeId ?? null,
+      generation: mergeWorkspaceContextGeneration(initialState),
       ...initialState.workspaceContextRead,
       pending: {
         ...defaultState.workspaceContextRead.pending,

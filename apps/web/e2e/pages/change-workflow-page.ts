@@ -16,10 +16,9 @@ export class ChangeWorkflowPage {
 
   async chooseWorkflow(workflowId: string) {
     const trigger = this.form.getByTestId("change-workflow-destination");
-    await expect(trigger).toBeVisible();
-    if (this.mobile) await trigger.tap();
-    else await trigger.click();
+    await this.openSelector(trigger);
     const option = this.option(workflowId);
+    await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
     await expect
@@ -34,21 +33,29 @@ export class ChangeWorkflowPage {
   async chooseStep(stepId: string) {
     const trigger = this.form.getByTestId("change-workflow-step");
     await expect(trigger).toBeEnabled();
-    if (this.mobile) await trigger.tap();
-    else await trigger.click();
+    await this.openSelector(trigger);
     const option = this.option(stepId);
+    await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
   }
 
   async chooseProfile(sourceProfileId: string, replacementProfileName: string) {
     const trigger = this.form.getByTestId(`change-workflow-profile-selector-${sourceProfileId}`);
-    await expect(trigger).toBeVisible();
-    if (this.mobile) await trigger.tap();
-    else await trigger.click();
+    await this.openSelector(trigger);
     const option = this.page.getByRole("option").filter({ hasText: replacementProfileName }).last();
+    await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+  }
+
+  private async openSelector(trigger: Locator) {
+    await expect(trigger).toBeVisible();
+    if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+      if (this.mobile) await trigger.tap();
+      else await trigger.click();
+    }
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
   }
 
   async submit() {

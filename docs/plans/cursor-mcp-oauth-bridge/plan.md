@@ -122,3 +122,20 @@ Review follow-up passed the full focused MCP bridge and lifecycle suites, their 
 - The supplied Cursor filesystem contract requires real-version compatibility evidence before claiming live OAuth success.
 - Credential entries are matched by exact server name without checking project MCP URLs or OAuth issuers. Users must trust project configurations launched with sharing enabled and revoke credentials through the provider if an unintended endpoint may have received them.
 - No automatic backend restart or global runtime release flag is part of this request.
+
+
+## Follow-up: native discovery and credential-bearing precedence
+
+The [discovery/auth repair](../cursor-mcp-discovery-auth-repair/plan.md)
+supersedes the filesystem-only native inventory assumption and newest-file-only
+credential conflict rule. All three repair work orders are complete, with package/lifecycle race tests,
+scoped lint and isolated native terminal/ACP fixture calls recorded there.
+Historical results above are separate from this follow-up evidence. Source-repository-only disable inheritance
+was explicitly selected by the user.
+
+## Follow-up: profile-authorized preparation
+
+The [agent MCP preparation package](../agent-mcp-preparation/plan.md) extends
+this delivery with profile selection, native server approval/readiness, task
+recovery and preservation of native credential refresh. Its results are tracked
+separately; the historical verification above does not prove the new behavior.

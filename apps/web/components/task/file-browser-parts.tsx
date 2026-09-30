@@ -21,14 +21,12 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
-import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
-import { measureFileTreeElement } from "./file-tree-measurement";
+import { measureFileTreeElement, observeFileTreeRect } from "./file-tree-measurement";
 import { InlineFileInput } from "./inline-file-input";
 import {
   FileContextMenu,
@@ -138,28 +136,10 @@ export function FileTreeNodeTouchActions({
 }) {
   const { t } = useTranslation();
   const deleteAction = useFileDeleteAction();
-  const { isMobile } = useResponsiveBreakpoint();
   const deletePendingRef = React.useRef(false);
   if (!showTouchActions || (!onAddToChatContext && !deleteAction)) return null;
 
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
-
-  if (deleteAction?.confirming && !deleteAction.isBulk && !isMobile) {
-    return (
-      <InlineConfirmActions
-        density="touch"
-        testId="file-delete-inline-confirmation"
-        ariaLabel={deleteAction.title}
-        description={deleteAction.description}
-        cancelLabel={deleteAction.cancelLabel}
-        confirmLabel={deleteAction.label}
-        confirmAriaLabel={deleteAction.title}
-        confirmTestId="file-delete-confirm"
-        onCancel={deleteAction.onCancel}
-        onConfirm={deleteAction.onConfirm}
-      />
-    );
-  }
 
   return (
     <DropdownMenu>
@@ -205,7 +185,7 @@ export function FileTreeNodeTouchActions({
             variant="destructive"
             className="min-h-11 cursor-pointer"
             onSelect={() => {
-              if (isMobile && !deleteAction.isBulk) deletePendingRef.current = true;
+              if (!deleteAction.isBulk) deletePendingRef.current = true;
               else deleteAction.onDelete();
             }}
           >
@@ -548,6 +528,7 @@ function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
       return row?.type === "create" ? `create:${row.parentPath}` : (row?.row.path ?? index);
     },
     measureElement: measureFileTreeElement,
+    observeElementRect: observeFileTreeRect,
     overscan: 5,
   });
 

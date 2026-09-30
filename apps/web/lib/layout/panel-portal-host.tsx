@@ -143,6 +143,15 @@ export function usePortalSlot(
  * subtrees can be garbage collected if the portal is ever released.
  */
 const scrollSnapshots = new WeakMap<Element, { top: number; left: number }>();
+const pendingScrollRestoreReleases = new WeakMap<HTMLElement, () => void>();
+const explicitScrollNavigationUntil = new WeakMap<HTMLElement, number>();
+
+/** Gives an explicit navigation scroll priority over a current or imminent restore. */
+export function releasePortalScrollRestoration(element: HTMLElement): void {
+  pendingScrollRestoreReleases.get(element)?.();
+  scrollSnapshots.set(element, { top: element.scrollTop, left: element.scrollLeft });
+  explicitScrollNavigationUntil.set(element, Date.now() + RESTORE_WINDOW_MS + 500);
+}
 
 /** Window during which we keep re-applying snapshots after attach. */
 const RESTORE_WINDOW_MS = 1500;
@@ -167,6 +176,12 @@ function restorePortalScroll(portal: Element): () => void {
   while (node) {
     const snap = scrollSnapshots.get(node);
     if (snap && (snap.top > 0 || snap.left > 0)) {
+      const navigationExpiresAt = explicitScrollNavigationUntil.get(node);
+      explicitScrollNavigationUntil.delete(node);
+      if (navigationExpiresAt !== undefined && navigationExpiresAt > Date.now()) {
+        node = walker.nextNode() as HTMLElement | null;
+        continue;
+      }
       targets.push({ el: node, snap });
     }
     node = walker.nextNode() as HTMLElement | null;
@@ -178,6 +193,7 @@ function restorePortalScroll(portal: Element): () => void {
   // so subsequent ResizeObserver/rAF callbacks won't fight a deliberate user
   // scroll (including scrolling upward, away from the snapshot position).
   const pending = new Set(targets.map((t) => t.el));
+  const releaseByElement = new Map<HTMLElement, () => void>();
   let cancelled = false;
   let stopId = 0;
   let ro: ResizeObserver | null = null;
@@ -186,7 +202,21 @@ function restorePortalScroll(portal: Element): () => void {
     cancelled = true;
     ro?.disconnect();
     window.clearTimeout(stopId);
+    for (const { el } of targets) {
+      if (pendingScrollRestoreReleases.get(el) === releaseByElement.get(el)) {
+        pendingScrollRestoreReleases.delete(el);
+      }
+    }
   };
+
+  for (const { el } of targets) {
+    const release = () => {
+      pending.delete(el);
+      if (pending.size === 0) stop();
+    };
+    releaseByElement.set(el, release);
+    pendingScrollRestoreReleases.set(el, release);
+  }
 
   const apply = () => {
     for (const { el, snap } of targets) {

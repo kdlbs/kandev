@@ -24,6 +24,8 @@ const HOST_SERIES_COLORS = [
 ] as const;
 const CHART_MARGIN = { left: 0, right: 8 } as const;
 const BAR_RADIUS: [number, number, number, number] = [3, 3, 0, 0];
+// i18n-exempt: CSS layout classes, not user-facing copy.
+const CHART_PLOT_CLASS_NAME = "h-52 min-h-52 w-full min-w-0 max-w-full";
 
 function seriesKey(index: number): string {
   return `series_${index}`;
@@ -152,7 +154,7 @@ export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutpu
         <h4 className="text-xs font-medium text-foreground">{block.title}</h4>
         <p className="text-[11px] leading-relaxed text-muted-foreground">{block.summary}</p>
       </figcaption>
-      <div ref={plotRef} className="h-52 min-h-52 w-full min-w-0 max-w-full">
+      <div ref={plotRef} data-testid="rich-output-chart-plot" className={CHART_PLOT_CLASS_NAME}>
         {shouldMountPlot && (
           <ChartContainer
             config={config}

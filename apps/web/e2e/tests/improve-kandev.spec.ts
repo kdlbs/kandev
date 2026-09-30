@@ -225,11 +225,16 @@ test.describe("Improve Kandev dialog", () => {
     await apiClient.updateWorkspace(staging.id, { name: "Improve Kandev" });
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     const dedicated = staging;
+    let releaseBootstrap: () => void = () => {};
+    const bootstrapHold = new Promise<void>((resolve) => {
+      releaseBootstrap = resolve;
+    });
     await mockImproveKandevApis(testPage, seedData, {
       workspaceId: dedicated.id,
       workflowId: dedicatedWorkflow.id,
       issueWorkflowId: dedicatedWorkflow.id,
       repositoryId: dedicatedRepo.id,
+      bootstrapHold,
     });
 
     await testPage.goto("/");
@@ -240,14 +245,22 @@ test.describe("Improve Kandev dialog", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await expect(
+      createDialog.getByText(/Preparing kandev repository in background/i),
+    ).toBeVisible();
 
     const title = "Isolate improve tasks in their own workspace";
-    await createDialog.getByTestId("task-title-input").fill(title);
-    await createDialog
-      .getByTestId("task-description-input")
-      .fill("Improve Kandev tasks must not mix with regular work.");
+    const titleInput = createDialog.getByTestId("task-title-input");
+    const descriptionInput = createDialog.getByTestId("task-description-input");
+    await titleInput.fill(title);
+    await descriptionInput.fill("Improve Kandev tasks must not mix with regular work.");
+    releaseBootstrap();
     const submit = createDialog.getByTestId("submit-start-agent");
     await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await expect(titleInput).toHaveValue(title);
+    await expect(descriptionInput).toContainText(
+      "Improve Kandev tasks must not mix with regular work.",
+    );
     await submit.click();
     await expect(createDialog).toBeHidden({ timeout: 10_000 });
 

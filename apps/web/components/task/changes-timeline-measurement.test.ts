@@ -72,7 +72,9 @@ describe("Changes timeline measurement", () => {
     };
     measureElementMock.mockReturnValueOnce(0);
 
-    expect(measureFileTreeElement({} as HTMLDivElement, undefined, instance as never)).toBe(46);
+    expect(
+      measureFileTreeElement({} as HTMLDivElement, {} as ResizeObserverEntry, instance as never),
+    ).toBe(46);
   });
 
   it("uses a positive estimate when neither the measurement nor cache is positive", () => {
@@ -83,10 +85,12 @@ describe("Changes timeline measurement", () => {
     };
     measureElementMock.mockReturnValueOnce(0);
 
-    expect(measureFileTreeElement({} as HTMLDivElement, undefined, instance as never)).toBe(32);
+    expect(
+      measureFileTreeElement({} as HTMLDivElement, {} as ResizeObserverEntry, instance as never),
+    ).toBe(32);
   });
 
-  it("prefers a current positive measurement", () => {
+  it("prefers a current positive observer measurement", () => {
     const instance = {
       indexFromElement: () => 3,
       options: { getItemKey: (index: number) => `row-${index}`, estimateSize: () => 32 },
@@ -94,6 +98,8 @@ describe("Changes timeline measurement", () => {
     };
     measureElementMock.mockReturnValueOnce(51);
 
-    expect(measureFileTreeElement({} as HTMLDivElement, undefined, instance as never)).toBe(51);
+    expect(
+      measureFileTreeElement({} as HTMLDivElement, {} as ResizeObserverEntry, instance as never),
+    ).toBe(51);
   });
 });

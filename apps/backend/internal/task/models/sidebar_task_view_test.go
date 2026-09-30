@@ -16,6 +16,11 @@ func TestSidebarTaskViewQueryValidation(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid query rejected: %v", err)
 	}
+	korean := valid
+	korean.Locale = "ko"
+	if err := korean.Validate(); err != nil {
+		t.Fatalf("korean query rejected: %v", err)
+	}
 
 	tests := []struct {
 		name  string

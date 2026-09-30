@@ -144,6 +144,8 @@ test.describe("Markdown text wrapping", () => {
     const firstColumnCode = table.locator("tbody tr").nth(1).locator("td").first().locator("code");
 
     await expect(table).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle();
+    await expect(firstColumnCode).toHaveText("strictDepBuilds: true");
     expect(await tableWrapper.evaluate((element) => element.clientWidth)).toBe(255);
     expect(
       await firstColumnCode.evaluate((code) => {

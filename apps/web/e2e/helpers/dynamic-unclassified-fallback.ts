@@ -44,6 +44,24 @@ export async function createDynamicFallbackProfile(
   return { dynamicProfile, firstCandidate, secondCandidate };
 }
 
+export async function cleanupDynamicFallbackProfiles(
+  apiClient: ApiClient,
+  dynamicProfileIds: string[],
+  candidateProfileIds: string[],
+) {
+  const failures: unknown[] = [];
+  for (const profileId of [...dynamicProfileIds, ...candidateProfileIds]) {
+    try {
+      await apiClient.deleteAgentProfile(profileId, true);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Failed to clean up dynamic fallback test profiles");
+  }
+}
+
 export async function startDynamicFallbackSession(
   testPage: Page,
   apiClient: ApiClient,

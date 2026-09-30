@@ -282,9 +282,15 @@ func TestApplyPassthroughMCPPreparesCursorAuth(t *testing.T) {
 }
 
 func TestResumePassthroughCommandPreparesCursorAuth(t *testing.T) {
+	const revision = "1111111111111111111111111111111111111111"
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	workspace := t.TempDir()
+	sourceRepository := t.TempDir()
+	unrelatedFolder := t.TempDir()
+	cursorHome := filepath.Join(home, ".cursor")
+	writeCursorMCPDisabledForPath(t, cursorHome, sourceRepository, []string{"plugin-atlassian-atlassian"})
+	writeCursorNativeCachePlugin(t, cursorHome, revision, `{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"}}}`)
 	cursorProjects := filepath.Join(home, ".cursor", "projects")
 	if err := os.MkdirAll(filepath.Join(cursorProjects, "source-project"), 0o755); err != nil {
 		t.Fatal(err)
@@ -302,25 +308,35 @@ func TestResumePassthroughCommandPreparesCursorAuth(t *testing.T) {
 		}},
 	}
 	execution := &AgentExecution{
-		ID:             "exec-cursor-resume",
-		WorkspacePath:  workspace,
-		ExecutorType:   string(models.ExecutorTypeLocal),
-		standalonePort: 45678,
+		ID:                   "exec-cursor-resume",
+		WorkspacePath:        workspace,
+		WorkspaceSourceRoots: []string{unrelatedFolder},
+		ExecutorType:         string(models.ExecutorTypeLocal),
+		standalonePort:       45678,
+		metadata:             map[string]interface{}{MetadataKeyRepositoryPath: sourceRepository},
 	}
+	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	resolved := &resolvedPassthrough{
 		agentConfig: terminalAgent,
 		agent:       terminalAgent,
 		pt:          terminalAgent.PassthroughConfig(),
-		profile:     &AgentProfileInfo{CursorMCPAuthEnabled: true},
+		profile:     &AgentProfileInfo{CursorMCPAuthEnabled: true, CursorPluginsMCPEnabled: true},
 	}
 
 	mgr := newTestManager(t)
+	mgr.cursorInventoryLoader = func(context.Context) (mcpconfig.CursorNativeInventory, error) {
+		return cursorInventoryForRevision(revision), nil
+	}
 	if _, err := mgr.resumePassthroughCommand(context.Background(), execution, resolved, true); err != nil {
 		t.Fatalf("resumePassthroughCommand: %v", err)
 	}
 	destination := cursorMCPAuthDestinationForTest(t, cursorProjects, workspace)
 	if _, err := os.Readlink(destination); err != nil {
 		t.Fatalf("resumed terminal Cursor auth link was not prepared: %v", err)
+	}
+	materialized := readCursorProjectMCPForTest(t, filepath.Join(workspace, ".cursor", "mcp.json"))
+	if _, imported := materialized["plugin-atlassian-atlassian"]; imported {
+		t.Fatal("resumed terminal imported the source-disabled native plugin")
 	}
 }
 
