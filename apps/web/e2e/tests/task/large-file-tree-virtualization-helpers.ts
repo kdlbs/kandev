@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { expect, type Locator } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
@@ -137,6 +137,9 @@ export async function setupLargeFileTreeTask({
   backend: BackendContext;
   title: string;
 }): Promise<SessionPage> {
+  // Earlier specs can leave unpublished commits in the worker-shared checkout.
+  // Start from the immutable fixture baseline before fast-forwarding its origin.
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   const branch = `e2e-large-file-tree-${randomUUID()}`;
   seedLargeFileTree(backend, branch);
   const response = await apiClient.rawRequest(

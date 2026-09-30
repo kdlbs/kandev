@@ -15,7 +15,7 @@ on:
     types: [checks_requested]
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
   # default sharded run uses the same ref the user picks in the dispatch UI.
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
