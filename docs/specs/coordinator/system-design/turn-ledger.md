@@ -95,7 +95,7 @@ changes a stored trigger (`001.2`).
 
 If the start event was lost, the completion handler inserts the row with the
 same `ON CONFLICT` rule and derives the stamp at that time. The trigger match
-is the same but reads the unattended-turn row in any status except `send_failed`
+is the same but reads the unattended-turn row in any status except `send_failed` (the acceptance criterion states this exclusion; a `send_failed` or pause-settled unbound row never started a turn, so letting it match would label a manager's message a `wake`)
 and except a row settled while unbound (`session_turn_id IS NULL` and `outcome`
 set: a failed or pause-stopped delivery never started a turn, so such a row
 cannot turn a manager's message into a `wake` or lend it `blocked`), since turn end may already have settled

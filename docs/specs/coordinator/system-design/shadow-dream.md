@@ -60,8 +60,9 @@ key `(item_id, user_id)`.
 
 `dream.Scheduler.Tick(coordinatorID)` runs at the end of each wake backstop pass
 (it adds a call in the pass, never a second timer). The pass visits every
-coordinator with `shadow_dream_enabled`, a `running` dream row or a `running`
-replay result row (`coordinator_replay_results`, so a manual or orphaned replay is
+coordinator with `shadow_dream_enabled`, a `running` dream row, a `running`
+replay result row or `paused_at` set (so a pending `Stopper.Stop` retry reaches
+a paused coordinator whose autonomy is off) (`coordinator_replay_results`, so a manual or orphaned replay is
 settled too), whatever its
 autonomy, so an expired lease is found even when autonomy has been turned off. The visit
 runs only the dream tick and the `Stopper.Stop` call; wake delivery and every

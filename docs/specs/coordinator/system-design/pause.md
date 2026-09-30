@@ -130,16 +130,27 @@ migration of this work order, and the two code paths change as follows.
 
 - `boundTurnOutcome`: `stop_requested_at` set gives `stopped_at_ceiling`
   (unchanged, so a turn the ceiling already marked keeps that outcome); else
-  `pause_requested_at` set and the session state read as cancelled (or absent)
-  gives `stopped_by_pause`; any other state keeps the ordinary outcome
-  (`completed`, `failed`) even when `pause_requested_at` is set, so a turn that
-  finished on its own after the mark is a completed turn, its wakes stay handled
-  and the ledger verdict is its own, not `blocked`.
-- `settleBoundTurn`: when its conditional settle changed a row whose outcome is
-  `stopped_by_pause`, it returns the turn's wakes (`coordinator_wakes.turn_id`
+  `pause_cancel_at` set gives `stopped_by_pause` whatever the session state
+  reads (`CancelTurn` leaves the session `WAITING_FOR_INPUT`, so the state can
+  never tell a Pause stop from a normal end); else the session-state read as
+  today. `pause_cancel_at` is a second nullable column of this work order, the
+  cancel intent: only the code that is about to call `CancelTurn` for Pause
+  writes it (the Stopper and the `OnAccepted` late-send path, below), always
+  before the call and conditionally (`WHERE outcome IS NULL AND
+  stop_requested_at IS NULL`), so the turn-end handler that runs when the cancel
+  lands already sees it. `pause_requested_at` alone (a mark that cancelled
+  nothing) never changes an outcome, and a turn that ends on its own after that
+  mark is an ordinary `completed` turn whose wakes stay handled.
+- `settleBoundTurn` (`turn_end.go`) stays the one settle path for a bound turn,
+  with its cost recompute, counter, publish and kick. Its store call
+  `Store.settleOpenTurn` (`store_turns.go`), when the outcome is
+  `stopped_by_pause`, also returns the turn's wakes (`coordinator_wakes.turn_id`
   equal to the row id) to `pending` with `turn_id` cleared and kinds and created
-  times unchanged, in the same transaction as the settle. `Stopper` and turn end
-  therefore share one settle path and either may run first (`002.2`).
+  times unchanged, in the same transaction as the settle. The turn-end handler
+  and the Stopper both call `settleBoundTurn`, so either may run first and the
+  loser changes nothing; the outcome is the same either way because it comes
+  from `pause_cancel_at`, not from timing (`002.2`). The ceiling keeps its own
+  `settleTurnStoppedAtCeiling` (`store_ceiling.go`), which returns no wakes.
 - `checkCeiling` is unchanged: it reads `stop_requested_at` only.
 
 `pause.Stopper.Stop(coordinatorID)` runs after the state commit, and again every
@@ -149,8 +160,8 @@ the row's binding columns, the only state that tells the stages apart:
 
 | Row | Meaning | Stop does |
 | --- | --- | --- |
-| `session_turn_id` set | running | Sets `pause_requested_at` (conditional, `WHERE pause_requested_at IS NULL AND outcome IS NULL`), cancels the session turn through the `CancelTurn` path the spend ceiling uses ([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)), then, after a successful cancel, settles the row directly as `stopped_by_pause` with the wakes back to `pending` (the ceiling does the same with its own settle), so the outcome never depends on when the session state catches up. `ErrTurnNotActive` from `CancelTurn` is not an error and settles nothing, as in the ceiling: the turn is ending on its own and turn end settles it with the ordinary outcome above; any other cancel error is logged and the next pass retries (`002.2`) |
-| both bindings NULL | started, maybe not yet sent | Sets `pause_requested_at` and does nothing else until the row is 2 minutes old; then `settleUnsentTurn(id, 'stopped_by_pause')`, which returns its wakes to `pending` in the same transaction and matches only while `session_turn_id IS NULL AND reserved_turn_id IS NULL`, so it loses to a binding or a reservation that arrived between the read and the settle |
+| `session_turn_id` set | running | Sets `pause_requested_at` (conditional, `WHERE pause_requested_at IS NULL AND outcome IS NULL`) and `pause_cancel_at` (conditional as above), cancels the session turn through the `CancelTurn` path the spend ceiling uses ([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)), then, after a successful cancel, calls `settleBoundTurn`, which settles `stopped_by_pause` with the wakes back to `pending`. `ErrTurnNotActive` from `CancelTurn` is not an error: the turn is ending on its own, so the Stopper clears `pause_cancel_at` (`WHERE outcome IS NULL`) and settles nothing, and turn end settles with the ordinary outcome. A turn end that lands between the write and the clear settles `stopped_by_pause` with its wakes `pending`; that is accepted, because the wakes are redelivered after Resume and a wake is an invitation, not a record. Any other cancel error is logged, leaves `pause_cancel_at` set and the next pass retries (`002.2`) |
+| both bindings NULL | started, maybe not yet sent | Sets `pause_requested_at` and does nothing else until the row is 2 minutes old; then `Store.settlePausedUnsentTurn(id)` (new, `store_turns.go`), which sets `stopped_by_pause`, returns the row's wakes to `pending` in the same transaction and matches only `outcome IS NULL AND session_turn_id IS NULL AND reserved_turn_id IS NULL`, so it loses to a binding or a reservation that arrived between the read and the settle. The existing `settleUnsentTurn` is not changed: `settleNotSent` keeps closing reserved rows as `send_failed` and `interrupted`, so a pause never leaves a row that blocks delivery |
 | `reserved_turn_id` set, `session_turn_id` NULL | send in flight | Sets `pause_requested_at` only; the next pass sees the row bound (running, cancelled as above) or settled |
 
 Setting `pause_requested_at` never settles anything. The accepted-turn binding
@@ -166,12 +177,20 @@ state and, when it is paused, cancels the accepted session turn through
 `CancelTurn` (an `ErrTurnNotActive` result is ignored) and counts
 `coordinator_pause_late_send_total`; when it is not paused the turn runs as an
 unbound turn of a coordinator that was resumed, which the ledger records as a
-`message` turn. Two minutes exceeds the orchestrator's dispatch time, so the path
+`message` turn. The cancelled late turn has no open unattended row to settle, so
+it is an ordinary `message` turn in the ledger: outcome and verdict come from
+the session state at completion by the ordinary precedence, and Pause does not
+relabel it. Its wakes were already returned to `pending` by the settle of the
+not-sent row. Two minutes exceeds the orchestrator's dispatch time, so the path
 is a residual, not a designed one; task-05 tests that a late accepted send on a
 paused coordinator is cancelled. The ledger's
 completion maps a `stopped_by_pause` outcome to verdict `blocked`
 ([turn ledger](turn-ledger.md#completion-and-verdict)). Stop is idempotent: every
-statement is conditional on the row still being open. If the ceiling and Pause
+statement is conditional on the row still being open. In one backstop pass
+`Stopper.Stop` runs before the not-sent recovery (`recoverUnboundTurn`), and both
+settle conditionally on `outcome IS NULL`, so for one unsent row exactly one
+wins and the other matches nothing; the winner only decides the label
+(`stopped_by_pause` or `send_failed`), the wakes return to `pending` either way. If the ceiling and Pause
 both mark one row, `stopped_at_ceiling` wins and the row's wakes follow the
 phase 3 ceiling settle.
 
@@ -225,7 +244,7 @@ second line (`003.4`). Copy is in six locales; no em dash.
 | Failure | Behaviour |
 | --- | --- |
 | State read fails | Paused for all act-on-its-own points, logged |
-| Stop fails | State stays paused; failure logged; the turn is stopped by the next ceiling or completion; the next delivery pass still refuses to start another |
+| Stop fails | State stays paused; failure logged; the next backstop pass retries the stop, and the turn can also end by the ceiling or on its own; the next delivery pass still refuses to start another |
 | Concurrent pause and resume | Commit order decides |
 
 A Stop that fails leaves a turn running after the state says paused. It does not

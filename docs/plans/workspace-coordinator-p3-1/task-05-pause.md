@@ -51,19 +51,29 @@ turn, and the Pause and Resume controls.
 - Web: the fourth state of the autonomy strip and the Autonomy section
   control, phone layout, copy in six locales.
 - Existing code changed: `coordinator_unattended_turns` gains nullable
-  `pause_requested_at` (an idempotent column add in `Store.migratePhase2`, `store_phase2_schema.go`, replay test);
-  `boundTurnOutcome` in `turn_end.go` maps `pause_requested_at` (when
-  `stop_requested_at` is unset and the session state reads cancelled or absent)
-  to `stopped_by_pause` and keeps `completed` or `failed` otherwise; `settleBoundTurn`
-  returns the wakes of a row it settles `stopped_by_pause` to `pending` in the
-  settle transaction; `ceiling.go` stays reading `stop_requested_at` only, with a
+  `pause_requested_at` and `pause_cancel_at` (idempotent column adds in `Store.migratePhase2`, `store_phase2_schema.go`, replay test);
+  `boundTurnOutcome` in `turn_end.go` maps `pause_cancel_at` (when
+  `stop_requested_at` is unset) to `stopped_by_pause` whatever the session state;
+  `Store.settleOpenTurn` (`store_turns.go`) returns the wakes of a row it settles
+  `stopped_by_pause` to `pending` in the settle transaction, and `settleBoundTurn`
+  stays the one settle path for the Stopper and turn end; new
+  `Store.settlePausedUnsentTurn` (`store_turns.go`) settles an unbound, unreserved
+  row; the existing `settleUnsentTurn` and `settleNotSent` are unchanged;
+  `Stopper.Stop` runs before `recoverUnboundTurn` in the backstop pass; `ceiling.go` stays reading `stop_requested_at` only, with a
   test that a turn marked by Pause alone is never settled `stopped_at_ceiling`
-  and one marked by both is (the ceiling wins); tests for a turn that finishes
-  on its own after the pause mark (`completed`, wakes stay handled), for
-  `ErrTurnNotActive` from the stop (nothing settled), for a reservation landing
-  before `settleUnsentTurn` (not settled) and for a late accepted send on a
-  paused coordinator (cancelled, `coordinator_pause_late_send_total`).
-- Stop by binding state (`pause_requested_at`, `settleUnsentTurn` after 2
+  and one marked by both is (the ceiling wins); tests for a stop whose session state reads `WAITING_FOR_INPUT` after the cancel
+  and turn end settling first (`stopped_by_pause`, wakes `pending`), for a turn
+  that finishes on its own after the pause mark with no `pause_cancel_at`
+  (`completed`, wakes stay handled), for `ErrTurnNotActive` from the stop
+  (`pause_cancel_at` cleared, nothing settled), for a reservation landing before
+  `settlePausedUnsentTurn` (not settled), for `settleNotSent` still closing a
+  reserved row as `send_failed` and `interrupted` so the next delivery is not
+  blocked, for the Stopper and `recoverUnboundTurn` racing on one unsent row
+  (one wins, the other no-ops, wakes `pending`), for a paused autonomy-off
+  coordinator whose first Stop failed being retried by the backstop, and for a
+  late accepted send on a paused coordinator (cancelled,
+  `coordinator_pause_late_send_total`, ledger row an ordinary `message` turn).
+- Stop by binding state (`pause_requested_at`, `settlePausedUnsentTurn` after 2
   minutes, cancel on accepted binding), the in-memory known-paused set for the
   flag-off read-error carve-out, and the read-only "Paused" badge shown with the
   flag off, per the [pause design](../../specs/coordinator/system-design/pause.md).
