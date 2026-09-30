@@ -126,8 +126,10 @@ computed on read.
 
 - the `DecisionObserver` hook with decision `rejected`, `edited` or `undone`;
 - `task.moved` for tasks the coordinator created or moved (the same activity
-  lookup as the grader). The mover is read from the event's user field; an
-  event without one is counted `coordinator_override_ignored_total{reason=
+  lookup as the grader). `task.moved` carries no actor, so the mover is read from the step-transition
+  history row of that move (`SessionStepHistory`, its actor kind and, when it
+  records one, the acting user id); a move whose row is missing, whose actor is
+  an agent or the system, or that names no user is counted `coordinator_override_ignored_total{reason=
   "actor_unknown"}` and stores nothing.
 
 Each candidate goes through the manager check the automatic class already uses
@@ -181,8 +183,8 @@ each `{value, numerator, denominator, null_reason}`:
 
 A zero denominator gives `null` with `no_data`; an unknown cost among the inputs
 `cost_unknown`; fewer than 5 rated items `too_few` (`003.2`). Dollars per merged task includes the cost of dream turns, since they are
-coordinator turns; shadow items count for agreement only from dreams that started
-in the window. The median for an
+coordinator turns, counted by turn start time; shadow items count for agreement
+by their dream's start time. The median for an
 even count is the mean of the two middle values rounded down to the second;
 computed in Go from a bounded set (at most 2000 proposals in the window, newest
 first, the count reported).

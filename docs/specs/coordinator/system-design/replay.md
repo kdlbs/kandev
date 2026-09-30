@@ -155,7 +155,11 @@ integer thousandths to avoid float boundary flips: 0.05 is 50.
 `guard` (`pass`, `blocked`, `unmeasured`), `verdict`, `reason` (for
 `unmeasured`: `budget`, `cost_unknown`, `too_few`, `no_cases`),
 `prompt_version`, `cost_subcents`, `created_at`.
-One row per replay, written after all runs in one transaction (`002.6`).
+The row is inserted `running` before the first run and its `cost_subcents` is
+updated after every run, so a crash mid-replay keeps the spend already incurred
+(the ceiling never undercounts by more than one run); the rest of the row is
+written at the end (`002.6`). A row still `running` after 30 minutes is settled
+`unmeasured`, reason `interrupted`.
 Retention is 400 days, deleted with the coordinator.
 
 ## Planted suite

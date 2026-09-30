@@ -185,7 +185,7 @@ need condition 1 only and may start when phase 3 merges; work orders 03, 04 and
 
 ## Consequences
 
-- Ten new tables and columns on `coordinators`, `coordinator_proposals`,
+- Ten new tables (`coordinator_turns`, `_turn_calls`, `_turn_snapshots`, `_outcomes`, `_feedback`, `_replay_results`, `_dreams`, `_dream_items`, `_dream_ratings`, `_watch_projects`) and columns on `coordinators`, `coordinator_proposals`,
   `coordinator_activity` and `coordinator_unattended_turns`, plus observers,
   a retention job and, behind the flag, a scheduler tick, routes and the
   Learning section.

@@ -93,8 +93,10 @@ the unattended-turn row already records it.
 
 The turn outcome is read from the unattended-turn row's `outcome` when one is
 bound (`completed`, `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`,
-`stopped_by_pause`), else from the `turn.completed` event's status, else
-`unknown`; `task_session_turns` carries no outcome column, so it is never a
+`stopped_by_pause`), else from the session's state read at completion (`failed`, `cancelled`
+or ended normally), else `unknown` when that read fails or is ambiguous, so an
+attended turn whose state cannot be read is `completed`-unknown, never
+`blocked` by guess (the `turn.completed` payload carries no status); `task_session_turns` carries no outcome column, so it is never a
 source.
 
 ### Ordering and ties
@@ -107,6 +109,14 @@ never flips between two reads of the same page. Call rows order by `id`
 id) < cursor`.
 
 ## Completion and verdict
+
+Before computing the verdict, completion drains the call queue for this turn
+(flushes entries enqueued before the completion event, waiting at most 2
+seconds on the writer, never on the turn path since completion runs on the
+event subscription); calls still unwritten after that are absent from the
+verdict input, and the verdict falls back to proposals and activity rows, which
+are written synchronously by the guarded call. `proposed` and `acted` depend
+only on those rows, so the queue can change only `blocked` by refused calls.
 
 Completion runs as one conditional update: `UPDATE coordinator_turns SET
 finished_at = ?, outcome = ?, verdict = ? WHERE id = ? AND finished_at IS NULL`.
@@ -228,8 +238,9 @@ effective too (`005.1`). Recording (recorder, calls, snapshots, the outcome
 grader, the retention job) starts under `coordinator` and `coordinatorPhase2`
 alone (`005.2`). Everything read side registers only when the flag is
 effective: the tool, HTTP routes (which answer 404 otherwise through the
-router's absent-route path), screens, the Learning section, Projects and Pause.
-A flag-off boot therefore differs from phase 3 only by extra write-side
+router's absent-route path), screens, and the Learning section, Projects and
+Pause controls. The Pause gate and project filter enforce stored state whatever
+the flag (see the ADR's flag boundary). A flag-off boot therefore differs from phase 3 only by extra write-side
 tables, columns and observers.
 
 ## Retention

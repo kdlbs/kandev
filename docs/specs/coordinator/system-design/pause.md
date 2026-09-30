@@ -110,7 +110,11 @@ wakes is delivered at the pace the phase 3 admission already limits.
 ## Pause and the running turn
 
 On a successful pause, `pause.Stopper.Stop(coordinatorID)` runs after the
-state commit: if the coordinator has a running unattended turn, it cancels the
+state commit. A reserved turn that has not been sent has no session turn to
+cancel: Stop releases the reservation, sets the unattended-turn row
+`stopped_by_pause` and returns its wakes to `pending`; if the send is already in
+flight it is treated as running and cancelled once its session turn exists (the
+next minute's call). If the coordinator has a running unattended turn, it cancels the
 session turn through the same `CancelTurn` path the spend ceiling uses
 ([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)), settles the
 unattended-turn row with outcome `stopped_by_pause`, and returns the turn's
