@@ -436,6 +436,57 @@ describe("ActionMessage recovery settlement", () => {
   });
 });
 
+describe("ActionMessage active legacy recovery ownership", () => {
+  it("keeps an active legacy recovery row compact when the owner has no stamp", () => {
+    const legacyMessage = recoveryMessage();
+    legacyMessage.id = "legacy-recovery-owner";
+    legacyMessage.metadata = {
+      variant: "error",
+      recovery_actions: true,
+      error_output: "The provider request failed.",
+      actions: [
+        {
+          type: "archive_task",
+          label: "Archive task",
+          test_id: "legacy-recovery-archive-button",
+        },
+      ],
+    };
+    const session = {
+      id: TEST_SESSION_ID,
+      task_id: TEST_TASK_ID,
+      state: "FAILED",
+      error_message: "",
+      metadata: {},
+    } as unknown as TaskSession;
+
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { [TEST_SESSION_ID]: session } },
+            messages: { bySession: { [TEST_SESSION_ID]: [legacyMessage] }, metaBySession: {} },
+          } as Partial<AppState>
+        }
+      >
+        <SessionRecoveryProvider
+          session={session}
+          messages={[legacyMessage]}
+          taskId={TEST_TASK_ID}
+          enabled
+        >
+          <ActionMessage comment={legacyMessage} />
+        </SessionRecoveryProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("session-recovery-history").textContent).toContain(
+      "This failure is explained in the recovery card above.",
+    );
+    expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
+  });
+});
+
 describe("ActionMessage historical typed recovery evidence", () => {
   it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
     const first = recoveryHistoryMessage("failure-first");

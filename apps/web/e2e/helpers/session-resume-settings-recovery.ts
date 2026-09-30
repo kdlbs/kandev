@@ -509,6 +509,13 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       "read-only mode",
       { timeout: 15_000 },
     );
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "FAILED",
+      message: "read-only recovery should settle before Resume is requested",
+      timeout: 60_000,
+    });
     if (options.prCapture?.capturing) {
       await waitForFiniteAnimations(recoveryCard);
       await options.prCapture.screenshot("read-only-recovery-card", {
@@ -549,6 +556,13 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
         },
       )
       .toBe("error");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "FAILED",
+      message: "the rejected provider load should settle before Resume is retried",
+      timeout: 60_000,
+    });
     await expect(recoveryCard.getByRole("heading")).toHaveText(
       /^(Saved model unavailable|Session startup needs attention)$/,
     );

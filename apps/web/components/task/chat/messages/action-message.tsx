@@ -86,7 +86,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   const historyState = resolveRecoveryHistoryState(
     comment,
     metadata,
-    owner?.model?.stamp,
+    owner?.model?.messageId,
     sessionMetadata,
   );
   if (historyState) {

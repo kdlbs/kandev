@@ -29,6 +29,7 @@ type RecoveryMessage = {
 };
 export type ActiveSessionRecovery = {
   sessionId: string;
+  messageId?: string;
   stamp?: string;
   error?: import("./session-last-agent-error").LastAgentError | null;
   kind: string;
@@ -115,13 +116,37 @@ function recoveryModel(
   const metadata = message?.metadata as ActionMeta | undefined;
   return {
     sessionId: session.id,
+    messageId: message?.id,
     stamp,
     error,
-    kind: metadata?.failure_kind ?? error?.code ?? "generic",
-    summary: error?.message ?? session.error_message ?? message?.content,
-    details: metadata?.error_output ?? error?.details ?? session.error_message ?? undefined,
+    kind: recoveryKind(metadata, error),
+    summary: recoverySummary(session, error, message),
+    details: recoveryDetails(session, error, metadata),
     metadata,
   };
+}
+
+function recoveryKind(
+  metadata: ActionMeta | undefined,
+  error: ReturnType<typeof readLastAgentError>,
+) {
+  return metadata?.failure_kind ?? error?.code ?? "generic";
+}
+
+function recoverySummary(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+  message: RecoveryMessage | undefined,
+) {
+  return error?.message ?? session.error_message ?? message?.content;
+}
+
+function recoveryDetails(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+  metadata: ActionMeta | undefined,
+) {
+  return metadata?.error_output ?? error?.details ?? session.error_message ?? undefined;
 }
 
 function matchesRecoveryMessage(

@@ -34,23 +34,17 @@ export function isRecoveryMessageDismissed(
 export function resolveRecoveryHistoryState(
   comment: Message,
   metadata: ActionMeta | undefined,
-  ownerStamp: string | undefined,
+  ownerMessageId: string | undefined,
   sessionMetadata: Record<string, unknown> | null | undefined,
 ): { activeOwner: boolean } | null {
   if (!metadata?.recovery_actions) return null;
   const currentError = readLastAgentError(sessionMetadata);
   const messageStamp = metadata.recovery_stamp ?? metadata.error_stamp;
   const currentStamp = currentError ? lastAgentErrorStamp(currentError) : undefined;
-  const activeOwner = Boolean(
-    ownerStamp &&
-    (messageStamp
-      ? ownerStamp === messageStamp
-      : currentError &&
-        legacyRecoveryMessageMatchesError(comment.content, comment.created_at, currentError)),
-  );
+  const activeOwner = ownerMessageId === comment.id;
   const isHistorical = Boolean(messageStamp && currentStamp && messageStamp !== currentStamp);
   if (
-    ownerStamp ||
+    activeOwner ||
     isRecoveryMessageDismissed(comment, metadata, sessionMetadata) ||
     isHistorical
   ) {
