@@ -36,6 +36,7 @@ export type LaunchSessionRequest = {
   launch_workspace?: boolean;
   skip_message_record?: boolean;
   auto_start?: boolean;
+  auto_create_pr?: boolean;
   attachments?: MessageAttachment[];
   activation_source?: LaunchActivationSource;
 };

@@ -102,8 +102,8 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			// Check agent count
 			all := reg.List()
 			if tt.wantOnlyMock {
-				if len(all) != 3 {
-					t.Errorf("only mode: expected mock agent, virtual family, and disabled native descriptor, got %d", len(all))
+				if len(all) != 4 {
+					t.Errorf("only mode: expected mock agent, virtual families, and disabled native descriptor, got %d", len(all))
 				}
 			}
 			if native, exists := reg.Get("codex-app-server"); !exists || native.Enabled() {
@@ -111,6 +111,9 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			}
 			if !reg.Exists(agents.DynamicAgentID) {
 				t.Error("dynamic virtual family should always be registered")
+			}
+			if !reg.Exists(agents.CursorCloudAgentID) {
+				t.Error("Cursor Cloud virtual family should always be registered")
 			}
 			if tt.wantDefaultsCount > 0 && len(all) < tt.wantDefaultsCount {
 				t.Errorf("expected at least %d agents, got %d", tt.wantDefaultsCount, len(all))

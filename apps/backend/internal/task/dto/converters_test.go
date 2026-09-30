@@ -62,6 +62,36 @@ func TestFromTaskSerializesWorkspaceFolders(t *testing.T) {
 	}
 }
 
+func TestSessionExecutionCapabilitiesAreTypedAndExecutorSpecific(t *testing.T) {
+	cloud := &models.TaskSession{
+		ID: "cloud-session", ExecutorSnapshot: map[string]interface{}{"executor_type": "cursor_cloud"},
+	}
+	full := FromTaskSession(cloud)
+	summary := FromTaskSessionSummary(cloud)
+	for name, capabilities := range map[string]*models.ExecutionCapabilities{
+		"full":    full.ExecutionCapabilities,
+		"summary": summary.ExecutionCapabilities,
+	} {
+		if capabilities == nil {
+			t.Fatalf("%s capabilities are missing", name)
+		}
+		if !capabilities.Chat || !capabilities.Stop || !capabilities.FollowUp || !capabilities.RemoteResults {
+			t.Fatalf("%s supported capabilities = %+v", name, capabilities)
+		}
+		if capabilities.WorkspaceFiles || capabilities.Terminal || capabilities.GitMutation ||
+			capabilities.LSP || capabilities.Preview || capabilities.ModelSwitch ||
+			capabilities.AgentProfileSwitch || capabilities.PermissionModeSwitch || capabilities.PlanModeSwitch {
+			t.Fatalf("%s exposed a workspace or frozen-selection capability: %+v", name, capabilities)
+		}
+	}
+	legacy := FromTaskSession(&models.TaskSession{
+		ID: "local-session", ExecutorSnapshot: map[string]interface{}{"type": "local_docker"},
+	})
+	if legacy.ExecutionCapabilities != nil {
+		t.Fatalf("legacy capabilities = %+v, want existing implicit behavior", legacy.ExecutionCapabilities)
+	}
+}
+
 func TestFromTaskProjectsWorkflowAgentOverridesOnlyForStoredWorkflow(t *testing.T) {
 	overrides, err := models.NewWorkflowAgentOverrides("wf-1", []models.WorkflowAgentOverrideBinding{
 		{StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},

@@ -32,6 +32,7 @@ import {
   resolveEffectiveTask,
   resolveLatestTaskProjection,
   resolveTaskContentState,
+  shouldLoadWorkspaceRepositories,
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
@@ -339,7 +340,10 @@ function useTaskPageData(
     if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
   }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
-  const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
+  const { repositories } = useRepositories(
+    task?.workspace_id ?? null,
+    shouldLoadWorkspaceRepositories(task),
+  );
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
   const repository = useMemo(
     () =>
@@ -360,6 +364,30 @@ function useTaskPageData(
     onTaskUnarchived,
     refreshTask,
   };
+}
+
+function useTaskPagePanelInputs({
+  task,
+  repositories,
+  canvasesEnabled,
+  sessionId,
+}: {
+  task: Task | null;
+  repositories: Repository[];
+  canvasesEnabled: boolean;
+  sessionId: string | null;
+}) {
+  const isCursorCloudTask = task?.primary_executor_type === "cursor_cloud";
+  const taskCanvasesState = useTaskCanvasesStateForTask(
+    task,
+    canvasesEnabled && !isCursorCloudTask,
+  );
+  useExternalVcsFileLinkHydration(isCursorCloudTask ? null : task, repositories);
+  useTaskWorkflowSnapshot(task);
+  const workflowSteps = useWorkflowStepsMapped(task?.workflow_id);
+  const sessionPanel = useSessionPanelState(isCursorCloudTask ? null : sessionId);
+  const agentctlStatus = useSessionAgentctl(isCursorCloudTask ? null : sessionId);
+  return { isCursorCloudTask, taskCanvasesState, workflowSteps, sessionPanel, agentctlStatus };
 }
 
 function TaskPageContentLive({
@@ -390,13 +418,14 @@ function TaskPageContentLive({
     onTaskUnarchived,
     refreshTask,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
-  useTaskWorkflowSnapshot(task);
-  const taskCanvasesState = useTaskCanvasesStateForTask(task, canvasesEnabled);
-  useExternalVcsFileLinkHydration(task, repositories);
-
-  const workflowSteps = useWorkflowStepsMapped(task?.workflow_id);
-  const sessionPanel = useSessionPanelState(effectiveSessionId);
-  const agentctlStatus = useSessionAgentctl(effectiveSessionId);
+  const { taskCanvasesState, workflowSteps, sessionPanel, agentctlStatus } = useTaskPagePanelInputs(
+    {
+      task,
+      repositories,
+      canvasesEnabled,
+      sessionId: effectiveSessionId,
+    },
+  );
   const resumption = useSessionResumption(
     task?.id ?? null,
     effectiveSessionId,

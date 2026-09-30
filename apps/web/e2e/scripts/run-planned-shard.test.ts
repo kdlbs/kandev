@@ -77,7 +77,7 @@ describe("planned shard runner", () => {
     });
 
     const populated = manifest({
-      projects: ["chromium", "mobile-chrome"],
+      projects: ["chromium", "mobile-chrome", "cursor-cloud", "cursor-cloud-mobile"],
       shards: [
         {
           index: 1,
@@ -102,6 +102,8 @@ describe("planned shard runner", () => {
         "--workers=1",
         "--project=chromium",
         "--project=mobile-chrome",
+        "--project=cursor-cloud",
+        "--project=cursor-cloud-mobile",
         "tests/example.spec.ts",
       ],
       expect.objectContaining({

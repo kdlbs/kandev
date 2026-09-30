@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -52,6 +54,19 @@ func TestCreateExecutorPersistsAndPublishes(t *testing.T) {
 	}
 	if types := eventTypes(bus.GetPublishedEvents()); len(types) != 1 || types[0] != events.ExecutorCreated {
 		t.Fatalf("published %v, want exactly one %s", types, events.ExecutorCreated)
+	}
+}
+
+func TestCursorCloudExecutorCreateIsDisabledByDefault(t *testing.T) {
+	svc, bus, _ := createTestService(t)
+	_, err := svc.CreateExecutor(context.Background(), &CreateExecutorRequest{
+		Name: "Cursor Cloud", Type: models.ExecutorTypeCursorCloud, Status: models.ExecutorStatusActive,
+	})
+	if !errors.Is(err, ErrCursorCloudDisabled) {
+		t.Fatalf("disabled cloud executor create error = %v, want ErrCursorCloudDisabled", err)
+	}
+	if events := bus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("disabled cloud executor published events: %+v", events)
 	}
 }
 
@@ -339,6 +354,70 @@ func TestCreateExecutorProfileRequiresSpritesToken(t *testing.T) {
 	}
 	if len(profile.EnvVars) != 1 {
 		t.Fatalf("env vars = %+v", profile.EnvVars)
+	}
+}
+
+func TestCursorCloudExecutorProfileRequiresEnabledFeatureGlobalSecretAndHTTPSCallback(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	svc.SetCursorCloudEnabled(true)
+	executor := createTestExecutor(t, svc, "Cursor Cloud", models.ExecutorTypeCursorCloud)
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secrets.NewUserVisibleStore(secretStore))
+	if err := secretStore.Create(ctx, &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "cursor-global", Scope: secrets.ScopeGlobal}, Value: "provider-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "cursor-ws", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secretStore.Create(ctx, &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "cursor-workspace", Scope: secrets.ScopeWorkspace, WorkspaceID: "cursor-ws"},
+		Value:  "workspace-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callback := "https://kandev.example.test"
+	config := func(secretID, callbackURL string) map[string]string {
+		return map[string]string{
+			"cursor_cloud_api_key_secret_id": secretID,
+			"cursor_cloud_callback_url":      callbackURL,
+		}
+	}
+
+	if _, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
+		ExecutorID: executor.ID, Name: "Workspace key", Config: config("cursor-workspace", callback),
+	}); err == nil {
+		t.Fatal("workspace-scoped credential was accepted")
+	}
+	if _, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
+		ExecutorID: executor.ID, Name: "Invalid callback", Config: config("cursor-global", "http://callback.example.test/mcp"),
+	}); err == nil {
+		t.Fatal("non-HTTPS callback was accepted")
+	}
+	profile, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
+		ExecutorID: executor.ID, Name: "Configured", Config: config("cursor-global", callback),
+	})
+	if err != nil {
+		t.Fatalf("valid cloud profile: %v", err)
+	}
+	badCallback := "http://callback.example.test/mcp"
+	if _, err := svc.UpdateExecutorProfile(ctx, profile.ID, &UpdateExecutorProfileRequest{Config: config("cursor-global", badCallback)}); err == nil {
+		t.Fatal("profile update accepted a non-HTTPS callback")
+	}
+	svc.SetCursorCloudEnabled(false)
+	if _, err := svc.UpdateExecutorProfile(ctx, profile.ID, &UpdateExecutorProfileRequest{}); !errors.Is(err, ErrCursorCloudDisabled) {
+		t.Fatalf("disabled feature update error = %v, want ErrCursorCloudDisabled", err)
 	}
 }
 

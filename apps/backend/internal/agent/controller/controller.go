@@ -4,6 +4,7 @@ package controller
 import (
 	"context"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -11,8 +12,9 @@ import (
 
 // Controller coordinates agent business logic
 type Controller struct {
-	lifecycle *lifecycle.Manager
-	registry  *registry.Registry
+	lifecycle          *lifecycle.Manager
+	registry           *registry.Registry
+	agentTypeAvailable func(context.Context, string) bool
 }
 
 // NewController creates a new agent controller
@@ -21,6 +23,12 @@ func NewController(lm *lifecycle.Manager, reg *registry.Registry) *Controller {
 		lifecycle: lm,
 		registry:  reg,
 	}
+}
+
+// SetAgentTypeAvailability controls managed agent families whose visibility
+// depends on user-scoped executor configuration.
+func (c *Controller) SetAgentTypeAvailability(check func(context.Context, string) bool) {
+	c.agentTypeAvailable = check
 }
 
 // ListAgents returns all agent instances
@@ -147,6 +155,10 @@ func (c *Controller) ListAgentTypes(ctx context.Context, req dto.ListAgentTypesR
 	}
 
 	for _, t := range types {
+		if _, managed := t.(agents.ManagedRemoteAgent); managed &&
+			(c.agentTypeAvailable == nil || !c.agentTypeAvailable(ctx, t.ID())) {
+			continue
+		}
 		var image string
 		if rt := t.Runtime(); rt != nil {
 			image = rt.Image
@@ -159,6 +171,7 @@ func (c *Controller) ListAgentTypes(ctx context.Context, req dto.ListAgentTypesR
 			Enabled:     t.Enabled(),
 		}))
 	}
+	resp.Total = len(resp.Types)
 
 	return resp, nil
 }

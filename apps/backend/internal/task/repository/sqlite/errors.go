@@ -46,6 +46,17 @@ var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
 // step-3 lookup. Callers should re-read by (workspace_id, external_id) and
 // return the winner rather than treating this as a hard failure.
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrManagedAgentBindingConflict = repoerrors.ErrManagedAgentBindingConflict
+var ErrManagedAgentBindingNotFound = repoerrors.ErrManagedAgentBindingNotFound
+var ErrManagedAgentOperationConflict = repoerrors.ErrManagedAgentOperationConflict
+var ErrManagedAgentOperationNotFound = repoerrors.ErrManagedAgentOperationNotFound
+var ErrManagedAgentStreamNotFound = repoerrors.ErrManagedAgentStreamNotFound
+var ErrManagedAgentToolGrantNotFound = repoerrors.ErrManagedAgentToolGrantNotFound
+var ErrManagedAgentRevisionConflict = repoerrors.ErrManagedAgentRevisionConflict
+var ErrManagedAgentLeaseHeld = repoerrors.ErrManagedAgentLeaseHeld
+var ErrManagedAgentActiveOperation = repoerrors.ErrManagedAgentActiveOperation
+var ErrManagedAgentOperationTransition = repoerrors.ErrManagedAgentOperationTransition
+var ErrManagedAgentStreamIdentityConflict = repoerrors.ErrManagedAgentStreamIdentityConflict
 
 // ErrOfficeSessionRaceConflict is returned by CreateOfficeTaskSession (and,
 // for repositories that don't implement the office creator interface, by the

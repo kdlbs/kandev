@@ -232,6 +232,8 @@ type AgentStreamEventData struct {
 	MessageID string `json:"message_id,omitempty"`
 	// IsAppend indicates whether this is an append to an existing message (true) or a new message (false)
 	IsAppend bool `json:"is_append,omitempty"`
+	// MessageUpdated indicates that a persisted message is being replaced with its current full content.
+	MessageUpdated bool `json:"message_updated,omitempty"`
 	// MessageType distinguishes between "message" and "thinking" content types
 	MessageType string `json:"message_type,omitempty"`
 	// RetractedMessageIDs lists abandoned assistant and thinking records in
@@ -339,6 +341,7 @@ type AgentStreamEventPayload struct {
 	AgentType                       string                `json:"agent_type,omitempty"`
 	TaskID                          string                `json:"task_id"`
 	SessionID                       string                `json:"session_id"` // Task session ID
+	ManagedAgentOperationID         string                `json:"managed_agent_operation_id,omitempty"`
 	Data                            *AgentStreamEventData `json:"data"`
 }
 

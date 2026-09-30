@@ -678,6 +678,14 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createAgent(name: string): Promise<Agent> {
+    const agent = await this.request<Agent>("POST", "/api/v1/agents", { name });
+    return {
+      ...agent,
+      profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
+    };
+  }
+
   async createCustomTUIAgent(options: {
     display_name: string;
     command: string;
@@ -1306,6 +1314,7 @@ export class ApiClient {
       id: string;
       name: string;
       type: string;
+      status?: string;
       profiles?: Array<{ id: string; name: string }>;
       provider?: { plugin_id?: string; key?: string };
     }>;
@@ -1564,19 +1573,19 @@ export class ApiClient {
         return;
       }
 
-      const text = await response.text();
+      const errorText = await response.text();
       let isStalePreview = false;
       if (response.status === 409) {
         try {
-          const payload = JSON.parse(text) as { error?: unknown };
-          isStalePreview = payload.error === "task deletion preview is no longer current";
+          isStalePreview =
+            (JSON.parse(errorText) as { error?: string }).error ===
+            "task deletion preview is no longer current";
         } catch {
-          isStalePreview = false;
+          // Only the documented stale-preview payload is retryable.
         }
       }
-      if (!isStalePreview || attempt === MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) {
-        throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${text}`);
-      }
+      if (isStalePreview && attempt < MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) continue;
+      throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${errorText}`);
     }
   }
 
@@ -3947,7 +3956,7 @@ export class ApiClient {
 
   async updateExecutor(
     executorId: string,
-    patch: { name?: string; config?: Record<string, string> },
+    patch: { name?: string; config?: Record<string, string>; status?: "active" | "disabled" },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/executors/${executorId}`, patch);
   }

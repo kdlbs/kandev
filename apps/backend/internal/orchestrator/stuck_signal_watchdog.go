@@ -182,6 +182,9 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 	if !stillPending {
 		return true
 	}
+	if s.managedAgentOperationActive(ctx, session.ID) {
+		return true
+	}
 	s.reconcileStepCompletionSignalLocked(ctx, task.ID, session.ID, signal.StepID)
 	return true
 }
@@ -225,6 +228,9 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 		return
 	}
 	if _, ok := s.stuckSignalStillPending(ctx, session.ID, signal.StepID); !ok {
+		return
+	}
+	if s.managedAgentOperationActive(ctx, session.ID) {
 		return
 	}
 	activity, inactive := s.stuckSignalInactiveLongEnough(ctx, session.ID, now)
@@ -416,6 +422,9 @@ func (s *Service) stuckSignalCandidate(
 	}
 	task, err := s.repo.GetTask(ctx, session.TaskID)
 	if err != nil || task == nil {
+		return nil, models.PendingStepCompletionSignal{}, false
+	}
+	if s.managedAgentOperationActive(ctx, session.ID) {
 		return nil, models.PendingStepCompletionSignal{}, false
 	}
 	switch stuckSignalDispositionFor(task, session, signal) {

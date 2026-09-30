@@ -45,6 +45,7 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 		// families and disabled optional-agent descriptors remain available for
 		// settings and historical profile retention. They cannot dispatch work.
 		_ = reg.Register(agents.NewDynamicAgent())
+		_ = reg.Register(agents.NewCursorCloudAgent())
 		_ = reg.Register(agents.NewMockAgent())
 		_ = reg.Register(agents.NewCodexAppServer(false))
 		configureMockAgent(reg, "mock-agent", log)

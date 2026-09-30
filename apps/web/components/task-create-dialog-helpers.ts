@@ -210,6 +210,8 @@ export type BuildCreatePayloadArgs = {
   parentId?: string;
   workspacePath?: string;
   autopilot?: boolean;
+  /** Explicit Cursor Cloud launch choice. Omitted means provider default (off). */
+  autoCreatePR?: boolean;
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
@@ -258,6 +260,7 @@ type OptionalCreateTaskFields = {
   parent_id?: string;
   workspace_path?: string;
   autopilot?: boolean;
+  auto_create_pr?: boolean;
 };
 
 function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCreateTaskFields {
@@ -270,6 +273,7 @@ function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCr
     parent_id: optionalString(args.parentId),
     workspace_path: optionalString(args.workspacePath),
     autopilot: args.autopilot || undefined,
+    auto_create_pr: args.autoCreatePR || undefined,
   };
 }
 

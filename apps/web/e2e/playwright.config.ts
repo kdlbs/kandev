@@ -75,6 +75,9 @@ export default defineConfig({
         /kubernetes\/.*\.spec\.ts/,
         /kubernetes-compat\/.*\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
+        // Cursor Cloud specs run only in dedicated projects whose worker
+        // fixture enables the feature against an isolated mock provider.
+        /cursor-cloud.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
       ],
@@ -83,6 +86,17 @@ export default defineConfig({
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
+      testIgnore: /mobile-cursor-cloud.*\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+    },
+    {
+      name: "cursor-cloud",
+      testMatch: /tests\/session\/cursor-cloud.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "cursor-cloud-mobile",
+      testMatch: /tests\/session\/mobile-cursor-cloud.*\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
     },
     {

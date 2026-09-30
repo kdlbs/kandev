@@ -50,6 +50,89 @@ describe("ApiClient.createAgentProfile", () => {
   });
 });
 
+describe("ApiClient.createAgent", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("creates a saved agent row after the agent type becomes available", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+        return Response.json({ interimSettingsInterlockToken: "test-token" });
+      }
+      if (url.endsWith("/api/v1/agents")) {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ name: "cursor_cloud" });
+        expect(init?.headers).toMatchObject({
+          "Content-Type": "application/json",
+          "X-Kandev-Interim-Settings-Interlock": "test-token",
+        });
+        return Response.json({
+          id: "saved-agent-id",
+          name: "cursor_cloud",
+          profiles: [],
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const agent = await new ApiClient("http://backend.test").createAgent("cursor_cloud");
+
+    expect(agent.id).toBe("saved-agent-id");
+    expect(agent.name).toBe("cursor_cloud");
+    expect(agent.profiles).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ApiClient.deleteTask", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refreshes a stale deletion preview before retrying cleanup", async () => {
+    const confirmations: string[] = [];
+    let previewCount = 0;
+    let deleteCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+        return Response.json({ interimSettingsInterlockToken: "test-token" });
+      }
+      if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+        previewCount += 1;
+        return Response.json({
+          confirmation_id: `confirmation-${previewCount}`,
+          requires_discard_consent: false,
+        });
+      }
+      if (url.endsWith("/api/v1/tasks/task-1") && init?.method === "DELETE") {
+        deleteCount += 1;
+        confirmations.push(
+          new Headers(init.headers).get("X-Kandev-Task-Delete-Confirmation") ?? "",
+        );
+        if (deleteCount === 1) {
+          return Response.json(
+            { error: "task deletion preview is no longer current" },
+            { status: 409 },
+          );
+        }
+        return Response.json({ success: true });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("http://backend.test").deleteTask("task-1");
+
+    expect(previewCount).toBe(2);
+    expect(deleteCount).toBe(2);
+    expect(confirmations).toEqual(["confirmation-1", "confirmation-2"]);
+  });
+});
+
 describe("ApiClient user settings", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

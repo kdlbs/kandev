@@ -47,6 +47,7 @@ import type {
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import { CursorCloudTaskPage } from "@/components/task/cursor-cloud-task-page";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
@@ -89,6 +90,11 @@ type RemoteExecutorStatus = {
   remote_created_at?: string | null;
   remote_checked_at?: string | null;
   remote_status_error?: string | null;
+  remote_repository_id?: string | null;
+  remote_branch?: string | null;
+  remote_pull_request_url?: string | null;
+  remote_agent_url?: string | null;
+  remote_history_gap?: boolean;
   capabilities?: {
     embedded_vscode?: boolean;
   };
@@ -108,6 +114,19 @@ function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
     remoteCreatedAt: toNullable(status?.remote_created_at),
     remoteCheckedAt: toNullable(status?.remote_checked_at),
     remoteStatusError: toNullable(status?.remote_status_error),
+    remoteHistoryGap: status?.remote_history_gap ?? false,
+    ...resolveRemoteExecutorResults(status),
+  };
+}
+
+export type ResolvedRemoteExecutor = ReturnType<typeof resolveRemoteExecutor>;
+
+function resolveRemoteExecutorResults(status?: RemoteExecutorStatus | null) {
+  return {
+    remoteRepositoryID: toNullable(status?.remote_repository_id),
+    remoteBranch: toNullable(status?.remote_branch),
+    remotePullRequestURL: toNullable(status?.remote_pull_request_url),
+    remoteAgentURL: toNullable(status?.remote_agent_url),
   };
 }
 
@@ -438,32 +457,12 @@ function useTaskPageRecoveryFeedback(
  * props plus the three prop bundles handed to the debug overlay, top bar, and
  * layout. Kept out of `TaskPageInner` so that component stays a wiring shell.
  */
-function useTaskPageDerivedProps(
-  {
-    task,
-    effectiveSessionId,
-    ensureSession,
-    isMobile,
-    repository,
-    merged,
-    resumption,
-    sessionPanel,
-    agentctlStatus,
-    connectionStatus,
-    workflowSteps,
-    showDebugOverlay,
-    onToggleDebugOverlay,
-    initialScripts,
-    initialTerminals,
-    defaultLayouts,
-    initialLayout,
-    officeTaskHref,
-    onTaskUnarchived,
-    taskCanvases,
-    taskCanvasesStatus,
-  }: TaskPageInnerProps,
-  taskMoveError: unknown,
-) {
+function useTaskPageDerivedProps(params: TaskPageInnerProps, taskMoveError: unknown) {
+  const { task, effectiveSessionId, ensureSession, isMobile, repository } = params;
+  const { merged, resumption, sessionPanel, agentctlStatus } = params;
+  const { connectionStatus, workflowSteps, showDebugOverlay, onToggleDebugOverlay } = params;
+  const { initialScripts, initialTerminals, defaultLayouts, initialLayout } = params;
+  const { officeTaskHref, onTaskUnarchived, taskCanvases, taskCanvasesStatus } = params;
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
@@ -525,14 +524,31 @@ function useTaskPageDerivedProps(
     debugEntries,
     topBarProps,
     layoutProps,
+    remote,
     bootstrapRecoveryError,
     automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,
   };
 }
 
+function renderCursorCloudTaskPage(
+  page: TaskPageInnerProps,
+  task: Task,
+  remote: ResolvedRemoteExecutor,
+  repositoryLabel: string | null,
+) {
+  return (
+    <CursorCloudTaskPage
+      page={page}
+      task={task}
+      remote={remote}
+      repositoryLabel={repositoryLabel}
+    />
+  );
+}
+
 export function TaskPageInner(props: TaskPageInnerProps) {
-  const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
+  const { effectiveSessionId, task, merged, archivedValue, sessionPanel, isMobile, ensureSession } =
     props;
   const [taskMoveError, setTaskMoveError] = useState<unknown>(null);
   const clearTaskMoveError = useCallback(() => setTaskMoveError(null), []);
@@ -545,11 +561,20 @@ export function TaskPageInner(props: TaskPageInnerProps) {
     debugEntries,
     topBarProps,
     layoutProps,
+    remote,
     bootstrapRecoveryError,
     automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,
   } = useTaskPageDerivedProps(props, taskMoveError);
   if (!task) return null;
+
+  const isCursorCloudTask =
+    task.primary_executor_type === "cursor_cloud" ||
+    props.resumption.sessionStatus?.executor_type === "cursor_cloud";
+
+  if (isCursorCloudTask) {
+    return renderCursorCloudTaskPage(props, task, remote, topBarProps.repositoryLabel);
+  }
 
   return (
     <TooltipProvider>

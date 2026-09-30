@@ -19,6 +19,9 @@ const (
 	RuntimeSprites      Runtime = "sprites"
 	RuntimeSSH          Runtime = "ssh"
 	RuntimeKubernetes   Runtime = "k8s"
+	// RuntimeCursorCloud identifies a provider-managed agent with no local
+	// process, shell, or workspace runtime.
+	RuntimeCursorCloud  Runtime = "cursor_cloud"
 	RuntimePluginRemote Runtime = "plugin_remote"
 )
 

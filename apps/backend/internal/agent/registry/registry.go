@@ -66,6 +66,7 @@ func (r *Registry) LoadDefaults(codexAppServerEnabled ...bool) {
 	nativeEnabled := len(codexAppServerEnabled) > 0 && codexAppServerEnabled[0]
 	all := []agents.Agent{
 		agents.NewDynamicAgent(),
+		agents.NewCursorCloudAgent(),
 		agents.NewAuggie(),
 		agents.NewClaudeACP(),
 		agents.NewCodexACP(),
@@ -180,6 +181,9 @@ func (r *Registry) ListEnabled() []agents.Agent {
 	result := make([]agents.Agent, 0, len(r.agents))
 	for _, ag := range r.agents {
 		if ag.Enabled() {
+			if _, managed := ag.(agents.ManagedRemoteAgent); managed {
+				continue
+			}
 			result = append(result, ag)
 		}
 	}

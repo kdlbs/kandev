@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -283,6 +284,30 @@ func TestAuthorizeSessionAccess(t *testing.T) {
 	}
 	if err := svc.AuthorizeSessionAccess(context.Background(), "sess-b"); err != nil {
 		t.Fatalf("internal session access: %v", err)
+	}
+}
+
+func TestCursorCloudWorkspaceDenied(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "sess-cloud", TaskID: "task-b", State: models.TaskSessionStateRunning,
+		ExecutorSnapshot: map[string]interface{}{"executor_type": string(models.ExecutorTypeCursorCloud)},
+	}); err != nil {
+		t.Fatalf("create cloud session: %v", err)
+	}
+
+	if err := svc.AuthorizeSessionScope(ctxAs("user-b"), "sess-cloud", authz.ScopeWorkspaceRead); err != nil {
+		t.Fatalf("read access was denied: %v", err)
+	}
+	for name, ctx := range map[string]context.Context{
+		"owner":    ctxAs("user-b"),
+		"internal": context.Background(),
+	} {
+		err := svc.AuthorizeSessionScope(ctx, "sess-cloud", authz.ScopeSessionExec)
+		if !errors.Is(err, ErrExecutionCapabilityUnavailable) {
+			t.Errorf("%s workspace operation = %v, want ErrExecutionCapabilityUnavailable", name, err)
+		}
 	}
 }
 

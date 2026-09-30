@@ -59,6 +59,12 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 	if err != nil || session == nil || session.State != models.TaskSessionStateRunning {
 		return
 	}
+	if s.managedAgentOperationActive(ctx, payload.SessionID) {
+		s.logger.Debug("ignoring local stall signal while managed remote work remains unsettled",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID))
+		return
+	}
 	generationOwner, ok := s.agentManager.(interface {
 		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	})

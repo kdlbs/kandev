@@ -382,6 +382,10 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		// External MCP enforces PAT auth in its own group middleware
 		// (externalMCPAuthMiddleware) so agent clients get MCP-shaped errors.
 		return true
+	case strings.HasPrefix(path, "/api/v1/managed-agent-mcp/"):
+		// Managed MCP callbacks authenticate their short-lived, task-scoped
+		// grant at the route. They never use application PAT authentication.
+		return true
 	case isPluginWebhookRelayMethod(c.Request.Method) && isPluginWebhookPath(path):
 		// Whether this specific webhook is anonymous-callable depends on the
 		// plugin's manifest (webhooks[].public), which only
