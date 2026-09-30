@@ -148,7 +148,7 @@ Implementation completed on 2026-09-28. Focused web verification passed:
 - `pnpm run i18n:ratchet`: passed; 2 added and 21 modified files are clean, with the guard allowlist intact.
 - `pnpm exec eslint components/task/ws-reconnect.ts components/task/use-passthrough-terminal.test.ts components/task/agent-mcp-prepare-actions.tsx components/task/agent-mcp-prepare-actions.test.tsx lib/api/domains/session-api.ts lib/api/domains/session-mcp-actions.test.ts components/settings/cursor-mcp-profile-selection.tsx components/settings/cursor-mcp-selection.ts components/settings/cursor-mcp-profile-selection.test.tsx`: passed with no warnings.
 
-Desktop Playwright command:
+Historical 2026-09-28 desktop Playwright command:
 
 ```bash
 GOCACHE=/private/tmp/kandev-cursor-review-go-cache pnpm e2e:run --host --project chromium e2e/tests/settings/cursor-plugin-mcp.spec.ts e2e/tests/session/agent-mcp-preparation.spec.ts
@@ -164,7 +164,7 @@ and SIGTRAP. The retained error contexts are:
 - `apps/web/e2e/test-results/settings-cursor-plugin-mcp-de164-r-a-Cursor-strategy-profile-chromium/error-context.md`
 - `apps/web/e2e/test-results/settings-cursor-plugin-mcp-ea0e8-nce-for-non-Cursor-profiles-chromium/error-context.md`
 
-Mobile command:
+Historical 2026-09-28 mobile command:
 
 ```bash
 GOCACHE=/private/tmp/kandev-cursor-review-go-cache pnpm e2e:run --host --project mobile-chrome e2e/tests/settings/mobile-cursor-plugin-mcp.spec.ts e2e/tests/session/mobile-agent-mcp-preparation.spec.ts
@@ -174,3 +174,40 @@ The mobile attempt was stopped during its backend build, before Playwright
 started, at the coordinator's direction. It uses the same Chromium binary that
 failed to launch in the desktop run, so mobile E2E remains blocked and is not
 reported as passed.
+
+
+PR #4025 remediation on 2026-09-30 isolates terminal callbacks by socket
+identity. A replaced socket's late open or close cannot overwrite/dispose the
+active attachment or disconnect its successor.
+`terminal-websocket-lifecycle.test.tsx` reproduces that handoff and also checks
+that closing the active socket still disposes its attachment and disconnects.
+Desktop and mobile authentication assertions select the visible terminal panel.
+The affected fork-PR scenario now waits for the established chat-idle signal
+before asserting the response, rather than racing agent startup.
+
+From `apps/web`, focused verification passed:
+
+```bash
+pnpm exec vitest run components/task/terminal-websocket-lifecycle.test.tsx components/task/use-passthrough-terminal.test.ts components/session/prepare-progress-status.test.ts lib/ws/handlers/executor-prepare.test.ts components/task/agent-mcp-prepare-actions.test.tsx lib/state/slices/session-runtime/prepare-result.test.ts
+pnpm run typecheck
+pnpm run lint
+```
+
+The focused Vitest run passed 44 tests in six files. Managed Docker Chromium
+provides browser verification despite the host's Mach-port restriction; fresh
+pushed-head CI remains an external verification step. These fixes restore
+existing terminal and preparation behavior, so public documentation is unchanged.
+
+
+PR #4025 remediation verification on 2026-09-30: all 16 desktop scenarios
+in the setup-script, GitHub URL task-creation and MCP-recovery files passed
+under managed Docker Chromium. This supersedes the historical host browser
+launch limitation for these scenarios. The task file's describe-level retry was
+temporarily disabled for verification and restored afterward.
+
+From `apps/web`:
+
+```bash
+pnpm e2e:run --docker -- tests/task/create-task-github-url.spec.ts tests/session/setup-script-progress.spec.ts tests/session/agent-mcp-preparation.spec.ts --retries=0
+```
+

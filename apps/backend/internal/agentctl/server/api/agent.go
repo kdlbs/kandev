@@ -70,8 +70,9 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID  string            `json:"session_id"`
-	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	SessionID             string                        `json:"session_id"`
+	McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+	SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call
@@ -675,6 +676,10 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id is required", nil)
 		return resp
 	}
+	if req.SessionSettingsPolicy != "" && req.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "unsupported session settings policy", nil)
+		return resp
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
 	defer cancel()
@@ -707,6 +712,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
+	ctx = streams.WithSessionSettingsPolicy(ctx, req.SessionSettingsPolicy)
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
 		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 		s.logger.Error("load session failed", zap.Error(err))
@@ -968,15 +974,23 @@ func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Mess
 
 func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID              string                        `json:"config_id"`
+		Value                 string                        `json:"value"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}
 	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		policy := req.SessionSettingsPolicy
+		if policy == "" {
+			policy = streams.SessionSettingsPolicyStrict
+		}
+		if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+			return fmt.Errorf("unsupported session settings policy %q", policy)
+		}
 		cs, ok := a.(adapter.ConfigOptionSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support set_config_option")
 		}
-		return cs.SetConfigOption(ctx, req.ConfigID, req.Value)
+		return cs.SetConfigOption(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
 	})
 }
 

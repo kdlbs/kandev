@@ -74,7 +74,9 @@ test.describe("Agent MCP preparation recovery", () => {
           { timeout: 15_000 },
         )
         .toBe(true);
-      await expect(testPage.getByTestId("terminal-panel").first()).toBeVisible();
+      await expect(
+        testPage.locator('[data-testid="terminal-panel"]:visible').first(),
+      ).toBeVisible();
       expect(fixture.authenticationTerminalId).not.toBe(fixture.existingTerminalId);
       expect(requests.authenticate).toEqual([{ server_id: E2E_MCP_SERVER_ID }]);
       await expect

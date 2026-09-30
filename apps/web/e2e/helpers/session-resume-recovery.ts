@@ -46,9 +46,11 @@ function forEachSessionRecoveryFrame(
   }
 }
 
-/** Capture request IDs and responses for explicit session.recover requests. */
+/** Capture requests and responses for explicit session.recover requests. */
 export function captureSessionRecoveryMessages(page: Page) {
   const requestIds: Record<string, string> = {};
+  const requestCounts: Record<string, number> = {};
+  const requests = new Map<string, unknown>();
   const responses = new Map<string, { type?: string; payload?: unknown }>();
   page.on("websocket", (socket) => {
     if (!socket.url().endsWith("/ws")) return;
@@ -57,6 +59,8 @@ export function captureSessionRecoveryMessages(page: Page) {
         const action = (frame.payload as { action?: unknown } | null)?.action;
         if (frame.type === "request" && typeof action === "string") {
           requestIds[action] = frame.id!;
+          requestCounts[action] = (requestCounts[action] ?? 0) + 1;
+          requests.set(action, frame.payload);
         }
       });
     });
@@ -68,7 +72,11 @@ export function captureSessionRecoveryMessages(page: Page) {
       });
     });
   });
-  return { requestIds, responses };
+  return { requestIds, requestCounts, requests, responses };
+}
+
+export function capturedSessionRecoveryRequest(requests: Map<string, unknown>, action: string) {
+  return requests.get(action);
 }
 
 export function capturedSessionRecoveryResponse(

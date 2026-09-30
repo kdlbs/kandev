@@ -140,6 +140,15 @@ type AgentEvent struct {
 	// the lifetime of the callback.
 	AttemptID string `json:"attempt_id,omitempty"`
 
+	// SessionSettingsPolicy is host provenance for initial model/mode reports
+	// emitted as part of session/load. Later explicit selector reports omit it.
+	SessionSettingsPolicy     SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+	SessionSettingsGeneration uint64                `json:"session_settings_generation,omitempty"`
+	// SessionSettingsSourceGeneration is lifecycle-owned ordering for the
+	// process startup that produced this event. It is never accepted from the
+	// provider wire payload.
+	SessionSettingsSourceGeneration uint64 `json:"-"`
+
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 

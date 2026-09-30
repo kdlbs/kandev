@@ -103,14 +103,19 @@ prepare_result on session reload and do not replace it with MCP-only steps on
 resume. Progress and completion carry a preparation identity plus an ordered start
 marker. Current-attempt progress supersedes prior-attempt state; delayed older
 progress/completion cannot replace a successor even if the client never saw
-that older attempt. Persist the markers with prepare_result for reload.
+that older attempt. Persist the markers with prepare_result for reload. Keep the executor preparer's
+overall outcome when aggregating steps: optional setup-script failures remain
+failed rows in a successful preparation result. Fatal environment or MCP
+materialization errors still fail the aggregate.
 
 An auth/connection failure for an optional imported MCP is a visible degraded
 preparation outcome: retain the task environment and other usable tools, with
 failed per-server rows and recovery actions. Do not fabricate a ready state or
 abort access to the terminal required for recovery. Configuration integrity,
 stale-ownership and unsafe-path failures remain launch-blocking. The UI must
-not label a degraded result as all steps successful.
+not label a degraded result as all steps successful. Terminal WebSocket callbacks
+retain their socket identity: a late close from a replaced socket cannot dispose
+the successor terminal's attachment or mark that connection disconnected.
 
 ## Concurrency and isolation
 

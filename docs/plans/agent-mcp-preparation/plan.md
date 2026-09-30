@@ -153,7 +153,7 @@ Both installed Cursor native smoke tests pass (73.772s total), proving fresh
 ACP/terminal fixture tool access and saved-conversation recovery in a replacement
 ACP child.
 
-Browser E2E is not passed: desktop Chromium cannot launch under this macOS
+Historical 2026-09-28 browser evidence: desktop Chromium cannot launch under this macOS
 sandbox (Mach port permission denial), and mobile was stopped before launch
 because it uses the same binary. Broader backend suites also contain reported
 path/cleanup/Git/socket fixture failures; no clean-baseline run establishes that
@@ -185,3 +185,22 @@ an unverified shell command. Native Windows execution remains untested here.
 Automatic live TUI recovery remains unavailable until Kandev can retain an owned
 Cursor CLI chat ID. Initial TUI preparation and POSIX authentication terminals
 are supported; same-conversation automatic reload is ACP-only.
+
+
+PR #4025 remediation verification on 2026-09-30: all 16 desktop scenarios
+in the setup-script, GitHub URL task-creation and MCP-recovery files passed
+under managed Docker Chromium. This supersedes the historical host browser
+launch limitation for these scenarios. The task file's describe-level retry was
+temporarily disabled for verification and restored afterward.
+
+From `apps/web`:
+
+```bash
+pnpm e2e:run --docker -- tests/task/create-task-github-url.spec.ts tests/session/setup-script-progress.spec.ts tests/session/agent-mcp-preparation.spec.ts --retries=0
+```
+
+The remediation preserves nonfatal setup failures, fences replaced terminal
+sockets, waits for chat readiness in the fork-PR test and asserts the visible
+authentication panel on desktop and mobile. See Tasks 03 and 04 for focused
+backend and web checks. Latest-base integration and pushed-head CI are separate
+external verification steps.

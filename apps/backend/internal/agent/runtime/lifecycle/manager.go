@@ -249,10 +249,11 @@ type Manager struct {
 	// environment so user shell terminals can be given the same profile env
 	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
 	// terminal inherits only the backend process environment.
-	executorProfileReader       ExecutorProfileReader
-	pluginExecutorProfileLoader PluginExecutorProfileLoader
-	pluginExecutorCallbackMu    sync.Mutex
-	pluginExecutorCallbacks     map[string]*ExecutorCreateRequest
+	executorProfileReader         ExecutorProfileReader
+	sessionSettingsSnapshotWriter SessionSettingsSnapshotWriter
+	pluginExecutorProfileLoader   PluginExecutorProfileLoader
+	pluginExecutorCallbackMu      sync.Mutex
+	pluginExecutorCallbacks       map[string]*ExecutorCreateRequest
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep

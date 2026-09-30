@@ -231,6 +231,8 @@ export type SessionModeState = {
     {
       currentModeId: string;
       availableModes: SessionModeEntry[];
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
       /**
        * The mode Kandev asked for when the session did not end up in it. Set
        * so a clamped mode is distinguishable from an applied one.
@@ -294,6 +296,8 @@ export type SessionModelsState = {
       configOptions: ConfigOptionEntry[];
       configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
     }
@@ -556,6 +560,7 @@ export type SessionRuntimeSliceActions = {
     modeId: string,
     availableModes?: SessionModeEntry[],
     requestedModeId?: string,
+    settingsPolicy?: "provider_restored" | "strict",
   ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
@@ -568,6 +573,7 @@ export type SessionRuntimeSliceActions = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configBaseline?: Record<string, string>;
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */
       fallbackModel?: string;

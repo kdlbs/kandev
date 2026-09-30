@@ -7,6 +7,8 @@ owners:
 ---
 # Agent Permission Control Integrity Requirements
 
+The [explicit Auggie recovery amendment](explicit-resume-settings.md) permits one user-requested recovery attempt to omit mode/model overrides. It is an exception to startup reapplication, not mode confirmation.
+
 ## Overview
 
 An agent profile exposes three permission controls: a permission `mode`, an

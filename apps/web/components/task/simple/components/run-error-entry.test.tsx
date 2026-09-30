@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { RunError } from "@/app/office/tasks/[id]/types";
@@ -8,16 +8,22 @@ import { RunErrorEntry } from "./run-error-entry";
 const FAILURE_STAMP = "ordinary-failure-stamp";
 const REMEDIATION_LINK_ID = "remediation-link";
 const RECOVERY_ERROR_ID = "run-error-recovery-error";
-const { requestMock, recoveryContext } = vi.hoisted(() => ({
+const { requestMock, recoveryContext, appState } = vi.hoisted(() => ({
   requestMock: vi.fn(),
   recoveryContext: {
     value: null as { sessionId: string; model: ActiveSessionRecovery | null; pending: null } | null,
+  },
+  appState: {
+    agentProfiles: { items: [] as unknown[] },
+    kanban: { tasks: [] as unknown[] },
+    quickChat: { sessions: [] as unknown[] },
+    taskSessions: { items: {} as Record<string, unknown> },
   },
 }));
 const RUN_ERROR_RESUME_TEST_ID = "run-error-resume-button";
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: unknown) => unknown) => selector({}),
+  useAppStore: (selector: (state: unknown) => unknown) => selector(appState),
 }));
 vi.mock("@/lib/state/slices/office/selectors", () => ({
   selectOfficeAgentProfiles: () => [],
@@ -32,6 +38,11 @@ vi.mock("@/components/task/chat/session-recovery-context", () => ({
 afterEach(() => {
   cleanup();
   recoveryContext.value = null;
+  requestMock.mockReset().mockResolvedValue({});
+  appState.agentProfiles.items = [];
+  appState.kanban.tasks = [];
+  appState.quickChat.sessions = [];
+  appState.taskSessions.items = {};
 });
 
 function runError(failureCode: string): RunError {
@@ -135,6 +146,56 @@ describe("RunErrorEntry", () => {
 
     expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("run-error-fresh-button")).toBeNull();
+  });
+});
+
+describe("RunErrorEntry provider-restored Resume", () => {
+  it("discloses skipped settings and sends provider-restored policy", async () => {
+    appState.taskSessions.items = {
+      "session-1": {
+        task_id: "task-1",
+        state: "FAILED",
+        execution_profile_id: "profile-1",
+        downstream_acp_session_id: "native-session-1",
+      },
+    };
+    appState.kanban.tasks = [{ id: "task-1", isFromOffice: false }];
+    appState.agentProfiles.items = [
+      {
+        id: "profile-1",
+        agent_id: "opaque-agent-uuid",
+        agent_name: "auggie",
+        cli_passthrough: false,
+      },
+    ];
+
+    render(
+      <RunErrorEntry
+        taskId="task-1"
+        workspaceId="workspace-1"
+        error={runError("provider_auth_required")}
+      />,
+    );
+
+    const disclosure = screen.getByTestId("provider-restored-resume-disclosure");
+    const resume = screen.getByTestId(RUN_ERROR_RESUME_TEST_ID);
+    expect(
+      disclosure.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    fireEvent.click(resume);
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        "session.recover",
+        {
+          task_id: "task-1",
+          session_id: "session-1",
+          action: "resume",
+          settings_policy: "provider_restored",
+        },
+        30_000,
+      ),
+    );
   });
 });
 

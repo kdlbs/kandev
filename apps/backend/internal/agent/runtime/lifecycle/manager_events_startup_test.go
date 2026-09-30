@@ -135,6 +135,10 @@ func TestStartupGenerationPublishesOriginatingAttemptIDOnReusedExecution(t *test
 	if streamEvents[0].AttemptID != "attempt-new" {
 		t.Fatalf("replacement stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
 	}
+	if streamEvents[0].SessionSettingsSourceGeneration != newGeneration {
+		t.Fatalf("replacement stream source generation = %d, want %d",
+			streamEvents[0].SessionSettingsSourceGeneration, newGeneration)
+	}
 }
 
 func TestBindResumeAttemptCarriesIdentityAcrossAdoptedStartupCallbacks(t *testing.T) {

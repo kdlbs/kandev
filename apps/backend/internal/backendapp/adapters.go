@@ -441,6 +441,8 @@ func buildLifecycleLaunchRequest(
 ) *lifecycle.LaunchRequest {
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:                        req.TaskID,
+		TaskScope:                     req.TaskScope,
+		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
@@ -504,6 +506,13 @@ func buildLifecycleLaunchRequest(
 	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
 	launchReq.Repositories = lifecycleRepoLaunchSpecs(req.Repositories)
 	return launchReq
+}
+
+func lifecycleSessionSettingsPolicy(policy executor.ResumeSettingsPolicy) lifecycle.SessionSettingsPolicy {
+	if policy == executor.ResumeSettingsPolicyProviderRestored {
+		return lifecycle.SessionSettingsPolicyProviderRestored
+	}
+	return lifecycle.SessionSettingsPolicyStrict
 }
 
 func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecycle.WorkspaceFolderSpec {
@@ -1080,6 +1089,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,
+		NativeSessionResume:        info.NativeSessionResume,
 		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil

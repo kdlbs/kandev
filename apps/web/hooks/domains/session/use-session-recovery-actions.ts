@@ -2,6 +2,9 @@ import { claimSessionRecovery, usePendingSessionRecovery } from "./session-recov
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { useAppStore } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
+import type { TaskSession } from "@/lib/types/http";
 import {
   asRecoveryError,
   branchRecoveryDetails,
@@ -20,6 +23,8 @@ export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null
 export type ManualSessionRecoveryFailure = {
   operation: "resume" | "restore_workspace";
 };
+
+const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
 
 type SessionRecoveryActionsOptions = {
   taskId: string;
@@ -52,6 +57,49 @@ function guardOrFallbackError(
 }
 
 type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
+
+function hasNativeACPSessionToken(session: TaskSession): boolean {
+  if (
+    typeof session.downstream_acp_session_id === "string" &&
+    session.downstream_acp_session_id.trim()
+  ) {
+    return true;
+  }
+  const acp = session.metadata?.acp;
+  if (!acp || typeof acp !== "object" || Array.isArray(acp)) return false;
+  const nativeSessionId = (acp as Record<string, unknown>).session_id;
+  return typeof nativeSessionId === "string" && nativeSessionId.trim().length > 0;
+}
+
+function isProviderRestoredResumeEligible(
+  state: AppState,
+  taskId: string,
+  sessionId: string,
+): boolean {
+  const session = state.taskSessions.items[sessionId];
+  if (
+    !session ||
+    session.task_id !== taskId ||
+    session.state !== "FAILED" ||
+    session.is_passthrough ||
+    !hasNativeACPSessionToken(session)
+  ) {
+    return false;
+  }
+
+  const task = state.kanban.tasks.find((candidate) => candidate.id === taskId);
+  if (task?.isFromOffice) return false;
+  const quickChatOwnsTaskSession = state.quickChat.sessions.some(
+    (candidate) =>
+      candidate.kind === "chat" && candidate.sessionId === sessionId && candidate.taskId === taskId,
+  );
+  if (!task && !quickChatOwnsTaskSession) return false;
+
+  const profileId = session.execution_profile_id || session.agent_profile_id;
+  if (!profileId) return false;
+  const profile = state.agentProfiles.items.find((candidate) => candidate.id === profileId);
+  return !!profile && !profile.cli_passthrough && profile.agent_name.toLowerCase() === "auggie";
+}
 
 /** Fences in-flight recovery calls so a stale response cannot write newer state. */
 function useRecoveryOperationFence(
@@ -108,6 +156,9 @@ export function useSessionRecoveryActions({
   errorStamp,
 }: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
+  const providerRestoredResumeEligible = useAppStore((state) =>
+    isProviderRestoredResumeEligible(state, taskId, sessionId),
+  );
   const pendingKey = `${taskId}\u0000${sessionId}`;
   const sharedBusyAction = usePendingSessionRecovery(pendingKey);
   const sessionKey = pendingKey;
@@ -154,7 +205,7 @@ export function useSessionRecoveryActions({
       } else if (managedClone?.kind === "managed_clone_relocation_stale") {
         setManagedCloneRecoveryStamp(null);
       }
-      setResumeError(guardOrFallbackError(cause, guard, t, t("task:failedToResumeSession")));
+      setResumeError(guardOrFallbackError(cause, guard, t, t(FAILED_TO_RESUME_MESSAGE_KEY)));
       setRestoreError(null);
       setBranchDetails(guard ? null : branchRecoveryDetails(cause));
       setGuardDetails(guard);
@@ -174,15 +225,28 @@ export function useSessionRecoveryActions({
       try {
         const recoveryStamp = managedCloneRecoveryStamp ?? errorStamp;
         if (action === "relocate_and_resume") {
-          await requestSessionRecover(
+          await requestSessionRecover({
             taskId,
             sessionId,
             action,
-            t("task:failedToResumeSession"),
-            recoveryStamp,
-          );
+            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+            errorStamp: recoveryStamp,
+          });
+        } else if (action === "resume" && providerRestoredResumeEligible) {
+          await requestSessionRecover({
+            taskId,
+            sessionId,
+            action,
+            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+            settingsPolicy: "provider_restored",
+          });
         } else {
-          await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
+          await requestSessionRecover({
+            taskId,
+            sessionId,
+            action,
+            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+          });
         }
         if (!isCurrentOperation(operation)) return false;
         setResumeError(null);
@@ -209,6 +273,7 @@ export function useSessionRecoveryActions({
       isCurrentOperation,
       managedCloneRecoveryStamp,
       pendingKey,
+      providerRestoredResumeEligible,
       sessionId,
       taskId,
       t,
@@ -266,6 +331,7 @@ export function useSessionRecoveryActions({
     lastFailedAction,
     recoveryNotice,
     manualRecoveryFailure,
+    providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
     handleRetry,

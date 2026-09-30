@@ -28,6 +28,18 @@ func TestPreparationAttemptOptionalMCPFailureKeepsOverallSuccess(t *testing.T) {
 	require.Equal(t, PrepareStepFailed, result.Steps[0].Status)
 }
 
+func TestPreparationAttemptKeepsEnvironmentOutcome(t *testing.T) {
+	for _, success := range []bool{true, false} {
+		t.Run(map[bool]string{true: "optional script failure", false: "fatal environment failure"}[success], func(t *testing.T) {
+			recorder := newPrepareProgressRecorder(nil)
+			recorder.AppendStep(PrepareStep{Name: "Run setup script", Status: PrepareStepFailed})
+			result := mergePreparationAttemptResult(&EnvPrepareResult{Success: success}, recorder, "/workspace")
+			require.Equal(t, success, result.Success)
+			require.Equal(t, PrepareStepFailed, result.Steps[0].Status)
+		})
+	}
+}
+
 func TestExecutionPrepareCompletionFatalErrorUpdatesResultAndEvent(t *testing.T) {
 	mgr, eventBus := newPrepareEventsTestManager(t, "profile-mcp-materialization-error")
 	recorder := mgr.newPreparationAttemptRecorder("task-mcp", "session-mcp")

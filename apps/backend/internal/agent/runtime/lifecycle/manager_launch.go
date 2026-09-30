@@ -1034,7 +1034,6 @@ func mergePreparationAttemptResult(result *EnvPrepareResult, recorder *preparePr
 	if result == nil {
 		result = &EnvPrepareResult{Success: true}
 	}
-	result.Success = true
 	result.PreparationID = recorder.preparationID
 	result.PreparationStartedAt = recorder.preparationStartedAt
 	if workspacePath != "" {
@@ -1043,12 +1042,6 @@ func mergePreparationAttemptResult(result *EnvPrepareResult, recorder *preparePr
 	result.Steps = recorder.Steps()
 	if !recorder.preparationStartedAt.IsZero() {
 		result.Duration = time.Since(recorder.preparationStartedAt)
-	}
-	for _, step := range result.Steps {
-		if step.Status == PrepareStepFailed && !strings.HasPrefix(step.Kind, "agent_mcp_") {
-			result.Success = false
-			break
-		}
 	}
 	return result
 }
@@ -1837,6 +1830,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 				"prepare_result": SerializePrepareResult(execution.PrepareResult),
 			}))
 		}
+		execution.TaskScope = req.TaskScope
+		execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 		if !req.IsPassthrough {
 			executorType := req.ExecutorType
 			if executorType == "" {
@@ -2177,6 +2172,8 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.SessionID = req.SessionID
+	execution.TaskScope = req.TaskScope
+	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
 	execution.WorkspaceID = req.WorkspaceID

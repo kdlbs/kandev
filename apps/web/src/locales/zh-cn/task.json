@@ -2216,6 +2216,8 @@
   "failedToResumeAndRestore": "恢复会话失败 - 工作区还原同样不可用",
   "resumeAndRestoreFailed": "恢复失败：{{resumeError}}。还原工作区失败：{{restoreError}}。",
   "sessionRecoveryFailed": "会话恢复失败",
+  "providerRestoredResumeDisclosure": "恢复会话会保留当前对话，并在此次尝试中跳过模式和模型覆盖设置。",
+  "providerRestoredResumeSuccess": "会话已恢复，未应用模式或模型覆盖设置。",
   "sessionRecoveryFailedDetail": "无法恢复该会话。",
   "sessionRecoveryDetails": "恢复详情",
   "sessionRecoveryResumeAttempt": "恢复尝试",

@@ -49,9 +49,14 @@ MCP CONFIG TOOLS:
 SAVED PROMPT TOOLS:
 - list_shared_prompts_kandev: List saved prompt summaries without content.
 - get_shared_prompt_kandev: Read one saved prompt by exact name. Required: name.
-Saved prompt names are case-sensitive. Surrounding whitespace is ignored. Use
-the list result to discover names before reading a prompt. These tools are
-read-only and do not create, update, delete, or expand saved prompts.
+- create_shared_prompt_kandev: Create a saved prompt. Required: name, content. Duplicate names fail. New prompts allow subsequent agent edits.
+- update_shared_prompt_kandev: Replace saved content by exact name. Required: name, content. Built-in prompts and prompts without Allow agent edits reject writes.
+Saved prompt names are case-sensitive; surrounding whitespace is ignored. List
+and read existing prompts before editing. Apply the operator's agreed shared
+prompt changes before updating workflow steps that reference them, then read back
+both prompts and steps. A shared prompt edit affects every future reference.
+Only an operator can enable Allow agent edits in Settings > Prompts. Generic
+settings writes obey the same restriction. These tools do not delete prompts.
 
 SETTINGS TOOLS:
 - search_settings_kandev: Search setting definitions by metadata. This does not read saved values.

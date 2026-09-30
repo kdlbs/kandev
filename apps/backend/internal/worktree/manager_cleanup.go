@@ -87,9 +87,11 @@ const (
 )
 
 type worktreeRegistration struct {
-	path   string
-	head   string
-	branch string
+	path     string
+	head     string
+	branch   string
+	locked   bool
+	prunable bool
 }
 
 type worktreeRegistrationOwnershipOptions struct {
@@ -142,6 +144,10 @@ func parseWorktreeRegistrations(output string) []worktreeRegistration {
 			registrations[current].head = strings.TrimPrefix(field, "HEAD ")
 		case current >= 0 && strings.HasPrefix(field, "branch "):
 			registrations[current].branch = strings.TrimPrefix(field, "branch ")
+		case current >= 0 && (field == "locked" || strings.HasPrefix(field, "locked ")):
+			registrations[current].locked = true
+		case current >= 0 && (field == "prunable" || strings.HasPrefix(field, "prunable ")):
+			registrations[current].prunable = true
 		}
 	}
 	return registrations

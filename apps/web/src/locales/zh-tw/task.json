@@ -2559,5 +2559,7 @@
   "conversationUsage.estimatedCount_other": "{{count}} 個預估事件",
   "allowNetworkAccess": "允許網路存取",
   "approveWithCommandPolicy": "按命令規則批准",
-  "blockNetworkAccess": "阻止網路存取"
+  "blockNetworkAccess": "阻止網路存取",
+  "providerRestoredResumeDisclosure": "恢復工作階段會保留目前對話，並在此次嘗試中跳過模式和模型覆蓋設定。",
+  "providerRestoredResumeSuccess": "工作階段已恢復，未應用模式或模型覆蓋設定。"
 }

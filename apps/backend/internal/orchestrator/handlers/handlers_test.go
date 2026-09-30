@@ -39,6 +39,32 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.False(t, payload.Cancelled)
 }
 
+func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	tests := []struct {
+		name   string
+		action string
+		policy string
+	}{
+		{name: "unsupported policy", action: "resume", policy: "future_policy"},
+		{name: "runtime retry alias", action: "runtime_retry", policy: "provider_restored"},
+		{name: "branch replacement", action: "resume_new_branch", policy: "provider_restored"},
+		{name: "cancel retry", action: "cancel_retry", policy: "provider_restored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+				"task_id":         "task-1",
+				"session_id":      "session-1",
+				"action":          tt.action,
+				"settings_policy": tt.policy,
+			}))
+			require.NoError(t, err)
+			require.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
+		})
+	}
+}
+
 func TestWSForkConversationRequiresIdentityAndMapsServiceError(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 	require.NoError(t, err)

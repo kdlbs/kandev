@@ -10,6 +10,17 @@ export type SessionRecoveryAction =
   | "runtime_retry"
   | "relocate_and_resume";
 
+export type SessionRecoverySettingsPolicy = "provider_restored";
+
+export type SessionRecoveryRequest = {
+  taskId: string;
+  sessionId: string;
+  action: SessionRecoveryAction;
+  failureMessage: string;
+  errorStamp?: string | null;
+  settingsPolicy?: SessionRecoverySettingsPolicy;
+};
+
 const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type ManagedCloneRelocationRecoveryDetails = WebSocketRequestErrorDetails & {
@@ -115,14 +126,12 @@ export function asRecoveryError(error: unknown, fallback: string): Error {
 }
 
 /** Send one of the explicit session.recover actions. */
-export async function requestSessionRecover(
-  taskId: string,
-  sessionId: string,
-  action: SessionRecoveryAction,
-  failureMessage: string,
-  errorStamp?: string | null,
-): Promise<void> {
+export async function requestSessionRecover(options: SessionRecoveryRequest): Promise<void> {
+  const { taskId, sessionId, action, failureMessage, errorStamp, settingsPolicy } = options;
   if (action === "relocate_and_resume" && !errorStamp) {
+    throw new Error(failureMessage);
+  }
+  if (settingsPolicy && action !== "resume") {
     throw new Error(failureMessage);
   }
   const client = getWebSocketClient();
@@ -134,6 +143,7 @@ export async function requestSessionRecover(
       session_id: sessionId,
       action,
       ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
+      ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
     },
     action === "relocate_and_resume" ? MANAGED_CLONE_RELOCATION_TIMEOUT_MS : 30_000,
   );

@@ -396,6 +396,13 @@ or unsupported catalog, an unavailable model, or a failed apply stops the
 session before inference. Kandev never sends an unadvertised model and never
 rewrites the saved profile model.
 
+For Auggie ACP task sessions, Kandev also requires the selected model and mode
+to take effect before it sends the first prompt. If a failed session offers the
+explicit recovery **Resume** action, it keeps the same conversation and skips
+saved mode and model overrides for that attempt only. Saved profile and session
+settings remain unchanged, and later ordinary starts or resumes enforce them
+again.
+
 The host model list is only an editing hint. A missing host-probe model keeps a
 profile selectable and shows an advisory warning; the executor catalog decides
 the launch result. Upgrades and omitted API fields keep existing profiles

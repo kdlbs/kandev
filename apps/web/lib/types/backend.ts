@@ -454,6 +454,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
+    "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;

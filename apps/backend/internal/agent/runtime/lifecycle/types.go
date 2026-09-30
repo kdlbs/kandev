@@ -44,11 +44,18 @@ type AgentExecution struct {
 	Owner        ExecutionOwner
 	// OwnerAdmission is retained with the execution so the registration gate
 	// uses the same durable owner authority as the pre-allocation gate.
-	OwnerAdmission    OwnerAdmission
-	TaskID            string
-	SessionID         string
-	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
-	WorkspaceID       string
+	OwnerAdmission        OwnerAdmission
+	TaskScope             TaskLaunchScope
+	SessionSettingsPolicy SessionSettingsPolicy
+	// SessionSettingsProjectionPolicy describes provider reports from the
+	// running conversation. It is separate from startup authority so a
+	// reconstructed provider-restored session never opts into omission on a
+	// later independent launch.
+	SessionSettingsProjectionPolicy SessionSettingsPolicy
+	TaskID                          string
+	SessionID                       string
+	TaskEnvironmentID               string // Env owning this execution; sessions in the same task share one env
+	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
 	ExecutorType string
@@ -359,6 +366,28 @@ type AgentExecution struct {
 	startupCallbackMu sync.RWMutex
 }
 
+// SessionSettingsPolicy controls whether startup restores the saved mode/model
+// settings or uses settings already held by the provider conversation.
+type SessionSettingsPolicy uint8
+
+const (
+	// SessionSettingsPolicyStrict reapplies saved selections during startup.
+	SessionSettingsPolicyStrict SessionSettingsPolicy = iota
+	// SessionSettingsPolicyProviderRestored keeps the existing provider
+	// conversation and refuses to create a replacement if it cannot be loaded.
+	SessionSettingsPolicyProviderRestored
+)
+
+// TaskLaunchScope records the canonical owner of a task session at launch.
+// Unknown is retained for legacy callers and never opts into task-only policy.
+type TaskLaunchScope string
+
+const (
+	TaskLaunchScopeUnknown TaskLaunchScope = ""
+	TaskLaunchScopeTask    TaskLaunchScope = "task"
+	TaskLaunchScopeOffice  TaskLaunchScope = "office"
+)
+
 // OwnerSnapshot returns the immutable durable owner carried by this
 // execution. The value is copied so restart reconciliation cannot mutate the
 // lifecycle store through a runtime observation.
@@ -616,6 +645,53 @@ func (e *AgentExecution) beginStartupAttemptWithID(attemptID string) uint64 {
 	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
+	e.SessionSettingsProjectionPolicy = e.SessionSettingsPolicy
+	e.startupAttemptGeneration++
+	e.startupRecoveryStarted = false
+	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
+	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) setSessionSettingsStartupPolicy(policy SessionSettingsPolicy) {
+	if e == nil {
+		return
+	}
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.SessionSettingsPolicy = policy
+	e.SessionSettingsProjectionPolicy = policy
+}
+
+func (e *AgentExecution) sessionSettingsProjectionPolicy() SessionSettingsPolicy {
+	if e == nil {
+		return SessionSettingsPolicyStrict
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.SessionSettingsProjectionPolicy
+}
+
+func (e *AgentExecution) sessionSettingsStartupPolicy() SessionSettingsPolicy {
+	if e == nil {
+		return SessionSettingsPolicyStrict
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.SessionSettingsPolicy
+}
+
+func (e *AgentExecution) beginStartupAttemptPreservingIdentity() uint64 {
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.SessionSettingsProjectionPolicy = e.SessionSettingsPolicy
+	attemptID := e.startupAttemptIDs[e.startupAttemptGeneration]
+	if attemptID == "" {
+		attemptID = e.ResumeAttemptID
+	}
 	e.startupAttemptGeneration++
 	e.startupRecoveryStarted = false
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
@@ -690,6 +766,26 @@ func (e *AgentExecution) startupAttemptSnapshot() uint64 {
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
 	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) restoreSessionSettingsSource(
+	sourceGeneration uint64,
+	attemptID string,
+	projectionPolicy SessionSettingsPolicy,
+) {
+	if e == nil {
+		return
+	}
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.startupAttemptGeneration = sourceGeneration
+	e.startupAttemptIDs = nil
+	e.startupRecoveryStarted = false
+	e.ResumeAttemptID = attemptID
+	e.SessionSettingsProjectionPolicy = projectionPolicy
+	e.recordStartupAttemptIDLocked(sourceGeneration, attemptID)
 }
 
 func (e *AgentExecution) startupGenerationForAttemptID(attemptID string) (uint64, bool) {
@@ -1229,10 +1325,12 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID            string
-	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID         string
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskID                string
+	TaskScope             TaskLaunchScope
+	SessionSettingsPolicy SessionSettingsPolicy
+	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID             string
+	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.

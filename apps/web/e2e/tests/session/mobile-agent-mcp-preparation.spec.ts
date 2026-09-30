@@ -75,7 +75,7 @@ test("phone recovery opens the exact MCP sign-in terminal in the terminal panel"
     ).toHaveAttribute("data-state", "inactive");
     expect(fixture.authenticationTerminalId).not.toBe(fixture.existingTerminalId);
     expect(requests.authenticate).toEqual([{ server_id: E2E_MCP_SERVER_ID }]);
-    await expect(testPage.getByTestId("terminal-panel")).toBeVisible();
+    await expect(testPage.locator('[data-testid="terminal-panel"]:visible').first()).toBeVisible();
   } finally {
     await destroyMcpRecoveryTerminals(apiClient, fixture);
   }

@@ -24,6 +24,7 @@ function BootstrapRecoveryActions({
   blocked,
   canRestore,
   needsManagedCloneRelocation,
+  providerRestoredResumeEligible,
   onResume,
   onRestore,
   onFreshStart,
@@ -36,6 +37,7 @@ function BootstrapRecoveryActions({
   blocked: boolean;
   canRestore: boolean;
   needsManagedCloneRelocation: boolean;
+  providerRestoredResumeEligible: boolean;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
@@ -56,6 +58,9 @@ function BootstrapRecoveryActions({
         {
           kind: "resume",
           label: t("task:resume"),
+          disclosure: providerRestoredResumeEligible
+            ? t("task:providerRestoredResumeDisclosure")
+            : undefined,
           onClick: onResume,
           disabled: !profileExists,
           testId: "recovery-resume-button",
@@ -105,6 +110,7 @@ export function RecoveryCardContent({
   model,
   error,
   profileExists,
+  providerRestoredResumeEligible,
   busyAction,
   hasBranchRecovery,
   blocked,
@@ -121,6 +127,7 @@ export function RecoveryCardContent({
   model: RecoveryCardModel;
   error: TaskStatusSummaryActiveError;
   profileExists: boolean;
+  providerRestoredResumeEligible: boolean;
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
@@ -159,13 +166,16 @@ export function RecoveryCardContent({
           <span className="text-xs text-muted-foreground">{copy.launchNeedsAttention}</span>
         ) : null}
       </div>
-      <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
+      {summary && (model.showSummary || needsManagedCloneRelocation) ? (
+        <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
+      ) : null}
       <p className="mt-2 text-xs text-muted-foreground" data-testid="session-bootstrap-no-change">
         {copy.launchErrorNoChanges}
       </p>
       {!profileExists && <p className="mt-1 text-xs text-muted-foreground">{profileMissing}</p>}
       <BootstrapRecoveryActions
         profileExists={profileExists}
+        providerRestoredResumeEligible={providerRestoredResumeEligible}
         busyAction={busyAction}
         hasBranchRecovery={hasBranchRecovery}
         blocked={blocked}

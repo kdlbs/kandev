@@ -20,6 +20,8 @@ type DirectoryHandle interface {
 	VerifyPath(path string) error
 	IsValidWorktree() bool
 	RemoveDirectory(ctx context.Context) error
+	CreateSubdirectory(name string, mode os.FileMode) (DirectoryHandle, error)
+	ProcessPath(inheritedFD int) (string, *os.File, error)
 	OpenFile(name string) (io.ReadCloser, error)
 	OpenSubdirectory(name string) (DirectoryHandle, error)
 	LstatEntry(name string) (os.FileMode, error)

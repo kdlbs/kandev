@@ -1499,6 +1499,7 @@ func (m *Manager) restartAgentProcess(
 			return err
 		}
 	}
+	execution.beginStartupAttemptPreservingIdentity()
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
 	// methods rather than client.Close — the latter is a terminal drain

@@ -123,3 +123,23 @@ and `TestCursorPassthroughStartAndResumePublishAfterMCPPreparation` (both start
 and resume). They block native discovery, assert that no aggregate completion
 has fired, then release discovery and verify the final MCP step is present.
 Lifecycle lint passed again after these test-only additions.
+
+
+PR #4025 remediation on 2026-09-30 preserves the executor's authoritative
+preparation outcome instead of treating every failed setup-script row as fatal.
+The new regression covers both optional failure with overall success and fatal
+environment failure with overall failure. The workspace-promotion merge also
+preserves main's task scope and provider-restored startup/projection policies;
+the promotion regression asserts those policies.
+
+From `apps/backend`, the following focused command passed with and without
+`-race`:
+
+```bash
+go test ./internal/agent/runtime/lifecycle -run 'TestPreparationAttempt|TestExecutionPrepareCompletion|TestLaunch_.*(Prepare|Promot)|TestPromotion|TestCursorPassthroughStartAndResumePublishAfterMCPPreparation' -count=1
+```
+
+`golangci-lint run ./internal/agent/runtime/lifecycle/... --new-from-rev=origin/main --timeout=5m`
+also passed. Public setup-script documentation already promises nonfatal
+failures, so this remediation restores that contract without a public-copy
+change. Fresh pushed-head CI remains an external verification step.
