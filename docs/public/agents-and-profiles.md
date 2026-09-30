@@ -400,7 +400,8 @@ to take effect before it sends the first prompt. If a failed session offers the
 explicit recovery **Resume** action, it keeps the same conversation and skips
 saved mode and model overrides for that attempt only. Saved profile and session
 settings remain unchanged, and later ordinary starts or resumes enforce them
-again.
+again. See [Manage session state](sessions-and-review.md#manage-session-state)
+for the recovery notice and resolved or dismissed history in Chat.
 
 The host model list is only an editing hint. A missing host-probe model keeps a
 profile selectable and shows an advisory warning; the executor catalog decides

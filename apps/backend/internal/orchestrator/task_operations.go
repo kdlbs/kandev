@@ -5453,7 +5453,7 @@ func (s *Service) publishTaskSessionErrorEvent(
 			eventData["attempt_id"] = lastError.AttemptID
 		}
 		if len(lastError.Causes) > 0 {
-			eventData["causes"] = append([]models.AgentErrorCause(nil), lastError.Causes...)
+			eventData["causes"] = models.NormalizeAgentErrorCauses(lastError.Causes)
 		}
 		if lastError.Details != "" {
 			eventData["details"] = lastError.Details

@@ -272,7 +272,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 	if activeError.Phase != "" && activeError.Phase != models.LaunchErrorPhaseBootstrap {
 		return fmt.Errorf("active error has unknown phase")
 	}
-	if !slices.Equal(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
+	if !models.AgentErrorCausesEqual(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
 		return fmt.Errorf("active error has malformed causes")
 	}
 	if activeError.Details != models.NormalizeAgentErrorDetails(activeError.Details, activeError.Causes) {

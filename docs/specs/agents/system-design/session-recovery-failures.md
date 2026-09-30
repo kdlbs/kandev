@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-11
-updated: 2026-09-20
+updated: 2026-09-30
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
@@ -25,9 +25,8 @@ to own contribution admission and durable bootstrap failure projection.
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; post-start recoverable failure detail; responsive amendment |
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007 | Attempt isolation; accepted-turn ownership |
 
-The following amendments are implemented in the
-[contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
-They qualify the older recovery-surface descriptions below.
+[Planned startup failure explanations](session-startup-failure-explanations.md)
+extend requirement 006. The remaining sections describe implemented recovery behavior.
 
 ### Workspace-only registration (requirement 005)
 
