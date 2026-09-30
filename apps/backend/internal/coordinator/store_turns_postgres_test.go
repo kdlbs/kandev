@@ -10,7 +10,7 @@ import (
 func TestStartUnattendedTurnPostgres_ConcurrentStartsYieldOneOpenTurn(t *testing.T) {
 	s := newMultiConnStorePostgres(t)
 	c := newTestCoordinator(t, s, "ws-1")
-	mustExec(t, s, `UPDATE coordinators SET autonomy_enabled = ?, cost_ceiling_subcents = 1000, conversation_task_id = ? WHERE id = ?`, true, "conv", c.ID)
+	mustExec(t, s, `UPDATE coordinators SET autonomy_enabled = ?, cost_ceiling_subcents = 1000, conversation_task_id = ? WHERE id = ?`, 1, "conv", c.ID)
 	now := time.Now().UTC()
 	insertWakeRow(t, s, c, "w1", "task-1", string(WakeKindQuestion), "q1", "pending", now)
 	insertWakeRow(t, s, c, "w2", "task-2", string(WakeKindQuestion), "q2", "pending", now)
