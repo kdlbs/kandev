@@ -76,6 +76,9 @@ export type { PRCreateResult };
 const debugDeriv = createDebugLogger("git-status:derive");
 
 export type SessionGit = {
+  /** Accepted raw snapshots used to derive environment/repository status quality. */
+  gitStatus: ReturnType<typeof useSessionGitStatus>;
+  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>;
   // Branch info
   branch: string | null;
   remoteBranch: string | null;
@@ -100,6 +103,7 @@ export type SessionGit = {
 
   // Derived state — single source of truth for all git-dependent UI
   statusLoaded: boolean;
+  statusDetailsReady: boolean;
   hasUnstaged: boolean;
   hasStaged: boolean;
   hasCommits: boolean;
@@ -144,6 +148,7 @@ export type SessionGit = {
     pushAhead: number;
     pullBehind: number;
     hasUpstream: boolean;
+    detailsReady: boolean;
     hasStaged: boolean;
     hasUnstaged: boolean;
   }>;
@@ -719,13 +724,14 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     pendingScopeIdentity,
   });
   const { stageAll, unstageAll, commit, stageFile, unstageFile, discard } = stageOps;
-  const derived = deriveSessionGitValues(
+  const derived = deriveSessionGitValues({
     gitStatus,
-    statusByRepo.length > 0,
+    hasRepositoryStatuses: statusByRepo.length > 0,
     unstagedFiles,
     stagedFiles,
     commits,
-  );
+    repositoryDetailsReady: areRepositoryDetailsReady(statusByRepo),
+  });
   const comparison = deriveComparisonValues(comparisonStatuses(statusByRepo, gitStatus));
   const remoteOps = useRemoteOpsFanOut({
     gitOps,
@@ -741,6 +747,8 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   );
 
   return {
+    gitStatus,
+    statusByRepo,
     ...derived,
     ...comparison,
     repoNames: repoNamesForControls,
@@ -788,4 +796,10 @@ function comparisonStatuses(
 ): GitStatusEntry[] {
   if (statusByRepo.length > 0) return statusByRepo.map(({ status }) => status);
   return gitStatus ? [gitStatus] : [];
+}
+
+function areRepositoryDetailsReady(statuses: Array<{ status: GitStatusEntry }>): boolean {
+  return statuses.every(
+    ({ status }) => status.detail_state !== "pending" && status.detail_state !== "unavailable",
+  );
 }

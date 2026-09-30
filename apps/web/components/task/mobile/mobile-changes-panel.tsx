@@ -11,7 +11,7 @@ import { ChangesPanelHeader } from "../changes-panel-header";
 import { MobileDiffSheet } from "./mobile-diff-sheet";
 import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import {
   consumeContributionComparisonRequest,
@@ -40,13 +40,6 @@ function buildContributionHeaderProps(data: ReturnType<typeof useChangesPanelDat
     remoteContributionUrl: data.selectedPR?.pr_url ?? data.existingPrUrl,
     remoteContributionNumber: data.selectedPR?.pr_number,
   };
-}
-
-function useRefreshMobileSessionData(sessionId: string | null | undefined) {
-  useEffect(() => {
-    if (!sessionId) return;
-    getWebSocketClient()?.refreshSessionData(sessionId);
-  }, [sessionId]);
 }
 
 function useContributionComparisonRequestToken(
@@ -117,7 +110,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const { sourceCounts } = useReviewSources(activeSessionId);
   const [diffSheet, setDiffSheet] = useState<DiffSheetMode | null>(null);
 
-  useRefreshMobileSessionData(data.activeSessionId);
+  const retryGitStatus = useSessionGitRefresh(data.activeSessionId, true);
 
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
@@ -153,6 +146,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   }, []);
 
   const bodyProps = buildChangesPanelBodyProps(data, {
+    onRetryGitStatus: retryGitStatus,
     onOpenDiffFile: handleOpenDiffFile,
     onEditFile: onOpenFile ?? (() => {}),
     onOpenCommitDetail: (target, fileNavigation?: CommitFileNavigationRequest) => {

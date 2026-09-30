@@ -352,6 +352,10 @@ On an inline commit file row, press Enter or Space to open its diff.
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+Kandev lists changed files before it finishes loading their diffs. Select a listed file to open its diff while it loads; the panel fills in the details automatically, without another file edit. If the diff cannot be loaded, Kandev shows **Diff is unavailable**.
+
+While the first status check runs, the panel shows **Checking changed files...** and waits before showing an empty state. If status cannot be refreshed, select **Retry**; when earlier status exists, Kandev keeps those rows and shows **Refresh failed. Showing last observed changes.** The clean empty state appears only after a complete status check finds no changed files; pull-request changes and commits remain available when workspace status fails.
+
 On phones and touch devices, working-tree rows give filenames the main space.
 Tap a filename to open its diff, or tap the row's **Show more actions** menu to
 stage or unstage, edit, or discard that file. The menu shows the full path, and

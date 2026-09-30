@@ -3,7 +3,10 @@ import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
-import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import type {
+  GitStatusEntry,
+  GitStatusRefreshState,
+} from "@/lib/state/slices/session-runtime/types";
 
 const debugSub = createDebugLogger("git-status:subscribe");
 
@@ -80,6 +83,29 @@ export function useSessionGitStatusByRepo(
       .map(([name, status]) => ({ repository_name: name, status }))
       .sort((a, b) => a.repository_name.localeCompare(b.repository_name));
   }, [map]);
+}
+
+export function useSessionGitStatusRefresh(sessionId: string | null): {
+  environmentId: string | null;
+  environment: GitStatusRefreshState | undefined;
+  repositories: Record<string, GitStatusRefreshState> | undefined;
+} {
+  return useAppStore(
+    useShallow((state) => {
+      const environmentId = sessionId
+        ? (state.environmentIdBySessionId[sessionId] ?? sessionId)
+        : null;
+      return {
+        environmentId,
+        environment: environmentId
+          ? state.gitStatus.refreshByEnvironmentId?.[environmentId]
+          : undefined,
+        repositories: environmentId
+          ? state.gitStatus.refreshByEnvironmentRepo?.[environmentId]
+          : undefined,
+      };
+    }),
+  );
 }
 
 /** Identifies the active pending-operation scope across session/environment replacement. */

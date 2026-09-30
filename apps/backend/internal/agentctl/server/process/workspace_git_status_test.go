@@ -390,13 +390,14 @@ func TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions(t *testing.T)
 // TestGetGitStatus_FreshBypassesStaleCache simulates the bug class where the
 // poll loop missed a HEAD change (paused mode, dropped tick) and left
 // currentStatus.Files holding pre-commit entries. fresh=true must re-run
-// `git status --porcelain` and return ground truth, not the cached snapshot.
+// `git status --porcelain` and publish ground truth to the shared cache.
 func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
+	t.Cleanup(wt.Stop)
 	ctx := context.Background()
 
 	// Commit a file so we have something to modify.
@@ -444,16 +445,14 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 		t.Errorf("fresh=true should produce empty Modified; got %v", fresh.Modified)
 	}
 
-	// Contract: a fresh read MUST NOT mutate the shared cache. The poll loop
-	// owns currentStatus; subscribe-time fresh reads short-circuit it without
-	// writing back, so already-subscribed observers still see the cached
-	// stream until the poll loop catches up.
+	// Fresh reads use the same ordered publication path as polling. Cache replay
+	// must now preserve the clean membership accepted above.
 	afterFresh, err := wt.GetGitStatus(ctx, false)
 	if err != nil {
 		t.Fatalf("post-fresh GetGitStatus failed: %v", err)
 	}
-	if _, ok := afterFresh.Files["tracked.txt"]; !ok {
-		t.Errorf("fresh=true must not overwrite the cache; expected stale entry to remain, got Files=%v", mapKeys(afterFresh.Files))
+	if _, ok := afterFresh.Files["tracked.txt"]; ok {
+		t.Errorf("fresh snapshot was not published to the cache; got stale Files=%v", mapKeys(afterFresh.Files))
 	}
 }
 

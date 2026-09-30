@@ -768,6 +768,12 @@ func (e *AgentExecution) startupAttemptSnapshot() uint64 {
 	return e.startupAttemptGeneration
 }
 
+// StartupAttemptGeneration returns the generation that fences callbacks from
+// the execution's active startup and stream attempt.
+func (e *AgentExecution) StartupAttemptGeneration() uint64 {
+	return e.startupAttemptSnapshot()
+}
+
 func (e *AgentExecution) restoreSessionSettingsSource(
 	sourceGeneration uint64,
 	attemptID string,

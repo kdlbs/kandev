@@ -235,3 +235,33 @@ describe("ReviewDiffList auto-mark", () => {
     expect(diffViewerProps.at(-1)?.enableWalkthroughAnnotations).toBe(false);
   });
 });
+
+describe("ReviewDiffList pending diffs", () => {
+  it("keeps file membership visible without rendering or auto-marking an empty diff", () => {
+    const entry = { ...file("pending.ts"), diff: "", diff_state: "pending" as const };
+    const onToggleReviewed = vi.fn();
+    render(
+      <TooltipProvider>
+        <ReviewDiffList
+          files={[entry]}
+          reviewedFiles={new Set()}
+          staleFiles={new Set()}
+          sessionId="session-1"
+          autoMarkOnScroll
+          wordWrap={false}
+          enableWalkthroughAnnotations={false}
+          onToggleReviewed={onToggleReviewed}
+          onDiscard={() => undefined}
+          fileRefs={new Map([[entry.path, createRef<HTMLDivElement>()]])}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(document.querySelector('[data-testid="review-diff-pending"]')?.textContent).toBe(
+      "Diff is loading",
+    );
+    expect(diffViewerProps.some((props) => props.filePath === entry.path)).toBe(false);
+    expect(observerRecords.some((record) => record.options?.threshold === 0)).toBe(false);
+    expect(onToggleReviewed).not.toHaveBeenCalled();
+  });
+});

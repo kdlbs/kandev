@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -40,6 +41,8 @@ const (
 	fileStatusModified  = "modified"
 	fileStatusUntracked = "untracked"
 )
+
+var workspaceTrackerEpochCounter atomic.Uint64
 
 // WorkspaceTracker monitors workspace changes and provides real-time updates.
 // It uses git status polling instead of fsnotify to avoid file descriptor exhaustion
@@ -73,6 +76,8 @@ type WorkspaceTracker struct {
 	comparisonTargetRef       string
 	comparisonTargetStatus    string
 	comparisonTargetErrorCode string
+	comparisonGeneration      uint64
+	gitEnvironmentGeneration  atomic.Uint64
 	// comparisonAnchor is set for an initialized submodule. Unlike a branch
 	// name, it must remain pinned to the gitlink commit recorded by the parent
 	// comparison tree, even when the submodule's own default branch moves.
@@ -169,12 +174,28 @@ type WorkspaceTracker struct {
 	// gitStatusObserver is the expensive live repository observation. Keeping it
 	// as a dependency makes the concurrency contract deterministic to test while
 	// production uses computeGitStatus.
-	gitStatusObserver       func(context.Context) (types.GitStatusUpdate, error)
-	gitStatusObserveTimeout time.Duration
-	gitStatusGroup          singleflight.Group
-	gitStatusObserveMu      sync.Mutex
-	gitStatusObserveWG      sync.WaitGroup
-	gitStatusWaiterJoined   func() // Optional test synchronization hook; nil in production.
+	gitStatusObserver              func(context.Context) (types.GitStatusUpdate, error)
+	gitStatusBasicObserver         func(context.Context) (types.GitStatusUpdate, error)
+	gitStatusObserveTimeout        time.Duration
+	gitStatusGroup                 singleflight.Group
+	gitStatusObserveMu             sync.Mutex
+	gitStatusObserveWG             sync.WaitGroup
+	gitStatusEpoch                 uint64
+	gitStatusTrackerID             string
+	gitStatusRevision              uint64
+	gitStatusObservationID         atomic.Uint64
+	gitStatusLatestID              uint64
+	gitStatusFingerprint           string
+	gitStatusPublishMu             sync.Mutex
+	gitStatusEnrichmentMu          sync.Mutex
+	gitStatusEnrichmentRun         bool
+	gitStatusEnrichmentCurrent     string
+	gitStatusEnrichmentJob         *gitStatusEnrichmentJob
+	gitStatusEnrichmentNext        *gitStatusEnrichmentJob
+	gitStatusBeforeEnrich          func() // Optional test gate before a captured job starts.
+	gitStatusBeforeFinalValidation func() // Optional test gate before publishing enriched details.
+	gitStatusWaiterJoined          func() // Optional test synchronization hook; nil in production.
+	gitStatusDetailsWaitJoined     func() // Optional test synchronization hook; nil in production.
 	// gitStatusBetweenQueries is an optional test hook invoked between the
 	// tracked and untracked queries. It is nil in production.
 	gitStatusBetweenQueries func()
@@ -255,6 +276,7 @@ func (wt *WorkspaceTracker) SetGitEnvironment(env []string) {
 	detached := append([]string(nil), env...)
 	wt.gitEnvMu.Lock()
 	wt.gitEnv = detached
+	wt.gitEnvironmentGeneration.Add(1)
 	wt.gitEnvMu.Unlock()
 }
 
@@ -262,6 +284,12 @@ func (wt *WorkspaceTracker) gitEnvironmentSnapshot() []string {
 	wt.gitEnvMu.RLock()
 	defer wt.gitEnvMu.RUnlock()
 	return append([]string(nil), wt.gitEnv...)
+}
+
+func (wt *WorkspaceTracker) gitEnvironmentVersion() uint64 {
+	wt.gitEnvMu.RLock()
+	defer wt.gitEnvMu.RUnlock()
+	return wt.gitEnvironmentGeneration.Load()
 }
 
 // SetBaseBranch records the task's stored base branch for this repository.
@@ -280,6 +308,7 @@ func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 	wt.setBaseBranchLocked(baseBranch)
+	wt.comparisonGeneration++
 }
 
 // SetBaseBranchIfNotSubmodule updates the branch override only while holding
@@ -292,6 +321,7 @@ func (wt *WorkspaceTracker) SetBaseBranchIfNotSubmodule(baseBranch string) bool 
 		return false
 	}
 	wt.setBaseBranchLocked(baseBranch)
+	wt.comparisonGeneration++
 	return true
 }
 
@@ -314,6 +344,7 @@ func (wt *WorkspaceTracker) SetComparisonAnchor(anchor string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 	wt.comparisonAnchorSet = true
+	wt.comparisonGeneration++
 	if !sha1HexPattern.MatchString(anchor) {
 		wt.comparisonAnchor = ""
 		wt.baseBranch = ""
@@ -437,9 +468,10 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		cancelCtx:               ctx,
 		cancelFunc:              cancel,
 		gitStatusObserveTimeout: workspaceGitStatusObserveTimeout,
+		gitStatusEpoch:          workspaceTrackerEpochCounter.Add(1),
+		gitStatusTrackerID:      uuid.NewString(),
 		filesystemWarnings:      fsdiagnostics.NewWarningLimiter(0),
 	}
-	tracker.gitStatusObserver = tracker.computeGitStatus
 	return tracker
 }
 

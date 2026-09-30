@@ -87,7 +87,10 @@ func TestCapDiffOutput_Truncation(t *testing.T) {
 	runGit(t, repoDir, "add", "big.txt")
 
 	// Get diff — should be truncated
-	out, truncated := capDiffOutput(context.Background(), repoDir, "diff", "--cached", "--", "big.txt")
+	out, truncated, err := capDiffOutput(context.Background(), repoDir, "diff", "--cached", "--", "big.txt")
+	if err != nil {
+		t.Fatalf("capDiffOutput: %v", err)
+	}
 	if !truncated {
 		t.Error("expected truncated=true for large diff")
 	}

@@ -62,6 +62,10 @@ type Client struct {
 	mu                        sync.RWMutex
 	closed                    bool
 	logger                    *logger.Logger
+	gitRefreshMu              sync.Mutex
+	gitRefreshCancels         map[uint64]context.CancelFunc
+	gitRefreshNextID          uint64
+	gitRefreshClosed          bool
 
 	// Replaceable session.message.updated traffic is scheduled separately from
 	// semantic notifications so one noisy session cannot fill the shared FIFO.
@@ -103,6 +107,7 @@ func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hu
 		replaceableBySession:      make(map[string][]sessionNotificationQueueItem),
 		replaceableCurrentByKey:   make(map[replaceableNotificationKey]queuedReplaceableKey),
 		notificationWake:          make(chan struct{}, 1),
+		gitRefreshCancels:         make(map[uint64]context.CancelFunc),
 		logger:                    log.WithFields(zap.String("client_id", id)),
 	}
 }
@@ -128,6 +133,7 @@ func (c *Client) dispatchContext() context.Context {
 // hub's lifetime context instead; see handleMessage.
 func (c *Client) ReadPump(_ context.Context) {
 	defer func() {
+		c.cancelSessionGitRefreshes()
 		c.hub.Unregister(c)
 		if err := c.conn.Close(); err != nil {
 			c.logger.Debug("failed to close websocket connection", zap.Error(err))
@@ -317,6 +323,7 @@ type UserSubscribeRequest struct {
 
 type SessionSubscribeRequest struct {
 	SessionID        string  `json:"session_id"`
+	Mode             string  `json:"mode,omitempty"`
 	ConsumerKind     string  `json:"consumer_kind,omitempty"`
 	PluginID         string  `json:"plugin_id,omitempty"`
 	Generation       int64   `json:"generation,omitempty"`
@@ -676,13 +683,88 @@ func (c *Client) handleSessionGitRefresh(msg *ws.Message) {
 	if !c.maySubscribeSession(msg, req.SessionID) {
 		return
 	}
-
-	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"success":    true,
-		"session_id": req.SessionID,
-	})
+	mode := req.Mode
+	if mode == "" {
+		mode = "fresh"
+	}
+	if mode != "fresh" && mode != "recover" && mode != "replay" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "mode must be fresh, recover, or replay", nil)
+		return
+	}
+	ctx, finish, ok := c.beginSessionGitRefresh()
+	if !ok {
+		return
+	}
+	defer finish()
+	result, err := c.hub.GetSessionGitRefreshData(ctx, req.SessionID, mode)
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		result = SessionGitRefreshResult{
+			SessionID:   req.SessionID,
+			Mode:        mode,
+			StatusState: "unavailable",
+			ErrorCode:   "status_unavailable",
+		}
+	}
+	result.SessionID = req.SessionID
+	result.Mode = mode
+	resp, responseErr := ws.NewResponse(msg.ID, msg.Action, result)
+	if responseErr != nil {
+		c.logger.Error("failed to encode session git refresh response", zap.Error(responseErr))
+		return
+	}
 	c.sendMessage(resp)
-	c.sendSessionGitData(req.SessionID)
+	for _, snapshot := range result.Snapshots {
+		if snapshot == nil || snapshot.Action != ws.ActionSessionGitEvent {
+			continue
+		}
+		payload, marshalErr := json.Marshal(snapshot)
+		if marshalErr != nil {
+			c.logger.Error("failed to marshal session git snapshot", zap.Error(marshalErr))
+			continue
+		}
+		c.sendBytes(payload)
+	}
+}
+
+func (c *Client) beginSessionGitRefresh() (context.Context, func(), bool) {
+	ctx, cancel := context.WithCancel(c.dispatchContext())
+	c.gitRefreshMu.Lock()
+	if c.gitRefreshClosed {
+		c.gitRefreshMu.Unlock()
+		cancel()
+		return ctx, func() {}, false
+	}
+	if c.gitRefreshCancels == nil {
+		c.gitRefreshCancels = make(map[uint64]context.CancelFunc)
+	}
+	c.gitRefreshNextID++
+	refreshID := c.gitRefreshNextID
+	c.gitRefreshCancels[refreshID] = cancel
+	c.gitRefreshMu.Unlock()
+	finish := func() {
+		c.gitRefreshMu.Lock()
+		delete(c.gitRefreshCancels, refreshID)
+		c.gitRefreshMu.Unlock()
+		cancel()
+	}
+	return ctx, finish, true
+}
+
+func (c *Client) cancelSessionGitRefreshes() {
+	c.gitRefreshMu.Lock()
+	c.gitRefreshClosed = true
+	cancels := make([]context.CancelFunc, 0, len(c.gitRefreshCancels))
+	for id, cancel := range c.gitRefreshCancels {
+		cancels = append(cancels, cancel)
+		delete(c.gitRefreshCancels, id)
+	}
+	c.gitRefreshMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 // handleSessionUnfocus handles session.unfocus — releases the focus mark for
@@ -779,8 +861,9 @@ func (c *Client) sendError(id, action, code, message string, details map[string]
 
 func (c *Client) closeSend() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.closeSendLocked()
+	c.mu.Unlock()
+	c.cancelSessionGitRefreshes()
 }
 
 func (c *Client) closeSendLocked() {

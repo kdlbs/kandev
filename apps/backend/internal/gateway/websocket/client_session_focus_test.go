@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -164,13 +165,25 @@ func TestHandleSessionGitRefresh_SendsOnlyGitData(t *testing.T) {
 	case data := <-c.controlSend:
 		var response ws.Message
 		if err := json.Unmarshal(data, &response); err != nil {
-			t.Fatalf("decode refresh ACK: %v", err)
+			t.Fatalf("decode refresh response: %v", err)
 		}
 		if response.Action != ws.ActionSessionGitRefresh {
 			t.Fatalf("unexpected refresh response: %+v", response)
 		}
+		var payload struct {
+			Success   bool         `json:"success"`
+			SessionID string       `json:"session_id"`
+			Mode      string       `json:"mode"`
+			Snapshots []ws.Message `json:"snapshots"`
+		}
+		if err := json.Unmarshal(response.Payload, &payload); err != nil {
+			t.Fatalf("decode correlated refresh payload: %v", err)
+		}
+		if !payload.Success || payload.SessionID != sessionID || payload.Mode != "fresh" || len(payload.Snapshots) != 1 || payload.Snapshots[0].Action != ws.ActionSessionGitEvent {
+			t.Fatalf("correlated refresh payload = %+v, want the single Git snapshot", payload)
+		}
 	default:
-		t.Fatal("expected refresh ACK")
+		t.Fatal("expected correlated refresh response")
 	}
 	select {
 	case data := <-c.send:
@@ -188,6 +201,59 @@ func TestHandleSessionGitRefresh_SendsOnlyGitData(t *testing.T) {
 	case data := <-c.send:
 		t.Fatalf("unexpected non-git refresh data: %s", data)
 	default:
+	}
+}
+
+func TestHandleSessionGitRefreshForwardsRecoveryMode(t *testing.T) {
+	h := newTestHub(t)
+	modeSeen := make(chan string, 1)
+	h.SetSessionGitRefreshProvider(func(_ context.Context, sessionID, mode string) (SessionGitRefreshResult, error) {
+		modeSeen <- mode
+		return SessionGitRefreshResult{SessionID: sessionID, Mode: mode, StatusState: "unavailable", Snapshots: []*ws.Message{}}, nil
+	})
+	c := newTestClient("c-git-recover")
+	c.hub = h
+	c.controlSend = make(chan []byte, 4)
+	payload, _ := json.Marshal(SessionSubscribeRequest{SessionID: "sess-git-recover", Mode: "recover"})
+	c.handleSessionGitRefresh(&ws.Message{ID: "req-recover", Action: ws.ActionSessionGitRefresh, Payload: payload})
+	select {
+	case mode := <-modeSeen:
+		if mode != "recover" {
+			t.Fatalf("mode = %q, want recover", mode)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("refresh provider was not called")
+	}
+}
+
+func TestSessionGitRefreshIsCanceledWithConnection(t *testing.T) {
+	h := newTestHub(t)
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	h.SetSessionGitRefreshProvider(func(ctx context.Context, sessionID, mode string) (SessionGitRefreshResult, error) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return SessionGitRefreshResult{SessionID: sessionID, Mode: mode}, nil
+	})
+	c := newTestClient("c-git-cancel")
+	c.hub = h
+	c.controlSend = make(chan []byte, 4)
+	payload, _ := json.Marshal(SessionSubscribeRequest{SessionID: "sess-git-cancel"})
+	go c.handleSessionGitRefresh(&ws.Message{ID: "req-cancel", Action: ws.ActionSessionGitRefresh, Payload: payload})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("refresh provider did not start")
+	}
+	c.cancelSessionGitRefreshes()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("connection teardown did not cancel refresh work")
+	}
+	if len(c.controlSend) != 0 {
+		t.Fatal("canceled refresh sent a response")
 	}
 }
 

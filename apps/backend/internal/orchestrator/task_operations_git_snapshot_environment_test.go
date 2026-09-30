@@ -91,7 +91,13 @@ func TestCaptureArchiveDiffRequiresEnvironmentIdentity(t *testing.T) {
 				}, nil
 			},
 			getGitStatusFreshFunc: func(context.Context, string) (*client.GitStatusResult, error) {
-				return nil, nil
+				return &client.GitStatusResult{
+					Success:       true,
+					StatusState:   "ready",
+					FilesComplete: true,
+					DetailState:   "ready",
+					Files:         map[string]interface{}{"main.go": map[string]interface{}{"status": "modified"}},
+				}, nil
 			},
 		}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)

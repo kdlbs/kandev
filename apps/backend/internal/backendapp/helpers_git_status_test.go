@@ -14,6 +14,7 @@ import (
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/task/models"
 	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -347,6 +348,67 @@ func TestAppendLiveGitStatusMessageDoesNotFallbackAfterLiveQueryFailure(t *testi
 	}
 }
 
+func TestAppendLiveGitStatusMessageDropsResultFromReplacedExecution(t *testing.T) {
+	fixture := newGitStatusEnvironmentFixture(t)
+	log := newTestLogger()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	agentClient, closeServer := newGitStatusClientWithHandler(t, log, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/git/status/multi" {
+			http.NotFound(w, r)
+			return
+		}
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(client.MultiRepoGitStatusResult{
+			Success: true,
+			Repos: []client.PerRepoGitStatus{{Status: client.GitStatusResult{
+				Success: true, StatusState: "ready", FilesComplete: true, DetailState: "ready",
+				Modified: []string{"retired.txt"}, Files: map[string]interface{}{"retired.txt": map[string]interface{}{"status": "modified"}},
+			}}},
+		})
+	}))
+	defer closeServer()
+
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	oldExecution := &lifecycle.AgentExecution{
+		ID: "git-status-live-old", TaskID: fixture.requested.TaskID, SessionID: "git-status-canonical",
+		TaskEnvironmentID: fixture.env.ID, WorkspacePath: fixture.env.WorkspacePath,
+	}
+	if err := mgr.ExecutionStoreForTesting().Add(oldExecution); err != nil {
+		t.Fatalf("add old source execution: %v", err)
+	}
+	oldExecution.SetAgentCtlClientForTesting(agentClient)
+
+	result := make(chan int, 1)
+	go func() {
+		messages := appendLiveGitStatusMessage(context.Background(), fixture.repo, mgr, fixture.requested.ID, fixture.requested, nil, log)
+		result <- len(messages)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("initial subscription did not enter the live status request")
+	}
+	mgr.ExecutionStoreForTesting().Remove(oldExecution.ID)
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID: "git-status-live-new", TaskID: fixture.requested.TaskID, SessionID: "git-status-canonical",
+		TaskEnvironmentID: fixture.env.ID, WorkspacePath: fixture.env.WorkspacePath,
+	}); err != nil {
+		t.Fatalf("add replacement execution: %v", err)
+	}
+	close(release)
+	select {
+	case count := <-result:
+		if count != 0 {
+			t.Fatalf("initial subscription forwarded %d stale status messages, want zero", count)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("initial subscription did not finish after source replacement")
+	}
+}
+
 func TestAppendLiveGitStatusMessageRejectsUnrecordedWorkspace(t *testing.T) {
 	fixture := newGitStatusEnvironmentFixture(t)
 	ctx := context.Background()
@@ -550,6 +612,115 @@ func TestTryGetLiveGitStatusUsesSingleTimeoutAcrossSources(t *testing.T) {
 	case <-secondCalled:
 		t.Fatal("second source was probed after the shared live-status deadline expired")
 	default:
+	}
+}
+
+func TestSessionGitRefreshPreservesMixedRepositoryOutcomes(t *testing.T) {
+	fixture := newGitStatusEnvironmentFixture(t)
+	log := newTestLogger()
+	agentClient, closeServer := newGitStatusClientWithHandler(t, log, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(client.MultiRepoGitStatusResult{Success: true, Repos: []client.PerRepoGitStatus{
+			{RepositoryName: "backend", Status: client.GitStatusResult{
+				Success: true, StatusState: "ready", FilesComplete: true, DetailState: "pending",
+				TrackerID:      "agentctl/tracker-3",
+				RepositoryName: "backend", Modified: []string{"main.go"}, Files: map[string]interface{}{"main.go": map[string]interface{}{"status": "modified"}},
+			}},
+			{RepositoryName: "web", Status: client.GitStatusResult{
+				Success: false, Error: "/private/path leaked", ErrorCode: "repository_unavailable",
+			}},
+		}})
+	}))
+	defer closeServer()
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID: "refresh-source", TaskID: fixture.requested.TaskID, SessionID: "git-status-canonical",
+		TaskEnvironmentID: fixture.env.ID, WorkspacePath: fixture.env.WorkspacePath,
+	}); err != nil {
+		t.Fatalf("add source execution: %v", err)
+	}
+	execution, ok := mgr.GetExecutionBySessionID("git-status-canonical")
+	if !ok {
+		t.Fatal("source execution was not registered")
+	}
+	execution.SetAgentCtlClientForTesting(agentClient)
+
+	result, err := buildSessionGitRefreshProvider(fixture.repo, mgr, log)(context.Background(), fixture.requested.ID, "fresh")
+	if err != nil {
+		t.Fatalf("refresh provider: %v", err)
+	}
+	if !result.Success || result.StatusState != "ready" || result.TaskEnvironmentID != fixture.env.ID || len(result.Snapshots) != 2 {
+		t.Fatalf("refresh result = %+v, want two scoped repository states with one usable snapshot", result)
+	}
+	healthy := decodePayload(t, result.Snapshots[0].Payload)["status"].(map[string]interface{})
+	if healthy["files_complete"] != true || healthy["detail_state"] != "pending" || healthy["tracker_epoch"] != float64(0) || healthy["tracker_id"] != "agentctl/tracker-3" {
+		t.Fatalf("healthy status projection = %#v", healthy)
+	}
+	failed := decodePayload(t, result.Snapshots[1].Payload)["status"].(map[string]interface{})
+	if failed["status_state"] != "unavailable" || failed["files_complete"] != false || failed["error_code"] != "repository_unavailable" {
+		t.Fatalf("failed status projection = %#v", failed)
+	}
+	if _, leaked := failed["error"]; leaked {
+		t.Fatal("per-repository Git error text was exposed in refresh data")
+	}
+}
+
+func TestSessionGitRefreshRejectsReplacedSource(t *testing.T) {
+	fixture := newGitStatusEnvironmentFixture(t)
+	log := newTestLogger()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	agentClient, closeServer := newGitStatusClientWithHandler(t, log, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(client.MultiRepoGitStatusResult{Success: true, Repos: []client.PerRepoGitStatus{{Status: client.GitStatusResult{
+			Success: true, StatusState: "ready", FilesComplete: true, DetailState: "ready",
+		}}}})
+	}))
+	defer closeServer()
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	original := &lifecycle.AgentExecution{
+		ID: "refresh-source-old", TaskID: fixture.requested.TaskID, SessionID: "git-status-canonical",
+		TaskEnvironmentID: fixture.env.ID, WorkspacePath: fixture.env.WorkspacePath,
+	}
+	if err := mgr.ExecutionStoreForTesting().Add(original); err != nil {
+		t.Fatalf("add source execution: %v", err)
+	}
+	original.SetAgentCtlClientForTesting(agentClient)
+	type refreshResult struct {
+		result gateways.SessionGitRefreshResult
+		err    error
+	}
+	resultCh := make(chan refreshResult, 1)
+	go func() {
+		result, err := buildSessionGitRefreshProvider(fixture.repo, mgr, log)(context.Background(), fixture.requested.ID, "fresh")
+		resultCh <- refreshResult{result: result, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agentctl refresh request did not start")
+	}
+	mgr.ExecutionStoreForTesting().Remove(original.ID)
+	replacement := &lifecycle.AgentExecution{
+		ID: "refresh-source-new", TaskID: fixture.requested.TaskID, SessionID: "git-status-canonical",
+		TaskEnvironmentID: fixture.env.ID, WorkspacePath: fixture.env.WorkspacePath,
+	}
+	if err := mgr.ExecutionStoreForTesting().Add(replacement); err != nil {
+		t.Fatalf("replace source execution: %v", err)
+	}
+	close(release)
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("refresh provider: %v", result.err)
+		}
+		if result.result.Success || len(result.result.Snapshots) != 0 || result.result.ErrorCode != "live_source_unavailable" {
+			t.Fatalf("replaced source result = %+v, want unavailable without stale snapshots", result.result)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("refresh provider did not return after source replacement")
 	}
 }
 

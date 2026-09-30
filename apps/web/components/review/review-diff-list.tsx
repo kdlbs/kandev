@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { FileDiffViewer, DiffErrorBoundary } from "@/components/diff";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -12,21 +11,16 @@ import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import { ReviewFileComments } from "./review-file-comments";
 import type { DiffComment } from "@/lib/diff/types";
-import {
-  diffSkipReasonLabel,
-  hasTextualDiff,
-  reviewDiffUnavailableLabel,
-  reviewFileKey,
-} from "./types";
+import { reviewFileKey } from "./types";
 import type { ReviewFile } from "./types";
 import { ReviewDiffGroup } from "./review-diff-group";
 import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
 import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
 import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
+import { ReviewFileDiffContent } from "./review-file-diff-content";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const SCROLL_KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "]);
@@ -390,74 +384,6 @@ export function resolveDiffExpansion(
   return { enableExpansion: true, baseRef: "HEAD" };
 }
 
-function renderDiffContent(opts: {
-  shouldRender: boolean;
-  file: ReviewFile;
-  sessionId: string;
-  wordWrap: boolean;
-  enableWalkthroughAnnotations: boolean;
-  expandUnchanged: boolean;
-  enableExpansion: boolean;
-  baseRef: string;
-  onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
-  onCommentRun: (comment: DiffComment) => void;
-  onToggleExpandUnchanged: () => void;
-}) {
-  const {
-    shouldRender,
-    file,
-    sessionId,
-    wordWrap,
-    enableWalkthroughAnnotations,
-    expandUnchanged,
-    enableExpansion,
-    baseRef,
-    onRevertBlock,
-    onCommentRun,
-    onToggleExpandUnchanged,
-  } = opts;
-  const hasText = hasTextualDiff(file);
-  if (shouldRender && hasText) {
-    return (
-      <>
-        <DiffErrorBoundary filePath={file.path}>
-          <FileDiffViewer
-            filePath={file.path}
-            diff={file.diff}
-            status={file.status}
-            enableComments
-            enableAcceptReject
-            enableWalkthroughAnnotations={enableWalkthroughAnnotations}
-            onRevertBlock={onRevertBlock}
-            onCommentRun={onCommentRun}
-            sessionId={sessionId}
-            wordWrap={wordWrap}
-            enableExpansion={enableExpansion}
-            baseRef={baseRef}
-            hideHeader
-            expandUnchanged={expandUnchanged}
-            onToggleExpandUnchanged={onToggleExpandUnchanged}
-            repo={file.repository_name ?? ""}
-          />
-        </DiffErrorBoundary>
-        {file.diff_skip_reason === "truncated" && (
-          <div className="py-1 text-center text-xs text-muted-foreground border-t">
-            {t("review:diffTruncated")}
-          </div>
-        )}
-      </>
-    );
-  }
-  const message = hasText
-    ? diffSkipReasonLabel(file.diff_skip_reason)
-    : reviewDiffUnavailableLabel(file);
-  return (
-    <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-      {message}
-    </div>
-  );
-}
-
 function useMarkdownPreview(
   file: ReviewFile,
   onPreviewMarkdown?: FileDiffSectionProps["onPreviewMarkdown"],
@@ -593,14 +519,10 @@ function FileDiffSection({
     onPreviewMarkdown,
   );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
-  // Force load when visible via intersection observer, or forceLoad is true
-  const shouldRenderContent = isVisible || !!forceLoad;
   useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed, suppressAutoMark);
-  // Auto-mark sends the composite key (matches the dialog's reviewed-set
-  // shape) so cross-repo same-named files don't all get marked when one
-  // scrolls past.
   const scrollSentinelRef = useAutoMarkOnScroll({
-    autoMarkOnScroll,
+    autoMarkOnScroll:
+      autoMarkOnScroll && file.diff_state !== "pending" && file.diff_state !== "unavailable",
     isReviewed,
     isStale,
     fileKey,
@@ -648,19 +570,19 @@ function FileDiffSection({
         (markdownPreview ? (
           <ReviewMarkdownDiffPreviewContent preview={markdownPreviewContent} />
         ) : (
-          renderDiffContent({
-            shouldRender: shouldRenderContent,
-            file,
-            sessionId,
-            wordWrap: controls.effectiveWordWrap,
-            enableWalkthroughAnnotations,
-            expandUnchanged: controls.expandUnchanged,
-            enableExpansion,
-            baseRef,
-            onRevertBlock: handleRevertBlock,
-            onCommentRun: handleCommentRun,
-            onToggleExpandUnchanged: controls.handleToggleExpandUnchanged,
-          })
+          <ReviewFileDiffContent
+            shouldRender={isVisible || !!forceLoad}
+            file={file}
+            sessionId={sessionId}
+            wordWrap={controls.effectiveWordWrap}
+            enableWalkthroughAnnotations={enableWalkthroughAnnotations}
+            expandUnchanged={controls.expandUnchanged}
+            enableExpansion={enableExpansion}
+            baseRef={baseRef}
+            onRevertBlock={handleRevertBlock}
+            onCommentRun={handleCommentRun}
+            onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
+          />
         ))}
     </div>
   );
