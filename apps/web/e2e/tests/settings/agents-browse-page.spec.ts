@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
+import { serializeInlineScriptJSON } from "../../helpers/inline-script-json";
 
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
@@ -70,7 +71,7 @@ test.describe("Agents browse page", () => {
       };
       await route.fulfill({
         response,
-        body: `${html.slice(0, jsonStart)}${JSON.stringify(seededPayload)}${html.slice(scriptEnd)}`,
+        body: `${html.slice(0, jsonStart)}${serializeInlineScriptJSON(seededPayload)}${html.slice(scriptEnd)}`,
       });
       bootStateSeeded = true;
     });

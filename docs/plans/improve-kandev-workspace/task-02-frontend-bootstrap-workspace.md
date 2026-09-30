@@ -98,6 +98,8 @@ with `pnpm vitest run components/improve-kandev-dialog.test.tsx`.
 A locked form starts with a provisional workspace and no resolved workflow.
 Bootstrap resolution preserves the title and description entered during that interval.
 An established workspace change still resets the form.
-Unit cases cover both transitions and initial null-workspace hydration.
+Preservation requires both the new workspace and locked workflow to be resolved.
+A workspace change with an unresolved workflow resets the draft.
+Four unit cases cover these transitions and initial null-workspace hydration.
 The browser isolation case holds bootstrap until the user enters a draft,
 then checks that submission retains the draft in the dedicated workspace.

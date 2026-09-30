@@ -48,6 +48,8 @@ navigation.
 The helper uses `scrollIntoView` with nearest block and inline alignment.
 Normal motion uses smooth scrolling. Reduced motion uses immediate scrolling.
 Visibility permits one CSS pixel of boundary rounding from browser scrolling.
+The helper observes a pending scroll without restarting it on every frame.
+If layout moves a previously visible row out of view, it requests another scroll within the same frame budget.
 Explicit command navigation releases pending portal restoration for that viewport.
 The release also prevents an imminent reattach from applying a stale snapshot.
 The cue uses a dedicated class on the interactive task row and is removed

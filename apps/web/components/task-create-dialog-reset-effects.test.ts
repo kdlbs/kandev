@@ -42,4 +42,15 @@ describe("locked workflow context hydration", () => {
     rerender({ workspaceId: "workspace-b" });
     expect(result.current.taskName).toBe("");
   });
+
+  it("resets a draft when the workspace changes while its workflow is still unresolved", () => {
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) =>
+        useDialogFormState(true, workspaceId, null, undefined, true),
+      { initialProps: { workspaceId: "workspace-a" } },
+    );
+    act(() => result.current.setTaskName("Workspace A draft"));
+    rerender({ workspaceId: "workspace-b" });
+    expect(result.current.taskName).toBe("");
+  });
 });

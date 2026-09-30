@@ -127,6 +127,8 @@ function updateTaskRowVisibility(
     state.portalScrollRestoreReleased = true;
   }
   if (!isInsideViewport(match.row, match.viewport)) {
+    // A row displaced after entering view starts a new scroll; pending motion does not.
+    if (state.previousGeometry !== null) state.scrollRequested = false;
     state.visibleFrames = 0;
     state.previousGeometry = null;
     if (!state.scrollRequested) {

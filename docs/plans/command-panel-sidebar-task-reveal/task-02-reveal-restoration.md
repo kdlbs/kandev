@@ -24,6 +24,8 @@ Release pending portal restoration before explicit command navigation.
 Wait for stable visible row geometry before the transient cue.
 Allow one CSS pixel of browser scroll rounding at viewport boundaries.
 Preserve smooth nearest scrolling, reduced-motion behavior, and cancellation.
+If layout displaces a row after it entered view, permit another scroll within the same frame budget.
+Do not restart a pending scroll on every frame.
 
 ## Evidence
 
@@ -36,6 +38,7 @@ The corrected browser suite passed both overflow directions and the guarded-navi
 ## Verification
 
 Sidebar unit cases cover stable geometry, rounding, cancellation, and bounded failure.
+Review regressions cover displacement after initial visibility and a pending scroll that never settles.
 Portal unit cases cover active release, imminent restoration, and release expiry.
 Desktop browser cases retain cue, row containment, active state, and document-scroll checks.
 The phone command-navigation cases retain direct routing and hidden-sidebar behavior.

@@ -27,8 +27,14 @@ type FormResetEffectsArgs = {
 function isInitialLockedHydration(
   lockedWorkflow: boolean,
   previous: { workspaceId: string | null; workflowId: string | null },
+  current: { workspaceId: string | null; workflowId: string | null },
 ): boolean {
-  return lockedWorkflow && (previous.workspaceId === null || previous.workflowId === null);
+  return (
+    lockedWorkflow &&
+    current.workspaceId !== null &&
+    current.workflowId !== null &&
+    (previous.workspaceId === null || previous.workflowId === null)
+  );
 }
 
 export function useFormResetEffects({
@@ -52,7 +58,10 @@ export function useFormResetEffects({
     };
 
     // Initial locked-context hydration preserves the user's in-progress draft.
-    const initialLockedHydration = isInitialLockedHydration(lockedWorkflow, previous);
+    const initialLockedHydration = isInitialLockedHydration(lockedWorkflow, previous, {
+      workspaceId,
+      workflowId,
+    });
     if (
       !open ||
       (previous.open && (previous.workspaceId === workspaceId || initialLockedHydration))

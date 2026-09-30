@@ -173,6 +173,34 @@ describe("revealSidebarTask", () => {
   });
 });
 
+describe("revealSidebarTask layout movement", () => {
+  it("scrolls again when layout moves a previously visible row out of view", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, "shifted", { x: 0, y: 120, width: 320, height: 24 });
+    const callbacks: Array<() => void> = [];
+    const navigation = revealSidebarTask("shifted", (callback) => callbacks.push(callback));
+    callbacks.shift()!();
+    callbacks.shift()!();
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+    setRect(viewport, { x: 0, y: 200, width: 320, height: 100 });
+    while (callbacks.length > 0) callbacks.shift()!();
+    await expect(navigation).resolves.toBe(true);
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+  });
+
+  it("does not restart scrolling on every frame while the first scroll is pending", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, "pending-scroll", { x: 0, y: 120, width: 320, height: 24 });
+    row.scrollIntoView = vi.fn();
+    await expect(revealSidebarTask("pending-scroll", (callback) => callback())).resolves.toBe(
+      false,
+    );
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
+  });
+});
+
 describe("revealSidebarTask edge cases", () => {
   it("finds a row that renders after a later animation frame", async () => {
     const viewport = mountViewport();
