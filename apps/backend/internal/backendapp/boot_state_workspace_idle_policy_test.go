@@ -1,6 +1,7 @@
 package backendapp
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,11 +36,18 @@ func TestSettingsBootCarriesSavedWorkspaceIdlePolicy(t *testing.T) {
 		if !ok {
 			t.Fatal("settings boot state has no workspaces block")
 		}
-		items, ok := block["items"].([]map[string]any)
-		if !ok || len(items) == 0 {
+		itemsJSON, err := json.Marshal(block["items"])
+		if err != nil {
+			t.Fatalf("marshal settings boot workspace items: %v", err)
+		}
+		var items []map[string]any
+		if err := json.Unmarshal(itemsJSON, &items); err != nil {
+			t.Fatalf("unmarshal settings boot workspace items: %v", err)
+		}
+		if len(items) == 0 {
 			t.Fatalf("settings boot workspace items = %#v", block["items"])
 		}
-		if items[0]["id"] != workspaceID || items[0]["acp_idle_suspension_enabled"] != enabled || items[0]["acp_idle_timeout_minutes"] != timeout {
+		if items[0]["id"] != workspaceID || items[0]["acp_idle_suspension_enabled"] != enabled || items[0]["acp_idle_timeout_minutes"] != float64(timeout) {
 			t.Fatalf("boot workspace policy = %#v, want enabled %t timeout %d", items[0], enabled, timeout)
 		}
 	}

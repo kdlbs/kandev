@@ -1,8 +1,52 @@
 import type { StoreApi } from "zustand";
 import type { AppState, WorkspaceState } from "@/lib/state/store";
+import type { WorkspacePayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 type WorkspaceItem = WorkspaceState["items"][number];
+
+function workspacePlacementUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<WorkspaceItem, "default_config_agent_profile_id" | "unit_id"> {
+  return {
+    default_config_agent_profile_id:
+      "default_config_agent_profile_id" in payload
+        ? (payload.default_config_agent_profile_id ?? null)
+        : (item.default_config_agent_profile_id ?? null),
+    unit_id: "unit_id" in payload ? (payload.unit_id ?? "") : (item.unit_id ?? ""),
+  };
+}
+
+function workspaceIdlePolicyUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<WorkspaceItem, "acp_idle_suspension_enabled" | "acp_idle_timeout_minutes"> {
+  return {
+    acp_idle_suspension_enabled:
+      "acp_idle_suspension_enabled" in payload
+        ? (payload.acp_idle_suspension_enabled ?? false)
+        : item.acp_idle_suspension_enabled,
+    acp_idle_timeout_minutes:
+      "acp_idle_timeout_minutes" in payload
+        ? (payload.acp_idle_timeout_minutes ?? 120)
+        : item.acp_idle_timeout_minutes,
+  };
+}
+
+function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): WorkspaceItem {
+  return {
+    ...item,
+    name: payload.name,
+    description: payload.description ?? item.description,
+    default_executor_id: payload.default_executor_id ?? null,
+    default_environment_id: payload.default_environment_id ?? null,
+    default_agent_profile_id: payload.default_agent_profile_id ?? null,
+    ...workspacePlacementUpdate(item, payload),
+    ...workspaceIdlePolicyUpdate(item, payload),
+    updated_at: payload.updated_at ?? item.updated_at,
+  };
+}
 
 function nextActiveWorkspaceRevision(workspaces: WorkspaceState, activeId: string | null): number {
   const revision = workspaces.activeIdRevision ?? 0;
@@ -86,36 +130,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
         workspaces: {
           ...state.workspaces,
           items: state.workspaces.items.map((item) =>
-            item.id === message.payload.id
-              ? {
-                  ...item,
-                  name: message.payload.name,
-                  description: message.payload.description ?? item.description,
-                  default_executor_id: message.payload.default_executor_id ?? null,
-                  default_environment_id: message.payload.default_environment_id ?? null,
-                  default_agent_profile_id: message.payload.default_agent_profile_id ?? null,
-                  default_config_agent_profile_id:
-                    "default_config_agent_profile_id" in message.payload
-                      ? (message.payload.default_config_agent_profile_id ?? null)
-                      : (item.default_config_agent_profile_id ?? null),
-                  // Placement decides who reaches this workspace, so a move
-                  // made in another tab has to land here.
-                  unit_id:
-                    "unit_id" in message.payload
-                      ? (message.payload.unit_id ?? "")
-                      : (item.unit_id ?? ""),
-                  // Omitted policy fields preserve the current values.
-                  acp_idle_suspension_enabled:
-                    "acp_idle_suspension_enabled" in message.payload
-                      ? (message.payload.acp_idle_suspension_enabled ?? false)
-                      : item.acp_idle_suspension_enabled,
-                  acp_idle_timeout_minutes:
-                    "acp_idle_timeout_minutes" in message.payload
-                      ? (message.payload.acp_idle_timeout_minutes ?? 120)
-                      : item.acp_idle_timeout_minutes,
-                  updated_at: message.payload.updated_at ?? item.updated_at,
-                }
-              : item,
+            item.id === message.payload.id ? updateWorkspaceItem(item, message.payload) : item,
           ),
         },
       }));
