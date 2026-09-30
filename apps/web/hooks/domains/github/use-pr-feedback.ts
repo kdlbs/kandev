@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useReducer } from "react";
+import { useEffect, useCallback } from "react";
 import { getPRFeedback } from "@/lib/api/domains/github-api";
 import type { PRFeedback } from "@/lib/types/github";
 import { t } from "@/lib/i18n";
+import { usePRFeedbackResourceScope, usePRFeedbackResourceSnapshot } from "./pr-feedback-resource";
 
 export type PRFeedbackState = {
   /** `<workspaceId>/<owner>/<repo>/<prNumber>` of the request `feedback` belongs to. */
@@ -18,28 +19,6 @@ type PRFeedbackView = {
   loading: boolean;
   error: string | null;
 };
-
-type Action =
-  | { type: "fetch"; key: string }
-  | { type: "success"; key: string; feedback: PRFeedback }
-  | { type: "error"; key: string; message: string };
-
-const INITIAL_STATE: PRFeedbackState = { key: "", feedback: null, loading: false, error: null };
-
-function reducer(state: PRFeedbackState, action: Action): PRFeedbackState {
-  // Same-PR refresh keeps the cached feedback visible while it reloads;
-  // a different PR (e.g. a task switch reusing this hook instance) never
-  // inherits another PR's feedback.
-  const carried = state.key === action.key ? state.feedback : null;
-  switch (action.type) {
-    case "fetch":
-      return { key: action.key, feedback: carried, loading: true, error: null };
-    case "success":
-      return { key: action.key, feedback: action.feedback, loading: false, error: null };
-    case "error":
-      return { key: action.key, feedback: carried, loading: false, error: action.message };
-  }
-}
 
 /**
  * Derives the feedback actually safe to render for `requestedKey`. Masks out
@@ -69,35 +48,37 @@ export function usePRFeedback(
   repo: string | null,
   prNumber: number | null,
 ) {
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
-  const [fetchCount, setFetchCount] = useState(0);
+  const scope = usePRFeedbackResourceScope();
   const key =
-    workspaceId && owner && repo && prNumber ? `${workspaceId}/${owner}/${repo}/${prNumber}` : "";
-
-  const refresh = useCallback(() => {
-    setFetchCount((c) => c + 1);
-  }, []);
+    workspaceId && owner && repo && prNumber
+      ? scope.key({ workspaceId, owner, repo, prNumber })
+      : null;
+  const snapshot = usePRFeedbackResourceSnapshot(scope, key);
+  const fetch = useCallback(() => {
+    if (!workspaceId || !owner || !repo || !prNumber) return Promise.reject();
+    return getPRFeedback(workspaceId, owner, repo, prNumber, { cache: "no-store" });
+  }, [owner, prNumber, repo, workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId || !owner || !repo || !prNumber || !key) return;
-    let cancelled = false;
-    dispatch({ type: "fetch", key });
-    getPRFeedback(workspaceId, owner, repo, prNumber, { cache: "no-store" })
-      .then((response) => {
-        if (!cancelled) dispatch({ type: "success", key, feedback: response });
-      })
-      .catch((err) => {
-        if (!cancelled)
-          dispatch({
-            type: "error",
-            key,
-            message: err instanceof Error ? err.message : t("github:failedToFetchPrFeedback"),
-          });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, owner, repo, prNumber, key, fetchCount]);
+    if (key) void scope.ensure(key, fetch);
+  }, [fetch, key, scope]);
 
-  return { ...resolvePRFeedbackView(state, key), refresh };
+  const refresh = useCallback(() => {
+    if (key) void scope.invalidate(key, fetch);
+  }, [fetch, key, scope]);
+
+  const state: PRFeedbackState = {
+    key: key ?? "",
+    feedback: snapshot.feedback,
+    loading: snapshot.loading,
+    error: resolveFeedbackError(snapshot.error),
+  };
+
+  return { ...resolvePRFeedbackView(state, key ?? ""), refresh };
+}
+
+function resolveFeedbackError(error: unknown): string | null {
+  if (error instanceof Error) return error.message;
+  if (error) return t("github:failedToFetchPrFeedback");
+  return null;
 }

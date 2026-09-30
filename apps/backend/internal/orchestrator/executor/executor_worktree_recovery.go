@@ -20,6 +20,7 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	session *models.TaskSession,
 	env *models.TaskEnvironment,
 	executorType string,
+	allowBranchReplacement bool,
 ) (*worktree.RecoveryAdmission, error) {
 	if e.selectedWorktreeRecoveryAdmission == nil || taskID == "" || session == nil || env == nil ||
 		env.ID == "" || executorType != string(models.ExecutorTypeWorktree) ||
@@ -76,13 +77,14 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	}
 
 	admission, err := e.selectedWorktreeRecoveryAdmission(ctx, worktree.RecoveryAdmissionRequest{
-		TaskID:              taskID,
-		SessionID:           session.ID,
-		TaskEnvironmentID:   env.ID,
-		OwnerTaskID:         env.TaskID,
-		OwnershipGeneration: env.OwnershipGeneration,
-		ExecutorType:        executorType,
-		Slots:               slots,
+		TaskID:                 taskID,
+		SessionID:              session.ID,
+		TaskEnvironmentID:      env.ID,
+		OwnerTaskID:            env.TaskID,
+		OwnershipGeneration:    env.OwnershipGeneration,
+		ExecutorType:           executorType,
+		AllowBranchReplacement: allowBranchReplacement,
+		Slots:                  slots,
 	})
 	if err != nil {
 		return nil, err
@@ -119,6 +121,7 @@ func (e *Executor) PreflightSessionWorktreeRecovery(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
+	allowBranchReplacement bool,
 ) (*worktree.RecoveryAdmission, error) {
 	if e == nil || e.repo == nil || session == nil || taskID == "" || session.TaskID != taskID {
 		return nil, nil
@@ -127,7 +130,7 @@ func (e *Executor) PreflightSessionWorktreeRecovery(
 	if err != nil || env == nil {
 		return nil, err
 	}
-	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType)
+	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement)
 }
 
 type managedClonePathResolver interface {

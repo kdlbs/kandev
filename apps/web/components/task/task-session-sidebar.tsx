@@ -8,7 +8,6 @@ import type { Repository, SidebarTaskPageResponse, TaskSessionState } from "@/li
 import type { AggregatedSidebarTasks } from "./task-session-sidebar-aggregate";
 import type { SidebarItemContext } from "./task-session-sidebar-item";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
-import { TaskSwitcher } from "./task-switcher";
 import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
@@ -38,7 +37,7 @@ import { buildSidebarItem } from "./task-session-sidebar-item";
 import { useSidebarTaskEdit } from "./task-session-sidebar-edit";
 import { TaskMoveErrorBanner } from "./task-move-error-banner";
 import { useMoveToStep } from "./task-session-sidebar-move";
-import { SidebarTaskPagination } from "./sidebar-task-pagination";
+import { SidebarTaskPageContent } from "./sidebar-task-page-content";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { applyView } from "@/lib/sidebar/apply-view";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
@@ -497,7 +496,6 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     stepsByWorkflowId,
     workflows,
     isLoadingWorkflow,
-    archivedError,
     retryArchivedTasks,
     workspaceContextError,
     workspaceContextPending,
@@ -593,7 +591,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleReorderSubtasks,
     handleNestTask: sidebarActions.handleNestTask,
     isLoadingWorkflow,
-    archivedError: page.response ? null : archivedError,
+    archivedError: null,
     retryArchivedTasks,
     archivedLoadErrorLabel: t("sidebar:archivedLoadFailed"),
     archivedRetryLabel: t("sidebar:retry"),
@@ -612,15 +610,11 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
       {!hideFilterBar && <SidebarFilterBar />}
       {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
       <TaskSidebarScrollArea viewportRef={listScrollRef}>
-        <TaskSwitcher {...switcherProps} />
-        <SidebarTaskPagination
-          page={page.response}
-          pending={page.requestedPage !== null}
-          error={page.error}
-          onPageChange={(nextPage) =>
-            page.goToPage(nextPage, () => listScrollRef.current?.scrollTo({ top: 0 }))
-          }
-          onRetry={page.retry}
+        <SidebarTaskPageContent
+          page={page}
+          workspaceContextError={workspaceContextError}
+          switcherProps={switcherProps}
+          scrollRef={listScrollRef}
         />
         <PluginSlot name="task-sidebar" />
       </TaskSidebarScrollArea>

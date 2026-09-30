@@ -130,5 +130,12 @@
   "nextPage": "Seguinte",
   "pageLoadFailed": "Não foi possível carregar esta página.",
   "pageStatus": "Página {{page}} de {{total}}",
-  "previousPage": "Anterior"
+  "previousPage": "Anterior",
+  "queryRefreshing": "A atualizar tarefas...",
+  "queryRefreshFailed": "Não foi possível atualizar as tarefas.",
+  "queryInvalid": "Não foi possível carregar esta vista de tarefas. Verifique os filtros e as definições da vista.",
+  "filterListLimit": "O filtro {{filter}} tem demasiadas seleções. Selecione até {{limit}}.",
+  "filterValueLimit": "Um valor no filtro {{filter}} é demasiado longo. Utilize no máximo {{limit}} bytes.",
+  "filterInvalid": "O filtro {{filter}} é inválido. Verifique o valor e o operador.",
+  "filterCountLimit": "Esta vista tem demasiados filtros. Utilize no máximo {{limit}}."
 }

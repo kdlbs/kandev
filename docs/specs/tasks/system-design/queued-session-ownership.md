@@ -21,7 +21,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 
 | Requirement | Sections |
 | --- | --- |
-| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history |
+| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history; Recovery metadata and prompt turns |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
 | REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
@@ -130,6 +130,45 @@ Desktop keeps its session tabs above chat. Phone keeps its existing session
 picker and one conversation scroll area. Both show ordinary recovery after open.
 Test provider readiness independently of workspace-only readiness. Recovery must
 preserve context without resending an interrupted or settled workflow prompt.
+
+## Recovery metadata and prompt turns
+
+This section implements criteria 001.10 through 001.12. The
+[resume todo fix package](../../../plans/resume-todo-turn-boundary/plan.md)
+records its delivery work.
+
+ACP `Adapter.LoadSession` suppresses historical output but re-emits a captured
+plan through `emitReplayPlan`. The fallback from `session/resume` to
+`session/load` retains this behavior. The restored plan updates the live todo
+indicator without representing new conversational work.
+
+`handleSessionTodosEvent` must retain its event-bus publication.
+`persistTodoMessage` must resolve an existing turn without calling
+`getActiveTurnID`, `StartTurn`, or another creating fallback. Resolve an
+in-flight reserved prompt turn first, then use the authoritative active-turn
+lookup. Preserve the reserved-turn ownership contract during dispatch.
+
+With an existing active or reserved prompt turn, persist the update against its
+explicit ID, including an empty list that clears the todos. Keep that resolved
+ID if the turn completes while persistence is in flight; a successor must not
+capture the snapshot. After a successful lookup confirms there is no active
+turn, persist the snapshot in a completed lifecycle-only turn through the
+`CompletedTurn` message path. This keeps changed and empty lists available to
+reload without leaving an open turn for the next prompt to adopt. Historical
+todo messages remain intact and the latest persisted snapshot wins on reload.
+A lookup error must omit persistence and produce a bounded diagnostic. It must
+never be treated as proof that no turn exists. An empty ID must not reach
+`CreateSessionMessage`, whose task-service fallback creates an open turn.
+
+Keep `handleSessionStatusEvent` non-creating. Preserve provider resume-token
+updates independently of message persistence. Use explicit turn IDs across
+persistence so concurrent completion cannot redirect a todo into a successor.
+Never close or re-stamp a genuine turn to make a completion signal eligible.
+
+The next workflow prompt uses ordinary turn creation and atomic step stamping.
+Completion checks continue to reject genuine turns that started on another step.
+This correction does not change automatic recovery admission, recipient selection,
+provider capabilities, storage schema, or prompt retry behavior.
 
 ## Deferred entry ownership
 

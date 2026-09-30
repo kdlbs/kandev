@@ -103,6 +103,7 @@ func (r *sqliteRepository) initSchema() error {
 		consecutive_failures INTEGER NOT NULL DEFAULT 0,
 		failure_threshold INTEGER NOT NULL DEFAULT 3,
 		executor_preference TEXT NOT NULL DEFAULT '',
+		execution_agent_profile_id TEXT NOT NULL DEFAULT '',
 		budget_monthly_cents INTEGER NOT NULL DEFAULT 0,
 		settings TEXT NOT NULL DEFAULT '{}',
 		permissions TEXT NOT NULL DEFAULT '{}',
@@ -206,6 +207,10 @@ func (r *sqliteRepository) initSchema() error {
 	_ = r.migrate.Apply("agent_profiles.provider_api_key_secret_id", `ALTER TABLE agent_profiles ADD COLUMN provider_api_key_secret_id TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("agent_profiles.require_exact_model", `ALTER TABLE agent_profiles ADD COLUMN require_exact_model INTEGER NOT NULL DEFAULT 0`)
 	_ = r.migrate.Apply("agent_profiles.cursor_mcp_auth_enabled", `ALTER TABLE agent_profiles ADD COLUMN cursor_mcp_auth_enabled INTEGER NOT NULL DEFAULT 1`)
+	// Office identifiers bind the execution profile that owns their launches.
+	// Added after the table-recreation block for the same reason as
+	// command_prefix / provider_kind.
+	_ = r.migrate.Apply("agent_profiles.execution_agent_profile_id", `ALTER TABLE agent_profiles ADD COLUMN execution_agent_profile_id TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
 	}
@@ -1032,7 +1037,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			executor_preference, budget_monthly_cents, settings, permissions,
 			command_prefix, fallback_model, auto_fallback,
 			provider_kind, provider_base_url, provider_api_key_secret_id, require_exact_model,
-			cursor_mcp_auth_enabled
+			cursor_mcp_auth_enabled, execution_agent_profile_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -1045,7 +1050,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?, ?,
-			?
+			?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1065,6 +1070,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
 		dialect.BoolToInt(profile.RequireExactModel),
 		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
+		profile.ExecutionAgentProfileID,
 	)
 	return err
 }
@@ -1337,7 +1343,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
 			command_prefix = ?, fallback_model = ?, auto_fallback = ?,
 			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?, require_exact_model = ?,
-			cursor_mcp_auth_enabled = ?
+			cursor_mcp_auth_enabled = ?, execution_agent_profile_id = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -1357,6 +1363,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
 		dialect.BoolToInt(profile.RequireExactModel),
 		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
+		profile.ExecutionAgentProfileID,
 		profile.ID)
 	if err != nil {
 		return err
@@ -1430,7 +1437,8 @@ const agentProfileSelectColumns = `
 		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0),
 		COALESCE(provider_kind, ''), COALESCE(provider_base_url, ''),
 		COALESCE(provider_api_key_secret_id, ''), COALESCE(require_exact_model, 0),
-		COALESCE(cursor_mcp_auth_enabled, 1)
+		COALESCE(cursor_mcp_auth_enabled, 1),
+		COALESCE(execution_agent_profile_id, '')
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1660,6 +1668,7 @@ func scanAgentProfile(scanner interface {
 		&profile.ProviderAPIKeySecretID,
 		&requireExactModel,
 		&cursorMCPAuthEnabled,
+		&profile.ExecutionAgentProfileID,
 	); err != nil {
 		return nil, err
 	}

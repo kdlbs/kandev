@@ -64,6 +64,10 @@ tradeoff in the proposed package, not an unrecorded implementation fallback.
 
 ## Scope correction
 
+The [2026-09-28 view reuse proposal](2026-09-28-sidebar-view-page-reuse.md)
+revises only the single-page client-retention rule to a bounded first-page cache.
+Server-side view evaluation and size-based paging remain unchanged.
+
 The user explicitly required size-based pagination for all sidebar views.
 Archive status determines membership, never whether pagination is available.
 The archived conversation navigation repair remains a separate outcome in this package.

@@ -11,21 +11,21 @@ import { useTranslation } from "react-i18next";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
+import {
+  sidebarTaskPageCache,
+  sidebarTaskPageScope,
+  type SidebarTaskPageCache,
+} from "@/lib/sidebar/sidebar-task-page-cache";
+import {
+  sidebarTaskQueryError,
+  isSidebarTaskAccessDenied,
+} from "@/lib/sidebar/sidebar-task-query-error";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import { normalizeLocale } from "@/lib/i18n";
 
 const PAGE_SIZE = 100;
-type SidebarPageRequest = {
-  promise: Promise<SidebarTaskPageResponse>;
-  controller: AbortController;
-  consumers: number;
-};
-
-const inFlightSidebarPages = new Map<string, SidebarPageRequest>();
-
 function buildSidebarQuery(
   view: ReturnType<typeof useEffectiveSidebarView>,
   page: number,
@@ -44,98 +44,19 @@ function buildSidebarQuery(
   };
 }
 
-function requestSidebarPage(workspaceId: string, query: SidebarTaskQuery, identity: string) {
-  const key = `${workspaceId}:${identity}:${JSON.stringify(query)}`;
-  let request = inFlightSidebarPages.get(key);
-  if (!request) {
-    const controller = new AbortController();
-    const created: SidebarPageRequest = {
-      controller,
-      consumers: 0,
-      promise: querySidebarTasks(workspaceId, query, {
-        cache: "no-store",
-        init: { signal: controller.signal },
-      }).finally(() => {
-        if (inFlightSidebarPages.get(key) === created) inFlightSidebarPages.delete(key);
-      }),
-    };
-    request = created;
-    inFlightSidebarPages.set(key, created);
-  }
-  request.consumers += 1;
-  let released = false;
-  return {
-    promise: request.promise,
-    release() {
-      if (released) return;
-      released = true;
-      request!.consumers -= 1;
-      if (request!.consumers === 0 && inFlightSidebarPages.get(key) === request) {
-        request!.controller.abort();
-        inFlightSidebarPages.delete(key);
-      }
-    },
-  };
-}
-
 type SidebarPageStore = ReturnType<typeof useAppStoreApi>;
 
-function useSidebarPageLoader(
-  workspaceId: string | null,
-  workspaceGeneration: number,
-  store: SidebarPageStore,
-  t: ReturnType<typeof useTranslation>["t"],
-  viewKeyRef: { current: string },
-) {
+function useSidebarPageState() {
   const [pendingPage, setPendingPage] = useState<number | null>(null);
   const [response, setResponse] = useState<SidebarTaskPageResponse | null>(null);
   const [responseViewKey, setResponseViewKey] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [canRetry, setCanRetry] = useState(true);
   const requestGeneration = useRef(0);
-  const activeRequestRef = useRef<ReturnType<typeof requestSidebarPage> | null>(null);
+  const activeRequestRef = useRef<ReturnType<SidebarTaskPageCache["request"]> | null>(null);
   const responseViewKeyRef = useRef("");
   const pageNumberRef = useRef(1);
-
-  const loadPage = useCallback(
-    async (requestedPage: number, key: string, queryBase: SidebarTaskQuery): Promise<boolean> => {
-      if (!workspaceId) return false;
-      const generation = ++requestGeneration.current;
-      activeRequestRef.current?.release();
-      activeRequestRef.current = null;
-      const startingWorkspaceGeneration = workspaceGeneration;
-      setPendingPage(requestedPage);
-      setError(null);
-      const request = requestSidebarPage(workspaceId, { ...queryBase, page: requestedPage }, key);
-      activeRequestRef.current = request;
-      try {
-        const result = await request.promise;
-        if (requestGeneration.current !== generation) return false;
-        if (
-          viewKeyRef.current !== key ||
-          !isCurrentWorkspaceContext(store.getState(), workspaceId, startingWorkspaceGeneration)
-        ) {
-          return false;
-        }
-        setResponse(result);
-        setResponseViewKey(key);
-        responseViewKeyRef.current = key;
-        pageNumberRef.current = result.page;
-        setPageNumber(result.page);
-        setError(null);
-        return true;
-      } catch (loadError) {
-        if (requestGeneration.current !== generation) return false;
-        setError(loadError instanceof Error ? loadError.message : t("sidebar:pageLoadFailed"));
-        return false;
-      } finally {
-        request.release();
-        if (activeRequestRef.current === request) activeRequestRef.current = null;
-        if (requestGeneration.current === generation) setPendingPage(null);
-      }
-    },
-    [store, t, workspaceGeneration, workspaceId, viewKeyRef],
-  );
 
   const reset = useCallback(() => {
     requestGeneration.current += 1;
@@ -163,16 +84,133 @@ function useSidebarPageLoader(
 
   return {
     response,
+    setResponse,
     responseViewKey,
+    setResponseViewKey,
     responseViewKeyRef,
     pageNumber,
+    setPageNumber,
     pageNumberRef,
     pendingPage,
+    setPendingPage,
     error,
-    loadPage,
+    setError,
+    canRetry,
+    setCanRetry,
+    requestGeneration,
+    activeRequestRef,
     reset,
     hasInFlight,
   };
+}
+
+function useSidebarAccessDenial(
+  store: SidebarPageStore,
+  state: ReturnType<typeof useSidebarPageState>,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const { reset, setError, setCanRetry } = state;
+  useEffect(
+    () =>
+      sidebarTaskPageCache(store).subscribeAccessDenied(() => {
+        reset();
+        setError(t("sidebar:workspaceContextAccessDenied"));
+        setCanRetry(false);
+      }),
+    [store, reset, setError, setCanRetry, t],
+  );
+}
+
+function queryRevision(store: SidebarPageStore, workspaceId: string) {
+  return store.getState().sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId] ?? 0;
+}
+
+function useSidebarPageLoader(
+  workspaceId: string | null,
+  workspaceGeneration: number,
+  store: SidebarPageStore,
+  t: ReturnType<typeof useTranslation>["t"],
+  viewKeyRef: { current: string },
+) {
+  const state = useSidebarPageState();
+  useSidebarAccessDenial(store, state, t);
+  const {
+    setResponse,
+    setResponseViewKey,
+    responseViewKeyRef,
+    setPageNumber,
+    pageNumberRef,
+    setPendingPage,
+    setError,
+    setCanRetry,
+    requestGeneration,
+    activeRequestRef,
+  } = state;
+
+  const loadPage = useCallback(
+    async (requestedPage: number, key: string, queryBase: SidebarTaskQuery): Promise<boolean> => {
+      if (!workspaceId) return false;
+      const generation = ++requestGeneration.current;
+      activeRequestRef.current?.release();
+      activeRequestRef.current = null;
+      const startingWorkspaceGeneration = workspaceGeneration;
+      const startingRevision = queryRevision(store, workspaceId);
+      const startingScope = sidebarTaskPageScope(store.getState());
+      const isCurrent = () =>
+        requestGeneration.current === generation &&
+        viewKeyRef.current === key &&
+        isCurrentWorkspaceContext(store.getState(), workspaceId, startingWorkspaceGeneration) &&
+        sidebarTaskPageScope(store.getState()) === startingScope;
+      const cached = requestedPage === 1 ? sidebarTaskPageCache(store).get(key) : null;
+      if (cached && responseViewKeyRef.current !== key) {
+        setResponse(cached);
+        setResponseViewKey(key);
+        responseViewKeyRef.current = key;
+        pageNumberRef.current = 1;
+        setPageNumber(1);
+      }
+      setPendingPage(requestedPage);
+      setError(null);
+      const request = sidebarTaskPageCache(store).request(
+        workspaceId,
+        { ...queryBase, page: requestedPage },
+        key,
+      );
+      activeRequestRef.current = request;
+      try {
+        const result = await request.promise;
+        if (!isCurrent()) return false;
+        if (queryRevision(store, workspaceId) !== startingRevision) {
+          pageNumberRef.current = requestedPage;
+          return false;
+        }
+        setResponse(result);
+        setResponseViewKey(key);
+        responseViewKeyRef.current = key;
+        pageNumberRef.current = result.page;
+        setPageNumber(result.page);
+        setError(null);
+        return true;
+      } catch (loadError) {
+        if (!isCurrent()) return false;
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return false;
+        if (isSidebarTaskAccessDenied(loadError)) {
+          sidebarTaskPageCache(store).denyAccess();
+        }
+        const failure = sidebarTaskQueryError(loadError, responseViewKeyRef.current === key, t);
+        setError(failure.message);
+        setCanRetry(failure.canRetry);
+        return false;
+      } finally {
+        request.release();
+        if (activeRequestRef.current === request) activeRequestRef.current = null;
+        if (requestGeneration.current === generation) setPendingPage(null);
+      }
+    },
+    [store, t, workspaceGeneration, workspaceId, viewKeyRef],
+  );
+
+  return { ...state, loadPage };
 }
 
 function useSidebarRevisionRefresh(
@@ -301,11 +339,92 @@ function useSidebarPageAutoLoad({
   }, [loader.pendingPage, queuedRefreshRef, setRefreshRevision]);
 }
 
+function useSidebarViewKey(
+  workspaceId: string | null,
+  workspaceGeneration: number,
+  contextScope: string,
+  queryView: SidebarTaskQuery,
+  prefs: Pick<
+    ReturnType<typeof useSidebarTaskPrefs>,
+    "pinnedTaskIds" | "orderedTaskIds" | "subtaskOrderByParentId"
+  >,
+) {
+  const { pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId } = prefs;
+  return useMemo(
+    () =>
+      JSON.stringify({
+        workspaceId,
+        workspaceGeneration,
+        contextScope,
+        ...queryView,
+        pinnedTaskIds,
+        orderedTaskIds,
+        subtaskOrderByParentId,
+      }),
+    [
+      orderedTaskIds,
+      pinnedTaskIds,
+      queryView,
+      subtaskOrderByParentId,
+      workspaceId,
+      workspaceGeneration,
+      contextScope,
+    ],
+  );
+}
+
+function useSidebarPageNavigation({
+  currentResponse,
+  pendingPage,
+  error,
+  loadPage,
+  viewKey,
+  queryView,
+}: {
+  currentResponse: SidebarTaskPageResponse | null;
+  pendingPage: number | null;
+  error: string | null;
+  loadPage: SidebarPageLoader["loadPage"];
+  viewKey: string;
+  queryView: SidebarTaskQuery;
+}) {
+  const navigation = useRef<{
+    key: string;
+    previous: SidebarTaskPageResponse;
+    afterSuccess: () => void;
+  } | null>(null);
+  useEffect(() => {
+    const pending = navigation.current;
+    if (!pending) return;
+    if (pending.key !== viewKey || error) {
+      navigation.current = null;
+      return;
+    }
+    if (pendingPage !== null || !currentResponse || currentResponse === pending.previous) return;
+    navigation.current = null;
+    requestAnimationFrame(pending.afterSuccess);
+  }, [currentResponse, error, pendingPage, viewKey]);
+  return useCallback(
+    (requestedPage: number, afterSuccess?: () => void) => {
+      if (!currentResponse || pendingPage !== null || requestedPage < 1) return;
+      if (requestedPage > currentResponse.page + (currentResponse.has_next ? 1 : 0)) return;
+      if (requestedPage < currentResponse.page && !currentResponse.has_previous) return;
+      if (requestedPage === currentResponse.page) return;
+      navigation.current = afterSuccess
+        ? { key: viewKey, previous: currentResponse, afterSuccess }
+        : null;
+      void loadPage(requestedPage, viewKey, queryView);
+    },
+    [currentResponse, loadPage, pendingPage, queryView, viewKey],
+  );
+}
+
 /** One current server-ordered page is shared by every built-in, saved, and draft view. */
 export function useSidebarTaskPage(workspaceId: string | null) {
   const view = useEffectiveSidebarView(workspaceId);
   const { i18n, t } = useTranslation();
   const store = useAppStoreApi();
+  const contextScope = useAppStore(sidebarTaskPageScope);
   const collapsedTaskIDs = useAppStore((state) => state.collapsedSubtaskParents);
   const workspaceGeneration = useAppStore((state) => state.workspaceContextGeneration);
   const queryRevision = useAppStore(
@@ -323,22 +442,17 @@ export function useSidebarTaskPage(workspaceId: string | null) {
     () => buildSidebarQuery(view, 1, locale, collapsedTaskIDs),
     [view, locale, collapsedTaskIDs],
   );
-  const viewKey = useMemo(
-    () =>
-      JSON.stringify({
-        workspaceId,
-        ...queryView,
-        pinnedTaskIds,
-        orderedTaskIds,
-        subtaskOrderByParentId,
-      }),
-    [orderedTaskIds, pinnedTaskIds, queryView, subtaskOrderByParentId, workspaceId],
-  );
+  const viewKey = useSidebarViewKey(workspaceId, workspaceGeneration, contextScope, queryView, {
+    pinnedTaskIds,
+    orderedTaskIds,
+    subtaskOrderByParentId,
+  });
   viewKeyRef.current = viewKey;
   const loader = useSidebarPageLoader(workspaceId, workspaceGeneration, store, t, viewKeyRef);
   const { response, pendingPage, error, loadPage } = loader;
-  const currentResponse = loader.responseViewKey === viewKey ? response : null;
-  const currentPage = currentResponse ? loader.pageNumber : 1;
+  const cachedResponse = workspaceId ? sidebarTaskPageCache(store).get(viewKey) : null;
+  const currentResponse = loader.responseViewKey === viewKey ? response : cachedResponse;
+  const currentPage = currentResponse?.page ?? 1;
 
   useSidebarPageAutoLoad({
     workspaceId,
@@ -365,18 +479,14 @@ export function useSidebarTaskPage(workspaceId: string | null) {
   useForegroundRefresh(refresh, Boolean(workspaceId), workspaceId);
   useSidebarRevisionRefresh(workspaceId, queryRevision, refresh);
 
-  const goToPage = useCallback(
-    (requestedPage: number, afterSuccess?: () => void) => {
-      if (!currentResponse || pendingPage !== null || requestedPage < 1) return;
-      if (requestedPage > currentResponse.page + (currentResponse.has_next ? 1 : 0)) return;
-      if (requestedPage < currentResponse.page && !currentResponse.has_previous) return;
-      if (requestedPage === currentResponse.page) return;
-      void loadPage(requestedPage, viewKey, queryView).then((succeeded) => {
-        if (succeeded && afterSuccess) requestAnimationFrame(afterSuccess);
-      });
-    },
-    [currentResponse, loadPage, pendingPage, queryView, viewKey],
-  );
+  const goToPage = useSidebarPageNavigation({
+    currentResponse,
+    pendingPage,
+    error,
+    loadPage,
+    viewKey,
+    queryView,
+  });
 
   const retry = useCallback(() => {
     void loadPage(currentResponse?.page ?? 1, viewKey, queryView);
@@ -390,6 +500,7 @@ export function useSidebarTaskPage(workspaceId: string | null) {
     isRefreshing: pendingPage !== null && currentResponse !== null,
     error,
     hasError: error !== null,
+    canRetry: loader.canRetry,
     refresh,
     retry,
     goToPage,

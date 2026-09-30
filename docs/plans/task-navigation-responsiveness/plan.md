@@ -303,3 +303,15 @@ including delayed optional reads, missing tasks, saved session selection, unread
 cursors, and rapid returns with a fresh hydration snapshot. Task 05 records
 the isolated browser measurements and their limits. PR/CI delivery is tracked
 in the task session, separately from completed local implementation.
+
+## September 29 task-switch follow-up
+
+The [session refresh efficiency extension](../session-refresh-efficiency/plan.md#second-trace-task-switch-extension)
+adds shared task identity reads, editor lifecycle attribution, shared PR
+feedback, agent initialization, and integration health reads. Its
+[trace report](../session-refresh-efficiency/trace-2026-09-29-task-switch.md)
+is new evidence, not a replacement for this package's recorded results.
+Preserve this package's row, file-tree, and scoped-read regression guarantees.
+Task 04 and Tasks 06–08 now have implementation and desktop/phone regression
+coverage. Task 05 remains open pending editor-owner attribution. These tasks do
+not reopen completed work here.

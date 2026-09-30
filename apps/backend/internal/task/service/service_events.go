@@ -1209,8 +1209,22 @@ func (s *Service) pendingActionProjectionChanged(
 	if s.lastPendingActionProjections == nil {
 		s.lastPendingActionProjections = make(map[string]pendingActionProjectionState)
 	}
+	if observed, exists := s.pendingActionProjectionObserved[sessionID]; exists &&
+		!pendingActionRevisionAfter(revision, observed.revision) && revision != observed.revision {
+		return false
+	}
 	previous, exists := s.lastPendingActionProjections[sessionID]
-	if exists && !pendingActionRevisionAfter(revision, previous.revision) {
+	if exists && revision != previous.revision && !pendingActionRevisionAfter(revision, previous.revision) {
+		return false
+	}
+	if exists && previous.action == action {
+		if pendingActionRevisionAfter(revision, previous.revision) {
+			previous.revision = revision
+			s.lastPendingActionProjections[sessionID] = previous
+		}
+		return false
+	}
+	if exists && revision == previous.revision {
 		return false
 	}
 	s.lastPendingActionProjections[sessionID] = pendingActionProjectionState{

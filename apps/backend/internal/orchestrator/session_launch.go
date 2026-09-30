@@ -873,9 +873,12 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	// Inspect and repair the selected environment before clearing any provider
 	// resume identity or crossing the agent-start boundary.
 	var recoveryAdmission *worktree.RecoveryAdmission
-	recoveryAdmission, err = s.executor.PreflightSessionWorktreeRecovery(launchCtx, taskID, session)
+	recoveryAdmission, err = s.executor.PreflightSessionWorktreeRecovery(
+		launchCtx, taskID, session, action == recoveryActionResumeNewBranch,
+	)
 	if err != nil {
-		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, err)
+		branchError := s.branchRecoveryError(launchCtx, taskID, sessionID, err)
+		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, branchError)
 	}
 	if recoveryAdmission != nil {
 		defer func() { _ = recoveryAdmission.Release(context.WithoutCancel(ctx)) }()

@@ -29,6 +29,12 @@ import { latestIncompleteTurnId } from "@/lib/state/slices/session/turn-actions"
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import type { StoreApi } from "zustand";
+import {
+  getAgentListResourceScope,
+  type AgentListResponse,
+} from "@/hooks/domains/settings/agent-list-resource";
 // Aliased: `t` is the Terminal parameter name throughout this module.
 import { t as translate } from "@/lib/i18n";
 
@@ -156,6 +162,7 @@ type BuildSessionPageStateParams = {
   turns?: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
   userSettingsResponse?: UserSettingsResponse | null;
   messagesResponse?: ListMessagesResponse | null;
+  taskSessionsLoaded?: boolean;
 };
 
 /**
@@ -246,7 +253,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
 
 /** Builds the session-page hydration slice (task sessions, turns, models) for the page's task. */
 function buildSessionState(p: BuildSessionPageStateParams) {
-  const { task, sessionId, allSessions, activeSession, turns } = p;
+  const { task, sessionId, allSessions, activeSession, turns, taskSessionsLoaded = true } = p;
   // Prefer the full active session payload (with agent_profile_snapshot) over
   // its summary entry in allSessions so the model selector can resolve the
   // persisted model on first render without flashing the agent default.
@@ -257,11 +264,15 @@ function buildSessionState(p: BuildSessionPageStateParams) {
   return {
     taskSessions: { items: itemsBySessionId },
     ...buildSessionModelsState(activeSession),
-    taskSessionsByTask: {
-      itemsByTaskId: { [task.id]: allSessions },
-      loadingByTaskId: { [task.id]: false },
-      loadedByTaskId: { [task.id]: true },
-    },
+    ...(taskSessionsLoaded
+      ? {
+          taskSessionsByTask: {
+            itemsByTaskId: { [task.id]: allSessions },
+            loadingByTaskId: { [task.id]: false },
+            loadedByTaskId: { [task.id]: true },
+          },
+        }
+      : {}),
     ...(turns !== undefined
       ? {
           turns: sessionId
@@ -333,13 +344,13 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
   ]);
 
   const optionalHydration = beginOptionalHydration();
-  return fetchSessionDataFromTask(
-    task,
-    sessionId,
-    allSessionsResponse,
-    Promise.resolve({ status: "fulfilled", value: { session: activeSession } }),
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
+    activeSessionResponse: Promise.resolve({
+      status: "fulfilled",
+      value: { session: activeSession },
+    }),
     optionalHydration,
-  );
+  });
 }
 
 /**
@@ -364,13 +375,10 @@ export async function fetchSessionDataForTask(
   const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
     fetchTaskSession(sessionId, { cache: "no-store" }),
   );
-  return fetchSessionDataFromTask(
-    task,
-    sessionId,
-    allSessionsResponse,
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
     activeSessionResponse,
     optionalHydration,
-  );
+  });
 }
 
 /** Client navigation leaves optional enrichment to the mounted domain hooks. */
@@ -395,6 +403,76 @@ export async function fetchTaskNavigationData(
   };
 }
 
+function resolveTaskSessionId(
+  task: Task,
+  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  requestedSessionId?: string,
+) {
+  const sessions = allSessionsResponse.sessions ?? [];
+  const ownedSessions = sessions.filter((session) => session.task_id === task.id);
+  const requestedSession = requestedSessionId
+    ? ownedSessions.find((session) => session.id === requestedSessionId)
+    : undefined;
+  const primarySession = task.primary_session_id
+    ? ownedSessions.find((session) => session.id === task.primary_session_id)
+    : undefined;
+  return requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id ?? null;
+}
+
+/** Builds task identity and lightweight session state before optional resources settle. */
+export function buildTaskNavigationShellData(
+  identity: TaskNavigationIdentity,
+  requestedSessionId?: string,
+): FetchedSessionData {
+  const { task, allSessionsResponse } = identity;
+  const allSessions = (allSessionsResponse.sessions ?? []).filter(
+    (session) => session.task_id === task.id,
+  );
+  const sessionId = identity.sessionListUnavailable
+    ? (requestedSessionId ?? task.primary_session_id ?? null)
+    : resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  return {
+    task,
+    sessionId,
+    initialState: buildSessionPageState({
+      task,
+      sessionId,
+      allSessions,
+      activeSession: null,
+      taskSessionsLoaded: !identity.sessionListUnavailable,
+    }),
+    initialTerminals: [],
+  };
+}
+
+/** Loads full session and optional convenience state after task identity is visible. */
+export async function fetchTaskNavigationEnrichment(
+  identity: TaskNavigationIdentity,
+  requestedSessionId?: string,
+  options: { store?: StoreApi<AppState> } = {},
+): Promise<FetchedSessionData> {
+  const { task } = identity;
+  const allSessionsResponse = identity.sessionListUnavailable
+    ? await listTaskSessions(task.id, { cache: "no-store" })
+    : identity.allSessionsResponse;
+  const sessionId = resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  const loadAgentList = options.store
+    ? () => getAgentListResourceScope(options.store!).ensure()
+    : () => listAgents({ cache: "no-store" });
+  if (!sessionId) return fetchTaskDataOnly(task, allSessionsResponse, loadAgentList);
+
+  const optionalHydration = beginOptionalHydration();
+  const { fetchTaskSession } = await import("@/lib/api");
+  const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
+    fetchTaskSession(sessionId, { cache: "no-store" }),
+  );
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
+    activeSessionResponse,
+    optionalHydration,
+    loadAgentList,
+  });
+}
+
 /**
  * Builds SSR data for a task with no sessions yet: fetches the optional
  * convenience slices (snapshot, agents, repositories, workspaces, workflows,
@@ -404,6 +482,7 @@ export async function fetchTaskNavigationData(
 async function fetchTaskDataOnly(
   task: Task,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  loadAgentList: () => Promise<AgentListResponse> = () => listAgents({ cache: "no-store" }),
 ): Promise<FetchedSessionData> {
   const optionalHydration = beginOptionalHydration();
   const results = await Promise.all([
@@ -414,7 +493,7 @@ async function fetchTaskDataOnly(
         ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
         : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
     ),
-    optionalHydration.load("agents", () => listAgents({ cache: "no-store" })),
+    optionalHydration.load("agents", loadAgentList),
     optionalHydration.load("repositories", () =>
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     ),
@@ -533,9 +612,14 @@ async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
-  activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>,
-  optionalHydration: ReturnType<typeof beginOptionalHydration>,
+  options: {
+    activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>;
+    optionalHydration: ReturnType<typeof beginOptionalHydration>;
+    loadAgentList?: () => Promise<AgentListResponse>;
+  },
 ): Promise<FetchedSessionData> {
+  const { activeSessionResponse, optionalHydration } = options;
+  const loadAgentList = options.loadAgentList ?? (() => listAgents({ cache: "no-store" }));
   // User shells are env-scoped — look up this session's task_environment_id
   // from the already-fetched session list. Sessions w/o env (legacy) skip
   // the terminal SSR fetch; the boot-time heal pass + WS-driven user_shell.list
@@ -550,7 +634,7 @@ async function fetchSessionDataFromTask(
         ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
         : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
     ),
-    optionalHydration.load("agents", () => listAgents({ cache: "no-store" })),
+    optionalHydration.load("agents", loadAgentList),
     optionalHydration.load("repositories", () =>
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     ),

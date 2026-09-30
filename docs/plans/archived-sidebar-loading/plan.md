@@ -65,6 +65,11 @@ or archived. This is a navigation repair, not an unarchive operation.
 
 ## Related delivery records
 
+- [View loading repair](../sidebar-view-loading-repair/plan.md): follow-up to correct
+  aggregate filter-value limits, add bounded first-page reuse, and unify query errors.
+  It replaces this package's single-current-page retention rule when implemented.
+  Completed work orders and recorded verification below remain historical evidence.
+
 - [Original archived sidebar package](../sidebar-archived-filter/plan.md): implemented history;
   this package supersedes eager accumulation and URL-only archived selection.
 - [Last activity](../sidebar-last-activity-sort/plan.md): preserve task activity publication.
