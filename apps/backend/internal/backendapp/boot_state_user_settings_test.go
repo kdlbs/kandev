@@ -237,6 +237,13 @@ func TestMapUserSettingsStateNormalizesLastSeenDisplay(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateDefaultsAgentTabCloseBehavior(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{}, "workspace-1")
+	if got := state["agentTabCloseBehavior"]; got != usermodels.AgentTabCloseBehaviorDeleteSession {
+		t.Fatalf("agentTabCloseBehavior = %#v, want %q", got, usermodels.AgentTabCloseBehaviorDeleteSession)
+	}
+}
+
 // TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID verifies boot state carries the
 // default utility agent profile id, the field the Settings UI actually writes.
 func TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID(t *testing.T) {

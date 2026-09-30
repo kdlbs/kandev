@@ -347,6 +347,26 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExec
 	}, nil
 }
 
+func (s *SimulatedAgentManagerClient) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	agentExecutionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	result, err := s.PromptAgent(ctx, agentExecutionID, prompt, attachments, dispatchOnly)
+	if err == nil && onDispatched != nil {
+		onDispatched()
+	}
+	return result, err
+}
+
 // RespondToPermissionBySessionID responds to a permission request for a session
 func (s *SimulatedAgentManagerClient) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	s.logger.Info("simulated: responding to permission",
@@ -505,14 +525,40 @@ func (s *SimulatedAgentManagerClient) Close() {
 // IsAgentRunningForSession checks if a simulated agent is running for a session
 func (s *SimulatedAgentManagerClient) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	var instance *simulatedInstance
 	for _, inst := range s.instances {
-		if inst.sessionID == sessionID && inst.status == v1.AgentStatusRunning {
-			return true
+		if inst.sessionID == sessionID {
+			instance = inst
+			break
 		}
 	}
-	return false
+	s.mu.Unlock()
+	if instance == nil {
+		return false
+	}
+	instance.statusMu.Lock()
+	running := instance.status == v1.AgentStatusRunning
+	instance.statusMu.Unlock()
+	return running
+}
+
+func (s *SimulatedAgentManagerClient) markAgentRunningForSession(sessionID string) bool {
+	s.mu.Lock()
+	var instance *simulatedInstance
+	for _, candidate := range s.instances {
+		if candidate.sessionID == sessionID {
+			instance = candidate
+			break
+		}
+	}
+	s.mu.Unlock()
+	if instance == nil {
+		return false
+	}
+	instance.statusMu.Lock()
+	instance.status = v1.AgentStatusRunning
+	instance.statusMu.Unlock()
+	return true
 }
 
 func (s *SimulatedAgentManagerClient) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {

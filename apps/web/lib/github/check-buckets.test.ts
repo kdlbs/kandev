@@ -22,9 +22,9 @@ describe("bucketCheck", () => {
     expect(bucketCheck(makeCheck({ conclusion: "neutral" }))).toBe("passed");
   });
 
-  it("buckets failure / cancelled / timed_out / action_required as Failed", () => {
+  it("buckets failure / timed_out / action_required as Failed and ignores cancellation", () => {
     expect(bucketCheck(makeCheck({ conclusion: "failure" }))).toBe("failed");
-    expect(bucketCheck(makeCheck({ conclusion: "cancelled" }))).toBe("failed");
+    expect(bucketCheck(makeCheck({ conclusion: "cancelled" }))).toBeNull();
     expect(bucketCheck(makeCheck({ conclusion: "timed_out" }))).toBe("failed");
     expect(bucketCheck(makeCheck({ conclusion: "action_required" }))).toBe("failed");
   });
@@ -56,7 +56,7 @@ describe("bucketCheckCounts", () => {
       makeCheck({ conclusion: "skipped" }),
       makeCheck({ conclusion: "stale" }),
     ];
-    expect(bucketCheckCounts(checks)).toEqual({ passed: 2, inProgress: 1, failed: 3 });
+    expect(bucketCheckCounts(checks)).toEqual({ passed: 2, inProgress: 1, failed: 2 });
   });
 });
 
@@ -95,6 +95,30 @@ describe("groupChecksByWorkflow", () => {
     expect(group.inProgress).toBe(1);
     expect(group.failed).toBe(1);
     expect(group.total).toBe(3);
+  });
+
+  it("omits groups whose only jobs were cancelled", () => {
+    expect(groupChecksByWorkflow([makeCheck({ conclusion: "cancelled" })])).toEqual([]);
+  });
+
+  it("keeps equal display names from independent workflow executions separate", () => {
+    const groups = groupChecksByWorkflow([
+      makeCheck({
+        workflow_id: 7,
+        workflow_run_id: 70,
+        workflow_event: "pull_request",
+        workflow_name: "Preview",
+      }),
+      makeCheck({
+        workflow_id: 7,
+        workflow_run_id: 71,
+        workflow_event: "pull_request_target",
+        workflow_name: "Preview",
+      }),
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.workflow)).toEqual(["Preview", "Preview"]);
+    expect(groups[0]).not.toBe(groups[1]);
   });
 
   it("computes (N/M passed) badge components correctly when no failures", () => {

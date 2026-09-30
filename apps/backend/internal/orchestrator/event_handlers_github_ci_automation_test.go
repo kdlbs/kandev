@@ -242,6 +242,64 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	}
 }
 
+func TestCIAutomationCancelledChecksDoNotConsumeRound(t *testing.T) {
+	feedback := &github.PRFeedback{Checks: []github.CheckRun{{
+		Name: "deploy-fork", Status: "completed", Conclusion: "cancelled",
+		HTMLURL: "https://ci/deploy", Output: "workflow superseded",
+	}}}
+	previous := ciAutomationCheckpoint{FailedChecks: []ciAutomationCheckSnapshot{{
+		Name: "deploy-fork", Conclusion: "cancelled", HTMLURL: "https://ci/deploy",
+		Output: "workflow superseded",
+	}}}
+	if ciAutomationCheckConclusionNeedsFix("cancelled") {
+		t.Fatal("cancelled check is still repair evidence")
+	}
+	if delta := ciAutomationBuildDelta(feedback, previous); !ciAutomationCheckpointEmpty(delta) {
+		t.Fatalf("cancellation produced a repair delta: %+v", delta)
+	}
+
+	current := ciAutomationCurrentCheckpoint(feedback)
+	if len(current.FailedChecks) != 0 {
+		t.Fatalf("current checkpoint retained cancellation as failure: %+v", current)
+	}
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previous)
+	currentJSON, currentSignature := encodeCIAutomationCheckpoint(current)
+	state := &github.TaskCIPRAutomationState{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		LastFixCheckpointJSON: previousJSON, LastFixSignature: previousSignature,
+		AutoFixRoundCount: 3,
+	}
+	ghSvc := &mockGitHubService{ciPRState: state}
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42, State: "open"}
+	if blocked := svc.handleTaskPRCIAutoFixEmptyDelta(context.Background(), pr, state, previous, currentSignature, currentJSON); blocked {
+		t.Fatal("cancellation-only refresh blocked on an unchanged dispatched prompt")
+	}
+	if len(ghSvc.fixCheckpointRefresh) != 1 {
+		t.Fatalf("checkpoint refresh calls = %d, want one prompt-free prune", len(ghSvc.fixCheckpointRefresh))
+	}
+	if state.AutoFixRoundCount != 3 || len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("cancellation changed repair rounds: state=%+v attempts=%+v", state, ghSvc.fixAttempts)
+	}
+	if strings.Contains(ghSvc.fixCheckpointRefresh[0].CheckpointJSON, "cancelled") {
+		t.Fatalf("pruned checkpoint retained cancellation: %s", ghSvc.fixCheckpointRefresh[0].CheckpointJSON)
+	}
+}
+
+func TestCIAutomationCancellationOnlyNotReadyToMerge(t *testing.T) {
+	ready := github.TaskPR{
+		State: "open", ChecksState: "success", ReviewState: "approved", MergeableState: "clean",
+	}
+	if !ciAutomationReadyToMerge(&ready) {
+		t.Fatal("positive control: clean successful PR should be ready")
+	}
+	ready.ChecksState = ""
+	if ciAutomationReadyToMerge(&ready) {
+		t.Fatal("cancellation-only empty check state established merge readiness")
+	}
+}
+
 func TestCIAutomationPromptOmitsSnapshotWithoutPlaceholder(t *testing.T) {
 	delta := ciAutomationCheckpoint{
 		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
@@ -442,8 +500,8 @@ func TestCIAutomationFeedbackDeltaIncludesKnownFailingConclusions(t *testing.T) 
 	}
 
 	delta := ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
-	if len(delta.FailedChecks) != 4 {
-		t.Fatalf("failed checks = %d, want 4: %+v", len(delta.FailedChecks), delta.FailedChecks)
+	if len(delta.FailedChecks) != 3 {
+		t.Fatalf("repairable failed checks = %d, want 3 (excluding cancellation): %+v", len(delta.FailedChecks), delta.FailedChecks)
 	}
 }
 

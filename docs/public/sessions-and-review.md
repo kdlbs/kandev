@@ -85,9 +85,9 @@ The expanded queue also lets you pause or discard stale work. Its compact header
 
 Use **Auto-run** for queue processing:
 
-| Setting | Queue behavior |
-| --- | --- |
-| **On** | Runs one eligible row per turn in FIFO order. |
+| Setting | Queue behavior                                         |
+| ------- | ------------------------------------------------------ |
+| **On**  | Runs one eligible row per turn in FIFO order.          |
 | **Off** | Lets the current response finish and holds later rows. |
 
 - The setting belongs to the session and survives an empty queue, reload, and backend restart.
@@ -543,3 +543,9 @@ Before moving a task to done:
 - **Share is unavailable:** wait until the session leaves `CREATED`/`STARTING` and configure GitHub Gist access. CLI-passthrough conversations do not have the structured snapshot used by this feature.
 
 Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), and [Developer tools](developer-tools.md).
+
+## Agent tab close behavior
+
+On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
+
+Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
