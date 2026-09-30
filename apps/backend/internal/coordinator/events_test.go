@@ -33,3 +33,11 @@ func TestCoordinatorUpdatedPayloadZeroOpenProposals(t *testing.T) {
 		t.Error("open_proposals key was dropped for a zero count; want it always present")
 	}
 }
+
+func TestCoordinatorUpdatedPayloadGetWorkspaceID(t *testing.T) {
+	var data interface{} = NewCoordinatorUpdatedPayload("ws-1", "co-1", 3)
+	p, ok := data.(interface{ GetWorkspaceID() string })
+	if !ok || p.GetWorkspaceID() != "ws-1" {
+		t.Fatalf("payload must expose its workspace id, ok=%v", ok)
+	}
+}
