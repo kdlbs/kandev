@@ -66,6 +66,10 @@ type mockAgent struct {
 var _ acp.Agent = (*mockAgent)(nil)
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--profile-probe-wrapper" {
+		os.Exit(runProfileProbeWrapper(os.Args[2:], os.Getenv(profileProbeEvidenceEnv)))
+	}
+	recordProfileProbeChildEvidence(os.Args, os.Getenv(profileProbeEvidenceEnv))
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing
@@ -241,6 +245,7 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 		{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
 	}
 	modelOptions = append(modelOptions, mockModelVariationOptions()...)
+	modelOptions = append(modelOptions, mockProfileModelOptions()...)
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
@@ -271,6 +276,46 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			Type:         "select",
 		}},
 	}
+}
+
+func mockProfileModelOptions() []acp.SessionConfigSelectOption {
+	options := make([]acp.SessionConfigSelectOption, 0, 2)
+	if component := profileModelComponent(os.Getenv("MOCK_AGENT_PROFILE_CATALOG")); component != "" {
+		options = append(options, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId("profile-env-" + component),
+			Name:  "Profile env " + component,
+		})
+	}
+	if component := profileModelComponent(profileCatalogFlag(os.Args)); component != "" {
+		options = append(options, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId("profile-cli-" + component),
+			Name:  "Profile CLI " + component,
+		})
+	}
+	return options
+}
+
+func profileCatalogFlag(args []string) string {
+	for index := 1; index < len(args); index++ {
+		if value, found := strings.CutPrefix(args[index], "--profile-catalog="); found {
+			return value
+		}
+		if args[index] == "--profile-catalog" && index+1 < len(args) {
+			return args[index+1]
+		}
+	}
+	return ""
+}
+
+func profileModelComponent(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var result strings.Builder
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			result.WriteRune(char)
+		}
+	}
+	return strings.Trim(result.String(), "-")
 }
 
 func mockModelVariationOptions() []acp.SessionConfigSelectOption {

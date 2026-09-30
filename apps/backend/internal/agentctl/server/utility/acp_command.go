@@ -51,9 +51,7 @@ func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, lifecycle acpCommandL
 	)
 	defer cancel()
 	log.Debug("ACP command cleanup requested",
-		zap.Int("pid", pid),
-		zap.String("path", cmd.Path),
-		zap.Strings("args", cmd.Args))
+		zap.Int("pid", pid))
 	log.Debug("ACP command process group SIGTERM requested",
 		zap.Int("pgid", pid),
 		zap.String("reason", "cleanup"))

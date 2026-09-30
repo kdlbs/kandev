@@ -72,6 +72,23 @@ done
 	}
 }
 
+func TestCodexAppServerProfileProbeRejectsUnsupportedCLIContext(t *testing.T) {
+	executor := NewCodexAppServerInferenceExecutor(zap.NewNop())
+	response, err := executor.Probe(context.Background(), &ProbeRequest{
+		AgentID: "codex-app-server", ProfileContext: true,
+		InferenceConfig: &InferenceConfigDTO{
+			WorkDir: t.TempDir(), Command: []string{"npx", "@openai/codex"},
+			CLIFlags: []string{"--profile-flag"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if response.Success || response.FailureCode != ProbeFailureUnsupportedContext {
+		t.Fatalf("response = %#v, want typed unsupported context", response)
+	}
+}
+
 // @covers AC-AGENTS-CODEX-NATIVE-002.1
 func TestCodexAppServerStartPreparesManagedPrefixForSharedUtilityLaunch(t *testing.T) {
 	workDir := t.TempDir()
