@@ -121,7 +121,7 @@ test.describe("Coordinator screens on a phone viewport", () => {
   // checking it. seedData.workspaceId is not usable for either concern: it
   // is a worker-scoped fixture shared across every test in the run, so its
   // layout/coordinator state depends on what earlier specs left behind.
-  test("with no coordinator the phone nav shows the generic entry with no badge and no strip (task-04 Acceptance)", async ({
+  test("with no coordinator the phone nav shows the Coordinators section with the set-up row and no strip (task-04 Acceptance)", async ({
     testPage,
     apiClient,
   }) => {
@@ -157,9 +157,15 @@ test.describe("Coordinator screens on a phone viewport", () => {
       const menu = testPage.getByTestId("app-nav-sheet");
       await expect(menu).toBeVisible();
 
-      const genericRow = menu.getByTestId("mobile-sidebar-coordinator-generic");
-      await expect(genericRow).toBeVisible();
-      await expect(genericRow).toHaveText("Coordinator");
+      const section = menu.getByTestId("mobile-coordinators-section");
+      await expect(section).toBeVisible();
+      await expect(section.getByRole("button", { name: /Coordinators/ })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      const emptyRow = menu.getByTestId("mobile-sidebar-coordinators-empty");
+      await expect(emptyRow).toBeVisible();
+      await expect(emptyRow).toHaveText("Set up a coordinator");
     } finally {
       await apiClient.deleteWorkspace(workspace.id, workspace.name);
     }
