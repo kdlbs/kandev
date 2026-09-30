@@ -20,7 +20,7 @@ executor provisioning, public APIs, or persistence ownership.
 | --- | --- |
 | .1, .6, .7, .9 | Creation and readiness |
 | .2, .3, .8, .10 | Tracker comparison |
-| .4 | Failure and observability |
+| .4, .11 | Failure and observability |
 | .5 | Data and contracts |
 
 All criteria belong to `REQ-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001`.
@@ -79,8 +79,12 @@ sibling repository has a configured base.
 
 ## Failure and observability
 
-Creation-time provider errors warn and remain nonfatal, matching the existing
-best-effort propagation contract. Readiness-time provider and HTTP push errors
+Creation-time hydration derives a five-second child context from its caller
+before the DB-backed provider lookup. The task repository and repository reads
+honor this context; an earlier parent deadline or cancellation still wins. A
+lookup timeout warns and leaves request preparation without a hydrated map.
+Creation-time provider errors remain nonfatal, matching the existing best-effort
+propagation contract. Readiness-time provider and HTTP push errors
 also warn without blocking workspace access indefinitely. All waits retain
 the lifecycle timeout and shutdown context. Missing refs keep existing fallback
 and diagnostic behavior. This repair guarantees seeded initial results when

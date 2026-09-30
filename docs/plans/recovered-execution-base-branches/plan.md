@@ -160,3 +160,36 @@ error. `(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle
 - Readiness includes existing push latency; preserve its bounded context and
   avoid locking across callbacks or leaking client leases.
 - Explicit comparison targets must retain precedence over branch-only refs.
+
+## Review remediation
+
+CodeRabbit suggested reducing the readiness-ordering test size. Extracted its
+blocking HTTP fixture into `blockingComparisonSeedHandler`, preserving both
+configuration barriers, cached poll-mode checks, and cancellation cleanup.
+The fixture extraction leaves production behavior and its contracts unchanged.
+
+Focused verification: `(cd apps/backend && go test -race
+./internal/agent/runtime/lifecycle -run
+'^TestWaitForAgentctlReady_SeedsBeforeReady$' -count=1)` PASS before and after
+the extraction (1.805s and 1.865s). Remote CI/review evidence is tracked in the external task plan.
+
+Claude suggested clarifying the readiness-time provider refresh. Updated
+`pushTaskBaseBranches` documentation to describe its correction of DB edits
+since creation and its coverage of already-running `Manager.Start` recovery.
+The two intentional provider reads and their best-effort behavior are unchanged.
+
+Greptile identified unbounded creation-time hydration before the launch deadline.
+Added a five-second child context for the DB-backed lookup, preserving shorter
+caller deadlines/cancellation and best-effort request preparation. Requirement
+criterion .11, design, and work-order acceptance now record this boundary.
+The virtual-time regression failed before the fix: the slow lookup consumed
+one minute instead of five seconds; shorter and cancelled caller cases passed.
+
+Post-fix verification: `(cd apps/backend && go test -race
+./internal/agent/runtime/lifecycle -run
+'^(TestPrepareExecutionCreateRequest_(BaseBranchLookupDeadline|HydratesBaseBranches)|TestGetOrEnsureExecution_SeedsBaseBranchesAtCreation|TestWaitForAgentctlReady_(SeedsBeforeReady|SeedingFailuresNonFatal|HealthFailureDoesNotSeed)|TestPushTaskBaseBranches)$'
+-count=1)` PASS (3.945s). Full changed-scope backend lint PASS with
+`golangci-lint run ./... --new-from-rev=<PR-base-sha> --timeout=10m` (zero issues).
+The local five-minute attempts timed out during analysis/package loading; the
+completed ten-minute run used the same linters and changed-code scope.
+Catalog/spec lint and diff checks PASS.

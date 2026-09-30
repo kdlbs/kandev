@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"maps"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -28,8 +29,10 @@ func (m *Manager) SetBaseBranchProvider(fn BaseBranchProvider) {
 func (m *Manager) seedExecutionBaseBranches(ctx context.Context, taskID, executionID string, metadata map[string]interface{}) {
 	branches := getMetadataStringMap(metadata, MetadataKeyBaseBranches)
 	if len(branches) == 0 && taskID != "" && m.baseBranchProvider != nil {
+		hydrationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 		var err error
-		branches, err = m.baseBranchProvider(ctx, taskID)
+		branches, err = m.baseBranchProvider(hydrationCtx, taskID)
 		if err != nil {
 			m.logger.Warn("failed to hydrate base branches before workspace creation",
 				zap.String("task_id", taskID),
@@ -43,9 +46,9 @@ func (m *Manager) seedExecutionBaseBranches(ctx context.Context, taskID, executi
 	}
 }
 
-// pushTaskBaseBranches hydrates taskID's stored base-branch map and pushes it to
-// one agentctl endpoint. Called from waitForAgentctlReady so every workspace
-// gets the map regardless of how it was created.
+// pushTaskBaseBranches refreshes taskID's stored base-branch map at readiness.
+// It applies changes since creation-time seeding and hydrates already-running
+// workspaces recovered by Manager.Start without a new create request.
 //
 // Best-effort throughout: a missing provider, a hydration failure, or a push
 // failure is logged and never blocks the workspace. The persisted

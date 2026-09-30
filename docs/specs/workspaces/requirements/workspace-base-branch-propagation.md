@@ -30,6 +30,8 @@ Workspace Git statistics and commit history describe changes on the task branch 
 - **AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.9:** When a workspace execution is recreated and its recorded base branches are available, its first comparison-derived result shall use those branches, including results produced before readiness is announced.
 - **AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.10:** The commits result shall contain only task-branch commits relative to each repository's configured comparison base. A task with no commits ahead of its recorded bases shall return zero commits, including after recovery; repositories with different bases shall resolve independently.
 
+- **AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.11:** Creation-time best-effort hydration shall stop after at most five seconds, honor an earlier caller deadline or cancellation, and continue workspace request preparation without a hydrated map on lookup failure.
+
 ## Failure and compatibility behavior
 
 - Hydration or delivery failure remains best-effort and observable in warnings;

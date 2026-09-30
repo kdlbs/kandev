@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
@@ -125,7 +126,6 @@ func TestWaitForAgentctlReady_SeedsBeforeReady(t *testing.T) {
 	mgr := newTestManager(t)
 	execution := &AgentExecution{ID: "execution-1", TaskID: "task-1", SessionID: "session-1", WorkspacePath: t.TempDir()}
 	var readyEvents atomic.Int32
-	var seeded atomic.Int32
 	mgr.eventBus.(*MockEventBus).OnPublish = func(subject string, _ *bus.Event) {
 		if subject == events.AgentctlReady {
 			readyEvents.Add(1)
@@ -136,26 +136,7 @@ func TestWaitForAgentctlReady_SeedsBeforeReady(t *testing.T) {
 	polled := make(chan bool, 1)
 	done := make(chan struct{})
 	var releaseOnce sync.Once
-	execution.agentctl = processTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/health":
-			w.WriteHeader(http.StatusOK)
-		case "/api/v1/workspace/base-branches", "/api/v1/workspace/comparison-targets":
-			entered <- r.URL.Path
-			select {
-			case <-release:
-			case <-r.Context().Done():
-				return
-			}
-			seeded.Add(1)
-			w.WriteHeader(http.StatusOK)
-		case "/api/v1/workspace/poll-mode":
-			polled <- seeded.Load() == 2
-			w.WriteHeader(http.StatusOK)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	execution.agentctl = processTestClient(t, blockingComparisonSeedHandler(entered, release, polled))
 	t.Cleanup(func() {
 		releaseOnce.Do(func() { close(release) })
 		select {
@@ -207,6 +188,30 @@ func TestWaitForAgentctlReady_SeedsBeforeReady(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("cached poll mode not flushed")
+	}
+}
+
+func blockingComparisonSeedHandler(entered chan<- string, release <-chan struct{}, polled chan<- bool) http.HandlerFunc {
+	var seeded atomic.Int32
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/workspace/base-branches", "/api/v1/workspace/comparison-targets":
+			entered <- r.URL.Path
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+			seeded.Add(1)
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/workspace/poll-mode":
+			polled <- seeded.Load() == 2
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
 	}
 }
 
@@ -287,4 +292,45 @@ func assertAgentctlLeaseReleased(t *testing.T, execution *AgentExecution) {
 		t.Fatal("startup retained the agentctl client lease")
 	}
 	execution.agentctlLifecycleMu.Unlock()
+}
+
+// @covers AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.11
+func TestPrepareExecutionCreateRequest_BaseBranchLookupDeadline(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		callerTimeout time.Duration
+		cancelled     bool
+		wantWait      time.Duration
+	}{
+		{name: "slow lookup", callerTimeout: time.Minute, wantWait: 5 * time.Second},
+		{name: "earlier caller deadline", callerTimeout: time.Second, wantWait: time.Second},
+		{name: "cancelled caller", callerTimeout: time.Minute, cancelled: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mgr := newTestManager(t)
+				ctx, cancel := context.WithTimeout(context.Background(), tt.callerTimeout)
+				defer cancel()
+				if tt.cancelled {
+					cancel()
+				}
+				mgr.SetBaseBranchProvider(func(ctx context.Context, _ string) (map[string]string, error) {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				})
+				info := &WorkspaceInfo{TaskID: "task-1", SessionID: "session-1", AgentID: "auggie", WorkspacePath: t.TempDir(), ExecutorType: string(models.ExecutorTypeWorktree)}
+				started := time.Now()
+				prep, err := mgr.prepareExecutionCreateRequest(ctx, info.TaskID, info, "execution-1")
+				if err != nil {
+					t.Fatalf("best-effort lookup failed request preparation: %v", err)
+				}
+				if waited := time.Since(started); waited != tt.wantWait {
+					t.Errorf("lookup waited %s, want %s", waited, tt.wantWait)
+				}
+				if bases := getMetadataStringMap(prep.request.Metadata, MetadataKeyBaseBranches); len(bases) != 0 {
+					t.Errorf("failed lookup seeded bases: %v", bases)
+				}
+			})
+		})
+	}
 }

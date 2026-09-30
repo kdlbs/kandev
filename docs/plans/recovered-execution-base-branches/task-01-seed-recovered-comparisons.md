@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.8
   - AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.9
   - AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.10
+  - AC-WORKSPACES-WORKSPACE-BASE-BRANCH-PROPAGATION-001.11
 system_design:
   - ../../specs/workspaces/system-design/workspace-base-branch-propagation.md
 ---
@@ -46,7 +47,8 @@ candidate/truncation changes. No unrelated refactoring.
    before `CreateInstance`. Usable metadata survives without provider lookup;
    typed and JSON-restored maps retain root and multi-repo keys. Neither input
    map is mutated. No-task/no-provider and hydration errors preserve best-effort
-   startup, with warnings on errors.
+   startup, with warnings on errors. Creation-time hydration uses a five-second
+   lookup deadline and honors earlier caller cancellation/deadlines.
 2. Readiness remains false while either push is blocked. Ready events and cached
    poll-mode flushing follow both attempts. HTTP readiness failure and push
    failure release leases and respect cancellation; push errors remain nonfatal.
@@ -153,3 +155,36 @@ readiness, ready events, and the cached poll-mode flush.
 See [the plan's recorded commands and results](plan.md#verification-results)
 for package durations and environment evidence. Publication remains outside
 this work order.
+
+## Review remediation
+
+CodeRabbit suggested reducing the readiness-ordering test size. Extracted its
+blocking HTTP fixture into `blockingComparisonSeedHandler`, preserving both
+configuration barriers, cached poll-mode checks, and cancellation cleanup.
+The fixture extraction leaves production behavior and its contracts unchanged.
+
+Focused verification: `(cd apps/backend && go test -race
+./internal/agent/runtime/lifecycle -run
+'^TestWaitForAgentctlReady_SeedsBeforeReady$' -count=1)` PASS before and after
+the extraction (1.805s and 1.865s). Remote CI/review evidence is tracked in the external task plan.
+
+Claude suggested clarifying the readiness-time provider refresh. Updated
+`pushTaskBaseBranches` documentation to describe its correction of DB edits
+since creation and its coverage of already-running `Manager.Start` recovery.
+The two intentional provider reads and their best-effort behavior are unchanged.
+
+Greptile identified unbounded creation-time hydration before the launch deadline.
+Added a five-second child context for the DB-backed lookup, preserving shorter
+caller deadlines/cancellation and best-effort request preparation. Requirement
+criterion .11, design, and work-order acceptance now record this boundary.
+The virtual-time regression failed before the fix: the slow lookup consumed
+one minute instead of five seconds; shorter and cancelled caller cases passed.
+
+Post-fix verification: `(cd apps/backend && go test -race
+./internal/agent/runtime/lifecycle -run
+'^(TestPrepareExecutionCreateRequest_(BaseBranchLookupDeadline|HydratesBaseBranches)|TestGetOrEnsureExecution_SeedsBaseBranchesAtCreation|TestWaitForAgentctlReady_(SeedsBeforeReady|SeedingFailuresNonFatal|HealthFailureDoesNotSeed)|TestPushTaskBaseBranches)$'
+-count=1)` PASS (3.945s). Full changed-scope backend lint PASS with
+`golangci-lint run ./... --new-from-rev=<PR-base-sha> --timeout=10m` (zero issues).
+The local five-minute attempts timed out during analysis/package loading; the
+completed ten-minute run used the same linters and changed-code scope.
+Catalog/spec lint and diff checks PASS.
