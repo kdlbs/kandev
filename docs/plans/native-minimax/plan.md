@@ -1,6 +1,6 @@
 ---
 created: 2026-09-30
-status: in_progress
+status: done
 requirements:
   - REQ-AGENTS-MINIMAX-001
   - REQ-AGENTS-MINIMAX-002
@@ -93,7 +93,10 @@ Native 0.5.10 probes verified initialize, auth_required, model selection, text,
 MCP tool execution, active cancel and subsequent load against an explicit local
 BYOK endpoint. No subscription credentials were available; native policy did
 not emit permission requests during the probe, so handler evidence comes from
-shared ACP regression tests. PR/check/review/merge delivery remains pending.
+shared ACP regression tests. Both implementation work orders are complete.
+CI/review disposition and final merge evidence are tracked by
+[PR #4110](https://github.com/kdlbs/kandev/pull/4110) and Kandev task
+`04d255ef-97fa-4d3c-9618-8abf0db8745c`.
 
 ## Risks
 
