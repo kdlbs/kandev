@@ -111,6 +111,9 @@ func TestPromptUnattendedWake_NeverUsesTheQueue(t *testing.T) {
 	if !errors.Is(err, ErrWakePromptNotDispatched) {
 		t.Fatalf("a busy session must fail as not dispatched, got %v", err)
 	}
+	if !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("a busy session must keep the in-progress cause in the chain, got %v", err)
+	}
 	if queued, _ := f.svc.messageQueue.HasPendingForSession(context.Background(), "session1"); queued {
 		t.Fatal("a wake send must never be queued")
 	}
