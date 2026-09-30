@@ -50,6 +50,8 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	if h.service.phase3 {
 		workspace.POST("/coordinators/:cid/proposals/:pid/reply", h.httpReplyToProposal)
 		workspace.POST("/coordinators/:cid/proposals/:pid/reply/deliver", h.httpDeliverReply)
+		workspace.GET("/coordinators/:cid/autonomy", h.httpGetAutonomy)
+		workspace.GET("/coordinators/:cid/runs/:runId", h.httpGetRun)
 	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 	if svc.phase2 {
