@@ -26,7 +26,7 @@ test.describe("Coordinator missing/empty/failure states", () => {
   // is not usable here either: it is a worker-scoped fixture shared across
   // every test in the run, and other specs create coordinators on it, so it
   // is not reliably coordinator-free by the time this test executes.
-  test("with no coordinator the sidebar Inbox row is unchanged and the generic entry has no badge (task-04 Acceptance)", async ({
+  test("with no coordinator the sidebar Inbox row is unchanged and the Coordinators section shows its set-up row (task-04 Acceptance)", async ({
     testPage,
     apiClient,
   }) => {
@@ -41,9 +41,17 @@ test.describe("Coordinator missing/empty/failure states", () => {
       await expect(testPage.getByTestId("coordinator-count-strip")).toHaveCount(0);
 
       await expect(testPage.getByTestId("sidebar-needs-you-inbox")).toBeVisible();
-      const genericRow = testPage.getByTestId("sidebar-coordinator-generic");
-      await expect(genericRow).toBeVisible();
-      await expect(genericRow).toHaveText("Coordinator");
+      const emptyRow = testPage.getByTestId("sidebar-coordinators-empty");
+      await expect(emptyRow).toBeVisible();
+      await expect(emptyRow).toHaveText("Set up a coordinator");
+      await expect(emptyRow).toHaveAttribute(
+        "href",
+        `/settings/workspaces/${workspace.id}/coordinators`,
+      );
+      await expect(testPage.getByTestId("coordinators-open-list")).toHaveAttribute(
+        "href",
+        linkToCoordinator(workspace.id),
+      );
     } finally {
       await apiClient.deleteWorkspace(workspace.id, workspace.name);
     }
