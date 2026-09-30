@@ -46,7 +46,7 @@
       "dompurify": "^3.4.13",
       "fast-uri": "^3.1.6",
       "flatted": "^3.4.2",
-      "hono": "^4.12.34",
+      "hono": "^4.13.5",
       "ip-address": "^10.3.1",
       "js-yaml@4": "^4.3.1",
       "linkify-it": "^5.0.2",
