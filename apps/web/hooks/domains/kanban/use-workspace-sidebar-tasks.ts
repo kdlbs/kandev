@@ -1,6 +1,6 @@
 import { matchesSidebarClause } from "@/lib/sidebar/sidebar-local-filter";
 import { sidebarCandidate } from "@/lib/sidebar/sidebar-local-projection";
-import type { SidebarTaskQuery } from "@/lib/types/http";
+import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import type { TaskOverview } from "@/lib/state/slices/task-overview-types";
 import { useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";

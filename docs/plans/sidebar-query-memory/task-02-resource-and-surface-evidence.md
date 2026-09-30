@@ -181,3 +181,10 @@ review disposition, and the zero-query covered-state contract remain acceptance
 criteria. Run `36701226446`, timing job `109841594666`, measured `e5ea04469` on
 AMD EPYC 9V74 with GOMAXPROCS=4: SQLite 0.909–1.502s and PostgreSQL
 2.246–3.227s across all first/middle/final None/State/Repository pages.
+
+The same exact SQL-head run passed memory job `109841594547`: 144 preparation
+samples peaked at 64,299,672 native bytes; five maximum-input cases peaked at
+15,684,584 bytes, with collapse preparation at 5,850,472 bytes. All 73 pooled
+cases produced 1,825 samples, with maxima 256,519,800 native bytes, 98,784
+retained bytes, and 450,637,824 bytes RSS delta. These meet the 64/256/8/512 MiB
+budgets. Full delivery-head CI and exact browser counts remain pending.

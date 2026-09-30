@@ -233,6 +233,14 @@ reported AMD EPYC 9V74 and GOMAXPROCS=4: SQLite warm pages took 0.909–0.926s
 (None), 1.474–1.502s (State), and 1.098–1.106s (Repository); PostgreSQL took
 2.246–2.299s, 3.138–3.227s, and 2.360–2.467s respectively.
 
+That run also passed memory job `109841594547`: preparation peak 64,299,672
+bytes; maximum-input peak 15,684,584 bytes; pooled peak 256,519,800 bytes,
+retained 98,784 bytes, and RSS delta 450,637,824 bytes. All native memory budgets
+passed. Delivery head `24e0eace9` included current main `d05b0a91c` and had the
+same tree as CI merge `d8c602f58`. Its frontend typecheck found a missing page
+response type import introduced by the ownership-helper extraction; the import
+is corrected. Final CI/browser counts and confirmed merge remain pending.
+
 ## Risks
 
 - Temporary relations introduce cleanup and pool-reuse hazards; failure-path tests are mandatory.

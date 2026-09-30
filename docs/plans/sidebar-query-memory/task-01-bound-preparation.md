@@ -145,5 +145,12 @@ memory job. The existing maximum-input regression supplies the failing evidence.
 Collapse IDs, collapsed group exclusions, and collapsed header requests now bind
 JSON string arrays through SQLite/PostgreSQL set expansion instead of expanding
 thousands of SQL parameters. Cross-engine coverage preserves duplicate/missing
-membership, quoted IDs, counts, headers, and page clamping. CI verification of
-this correction and the remaining maximum-input/benchmark matrix is pending.
+membership, quoted IDs, counts, headers, and page clamping.
+
+Exact SQL head `e5ea04469` passed isolated resource CI run `36701226446`,
+attempt 1, memory job `109841594547`. All 144 preparation samples remained
+below 64 MiB (peak 64,299,672 bytes). The five maximum-input cases peaked at
+15,684,584 bytes; collapse preparation fell to 5,850,472 bytes. The 73 pooled
+cases (100 reads each, concurrency four) peaked at 256,519,800 native bytes,
+98,784 retained bytes, and 450,637,824 bytes RSS delta, meeting every budget.
+Full delivery-head CI and cross-engine regression confirmation remain pending.
