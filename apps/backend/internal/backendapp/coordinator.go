@@ -133,10 +133,12 @@ func registerCoordinatorRoutes(p routeParams) {
 		if p.taskSvc != nil {
 			coordinatorWakeSources = &coordinatorWakeReader{tasks: p.taskSvc}
 		}
+		wireCoordinatorDelivery(svc, p.taskSvc, p.orchestratorSvc)
 		if p.addCleanup != nil {
 			p.addCleanup(func() error {
 				svc.StopWakeRecorder()
 				svc.StopWakeBackstop()
+				svc.StopDelivery()
 				return nil
 			})
 		}
@@ -283,7 +285,7 @@ var (
 	registerCoordinatorContainment  coordinatorRegistration = noopCoordinatorHook
 	registerCoordinatorSpend        coordinatorRegistration = noopCoordinatorHook
 	registerCoordinatorWake         coordinatorRegistration = registerCoordinatorWakeState
-	registerCoordinatorDelivery     coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorDelivery     coordinatorRegistration = registerCoordinatorDeliveryWorker
 	registerCoordinatorRelay        coordinatorRegistration = registerCoordinatorRelayRoutes
 	registerCoordinatorReply        coordinatorRegistration = noopCoordinatorHook
 	registerCoordinatorAutomatic    coordinatorRegistration = noopCoordinatorHook
