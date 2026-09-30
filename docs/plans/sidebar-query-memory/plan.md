@@ -225,6 +225,14 @@ These measurements still miss the one-second criterion. Subsequent changes reuse
 display-root forests, preserve parent statistics, and expose the validated page
 bound to the PostgreSQL planner. Final timings and browser counts remain required.
 
+On 2026-09-30 the user waived the one-second 100K timing gate because that dataset
+is an unused edge case. Timing remains reported evidence. Required CI, review gates,
+native memory budgets, zero-request covered sidebar behavior, and confirmed merge
+still gate delivery. At `e5ea04469`, timing job `109841594666` in run `36701226446`
+reported AMD EPYC 9V74 and GOMAXPROCS=4: SQLite warm pages took 0.909–0.926s
+(None), 1.474–1.502s (State), and 1.098–1.106s (Repository); PostgreSQL took
+2.246–2.299s, 3.138–3.227s, and 2.360–2.467s respectively.
+
 ## Risks
 
 - Temporary relations introduce cleanup and pool-reuse hazards; failure-path tests are mandatory.

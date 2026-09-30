@@ -366,8 +366,10 @@ Group headings never trigger pagination at 100 tasks. Filters and collapse chang
 cross the threshold; hidden descendants still affect tree rank.
 Prove paging never changes the active task/session or scrolls the conversation pane.
 A 100,000-task benchmark records SQL plans, query duration, response bytes, and allocations.
-Require first and deep-page queries to finish within one second after warm-up on the same
-reported four-vCPU fixture host. Record hardware and database backend with results.
+Record first and deep-page warm timings on the same reported four-vCPU fixture host,
+including hardware and database backend. The 100,000-task timing measurement is
+informational; it does not gate delivery. Native memory budgets and bounded output
+remain deterministic acceptance criteria.
 Do not claim constant database query time; window output and browser work are bounded.
 
 Use existing request tracing for route duration and structured query counts.

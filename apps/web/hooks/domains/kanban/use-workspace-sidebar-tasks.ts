@@ -162,11 +162,12 @@ function projectSidebarTasks(
   byId: AppState["taskOverview"]["byId"],
   summaries: Record<string, TaskStatusSummary>,
   filters: SidebarTaskQuery["filters"],
+  activeTaskOnly: boolean,
 ) {
   return entries.flatMap((entry): SidebarTask[] => {
     if (entry.kind !== "task") return [];
     const task = byId[entry.task_id ?? ""] ?? (entry.task ? toKanbanTask(entry.task) : undefined);
-    if (!task || !eligibleArchiveMembership(task, filters)) return [];
+    if (!task || (!activeTaskOnly && !eligibleArchiveMembership(task, filters))) return [];
     return [
       {
         ...task,
@@ -234,23 +235,25 @@ function useWorkspaceWorkflowMetadata(workspaceId: string | null) {
   return { filteredWorkflows, stepsByWorkflowId, allSteps };
 }
 
-/**
- * Complete inventories reuse the board's task state; other views use a
- * bounded server page. This hook never fetches workflow snapshots for the sidebar.
- */
-export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
-  const storeTasks = useSidebarStoreTasks(workspaceId);
-  const page = useSidebarTaskPage(workspaceId, storeTasks === null, storeTasks);
-  const taskRemoval = useAppStore((state) => state.taskRemoval);
-  const { filteredWorkflows, stepsByWorkflowId, allSteps } =
-    useWorkspaceWorkflowMetadata(workspaceId);
-  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration ?? 0);
-  const workspaceContextRead = useAppStore((state) => state.workspaceContextRead);
-  const retryWorkspaceContext = useAppStore(
-    (state) => state.requestWorkspaceContextRefresh ?? NOOP_REFRESH,
-  );
+function sidebarSourceEntries(
+  response: SidebarTaskPageResponse | null,
+  activeTaskId: string | null,
+  activeTaskOnly: boolean,
+): SidebarTaskPageResponse["entries"] {
+  if (!activeTaskOnly) return response?.entries ?? EMPTY_PAGE_ENTRIES;
+  return activeTaskId ? [{ kind: "task", task_id: activeTaskId }] : EMPTY_PAGE_ENTRIES;
+}
 
-  const pageEntries = page.response?.entries ?? EMPTY_PAGE_ENTRIES;
+function useSidebarPageTasks(
+  workspaceId: string | null,
+  page: ReturnType<typeof useSidebarTaskPage>,
+  activeTaskOnly: boolean,
+) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const pageEntries = useMemo(
+    () => sidebarSourceEntries(page.response, activeTaskId, activeTaskOnly),
+    [activeTaskOnly, activeTaskId, page.response],
+  );
   const byId = useAppStore((state) => state.taskOverview.byId);
   const pageTaskIds = useMemo(
     () => pageEntries.flatMap((entry) => (entry.task_id ? [entry.task_id] : [])),
@@ -267,8 +270,15 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     }),
   );
   const nextPageTasks = useMemo(
-    () => projectSidebarTasks(pageEntries, byId, statusSummaryByTaskId, page.view.filters),
-    [pageEntries, statusSummaryByTaskId, byId, page.view.filters],
+    () =>
+      projectSidebarTasks(
+        pageEntries,
+        byId,
+        statusSummaryByTaskId,
+        page.view.filters,
+        activeTaskOnly,
+      ),
+    [pageEntries, statusSummaryByTaskId, byId, page.view.filters, activeTaskOnly],
   );
   const previousTasksRef = useRef<SidebarTask[]>([]);
   const allTasks = useMemo(() => {
@@ -276,6 +286,36 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     previousTasksRef.current = tasks;
     return tasks;
   }, [nextPageTasks]);
+
+  return { pageEntries, allTasks };
+}
+
+/**
+ * Complete inventories reuse the board's task state; other views use a
+ * bounded server page. This hook never fetches workflow snapshots for the sidebar.
+ * Command hosts and hidden navigation read the active record without retaining a page.
+ */
+export function useWorkspaceSidebarTasks(
+  workspaceId: string | null,
+  activeTaskOnly = false,
+): WorkspaceSidebarTasksResult {
+  const pageWorkspaceId = activeTaskOnly ? null : workspaceId;
+  const storeTasks = useSidebarStoreTasks(pageWorkspaceId);
+  const page = useSidebarTaskPage(
+    pageWorkspaceId,
+    !activeTaskOnly && storeTasks === null,
+    storeTasks,
+  );
+  const taskRemoval = useAppStore((state) => state.taskRemoval);
+  const { filteredWorkflows, stepsByWorkflowId, allSteps } =
+    useWorkspaceWorkflowMetadata(workspaceId);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration ?? 0);
+  const workspaceContextRead = useAppStore((state) => state.workspaceContextRead);
+  const retryWorkspaceContext = useAppStore(
+    (state) => state.requestWorkspaceContextRefresh ?? NOOP_REFRESH,
+  );
+
+  const { pageEntries, allTasks } = useSidebarPageTasks(workspaceId, page, activeTaskOnly);
 
   const pendingArchiveTaskIds = useMemo(() => {
     const pending = new Set<string>();

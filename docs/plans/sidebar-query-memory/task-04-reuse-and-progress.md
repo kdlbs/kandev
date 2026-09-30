@@ -169,5 +169,14 @@ CI followups debounce queued invalidations after a slow response and cancel redu
 scheduled reads when that trailing read starts. Workspace-list failures retain manual
 recovery; a denied task-page read clears its data and offers no unchanged-scope retry.
 Changing workspace while a task route remains open cannot restart that old route and
-restore its previous workspace. The 101-task fixture searches its virtualized anchor
-before opening it, while retaining complete shared coverage and zero sidebar queries.
+restore its previous workspace. The 101-task fixture uses each surface's native
+search control before opening its virtualized anchor. It preserves complete shared
+coverage across client navigation and still asserts zero sidebar queries.
+
+Old-head CI found 101 display memberships after the desktop reached archived page
+two: the task command host independently retained page one. Commands and the
+CSS-hidden phone desktop sidebar now read the active canonical record without a
+list page. The controller regression covers an archived active record and active-task
+changes; desktop/phone ownership assertions remain unchanged. The current-main
+Changes timeline fixture now supplies a ResizeObserver entry when asserting a new
+measurement, matching the deferred initial geometry contract. CI verification is pending.

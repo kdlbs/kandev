@@ -39,6 +39,7 @@ import { TaskMoveErrorBanner } from "./task-move-error-banner";
 import { useMoveToStep } from "./task-session-sidebar-move";
 import { SidebarTaskPageContent } from "./sidebar-task-page-content";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { applyView } from "@/lib/sidebar/apply-view";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { applySidebarPageMetadata } from "./sidebar-page-metadata";
@@ -113,7 +114,7 @@ function buildSidebarTaskItems(params: {
   return allTasks.map((task) => buildSidebarItem(task, context));
 }
 
-export function useSidebarData(workspaceId: string | null) {
+export function useSidebarData(workspaceId: string | null, activeTaskOnly = false) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
@@ -145,7 +146,7 @@ export function useSidebarData(workspaceId: string | null) {
     workspaceContextPending,
     workspaceContextAccessDenied,
     retryWorkspaceContext,
-  } = useWorkspaceSidebarTasks(workspaceId);
+  } = useWorkspaceSidebarTasks(workspaceId, activeTaskOnly);
 
   const tasksWithRepositories = useMemo(
     () =>
@@ -486,6 +487,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
 }: TaskSessionSidebarProps) {
   const store = useAppStoreApi();
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   useRepositories(workspaceId);
   useWorkspaceMRs(workspaceId);
   const pathname = usePathname();
@@ -505,7 +507,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     allTasks,
     page,
     pageEntries,
-  } = useSidebarData(workspaceId);
+  } = useSidebarData(workspaceId, isMobile);
 
   // Only highlight while viewing a task route; AppSidebar is global and activeTaskId lingers.
   const onTaskRoute =

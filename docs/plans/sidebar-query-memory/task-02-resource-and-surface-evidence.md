@@ -174,3 +174,10 @@ These remain above the criterion. Execution plans exposed inflated recursive/pag
 cardinality and repeated ordering. Followups retain parent-relationship statistics,
 bound planner-visible page rows, share display-root memberships for grouping/counts,
 and add scratch statistics cleanup checks. Final exact-head evidence remains pending.
+
+The user waived the one-second 100K timing gate on 2026-09-30. Keep the populated
+benchmark informational and preserve its measured results; native memory, CI,
+review disposition, and the zero-query covered-state contract remain acceptance
+criteria. Run `36701226446`, timing job `109841594666`, measured `e5ea04469` on
+AMD EPYC 9V74 with GOMAXPROCS=4: SQLite 0.909–1.502s and PostgreSQL
+2.246–3.227s across all first/middle/final None/State/Repository pages.

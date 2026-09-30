@@ -6,6 +6,7 @@ import { toKanbanTask } from "@/lib/kanban/map-task";
 
 const mocks = vi.hoisted(() => ({
   state: {
+    tasks: { activeTaskId: null as string | null },
     taskOverview: { byId: {} as Record<string, TaskOverview> },
     taskRemoval: {
       pendingTokenByTaskId: {} as Record<string, string>,
@@ -36,16 +37,18 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mocks.state) => unknown) => selector(mocks.state),
 }));
 vi.mock("@/hooks/domains/kanban/use-sidebar-store-tasks", () => ({
-  useSidebarStoreTasks: () => null,
+  useSidebarStoreTasks: vi.fn(() => null),
 }));
 vi.mock("@/hooks/domains/kanban/use-sidebar-task-page", () => ({
-  useSidebarTaskPage: () => ({
+  useSidebarTaskPage: vi.fn(() => ({
     ...mocks.page,
     view: { id: "view-1", group: "none", filters: [] },
-  }),
+  })),
 }));
 
 import { useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
+import { useSidebarTaskPage } from "./use-sidebar-task-page";
+import { useSidebarStoreTasks } from "./use-sidebar-store-tasks";
 
 function task(id: string, overrides: Partial<Task> = {}): Task {
   return {
@@ -85,6 +88,7 @@ function setPageTasks(tasks: Task[]) {
 }
 
 beforeEach(() => {
+  mocks.state.tasks.activeTaskId = null;
   mocks.state.taskOverview.byId = {};
   mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
   mocks.state.kanbanMulti = { snapshots: {} };
@@ -103,6 +107,25 @@ beforeEach(() => {
 });
 
 describe("useWorkspaceSidebarTasks", () => {
+  it("reads active command data without owning a sidebar page", () => {
+    setPageTasks([task("page-a"), task("page-b")]);
+    mocks.state.tasks.activeTaskId = "active";
+    mocks.state.taskOverview.byId.active = toKanbanTask(
+      task("active", { archived_at: "2026-09-30T10:00:00Z" }),
+    );
+
+    const { result, rerender } = renderHook(() => useWorkspaceSidebarTasks("ws-1", true));
+
+    expect(useSidebarStoreTasks).toHaveBeenLastCalledWith(null);
+    expect(useSidebarTaskPage).toHaveBeenLastCalledWith(null, false, null);
+    expect(result.current.allTasks.map((item) => item.id)).toEqual(["active"]);
+    expect(result.current.allTasks[0]?.isArchived).toBe(true);
+
+    mocks.state.tasks.activeTaskId = "page-b";
+    rerender();
+    expect(result.current.allTasks.map((item) => item.id)).toEqual(["page-b"]);
+  });
+
   it("uses only the bounded page and does not leak workspace snapshot tasks", () => {
     setPageTasks([task("page-a"), task("page-b")]);
     mocks.state.kanbanMulti.snapshots = {

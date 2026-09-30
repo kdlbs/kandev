@@ -4,6 +4,7 @@ import type { AppState } from "../../../lib/state/store";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import {
   seedSidebarPaginationTasks,
@@ -107,8 +108,14 @@ export async function exerciseSharedPaging(
   await page.goto("/");
   await waitForCoverage(page, seed.workspaceId);
   expect(requests).toBe(0);
-  await page.getByRole("textbox", { name: "Search tasks...", exact: true }).fill(anchor.title);
-  await page.getByTestId(`task-card-${anchor.id}`).click();
+  if (mobile) {
+    const home = new MobileKanbanPage(page);
+    await home.openSearch();
+    await home.searchInput().fill(anchor.title);
+  } else {
+    await page.getByRole("textbox", { name: "Search by title..." }).fill(anchor.title);
+  }
+  await page.getByTestId(`task-card-${anchor.id}`).getByRole("link").click();
   const { session, rows } = await surface(page, mobile);
   const controls = rows.getByTestId("sidebar-page-controls");
   await expect(rows.locator("[data-task-row-id]")).toHaveCount(100);
