@@ -222,6 +222,27 @@ func TestClassify_OpenCodePeriodUsageLimitsAreHighConfidenceQuota(t *testing.T) 
 	}
 }
 
+func TestClassify_OpenCodeCreditLimitReachedIsHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	// Observed DevPass stderr, as the sanitized provider message reaches the
+	// classifier: the renewal URL is collapsed by the shared sanitizer, so
+	// only bounded credit language remains to classify on.
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		Stderr:     "AI_APICallError: Dev Plan credit limit reached. Upgrade your plan or wait for renewal on 10/08/2026 Or enable pay-as-you-go overflow in your DevPass dashboard to keep going past your allowance",
+	})
+	if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+		t.Fatalf("classification = %s/%s, want quota_limited/high (rule=%s)", e.Code, e.Confidence, e.ClassifierRule)
+	}
+	if e.ClassifierRule != "opencode.stderr.credit.v1" {
+		t.Fatalf("classifier rule = %s, want opencode.stderr.credit.v1", e.ClassifierRule)
+	}
+	if !e.FallbackAllowed {
+		t.Fatalf("credit exhaustion must allow fallback: %+v", e)
+	}
+}
+
 func TestHasProviderRules(t *testing.T) {
 	if !HasProviderRules("opencode-acp") {
 		t.Fatal("opencode-acp should have provider rules")
