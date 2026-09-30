@@ -89,7 +89,7 @@ They use typed envelopes, not generic browser actions.
 | `RecoverExecutorOperation` | Original operation identity and profile snapshot | `found`, `absent`, or `unknown`; resolves lost provision responses |
 | `AttachExecutorEnvironment` | Recorded handle/state, session identity, expected runtime identity | Same environment descriptor; never provisions a replacement |
 | `InspectExecutorEnvironment` | Recorded handle/state | `running`, `suspended`, `terminated`, `absent`, or `unknown`, reason and expiry |
-| `ResolveExecutorConnection` | Recorded handle, purpose `agentctl`, runtime port | Transient connection lease |
+| `ResolveExecutorConnection` | Recorded handle, purpose `agentctl`, runtime port (control or instance) | Transient connection lease |
 | `DestroyExecutorEnvironment` | Recorded handle or unresolved operation identity, cleanup reason and claim | Confirmed absent or retryable failure; idempotent |
 
 Every call carries host-derived plugin installation identity, workspace/task/session/environment IDs,
@@ -127,6 +127,9 @@ The plugin verifies the digest before execution. The fixture transfers it direct
 
 The bootstrap descriptor carries host-selected startup configuration, a one-time nonce, and runtime
 port allocation constraints. It is transient and never included in checkpoints or progress messages.
+The provider starts agentctl with its control server on `runtime_port` and the nonce as its bootstrap
+nonce. agentctl serves each session instance on a separate port that it assigns, so the provider must
+issue leases for the control port and for any instance port the host requests.
 Core owns the existing handshake and encrypted agentctl token persistence. Agent credentials and
 repository credentials follow existing host-to-agentctl setup after authenticated readiness.
 Do not put session secrets into reusable image configuration.
@@ -199,7 +202,9 @@ Provider lifecycle and task-session state remain separate concepts.
    session; never borrow another session's resource or overwrite a shared environment binding.
 3. Claim the session launch and persist `allocating` with operation identity before any provider call.
 4. Invoke provision. The provider checkpoints its handle immediately after allocation.
-5. Transfer/bootstrap agentctl. Resolve the connection lease and perform host authenticated readiness.
+5. Transfer/bootstrap agentctl. Lease the control port, perform the handshake, and create the session
+   instance. Record the instance port in inventory, lease it, and perform authenticated readiness.
+   Recovery and retained reattach lease the recorded instance port.
 6. Materialize credential-free repository locators through existing workspace APIs. Resolve credentials
    through existing secret/Git broker paths and preserve origin scrubbing.
 7. Configure and start the agent through core. Commit ready inventory before publishing success.

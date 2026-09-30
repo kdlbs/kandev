@@ -771,6 +771,8 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
 		"office_workflow_id":              nullString(workspace.OfficeWorkflowID),
 		"created_at":                      workspace.CreatedAt,
 		"updated_at":                      workspace.UpdatedAt,

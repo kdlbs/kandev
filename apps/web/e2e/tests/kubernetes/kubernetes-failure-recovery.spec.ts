@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { test, expect, kubernetesProfileConfig } from "../../fixtures/kubernetes-test-base";
+import { runWithBackendRecovery } from "../../fixtures/test-base";
 import {
   execInKubernetesPod,
   waitForKubernetesPod,
@@ -166,8 +167,22 @@ for (const restart of [false, true]) {
       await waitForKubernetesResourceAbsent(cluster, "pod", pod.metadata.name);
       await waitForKubernetesResourceAbsent(cluster, "persistentvolumeclaim", claim.metadata.name);
     } finally {
-      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
-      await apiClient.deleteExecutorProfile(profile.id);
+      try {
+        await runWithBackendRecovery(backend, () =>
+          apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false }),
+        );
+      } finally {
+        await runWithBackendRecovery(backend, async () => {
+          const { executors } = await apiClient.listExecutors();
+          // A lost DELETE response can mean the profile is already gone.
+          const profileStillExists = executors.some(
+            (executor) =>
+              executor.id === seedData.executorId &&
+              executor.profiles?.some(({ id }) => id === profile.id),
+          );
+          if (profileStillExists) await apiClient.deleteExecutorProfile(profile.id);
+        });
+      }
     }
   });
 }

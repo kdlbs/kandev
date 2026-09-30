@@ -1645,6 +1645,11 @@ within its declared maximum lifetime. Use operation-bound Host callbacks to
 checkpoint resource state, report progress, and read the host's agentctl runtime
 artifact.
 
+Start agentctl with its control server on the bootstrap `runtime_port` and the
+bootstrap `nonce`. Kandev then creates a session instance, which agentctl serves
+on a port it assigns, so `ResolveExecutorConnection` must route both the control
+port and any instance port Kandev requests.
+
 Return short-lived HTTPS connection leases. Put credentials in HTTP or
 WebSocket headers, never in the URL. Remote environments must reach the
 configured Kandev API URL so agentctl can complete normal session work. Kandev

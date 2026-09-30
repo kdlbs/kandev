@@ -110,4 +110,6 @@ After integrating newer upstream changes, all six affected package suites and
 the offline inventory-repair package and command suites passed. Backend lint
 passed with zero issues on retry after its initial five-minute timeout. Harness,
 documentation catalog, and specification validation passed. Remote delivery and
-fresh GitHub CI remain pending because authenticated GitHub access is unavailable.
+fresh GitHub CI remain pending. GitHub authentication has been restored; the
+latest upstream integration passed all six affected package suites, backend
+lint, documentation catalog, and specification validation before delivery.
