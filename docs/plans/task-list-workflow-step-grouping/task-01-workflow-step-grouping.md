@@ -74,14 +74,16 @@ Preview spacing and task names are illustrative, not new UI data.
 Run from the repository root with Node 24 and pnpm on PATH. The current shell
 can activate Node with `export PATH="$HOME/.nvm/versions/node/v24.18.0/bin:$PATH"`.
 Install workspace dependencies once before the first package command in this
-fresh worktree. Follow `/tdd` and `/e2e`; first prove new scenarios fail against
+fresh worktree. Run typecheck before direct Vitest: its pretypecheck script
+generates the ignored release-note and changelog JSON needed by SPA imports.
+Follow `/tdd` and `/e2e`; first prove new scenarios fail against
 the old implementation. Run E2E commands sequentially using the managed runner.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test ./internal/user/...)
-(cd apps/web && pnpm exec vitest run lib/tasks/tasks-list-options.test.ts lib/ssr/user-settings.test.ts src/spa-routes.tasks-preferences.test.tsx app/tasks/tasks-list-view.test.tsx app/tasks/tasks-page-client.mr-hydration.test.tsx hooks/use-workflow-option-previews.test.ts hooks/use-task-list-workflow-steps.test.ts hooks/use-ensure-user-settings.test.ts lib/tasks/task-list-sections.test.ts)
 (cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm exec vitest run lib/tasks/tasks-list-options.test.ts lib/ssr/user-settings.test.ts src/spa-routes.tasks-preferences.test.tsx app/tasks/tasks-list-view.test.tsx app/tasks/tasks-page-client.mr-hydration.test.tsx hooks/use-workflow-option-previews.test.ts hooks/use-task-list-workflow-steps.test.ts hooks/use-ensure-user-settings.test.ts lib/tasks/task-list-sections.test.ts)
 (cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:pseudo)
 (cd apps/web && pnpm run i18n:check)
