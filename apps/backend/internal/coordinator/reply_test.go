@@ -206,7 +206,7 @@ func TestReplyValidation(t *testing.T) {
 
 	other := env.propose(t)
 	if _, err := env.svc.store.db.Exec(env.svc.store.db.Rebind(
-		`UPDATE coordinator_proposals SET kind = 'improvement' WHERE id = ?`), other.ID); err != nil {
+		`UPDATE coordinator_proposals SET kind = 'unrepliable' WHERE id = ?`), other.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err := env.reply(other, "")

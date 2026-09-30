@@ -86,6 +86,10 @@ export type SettingsSaveCoordinator = {
    * superseding it with its own navigation). */
   cancelPendingNavigation: () => void;
   clearSavedStatus: () => void;
+  /** True while a runExclusive operation is in flight; saveAll refuses to start meanwhile. */
+  exclusiveBusy: boolean;
+  /** Runs fn only when no save and no other exclusive operation is in flight; null when refused. */
+  runExclusive: <T>(fn: () => Promise<T>) => Promise<{ value: T } | null>;
 };
 
 const SettingsSaveCoordinatorContext = createContext<SettingsSaveCoordinator | null>(null);
@@ -98,8 +102,16 @@ export function SettingsSaveProvider({
   placement?: SettingsSavePlacement;
 }) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
-  const { status, errorKind, saveAll, clearSavedStatus, markError, failedContributorIds } =
-    useSaveCoordinator(contributors, refreshRegistry);
+  const {
+    status,
+    errorKind,
+    saveAll,
+    clearSavedStatus,
+    markError,
+    failedContributorIds,
+    exclusiveBusy,
+    runExclusive,
+  } = useSaveCoordinator(contributors, refreshRegistry);
   const hasDirty = dirtyContributors.length > 0;
   const hasInvalid = dirtyContributors.some(({ contributor }) => contributor.canSave === false);
   const invalidReason = dirtyContributors.find(({ contributor }) => contributor.canSave === false)
@@ -147,6 +159,8 @@ export function SettingsSaveProvider({
         invalidReason,
         cancelPendingNavigation: continueEditing,
         clearSavedStatus,
+        exclusiveBusy,
+        runExclusive,
       }}
       placement={placement}
       hasInvalid={hasInvalid}
@@ -215,7 +229,7 @@ function SettingsSaveProviderBody({
           <SettingsFloatingSave
             status={displayStatus}
             placement={placement}
-            canSave={!hasInvalid}
+            canSave={!hasInvalid && !coordinator.exclusiveBusy}
             errorKind={errorKind}
             dirtyContributorIds={dirtyContributorIds}
             invalidReason={invalidReason}
@@ -429,6 +443,8 @@ function useSaveCoordinator(
   refreshRegistry: () => void,
 ) {
   const savingRef = useRef(false);
+  const exclusiveRef = useRef(false);
+  const [exclusiveBusy, setExclusiveBusy] = useState(false);
   const [failedContributorIds, setFailedContributorIds] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState<SettingsSaveStatus>("dirty");
   const [errorKind, setErrorKind] = useState<SettingsSaveErrorKind | null>(null);
@@ -442,7 +458,9 @@ function useSaveCoordinator(
     setStatus("error");
   }, []);
   const saveAll = useCallback(async (): Promise<SaveResult> => {
-    if (savingRef.current) return { canLeave: false, failedIds: new Set() };
+    if (savingRef.current || exclusiveRef.current) {
+      return { canLeave: false, failedIds: new Set() };
+    }
     const submitted = snapshotDirtyContributors(contributors);
     if (submitted.some(({ contributor }) => contributor.canSave === false)) {
       return { canLeave: false, failedIds: new Set() };
@@ -490,7 +508,28 @@ function useSaveCoordinator(
     };
   }, [contributors, refreshRegistry]);
 
-  return { status, errorKind, saveAll, clearSavedStatus, markError, failedContributorIds };
+  const runExclusive = useCallback(async <T,>(fn: () => Promise<T>) => {
+    if (savingRef.current || exclusiveRef.current) return null;
+    exclusiveRef.current = true;
+    setExclusiveBusy(true);
+    try {
+      return { value: await fn() };
+    } finally {
+      exclusiveRef.current = false;
+      setExclusiveBusy(false);
+    }
+  }, []);
+
+  return {
+    status,
+    errorKind,
+    saveAll,
+    clearSavedStatus,
+    markError,
+    failedContributorIds,
+    exclusiveBusy,
+    runExclusive,
+  };
 }
 
 function saveCompletionStatus(

@@ -96,10 +96,10 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 // claim may be stale and must settle whatever the flag says.
 func (s *Service) readForApprove(ctx context.Context, workspaceID, coordinatorID, proposalID string) (*Proposal, error) {
 	p, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
-	if s.phase2 || !errors.Is(err, ErrNotFound) {
+	if (s.phase2 && s.phase3) || !errors.Is(err, ErrNotFound) {
 		return p, err
 	}
-	p, err = s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	p, err = s.store.GetProposalAnyKind(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil || p.Status != ProposalStatusApproving || p.Kind == "" || p.Kind == ProposalKindCreateTask {
 		return nil, ErrNotFound
 	}
@@ -316,7 +316,7 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 // request's inline stale re-claim (cutoff = now - 2 minutes) and the startup
 // recovery pass (cutoff = T0, task 08).
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
-	row, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	row, err := s.store.GetProposalAnyKind(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil {
 		return nil, err
 	}
@@ -547,6 +547,8 @@ func kindAction(kind string) Action {
 		return ActionMove
 	case ProposalKindResume:
 		return ActionResume
+	case ProposalKindImprovement:
+		return ActionImprovement
 	default:
 		return ActionCreateTask
 	}
@@ -556,7 +558,7 @@ func kindAction(kind string) Action {
 // policy now denies. It reads only the proposal and the policy, so it runs
 // before any kind's own checks, and only with phase 2 on.
 func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, proposal *Proposal) error {
-	if !s.phase2 {
+	if !s.phase2 || proposal.Kind == ProposalKindImprovement {
 		return nil
 	}
 	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)

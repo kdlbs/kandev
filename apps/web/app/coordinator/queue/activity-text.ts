@@ -10,6 +10,7 @@ export const CLASS_LABEL_KEY: Record<string, string> = {
   move: "coordinator:activityClassMove",
   resume: "coordinator:activityClassResume",
   stop: "coordinator:activityClassStop",
+  improvement: "coordinator:activityClassImprovement",
   unknown: "coordinator:activityClassUnknown",
 };
 

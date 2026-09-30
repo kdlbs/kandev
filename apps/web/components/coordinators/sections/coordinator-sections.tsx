@@ -7,6 +7,7 @@ import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
 import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
 import { AutonomySection } from "./autonomy-section";
+import { ChangesWaiting } from "./changes-waiting";
 import { GoalSection } from "./goal-section";
 import { ControlError } from "./control-error";
 import { MayDoSection } from "./may-do-section";
@@ -21,7 +22,34 @@ type CoordinatorSectionsProps = {
   coordinatorId: string;
   canManage: boolean;
   identity: ReactNode;
+  /** Called with the stored context after a pending change was applied. */
+  onContextApplied?: (context: string) => void;
 };
+
+type AutonomyBodyProps = Omit<CoordinatorSectionsProps, "identity">;
+
+function AutonomyBody({
+  workspaceId,
+  coordinatorId,
+  canManage,
+  onContextApplied,
+}: AutonomyBodyProps) {
+  return (
+    <div className="space-y-6">
+      <AutonomySection
+        workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
+        canManage={canManage}
+      />
+      <ChangesWaiting
+        workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
+        canManage={canManage}
+        onContextApplied={onContextApplied}
+      />
+    </div>
+  );
+}
 
 /** The phase-2 coordinator page body: Identity holds the phase-1 fields unchanged. */
 export function CoordinatorSections({
@@ -29,6 +57,7 @@ export function CoordinatorSections({
   coordinatorId,
   canManage,
   identity,
+  onContextApplied,
 }: CoordinatorSectionsProps) {
   const { t } = useTranslation();
   const control = useControlDraft({ workspaceId, coordinatorId, canManage });
@@ -102,10 +131,11 @@ export function CoordinatorSections({
       label: t("coordinator:sectionAutonomy"),
       help: t("coordinator:sectionAutonomyHelp"),
       render: () => (
-        <AutonomySection
+        <AutonomyBody
           workspaceId={workspaceId}
           coordinatorId={coordinatorId}
           canManage={canManage}
+          onContextApplied={onContextApplied}
         />
       ),
     });

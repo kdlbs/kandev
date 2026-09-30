@@ -72,7 +72,7 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"proposal_id":     proposal.ID,
+		proposalIDKey:     proposal.ID,
 		stopTaskStatusKey: string(proposal.Status),
 	})
 }

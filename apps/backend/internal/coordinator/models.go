@@ -24,6 +24,9 @@ const (
 	ActionProposeMove    = mcpcontract.ActionProposeMove
 )
 
+// ActionProposeImprovement is mcpcontract.ActionProposeImprovement, re-exported.
+const ActionProposeImprovement = mcpcontract.ActionProposeImprovement
+
 // ActionGetItem is mcpcontract.ActionGetItem, re-exported
 // (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = mcpcontract.ActionGetItem
@@ -136,14 +139,18 @@ type Proposal struct {
 	ReplyDeliveredAt       *time.Time
 	ReplyDeliveryClaimedAt *time.Time
 	InReplyTo              *string
+	// ChangeStatus is the status of the pending change an approved improvement
+	// produced; nil for every other proposal.
+	ChangeStatus *string
 }
 
 // Proposal kinds.
 const (
-	ProposalKindCreateTask = "create_task"
-	ProposalKindMessage    = "message"
-	ProposalKindMove       = "move"
-	ProposalKindResume     = "resume"
+	ProposalKindCreateTask  = "create_task"
+	ProposalKindMessage     = "message"
+	ProposalKindMove        = "move"
+	ProposalKindResume      = "resume"
+	ProposalKindImprovement = "improvement"
 )
 
 // Stall is a coordinator_stalls row: the most recent task.stalled episode

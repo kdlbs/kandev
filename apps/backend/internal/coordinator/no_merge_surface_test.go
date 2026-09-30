@@ -18,7 +18,7 @@ func TestCoordinatorSurfaceNamesNoMergeOrCompletion(t *testing.T) {
 		allAllowed.Actions[a] = SettingRequiresApproval
 	}
 	var names []string
-	names = append(names, ToolNames(allAllowed, true)...)
+	names = append(names, ToolNames(allAllowed, true, false)...)
 	for action, tool := range actionTools {
 		names = append(names, action, tool)
 	}

@@ -92,6 +92,7 @@ func coordinatorStandingInstructionsReader(
 		} else {
 			sections = append(sections, goal)
 		}
+		sections = append(sections, svc.ImprovementInstructionSection())
 		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext, sections...), nil
 	}
 }

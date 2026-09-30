@@ -33,3 +33,13 @@ describe("What it did locale keys", () => {
     }
   });
 });
+
+describe("improvement activity class label", () => {
+  it("maps the improvement class to its own key, not the unknown fallback", async () => {
+    const { classLabel } = await import("./activity-text");
+    const t = ((key: string) => key) as never;
+    expect(classLabel("improvement", t)).toBe("coordinator:activityClassImprovement");
+    expect(classLabel("bogus", t)).toBe("coordinator:activityClassUnknown");
+    expect(catalog.activityClassImprovement).toBeTruthy();
+  });
+});

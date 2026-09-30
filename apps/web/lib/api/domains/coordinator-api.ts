@@ -1,4 +1,8 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "@/lib/api/client";
+import type {
+  ImprovementSpec,
+  PendingChangeStatus,
+} from "@/lib/api/domains/coordinator-changes-api";
 
 // Mirrors internal/coordinator/validate.go's ProfileStatus.
 export type ProfileStatus = "ok" | "missing" | "passthrough";
@@ -102,7 +106,7 @@ export type PatchCoordinatorRequest = {
 };
 
 // Mirrors internal/coordinator/models.go's ProposalKind* constants.
-export type OtherProposalKind = "message" | "move" | "resume";
+export type OtherProposalKind = "message" | "move" | "resume" | "improvement";
 
 // Mirrors internal/coordinator/dto.go's ProposalDTO (Build decision 10).
 // claim_token is never serialized by the backend and has no field here.
@@ -128,6 +132,8 @@ type ProposalBase = {
   reply_text?: string | null;
   reply_delivered_at?: string | null;
   in_reply_to?: string | null;
+  // Present on an improvement proposal only, while phase 3 is effective.
+  change_status?: PendingChangeStatus | null;
 };
 
 export type CreateTaskProposal = ProposalBase & {
@@ -171,17 +177,22 @@ export type ResumeProposal = KindProposalOf<"resume", ResumeSpec>;
 export type MessageProposal = KindProposalOf<"message", MessageSpec>;
 export type MoveProposal = KindProposalOf<"move", MoveSpec>;
 export type KindProposal = ResumeProposal | MessageProposal | MoveProposal;
+export type ImprovementProposal = KindProposalOf<"improvement", ImprovementSpec>;
 
 // Every proposal the client caches and renders: create_task, or a phase-2 kind
 // it knows. A row of any other kind is never stored.
-export type StoredProposal = CreateTaskProposal | KindProposal;
+export type StoredProposal = CreateTaskProposal | KindProposal | ImprovementProposal;
 
 export function isKindProposal(p: WireProposal): p is KindProposal {
   return p.kind === "resume" || p.kind === "message" || p.kind === "move";
 }
 
+export function isImprovementProposal(p: WireProposal): p is ImprovementProposal {
+  return p.kind === "improvement";
+}
+
 export function isStoredProposal(p: WireProposal): p is StoredProposal {
-  return isCreateTaskProposal(p) || isKindProposal(p);
+  return isCreateTaskProposal(p) || isKindProposal(p) || isImprovementProposal(p);
 }
 
 // isCreateTaskProposal narrows to the create_task kind; phase-1 rows carry
@@ -682,7 +693,7 @@ export function markGoalMet(
   );
 }
 
-function mutate<T>(
+export function mutate<T>(
   path: string,
   method: "POST" | "PATCH" | "PUT" | "DELETE",
   body: unknown,

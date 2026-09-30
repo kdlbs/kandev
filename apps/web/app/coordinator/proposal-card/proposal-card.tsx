@@ -7,8 +7,10 @@ import { CardDescription } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import {
   isCreateTaskProposal,
+  isImprovementProposal,
   type ApproveProposalEdits,
   type CreateTaskProposal,
+  type ImprovementProposal,
   type KindProposal,
   type MessageSpec,
   type ProposalSpec,
@@ -31,6 +33,12 @@ import {
 import { useToast } from "@/components/toast-provider";
 import { useNowTick } from "../use-now-tick";
 import { EditForm, type EditFormServerError } from "./edit-form";
+import {
+  ImprovementBody,
+  improvementGateOf,
+  improvementApprovedLine,
+  improvementFailedLine,
+} from "./improvement-card";
 import { KindBody } from "./kind-body";
 import { MessageEditForm } from "./message-edit-form";
 import { kindApprovedToast, kindFailureText, policyLineText } from "./outcome-copy";
@@ -97,7 +105,9 @@ type OutcomeContext = {
 
 async function toastApproved(proposal: StoredProposal, ctx: OutcomeContext) {
   let title: string;
-  if (isCreateTaskProposal(proposal)) {
+  if (isImprovementProposal(proposal)) {
+    title = ctx.t("coordinator:improvementApprovedPending");
+  } else if (isCreateTaskProposal(proposal)) {
     const step = resolveStepName(effectiveProposalSpec(proposal), ctx.stepNameByWorkflowStep);
     const card = await ctx.resolveCardLabel(proposal);
     title = ctx.t("coordinator:toastApproved", { card, step });
@@ -119,12 +129,16 @@ async function toastApproved(proposal: StoredProposal, ctx: OutcomeContext) {
 const ACTIONABLE: ReadonlySet<StoredProposal["status"]> = new Set(["pending", "failed"]);
 
 function splitProposal(proposal: StoredProposal) {
+  const improvementProposal: ImprovementProposal | null = isImprovementProposal(proposal)
+    ? proposal
+    : null;
   const createProposal: CreateTaskProposal | null = isCreateTaskProposal(proposal)
     ? proposal
     : null;
-  const kindProposal: KindProposal | null = createProposal ? null : (proposal as KindProposal);
+  const kindProposal: KindProposal | null =
+    createProposal || improvementProposal ? null : (proposal as KindProposal);
   const kindSpec = kindProposal ? (kindProposal.final_spec ?? kindProposal.spec) : null;
-  return { createProposal, kindProposal, kindSpec };
+  return { createProposal, kindProposal, improvementProposal, kindSpec };
 }
 
 function messageTextOf(kindSpec: KindProposal["spec"] | null): string {
@@ -138,6 +152,11 @@ function cardStatusLine(
   t: TFn,
   now: number,
 ): string {
+  if (isImprovementProposal(proposal)) {
+    if (proposal.status === "approved") return improvementApprovedLine(proposal, t);
+    if (proposal.status === "failed") return improvementFailedLine(t);
+    return proposalStatusLine(proposal, t, now);
+  }
   if (proposal.status === "approved") return approvedStatusLine(approvedLabel, t);
   if (proposal.status === "failed" && kindProposal) return kindFailureText(kindProposal, t);
   return proposalStatusLine(proposal, t, now);
@@ -251,6 +270,8 @@ type ProposalCardActionsProps = {
   messageText: string;
   policyDenied: boolean;
   serverError: EditFormServerError | null;
+  /** Set on an improvement card: Approve/Retry stay disabled until its diff was shown. */
+  improvementGate: { diffShown: boolean } | null;
   approveButtonRef: RefObject<HTMLButtonElement | null>;
   editButtonRef: RefObject<HTMLButtonElement | null>;
   rejectButtonRef: RefObject<HTMLButtonElement | null>;
@@ -266,19 +287,28 @@ type ProposalCardActionsProps = {
 function ActionButtons(props: ProposalCardActionsProps) {
   const { t } = useTranslation();
   const mayApprove = !props.policyDenied || props.isStaleApproving;
+  const gate = props.improvementGate;
+  const gated = gate !== null && !gate.diffShown;
+  let approveLabel = gate ? t("coordinator:improvementApprove") : t("coordinator:approve");
+  if (props.isStaleApproving) approveLabel = t("coordinator:retry");
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {mayApprove && (
         <Button
           ref={props.approveButtonRef}
           size="sm"
-          disabled={props.busy}
+          disabled={props.busy || gated}
           onClick={props.onApproveClick}
           className="min-h-11 sm:min-h-0"
         >
           {props.busy && <Spinner aria-hidden className="mr-1.5" />}
-          {props.isStaleApproving ? t("coordinator:retry") : t("coordinator:approve")}
+          {approveLabel}
         </Button>
+      )}
+      {mayApprove && gated && (
+        <span className="text-xs text-muted-foreground" data-testid="improvement-show-first">
+          {t("coordinator:improvementShowFirst")}
+        </span>
       )}
       {mayApprove && props.editable && !props.isStaleApproving && (
         <Button
@@ -360,6 +390,11 @@ type CardBodyProps = {
   createProposal: CreateTaskProposal | null;
   createSpec: ProposalSpec | null;
   kindProposal: KindProposal | null;
+  improvementProposal: ImprovementProposal | null;
+  workspaceId: string;
+  coordinatorId: string;
+  diffShown: boolean;
+  onShowDiff: () => void;
   specLabel: string | null;
   openTasksById?: Map<string, AttentionTask>;
   stepNameByWorkflowStep: Map<string, string>;
@@ -371,7 +406,8 @@ type CardBodyProps = {
 
 function CardBody(props: CardBodyProps) {
   const { t } = useTranslation();
-  const { proposal, variant, createProposal, createSpec, kindProposal } = props;
+  const { proposal, variant, createProposal, createSpec, kindProposal, improvementProposal } =
+    props;
   return (
     <>
       {createSpec && (
@@ -388,6 +424,16 @@ function CardBody(props: CardBodyProps) {
           stepNameByWorkflowStep={props.stepNameByWorkflowStep}
         />
       )}
+      {improvementProposal && (
+        <ImprovementBody
+          proposal={improvementProposal}
+          workspaceId={props.workspaceId}
+          coordinatorId={props.coordinatorId}
+          openTasksById={props.openTasksById}
+          shown={props.diffShown}
+          onShow={props.onShowDiff}
+        />
+      )}
       {createProposal && createProposal.starts_agent === true && (
         <CardDescription>{t("coordinator:startsAgentLine")}</CardDescription>
       )}
@@ -396,9 +442,13 @@ function CardBody(props: CardBodyProps) {
           <CardDescription>
             {t("coordinator:proposedBy", { name: props.coordinatorName ?? "" })}
           </CardDescription>
-          <CardDescription>
-            {kindProposal ? policyLineText(proposal, t) : t("coordinator:policyProposeOnly")}
-          </CardDescription>
+          {!improvementProposal && (
+            <CardDescription>
+              {kindProposal
+                ? policyLineText(proposal as Exclude<StoredProposal, ImprovementProposal>, t)
+                : t("coordinator:policyProposeOnly")}
+            </CardDescription>
+          )}
           <ShapedBy ids={proposal.standing_order_ids} orders={props.orders} />
         </>
       )}
@@ -444,7 +494,8 @@ export function ProposalCard({
   const { label: cardLabel, resolveLabel: resolveCardLabel } = useApprovedCardLabel(proposal);
   const phase2 = usePhase2CardContext();
   const [policyDenied, setPolicyDenied] = useState(false);
-  const { createProposal, kindProposal, kindSpec } = splitProposal(proposal);
+  const { createProposal, kindProposal, improvementProposal, kindSpec } = splitProposal(proposal);
+  const [diffShown, setDiffShown] = useState(false);
   const target = useTargetTask(kindSpec?.task_id ?? "", kindSpec ? openTasksById : new Map());
   const approveButtonRef = useRef<HTMLButtonElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
@@ -553,6 +604,11 @@ export function ProposalCard({
         createProposal={createProposal}
         createSpec={createSpec}
         kindProposal={kindProposal}
+        improvementProposal={improvementProposal}
+        workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
+        diffShown={diffShown}
+        onShowDiff={() => setDiffShown(true)}
         specLabel={label}
         openTasksById={openTasksById}
         stepNameByWorkflowStep={stepNameByWorkflowStep}
@@ -580,6 +636,7 @@ export function ProposalCard({
         messageText={messageTextOf(kindSpec)}
         policyDenied={policyDenied}
         serverError={serverError}
+        improvementGate={improvementGateOf(improvementProposal, diffShown)}
         approveButtonRef={approveButtonRef}
         editButtonRef={editButtonRef}
         rejectButtonRef={rejectButtonRef}

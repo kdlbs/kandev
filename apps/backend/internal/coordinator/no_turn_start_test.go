@@ -39,6 +39,8 @@ var noTurnStartPaths = []noTurnStartCase{
 	{name: "wake recovery duties", run: noTurnStartWakeBackstop},
 	{name: "wake delivery with admission held", run: noTurnStartWakeAdmissionHeld},
 	{name: "wake delivery with admission passed", run: noTurnStartWakeDelivery},
+	{name: "improvement approve", run: noTurnStartImprovementApprove},
+	{name: "improvement apply", run: noTurnStartImprovementApply},
 }
 
 // TestCoordinatorConversationNoTurnStart proves that no backend path capable

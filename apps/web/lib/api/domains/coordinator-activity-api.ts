@@ -8,6 +8,7 @@ export type ActivityClass =
   | "move"
   | "resume"
   | "stop"
+  | "improvement"
   | "unknown";
 
 export const ACTIVITY_CLASSES: readonly ActivityClass[] = [
@@ -17,6 +18,7 @@ export const ACTIVITY_CLASSES: readonly ActivityClass[] = [
   "move",
   "resume",
   "stop",
+  "improvement",
   "unknown",
 ];
 

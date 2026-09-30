@@ -51,3 +51,16 @@ func StandingInstructions(workspaceName, workspaceID, name, coordinatorContext s
 	}
 	return out
 }
+
+// improvementInstructions describes propose_improvement_kandev to a
+// coordinator whose conversation has the tool.
+const improvementInstructions = "To suggest a change to your own context text, call propose_improvement_kandev with a title, a rationale, the full replacement context and evidence: at least one of your unattended runs, and optionally tasks. Approval only stores the change for a manager to review; nothing is applied until a manager applies it in your settings, and you can never change your own configuration or permissions."
+
+// ImprovementInstructionSection is the standing-instructions paragraph for
+// propose_improvement_kandev, empty while phase 3 is not effective.
+func (s *Service) ImprovementInstructionSection() string {
+	if !s.phase3 {
+		return ""
+	}
+	return improvementInstructions
+}
