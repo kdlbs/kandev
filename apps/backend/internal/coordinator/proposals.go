@@ -121,8 +121,9 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 	pre := func(ctx context.Context, tx coordinatorExec) (*Proposal, error) {
 		return nil, s.checkOrdersActive(ctx, tx, coordinatorID, req.StandingOrderIDs)
 	}
+	turnID := s.currentUnattendedTurn(ctx, coordinatorID)
 	inTx := func(ctx context.Context, tx coordinatorExec, p *Proposal) error {
-		if err := s.recordProposed(ctx, tx, p); err != nil {
+		if err := s.recordProposed(ctx, tx, p, turnID); err != nil {
 			return err
 		}
 		return s.store.MarkApplied(ctx, tx, coordinatorID, req.StandingOrderIDs, p.CreatedAt)
@@ -142,16 +143,17 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 
 // recordProposed appends the proposed / requires_approval activity row for a
 // freshly inserted proposal, in the insert's own transaction.
-func (s *Service) recordProposed(ctx context.Context, tx coordinatorExec, p *Proposal) error {
+func (s *Service) recordProposed(ctx context.Context, tx coordinatorExec, p *Proposal, turnID *string) error {
 	id := p.ID
 	return s.Record(ctx, tx, ActivityRow{
-		CoordinatorID: p.CoordinatorID,
-		WorkspaceID:   p.WorkspaceID,
-		ActionClass:   ActionCreateTask,
-		Outcome:       ActivityProposed,
-		Authorization: AuthRequiresApproval,
-		ProposalID:    &id,
-		Detail:        p.Spec.Title,
+		CoordinatorID:    p.CoordinatorID,
+		WorkspaceID:      p.WorkspaceID,
+		ActionClass:      ActionCreateTask,
+		Outcome:          ActivityProposed,
+		Authorization:    AuthRequiresApproval,
+		ProposalID:       &id,
+		Detail:           p.Spec.Title,
+		UnattendedTurnID: turnID,
 	})
 }
 

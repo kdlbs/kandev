@@ -82,8 +82,9 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 		}
 		return nil, s.checkOrdersActive(ctx, tx, coordinatorID, orderIDs)
 	}
+	turnID := s.currentUnattendedTurn(ctx, coordinatorID)
 	inTx := func(ctx context.Context, tx coordinatorExec, p *Proposal) error {
-		if err := s.recordKindProposed(ctx, tx, exec, p, string(spec)); err != nil {
+		if err := s.recordKindProposed(ctx, tx, exec, p, string(spec), turnID); err != nil {
 			return err
 		}
 		return s.store.MarkApplied(ctx, tx, coordinatorID, orderIDs, p.CreatedAt)
@@ -121,12 +122,12 @@ func (s *Service) buildKindProposal(ctx context.Context, exec KindExecutor, c *C
 	return p, nil
 }
 
-func (s *Service) recordKindProposed(ctx context.Context, tx coordinatorExec, exec KindExecutor, p *Proposal, spec string) error {
+func (s *Service) recordKindProposed(ctx context.Context, tx coordinatorExec, exec KindExecutor, p *Proposal, spec string, turnID *string) error {
 	id := p.ID
 	return s.Record(ctx, tx, ActivityRow{
 		CoordinatorID: p.CoordinatorID, WorkspaceID: p.WorkspaceID, ActionClass: exec.Action(),
 		Outcome: ActivityProposed, Authorization: AuthRequiresApproval, TargetTaskID: p.TargetTaskID,
-		ProposalID: &id, Detail: proposedDetail(spec),
+		ProposalID: &id, Detail: proposedDetail(spec), UnattendedTurnID: turnID,
 	})
 }
 

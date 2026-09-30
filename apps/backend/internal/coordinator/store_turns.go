@@ -376,3 +376,18 @@ func scanTurnRows(rows *sql.Rows, what string) ([]*unattendedTurn, error) {
 func (s *Store) recordFoundMessage(ctx context.Context, id, messageID string) (bool, error) {
 	return s.setTurnMessage(ctx, id, messageID)
 }
+
+// openBoundTurn returns the coordinator's open row whose send was accepted,
+// nil when there is none.
+func (s *Store) openBoundTurn(ctx context.Context, coordinatorID string) (*unattendedTurn, error) {
+	t, err := scanUnattendedTurn(s.ro.QueryRowContext(ctx, s.ro.Rebind(
+		`SELECT `+unattendedTurnColumns+` FROM coordinator_unattended_turns
+		WHERE coordinator_id = ? AND outcome IS NULL AND session_turn_id IS NOT NULL`), coordinatorID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read open bound unattended turn: %w", err)
+	}
+	return t, nil
+}
