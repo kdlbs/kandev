@@ -30,22 +30,25 @@ type RebuildGit struct {
 // It deliberately does not expose the full provider record to the summary
 // package or to the WebSocket payload.
 type PullRequestInput struct {
-	Key                   string
-	State                 string
-	Number                int
-	URL                   string
-	ReviewState           string
-	ChecksState           string
-	MergeableState        string
-	HasMergeConflicts     *bool
-	MergeQueueState       string
-	UnresolvedReviewCount int
-	PendingReviewCount    int
-	RequiredReviews       int
-	ChecksTotal           int
-	ChecksPassing         int
-	AutoFixEnabled        bool
-	AutoMergeEnabled      bool
+	Key                      string
+	State                    string
+	Number                   int
+	URL                      string
+	ReviewState              string
+	ChecksState              string
+	MergeableState           string
+	HasMergeConflicts        *bool
+	MergeQueueState          string
+	UnresolvedReviewCount    int
+	PendingReviewCount       int
+	RequiredReviews          int
+	ChecksTotal              int
+	ChecksPassing            int
+	AutoFixEnabled           bool
+	AutoMergeEnabled         bool
+	HeadSHA                  string
+	WorkflowAttentionState   string
+	WorkflowAttentionHeadSHA string
 }
 
 // RebuildInput contains the authoritative bounded facts available from

@@ -26,7 +26,7 @@ import {
   type PRTaskIconDisclosureProps,
 } from "./pr-task-icon-disclosure";
 import { getTaskPRAutomationSummary, type TaskPRInfo } from "./pr-task-automation";
-import { getTaskPRWorkflowAttention } from "./pr-workflow-attention";
+import { getTaskPRWorkflowAttention, isWorkflowApprovalRequired } from "./pr-workflow-attention";
 
 export type { TaskPRInfo } from "./pr-task-automation";
 export { getTaskPRAutomationSummary } from "./pr-task-automation";
@@ -107,35 +107,79 @@ export function isPRDraft(pr: TaskPR): boolean {
   return pr.state === "open" && pr.mergeable_state === "draft";
 }
 
+function getPRLifecycleAccessibleLabel(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  if (pr.state === "merged") return t("github:merged");
+  if (pr.state === "closed") return t("github:closed");
+  if (isPRDraft(pr)) return t("github:draft");
+  if (pr.state === "open") return t("common:open");
+  return null;
+}
+
+function getPRWorkflowAccessibleLabel(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  const workflowAttention = getTaskPRWorkflowAttention(pr);
+  if (workflowAttention && isWorkflowApprovalRequired(workflowAttention)) {
+    return t("github:workflowAwaitingApproval");
+  }
+  return null;
+}
+
+function getPRChecksAccessibleLabel(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  if (pr.checks_state === "failure") return t("github:checksFailed");
+  if (pr.checks_state === "success") return t("github:checksPassed");
+  if (!hasPRChecksInProgressForDisplay(pr)) return null;
+
+  const pendingCount = pr.checks_total > 0 ? Math.max(1, pr.checks_total - pr.checks_passing) : 1;
+  return t("github:checksPendingCount", { count: pendingCount });
+}
+
+function getPRMergeabilityAccessibleLabel(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  if (pr.mergeable_state === "behind") return t("github:behindBase");
+  if (isPRWaitingOnBranchProtection(pr)) return t("github:blockedByBranchProtection");
+  return null;
+}
+
+function getPRReviewAccessibleLabel(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  switch (pr.review_state) {
+    case "changes_requested":
+      return t("github:changesRequested");
+    case "approved":
+      return t("github:approved");
+    case "pending":
+      return t("github:pendingReview");
+    default:
+      return null;
+  }
+}
+
 export function getPRStatusAccessibleLabels(
   pr: TaskPR,
   t: ReturnType<typeof useTranslation>["t"],
 ): string[] {
-  const labels: string[] = [];
-  if (pr.state === "merged") labels.push(t("github:merged"));
-  else if (pr.state === "closed") labels.push(t("github:closed"));
-  else if (isPRDraft(pr)) labels.push(t("github:draft"));
-  else if (pr.state === "open") labels.push(t("common:open"));
+  const lifecycleLabel = getPRLifecycleAccessibleLabel(pr, t);
+  if (pr.state !== "open") return lifecycleLabel ? [lifecycleLabel] : [];
 
-  if (pr.state === "open") {
-    if (pr.checks_state === "failure") labels.push(t("github:checksFailed"));
-    else if (pr.checks_state === "success") labels.push(t("github:checksPassed"));
-    else if (hasPRChecksInProgressForDisplay(pr)) {
-      const pendingCount =
-        pr.checks_total > 0 ? Math.max(1, pr.checks_total - pr.checks_passing) : 1;
-      labels.push(t("github:checksPendingCount", { count: pendingCount }));
-    }
-
-    if (pr.mergeable_state === "behind") labels.push(t("github:behindBase"));
-    else if (isPRWaitingOnBranchProtection(pr)) {
-      labels.push(t("github:blockedByBranchProtection"));
-    }
-
-    if (pr.review_state === "changes_requested") labels.push(t("github:changesRequested"));
-    else if (pr.review_state === "approved") labels.push(t("github:approved"));
-    else if (pr.review_state === "pending") labels.push(t("github:pendingReview"));
-  }
-  return labels;
+  return [
+    lifecycleLabel,
+    getPRWorkflowAccessibleLabel(pr, t),
+    getPRChecksAccessibleLabel(pr, t),
+    getPRMergeabilityAccessibleLabel(pr, t),
+    getPRReviewAccessibleLabel(pr, t),
+  ].filter((label): label is string => label !== null);
 }
 
 function compactPRLifecycleLabel(
@@ -193,6 +237,7 @@ export function getCompactPRStatusAccessibleLabels(
   return [
     compactPRLifecycleLabel(prInfo.state, t),
     compactPRAggregateLabel(prInfo.aggregateState, t),
+    prInfo.workflowApprovalRequired ? t("github:workflowAwaitingApproval") : null,
   ]
     .filter((label): label is string => label !== null)
     .filter((label, index, labels) => labels.indexOf(label) === index);
@@ -404,6 +449,7 @@ type TaskPRIconPresentation = {
   iconColor: string;
   displayState: string | undefined;
   displayCount: number;
+  hasWorkflowApprovalRequired: boolean;
 };
 
 function getTaskPRIconPresentation(prs: TaskPR[], prInfo?: TaskPRInfo): TaskPRIconPresentation {
@@ -419,7 +465,56 @@ function getTaskPRIconPresentation(prs: TaskPR[], prInfo?: TaskPRInfo): TaskPRIc
     iconColor: getTaskPRIconColor(prs, prInfo),
     displayState: singlePR?.state ?? (hasFullData ? undefined : prInfo?.state),
     displayCount: hasFullData ? prs.length : 1,
+    hasWorkflowApprovalRequired: hasFullData
+      ? prs.some((pr) => {
+          const attention = getTaskPRWorkflowAttention(pr);
+          return attention !== null && isWorkflowApprovalRequired(attention);
+        })
+      : prInfo?.workflowApprovalRequired === true,
   };
+}
+
+function getStaleWorkflowPRs(prs: TaskPR[]) {
+  return prs.flatMap((pr) => {
+    const attention = getTaskPRWorkflowAttention(pr);
+    if (!attention?.stale) return [];
+    return [
+      {
+        number: pr.pr_number,
+        repository: pr.owner && pr.repo ? `${pr.owner}/${pr.repo}` : undefined,
+      },
+    ];
+  });
+}
+
+function getPRTaskIconAriaLabel(
+  prs: TaskPR[],
+  singlePR: TaskPR | null,
+  prInfo: TaskPRInfo | undefined,
+  automation: ReturnType<typeof getTaskPRAutomationSummary>,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const statusLabels = getTaskPRStatusAccessibleLabels(prs, prInfo, t);
+  const statusAriaLabel =
+    prs.length > 1
+      ? t("github:pullRequestStatuses", { count: prs.length })
+      : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number });
+  const automationAria = [
+    automation.autoFixEnabled ? t("github:autoFixEnabledAria") : null,
+    automation.autoMergeEnabled ? t("github:autoMergeEnabledAria") : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const conflict = taskPRHasMergeConflict(prs, prInfo);
+  const ariaLabel = [
+    statusAriaLabel,
+    ...statusLabels,
+    conflict ? t("github:conflicts") : null,
+    automationAria || null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return { ariaLabel, conflict };
 }
 
 function PRTaskIconView({
@@ -441,6 +536,7 @@ function PRTaskIconView({
   const usesTouchDrawer = useTouchDrawer();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const automation = getTaskPRAutomationSummary(prs, prInfo, automationOptions);
+  const staleWorkflowPRs = getStaleWorkflowPRs(prs);
   const needsHydration =
     !hasFullData ||
     ((automation.autoFixEnabled || automation.autoMergeEnabled) && !automationOptions);
@@ -456,28 +552,10 @@ function PRTaskIconView({
     iconColor,
     displayState,
     displayCount,
+    hasWorkflowApprovalRequired,
   } = getTaskPRIconPresentation(prs, prInfo);
 
-  const statusLabels = getTaskPRStatusAccessibleLabels(prs, prInfo, t);
-  const statusAriaLabel =
-    prs.length > 1
-      ? t("github:pullRequestStatuses", { count: prs.length })
-      : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number });
-  const automationAria = [
-    automation.autoFixEnabled ? t("github:autoFixEnabledAria") : null,
-    automation.autoMergeEnabled ? t("github:autoMergeEnabledAria") : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const conflict = taskPRHasMergeConflict(prs, prInfo);
-  const ariaLabel = [
-    statusAriaLabel,
-    ...statusLabels,
-    conflict ? t("github:conflicts") : null,
-    automationAria || null,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const { ariaLabel, conflict } = getPRTaskIconAriaLabel(prs, singlePR, prInfo, automation, t);
 
   const disclosureProps: PRTaskIconDisclosureProps = {
     taskId,
@@ -491,15 +569,24 @@ function PRTaskIconView({
     displayCount,
     iconColor,
     ariaLabel,
-    icon: <PRTaskIconGlyph automation={automation} hasMergeConflicts={conflict} />,
+    icon: (
+      <PRTaskIconGlyph
+        automation={automation}
+        hasMergeConflicts={conflict}
+        hasWorkflowApprovalRequired={hasWorkflowApprovalRequired}
+      />
+    ),
     content: hasFullData ? (
       <>
-        <PRTaskStatusSummary summaries={summaries} />
+        <PRTaskStatusSummary summaries={summaries} staleWorkflowPRs={staleWorkflowPRs} />
         <TaskPRAutomationDetails summary={automation} />
       </>
     ) : (
       <>
-        <CompactPRTooltipContent status={hydration.status} />
+        <CompactPRTooltipContent
+          status={hydration.status}
+          workflowApprovalRequired={hasWorkflowApprovalRequired}
+        />
         <TaskPRAutomationDetails summary={automation} status={hydration.status} />
       </>
     ),

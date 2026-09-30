@@ -19,21 +19,24 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			key = fmt.Sprintf("index:%d", index)
 		}
 		state.prs[key] = pullRequestObservation{
-			state:                 input.State,
-			number:                maxInt(input.Number, 0),
-			url:                   input.URL,
-			reviewState:           input.ReviewState,
-			checksState:           input.ChecksState,
-			mergeableState:        input.MergeableState,
-			hasMergeConflicts:     input.HasMergeConflicts,
-			mergeQueueState:       input.MergeQueueState,
-			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
-			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
-			requiredReviews:       maxInt(input.RequiredReviews, 0),
-			checksTotal:           maxInt(input.ChecksTotal, 0),
-			checksPassing:         maxInt(input.ChecksPassing, 0),
-			autoFixEnabled:        input.AutoFixEnabled,
-			autoMergeEnabled:      input.AutoMergeEnabled,
+			state:                    input.State,
+			number:                   maxInt(input.Number, 0),
+			url:                      input.URL,
+			reviewState:              input.ReviewState,
+			checksState:              input.ChecksState,
+			mergeableState:           input.MergeableState,
+			hasMergeConflicts:        input.HasMergeConflicts,
+			mergeQueueState:          input.MergeQueueState,
+			unresolvedReviewCount:    maxInt(input.UnresolvedReviewCount, 0),
+			pendingReviewCount:       maxInt(input.PendingReviewCount, 0),
+			requiredReviews:          maxInt(input.RequiredReviews, 0),
+			checksTotal:              maxInt(input.ChecksTotal, 0),
+			checksPassing:            maxInt(input.ChecksPassing, 0),
+			autoFixEnabled:           input.AutoFixEnabled,
+			autoMergeEnabled:         input.AutoMergeEnabled,
+			headSHA:                  boundedWorkflowValue(input.HeadSHA),
+			workflowAttentionState:   boundedWorkflowValue(input.WorkflowAttentionState),
+			workflowAttentionHeadSHA: boundedWorkflowValue(input.WorkflowAttentionHeadSHA),
 		}
 	}
 }
@@ -60,6 +63,9 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
+			if workflowApprovalRequired(observation) {
+				summary.WorkflowApprovalRequired = true
+			}
 			if observation.autoFixEnabled {
 				summary.AutoFixEnabled = true
 			}
@@ -83,6 +89,21 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	summary.URL = truncateString(representative.url, maxPullRequestURLBytes)
 	summary.AggregateState = aggregatePullRequestState(state.prs)
 	return &summary
+}
+
+func workflowApprovalRequired(pr pullRequestObservation) bool {
+	return strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) &&
+		pr.headSHA != "" &&
+		pr.headSHA == pr.workflowAttentionHeadSHA &&
+		strings.EqualFold(pr.workflowAttentionState, "approval_required")
+}
+
+func boundedWorkflowValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 128 {
+		return ""
+	}
+	return value
 }
 
 func equalPullRequestSummary(left, right *PullRequestSummary) bool {

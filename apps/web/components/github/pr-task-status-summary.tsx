@@ -1,6 +1,7 @@
 "use client";
 
 import type { TaskPR } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 import {
   getMergeQueueSummaryDetail,
   getMergeQueueSummaryStatus,
@@ -158,6 +159,40 @@ export function derivePRTaskStatusSummary(
   };
 }
 
-export function PRTaskStatusSummary({ summaries }: { summaries: PRTaskStatusSummaryData[] }) {
-  return <ChangeRequestTaskStatusSummary summaries={summaries} />;
+export type StaleWorkflowAttentionPR = {
+  number: number | string;
+  repository?: string;
+};
+
+export function PRTaskStatusSummary({
+  summaries,
+  staleWorkflowPRs = [],
+}: {
+  summaries: PRTaskStatusSummaryData[];
+  staleWorkflowPRs?: StaleWorkflowAttentionPR[];
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <ChangeRequestTaskStatusSummary summaries={summaries} />
+      {staleWorkflowPRs.length > 0 && (
+        <div className="mt-2 space-y-1.5 border-t border-border/60 pt-2">
+          {staleWorkflowPRs.map(({ number, repository }) => (
+            <p
+              key={`${repository ?? ""}-${number}`}
+              data-testid="pr-task-stale-workflow-evidence"
+              className="flex flex-wrap gap-x-1 text-[11px] leading-snug text-muted-foreground"
+            >
+              <span className="font-medium">
+                {repository
+                  ? t("github:prTaskStatusRepositoryNumber", { repository, number })
+                  : t("github:prTaskStatusNumber", { number })}
+              </span>
+              <span>{t("github:workflowAttentionStale")}</span>
+            </p>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }

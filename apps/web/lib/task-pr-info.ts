@@ -7,6 +7,7 @@ export type TaskPRInfo = {
   autoFixEnabled?: boolean;
   autoMergeEnabled?: boolean;
   hasMergeConflicts?: boolean;
+  workflowApprovalRequired?: boolean;
 };
 
 function capitalize(value: string): string {
@@ -26,5 +27,6 @@ export function taskPRInfoFromSummary(
     ...(pullRequest.auto_fix_enabled ? { autoFixEnabled: true } : {}),
     ...(pullRequest.auto_merge_enabled ? { autoMergeEnabled: true } : {}),
     ...(pullRequest.has_merge_conflicts ? { hasMergeConflicts: true } : {}),
+    ...(pullRequest.workflow_approval_required === true ? { workflowApprovalRequired: true } : {}),
   };
 }

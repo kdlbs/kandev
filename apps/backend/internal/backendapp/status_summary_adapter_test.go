@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -112,6 +113,47 @@ func TestGitHubTaskStatusSummaryPRReaderPreservesMergeQueueState(t *testing.T) {
 	}
 	if inputs[0].MergeQueueState != queuePR.MergeQueueState {
 		t.Fatalf("MergeQueueState = %q, want %q", inputs[0].MergeQueueState, queuePR.MergeQueueState)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.7
+func TestGitHubTaskStatusSummaryPRReaderIncludesWorkflowApprovalIdentity(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	approvalPR := &github.TaskPR{
+		TaskID: "task-workflow-approval-summary", RepositoryID: "repo-workflow-approval-summary", PRNumber: 42,
+		PRURL: "https://example.test/42", State: "open", HeadSHA: "head-a", CreatedAt: time.Now().UTC(),
+		WorkflowAttention: &github.WorkflowAttention{
+			State:   github.WorkflowAttentionApprovalRequired,
+			HeadSHA: "head-a",
+		},
+	}
+	if err := store.CreateTaskPR(ctx, approvalPR); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{approvalPR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	inputs := result[approvalPR.TaskID]
+	if len(inputs) != 1 {
+		t.Fatalf("summary inputs = %+v, want one input", inputs)
+	}
+	encoded, err := json.Marshal(inputs[0])
+	if err != nil {
+		t.Fatalf("marshal summary input: %v", err)
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("unmarshal summary input: %v", err)
+	}
+	if fields["HeadSHA"] != "head-a" || fields["WorkflowAttentionState"] != "approval_required" ||
+		fields["WorkflowAttentionHeadSHA"] != "head-a" {
+		t.Fatalf("workflow approval identity fields = %s", encoded)
 	}
 }
 

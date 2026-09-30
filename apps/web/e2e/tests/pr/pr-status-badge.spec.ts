@@ -549,7 +549,7 @@ test.describe("PR status badge", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const { task } = await seedBadgeTest(
+    const { workflow, inboxStep, task } = await seedBadgeTest(
       apiClient,
       seedData.workspaceId,
       seedData.agentProfileId,
@@ -606,6 +606,101 @@ test.describe("PR status badge", () => {
     });
 
     await testPage.goto(`/t/${task.id}`);
+    const refreshSession = new SessionPage(testPage);
+    await refreshSession.waitForLoad();
+    await refreshSession.hoverPRTopbar();
+    await expect(
+      refreshSession.prTopbarPopover().getByTestId("pr-workflow-attention"),
+    ).toContainText("Awaiting maintainer approval");
+    await expect
+      .poll(async () => (await apiClient.listTaskPRs(task.id))[0]?.workflow_attention?.state, {
+        timeout: 15_000,
+      })
+      .toBe("approval_required");
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.listTasks(seedData.workspaceId);
+          return response.tasks.find((candidate) => candidate.id === task.id)?.status_summary
+            ?.pull_request;
+        },
+        { timeout: 15_000 },
+      )
+      .toMatchObject({ workflow_approval_required: true });
+
+    await testPage.goto("/tasks");
+    await testPage.evaluate(() => localStorage.setItem("theme", "light"));
+    await testPage.reload();
+    await expect(testPage.getByTestId("tasks-list")).toBeVisible();
+    const sidebar = testPage.getByTestId("app-sidebar");
+    const taskRow = sidebar.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+    const sidebarIcon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+    const approvalWarning = sidebarIcon.getByTestId("pr-workflow-approval-warning");
+    await expect(approvalWarning).toBeVisible();
+    await expect(sidebarIcon).toHaveAttribute("aria-label", /Awaiting maintainer approval/);
+    const lightWarningColor = await approvalWarning.evaluate(
+      (element) => getComputedStyle(element).color,
+    );
+    expect(lightWarningColor).toBe("rgb(217, 119, 6)");
+    await prCapture.screenshot("desktop-workflow-approval-badge-light", {
+      caption: "Task sidebar shows the amber lock before opening PR details",
+    });
+
+    await testPage.evaluate(() => localStorage.setItem("theme", "dark"));
+    await testPage.reload();
+    await expect(testPage.locator("html")).toHaveClass(/\bdark\b/);
+    const darkSidebarIcon = testPage
+      .getByTestId("app-sidebar")
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: task.title })
+      .getByTestId(`pr-task-icon-${task.id}`);
+    const darkApprovalWarning = darkSidebarIcon.getByTestId("pr-workflow-approval-warning");
+    await expect(darkApprovalWarning).toBeVisible();
+    const darkWarningColor = await darkApprovalWarning.evaluate(
+      (element) => getComputedStyle(element).color,
+    );
+    expect(darkWarningColor).toBe("rgb(251, 191, 36)");
+    await prCapture.screenshot("desktop-workflow-approval-badge-dark", {
+      caption: "Task sidebar shows the amber lock in dark mode",
+    });
+
+    await testPage.setViewportSize({ width: 900, height: 760 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    const narrowRowBox = await testPage
+      .getByTestId("app-sidebar")
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: task.title })
+      .boundingBox();
+    const narrowWarningBox = await darkApprovalWarning.boundingBox();
+    expect(narrowRowBox).not.toBeNull();
+    expect(narrowWarningBox).not.toBeNull();
+    expect(narrowWarningBox!.x).toBeGreaterThanOrEqual(narrowRowBox!.x - 1);
+    expect(narrowWarningBox!.y).toBeGreaterThanOrEqual(narrowRowBox!.y - 1);
+    expect(narrowWarningBox!.x + narrowWarningBox!.width).toBeLessThanOrEqual(
+      narrowRowBox!.x + narrowRowBox!.width + 1,
+    );
+    expect(narrowWarningBox!.y + narrowWarningBox!.height).toBeLessThanOrEqual(
+      narrowRowBox!.y + narrowRowBox!.height + 1,
+    );
+    await expect
+      .poll(async () =>
+        testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+
+    await darkSidebarIcon.hover();
+    await expect(visibleTaskPRSummary(testPage, 143)).toContainText("Awaiting maintainer approval");
+    await testPage.goto(`/?workflowId=${encodeURIComponent(workflow.id)}`);
+    const kanban = new KanbanPage(testPage);
+    await kanban.board.waitFor({ state: "visible" });
+    const kanbanIcon = kanban
+      .taskCardInColumn(task.title, inboxStep.id)
+      .getByTestId(`pr-task-icon-${task.id}`);
+    await expect(kanbanIcon.getByTestId("pr-workflow-approval-warning")).toBeVisible();
+
+    await testPage.goto(`/t/${task.id}`);
     let session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.hoverPRTopbar();
@@ -645,6 +740,22 @@ test.describe("PR status badge", () => {
       .poll(async () => (await apiClient.listTaskPRs(task.id))[0]?.workflow_attention?.state)
       .toBe("none");
     await expect(session.prTopbarPopover().getByTestId("pr-workflow-attention")).toHaveCount(0);
+
+    await expect
+      .poll(async () => {
+        const response = await apiClient.listTasks(seedData.workspaceId);
+        return response.tasks.find((candidate) => candidate.id === task.id)?.status_summary
+          ?.pull_request?.workflow_approval_required;
+      })
+      .toBeUndefined();
+    await testPage.goto("/tasks");
+    await expect(testPage.getByTestId("tasks-list")).toBeVisible();
+    const clearedIcon = testPage
+      .getByTestId("app-sidebar")
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: task.title })
+      .getByTestId(`pr-task-icon-${task.id}`);
+    await expect(clearedIcon.getByTestId("pr-workflow-approval-warning")).toHaveCount(0);
   });
 
   /**

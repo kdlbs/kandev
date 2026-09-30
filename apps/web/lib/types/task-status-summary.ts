@@ -80,6 +80,7 @@ export type TaskStatusSummary = {
     auto_fix_enabled?: boolean;
     auto_merge_enabled?: boolean;
     has_merge_conflicts?: boolean;
+    workflow_approval_required?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

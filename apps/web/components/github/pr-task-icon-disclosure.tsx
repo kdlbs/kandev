@@ -45,13 +45,16 @@ export type PRTaskIconDisclosureProps = {
 export function PRTaskIconGlyph({
   automation,
   hasMergeConflicts,
+  hasWorkflowApprovalRequired,
 }: {
   automation: TaskPRAutomationSummary;
   hasMergeConflicts: boolean;
+  hasWorkflowApprovalRequired: boolean;
 }) {
   return (
     <PRStatusGlyph
       hasMergeConflicts={hasMergeConflicts}
+      hasWorkflowApprovalRequired={hasWorkflowApprovalRequired}
       autoFixEnabled={automation.autoFixEnabled}
       autoMergeEnabled={automation.autoMergeEnabled}
     />
@@ -273,20 +276,40 @@ export function TaskPRAutomationDetails({
   );
 }
 
-export function CompactPRTooltipContent({ status }: { status: TaskPRTooltipHydrationStatus }) {
+export function CompactPRTooltipContent({
+  status,
+  workflowApprovalRequired = false,
+}: {
+  status: TaskPRTooltipHydrationStatus;
+  workflowApprovalRequired?: boolean;
+}) {
   const { t } = useTranslation();
   if (status === "loading" || status === "idle") {
     return (
-      <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
-        {t("github:taskPrDetailsLoading")}
-      </span>
+      <>
+        {workflowApprovalRequired ? (
+          <div className="text-sm font-medium text-foreground">
+            {t("github:workflowAwaitingApproval")}
+          </div>
+        ) : null}
+        <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
+          {t("github:taskPrDetailsLoading")}
+        </span>
+      </>
     );
   }
   if (status === "unavailable") {
     return (
-      <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
-        {t("github:taskPrDetailsUnavailable")}
-      </span>
+      <>
+        {workflowApprovalRequired ? (
+          <div className="text-sm font-medium text-foreground">
+            {t("github:workflowAwaitingApproval")}
+          </div>
+        ) : null}
+        <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
+          {t("github:taskPrDetailsUnavailable")}
+        </span>
+      </>
     );
   }
   return null;
