@@ -116,6 +116,8 @@ stale-ownership and unsafe-path failures remain launch-blocking. The UI must
 not label a degraded result as all steps successful. Terminal WebSocket callbacks
 retain their socket identity: a late close from a replaced socket cannot dispose
 the successor terminal's attachment or mark that connection disconnected.
+Unix terminal resizing uses guarded syscall access that keeps the PTY descriptor
+valid through the resize operation while read completion and close run concurrently.
 
 ## Concurrency and isolation
 

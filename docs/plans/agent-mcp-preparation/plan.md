@@ -252,3 +252,12 @@ docker run --rm --platform linux/amd64 \
 ```
 
 Fresh remote CI/review evidence is required after this test-only delivery.
+
+Further CI remediation fixes a Unix PTY descriptor race exposed by a
+short-lived one-shot authentication terminal. The real-PTY regression failed
+under the Linux race detector before the fix; guarded syscall access now keeps
+the descriptor valid through resize while read completion and close run
+concurrently. Wrapper race tests passed ten times on both macOS and Linux;
+complete process, gateway WebSocket and login-PTY packages passed in Linux.
+PTY lint and rebuilt desktop/phone authentication recovery passed. Task 03 records
+the exact commands. Remote CI/review remains pending after this delivery.

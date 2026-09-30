@@ -68,6 +68,8 @@ Other work-order ownership, commits, personal credential changes and unrelated r
 - `apps/backend/internal/agent/runtime/lifecycle/event_types.go`
 - `apps/backend/internal/agent/settings/handlers/handlers.go`
 - `apps/backend/internal/agent/handlers/shell_handlers.go`
+- `apps/backend/internal/common/ptyexec/pty_unix.go`
+- `apps/backend/internal/common/ptyexec/pty_unix_test.go`
 
 ## Dependencies
 
@@ -192,3 +194,44 @@ docker run --rm --platform linux/amd64 \
 ```
 
 Fresh remote CI/review evidence is required after this test-only delivery.
+
+The next CI run exposed a Unix PTY descriptor race in
+`TestStartUserShellProcessExecutesPersistedTerminalCommand`: a short-lived
+authentication shell closed its PTY while resize read the descriptor through
+`os.File.Fd()`. A real-PTY regression reproduced the same race before the fix.
+Resize now uses `SyscallConn.Control` to keep the descriptor valid through the
+window-size ioctl, including concurrent read completion and close. Tests cover
+the resulting window dimensions, concurrent read/resize/close and rejection of
+resize after close. This restores existing terminal behavior and needs no public
+documentation change.
+
+From `apps/backend`, repeated wrapper tests passed on macOS and Linux:
+
+```bash
+go test -race ./internal/common/ptyexec -count=10 -timeout=90s
+```
+
+Complete consumer packages passed in Linux under the same CI image. From the
+repository root:
+
+```bash
+docker run --rm --platform linux/amd64 \
+  -v "$PWD:/workspace" -v kandev-gocache:/gocache -v kandev-gomod:/go/pkg/mod \
+  -e GOCACHE=/gocache -e GOMODCACHE=/go/pkg/mod -w /workspace/apps/backend \
+  ghcr.io/kdlbs/kandev-ci:build-latest \
+  bash -lc 'git config --global --add safe.directory /workspace && go test -race ./internal/agentctl/server/process ./internal/gateway/websocket ./internal/agent/loginpty -count=1 -timeout=10m'
+```
+
+Changed-package PTY lint passed. Desktop authentication recovery also passed
+after a managed Docker rebuild with retries disabled:
+
+```bash
+cd apps/web
+pnpm e2e:run --docker -- tests/session/agent-mcp-preparation.spec.ts --retries=0
+pnpm e2e:run --docker --no-build --project mobile-chrome -- tests/session/mobile-agent-mcp-preparation.spec.ts --retries=0
+```
+
+The phone authentication recovery scenario passed against the same rebuilt
+runtime, with retries disabled.
+
+Remote checks and reviews remain pending until fresh pushed-head verification.
