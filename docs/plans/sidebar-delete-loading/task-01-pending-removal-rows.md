@@ -147,5 +147,24 @@ Public docs: `node --test scripts/validate-public-docs.test.mjs` passed 62 tests
 full specification lint and diff checks passed. The environment switch
 interrupted initial processes; completed results above come from resumed checks.
 The namespace sandbox could not start, so final commands ran outside it against
-isolated E2E data. No user data, commits, pushes, or persistent tasks were created.
+isolated E2E data. No user data or persistent tasks were created during implementation verification.
 
+
+## PR review remediation
+
+Greptile identified a successful-delete/page-refresh race. A real-store
+regression reproduced stale successful targets after pending membership cleared.
+The coordinator and deletion event handler now publish confirmed IDs to the
+existing sidebar page cache. Mounted pages prune those rows and replace their
+query, fencing pre-deletion responses without retaining tombstones. Tests cover
+cascade partial failure, two mounted consumers, cache eviction, unsubscribe,
+and delayed sidebar refreshes in both browser viewports. Archive behavior stays
+unchanged. This completes the existing AC-005.2 recovery/refresh contract.
+
+Remediation verification passed: 72 tests in the ten focused sidebar/cache/
+coordinator/handler suites, plus 134 tests across all task-event handlers and
+removal hook consumers (`pnpm exec vitest run lib/ws/handlers/tasks
+hooks/use-task-removal`). Typecheck, targeted ESLint/Prettier, catalog and spec
+lint passed. The same desktop and phone E2E commands above passed two scenarios
+each with retries disabled; deletion now holds the post-delete query to assert
+immediate pruning. Both viewport screenshots were refreshed and inspected.

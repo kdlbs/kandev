@@ -24,6 +24,7 @@ export class SidebarTaskPageCache {
   private bytes = 0;
   private epoch = 0;
   private accessDeniedListeners = new Set<() => void>();
+  private deletedTaskListeners = new Set<(taskIds: ReadonlySet<string>) => void>();
 
   constructor(private store: PageStore) {}
 
@@ -72,6 +73,19 @@ export class SidebarTaskPageCache {
     this.bytes = 0;
     for (const request of this.requests.values()) request.controller.abort();
     this.requests.clear();
+  }
+
+  subscribeDeletedTasks(listener: (taskIds: ReadonlySet<string>) => void) {
+    this.deletedTaskListeners.add(listener);
+    return () => {
+      this.deletedTaskListeners.delete(listener);
+    };
+  }
+
+  removeTasks(taskIds: ReadonlySet<string>) {
+    if (taskIds.size === 0) return;
+    this.clear();
+    for (const listener of this.deletedTaskListeners) listener(taskIds);
   }
 
   subscribeAccessDenied(listener: () => void) {

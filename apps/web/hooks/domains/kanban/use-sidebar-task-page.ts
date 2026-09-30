@@ -373,6 +373,33 @@ function useSidebarViewKey(
   );
 }
 
+function useSidebarDeletedTasks(
+  store: SidebarPageStore,
+  loader: SidebarPageLoader,
+  viewKey: string,
+  queryView: SidebarTaskQuery,
+) {
+  const { setResponse, loadPage, pageNumberRef } = loader;
+  useEffect(
+    () =>
+      sidebarTaskPageCache(store).subscribeDeletedTasks((taskIds) => {
+        setResponse((current) =>
+          current
+            ? {
+                ...current,
+                entries: current.entries.filter(
+                  (entry) => !entry.task || !taskIds.has(entry.task.id),
+                ),
+              }
+            : current,
+        );
+        // Starting the replacement also fences any pre-deletion response still in flight.
+        void loadPage(pageNumberRef.current, viewKey, queryView);
+      }),
+    [store, setResponse, loadPage, pageNumberRef, viewKey, queryView],
+  );
+}
+
 function useSidebarPageNavigation({
   currentResponse,
   pendingPage,
@@ -450,6 +477,7 @@ export function useSidebarTaskPage(workspaceId: string | null) {
   viewKeyRef.current = viewKey;
   const loader = useSidebarPageLoader(workspaceId, workspaceGeneration, store, t, viewKeyRef);
   const { response, pendingPage, error, loadPage } = loader;
+  useSidebarDeletedTasks(store, loader, viewKey, queryView);
   const cachedResponse = workspaceId ? sidebarTaskPageCache(store).get(viewKey) : null;
   const currentResponse = loader.responseViewKey === viewKey ? response : cachedResponse;
   const currentPage = currentResponse?.page ?? 1;

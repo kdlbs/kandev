@@ -208,3 +208,30 @@ it("keeps render-time lookups read-only across a discarded workspace change", as
   request.release();
   expect(cache.get("b")).not.toBeNull();
 });
+
+it("clears cached and in-flight pages on confirmed deletion and unsubscribes consumers", async () => {
+  const { cache } = setup();
+  await load(cache, "a");
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const request = cache.request("ws", query, "b");
+  const signal = vi.mocked(querySidebarTasks).mock.calls.at(-1)?.[2]?.init?.signal;
+  const live = vi.fn(),
+    disposed = vi.fn();
+  cache.subscribeDeletedTasks(live);
+  const unsubscribe = cache.subscribeDeletedTasks(disposed);
+  unsubscribe();
+  cache.removeTasks(new Set(["deleted"]));
+  expect(signal?.aborted).toBe(true);
+  expect(cache.get("a")).toBeNull();
+  expect(live).toHaveBeenCalledWith(new Set(["deleted"]));
+  expect(disposed).not.toHaveBeenCalled();
+  resolve(page("b"));
+  await request.promise;
+  expect(cache.get("b")).toBeNull();
+  request.release();
+});

@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { fetchTask } from "@/lib/api";
+import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { softNavigate } from "@/lib/routing/client-router";
 import {
@@ -492,6 +493,7 @@ async function settleAndReconcileRemoval(params: {
     settled.succeededRequests,
     removalIdsByRequest,
   );
+  if (action === "delete") sidebarTaskPageCache(deps.store).removeTasks(succeededRemovalIds);
   const activeSucceeded = operation.departure
     ? succeededRemovalIds.has(operation.departure.taskId)
     : false;

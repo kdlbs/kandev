@@ -72,6 +72,14 @@ must reapply pending membership to surviving rows; failures reveal current data.
 Keep archive-only filtering in the data projection rather than dropping pending
 flags on archived rows downstream.
 
+Successful delete reconciliation and authoritative `task.deleted` events notify
+`SidebarTaskPageCache` before local pending membership is released. It clears
+cached pages and aborts prior reads, then each subscribed page removes only the
+confirmed IDs from its accepted response and starts a replacement query. The
+loader generation fences late pre-deletion responses. This avoids an idle-row
+flash while a delayed refresh catches up, preserves failed/non-target rows, and
+lets newly mounted pickers fetch fresh data without retaining deletion tombstones.
+
 Mobile reuses `session-task-switcher-sheet.tsx`: its existing header trigger,
 inset drawer, visible overflow menu, fixed header, single scrolling list, safe
 areas, and touch targets remain unchanged. A reopened picker reads the same
