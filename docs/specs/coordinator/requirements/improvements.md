@@ -76,10 +76,12 @@ with the runs that show why.
 - **AC-COORDINATOR-IMPROVEMENTS-001.3:** Improvement proposals shall count
   toward the coordinator's limit of 25 open proposals.
 - **AC-COORDINATOR-IMPROVEMENTS-001.4:** While phase 3 is not effective,
-  improvement proposals shall be hidden as phase 2 kinds are while phase 2 is
-  off: not listed, not counted toward the limit, not decidable (a decision on
-  one answers as an absent proposal) and not swept for stale claims. They shall
-  appear again, with their stored status, when phase 3 is effective again.
+  improvement proposals shall be hidden from every read and decision route: not
+  listed, not counted toward the limit, and not decidable (a decision on one
+  answers as an absent proposal). A claim left `approving` on one shall still be
+  settled by the stale-claim sweep, and an Approve already past its claim shall
+  still complete, exactly as for phase 2 kinds. They shall appear again, with
+  their stored status, when phase 3 is effective again.
 
 ### REQ-COORDINATOR-IMPROVEMENTS-002: The improvement card
 
@@ -100,7 +102,8 @@ Mockup:
   current and proposed context as a line diff. For managers,
   **Approve as a reviewable change** shall stay disabled until the change has
   been shown in this card, with **Reject** and **Reply with a condition**
-  always available. There shall be no **Edit**.
+  available on a `pending` improvement, and **Reject** on a `failed` one. There
+  shall be no **Edit**.
 - **AC-COORDINATOR-IMPROVEMENTS-002.3:** An improvement proposal shall never be
   approved automatically, whatever the D17 settings say.
 
@@ -121,8 +124,8 @@ changes the coordinator.
   pending changes with the diff, **Apply** and **Discard**. Apply shall write
   the context exactly as a manager's context edit does, including replacing
   the conversation and the same refusals (a stored replacement that no longer
-  passes context validation, or an agent profile that no longer resolves,
-  refuses Apply and leaves the change pending). When the current context
+  passes context validation, or an agent or executor profile that no longer resolves,
+  or the autonomy interlock, refuses Apply and leaves the change pending). When the current context
   differs from the change's base, Apply shall be refused with 409 and the
   change shall stay pending, for the manager to discard. A manager's context
   edit and an Apply that race shall never lose either write: the one that

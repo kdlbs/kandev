@@ -54,10 +54,14 @@ document adds no column to that table. For an improvement, `spec_json` is:
 `final_spec_json` is written at claim as for tasks, equal to `spec_json`.
 While phase 3 is not effective, `kindFilter` also hides `kind = 'improvement'`
 rows: it takes the phase 3 flag beside phase 2, and every query that uses it
-(count, list, single read, the stale-claim sweep and its per-row conditional
-update) excludes those rows, so they are not listed, not counted, not
-decidable (approve, reject and reply answer an absent proposal, 404) and never
-swept. `registerKinds` stays unconditional, so a row that reappears with phase
+(count, list and the single read behind the decision routes) excludes those
+rows, so they are not listed, not counted and not decidable (approve, reject and
+reply answer an absent proposal, 404). The stale-claim sweep, the startup
+recovery and the read that completes a claim already held keep passing the
+literal `true` phase 2 passes today, so a claim left `approving` on an
+improvement settles `failed`/`outcome_unknown` whatever the flag, and an
+Approve whose claim is held when phase 3 turns off still completes; both
+touch only rows the fence already owns. `registerKinds` stays unconditional, so a row that reappears with phase
 3 is recovered like any other. A `coordinator_pending_changes` row is
 unaffected by the flag, but its routes are unregistered while phase 3 is off
 (see [Pending changes](#pending-changes)). Turning phase 3 back on shows every
@@ -85,9 +89,14 @@ Deleted with the coordinator and on `workspace.deleted`.
 
 ## Tool
 
-`propose_improvement_kandev` is registered on the coordinator surface only
-while phase 3 is effective, added to the exact-name auto-approve list and the
-guard's allowed coordinator actions, and absent from every other surface. It
+`propose_improvement_kandev` is offered on the coordinator surface only
+while phase 3 is effective (its entry in a conversation's bound list is
+conditional, below), added to the exact-name auto-approve list and the
+guard's allowed coordinator actions, and absent from every other surface. The
+action stays in the guard's dispatch whatever the flag, so a call from a
+conversation opened while phase 3 was on reaches guard check 0 and gets the
+phase 1 unknown-action error rather than a transport-level unknown-tool
+error. It
 enters a conversation's bound list through the `phase3` input of
 `ToolNames`, evaluated when the conversation is opened, so a conversation
 opened before phase 3 was on has no such tool
@@ -107,8 +116,10 @@ storing nothing (`AC-COORDINATOR-IMPROVEMENTS-001.2`):
 3. `context` through the phase 1 coordinator context validation (trimmed, at
    most 4,000 characters); the trimmed value is stored. An empty trimmed value
    is refused naming `context` (an improvement replaces the instructions with
-   text; blanking them is a manager's edit). A value equal to the current
-   stored context is refused naming `context`.
+   text; blanking them is a manager's edit). A value equal to the context stored at that moment is refused naming
+   `context`; the comparison uses the value read inside the limit transaction
+   (step 5's `context_before`), so a PATCH landing between validation and
+   insert cannot leave a proposal whose before equals its after.
 4. `evidence` is an array of 1 to 10 objects, in the order given, stored in
    that order. Each object has exactly one key, `run_id` or `task_id`, with a
    non-empty string value; any other shape (both keys, neither, an extra key,
@@ -174,8 +185,10 @@ does, so no bound-list read and no activity row happens
   component that needs no file context); the left side is labelled "Context
   when proposed", not "current", because the coordinator's context may have
   changed since. The card records that it was shown in component state.
-- For managers on a `pending` improvement (a `failed` one keeps Approve and
-  Reject): **Approve as a reviewable change**, disabled with the hint "Show the
+- For managers on a `pending` improvement (a `failed` one shows only
+  **Approve as a reviewable change** and **Reject**, with no **Reply**, because
+  the reply route answers 409 for `failed`; the diff gate applies to its Approve
+  as to a pending one): **Approve as a reviewable change**, disabled with the hint "Show the
   change first" until the diff has been shown in this card instance; **Reject**;
   and **Reply with a condition** ([relay](relay.md#cards)). No **Edit**. The gate
   is a review aid on the client; the approve route does not require proof that
@@ -189,8 +202,10 @@ does, so no bound-list read and no activity row happens
   **Open settings**; `applied` "Approved as a reviewable change. Applied to the
   context."; `discarded` "Approved as a reviewable change. Discarded, nothing
   was applied." **Open settings** goes to
-  `/settings/workspace/:id/coordinators/:cid` and scrolls to the "Changes
-  waiting for you" section. `change_status` is an improvement-only DTO field
+  `/settings/workspaces/:id/coordinators/:cid?section=autonomy` (the plural
+  path and `section` query the goal note builds, `goal-note.tsx`), which opens
+  the Autonomy tab; the "Changes waiting for you" section is inside it, and the
+  page scrolls it into view once its list has loaded. `change_status` is an improvement-only DTO field
   read with a left join on `coordinator_pending_changes.proposal_id`; it is
   absent for every other kind.
 
@@ -279,8 +294,9 @@ locking, and performs, in that one transaction:
    when they differ answer 409 with `{"reason": "context_changed"}` and leave
    the change `pending`;
 5. run the phase 1 PATCH validator on the merged row, which resolves the agent
-   profile: a failure is returned as the PATCH returns it (400 naming
-   `agent_profile_id`), the change staying `pending`;
+   profile: every refusal is returned as the PATCH returns it (400 naming the field:
+   `agent_profile_id`, `executor_profile_id`, or the autonomy interlock's
+   field), the change staying `pending`;
 6. perform the phase 1 PATCH write of `context = new_value`, which clears
    `conversation_task_id` and increments `config_revision` because the context
    changed, with the added guard `AND context = ?` bound to `base_value`; a
@@ -311,7 +327,7 @@ otherwise. It publishes `coordinator.updated` after commit. Concurrent applies
 or discards settle once; the loser gets 409 with the change
 (`AC-COORDINATOR-IMPROVEMENTS-003.3`). Neither writes an activity row: the
 `approved` row records the decision, and the change's own state is its status.
-Applied and discarded changes are not returned by any route, and are kept until
+Applied and discarded changes are not returned by the list route (Discard and a 409 return the change they settled), and are kept until
 the coordinator or workspace is deleted. While phase 3 is off a pending change
 can be neither applied nor discarded, because its routes are unregistered.
 
@@ -327,7 +343,11 @@ server's message. A 409 `context_changed` shows "The context changed since this
 was proposed. Discard it, or ask the coordinator to propose again." A 409
 without that reason shows "This change was already settled." The section
 follows the list order and keeps it after a refetch; a lower `created_at`
-change is never moved. It is rendered in the phase 3 Autonomy body of settings
+change is never moved. After a successful Apply the page refetches the coordinator and resets the
+Identity form's draft to the fetched context, discarding an unsaved edit there
+(the draft was written against the base Apply just replaced), and shows the
+existing "saved" confirmation of a context edit beside the section; a page
+that does not hold the Identity form needs no reset. It is rendered in the phase 3 Autonomy body of settings
 ([integration](integration.md#settings-layout)), only while phase 3 is
 effective.
 
