@@ -58,7 +58,7 @@ racing produce one row with one value. The only non-derivable field is
 `reopen_count`, handled below.
 
 `decided_at` is the time of the first recorded decision and is written only by
-the insert: the observer stores the hook time, and a row created by the sweep
+the insert: the insert takes the queue entry's `decidedAt` (the hook time) when it is non-zero, and a row created by the sweep or the task-transition path
 (below) stores the proposal's `updated_at`, since `coordinator_proposals` has no
 decision time column. A re-grade and an undo never change it (an undo changes
 `decision` to `undone` only). `decision` is `edited` when `edited_fields` is
@@ -74,15 +74,25 @@ decision has no row (`001.5`).
 
 No decision event exists today, so the decision paths gain a post-commit hook: an
 optional `DecisionObserver` on the coordinator service (nil-safe, a no-op when
-nothing registers) called by every path that decides a proposal:
+nothing registers) called by every path that decides a proposal (a decided proposal has status `approved`, `rejected` or `returned`; `pending`, `approving` and `failed` are open and have no outcome row, `001.5`):
 `ApproveProposal` and `finishClaim` (`approve.go`), the automatic class
 (`approveAutomatically`, `automatic_approve.go`, with `automatic = true`),
 `RejectProposal` (`reject.go`), `ReturnProposalTx` (`store_reply.go`, decision
 `returned`) and `UndoActivity`/`markUndone` (`undo.go`), after their
 transaction commits, with `{proposalID, decision, automatic, actor,
-editedFields, reasonCode}`. The edited field names come from the approve request's edits
-(`carriesApproveEdits`); a call the observer makes never fails the decision, and
-a panic in it is recovered and counted.
+editedFields, reasonCode}`. Override capture uses the whole payload. Grading
+uses only `proposalID` and the hook time: the grader queue entry is
+`{proposalID, decidedAt}` with `decidedAt` zero on every entry that does not come
+from the hook, and **`Grade` derives every other value from stored rows**, so a
+sweep-run grade and a hook-run grade write the same row. The derivation:
+`automatic` is `coordinator_proposals.decided_automatically`; `decision` is
+`rejected` or `returned` from the status, `undone` when the proposal's created or
+moved activity row has `undone_at` set, `edited` when `edited_fields` is
+non-empty and `approved` otherwise; `edited_fields` is the sorted names that
+differ between `spec_json` and `final_spec_json`; `reason_code` is
+`reasons.Code` of `reject_reason` (the text is read and dropped, never copied).
+A call the observer makes never fails the decision, and a panic in it is
+recovered and counted.
 
 Three paths call `Grade` through one in-process queue (`grader.Enqueue(id)`,
 keyed set so a proposal is queued once at a time, a worker pool of 1):
@@ -95,7 +105,7 @@ keyed set so a proposal is queued once at a time, a worker pool of 1):
    each.
 3. **Sweep:** every 24 hours (and at start) it enqueues, from
    `coordinator_proposals` left-joined to `coordinator_outcomes`, decided
-   proposals (status other than pending) whose `updated_at` is within 400 days and
+   proposals (status `approved`, `rejected` or `returned`, never `pending`, `approving` or `failed`) whose `updated_at` is within 400 days and
    that have no outcome row or whose row has `final = false`, in batches of 200
    ordered by `(graded_at NULLS FIRST, proposal_id)`. A proposal decided before
    recording began therefore gets a row on the first sweep within that window.
@@ -179,9 +189,10 @@ step the coordinator's approved action left the card in, both read from the
 workflow's step order when the candidate is processed, and requires the row time
 to be later than the action's time (`002.4`). `transition_key` is the history
 row id, so two different moves back both count while one row seen twice does
-not. The observation names the newest approved proposal of the coordinator that
-created or moved the card whose action time is not later than the row's
-`created_at`; that choice is fixed by the row, so every path names the same
+not. The observation names the approved proposal of the coordinator that
+created or moved the card with the greatest action time (the `created_at` of its
+created or moved activity row) not later than the row's `created_at`, ties by
+`proposal_id` descending; that choice is fixed by the row, so every path names the same
 proposal and the unique key `(proposal_id, kind, transition_key)` admits one
 observation per row (`002.2`). A step no longer in the workflow, or an equal or
 later position, stores nothing.

@@ -301,7 +301,7 @@ that belongs to another team.
 - **AC-COORDINATOR-PERMISSIONS-005.9:** When the sets or repositories cannot be
   loaded, the Projects part shall show "Could not load projects" with **Try
   again**, keep the switch on `all` only if it was, and never allow a
-  `selected` save. While the phase 3.1 flag is not effective, no Projects field, route or control shall exist, and a stored Projects scope shall stay enforced in every path of `005.4`; a coordinator that never had one watches as before.
+  `selected` save. While the phase 3.1 flag is not effective, the Projects write member of the settings request, the lists, the routes and the controls shall not exist, and a stored Projects scope shall stay enforced in every path of `005.4`. The enforcement `projects` member of the read settings payload shall be present while the stored scope is `selected` and absent while it is `all`, so a coordinator that never had a scope watches and reads as before.
 
 ## Out of scope
 

@@ -167,18 +167,24 @@ integer thousandths to avoid float boundary flips: 0.05 is 50.
 
 ## Result row
 
-`coordinator_replay_results`: `id`, `coordinator_id`, `dream_id` (nullable),
+`coordinator_replay_results`: `id`, `coordinator_id`, `status` (`running` or
+`done`), `dream_id` (nullable),
 `item_id` (nullable), `candidate_hash`, `baseline_hash`, `model`, `cases`
 (JSON: per case run count, score, skip reason), `candidate_score`,
 `baseline_score`, `flips` (JSON), `unmatched_candidate`, `unmatched_baseline`,
 `guard` (`pass`, `blocked`, `unmeasured`), `verdict`, `reason` (for
-`unmeasured`: `budget`, `cost_unknown`, `too_few`, `no_cases`),
+`unmeasured`: `budget`, `cost_unknown`, `too_few`, `no_cases`, `interrupted`),
 `prompt_version`, `cost_subcents`, `created_at`.
-The row is inserted `running` before the first run and its `cost_subcents` is
+The row is inserted with `status = 'running'` before the first run and its `cost_subcents` is
 updated after every run, so a crash mid-replay keeps the spend already incurred
 (the ceiling never undercounts by more than one run); the rest of the row is
-written at the end (`002.6`). A row still `running` after 30 minutes is settled
-`unmeasured`, reason `interrupted`.
+written at the end with `status = 'done'`, in one statement conditional on
+`status = 'running'` (`002.6`). The settle of a stale row belongs to the dream
+scheduler's backstop step (`Scheduler.Tick`, run each backstop pass for every
+visited coordinator): `UPDATE ... SET status = 'done', guard = 'unmeasured',
+verdict = 'unmeasured', reason = 'interrupted' WHERE status = 'running' AND
+created_at < now - 30 minutes`; a late write by a replay that finished after
+that matches nothing. `ExtraSpend` counts rows of both statuses.
 Retention is 400 days, deleted with the coordinator.
 
 ## Planted suite

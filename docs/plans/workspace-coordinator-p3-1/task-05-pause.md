@@ -50,7 +50,14 @@ turn, and the Pause and Resume controls.
   `Stopper.Stop` for a paused coordinator.
 - Web: the fourth state of the autonomy strip and the Autonomy section
   control, phone layout, copy in six locales.
-- Stop by binding state (`stop_requested_at`, `settleUnsentTurn` after 2
+- Existing code changed: `coordinator_unattended_turns` gains nullable
+  `pause_requested_at` (migration in `runMigrations()`, replay test);
+  `boundTurnOutcome` in `turn_end.go` maps `pause_requested_at` (when
+  `stop_requested_at` is unset) to `stopped_by_pause`; `settleBoundTurn`
+  returns the wakes of a row it settles `stopped_by_pause` to `pending` in the
+  settle transaction; `ceiling.go` stays reading `stop_requested_at` only, with a
+  test that a pause-marked turn is never settled `stopped_at_ceiling`.
+- Stop by binding state (`pause_requested_at`, `settleUnsentTurn` after 2
   minutes, cancel on accepted binding), the in-memory known-paused set for the
   flag-off read-error carve-out, and the read-only "Paused" badge shown with the
   flag off, per the [pause design](../../specs/coordinator/system-design/pause.md).

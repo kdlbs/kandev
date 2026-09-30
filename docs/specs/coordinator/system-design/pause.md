@@ -81,8 +81,9 @@ anything else that has an effect:
    pending wakes. When paused, delivery stops for that coordinator in that
    pass, before `Admit`, so no admission check, cooldown timestamp or
    `coordinator_unattended_turns` row is created or consumed. The state is read
-   again, and the turn row reserved, inside one `withCoordinatorLock` section, and
-   Pause commits under the same lock: a turn is either reserved before the pause
+   again, and the turn row reserved (the existing `Store.WithWakeLock` section of
+   `store_turns.go`, which locks the coordinator row as `withCoordinatorLock`
+   does), and Pause commits under the same lock: a turn is either reserved before the pause
    commit, in which case `Stopper.Stop` (run after the commit) finds and stops
    it, or refused. No turn starts after the pause commits.
 2. **Dream trigger:** first condition of `Scheduler.Tick`
@@ -120,28 +121,50 @@ wakes is delivered at the pace the phase 3 admission already limits.
 
 ## Pause and the running turn
 
-On a successful pause, `pause.Stopper.Stop(coordinatorID)` runs after the
-state commit, and again every backstop pass for every paused coordinator. It
-reads the coordinator's open unattended-turn rows (`outcome IS NULL`) and acts by
+`stop_requested_at` stays the spend ceiling's marker and Pause never writes it:
+`boundTurnOutcome` (`turn_end.go`) maps any `stop_requested_at` to
+`stopped_at_ceiling`, and `checkCeiling` (`ceiling.go`) treats a marked row as a
+ceiling stop already decided. Pause has its own nullable column,
+`pause_requested_at`, on `coordinator_unattended_turns`, added by the schema
+migration of this work order, and the two code paths change as follows.
+
+- `boundTurnOutcome`: `stop_requested_at` set gives `stopped_at_ceiling`
+  (unchanged, so a turn the ceiling already marked keeps that outcome); else
+  `pause_requested_at` set gives `stopped_by_pause`; else the session-state read
+  as today.
+- `settleBoundTurn`: when its conditional settle changed a row whose outcome is
+  `stopped_by_pause`, it returns the turn's wakes (`coordinator_wakes.turn_id`
+  equal to the row id) to `pending` with `turn_id` cleared and kinds and created
+  times unchanged, in the same transaction as the settle. `Stopper` and turn end
+  therefore share one settle path and either may run first (`002.2`).
+- `checkCeiling` is unchanged: it reads `stop_requested_at` only.
+
+`pause.Stopper.Stop(coordinatorID)` runs after the state commit, and again every
+backstop pass for every paused coordinator. It reads the coordinator's open
+unattended-turn rows (`outcome IS NULL`) ordered `(started_at, id)` and acts by
 the row's binding columns, the only state that tells the stages apart:
 
 | Row | Meaning | Stop does |
 | --- | --- | --- |
-| `session_turn_id` set | running | Sets `stop_requested_at` (conditional, once), cancels the session turn through the `CancelTurn` path the spend ceiling uses ([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)), settles the row `stopped_by_pause` with `settleOpenTurn`, and returns the turn's wakes (`coordinator_wakes.turn_id` equal to the row id) to `pending` with kinds and created times unchanged (`002.2`) |
-| both bindings NULL | started, maybe not yet sent | Sets `stop_requested_at` and does nothing else until the row is 2 minutes old; then `settleUnsentTurn(id, 'stopped_by_pause')`, which returns its wakes to `pending` in the same transaction and matches only while `session_turn_id IS NULL`, so it loses to a binding that arrived first |
-| `reserved_turn_id` set, `session_turn_id` NULL | send in flight | Sets `stop_requested_at` only; the next pass sees the row bound (running, cancelled as above) or settled |
+| `session_turn_id` set | running | Sets `pause_requested_at` (conditional, `WHERE pause_requested_at IS NULL AND outcome IS NULL`), cancels the session turn through the `CancelTurn` path the spend ceiling uses ([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)), then runs the shared `settleBoundTurn` (outcome `stopped_by_pause`, wakes back to `pending`) (`002.2`) |
+| both bindings NULL | started, maybe not yet sent | Sets `pause_requested_at` and does nothing else until the row is 2 minutes old; then `settleUnsentTurn(id, 'stopped_by_pause')`, which returns its wakes to `pending` in the same transaction and matches only while `session_turn_id IS NULL`, so it loses to a binding that arrived first |
+| `reserved_turn_id` set, `session_turn_id` NULL | send in flight | Sets `pause_requested_at` only; the next pass sees the row bound (running, cancelled as above) or settled |
 
-`stop_requested_at` is the column the ceiling stop already uses; setting it never
-settles anything. The accepted-turn binding writer (`OnAccepted`) reads it after
-its own conditional write and, when set on this row, cancels the session turn
-immediately instead of waiting for the next pass. A send that lands after the
-2-minute settle of a not-sent row cannot bind (`bindAcceptedTurn` matches only
-open rows); that turn is bounded by the spend ceiling and the ledger records it
-as a `message` turn. Two minutes exceeds the orchestrator's dispatch time, so it
-is a residual, counted `coordinator_pause_late_send_total`, not a designed path.
-The ledger's completion maps the outcome to verdict `blocked`
+Setting `pause_requested_at` never settles anything. The accepted-turn binding
+writer (the `OnAccepted` callback that `delivery.go` passes on the orchestrator's
+`UnattendedWakePrompt`, which calls `bindAcceptedTurn`) reads the row after its
+own conditional write and, when `pause_requested_at` is set on this row, cancels
+the session turn immediately instead of waiting for the next pass. A send that
+lands after the 2-minute settle of a not-sent row cannot bind
+(`bindAcceptedTurn` matches only open rows); that turn is bounded by the spend
+ceiling and the ledger records it as a `message` turn. Two minutes exceeds the
+orchestrator's dispatch time, so it is a residual, counted
+`coordinator_pause_late_send_total`, not a designed path. The ledger's
+completion maps the outcome to verdict `blocked`
 ([turn ledger](turn-ledger.md#completion-and-verdict)). Stop is idempotent: every
-statement is conditional on the row still being open.
+statement is conditional on the row still being open. If the ceiling and Pause
+both mark one row, `stopped_at_ceiling` wins and the row's wakes follow the
+phase 3 ceiling settle.
 
 A manager's own attended turn is never stopped (`002.4`).
 

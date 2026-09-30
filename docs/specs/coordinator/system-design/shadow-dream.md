@@ -85,13 +85,29 @@ isolation level, so the lease needs no read-then-insert. Tick first expires stal
 rows (below), then inserts the `running` row with a plain `INSERT`; a
 unique-violation means another dream holds the lease and the tick ends, storing
 nothing. A single orchestrating goroutine owns the whole dream (episode, gate, replays,
-report) and refreshes `refreshed_at` every minute for all of it; at each refresh
-it re-checks autonomy, Pause and the containment check and, when one fails,
-cancels the episode or the replay and sets the row `failed` with the reason
-`autonomy_off`, `paused` or `containment` (`001.6`). The backstop expires a
+report) and refreshes `refreshed_at` every minute for all of it. The refresh is a
+conditional statement, `UPDATE coordinator_dreams SET refreshed_at = ? WHERE id
+= ? AND status = 'running'`; zero rows changed means the backstop expired the
+lease, and the goroutine cancels the episode or replay itself and stops writing.
+At each refresh it re-checks autonomy, Pause, the containment check and spend
+and, when one fails, cancels the episode or the replay and sets the row `failed`
+(`WHERE status = 'running'`) with the reason `autonomy_off`, `paused`,
+`containment` or `ceiling` (`001.6`). The spend check is the only ceiling
+detector of a dream: the phase 3 `checkCeiling` acts on the open
+unattended-turn row of a session and a dream session has none. The goroutine
+reads the same phase 3 spend reader (`Spend(ctx, coord, now)`, replay spend
+included) and the ceiling in effect (the coordinator's current
+`CostCeilingSubcents` when set, else the value the tick's own spend condition
+used, held in memory by the goroutine); an unmeasurable reading or a window at
+or above the ceiling is `ceiling`, and the stop uses the phase 3 `CancelTurn`
+path. The overrun is therefore bounded by one minute of spend plus one turn
+(`002.3`). The backstop expires a
 `running` row past 5 minutes: `UPDATE ... SET status = 'failed', reason =
 'lease_lost', finished_at = ? WHERE id = ? AND status = 'running'`, cancels the
-episode if active, and leaves the window (the next window starts from the last
+episode when the orchestrating goroutine is in this process (its next refresh
+sees zero rows and cancels too); a row expired after a process restart has no
+goroutine, so the expiry archives the dream task and its session through the
+`OpenTask` archive call instead, and leaves the window (the next window starts from the last
 accepted dream) (`001.3`). A completion arriving afterwards updates with `WHERE
 status = 'running'`, matches nothing and changes nothing.
 
@@ -136,7 +152,7 @@ call of each registered action from that session is refused.
 **One turn, bounded.** One prompt, a 20-minute wall clock that covers the episode only (the gate and
 each replay have their own bound, [replay](replay.md#budget)); at expiry the system
 cancels the session and sets the row `failed`, reason `timeout` (`002.4`). The
-ceiling stop uses the phase 3 `CancelTurn` path and sets `failed` with the
+ceiling stop is the refresh-time spend check above and sets `failed` with the
 reason `ceiling`. Pause during a running episode cancels it and sets `failed`,
 reason `paused` ([pause](pause.md#pause-and-the-episode)). The ledger records the
 turn with trigger `dream` and the model stamp; the session is archived on end

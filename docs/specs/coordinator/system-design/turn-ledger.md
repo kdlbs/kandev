@@ -86,8 +86,9 @@ second link fail and be logged.
 If the start event was lost, the completion handler inserts the row with the
 same `ON CONFLICT` rule and derives the stamp at that time. The trigger match
 is the same but reads the unattended-turn row in any status except `send_failed`
-(a failed delivery never started a turn, so an old `send_failed` row cannot
-turn a manager's message into a `wake`), since turn end may already have settled
+and except a row settled while unbound (`session_turn_id IS NULL` and `outcome`
+set: a failed or pause-stopped delivery never started a turn, so such a row
+cannot turn a manager's message into a `wake` or lend it `blocked`), since turn end may already have settled
 it; when several rows match, the newest by `(started_at DESC, id DESC)` wins. A late row is correct except for a model or snapshot
 that was not available, which stay empty (`001.2`). A delivery that failed
 before any turn started (`send_failed`, no `session_turn_id`) has no ledger row;
@@ -122,9 +123,10 @@ id) < cursor`.
 ## Completion and verdict
 
 Before computing the verdict, completion drains the call queue for this turn
-(flushes entries enqueued before the completion event, waiting at most 2
-seconds on the writer, never on the turn path since completion runs on the
-event subscription); calls still unwritten after that are absent from the
+(every queue entry carries a per-process sequence number from a counter the
+enqueue increments; completion reads the counter once when it starts and waits
+until the writer's written-sequence reaches that value, at most 2 seconds, never
+on the turn path since completion runs on the event subscription); calls still unwritten after that are absent from the
 verdict input, and the verdict falls back to proposals and activity rows, which
 are written synchronously by the guarded call. `proposed` and `acted` depend
 only on those rows, so the queue can change only `blocked` by refused calls.
@@ -191,15 +193,29 @@ The guarded-call layer already resolves the calling session. `ledger.ActiveTurnI
 reads an in-memory map from session id to the open ledger row id that the
 recorder maintains (set at insert, cleared at completion, rebuilt at startup
 from unfinished rows), so the proposal and activity inserts of a guarded call
-perform no extra database read. The start handler generates the row id and sets
-the map entry before it issues the insert, so the entry never waits on the
-database; the handler itself is asynchronous, so a guarded call that beats it
-sees no entry and its write proceeds with an empty `turn_id` (`003.1`). Completion
-repairs those rows: for proposals and activity rows of the coordinator with a
-NULL `turn_id` and `created_at` between the turn's `started_at` and
-`finished_at`, one statement per table sets the turn id, but only when no other
-turn of the same coordinator overlaps that window (an overlap leaves NULL, never
-a guess). The repair runs before the verdict is computed. Approvals and undos run outside a session
+perform no extra database read. The map entry holds `(rowID, sessionTurnID)`. The start handler first reads the
+entry: one already carrying this `sessionTurnID` means a redelivered start, and
+the handler leaves the entry alone. Otherwise it generates the row id and sets
+the entry before it issues the insert, so the entry never waits on the database.
+When the insert changes no row (the row exists), the handler reads the existing
+row by `(session_id, session_turn_id)`: an unfinished row replaces the entry
+(`rowID` of the existing row), and a finished row removes the entry if it still
+holds the generated id, so a redelivered start never leaves an entry whose id
+has no row. The rebuild at startup puts the newest unfinished row of each session
+by `(started_at DESC, id DESC)` in the map; older unfinished rows of the same
+session stay and are settled by completion or the retention settle. The handler
+itself is asynchronous, so a guarded call that beats it sees no entry and its
+write proceeds with an empty `turn_id` (`003.1`). Completion
+repairs those rows: for proposals of the coordinator, and activity rows of the coordinator with
+`actor_user_id IS NULL AND undo_of_id IS NULL` (rows a guarded call or the
+automatic class wrote; never the approval and undo rows a manager writes, which
+carry an actor or an undo reference and no turn id, `003.3`), with a NULL
+`turn_id` and `created_at >= started_at` and `created_at <= finished_at` (both
+bounds inclusive), one statement per table sets the turn id, but only when no
+other turn T2 of the same coordinator overlaps that window, meaning
+`T2.started_at <= this.finished_at AND (T2.finished_at IS NULL OR T2.finished_at
+>= this.started_at)` (an overlap, including a shared boundary instant, leaves
+NULL, never a guess). The repair runs before the verdict is computed. Approvals and undos run outside a session
 and set nothing (`003.3`).
 
 ## Call digest

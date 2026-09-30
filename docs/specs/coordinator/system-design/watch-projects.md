@@ -104,8 +104,11 @@ server-resolved union of the listed repositories and the current members of the
 listed sets, so the client never resolves sets itself and a set change reaches
 open screens through `coordinator.updated` and the repository set events. `AttentionTask` gains `repositoryIds: string[]`, set from
 the snapshot. The rule is the server's: workflow watched and `InProjects`. An
-unknown repository list (snapshot lacks it) is treated as not watched, the same
-fail-closed rule as a missing workflow id.
+unknown repository list is treated as not watched, the same fail-closed rule as a
+missing workflow id. Unknown and empty are different shapes: `repositoryIds`
+absent or `null` (in `AttentionTask`, or in the settings `projects` member when
+the server could not resolve the sets) means unknown, and `[]` means known and
+empty, which matches only when `includeNoRepository` is on.
 
 **With the flag off.** The stored scope is still enforced on the client. The
 effective watch set in `GET .../settings` carries the `projects` member whenever
