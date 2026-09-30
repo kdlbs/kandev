@@ -91,6 +91,7 @@ function toProfileFormData(
     mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
     mcp_selected_servers: profile.mcpSelectedServers ?? [],
     cli_flags: profile.cliFlags ?? [],
+    env_vars: profile.envVars ?? [],
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
   };
@@ -208,6 +209,7 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          capabilityProfileId={savedProfile?.id}
           cursorMcpAuthSupported={
             agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor"
           }

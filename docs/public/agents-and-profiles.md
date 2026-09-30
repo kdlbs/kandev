@@ -250,7 +250,7 @@ preserve profile validation and save replacement lists atomically. They never
 return environment values or MCP credentials; use references or the existing
 interactive credential flow when a secret is required.
 
-Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
+Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
 ### Use an OpenAI-compatible provider
 

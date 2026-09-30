@@ -202,5 +202,23 @@ pnpm e2e:run --docker -- tests/task/create-task-github-url.spec.ts tests/session
 The remediation preserves nonfatal setup failures, fences replaced terminal
 sockets, waits for chat readiness in the fork-PR test and asserts the visible
 authentication panel on desktop and mobile. See Tasks 03 and 04 for focused
-backend and web checks. Latest-base integration and pushed-head CI are separate
-external verification steps.
+backend and web checks. Pushed-head CI remains a separate external verification step.
+
+
+Latest-base browser verification on 2026-09-30 passed seven focused desktop
+scenarios and all three mobile profile/recovery scenarios. The desktop task
+file's describe-level retry was disabled for that run and restored afterward.
+From `apps/web`:
+
+```bash
+pnpm e2e:run --docker -- tests/task/create-task-github-url.spec.ts tests/session/setup-script-progress.spec.ts tests/session/agent-mcp-preparation.spec.ts tests/settings/cursor-plugin-mcp.spec.ts --grep "opens the exact DB-backed|keeps setup script failure|two tasks from the same PR URL|starts a target-attached fork PR|Cursor plugin MCP" --retries=0
+pnpm e2e:run --docker --no-build --project mobile-chrome -- tests/session/mobile-agent-mcp-preparation.spec.ts tests/settings/mobile-cursor-plugin-mcp.spec.ts --retries=0
+```
+
+The managed desktop run rebuilt backend binaries, web assets and plugin
+fixtures before the mobile run reused them. These results supersede the
+historical desktop/mobile browser launch limitation for these files.
+Latest-base `pnpm run typecheck`, `pnpm run lint` and `pnpm run i18n:check` passed.
+Harness tests (19), specification-linter tests (36), full harness/specification
+lint and the documentation catalog (334 decisions, 1264 specs) also passed.
+Remote checks and reviews still require fresh evidence after delivery.

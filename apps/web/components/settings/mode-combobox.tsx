@@ -21,6 +21,7 @@ type ModeComboboxProps = {
   onChange: (value: string) => void;
   modes: ModeEntry[];
   currentModeId: string | undefined;
+  disabled?: boolean;
 };
 
 /**
@@ -28,7 +29,13 @@ type ModeComboboxProps = {
  * ModelCombobox so descriptions in the dropdown don't leak into the
  * trigger text (which happens with Radix Select).
  */
-export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComboboxProps) {
+export function ModeCombobox({
+  value,
+  onChange,
+  modes,
+  currentModeId,
+  disabled = false,
+}: ModeComboboxProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const selected = value || currentModeId || modes[0]?.id || "";
@@ -41,6 +48,7 @@ export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComb
           role="combobox"
           aria-expanded={open}
           data-testid="profile-mode-select"
+          disabled={disabled}
           className={settingsControlClassName("w-full justify-between font-normal cursor-pointer")}
         >
           <span className="flex items-center gap-2 truncate">

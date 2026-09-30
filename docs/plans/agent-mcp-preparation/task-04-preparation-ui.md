@@ -211,3 +211,38 @@ From `apps/web`:
 pnpm e2e:run --docker -- tests/task/create-task-github-url.spec.ts tests/session/setup-script-progress.spec.ts tests/session/agent-mcp-preparation.spec.ts --retries=0
 ```
 
+
+Latest-main integration on 2026-09-30 preserves profile-context model
+discovery, the extracted capabilities UI and the existing Cursor MCP preferences
+and selection fields. The permission-toggle extraction remains shared, and
+profile HTTP validation follows main's extracted handler file. The focused
+frontend suite expanded to 129 passing tests in 16 files, including model
+capabilities, profile forms, MCP selection, preparation and terminal handoff.
+The profile-form tests passed again after splitting the MCP assertions into
+their own describe group to keep the merged test within the lint limit.
+
+
+Latest-base browser verification on 2026-09-30 passed seven focused desktop
+scenarios and all three mobile profile/recovery scenarios. The desktop task
+file's describe-level retry was disabled for that run and restored afterward.
+From `apps/web`:
+
+```bash
+pnpm e2e:run --docker -- tests/task/create-task-github-url.spec.ts tests/session/setup-script-progress.spec.ts tests/session/agent-mcp-preparation.spec.ts tests/settings/cursor-plugin-mcp.spec.ts --grep "opens the exact DB-backed|keeps setup script failure|two tasks from the same PR URL|starts a target-attached fork PR|Cursor plugin MCP" --retries=0
+pnpm e2e:run --docker --no-build --project mobile-chrome -- tests/session/mobile-agent-mcp-preparation.spec.ts tests/settings/mobile-cursor-plugin-mcp.spec.ts --retries=0
+```
+
+The managed desktop run rebuilt backend binaries, web assets and plugin
+fixtures before the mobile run reused them. These results supersede the
+historical desktop/mobile browser launch limitation for these files.
+Latest-base `pnpm run typecheck`, `pnpm run lint` and `pnpm run i18n:check` passed.
+Harness tests (19), specification-linter tests (36), full harness/specification
+lint and the documentation catalog (334 decisions, 1264 specs) also passed.
+Remote checks and reviews still require fresh evidence after delivery.
+
+
+The expanded frontend verification command from `apps/web` was:
+
+```bash
+pnpm exec vitest run components/settings/profile-form-fields.test.tsx components/settings/profile-model-options.test.tsx hooks/domains/settings/use-profile-model-capabilities.test.tsx components/settings/cursor-mcp-profile-selection.test.tsx components/settings/cursor-mcp-selection.test.ts hooks/domains/settings/use-agent-mcp-discovery.test.tsx components/settings/agent-profile-reconciliation.test.ts components/settings/agent-profile-dirty.test.ts lib/api/domains/agent-profile-normalize.test.ts components/task/terminal-websocket-lifecycle.test.tsx components/task/use-passthrough-terminal.test.ts components/task/agent-mcp-prepare-actions.test.tsx components/session/prepare-progress-status.test.ts lib/state/slices/session-runtime/prepare-result.test.ts lib/ws/handlers/executor-prepare.test.ts lib/api/domains/session-mcp-actions.test.ts
+```

@@ -143,3 +143,22 @@ go test ./internal/agent/runtime/lifecycle -run 'TestPreparationAttempt|TestExec
 also passed. Public setup-script documentation already promises nonfatal
 failures, so this remediation restores that contract without a public-copy
 change. Fresh pushed-head CI remains an external verification step.
+
+
+Latest-main integration on 2026-09-30 retained its extracted profile HTTP
+handler owner. MCP-selection validation errors are forwarded by
+`profile_handlers.go`; profile CRUD and model-capability discovery remain
+registered together. `go test -race ./internal/agent/settings/...` and the
+focused lifecycle race command above both passed after this integration.
+
+
+After the latest-main integration,
+`golangci-lint run ./internal/agent/settings/... ./internal/agent/runtime/lifecycle/... --new-from-rev=origin/main --timeout=5m`
+also passed from `apps/backend`.
+
+
+The merge hook caught the combined create-profile handler above the cyclomatic
+complexity limit. Its existing required-field/MCP-validation message selection
+is now shared by create and update handlers through `profileValidationMessage`.
+The HTTP regressions retain blank-name, invalid-mode and duplicate-selection
+error assertions. The normal changed-package lint hook remains required.

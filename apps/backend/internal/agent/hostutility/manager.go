@@ -1,7 +1,9 @@
 package hostutility
 
 import (
+	"container/list"
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -58,16 +60,24 @@ type Manager struct {
 	tempLease     *tempartifacts.Lease
 	cache         *cache
 	modelCache    *modelConfigCache
+	profileCache  *profileCapabilityCache
+	profileKey    []byte
 
-	mu                       sync.RWMutex
-	instances                map[string]*instance // keyed by agent type
-	createGroup              singleflight.Group
-	modelGroup               singleflight.Group
-	modelGenerationMu        sync.Mutex
-	modelGenerations         map[string]uint64
-	managedRuntimeSelections managedruntime.SelectionReader
-	startCancel              context.CancelFunc
-	stopped                  bool
+	mu                            sync.RWMutex
+	instances                     map[string]*instance // keyed by agent type
+	createGroup                   singleflight.Group
+	modelGroup                    singleflight.Group
+	modelGenerationMu             sync.Mutex
+	modelGenerations              map[string]uint64
+	profileGenerations            map[string]uint64
+	profileContextGenerations     map[string]uint64
+	profileContextGenerationNodes map[string]*list.Element
+	profileContextGenerationOrder *list.List
+	nextProfileContextGeneration  uint64
+	profileGroup                  singleflight.Group
+	managedRuntimeSelections      managedruntime.SelectionReader
+	startCancel                   context.CancelFunc
+	stopped                       bool
 }
 
 // ProviderGatewayAuthResolver resolves provider authentication for a saved
@@ -127,16 +137,26 @@ func NewManager(
 	controlClient *agentctlclient.ControlClient,
 	log *logger.Logger,
 ) *Manager {
+	profileKey := make([]byte, 32)
+	if _, err := cryptorand.Read(profileKey); err != nil {
+		panic("host utility profile cache key initialization failed")
+	}
 	return &Manager{
-		registry:         reg,
-		controlHost:      controlHost,
-		controlPort:      controlPort,
-		controlClient:    controlClient,
-		log:              log.WithFields(zap.String("component", "host-utility")),
-		cache:            newCache(),
-		modelCache:       newModelConfigCache(),
-		instances:        make(map[string]*instance),
-		modelGenerations: make(map[string]uint64),
+		registry:                      reg,
+		controlHost:                   controlHost,
+		controlPort:                   controlPort,
+		controlClient:                 controlClient,
+		log:                           log.WithFields(zap.String("component", "host-utility")),
+		cache:                         newCache(),
+		modelCache:                    newModelConfigCache(),
+		profileCache:                  newProfileCapabilityCache(),
+		profileKey:                    profileKey,
+		instances:                     make(map[string]*instance),
+		modelGenerations:              make(map[string]uint64),
+		profileGenerations:            make(map[string]uint64),
+		profileContextGenerations:     make(map[string]uint64),
+		profileContextGenerationNodes: make(map[string]*list.Element),
+		profileContextGenerationOrder: list.New(),
 	}
 }
 
@@ -237,6 +257,9 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) Stop(ctx context.Context) {
 	if m.modelCache != nil {
 		m.modelCache.clear()
+	}
+	if m.profileCache != nil {
+		m.profileCache.clear()
 	}
 	m.mu.Lock()
 	m.stopped = true
@@ -746,6 +769,9 @@ func capabilityStatus(response *agentctlutil.ProbeResponse) Status {
 	if response != nil && response.Success {
 		return StatusOK
 	}
+	if response != nil && response.FailureCode == agentctlutil.ProbeFailureUnsupportedContext {
+		return StatusUnsupported
+	}
 	return StatusFailed
 }
 
@@ -777,7 +803,9 @@ func managedRuntimeProbeRetry(
 func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, now time.Time) AgentCapabilities {
 	if !resp.Success {
 		status := StatusFailed
-		if isAuthError(resp.Error) {
+		if resp.FailureCode == agentctlutil.ProbeFailureUnsupportedContext {
+			status = StatusUnsupported
+		} else if resp.FailureCode == agentctlutil.ProbeFailureAuthenticationRequired || isAuthError(resp.Error) {
 			status = StatusAuthRequired
 		}
 		return probeFailureCapabilities(agentType, status, resp.Error, resp.DurationMs, now)

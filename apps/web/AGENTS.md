@@ -113,7 +113,7 @@ surface.
   browser-native behavior for the Vite SPA while legacy Next entrypoints are
   phased out.
 - Task links: `lib/links.ts::linkToTask` is the only `/t/:taskId` builder; pass raw IDs, use `TaskLink` or `AppLink`, and use `linkToTask` for router pushes. Keep compatibility `/tasks/:id`, Office/API paths, and route-recognition prefixes separate.
-- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection.
+- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection. `ChangesPanelBody` owns the sole scroller; route working-tree, PR, commit, inline-file, and status row descriptors through `ChangesTimelineViewport`, keeping full collections for counts/actions and keying state by task/session/environment.
 - **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
   the provider-neutral primitives in `components/integrations/` for
   change-request lists, rows, toolbars, scope controls, task preset menus, and

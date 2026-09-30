@@ -2,47 +2,27 @@
 
 import { useTranslation } from "react-i18next";
 import type { SelectConfigOption } from "@/components/model-config-selector";
-import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Skeleton } from "@kandev/ui/skeleton";
 import type { PermissionKey } from "@/lib/agent-permissions";
-import { CLIFlagsField } from "@/components/settings/cli-flags-field";
-import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
-import { CursorPluginsMCPPreference } from "@/components/settings/cursor-plugins-mcp-preference";
-import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
-import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
 import { PermissionToggles } from "@/components/settings/profile-permission-toggles";
-import {
-  CapabilityStatusMessage,
-  RefreshCapabilitiesButton,
-} from "@/components/settings/profile-capability-status";
-import {
-  CommandsButton,
-  findActiveMode,
-  profileModeIsDirty,
-  profileModelIsDirty,
-  useProfileFormCapabilities,
-} from "@/components/settings/profile-capability-helpers";
-import {
-  ModelFallbackSection,
-  ModelPicker,
-  ModePicker,
-} from "@/components/settings/profile-model-fields";
-import {
-  SettingsFieldDescription,
-  SettingsFieldLabel,
-} from "@/components/settings/settings-typography";
+import { CLIFlagsField } from "@/components/settings/cli-flags-field";
+import { CursorPluginsMCPPreference } from "@/components/settings/cursor-plugins-mcp-preference";
+import type { MCPSelectionMode } from "@/lib/types/agent-profile";
+import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
+import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
+import { useProfileFormCapabilities } from "@/components/settings/profile-capability-helpers";
+import { ProfileCapabilitiesSection } from "@/components/settings/profile-capabilities-row";
+import { ModelFallbackSection } from "@/components/settings/profile-model-fields";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import type {
   CLIFlag,
-  CommandEntry,
   ModelConfig,
-  ModeEntry,
   ModelEntry,
   PermissionSetting,
   PassthroughConfig,
+  ProfileLaunchSettingsRequest,
 } from "@/lib/types/http";
-import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 
 export type ProfileFormData = {
   name: string;
@@ -56,6 +36,7 @@ export type ProfileFormData = {
   config_options?: Record<string, string>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
+  env_vars?: { key: string; value?: string; secret_id?: string }[];
   command_prefix?: string;
   provider_kind?: string;
   cursor_mcp_auth_enabled?: boolean;
@@ -79,6 +60,7 @@ export type ProfileFormFieldsProps = {
   hideNameField?: boolean;
   lockPassthrough?: boolean;
   onModelConfigResolutionPendingChange?: (pending: boolean) => void;
+  capabilityProfileId?: string;
   /**
    * When true, the custom-flag list + Add form on CLIFlagsField is
    * hidden. Curated predefined toggles still render. Used by the
@@ -87,162 +69,23 @@ export type ProfileFormFieldsProps = {
   hideCustomCLIFlags?: boolean;
 };
 
-type CapabilitiesRowProps = {
-  profile: ProfileFormData;
-  models: ModelEntry[];
-  modes: ModeEntry[];
-  commands: CommandEntry[];
-  currentModelId: string | undefined;
-  currentModeId: string | undefined;
-  status: ModelConfig["status"];
-  onChange: (patch: Partial<ProfileFormData>) => void;
-  isCompact: boolean;
-  isLoading: boolean;
-  onRefresh: () => Promise<void>;
-  error: string | null;
-  modelConfig: ModelConfig;
-  configOptions: SelectConfigOption[];
-  configStatus: ModelConfig["status"];
-  configError: string | null;
-  configIsLoading: boolean;
-  onRetryConfig: () => Promise<void>;
-  agentName: string;
-  baselineProfile?: ProfileFormData;
-};
-
-function CapabilitiesRow(props: CapabilitiesRowProps) {
-  const { t } = useTranslation();
-  const gapCls = props.isCompact ? "space-y-1.5" : "space-y-2";
-
-  if (props.profile.provider_kind === "openai_compatible") {
-    return <CapabilitiesRowContent {...props} status="ok" isLoading={false} />;
-  }
-
-  if (props.isLoading && props.models.length === 0) {
-    return (
-      <div className={gapCls}>
-        <SettingsFieldLabel className={props.isCompact ? "text-xs" : undefined}>
-          {t("agents:startModel")}
-        </SettingsFieldLabel>
-        <Skeleton className="h-7 w-full" />
-      </div>
-    );
-  }
-
-  if (props.status === "probing") {
-    return <ProbingPanel />;
-  }
-  if (props.status === "auth_required" || props.status === "not_installed") {
-    return (
-      <NoAuthPanel
-        agentName={props.agentName}
-        status={props.status}
-        isLoading={props.isLoading}
-        onRefresh={props.onRefresh}
-        error={props.error}
-        rawError={props.modelConfig.error ?? null}
-      />
-    );
-  }
-
-  return <CapabilitiesRowContent {...props} />;
-}
-
-function CapabilitiesRowContent({
-  profile,
-  models,
-  modes,
-  commands,
-  currentModelId,
-  currentModeId,
-  status,
-  onChange,
-  isCompact,
-  isLoading,
-  onRefresh,
-  error,
-  modelConfig,
-  configOptions,
-  configStatus,
-  configError,
-  configIsLoading,
-  onRetryConfig,
-  baselineProfile,
-}: CapabilitiesRowProps) {
-  const { t } = useTranslation();
-  const hasModes = modes.length > 0;
-  const activeMode = findActiveMode(modes, profile.mode, currentModeId);
-  const labelCls = isCompact ? "text-xs" : undefined;
-  const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
-
-  return (
-    <div className={gapCls}>
-      <div className="flex items-end gap-2" data-testid="profile-capabilities-model-row">
-        <div
-          className={`${hasModes ? "flex-1" : "w-full md:max-w-xl"} min-w-0 ${gapCls}`}
-          data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
-          data-settings-dirty-level="container"
-        >
-          <SettingsFieldLabel className={labelCls}>{t("agents:startModel")}</SettingsFieldLabel>
-          <ModelPicker
-            profile={profile}
-            models={models}
-            currentModelId={currentModelId}
-            configOptions={configOptions}
-            onChange={onChange}
-            ariaLabel={t("settings:startModelAria")}
-            goneModelLabel={t("settings:startModelUnavailable")}
-            configOptionsLoading={configIsLoading}
-            keepOpenOnModelChange={modelConfig.supports_dynamic_models}
-          />
-        </div>
-        {hasModes && (
-          <div
-            data-testid="profile-mode-field"
-            className={`flex-1 min-w-0 ${gapCls}`}
-            data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
-            data-settings-dirty-level="container"
-          >
-            <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
-            <ModePicker
-              profile={profile}
-              modes={modes}
-              currentModeId={currentModeId}
-              onChange={onChange}
-            />
-          </div>
-        )}
-        <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
-      </div>
-      <ModelConfigResolutionStatus
-        status={configStatus}
-        error={configError}
-        isLoading={configIsLoading}
-        onRetry={onRetryConfig}
-      />
-      {activeMode?.description && (
-        <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
-      )}
-      {commands.length > 0 && <CommandsButton commands={commands} />}
-      <CapabilityStatusMessage status={status} />
-    </div>
-  );
-}
-
 function NameField({
   profile,
   onChange,
   canRemove,
   onRemove,
   baselineName,
+  visible = true,
 }: {
   profile: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
   canRemove?: boolean;
   onRemove?: () => void;
   baselineName?: string;
+  visible?: boolean;
 }) {
   const { t } = useTranslation();
+  if (!visible) return null;
   return (
     <div className="flex items-center justify-between gap-4">
       <ProfileNameField
@@ -257,6 +100,53 @@ function NameField({
       )}
     </div>
   );
+}
+
+function CursorProfilePreferences({
+  supported,
+  profile,
+  baselineProfile,
+  onChange,
+}: {
+  supported: boolean;
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  if (!supported) return null;
+  return (
+    <>
+      <CursorMCPAuthPreference
+        enabled={profile.cursor_mcp_auth_enabled ?? true}
+        savedEnabled={
+          baselineProfile === undefined
+            ? undefined
+            : (baselineProfile.cursor_mcp_auth_enabled ?? true)
+        }
+        onChange={(enabled) => onChange({ cursor_mcp_auth_enabled: enabled })}
+      />
+      <CursorPluginsMCPPreference
+        enabled={profile.cursor_plugins_mcp_enabled ?? true}
+        savedEnabled={
+          baselineProfile === undefined
+            ? undefined
+            : (baselineProfile.cursor_plugins_mcp_enabled ?? true)
+        }
+        onChange={(enabled) => onChange({ cursor_plugins_mcp_enabled: enabled })}
+      />
+    </>
+  );
+}
+
+function savedProfileLaunchSettings(
+  baselineProfile?: ProfileFormData,
+): ProfileLaunchSettingsRequest | undefined {
+  if (!baselineProfile) return undefined;
+  return {
+    env_vars: baselineProfile.env_vars ?? [],
+    cli_flags: baselineProfile.cli_flags ?? [],
+    command_prefix: baselineProfile.command_prefix ?? "",
+  };
 }
 
 export type ProfileNameFieldProps = {
@@ -306,57 +196,34 @@ export function ProfileFormFields({
   lockPassthrough = false,
   hideCustomCLIFlags = false,
   onModelConfigResolutionPendingChange,
+  capabilityProfileId,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === "compact";
-  const {
-    capabilities: caps,
-    configOptions,
-    configStatus,
-    configError,
-    configIsLoading,
-    refreshModelConfig,
-    refresh,
-  } = useProfileFormCapabilities(
-    agentName,
-    profile,
-    modelConfig,
-    onChange,
-    onModelConfigResolutionPendingChange,
-  );
+  const capabilityResult = useProfileFormCapabilities(agentName, profile, modelConfig, onChange, {
+    profileId: capabilityProfileId,
+    onPendingChange: onModelConfigResolutionPendingChange,
+    savedLaunchSettings: savedProfileLaunchSettings(baselineProfile),
+  });
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>
-      {!hideNameField && (
-        <NameField
-          profile={profile}
-          onChange={onChange}
-          canRemove={canRemove}
-          onRemove={onRemove}
-          baselineName={baselineProfile?.name}
-        />
-      )}
-
-      <CapabilitiesRow
+      <NameField
         profile={profile}
-        models={caps.models}
-        modes={caps.modes}
-        commands={caps.commands}
-        currentModelId={caps.currentModelId}
-        currentModeId={caps.currentModeId}
-        status={caps.status}
-        agentName={agentName}
         onChange={onChange}
-        isCompact={isCompact}
-        isLoading={caps.isLoading}
-        onRefresh={refresh}
-        error={caps.error}
-        modelConfig={modelConfig}
-        configOptions={configOptions}
-        configStatus={configStatus}
-        configError={configError}
-        configIsLoading={configIsLoading}
-        onRetryConfig={refreshModelConfig}
+        canRemove={canRemove}
+        onRemove={onRemove}
+        baselineName={baselineProfile?.name}
+        visible={!hideNameField}
+      />
+
+      <ProfileCapabilitiesSection
+        profile={profile}
         baselineProfile={baselineProfile}
+        onChange={onChange}
+        modelConfig={modelConfig}
+        agentName={agentName}
+        isCompact={isCompact}
+        result={capabilityResult}
       />
 
       <PermissionToggles
@@ -383,47 +250,12 @@ export function ProfileFormFields({
         permissionSettings={permissionSettings}
         variant={variant}
         hideCustomCLIFlags={hideCustomCLIFlags}
-        models={caps.models}
-        configOptions={configOptions}
+        models={capabilityResult.capabilities.models}
+        configOptions={capabilityResult.configOptions}
         isCompact={isCompact}
+        disableUnverifiedModels={capabilityResult.discoveryState !== "ready"}
       />
     </div>
-  );
-}
-
-function CursorProfilePreferences({
-  supported,
-  profile,
-  baselineProfile,
-  onChange,
-}: {
-  supported: boolean;
-  profile: ProfileFormData;
-  baselineProfile?: ProfileFormData;
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  if (!supported) return null;
-  return (
-    <>
-      <CursorMCPAuthPreference
-        enabled={profile.cursor_mcp_auth_enabled ?? true}
-        savedEnabled={
-          baselineProfile === undefined
-            ? undefined
-            : (baselineProfile.cursor_mcp_auth_enabled ?? true)
-        }
-        onChange={(enabled) => onChange({ cursor_mcp_auth_enabled: enabled })}
-      />
-      <CursorPluginsMCPPreference
-        enabled={profile.cursor_plugins_mcp_enabled ?? true}
-        savedEnabled={
-          baselineProfile === undefined
-            ? undefined
-            : (baselineProfile.cursor_plugins_mcp_enabled ?? true)
-        }
-        onChange={(enabled) => onChange({ cursor_plugins_mcp_enabled: enabled })}
-      />
-    </>
   );
 }
 
@@ -437,6 +269,7 @@ function ProfileFormFooter({
   models,
   configOptions,
   isCompact,
+  disableUnverifiedModels,
 }: {
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
@@ -447,6 +280,7 @@ function ProfileFormFooter({
   models: ModelEntry[];
   configOptions: SelectConfigOption[];
   isCompact: boolean;
+  disableUnverifiedModels: boolean;
 }) {
   return (
     <>
@@ -472,6 +306,7 @@ function ProfileFormFooter({
           models={models}
           configOptions={configOptions}
           baselineProfile={baselineProfile}
+          disabled={disableUnverifiedModels}
           labelCls={isCompact ? "text-xs" : undefined}
           gapCls={isCompact ? "space-y-1.5" : "space-y-2"}
           onChange={onChange}

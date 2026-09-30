@@ -53,6 +53,7 @@ function profileFormData(
     cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
+    env_vars: profile.envVars ?? [],
     command_prefix: profile.commandPrefix ?? "",
   };
 }
@@ -188,6 +189,7 @@ export function ProfileCardItem({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={draftAgent.name}
+          capabilityProfileId={savedProfile?.id}
           cursorMcpAuthSupported={
             draftAgent.name === "cursor-acp" || draftAgent.tui_config?.mcp_strategy === "cursor"
           }
