@@ -179,6 +179,7 @@ Verification passed:
 - Desktop E2E command above: 27 tests passed, including the profile refresh and existing ACP, CLI-flag, and workflow tests.
 - Mobile E2E command above: 10 tests passed, including profile refresh, picker, and workflow tests.
 - Review follow-up mobile E2E passed: `pnpm e2e:run --project mobile-chrome e2e/tests/settings/mobile-profile-capability-discovery.spec.ts -- --grep "keeps authentication recovery available"` (1 test). The test verifies required-auth status retains the host-terminal action and its phone-sized target.
+- PR CI exposed two existing native Codex profile E2E assertions that still waited for the agent-wide GET. Their fixture now handles the profile-scoped probe, and both desktop and mobile tests assert the matching ready state. Each targeted E2E passed locally.
 - Targeted ESLint and `pnpm run typecheck` passed after the review follow-up.
 - Public documentation, specification catalog/lint, and PR documentation-coverage checks passed.
 - Final `git diff --check` passed.

@@ -200,6 +200,7 @@ Implementation and documentation checks passed. The commands and detailed counts
 - Backend controller, handler, hostutility, utility, CLI-flag, lifecycle, race, and mock-agent suites passed.
 - Follow-up review regressions passed for profile-scoped refresh, activation during a blocked probe, and activation during command resolution; the hostutility race suite and focused backend packages passed again.
 - PR review regressions passed for managed-default/profile environment precedence, empty unbound environment entries, bounded profile-generation eviction, and cancellation of a secondary provider descendant that retains output pipes. Required-auth recovery remains available in the phone profile editor.
+- Updated the existing native Codex profile E2E stubs to exercise the profile-scoped probe contract; focused desktop and mobile runs passed. The backend utility package also passed locally with race and coverage instrumentation after one unrelated CI classification assertion failed once.
 - Focused frontend Vitest passed, with typecheck, scoped ESLint, i18n checks, and production Vite build.
 - Desktop E2E passed 27 tests; mobile E2E passed 10 tests.
 - The focused mobile auth-recovery regression passed 1 test; post-review backend race tests, targeted ESLint, and web typecheck passed.

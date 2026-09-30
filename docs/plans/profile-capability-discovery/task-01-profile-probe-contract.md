@@ -138,5 +138,6 @@ The PR review follow-up also aligned probe environment construction with profile
 Additional review verification passed:
 
 - `go test -tags fts5 -race ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agentctl/server/utility -count=1`
+- `go test -race -coverprofile=/tmp/profile-discovery-agentctl-utility-coverage.out -covermode=atomic ./internal/agentctl/server/utility -count=1`
 - `make -C apps/backend build`
 - `git diff --check`
