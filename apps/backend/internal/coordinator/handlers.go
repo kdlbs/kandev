@@ -199,6 +199,10 @@ func (h *Handlers) httpListProposals(c *gin.Context) {
 	c.JSON(http.StatusOK, NewProposalListResponse(dtos))
 }
 
+// proposalStatusAll is the proposal list's `status` query value that selects
+// every proposal; it is unrelated to the Watches scope of the same spelling.
+const proposalStatusAll = "all"
+
 // parseProposalListStatus implements Build decision 3's status query
 // parameter rule: absent means pending; exactly "pending" or "all" (case
 // sensitive) select that list; any other value, including the empty string
@@ -211,7 +215,7 @@ func parseProposalListStatus(c *gin.Context) (ListProposalsStatus, *FieldError) 
 	switch raw {
 	case "pending":
 		return ListProposalsPending, nil
-	case "all":
+	case proposalStatusAll:
 		return ListProposalsAll, nil
 	default:
 		return 0, &FieldError{Field: "status", Message: `status must be "pending" or "all"`}
