@@ -224,6 +224,10 @@ func TestApplyPendingSessionMCPRestoresRuntimeConfigAfterLoad(t *testing.T) {
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
+	runtimeConfig := mgr.captureSessionRuntimeConfigForReset(context.Background(), execution)
+	if got := runtimeConfig.ConfigOptions["effort"]; got != "max" {
+		t.Fatalf("captured runtime config options = %#v, want effort=max", runtimeConfig.ConfigOptions)
+	}
 
 	if got := <-actions; got != "agent.initialize" {
 		t.Fatalf("first action = %q, want initialize", got)
@@ -231,7 +235,6 @@ func TestApplyPendingSessionMCPRestoresRuntimeConfigAfterLoad(t *testing.T) {
 	if err := mgr.applyPendingSessionMCP(context.Background(), execution.SessionID); err != nil {
 		t.Fatalf("applyPendingSessionMCP: %v", err)
 	}
-
 	got := make([]string, 0, 4)
 	for {
 		select {
@@ -322,7 +325,18 @@ func newSessionMCPClient(t *testing.T, failResume, supportsResume, supportsLoad 
 				response, _ = ws.NewResponse(msg.ID, msg.Action, map[string]any{
 					"success": true, "attachment_attempt_id": "attempt-load",
 				})
-			case "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option":
+			case "agent.session.set_mode":
+				var request struct {
+					ModeID string `json:"mode_id"`
+				}
+				_ = json.Unmarshal(msg.Payload, &request)
+				result := agentctl.ModeResult{
+					Requested: request.ModeID,
+					Effective: request.ModeID,
+					Confirmed: request.ModeID != "",
+				}
+				response, _ = ws.NewResponse(msg.ID, msg.Action, result)
+			case "agent.session.set_model", "agent.session.set_config_option":
 				response, _ = ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
 			}
 			if response != nil {

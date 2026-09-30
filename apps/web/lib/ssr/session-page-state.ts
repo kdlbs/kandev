@@ -25,7 +25,6 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
-import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/session-model-hydration";
 import { latestIncompleteTurnId } from "@/lib/state/slices/session/turn-actions";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";

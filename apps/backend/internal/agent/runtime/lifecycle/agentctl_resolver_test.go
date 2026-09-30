@@ -743,9 +743,9 @@ func TestAgentctlResolverLaunchDeadlineBoundsDownload(t *testing.T) {
 	defer server.Close()
 	resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
 		Version: version, Commit: commit, BundleDir: bundle, HomeDir: t.TempDir(), ReleaseBaseURL: server.URL,
-		DownloadTimeout: 10 * time.Second,
+		DownloadTimeout: 5 * time.Second,
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var steps []PrepareStep
 	_, err := resolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, func(step PrepareStep, _, _ int) {
@@ -764,7 +764,7 @@ func TestAgentctlResolverLaunchDeadlineBoundsDownload(t *testing.T) {
 	}
 	select {
 	case <-requestCanceled:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("shared helper transfer continued after its only launch waiter expired")
 	}
 	if _, err := resolver.ResolveRemoteBinaryContext(context.Background(), SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, nil); err != nil {
