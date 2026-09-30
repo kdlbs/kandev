@@ -203,8 +203,8 @@ test.describe("Session resume (ACP mode)", () => {
 
     // Reproduce the stale client projection left behind when the reconnect
     // state_changed event is missed. The real session-list refresh must clear it.
-    await seedActiveSessionForegroundActivity(testPage, "background");
-    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await seedActiveSessionForegroundActivity(testPage, "background", sessionId);
+    await waitForActiveSessionForegroundActivity(testPage, "background", sessionId);
     await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
 
     const refreshedSessions = testPage.waitForResponse((response) => {
@@ -214,7 +214,7 @@ test.describe("Session resume (ACP mode)", () => {
     await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
     expect((await refreshedSessions).ok()).toBe(true);
 
-    await waitForActiveSessionForegroundActivity(testPage, null);
+    await waitForActiveSessionForegroundActivity(testPage, null, sessionId);
     await expect(testPage.getByRole("status", { name: "Background work is running" })).toHaveCount(
       0,
     );

@@ -162,6 +162,11 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
       task.session_id,
       "skipped clarification turn should finish before the next prompt",
     );
+    await waitForSessionWaitingForInput(
+      apiClient,
+      task.id,
+      "skipped clarification should release the session before the next prompt",
+    );
 
     await apiClient.addUserMessage(
       task.id,

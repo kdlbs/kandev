@@ -11,6 +11,7 @@ type WireFrame = {
 type RequestContext = {
   action: string;
   sessionId?: string;
+  rejectionMessage?: string;
 };
 
 type DropRule = {
@@ -63,7 +64,13 @@ function responseAction(
 ): RequestContext | undefined {
   const request = typeof frame?.id === "string" ? requestContexts.get(frame.id) : undefined;
   const action = typeof frame?.action === "string" ? frame.action : request?.action;
-  return action ? { action, sessionId: request?.sessionId } : undefined;
+  return action
+    ? {
+        action,
+        sessionId: request?.sessionId,
+        rejectionMessage: request?.rejectionMessage,
+      }
+    : undefined;
 }
 
 function takeResponseContext(
@@ -91,14 +98,11 @@ function consumeDropRule(
 
 function consumeRejectRule(
   context: RequestContext | undefined,
-  rejectRules: Map<string, RejectRule>,
   rejectedCounts: Map<string, number>,
 ): string | undefined {
-  if (!context) return undefined;
-  const rule = rejectRules.get(context.action);
-  if (!rule || (rule.sessionId && context.sessionId !== rule.sessionId)) return undefined;
+  if (!context?.rejectionMessage) return undefined;
   rejectedCounts.set(context.action, (rejectedCounts.get(context.action) ?? 0) + 1);
-  return rule.message;
+  return context.rejectionMessage;
 }
 
 function consumeDelayRule(
@@ -147,13 +151,23 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
             typeof frame.id === "string" &&
             typeof frame.action === "string"
           ) {
-            requestContexts.set(frame.id, {
+            const context: RequestContext = {
               action: frame.action,
               sessionId:
                 typeof frame.payload?.session_id === "string"
                   ? frame.payload.session_id
                   : undefined,
-            });
+            };
+            const rejectRule = rejectRules.get(context.action);
+            // Keep fault injection stable for requests that are already in flight.
+            if (
+              !rejectRule ||
+              (rejectRule.sessionId && rejectRule.sessionId !== context.sessionId)
+            ) {
+              requestContexts.set(frame.id, context);
+            } else {
+              requestContexts.set(frame.id, { ...context, rejectionMessage: rejectRule.message });
+            }
             requestCounts.set(frame.action, (requestCounts.get(frame.action) ?? 0) + 1);
           }
         }
@@ -173,7 +187,7 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
         const frame = parseFrame(trimmed);
         const context = takeResponseContext(frame, requestContexts);
         if (isResponseFrame(frame)) {
-          const rejection = consumeRejectRule(context, rejectRules, rejectedCounts);
+          const rejection = consumeRejectRule(context, rejectedCounts);
           if (rejection && frame) {
             ws.send(
               JSON.stringify({

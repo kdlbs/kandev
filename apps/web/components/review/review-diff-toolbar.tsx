@@ -293,11 +293,10 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         onCloseAutoFocus={(event) => {
-          if (commentSelectedRef.current) {
-            event.preventDefault();
-            commentSelectedRef.current = false;
-            onCommentFile?.();
-          }
+          if (!commentSelectedRef.current) return;
+          event.preventDefault();
+          commentSelectedRef.current = false;
+          requestAnimationFrame(() => onCommentFile?.());
         }}
         data-testid="review-file-actions-menu"
         aria-label={t("review:actionsFor", { filePath })}

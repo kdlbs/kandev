@@ -710,7 +710,7 @@ export class ApiClient {
   /**
    * Delete kanban-only agent profiles except the ones in keepIds.
    *
-   * Office-scoped profiles (those with a non-empty `workspace_id`) are
+   * Office-scoped profiles (those with a non-empty `workspaceId`) are
    * always preserved — they belong to onboarded office workspaces and
    * are managed via the office agent endpoints, not by this helper.
    * Without this guard the per-test cleanup deletes the seeded CEO and
@@ -720,8 +720,7 @@ export class ApiClient {
     const { agents } = await this.listAgents();
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
-        const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
-        if (wsId) continue;
+        if (profile.workspaceId) continue;
         if (!keepIds.includes(profile.id)) {
           await this.deleteTestProfile(profile.id);
         }

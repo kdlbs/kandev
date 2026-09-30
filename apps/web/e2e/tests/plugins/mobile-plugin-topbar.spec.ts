@@ -190,14 +190,45 @@ test.describe("Mobile plugin menu actions", () => {
     await expect(pluginSection.locator("#hello-main-top-bar")).toHaveCount(0);
     const workspaceAction = pluginSection.getByTestId("e2e-sidebar-workspace-actions");
     await expect(workspaceAction).toHaveCount(1);
+    await testPage.evaluate(() => {
+      document.documentElement.dataset.e2eWorkspaceActionClicked = "false";
+      document.addEventListener("click", function observeWorkspaceAction(event) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const action = target.closest<HTMLElement>('[data-testid="e2e-sidebar-workspace-actions"]');
+        if (!action) return;
+        document.documentElement.dataset.e2eWorkspaceActionClicked =
+          action.dataset.clicked === "true" ? "true" : "false";
+        document.removeEventListener("click", observeWorkspaceAction);
+      });
+    });
+    await workspaceAction.scrollIntoViewIfNeeded();
+    await waitForFiniteAnimations(menu);
+    const workspaceActionReceivesCenterTap = await workspaceAction.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      );
+      return target === element || (target instanceof Node && element.contains(target));
+    });
+    expect(workspaceActionReceivesCenterTap).toBe(true);
     await workspaceAction.tap();
-    await expect(workspaceAction).toHaveAttribute("data-clicked", "true");
+    await expect
+      .poll(() => testPage.locator("html").getAttribute("data-e2e-workspace-action-clicked"))
+      .toBe("true");
     await expect(menu.locator("nav.overflow-y-auto")).toHaveCount(1);
     const metrics = menu.getByTestId("app-status-metrics");
     await expect(metrics.getByLabel(/^CPU /)).toBeVisible();
-    const metricsBox = await requireBox(metrics, "system metrics");
-    const pluginBox = await requireBox(pluginSection, "Plugins section");
-    expect(metricsBox.y).toBeGreaterThanOrEqual(pluginBox.y + pluginBox.height);
+    await waitForFiniteAnimations(menu);
+    await expect
+      .poll(async () => {
+        const metricsBox = await metrics.boundingBox();
+        const pluginBox = await pluginSection.boundingBox();
+        if (!metricsBox || !pluginBox) return -1;
+        return metricsBox.y - (pluginBox.y + pluginBox.height);
+      })
+      .toBeGreaterThanOrEqual(0);
     await expect(status).toHaveAttribute("data-task-id", task.id);
     await expect(status).toHaveAttribute("data-workspace-id", seedData.workspaceId);
     await expect(status).toHaveAttribute("data-active-session-id", task.session_id);
@@ -213,6 +244,17 @@ test.describe("Mobile plugin menu actions", () => {
     const actionBox = await requireBox(action, "session plugin action");
     expect(actionBox.height).toBeGreaterThanOrEqual(44);
     expect(actionBox.width).toBeGreaterThanOrEqual(44);
+    await action.scrollIntoViewIfNeeded();
+    await waitForFiniteAnimations(menu);
+    const actionReceivesCenterTap = await action.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      );
+      return target === element || (target instanceof Node && element.contains(target));
+    });
+    expect(actionReceivesCenterTap).toBe(true);
     await action.tap();
     await expect(action).toHaveAttribute("data-activated", "true");
     await expect(menu).toBeVisible();
