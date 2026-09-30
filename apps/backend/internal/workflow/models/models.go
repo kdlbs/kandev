@@ -322,6 +322,30 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 	return false
 }
 
+// AdvancesOnTurnComplete reports whether the step's on_turn_complete actions
+// include a move the workflow engine runs: move_to_next, move_to_previous, or
+// move_to_step with a non-empty step_id, not marked requires_approval. The
+// engine skips a move_to_step without a step_id and does not run a
+// requires_approval move on turn completion; disable_plan_mode never moves the
+// task. A move behind a wait_for_quorum guard counts, because the guard can be
+// satisfied later.
+func (s *WorkflowStep) AdvancesOnTurnComplete() bool {
+	for _, action := range s.Events.OnTurnComplete {
+		if requiresApproval, _ := action.Config["requires_approval"].(bool); requiresApproval {
+			continue
+		}
+		switch action.Type {
+		case OnTurnCompleteMoveToNext, OnTurnCompleteMoveToPrevious:
+			return true
+		case OnTurnCompleteMoveToStep:
+			if stepID, _ := action.Config["step_id"].(string); stepID != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RemapStepID returns the mapped workflow-step ID when id references a template
 // step alias; otherwise it returns id unchanged.
 func RemapStepID(id string, idMap map[string]string) string {

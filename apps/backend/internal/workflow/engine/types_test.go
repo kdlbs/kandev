@@ -203,3 +203,54 @@ func TestCompileStep_RequiresApproval(t *testing.T) {
 		t.Fatalf("expected disable_plan_mode to not require approval")
 	}
 }
+
+// TestCompileStep_OnTurnCompleteMovesMatchAdvancesOnTurnComplete keeps the
+// model-level WorkflowStep.AdvancesOnTurnComplete in step with what
+// evaluateActions can transition on: a compiled move action that does not
+// require approval. A wait_for_quorum guarded move counts, because quorum
+// re-evaluation can apply it after the turn ends.
+func TestCompileStep_OnTurnCompleteMovesMatchAdvancesOnTurnComplete(t *testing.T) {
+	const guardedCase = "wait_for_quorum guarded move"
+	cases := map[string][]wfmodels.OnTurnCompleteAction{
+		"no actions":                  nil,
+		"disable_plan_mode":           {{Type: wfmodels.OnTurnCompleteDisablePlanMode}},
+		"move_to_next":                {{Type: wfmodels.OnTurnCompleteMoveToNext}},
+		"move_to_previous":            {{Type: wfmodels.OnTurnCompleteMoveToPrevious}},
+		"move_to_step":                {{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "s3"}}},
+		"move_to_step without config": {{Type: wfmodels.OnTurnCompleteMoveToStep}},
+		"move_to_step empty step_id":  {{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": ""}}},
+		"requires_approval move": {{
+			Type:   wfmodels.OnTurnCompleteMoveToNext,
+			Config: map[string]any{"requires_approval": true},
+		}},
+		"malformed then valid move": {
+			{Type: wfmodels.OnTurnCompleteMoveToStep},
+			{Type: wfmodels.OnTurnCompleteMoveToPrevious},
+		},
+		guardedCase: {{
+			Type: wfmodels.OnTurnCompleteMoveToStep,
+			Config: map[string]any{
+				"step_id": "s3",
+				"if":      map[string]any{"wait_for_quorum": map[string]any{"role": "approver", "threshold": QuorumAllApprove}},
+			},
+		}},
+	}
+	for name, actions := range cases {
+		t.Run(name, func(t *testing.T) {
+			step := &wfmodels.WorkflowStep{Events: wfmodels.StepEvents{OnTurnComplete: actions}}
+			compiled := CompileStep(step).Events[TriggerOnTurnComplete]
+			if name == guardedCase && (len(compiled) != 1 || compiled[0].Guard == nil) {
+				t.Fatalf("expected one move compiled with a wait_for_quorum guard, got %+v", compiled)
+			}
+			engineMoves := false
+			for _, action := range compiled {
+				if isTransitionAction(action.Kind) && !action.RequiresApproval {
+					engineMoves = true
+				}
+			}
+			if got := step.AdvancesOnTurnComplete(); got != engineMoves {
+				t.Fatalf("AdvancesOnTurnComplete() = %t, engine compiles a runnable move = %t", got, engineMoves)
+			}
+		})
+	}
+}
