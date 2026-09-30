@@ -48,6 +48,34 @@ export function observeProfileDiscoveryRequests(page: Page): ProfileDiscoveryReq
   return requests;
 }
 
+export async function mockProfileProbeRequiresAuth(
+  page: Page,
+  profileId: string,
+): Promise<() => boolean> {
+  let matched = false;
+  await page.route("**/api/v1/agent-models/mock-agent/probe", async (route) => {
+    const body = route.request().postDataJSON() as { profile_id?: string } | null;
+    if (body?.profile_id !== profileId) {
+      await route.continue();
+      return;
+    }
+    matched = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_name: "mock-agent",
+        status: "auth_required",
+        models: [],
+        modes: [],
+        commands: [],
+        error: "Agent authentication is required.",
+      }),
+    });
+  });
+  return () => matched;
+}
+
 export async function createProfileWithCatalog(
   apiClient: ApiClient,
   backend: BackendContext,

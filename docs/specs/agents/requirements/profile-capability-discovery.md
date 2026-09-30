@@ -58,7 +58,7 @@ This capability extends the launch context of discovery.
 #### Acceptance criteria
 
 - **AC-AGENTS-PROFILE-DISCOVERY-003.1:** A launch-setting edit shall mark discovery stale and expose Refresh. Typing shall not start provider processes with each partial edit.
-- **AC-AGENTS-PROFILE-DISCOVERY-003.2:** Refresh shall show progress and then either matching choices or a retryable error. Stale choices shall not appear authoritative.
+- **AC-AGENTS-PROFILE-DISCOVERY-003.2:** Refresh shall show progress and then either matching choices or a retryable error. Stale choices shall not appear authoritative. When discovery reports that provider authentication is required or the provider is not installed, the profile editor shall retain its existing login and host-terminal recovery actions alongside refresh.
 - **AC-AGENTS-PROFILE-DISCOVERY-003.3:** Refresh, failure, and a missing selected model shall preserve draft and saved selections. Existing save and model-option reconciliation rules shall remain effective.
 - **AC-AGENTS-PROFILE-DISCOVERY-003.4:** Desktop and phone editors shall offer the same refresh, selection, and retry outcomes through localized, keyboard-accessible and touch-accessible controls.
 

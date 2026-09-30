@@ -5,6 +5,7 @@ import {
   CapabilityStatusMessage,
   RefreshCapabilitiesButton,
 } from "@/components/settings/profile-capability-status";
+import { NoAuthPanel } from "@/components/settings/profile-status-panels";
 import {
   CommandsButton,
   findActiveMode,
@@ -60,6 +61,7 @@ function CapabilitiesRowContent({
   commands,
   currentModelId,
   currentModeId,
+  status,
   discoveryState,
   onChange,
   isCompact,
@@ -72,6 +74,7 @@ function CapabilitiesRowContent({
   configError,
   configIsLoading,
   onRetryConfig,
+  agentName,
   baselineProfile,
   disableUnverifiedModels,
 }: CapabilitiesRowProps) {
@@ -123,7 +126,9 @@ function CapabilitiesRowContent({
             />
           </div>
         )}
-        <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
+        {status !== "auth_required" && status !== "not_installed" && (
+          <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
+        )}
       </div>
       <ModelConfigResolutionStatus
         status={configStatus}
@@ -135,7 +140,18 @@ function CapabilitiesRowContent({
         <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
-      <CapabilityStatusMessage status={discoveryState} />
+      {status === "auth_required" || status === "not_installed" ? (
+        <NoAuthPanel
+          agentName={agentName}
+          status={status}
+          isLoading={isLoading}
+          onRefresh={onRefresh}
+          error={error}
+          rawError={null}
+        />
+      ) : (
+        <CapabilityStatusMessage status={discoveryState} />
+      )}
     </div>
   );
 }

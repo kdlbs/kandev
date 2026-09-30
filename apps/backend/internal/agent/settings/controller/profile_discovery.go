@@ -213,13 +213,26 @@ func profileProbeEnvironmentDefinitions(
 	envVars []dto.ProfileEnvVarDTO,
 ) []runtimeenv.Definition {
 	defaults := agents.RuntimeEnvFor(inference)
+	profileKeys := make(map[string]struct{}, len(envVars))
+	for _, envVar := range envVars {
+		if envVar.Value == "" && envVar.SecretID == "" {
+			continue
+		}
+		profileKeys[envVar.Key] = struct{}{}
+	}
 	definitions := make([]runtimeenv.Definition, 0, len(defaults)+len(envVars))
 	for key, value := range defaults {
+		if _, overridden := profileKeys[key]; overridden {
+			continue
+		}
 		definitions = append(definitions, runtimeenv.Definition{
 			Key: key, Literal: value, Origin: runtimeenv.OriginManagedAgentDefaults,
 		})
 	}
 	for _, envVar := range envVars {
+		if envVar.Value == "" && envVar.SecretID == "" {
+			continue
+		}
 		definitions = append(definitions, runtimeenv.Definition{
 			Key: envVar.Key, Literal: envVar.Value, SecretID: envVar.SecretID,
 			Origin: runtimeenv.OriginAgentProfile,

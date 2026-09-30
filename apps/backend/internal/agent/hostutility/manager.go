@@ -1,6 +1,7 @@
 package hostutility
 
 import (
+	"container/list"
 	"context"
 	cryptorand "crypto/rand"
 	"errors"
@@ -62,18 +63,21 @@ type Manager struct {
 	profileCache  *profileCapabilityCache
 	profileKey    []byte
 
-	mu                        sync.RWMutex
-	instances                 map[string]*instance // keyed by agent type
-	createGroup               singleflight.Group
-	modelGroup                singleflight.Group
-	modelGenerationMu         sync.Mutex
-	modelGenerations          map[string]uint64
-	profileGenerations        map[string]uint64
-	profileContextGenerations map[string]uint64
-	profileGroup              singleflight.Group
-	managedRuntimeSelections  managedruntime.SelectionReader
-	startCancel               context.CancelFunc
-	stopped                   bool
+	mu                            sync.RWMutex
+	instances                     map[string]*instance // keyed by agent type
+	createGroup                   singleflight.Group
+	modelGroup                    singleflight.Group
+	modelGenerationMu             sync.Mutex
+	modelGenerations              map[string]uint64
+	profileGenerations            map[string]uint64
+	profileContextGenerations     map[string]uint64
+	profileContextGenerationNodes map[string]*list.Element
+	profileContextGenerationOrder *list.List
+	nextProfileContextGeneration  uint64
+	profileGroup                  singleflight.Group
+	managedRuntimeSelections      managedruntime.SelectionReader
+	startCancel                   context.CancelFunc
+	stopped                       bool
 }
 
 // ProviderGatewayAuthResolver resolves provider authentication for a saved
@@ -138,19 +142,21 @@ func NewManager(
 		panic("host utility profile cache key initialization failed")
 	}
 	return &Manager{
-		registry:                  reg,
-		controlHost:               controlHost,
-		controlPort:               controlPort,
-		controlClient:             controlClient,
-		log:                       log.WithFields(zap.String("component", "host-utility")),
-		cache:                     newCache(),
-		modelCache:                newModelConfigCache(),
-		profileCache:              newProfileCapabilityCache(),
-		profileKey:                profileKey,
-		instances:                 make(map[string]*instance),
-		modelGenerations:          make(map[string]uint64),
-		profileGenerations:        make(map[string]uint64),
-		profileContextGenerations: make(map[string]uint64),
+		registry:                      reg,
+		controlHost:                   controlHost,
+		controlPort:                   controlPort,
+		controlClient:                 controlClient,
+		log:                           log.WithFields(zap.String("component", "host-utility")),
+		cache:                         newCache(),
+		modelCache:                    newModelConfigCache(),
+		profileCache:                  newProfileCapabilityCache(),
+		profileKey:                    profileKey,
+		instances:                     make(map[string]*instance),
+		modelGenerations:              make(map[string]uint64),
+		profileGenerations:            make(map[string]uint64),
+		profileContextGenerations:     make(map[string]uint64),
+		profileContextGenerationNodes: make(map[string]*list.Element),
+		profileContextGenerationOrder: list.New(),
 	}
 }
 

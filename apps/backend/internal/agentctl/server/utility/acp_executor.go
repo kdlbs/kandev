@@ -694,9 +694,9 @@ func probeOpenCodeModels(
 	} else {
 		cmd.Env = environWithNoColor(os.Environ())
 	}
-	out, err := cmd.Output()
+	out, err := runACPCommandWithOutput(ctx, cmd, zap.NewNop())
 	if err != nil {
-		return nil, commandErrorWithStderr(err)
+		return nil, err
 	}
 	return parseOpenCodeModelsOutput(string(out)), nil
 }
@@ -715,7 +715,10 @@ func environWithNoColor(environ []string) []string {
 
 // commandErrorWithStderr preserves stderr from failed commands when Go exposes
 // it through exec.ExitError.
-func commandErrorWithStderr(err error) error {
+func commandErrorWithStderr(err error, capturedStderr string) error {
+	if stderr := strings.TrimSpace(capturedStderr); stderr != "" {
+		return fmt.Errorf("%w: %s", err, stderr)
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		stderr := strings.TrimSpace(string(exitErr.Stderr))

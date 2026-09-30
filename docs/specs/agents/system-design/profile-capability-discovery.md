@@ -69,7 +69,7 @@ Reuse the existing environment definition and secret-resolution primitives used 
 Do not introduce a second precedence table or import the lifecycle manager into the settings controller.
 If extraction is required, move the narrow pure resolution helper into the existing agent/common environment boundary.
 
-Merge host runtime defaults and profile environment entries with the existing agent-profile precedence.
+Merge host runtime defaults and profile environment entries with the existing agent-profile precedence. A non-empty profile value or secret binding replaces a managed default with the same key. Ignore empty entries without a secret binding, matching session launch semantics.
 Preserve `StripEnv` and managed npm project isolation.
 Profile values must reach the child after inherited environment sanitization, exactly as supported by session launch.
 Missing or inaccessible secret bindings fail before spawning. Do not copy the utility prompt path's omission of unresolved secrets.
@@ -83,7 +83,7 @@ Environment values such as `CODEX_PATH` remain provider-owned runtime inputs, wi
 
 Extend the host utility probe input to accept an already-authorized launch context.
 Populate `InferenceConfigDTO.Env`, `CLIFlags`, and `CommandPrefix` for both baseline and model-option resolution.
-Keep the host temporary work directory and existing bounded process cleanup.
+Keep the host temporary work directory and existing bounded process cleanup. Secondary subprocesses must also bound output-pipe waits and terminate descendants that retain those pipes after cancellation.
 The ACP probe omits the dedicated model flag for initial discovery, then applies a requested model through existing session-model logic.
 It must not strip user CLI flags that select a provider configuration or runtime.
 
@@ -117,7 +117,7 @@ Resolve secret references before hashing, including their current values, but ne
 Do not return or log an ordinary hash of a credential. Only the opaque context identity can cross response boundaries.
 The launch request holds resolved values only for its bounded execution lifetime.
 
-Refresh bypasses matching entries and increments the generation for that complete authorized launch context.
+Refresh bypasses matching entries and increments the generation for that complete authorized launch context. Keep context-generation tracking bounded to 256 entries with least-recently-used eviction; an evicted revision is stale and cannot validate an in-flight result.
 Refresh in one profile does not change revisions or cache entries for another profile.
 An older in-flight operation can finish, but cannot cache or return a result after its context generation changes.
 Runtime activation advances a separate agent-wide generation and invalidates profile contexts for that agent as well as the existing agent-wide caches.
@@ -175,6 +175,7 @@ This change does not introduce a new overlay, navigation path, or fixed action r
 Validation failures identify fields without echoing values.
 Secret, authorization, missing-executable, unsupported-context, provider-authentication, and timeout failures use sanitized statuses.
 No failure retries through agent defaults, clears a saved selection, or activates another runtime.
+When a profile probe reports required authentication or a missing provider, preserve the existing login and host-terminal recovery actions with refresh on desktop and phone. Phone actions retain 44px touch targets.
 
 The current ACP probe logs its complete command. Profile flags can contain credentials.
 Remove that raw-argument logging from this path before forwarding profile settings.

@@ -1,6 +1,7 @@
 package hostutility
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"strings"
@@ -297,8 +298,37 @@ func (m *Manager) profileContextGeneration(agentType, baseRevision string, runti
 	if m.profileContextGenerations == nil {
 		m.profileContextGenerations = make(map[string]uint64)
 	}
-	if refresh {
-		m.profileContextGenerations[baseRevision]++
+	if m.profileContextGenerationNodes == nil {
+		m.profileContextGenerationNodes = make(map[string]*list.Element)
+	}
+	if m.profileContextGenerationOrder == nil {
+		m.profileContextGenerationOrder = list.New()
+		for revision := range m.profileContextGenerations {
+			m.profileContextGenerationNodes[revision] = m.profileContextGenerationOrder.PushFront(revision)
+		}
+	}
+
+	node := m.profileContextGenerationNodes[baseRevision]
+	if node == nil {
+		m.nextProfileContextGeneration++
+		m.profileContextGenerations[baseRevision] = m.nextProfileContextGeneration
+		m.profileContextGenerationNodes[baseRevision] = m.profileContextGenerationOrder.PushFront(baseRevision)
+	} else {
+		m.profileContextGenerationOrder.MoveToFront(node)
+		if refresh {
+			m.nextProfileContextGeneration++
+			m.profileContextGenerations[baseRevision] = m.nextProfileContextGeneration
+		}
+	}
+	for len(m.profileContextGenerations) > profileCapabilityCacheMaxEntries {
+		oldest := m.profileContextGenerationOrder.Back()
+		if oldest == nil {
+			break
+		}
+		revision := oldest.Value.(string)
+		delete(m.profileContextGenerations, revision)
+		delete(m.profileContextGenerationNodes, revision)
+		m.profileContextGenerationOrder.Remove(oldest)
 	}
 	return m.profileContextGenerations[baseRevision], true
 }

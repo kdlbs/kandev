@@ -132,3 +132,11 @@ Additional verification passed:
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`
 - `git diff --check`
+
+The PR review follow-up also aligned probe environment construction with profile session launch: non-empty profile values and secret bindings override managed defaults, while empty unbound entries are ignored. Profile-context generation tracking is LRU-bounded to 256 revisions; eviction makes the old revision stale. The secondary OpenCode catalog command now uses bounded output-pipe waiting and process-tree cleanup. Regression tests cover both environment cases, generation eviction, and a cancelled provider descendant that retains output pipes.
+
+Additional review verification passed:
+
+- `go test -tags fts5 -race ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agentctl/server/utility -count=1`
+- `make -C apps/backend build`
+- `git diff --check`
