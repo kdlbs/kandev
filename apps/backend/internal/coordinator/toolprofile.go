@@ -14,6 +14,10 @@ var readTools = []string{
 	"list_repositories_kandev", "get_coordinator_item_kandev",
 }
 
+// improvementTool is the phase-3 tool that proposes a change to the
+// coordinator's own context. It exercises no policy action.
+const improvementTool = "propose_improvement_kandev"
+
 var proposeTool = map[Action]string{
 	ActionCreateTask: "propose_task_kandev",
 	ActionMessage:    "propose_message_kandev",
@@ -26,8 +30,9 @@ var proposeOrder = []Action{ActionCreateTask, ActionMessage, ActionMove, ActionR
 
 // ToolNames returns the MCP tools a coordinator conversation may call. With
 // phase2 false it is the phase-1 seven; with phase2 true it is the read tools,
-// the activity tool, and each propose tool whose action the policy allows.
-func ToolNames(p Policy, phase2 bool) []string {
+// the activity tool, and each propose tool whose action the policy allows;
+// phase3 adds the improvement tool.
+func ToolNames(p Policy, phase2, phase3 bool) []string {
 	names := append([]string{}, readTools...)
 	if !phase2 {
 		return append(names, proposeTool[ActionCreateTask])
@@ -37,6 +42,9 @@ func ToolNames(p Policy, phase2 bool) []string {
 		if p.Allows(a) {
 			names = append(names, proposeTool[a])
 		}
+	}
+	if phase3 {
+		names = append(names, improvementTool)
 	}
 	return names
 }
@@ -66,6 +74,8 @@ var actionTools = map[string]string{
 	mcpcontract.ActionProposeResume:  "propose_resume_kandev",
 	mcpcontract.ActionProposeMessage: "propose_message_kandev",
 	mcpcontract.ActionProposeMove:    "propose_move_kandev",
+
+	mcpcontract.ActionProposeImprovement: improvementTool,
 }
 
 // ToolForAction returns the MCP tool name that exposes a WebSocket action.

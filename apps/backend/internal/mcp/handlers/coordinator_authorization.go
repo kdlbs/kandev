@@ -32,6 +32,8 @@ var coordinatorSurfaceActions = map[string]struct{}{
 	coordinator.ActionProposeMove:    {},
 	coordinator.ActionGetItem:        {},
 	coordinator.ActionListActivity:   {},
+
+	coordinator.ActionProposeImprovement: {},
 }
 
 // coordinatorPrincipalOnlyActions are registered coordinator-surface actions
@@ -47,6 +49,8 @@ var coordinatorPrincipalOnlyActions = map[string]struct{}{
 	coordinator.ActionProposeMove:    {},
 	coordinator.ActionGetItem:        {},
 	coordinator.ActionListActivity:   {},
+
+	coordinator.ActionProposeImprovement: {},
 }
 
 // authorizeCoordinatorRequest is the one execution-time boundary for the
@@ -73,6 +77,9 @@ func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Mess
 	isCoordinator := hasPrincipal && principal.IsCoordinator()
 
 	if _, reserved := coordinator.DecisionActions[msg.Action]; reserved && (isCoordinator || !hasPrincipal) {
+		return coordinatorUnknownAction(msg)
+	}
+	if msg.Action == coordinator.ActionProposeImprovement && (h.coordinatorSvc == nil || !h.coordinatorSvc.Phase3Enabled()) {
 		return coordinatorUnknownAction(msg)
 	}
 	if _, principalOnly := coordinatorPrincipalOnlyActions[msg.Action]; principalOnly && !isCoordinator {
@@ -120,11 +127,14 @@ func (h *Handlers) authorizeCoordinatorSurface(
 }
 
 // phaseOneToolNames is the tool list of a conversation that has no binding.
-var phaseOneToolNames = coordinator.ToolNames(coordinator.PhaseOnePolicy(), false)
+var phaseOneToolNames = coordinator.ToolNames(coordinator.PhaseOnePolicy(), false, false)
 
 // actionClass is the activity class a refused request is recorded under: the
 // policy action of a propose tool, otherwise unknown.
 func actionClass(action string) coordinator.Action {
+	if action == coordinator.ActionProposeImprovement {
+		return coordinator.ActionImprovement
+	}
 	if tool, ok := coordinator.ToolForAction(action); ok {
 		if class, isPropose := coordinator.ProposeActionFor(tool); isPropose {
 			return class
@@ -306,6 +316,9 @@ func coordinatorNotFound(msg *ws.Message) (*ws.Message, *ws.Message, error) {
 // propose tools, whose own field and target validation runs in the coordinator
 // service and names the offending field.
 func isCoordinatorProposeAction(action string) bool {
+	if action == coordinator.ActionProposeImprovement {
+		return true
+	}
 	tool, ok := coordinator.ToolForAction(action)
 	if !ok {
 		return false

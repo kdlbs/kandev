@@ -278,6 +278,8 @@ type ProposalPhase3 struct {
 	ReplyText        *string    `json:"reply_text"`
 	ReplyDeliveredAt *time.Time `json:"reply_delivered_at"`
 	InReplyTo        *string    `json:"in_reply_to"`
+	// ChangeStatus is present for improvement proposals only.
+	ChangeStatus *string `json:"change_status,omitempty"`
 }
 
 // ProposalPhase2 holds the proposal wire fields added by phase 2.
@@ -308,6 +310,9 @@ func NewProposalDTOPhases(p *Proposal, phase2, phase3 bool) *ProposalDTO {
 	if phase3 {
 		dto.ProposalPhase3 = &ProposalPhase3{
 			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo,
+		}
+		if p.Kind == ProposalKindImprovement && p.ChangeStatus != nil {
+			dto.ChangeStatus = p.ChangeStatus
 		}
 	}
 	return dto

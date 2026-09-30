@@ -15,7 +15,7 @@ var ErrUnknownProposalKind = errors.New("coordinator: unknown proposal kind")
 
 func knownProposalKind(kind string) bool {
 	switch kind {
-	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume:
+	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume, ProposalKindImprovement:
 		return true
 	}
 	return false
@@ -29,7 +29,7 @@ func (s *Service) checkApprovable(p *Proposal) error {
 	return fmt.Errorf("%w: %q cannot be approved", ErrUnknownProposalKind, p.Kind)
 }
 
-// checkRejectable rejects a proposal whose kind is not one of the four.
+// checkRejectable rejects a proposal whose kind is not a known kind.
 func (s *Service) checkRejectable(p *Proposal) error {
 	if !s.phase2 || p.Kind == "" || knownProposalKind(p.Kind) {
 		return nil
@@ -129,7 +129,7 @@ func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, 
 		return s.store.RejectProposal(ctx, p.ID, reason, decidedBy, time.Now())
 	}
 	class := ActionUnknown
-	if a := Action(p.Kind); isPolicyAction(a) {
+	if a := Action(p.Kind); isPolicyAction(a) || a == ActionImprovement {
 		class = a
 	}
 	row := ActivityRow{

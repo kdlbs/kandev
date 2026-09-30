@@ -16,6 +16,10 @@ const (
 	ActionProposeMove    = "coordinator.propose_move"
 )
 
+// ActionProposeImprovement is the MCP action the propose_improvement_kandev
+// tool dispatches (docs/specs/coordinator/system-design/improvements.md#tool).
+const ActionProposeImprovement = "coordinator.propose_improvement"
+
 // ActionGetItem is the MCP action the get_coordinator_item_kandev tool
 // dispatches (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = "coordinator.get_item"
@@ -53,4 +57,6 @@ var DecisionActions = map[string]struct{}{
 const (
 	FieldWorkflowID = "workflow_id"
 	FieldStepID     = "step_id"
+	// FieldEvidence is the improvement tool's evidence array argument.
+	FieldEvidence = "evidence"
 )

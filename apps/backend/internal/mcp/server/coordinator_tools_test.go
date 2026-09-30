@@ -66,7 +66,7 @@ func TestServerSurfaceCoordinatorRegistersEveryBoundToolForEveryPolicy(t *testin
 			}
 			policy.Actions[a] = setting
 		}
-		want := coordinator.ToolNames(policy, true)
+		want := coordinator.ToolNames(policy, true, false)
 		profile := mcpprofile.NewCoordinator()
 		profile.CoordinatorToolPolicy = &mcpprofile.CoordinatorToolPolicy{
 			Version: 1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t", ToolNames: want,

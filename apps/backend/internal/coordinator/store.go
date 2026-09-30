@@ -29,6 +29,11 @@ type Store struct {
 	// deterministic-order test needs a strictly increasing fake clock).
 	now func() time.Time
 
+	// phase3 reports whether phase 3 is effective; improvement proposals are
+	// fenced out of every fenced read while it is not. Set by the Service that
+	// owns the store, nil (phase 3 off) on a bare store.
+	phase3 func() bool
+
 	// afterLock is a test-only hook invoked once inside PatchCoordinator,
 	// immediately after the per-coordinator write lock is acquired (right
 	// after SQLite's BEGIN IMMEDIATE, right after PostgreSQL's SELECT ...
@@ -403,19 +408,35 @@ func (s *Store) PatchCoordinator(ctx context.Context, workspaceID, id string, pa
 	return res.Coordinator, res.ClearedConversationTaskID, nil
 }
 
+// patchGuard adds steps to the PATCH transaction: pre runs after the row is
+// read under the lock and before validation (and may complete the patch from
+// what it read), pinContext (when set) makes the
+// write conditional on the stored context, and post runs in the same
+// transaction after the write.
+type patchGuard struct {
+	pre           func(ctx context.Context, exec coordinatorExec, row *coordinatorRow, patch *CoordinatorPatch) error
+	pinContext    *string
+	onPinMismatch error
+	post          func(ctx context.Context, exec coordinatorExec) error
+}
+
 // PatchCoordinatorResult is PatchCoordinator returning the full PatchResult,
 // including whether the autonomy settings changed.
 func (s *Store) PatchCoordinatorResult(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*PatchResult, error) {
+	return s.patchCoordinatorGuarded(ctx, workspaceID, id, patch, validate, nil)
+}
+
+func (s *Store) patchCoordinatorGuarded(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, guard *patchGuard) (*PatchResult, error) {
 	if dialect.IsPostgres(s.db.DriverName()) {
-		return s.patchCoordinatorPostgres(ctx, workspaceID, id, patch, validate)
+		return s.patchCoordinatorPostgres(ctx, workspaceID, id, patch, validate, guard)
 	}
-	return s.patchCoordinatorSQLite(ctx, workspaceID, id, patch, validate)
+	return s.patchCoordinatorSQLite(ctx, workspaceID, id, patch, validate, guard)
 }
 
 // patchCoordinatorSQLite takes the single writer lock up front with BEGIN
 // IMMEDIATE, before any read, so a competing PATCH serializes rather than
 // racing the read.
-func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*PatchResult, error) {
+func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, guard *patchGuard) (*PatchResult, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire writer connection: %w", err)
@@ -439,7 +460,7 @@ func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id stri
 		s.afterLock(ctx)
 	}
 
-	result, err := s.patchCoordinatorBody(ctx, conn, func(q string) string { return q }, workspaceID, id, patch, validate, false, nil)
+	result, err := s.patchCoordinatorBody(ctx, conn, func(q string) string { return q }, workspaceID, id, patch, validate, false, nil, guard)
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +474,7 @@ func (s *Store) patchCoordinatorSQLite(ctx context.Context, workspaceID, id stri
 // patchCoordinatorPostgres acquires the lock via SELECT ... FOR UPDATE inside
 // patchCoordinatorBody: on PostgreSQL that statement is what acquires the
 // row lock, so afterLock fires right after it returns (see the passed hook).
-func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator) (*PatchResult, error) {
+func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, guard *patchGuard) (*PatchResult, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin patch coordinator: %w", err)
@@ -465,7 +486,7 @@ func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id st
 			s.afterLock(ctx)
 		}
 	}
-	result, err := s.patchCoordinatorBody(ctx, tx, s.db.Rebind, workspaceID, id, patch, validate, true, hook)
+	result, err := s.patchCoordinatorBody(ctx, tx, s.db.Rebind, workspaceID, id, patch, validate, true, hook, guard)
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +500,7 @@ func (s *Store) patchCoordinatorPostgres(ctx context.Context, workspaceID, id st
 // stamps updated_at with the store's clock, and writes the update. hookAfterRead
 // is called right after the row read succeeds (used only by the PostgreSQL
 // path, where that read is what acquires the lock); pass nil otherwise.
-func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, rebind func(string) string, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, forUpdate bool, hookAfterRead func()) (*PatchResult, error) {
+func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, rebind func(string) string, workspaceID, id string, patch CoordinatorPatch, validate PatchValidator, forUpdate bool, hookAfterRead func(), guard *patchGuard) (*PatchResult, error) {
 	turningAutonomyOff := patch.AutonomyEnabled != nil && !*patch.AutonomyEnabled
 	if turningAutonomyOff {
 		if err := s.takeWakeLock(ctx, exec, id); err != nil {
@@ -493,6 +514,9 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 	if hookAfterRead != nil {
 		hookAfterRead()
 	}
+	if err := guard.runPre(ctx, exec, row, &patch); err != nil {
+		return nil, err
+	}
 
 	merged := mergeCoordinatorPatch(row, patch)
 	if validate != nil {
@@ -500,28 +524,14 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 			return nil, err
 		}
 	}
-
-	var clearedConversationTaskID *string
-	newConversationTaskID := merged.ConversationTaskID
-	newConfigRevision := row.ConfigRevision
-	if merged.Context != row.Context || merged.AgentProfileID != row.AgentProfileID || merged.ExecutorProfileID != row.ExecutorProfileID {
-		if row.ConversationTaskID.Valid {
-			old := row.ConversationTaskID.String
-			clearedConversationTaskID = &old
-		}
-		newConversationTaskID = nil
-		newConfigRevision = row.ConfigRevision + 1
-	}
+	clearedConversationTaskID, newConversationTaskID, newConfigRevision := configChangeEffects(row, merged)
 
 	now := s.now()
-	_, err = exec.ExecContext(ctx, rebind(`
-		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, autonomy_enabled = ?, cost_ceiling_subcents = ?, updated_at = ?
-		WHERE id = ? AND workspace_id = ?`),
-		merged.Name, merged.AgentProfileID, merged.ExecutorProfileID, merged.Context,
-		nullableString(newConversationTaskID), newConfigRevision,
-		autonomyColumn(merged.AutonomyEnabled), nullableInt64(merged.CostCeilingSubcents), now, row.ID, row.WorkspaceID)
-	if err != nil {
-		return nil, fmt.Errorf("update coordinator: %w", err)
+	if err := s.writePatchedCoordinator(ctx, exec, rebind, row, merged, newConversationTaskID, newConfigRevision, now, guard); err != nil {
+		return nil, err
+	}
+	if err := guard.runPost(ctx, exec); err != nil {
+		return nil, err
 	}
 	if turningAutonomyOff {
 		if _, err := exec.ExecContext(ctx, rebind(`
@@ -540,6 +550,67 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 		ClearedConversationTaskID: clearedConversationTaskID,
 		AutonomyChanged:           autonomySettingsChanged(row, merged),
 	}, nil
+}
+
+func (g *patchGuard) runPre(ctx context.Context, exec coordinatorExec, row *coordinatorRow, patch *CoordinatorPatch) error {
+	if g == nil || g.pre == nil {
+		return nil
+	}
+	return g.pre(ctx, exec, row, patch)
+}
+
+func (g *patchGuard) runPost(ctx context.Context, exec coordinatorExec) error {
+	if g == nil || g.post == nil {
+		return nil
+	}
+	return g.post(ctx, exec)
+}
+
+// configChangeEffects derives what a merged patch does to the conversation and
+// the config revision: a changed context or profile drops the conversation and
+// bumps the revision.
+func configChangeEffects(row *coordinatorRow, merged *Coordinator) (cleared, conversationTaskID *string, revision int64) {
+	conversationTaskID, revision = merged.ConversationTaskID, row.ConfigRevision
+	if merged.Context == row.Context && merged.AgentProfileID == row.AgentProfileID && merged.ExecutorProfileID == row.ExecutorProfileID {
+		return nil, conversationTaskID, revision
+	}
+	if row.ConversationTaskID.Valid {
+		old := row.ConversationTaskID.String
+		cleared = &old
+	}
+	return cleared, nil, row.ConfigRevision + 1
+}
+
+// writePatchedCoordinator writes the merged row. A guard that pins the stored
+// context adds it to the WHERE clause, so a write that lost the context it was
+// built against changes no row and returns the guard's mismatch error.
+func (s *Store) writePatchedCoordinator(ctx context.Context, exec coordinatorExec, rebind func(string) string, row *coordinatorRow, merged *Coordinator, conversationTaskID *string, configRevision int64, now time.Time, guard *patchGuard) error {
+	query := `
+		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, autonomy_enabled = ?, cost_ceiling_subcents = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ?`
+	args := []any{merged.Name, merged.AgentProfileID, merged.ExecutorProfileID, merged.Context,
+		nullableString(conversationTaskID), configRevision,
+		autonomyColumn(merged.AutonomyEnabled), nullableInt64(merged.CostCeilingSubcents), now, row.ID, row.WorkspaceID}
+	pinned := guard != nil && guard.pinContext != nil
+	if pinned {
+		query += ` AND context = ?`
+		args = append(args, *guard.pinContext)
+	}
+	res, err := exec.ExecContext(ctx, rebind(query), args...)
+	if err != nil {
+		return fmt.Errorf("update coordinator: %w", err)
+	}
+	if !pinned {
+		return nil
+	}
+	matched, err := matchedRow(res)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return guard.onPinMismatch
+	}
+	return nil
 }
 
 // autonomySettingsChanged reports whether the merged autonomy switch or

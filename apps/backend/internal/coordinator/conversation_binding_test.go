@@ -23,7 +23,7 @@ func TestOpenConversationStampsBindingWithPhase2(t *testing.T) {
 	if binding.ConversationTaskID != task.ID || binding.CoordinatorID != d.coordinator.ID || binding.WorkspaceID != d.coordinator.WorkspaceID {
 		t.Fatalf("binding identity = %+v, want the conversation's own ids", binding)
 	}
-	want := ToolNames(d.svc.policyFor(d.coordinator), true)
+	want := ToolNames(d.svc.policyFor(d.coordinator), true, false)
 	if len(binding.ToolNames) != len(want) {
 		t.Fatalf("ToolNames = %v, want %v", binding.ToolNames, want)
 	}

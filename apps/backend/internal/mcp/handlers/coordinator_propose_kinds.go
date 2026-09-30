@@ -36,7 +36,7 @@ func (h *Handlers) proposeKindHandler(kind string) func(context.Context, *ws.Mes
 			return h.proposeKindErrorResponse(msg, kind, err)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-			"proposal_id":     proposal.ID,
+			proposalIDKey:     proposal.ID,
 			stopTaskStatusKey: string(proposal.Status),
 			"deduplicated":    deduplicated,
 		})
@@ -56,3 +56,32 @@ func (h *Handlers) proposeKindErrorResponse(msg *ws.Message, kind string, err er
 	h.logger.Error("propose failed", zap.String("kind", kind), zap.Error(err))
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create proposal", nil)
 }
+
+// handleProposeImprovement backs coordinator.propose_improvement. The
+// coordinator id comes from the trusted principal, never the payload, and the
+// action exists only while phase 3 is effective.
+func (h *Handlers) handleProposeImprovement(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || !principal.IsCoordinator() {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator principal is required", nil)
+	}
+	if h.coordinatorSvc == nil || !h.coordinatorSvc.Phase3Enabled() {
+		response, _, err := coordinatorUnknownAction(msg)
+		return response, err
+	}
+	proposal, err := h.coordinatorSvc.ProposeImprovement(ctx, principal.CoordinatorID, msg.Payload)
+	if err != nil {
+		if errors.Is(err, coordinator.ErrImprovementsUnavailable) {
+			response, _, unknownErr := coordinatorUnknownAction(msg)
+			return response, unknownErr
+		}
+		return h.proposeKindErrorResponse(msg, coordinator.ProposalKindImprovement, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		proposalIDKey:     proposal.ID,
+		stopTaskStatusKey: string(proposal.Status),
+	})
+}
+
+// proposalIDKey is the response key carrying a created proposal's id.
+const proposalIDKey = "proposal_id"

@@ -237,6 +237,7 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 	for _, opt := range opts {
 		opt(s)
 	}
+	store.phase3 = func() bool { return s.phase3 }
 	return s
 }
 
@@ -382,16 +383,7 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 		return nil, err
 	}
 
-	validate := func(ctx context.Context, merged *Coordinator) error {
-		if err := s.validator.ValidateAgentProfile(ctx, workspaceID, merged.AgentProfileID); err != nil {
-			return err
-		}
-		if err := s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID); err != nil {
-			return err
-		}
-		return checkAutonomyInterlock(patch, merged)
-	}
-	result, err := s.store.PatchCoordinatorResult(ctx, workspaceID, id, patch, validate)
+	result, err := s.store.PatchCoordinatorResult(ctx, workspaceID, id, patch, s.patchValidator(workspaceID, patch))
 	if err != nil {
 		return nil, err
 	}
@@ -406,6 +398,20 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", id),
 		zap.Bool("context_changed", clearedConversationTaskID != nil))
 	return updated, nil
+}
+
+// patchValidator is the validation a coordinator write runs on the merged row:
+// both profiles must resolve and the autonomy interlock must hold.
+func (s *Service) patchValidator(workspaceID string, patch CoordinatorPatch) PatchValidator {
+	return func(ctx context.Context, merged *Coordinator) error {
+		if err := s.validator.ValidateAgentProfile(ctx, workspaceID, merged.AgentProfileID); err != nil {
+			return err
+		}
+		if err := s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID); err != nil {
+			return err
+		}
+		return checkAutonomyInterlock(patch, merged)
+	}
 }
 
 // afterAutonomyChange runs after a PATCH that changed autonomy or the ceiling

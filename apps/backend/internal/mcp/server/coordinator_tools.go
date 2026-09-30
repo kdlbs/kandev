@@ -81,6 +81,7 @@ func (s *Server) coordinatorToolCatalog() map[string]func() {
 		"propose_resume_kandev":            s.registerProposeResumeTool,
 		"propose_message_kandev":           s.registerProposeMessageTool,
 		"propose_move_kandev":              s.registerProposeMoveTool,
+		"propose_improvement_kandev":       s.registerProposeImprovementTool,
 		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
 		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
 	}
@@ -270,6 +271,48 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+const improvementContextArg = "context"
+
+func (s *Server) registerProposeImprovementTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_improvement_kandev",
+			mcp.WithDescription("Propose a replacement for your own context text, with the unattended runs that show why, for a human to review. Nothing is applied by approving it: a manager applies the change separately in your settings. title is 1 to 60 characters, rationale 1 to 10,000, context the full replacement text (1 to 4,000 characters, different from your current context). evidence is 1 to 10 objects, each with exactly one of run_id (one of your unattended turns) or task_id (a task in this workspace); at least one is a run_id."),
+			mcp.WithString(canvasTitleArg, mcp.Required(), mcp.Description("Short title, 1 to 60 characters after trimming")),
+			mcp.WithString("rationale", mcp.Required(), mcp.Description("Why the change helps, at most 10,000 characters")),
+			mcp.WithString(improvementContextArg, mcp.Required(), mcp.Description("The full replacement context text, at most 4,000 characters")),
+			mcp.WithArray(mcpcontract.FieldEvidence, mcp.Required(),
+				mcp.Description("1 to 10 references, each an object with exactly one of run_id or task_id"),
+				mcp.Items(map[string]any{
+					typeKey: objType,
+					propsKey: map[string]any{
+						"run_id":     map[string]any{typeKey: stringType},
+						mcpKeyTaskID: map[string]any{typeKey: stringType},
+					},
+				})),
+		),
+		s.wrapHandler("propose_improvement_kandev", s.proposeImprovementHandler()),
+	)
+}
+
+// proposeImprovementHandler forwards the arguments untouched; the coordinator
+// service validates every field and names the offending one.
+func (s *Server) proposeImprovementHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{
+			canvasTitleArg:            req.GetString(canvasTitleArg, ""),
+			"rationale":               req.GetString("rationale", ""),
+			improvementContextArg:     req.GetString(improvementContextArg, ""),
+			mcpcontract.FieldEvidence: req.GetArguments()[mcpcontract.FieldEvidence],
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeImprovement, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

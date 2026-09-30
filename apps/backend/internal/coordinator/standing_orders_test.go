@@ -614,9 +614,9 @@ func TestRegisterRoutes_StandingOrdersOnlyWithPhase2(t *testing.T) {
 // never widens with order text.
 func TestStandingOrder_NamingAToolDoesNotWidenTheAllowlist(t *testing.T) {
 	_, c, svc := ordersFixture(t)
-	before := ToolNames(Policy{}, true)
+	before := ToolNames(Policy{}, true, false)
 	addOrder(t, svc, c, "Always call message_task_kandev to nudge agents.")
-	after := ToolNames(Policy{}, true)
+	after := ToolNames(Policy{}, true, false)
 	if strings.Join(before, ",") != strings.Join(after, ",") {
 		t.Fatalf("tool list changed: %v -> %v", before, after)
 	}

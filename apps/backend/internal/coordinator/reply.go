@@ -71,6 +71,11 @@ var replyTexts = map[string]replyTextFunc{
 	ProposalKindMessage: taskKindReplyText,
 	ProposalKindMove:    taskKindReplyText,
 	ProposalKindResume:  taskKindReplyText,
+	ProposalKindImprovement: func(p *Proposal, title, reply string) string {
+		return fmt.Sprintf("Reply to your improvement proposal %q (proposal %s): %s. "+
+			"If you still think the change is needed, send a new improvement that meets the condition.",
+			title, p.ID, reply)
+	},
 }
 
 func taskKindReplyText(p *Proposal, title, reply string) string {
@@ -92,8 +97,12 @@ func replyTitle(p *Proposal) string {
 	}
 	var spec struct {
 		TaskID string `json:"task_id"`
+		Title  string `json:"title"`
 	}
 	_ = json.Unmarshal([]byte(p.RawSpec), &spec)
+	if p.Kind == ProposalKindImprovement {
+		return spec.Title
+	}
 	return fmt.Sprintf("%s task %s", replyTitleVerbs[p.Kind], spec.TaskID)
 }
 

@@ -21,6 +21,7 @@ const (
 	stopStateFailing    = "stop_failing"
 	codeCoordinatorGone = "coordinator_not_found"
 	codeRunGone         = "run_not_found"
+	codeChangeGone      = "change_not_found"
 	codeReadError       = "read_error"
 	autonomyReadTimeFmt = time.RFC3339
 )
@@ -321,10 +322,23 @@ func (h *Handlers) respondReadError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, NewErrorResponse(codeRunGone))
 	case errors.Is(err, ErrNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse(codeCoordinatorGone))
+	case errors.Is(err, ErrChangeNotFound):
+		c.JSON(http.StatusNotFound, NewErrorResponse(codeChangeGone))
+	case errors.As(err, new(*ChangeConflictError)):
+		var conflict *ChangeConflictError
+		_ = errors.As(err, &conflict)
+		c.JSON(http.StatusConflict, changeConflictBody{Error: "conflict", Reason: conflict.Reason, Change: conflict.Change})
 	case errors.Is(err, errReadFailed):
 		h.logger.Warn("coordinator read failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, NewErrorResponse(codeReadError))
 	default:
 		h.respondError(c, err)
 	}
+}
+
+// changeConflictBody is the 409 body of an Apply or Discard that lost.
+type changeConflictBody struct {
+	Error  string         `json:"error"`
+	Reason string         `json:"reason"`
+	Change *PendingChange `json:"change"`
 }
