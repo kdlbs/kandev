@@ -181,6 +181,7 @@ function renderActionWithStore(
   comment: Message,
   sessionState: TaskSessionState,
   sessionError = "",
+  activeTurnId?: string,
 ) {
   let store: StoreApi<AppState> | null = null;
   function CaptureStore() {
@@ -195,7 +196,7 @@ function renderActionWithStore(
     },
     turns: {
       bySession: {},
-      activeBySession: {},
+      activeBySession: activeTurnId ? { [TEST_SESSION_ID]: activeTurnId } : {},
       loadedBySession: {},
       reconcileEpochBySession: {},
       settledBoundaryBySession: {},
@@ -217,7 +218,10 @@ function renderActionWithStore(
         updated_at: "",
       } as TaskSession);
     });
-  return { ...utils, setSessionState };
+  const addMessage = (message: Message) => act(() => store?.getState().addMessage(message));
+  const updateMessage = (message: Message) =>
+    act(() => store?.getState().updateMessages([message]));
+  return { ...utils, setSessionState, addMessage, updateMessage };
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {
@@ -461,6 +465,32 @@ describe("ActionMessage — running stall notice", () => {
   it("hides an old notice when a later turn is active", () => {
     const { container } = renderAction(stalledMessage("turn-1"), "RUNNING", undefined, "turn-2");
     expect(container.firstChild).toBeNull();
+  });
+
+  // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.6
+  it("hides a running notice when the existing compaction tool resumes in the same turn", () => {
+    const notice = stalledMessage();
+    const { addMessage, updateMessage } = renderActionWithStore(notice, "RUNNING", "", "turn-1");
+    const tool: Message = {
+      ...notice,
+      id: "compaction-tool",
+      author_type: "agent",
+      type: "tool_call",
+      content: "Compact conversation",
+      created_at: "2026-05-29T23:59:00Z",
+      updated_at: "2026-05-29T23:59:00Z",
+      metadata: { tool_call_id: "compact-1", status: "running" },
+    };
+    addMessage(tool);
+    expect(screen.queryByTestId("running-action-notice")).not.toBeNull();
+
+    updateMessage({
+      ...tool,
+      updated_at: "2026-05-30T00:00:01Z",
+      metadata: { ...tool.metadata, status: "complete" },
+    });
+
+    expect(screen.queryByTestId("running-action-notice")).toBeNull();
   });
 
   it("hides a running-only notice without a turn ID", () => {

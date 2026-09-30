@@ -82,6 +82,23 @@ without setting it, because user input is not agent output.
 6. An accepted never-started event persists the terminal error notice, applies
    the launch-failure transition, and then requests execution teardown.
 
+### Advisory notice resolution
+
+The action-message renderer derives advisory visibility from the existing
+session, active turn, and session-message store. A running-only status notice
+is hidden once an agent-authored content, reasoning, tool, plan, or permission
+row for the same session and turn has a timestamp later than the notice's
+creation. Use `updated_at` as well as `created_at`, preserving RFC3339
+nanosecond precision: a tool can finish by updating a row created before the
+notice. System status rows, queued user input, and other turns do not resolve
+it. Terminal error diagnostics retain their settled rendering.
+
+The store selector returns a boolean and subscribes only for running-only
+status notices. Both live message events and hydrated persisted rows provide
+the same resolution evidence, so reload does not restore a stale notice.
+The advisory message remains persisted and the watchdog still publishes at
+most once per prompt generation; resolution adds no automatic cancellation.
+
 ### Prompt progress clock
 
 Because the clock advances only on the four inputs above, an adapter that emits
