@@ -171,3 +171,23 @@ func TestAutomatic_VolumeIgnoresAutomaticApprovalsAfterLowerAndReRaise(t *testin
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestLoweringDuty_LowersForACoordinatorWhoseAutonomyIsOff(t *testing.T) {
+	store, c, _, svc, _ := raisedFixture(t)
+	svc.SetAutomaticPorts(nil, nil)
+	p, _ := proposeAuto(t, store, c, svc)
+	mustExec(t, store, `UPDATE coordinator_activity SET undone_at = ? WHERE proposal_id = ?`, automaticNow, p.ID)
+	mustExec(t, store, `UPDATE coordinators SET autonomy_enabled = 0 WHERE id = ?`, c.ID)
+	duty := svc.LoweringDuty()
+	for i := 0; i < 2; i++ {
+		if err := duty(context.Background(), c.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if settingOf(t, store, svc, c) != SettingRequiresApproval {
+		t.Fatal("duty did not lower with autonomy off")
+	}
+	if n := countClassChanges(t, store, c, SettingRequiresApproval); n != 1 {
+		t.Fatalf("lower changes = %d, want 1", n)
+	}
+}

@@ -69,7 +69,10 @@ func (s *Service) raiserContext(ctx context.Context, workspaceID, raiser string)
 	if resolver == nil {
 		return ctx, raiserInvalid, fmt.Errorf("%w: no identity resolver", errRaiserUnavailable)
 	}
-	identity, ok := resolver.IdentityForUser(ctx, raiser)
+	identity, ok, err := resolver.ResolveUserIdentity(ctx, raiser)
+	if err != nil {
+		return ctx, raiserInvalid, fmt.Errorf("%w: %v", errRaiserUnavailable, err)
+	}
 	if !ok {
 		return ctx, raiserInvalid, nil
 	}
@@ -93,7 +96,7 @@ func raiserCheckError(err error) error {
 // create_task proposal. It returns nil when the class is not automatic, so the
 // phase 1 result stands.
 func (s *Service) TryAutomaticApproval(ctx context.Context, proposal *Proposal) (*AutomaticResult, error) {
-	if !s.phase3 || s.decisionTasks == nil || proposal.Kind != ProposalKindCreateTask {
+	if !s.phase3 || s.decisionTasks == nil || proposal.Kind != ProposalKindCreateTask || proposal.StartsAgent {
 		return nil, nil
 	}
 	setting, err := s.actionSettings().Setting(ctx, proposal.CoordinatorID, string(ActionCreateTask))
@@ -161,7 +164,7 @@ func (s *Service) approveAutomatically(ctx, raiserCtx context.Context, proposal 
 		return &AutomaticResult{Status: current.Status}, nil
 	}
 	turnCtx := withAutomaticTurn(raiserCtx, s.currentUnattendedTurn(ctx, proposal.CoordinatorID))
-	done, err := s.finishClaim(turnCtx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, claim.token, spec, proposal.StartsAgent, nil)
+	done, err := s.finishClaim(turnCtx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, claim.token, spec, false, nil)
 	if err != nil {
 		s.logger.Error("automatic approval: completion failed after claim", zap.String("proposal_id", proposal.ID), zap.Error(err))
 		return s.afterFailedFinish(ctx, proposal), nil

@@ -101,9 +101,9 @@ type automaticState struct {
 
 // IdentityResolver resolves a stored user id to the identity that user
 // carries on an authenticated request; ok is false when the account is
-// missing or disabled.
+// missing or disabled, and an error means the lookup could not decide.
 type IdentityResolver interface {
-	IdentityForUser(ctx context.Context, userID string) (authn.Identity, bool)
+	ResolveUserIdentity(ctx context.Context, userID string) (authn.Identity, bool, error)
 }
 
 // SetAutomaticIdentities registers the resolver the automatic path uses to

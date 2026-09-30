@@ -41,10 +41,16 @@ func (a *identityAuthorizer) AuthorizeWorkspaceScope(ctx context.Context, _ stri
 	return nil
 }
 
-type fakeIdentities struct{ known map[string]bool }
+type fakeIdentities struct {
+	known map[string]bool
+	err   error
+}
 
-func (f fakeIdentities) IdentityForUser(_ context.Context, userID string) (authn.Identity, bool) {
-	return authn.Identity{UserID: userID}, f.known[userID]
+func (f fakeIdentities) ResolveUserIdentity(_ context.Context, userID string) (authn.Identity, bool, error) {
+	if f.err != nil {
+		return authn.Identity{}, false, f.err
+	}
+	return authn.Identity{UserID: userID}, f.known[userID], nil
 }
 
 // raisedFixture is an automaticFixture whose create_task is raised to
@@ -371,3 +377,35 @@ func (idleKindTasks) GetTarget(context.Context, string) (*TargetTask, error) {
 	return nil, ErrNotFound
 }
 func (idleKindTasks) HasLiveExecution(context.Context, string) bool { return false }
+
+func TestAutomaticApproval_StartsAgentProposalStaysPendingForAManager(t *testing.T) {
+	store, c, tasks, svc, _ := raisedFixture(t)
+	p := insertKind(t, store, c, ProposalKindCreateTask)
+	p.StartsAgent = true
+	res, err := svc.TryAutomaticApproval(context.Background(), p)
+	if err != nil || res != nil {
+		t.Fatalf("res = %+v err = %v, want nil (phase 1 stands)", res, err)
+	}
+	got := reload(t, store, c, p.ID)
+	if got.Status != ProposalStatusPending || got.AutomaticAt != nil || got.ClaimedAutomatically || len(tasks.createCalls) != 0 {
+		t.Fatalf("agent-starting proposal handled automatically: %+v", got)
+	}
+	if settingOf(t, store, svc, c) != SettingAutomatic {
+		t.Fatal("class must not be lowered")
+	}
+}
+
+func TestAutomaticApproval_IdentityLookupErrorDoesNotLower(t *testing.T) {
+	store, c, tasks, svc, _ := raisedFixture(t)
+	svc.SetAutomaticIdentities(fakeIdentities{err: errors.New("db down")})
+	p, res := proposeAuto(t, store, c, svc)
+	if res == nil || res.Status != ProposalStatusPending || res.Note != unavailableNote {
+		t.Fatalf("res = %+v", res)
+	}
+	if got := reload(t, store, c, p.ID); got.AutomaticAt != nil || len(tasks.createCalls) != 0 {
+		t.Fatalf("claimed on lookup error: %+v", got)
+	}
+	if settingOf(t, store, svc, c) != SettingAutomatic {
+		t.Fatal("a lookup error must not lower the class")
+	}
+}

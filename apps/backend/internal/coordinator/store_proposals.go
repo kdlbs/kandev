@@ -477,7 +477,7 @@ func (s *Store) ClaimProposalRawTx(ctx context.Context, exec coordinatorExec, id
 	query := `
 		UPDATE coordinator_proposals
 		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?, claimed_automatically = ?`
-	args := []any{string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now, automaticAt != nil}
+	args := []any{string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now, autonomyColumn(automaticAt != nil)}
 	if automaticAt != nil {
 		query += `, decided_automatically = 1, automatic_at = ?`
 		args = append(args, automaticAt.UTC())

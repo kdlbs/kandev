@@ -39,3 +39,23 @@ func TestClaimProposal_ManagerClaimOfPendingWritesNoAutomaticStamp(t *testing.T)
 		t.Fatalf("proposal = %+v", got)
 	}
 }
+
+func TestReclaimStale_KeepsTheAutomaticStamp(t *testing.T) {
+	store := newTestStore(t)
+	c := newTestCoordinator(t, store, "ws-1")
+	p := insertKind(t, store, c, ProposalKindCreateTask)
+	at := automaticNow.Add(-time.Hour)
+	if ok, err := store.ClaimProposalTx(context.Background(), store.db, p.ID, "tok-a", sampleSpec(), "mgr", at, &at); err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	if ok, err := store.ReclaimStale(context.Background(), p.ID, "tok-b", automaticNow, automaticNow.Add(-time.Minute), true); err != nil || !ok {
+		t.Fatalf("reclaim ok=%v err=%v", ok, err)
+	}
+	got, err := store.GetProposal(context.Background(), c.WorkspaceID, c.ID, p.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.DecidedAutomatically || !got.ClaimedAutomatically || got.AutomaticAt == nil || !got.AutomaticAt.Equal(at) {
+		t.Fatalf("stamp lost through reclaim: %+v", got)
+	}
+}

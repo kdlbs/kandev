@@ -135,6 +135,7 @@ func TestEligibility_ReviewAge(t *testing.T) {
 		wantMet bool
 	}{
 		{"7 days", 7 * day, true},
+		{"7 days and 1 second", 7*day + time.Second, false},
 		{"8 days", 8 * day, false},
 	}
 	for _, tc := range cases {
