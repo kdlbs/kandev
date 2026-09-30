@@ -1,4 +1,4 @@
-import { primaryTaskRepository, type Task, type Workflow } from "@/lib/types/http";
+import { primaryTaskRepository, type Task } from "@/lib/types/http";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
 import { t } from "@/lib/i18n";
 
@@ -7,6 +7,13 @@ export type TaskListStepPreviews = Record<
   | { status: "loading" | "error" }
   | { status: "success"; steps: Array<{ id: string; title: string; position: number }> }
 >;
+
+export type TaskListWorkflow = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  sort_order?: number;
+};
 
 export type TaskTreeNode = {
   task: Task;
@@ -41,7 +48,7 @@ export function buildTaskSections(
     workflowMap: Map<string, string>;
     repoMap: Map<string, string>;
     facetValues: Record<string, readonly TaskListFacetValue[]>;
-    workflows?: Workflow[];
+    workflows?: TaskListWorkflow[];
     workflowStepPreviews?: TaskListStepPreviews;
   },
 ): TaskListSection[] {
@@ -162,7 +169,7 @@ type StepSection = TaskListSection & {
 
 function buildWorkflowStepSections(
   roots: TaskTreeNode[],
-  workflows: Workflow[],
+  workflows: TaskListWorkflow[],
   previews: TaskListStepPreviews,
 ): TaskListSection[] {
   const workflowMap = new Map(workflows.map((workflow) => [workflow.id, workflow]));

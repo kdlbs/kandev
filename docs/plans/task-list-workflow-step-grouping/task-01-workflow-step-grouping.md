@@ -185,3 +185,16 @@ HTTP method; both test-harness mistakes were corrected to the existing native
 Response contract and PUT route before the desktop suite passed. The final
 runs reused the freshly built unchanged production artifacts. No unresolved
 implementation or validation blockers remain.
+
+PR review exposed stale initial workflow data after workspace changes or
+workflow creation. The List now projects authorized IDs, names, and ordering
+from the current workspace store. Two new regression tests reproduced these
+gaps before the fix; the metadata suite now passes seven tests. Four affected
+frontend suites passed 17 tests, and typecheck, ESLint, and localization checks
+passed. The desktop Select also uses intrinsic width with a 150px minimum:
+the Portuguese E2E test reproduced clipping and now passes. Seven desktop E2E
+tests and two phone E2E tests passed, including foreground refresh resolving
+a newly created workflow's configured step.
+Four refreshed screenshots cover English and Portuguese desktop groups, phone
+groups, and phone View options; all were inspected and compressed from synthetic
+test data for publication in the PR.

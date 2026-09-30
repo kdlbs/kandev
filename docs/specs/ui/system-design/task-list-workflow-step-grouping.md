@@ -71,6 +71,13 @@ responses; do not fetch full task snapshots merely to obtain names. Any cached
 step metadata reused from the board must match the active workspace and
 workflow, and must not override task placement from the accepted list result.
 
+Use the current workspace's `workflows.items` store collection for authorized
+workflow IDs, names, and ordering. Project its fields into `TaskListWorkflow`,
+the minimal List metadata shape. Do not retain initial route workflows in local
+state: workflow creation and workspace selection update the store while the
+List can remain mounted. Both step reads and section labels consume this same
+current projection.
+
 Keep step metadata and the pure section projection outside row markup.
 `TasksPageClient` owns the hook, passing metadata through `TasksPageContent` to
 `TasksListView`. Revalidate step metadata during explicit list refresh and after
@@ -117,15 +124,16 @@ Desktop keeps its existing toolbar Select. Phone keeps
 drawer, the nearest shipped mobile exemplar. This is a short temporary choice;
 the shared option model serves both surfaces. Preserve the drawer's fixed
 header, internal scroll owner, safe-area handling, 44px touch control, and focus
-return. Use existing control sizing and verify the longer translated label fits.
+return. The desktop Select uses intrinsic width with a 150px minimum so the
+longer translated label remains visible. Verify the closed Portuguese selector
+and document width in addition to phone geometry.
 
 ## Documentation and verification
 
 During implementation update the List grouping bullet in
 `docs/public/tasks-and-workflows.md` to explain Workflow step, configured step
 names, and the distinction from runtime-status icons. The public page is a
-how-to guide. Leave the currently shipped public description intact during
-this design-only turn.
+how-to guide.
 
 Focused tests distinguish same-step/different-state and same-state/different-step
 tasks, repeated names across workflows, cold metadata loading, missing/deleted

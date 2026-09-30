@@ -8,7 +8,7 @@ import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icon
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { type Repository, type Task, type Workflow } from "@/lib/types/http";
+import { type Repository, type Task } from "@/lib/types/http";
 import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
@@ -25,6 +25,7 @@ import {
   type TaskTreeNode,
   type TaskListSection,
   type TaskListStepPreviews,
+  type TaskListWorkflow,
 } from "@/lib/tasks/task-list-sections";
 
 export type TasksListViewProps = {
@@ -39,7 +40,7 @@ export type TasksListViewProps = {
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
   workflowStepPreviews?: TaskListStepPreviews;
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   pageCount: number;
@@ -139,7 +140,7 @@ function TaskRows({
   workflowStepPreviews = {},
 }: {
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   tasksListGroup: string;

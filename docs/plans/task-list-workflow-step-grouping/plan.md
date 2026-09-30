@@ -150,12 +150,28 @@ Implementation validation on 2026-10-01:
 Task 01 is complete. Commit, push, screenshot embedding, and PR monitoring are
 tracked in the current platform task plan.
 
+PR review remediation on 2026-10-01:
+
+- Workspace changes and newly created workflows now use the current workspace
+  store collection for metadata authorization, workflow names, and ordering.
+  Two regression tests failed with the initial route-data source and passed
+  with the store projection; the metadata-hook suite now has seven tests.
+- The desktop grouping Select grows from its 150px minimum. A Portuguese E2E
+  assertion reproduced clipping before the fix and passes afterward.
+- Four affected frontend suites passed 17 tests, with typecheck, focused ESLint,
+  and localization checks passing. Desktop List E2E passed seven tests,
+  including a new workflow becoming visible after foreground refresh. Phone
+  List E2E passed two tests against the rebuilt frontend.
+- Four refreshed screenshots were inspected and compressed: English and
+  Portuguese desktop groups, phone groups, and phone View options. They replace
+  the initial PR screenshots and use only synthetic test data.
+
 ## Risks
 
 - Cold All Workflows visits lack names in Task DTOs; the active board's steps
   cannot substitute for every task's own workflow.
 - Backend validation must accept the legacy input before canonical assignment.
-- A longer localized label may clip the desktop's existing 150px Select.
+- Longer localized labels need intrinsic desktop Select width and phone checks.
 - Existing task hierarchy intentionally keeps children under a displayed
   parent; this can place a child's row outside its own step section.
 

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import type { Task, Workflow } from "@/lib/types/http";
+import type { Task } from "@/lib/types/http";
+import type { TaskListWorkflow } from "@/lib/tasks/task-list-sections";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useWorkflowOptionPreviews } from "@/hooks/use-workflow-option-previews";
 import { useWebSocketClient } from "@/lib/ws/connection";
@@ -8,7 +9,7 @@ import { useWebSocketClient } from "@/lib/ws/connection";
 export function useTaskListWorkflowSteps(
   workspaceId: string | null,
   tasks: Task[],
-  workflows: Workflow[],
+  workflows: TaskListWorkflow[],
   enabled: boolean,
 ) {
   const [revision, setRevision] = useState(0);
@@ -60,17 +61,28 @@ export function useTaskListWorkflowSteps(
 export function useTasksListStepRefresh(
   {
     activeWorkspaceId: workspaceId,
-    workflows,
     fetchTasks,
   }: {
     activeWorkspaceId: string | null;
-    workflows: Workflow[];
     fetchTasks: (reset?: boolean) => Promise<void>;
   },
   tasks: Task[],
   group: string,
 ) {
   const enabled = group === "workflow_step";
+  const items = useAppStore((state) => state.workflows.items);
+  const workflows = useMemo(
+    () =>
+      items
+        .filter((workflow) => workflow.workspaceId === workspaceId)
+        .map((workflow) => ({
+          id: workflow.id,
+          workspace_id: workflow.workspaceId,
+          name: workflow.name,
+          sort_order: workflow.sortOrder,
+        })),
+    [items, workspaceId],
+  );
   const metadata = useTaskListWorkflowSteps(workspaceId, tasks, workflows, enabled);
   useForegroundRefresh(() => fetchTasks(true), Boolean(workspaceId), workspaceId);
   useForegroundRefresh(metadata.refresh, enabled, workspaceId);
@@ -78,5 +90,5 @@ export function useTasksListStepRefresh(
     metadata.refresh();
     await fetchTasks();
   };
-  return { previews: metadata.previews, refresh };
+  return { previews: metadata.previews, refresh, workflows };
 }

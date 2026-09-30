@@ -11,6 +11,39 @@ async function taskRowTitles(page: Page): Promise<string[]> {
 }
 
 test.describe("Task List", () => {
+  test("Portuguese workflow step choice fits the closed grouping control", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createTask(seedData.workspaceId, "Prepare release checklist", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage
+      .context()
+      .addCookies([{ name: "kandev_locale", value: "pt-pt", url: backend.frontendUrl }]);
+    await testPage.goto("/tasks");
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "pt-pt");
+    const group = testPage.getByTestId("tasks-list-group");
+    await expect(group).toContainText("Etapa do fluxo de trabalho");
+    const size = await group.locator('[data-slot="select-value"]').evaluate((element) => ({
+      content: element.scrollWidth,
+      visible: element.clientWidth,
+    }));
+    expect(size.content).toBeLessThanOrEqual(size.visible);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expect(
+      testPage.getByTestId("tasks-list").getByText("Prepare release checklist"),
+    ).toBeVisible();
+    const { steps } = await apiClient.listWorkflowSteps(seedData.workflowId);
+    await expect(testPage.getByTestId("tasks-list-section")).toContainText(
+      steps.find((step) => step.id === seedData.startStepId)!.name,
+    );
+  });
   test("seeded task appears in task list", async ({ testPage, apiClient, seedData }) => {
     await apiClient.createTask(seedData.workspaceId, "Direct Navigate Task", {
       workflow_id: seedData.workflowId,
@@ -242,6 +275,33 @@ test.describe("Task List", () => {
     await expect(testPage.getByText("Updating tasks...", { exact: true })).not.toBeVisible();
     await prCapture.screenshot("desktop-workflow-step-groups", {
       caption: "Desktop task list groups by configured steps and distinguishes workflows.",
+    });
+    const created = await apiClient.createWorkflow(seedData.workspaceId, "Operations");
+    const createdStep = await apiClient.createWorkflowStep(created.id, "Documentation", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Document workflow steps", {
+      workflow_id: created.id,
+      workflow_step_id: createdStep.id,
+    });
+    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+    const newSection = sections.filter({ hasText: "Operations / Documentation" });
+    await expect(newSection.getByTestId("tasks-list-row-title")).toHaveText(
+      "Document workflow steps",
+    );
+    await testPage
+      .context()
+      .addCookies([{ name: "kandev_locale", value: "pt-pt", url: new URL(testPage.url()).origin }]);
+    await testPage.reload();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "pt-pt");
+    await expect(testPage.getByTestId("tasks-list-group")).toContainText(
+      "Etapa do fluxo de trabalho",
+    );
+    await expect(newSection).toContainText("Operations / Documentation");
+    await expect(sections.nth(1)).toContainText("Delivery / Implementation");
+    await expect(testPage.getByTestId("sidebar-task-item").first()).toBeVisible();
+    await prCapture.screenshot("desktop-portuguese-workflow-step", {
+      caption: "The Portuguese Workflow step label fits the desktop grouping selector.",
     });
   });
 

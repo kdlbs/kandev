@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   listWorkflowSteps: vi.fn(),
   handlers: new Map<string, (message: { payload: { step: { workflow_id: string } } }) => void>(),
   state: {
+    workflows: {
+      items: [] as Array<{ id: string; workspaceId: string; name: string; sortOrder: number }>,
+    },
     connection: { status: "connected" },
     kanban: {
       workflowId: "wf",
@@ -41,6 +44,7 @@ const response = (name: string) => ({
 beforeEach(() => {
   mocks.listWorkflowSteps.mockReset();
   mocks.handlers.clear();
+  mocks.state.workflows.items = [{ id: "wf", workspaceId: "ws", name: "Delivery", sortOrder: 0 }];
   mocks.state.kanban.steps = [];
   mocks.listWorkflowSteps.mockResolvedValue(response("Build"));
 });
@@ -79,11 +83,7 @@ it("retries failed metadata when the list refreshes", async () => {
 it("refreshes metadata and tasks together while preserving foreground task refresh", async () => {
   const fetchTasks = vi.fn().mockResolvedValue(undefined);
   const { result, unmount } = renderHook(() =>
-    useTasksListStepRefresh(
-      { activeWorkspaceId: "ws", workflows, fetchTasks },
-      tasks,
-      "workflow_step",
-    ),
+    useTasksListStepRefresh({ activeWorkspaceId: "ws", fetchTasks }, tasks, "workflow_step"),
   );
   await waitFor(() => expect(result.current.previews.wf?.status).toBe("success"));
   mocks.listWorkflowSteps.mockResolvedValue(response("Updated"));
@@ -96,6 +96,51 @@ it("refreshes metadata and tasks together while preserving foreground task refre
   await waitFor(() => expect(fetchTasks).toHaveBeenCalledWith(true));
   unmount();
   expect(mocks.handlers.size).toBe(0);
+});
+
+it("reads a newly created workflow from the store after a task-list refresh", async () => {
+  const fetchTasks = vi.fn().mockResolvedValue(undefined);
+  const newTask = { ...tasks[0], workflow_id: "new" } as Task;
+  const { result, rerender } = renderHook(() =>
+    useTasksListStepRefresh({ activeWorkspaceId: "ws", fetchTasks }, [newTask], "workflow_step"),
+  );
+  expect(mocks.listWorkflowSteps).not.toHaveBeenCalled();
+  mocks.state.workflows.items = [
+    ...mocks.state.workflows.items,
+    { id: "new", workspaceId: "ws", name: "New delivery", sortOrder: 2 },
+  ];
+  rerender();
+  await waitFor(() =>
+    expect(mocks.listWorkflowSteps).toHaveBeenCalledWith("new", expect.anything()),
+  );
+  await waitFor(() => expect(result.current.previews.new?.status).toBe("success"));
+  expect(result.current.workflows).toContainEqual({
+    id: "new",
+    workspace_id: "ws",
+    name: "New delivery",
+    sort_order: 2,
+  });
+});
+
+it("reads new workspace workflows while old page props remain unchanged", async () => {
+  const fetchTasks = vi.fn().mockResolvedValue(undefined);
+  const nextTasks = [{ ...tasks[0], workspace_id: "next", workflow_id: "next-wf" }] as Task[];
+  const { result, rerender } = renderHook(() =>
+    useTasksListStepRefresh({ activeWorkspaceId: "next", fetchTasks }, nextTasks, "workflow_step"),
+  );
+  expect(mocks.listWorkflowSteps).not.toHaveBeenCalled();
+  mocks.state.workflows.items = [
+    ...mocks.state.workflows.items,
+    { id: "next-wf", workspaceId: "next", name: "Support", sortOrder: 1 },
+  ];
+  rerender();
+  await waitFor(() =>
+    expect(mocks.listWorkflowSteps).toHaveBeenCalledWith("next-wf", expect.anything()),
+  );
+  await waitFor(() => expect(result.current.previews["next-wf"]?.status).toBe("success"));
+  expect(result.current.workflows).toEqual([
+    { id: "next-wf", workspace_id: "next", name: "Support", sort_order: 1 },
+  ]);
 });
 
 it("refreshes relevant step notifications on a cold list but not task rerenders or foreign workflows", async () => {
