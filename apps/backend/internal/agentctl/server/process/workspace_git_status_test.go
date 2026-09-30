@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -456,15 +457,47 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	}
 }
 
-func TestGetGitStatusFreshUsesInteractiveAdmissionForEveryCommand(t *testing.T) {
+func TestGetGitStatusFreshReturnsBeforeBackgroundEnrichment(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	t.Cleanup(wt.Stop)
 
+	enrichmentStarted := make(chan struct{})
+	releaseEnrichment := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(releaseEnrichment)
+		}
+	}()
+	wt.gitStatusBeforeEnrich = func() {
+		close(enrichmentStarted)
+		<-releaseEnrichment
+	}
+
 	before := subproc.AdmissionSnapshot()
-	if _, err := wt.GetGitStatus(context.Background(), true); err != nil {
-		t.Fatalf("fresh GetGitStatus failed: %v", err)
+	type statusResult struct {
+		status types.GitStatusUpdate
+		err    error
+	}
+	result := make(chan statusResult, 1)
+	go func() {
+		status, err := wt.GetGitStatus(context.Background(), true)
+		result <- statusResult{status: status, err: err}
+	}()
+	waitForSignal(t, enrichmentStarted, "background enrichment gate")
+	var got statusResult
+	select {
+	case got = <-result:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fresh status waited for background enrichment")
+	}
+	if got.err != nil {
+		t.Fatalf("fresh GetGitStatus failed: %v", got.err)
+	}
+	if got.status.StatusState != gitStatusStateReady || !got.status.FilesComplete || got.status.DetailState != gitStatusDetailPending {
+		t.Fatalf("fresh status = %+v, want complete membership with pending details", got.status)
 	}
 	after := subproc.AdmissionSnapshot()
 	interactive := after.Classes[string(subproc.GitInteractive)].AcquireTotal -
@@ -475,8 +508,10 @@ func TestGetGitStatusFreshUsesInteractiveAdmissionForEveryCommand(t *testing.T) 
 		t.Fatal("fresh status did not admit any interactive Git commands")
 	}
 	if background != 0 {
-		t.Fatalf("fresh status admitted %d background Git commands, want 0", background)
+		t.Fatalf("basic status admitted %d background Git commands before enrichment was released", background)
 	}
+	close(releaseEnrichment)
+	released = true
 }
 
 // mapKeys returns the keys of a map for diagnostic output.

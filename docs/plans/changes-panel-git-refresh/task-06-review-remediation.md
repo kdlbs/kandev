@@ -82,3 +82,14 @@ PR fixup additionally covers task-root promotion after an execution starts: a li
 - Backend `golangci-lint` passed across the nine affected packages (0 issues); `(cd apps/backend && make build)` passed for host binaries and agentctl cross-build targets.
 - Desktop and mobile recovery E2E each passed (1 test) through the managed runner, which rebuilt the production backend, Vite assets, and fixture plugin before each isolated browser run.
 - Documentation validation passed: 334 decisions and 1262 specifications; specification lint, 62 public-doc tests, 47-page validation, and `git diff --check` passed.
+
+## PR fixup CI follow-up
+
+The pre-fix PR check wait reached its 45-minute deadline with 36 checks passed, 11 skipped, three failed, and 20 pending. The backend failures exposed two test assumptions that predated progressive status delivery: the recovered-base integration test expected comparison totals in the first fresh response, and the admission test counted background enrichment as part of the interactive basic read.
+
+The recovered-base test now checks that the first response contains complete live membership, then uses the API's explicit `details=wait` mode to verify configured-base totals. The admission test gates enrichment and proves that a fresh basic response returns with pending details before any background Git command is admitted. These preserve the pending-then-ready contract; no production behavior or durable requirement changed.
+
+- `(cd apps/backend && go test -race ./internal/agentctl/server/api -run '^TestRecoveredBaseBranches_FirstGitResponses$' -count=1)`: passed.
+- `(cd apps/backend && go test -race ./internal/agentctl/server/process -run '^TestGetGitStatusFreshReturnsBeforeBackgroundEnrichment$' -count=1)`: passed.
+- `(cd apps/backend && go test -race ./internal/agentctl/server/process ./internal/agentctl/server/api -count=1)`: passed; process 127.532s, API 58.943s.
+- Fresh PR checks are required after this fixup push. The prior wait did not establish a terminal result for the pending E2E and frontend checks.
