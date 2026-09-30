@@ -20,10 +20,13 @@ Run these commands from the repository root:
 
 ```sh
 pnpm --dir apps install --frozen-lockfile
-pnpm --dir apps/web exec playwright install chromium
+pnpm --dir apps/web exec playwright install --with-deps chromium
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/task-create-workflow-step-previews.spec.ts
 pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-create-workflow-step-previews.spec.ts
 ```
+
+On Linux, `--with-deps` also installs Chromium's required system libraries and
+may request administrator privileges.
 
 Run the two test commands sequentially. The managed runner builds the backend,
 Vite assets, and fixture plugin, then starts and cleans up isolated test instances.
