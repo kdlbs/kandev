@@ -8,9 +8,6 @@ import { Badge } from "@kandev/ui/badge";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { useCoordinatorSidebarEntries } from "@/app/coordinator/use-coordinator-sidebar-entries";
-import { CoordinatorIcon } from "@/lib/coordinator/icon";
-import { linkToCoordinator, linkToCoordinatorNeedsYou } from "@/lib/coordinator/links";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
@@ -35,6 +32,7 @@ import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { MobileCanvasesSection } from "./mobile-canvases-section";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 
@@ -152,69 +150,6 @@ function MobileNewTaskRow({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
-/**
- * The coordinator phone navigation rows (AC-COORDINATOR-NEEDS-YOU-006.1):
- * the same entries as `AppSidebarCoordinatorRows`, rendered with this file's
- * own row markup. Renders nothing until the coordinator list has loaded.
- */
-function MobileCoordinatorRows({
-  workspaceId,
-  onNavigate,
-}: {
-  workspaceId: string;
-  onNavigate: () => void;
-}) {
-  const { t } = useTranslation();
-  const { coordinators, badgeByCoordinatorId } = useCoordinatorSidebarEntries(workspaceId);
-
-  if (!coordinators) return null;
-
-  if (coordinators.length === 0) {
-    return (
-      <Button
-        asChild
-        variant="outline"
-        className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-      >
-        <Link
-          href={linkToCoordinator(workspaceId)}
-          onClick={onNavigate}
-          data-testid="mobile-sidebar-coordinator-generic"
-        >
-          <CoordinatorIcon className="h-4 w-4 shrink-0" />
-          <span className="flex-1 text-left">{t("coordinator:sidebarGenericEntry")}</span>
-        </Link>
-      </Button>
-    );
-  }
-
-  return (
-    <>
-      {coordinators.map((coordinator) => {
-        const badge = badgeByCoordinatorId.get(coordinator.id) ?? 0;
-        return (
-          <Button
-            key={coordinator.id}
-            asChild
-            variant="outline"
-            className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-          >
-            <Link
-              href={linkToCoordinatorNeedsYou(workspaceId, coordinator.id)}
-              onClick={onNavigate}
-              data-testid={`mobile-sidebar-coordinator-${coordinator.id}`}
-            >
-              <CoordinatorIcon className="h-4 w-4 shrink-0" />
-              <span className="flex-1 truncate text-left">{coordinator.name}</span>
-              {badge > 0 && <Badge>{badge}</Badge>}
-            </Link>
-          </Button>
-        );
-      })}
-    </>
-  );
-}
-
 function hasNoFixedRows(
   fixedDestinationCount: number,
   mode: ReturnType<typeof useOfficeModeState>,
@@ -232,10 +167,12 @@ function MobileRequiredRows({
   onNavigate,
   omitSections,
   omitDestinations,
+  coordinatorsWithAutomations,
 }: {
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
+  coordinatorsWithAutomations: boolean;
 }) {
   const { t } = useTranslation();
   const primary = useStaticDestinations("mobileMenu", "primary");
@@ -245,7 +182,7 @@ function MobileRequiredRows({
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
   const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
   const officeInboxCount = useAppStore(selectOfficeInboxCount);
-  const coordinatorEnabled = useFeature("coordinator");
+  const coordinatorEnabled = useFeature("coordinator") && !coordinatorsWithAutomations;
   if (omitSections.has("primary")) return null;
   const fixedDestinations = primary.filter(
     (destination) =>
@@ -293,9 +230,7 @@ function MobileRequiredRows({
           </Link>
         </Button>
       )}
-      {coordinatorEnabled && workspaceId && (
-        <MobileCoordinatorRows workspaceId={workspaceId} onNavigate={onNavigate} />
-      )}
+      {coordinatorEnabled && workspaceId && <MobileCoordinatorsSection onNavigate={onNavigate} />}
     </div>
   );
 }
@@ -389,7 +324,7 @@ function MobilePhoneResource(props: MobileLayoutNodeProps) {
   }
 }
 
-function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
   const {
     node,
     homeCoversListings,
@@ -440,6 +375,16 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
       onActivateShortcut={onActivateShortcut}
       onNavigate={onNavigate}
     />
+  );
+}
+
+function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+  if (props.node.destinationId !== "automations") return <MobileBuiltinNodeContent {...props} />;
+  return (
+    <>
+      <MobileCoordinatorsSection onNavigate={props.onNavigate} />
+      <MobileBuiltinNodeContent {...props} />
+    </>
   );
 }
 
@@ -527,6 +472,9 @@ export function MobileSidebarLayoutNavigation({
   const afterTasks = homeCoversListings
     ? visibleNodes.filter((node) => node.destinationId !== "home")
     : [];
+  const coordinatorsWithAutomations = visibleNodes.some(
+    (node) => node.destinationId === "automations",
+  );
   const renderNode = (node: ProjectedSidebarNode) => (
     <MobileLayoutNode
       key={node.id}
@@ -559,6 +507,7 @@ export function MobileSidebarLayoutNavigation({
           onNavigate={onNavigate}
           omitSections={omitSections}
           omitDestinations={omitDestinations}
+          coordinatorsWithAutomations={coordinatorsWithAutomations}
         />
       </div>
       {afterPrimary}

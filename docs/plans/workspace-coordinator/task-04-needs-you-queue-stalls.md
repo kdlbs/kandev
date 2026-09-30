@@ -340,6 +340,7 @@ implementation; none changes an acceptance criterion.
 - `apps/web/components/app-sidebar/app-sidebar-primary-nav.tsx`
 - `apps/web/components/app-sidebar/sections/coordinators-section.tsx`
 - `apps/web/components/navigation/mobile-sidebar-layout-navigation.tsx`
+- `apps/web/components/navigation/mobile-coordinators-section.tsx` (phone menu section matching the desktop one; #3981 owner request 2026-09-30)
 - `apps/web/src/locales/*/`
 - `apps/web/e2e/tests/coordinator/`, including `mobile-needs-you.spec.ts`
 - `apps/web/e2e/helpers/axe.ts`

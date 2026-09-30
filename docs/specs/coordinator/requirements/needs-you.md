@@ -220,8 +220,10 @@ Mockup:
   coordinator's Needs you screen. The section shall be expanded until the user
   folds it, shall keep its folded state across reloads, shall have a header
   shortcut to `/workspaces/:id/coordinator`, and shall not render before the
-  coordinator list has loaded. The phone navigation rows shall show the same
-  coordinators.
+  coordinator list has loaded. The phone menu shall show the same section: an
+  expandable "Coordinators" group immediately above its Automations section,
+  expanded until folded, with the same rows, folded summary, header shortcut
+  and empty row, and 44px touch targets.
 - **AC-COORDINATOR-NEEDS-YOU-006.2:** A coordinator's row shall show a badge
   with its open proposal count when that count is above zero and no badge
   at zero, and the badge shall update from `coordinator.updated` without reload.
