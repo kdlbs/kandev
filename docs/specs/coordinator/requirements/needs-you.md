@@ -210,20 +210,28 @@ workspaces.
 
 Mockup:
 
-- [`docs/plans/workspace-coordinator/assets/p1-01-needs-you.png`](../../../plans/workspace-coordinator/assets/p1-01-needs-you.png): the Planner sidebar entry with its open-proposal badge after Inbox and before New Task, and the header with Configure.
+- [`docs/plans/workspace-coordinator/assets/p1-01-needs-you.png`](../../../plans/workspace-coordinator/assets/p1-01-needs-you.png): the Planner sidebar row with its open-proposal badge, and the header with Configure. The mockup predates the Coordinators section and draws the row in the primary navigation.
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-NEEDS-YOU-006.1:** When the flag is on, the sidebar shall
-  show one entry per coordinator, by name and in the order of
-  `AC-COORDINATOR-COORDINATORS-003.1`, after the Inbox row and before the New
-  Task entry, and the same entries in the phone navigation rows.
-- **AC-COORDINATOR-NEEDS-YOU-006.2:** A coordinator's entry shall show a badge
+- **AC-COORDINATOR-NEEDS-YOU-006.1:** When the flag is on and a workspace is
+  active, the sidebar shall show a "Coordinators" section, immediately above
+  the Automations section, with one row per coordinator, by name and in the
+  order of `AC-COORDINATOR-COORDINATORS-003.1`, each linking to that
+  coordinator's Needs you screen. The section shall be expanded until the user
+  folds it, shall keep its folded state across reloads, shall have a header
+  shortcut to `/workspaces/:id/coordinator`, and shall not render before the
+  coordinator list has loaded. The phone navigation rows shall show the same
+  coordinators.
+- **AC-COORDINATOR-NEEDS-YOU-006.2:** A coordinator's row shall show a badge
   with its open proposal count when that count is above zero and no badge
   at zero, and the badge shall update from `coordinator.updated` without reload.
+  While the section is folded, its header shall show the sum of those counts
+  when the sum is above zero, and otherwise the number of coordinators, so a
+  folded section never hides pending work.
 - **AC-COORDINATOR-NEEDS-YOU-006.3:** When the workspace has no coordinator, the
-  sidebar shall show one "Coordinator" entry with no badge, and the Inbox row
-  shall be unchanged.
+  section shall show one "Set up a coordinator" row linking to the Coordinators
+  settings tab, and the Inbox row shall be unchanged.
 - **AC-COORDINATOR-NEEDS-YOU-006.4:** `/workspaces/:id/coordinator/:coordinatorId`
   shall open Needs you and `/workspaces/:id/coordinator/:coordinatorId/queue`
   Queue; `/workspaces/:id/coordinator` shall open the first coordinator's Needs
