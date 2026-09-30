@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-CHANGE-WORKFLOW-001
@@ -217,6 +217,19 @@ Existing one-shot move options may remain in a collapsed section, with their
 current defaults. Mapping is not a one-shot option and never travels in the
 pending one-shot marker. Reset-context remains off by default.
 
+### Destination step colors
+
+For AC-TASKS-CHANGE-WORKFLOW-001.9, `stepOptions` in
+`components/task/change-workflow-form-sections.tsx` applies the configured
+`WorkflowStepDTO.color` background utility class to its decorative dot using
+`cn`, following `task-move-context-menu.tsx`. Values beginning with `bg-`
+are class tokens; other saved CSS colors retain the existing inline
+`backgroundColor` behavior, including imported hex values. Keep the text label
+and mark the dot aria-hidden.
+`Combobox` uses the same `renderLabel` for options and the selected trigger;
+retain that shared rendering and existing selection/reset behavior. This is a
+presentation correction with no API, persistence, or palette change.
+
 ## Mobile contract
 
 Use `useResponsiveBreakpoint` for a phone form and wider dialog. The nearest
@@ -266,3 +279,5 @@ No new ADR is needed. This feature reuses the existing storage owner and routing
 policy; the request opt-in and legacy compatibility rationale are captured here.
 Reconcile creation-only override and single-task submenu wording during delivery.
 Do not rewrite completed companion plan results or publish draft behavior as shipped.
+
+- [Step color repair package](../../../plans/change-workflow-step-colors/plan.md)

@@ -73,6 +73,16 @@ test.describe("Change workflow", () => {
       seedData,
       "Change Workflow Desktop",
     );
+    const resetWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Reset destination");
+    const stepColors = [
+      { id: fixture.analysisStep.id, color: "bg-blue-500" },
+      { id: fixture.implementStep.id, color: "bg-green-500" },
+      { id: fixture.prStep.id, color: "#f97316" },
+    ];
+    for (const step of stepColors) {
+      const response = await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${step.id}`, step);
+      expect(response.ok).toBe(true);
+    }
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Change workflow source task",
@@ -113,6 +123,14 @@ test.describe("Change workflow", () => {
     const changeWorkflow = new ChangeWorkflowPage(testPage);
     await expect(changeWorkflow.desktopDialog).toBeVisible();
     await changeWorkflow.chooseWorkflow(fixture.workflow.id);
+    // @covers AC-TASKS-CHANGE-WORKFLOW-001.9
+    await changeWorkflow.expectStepColors(stepColors);
+    await changeWorkflow.captureStepPicker(testInfo.outputPath("step-colors.png"));
+    await changeWorkflow.chooseWorkflow(resetWorkflow.id);
+    await changeWorkflow.chooseWorkflow(fixture.workflow.id);
+    await expect(
+      changeWorkflow.form.getByTestId("change-workflow-step").locator("span.rounded-full"),
+    ).toHaveCount(0);
     await changeWorkflow.chooseStep(fixture.prStep.id);
     await changeWorkflow.chooseProfile(fixture.profileA.id, fixture.profileB.name);
     await expect

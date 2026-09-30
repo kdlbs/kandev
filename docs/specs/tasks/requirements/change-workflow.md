@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-23
 owners:
@@ -68,6 +68,13 @@ conversation. Actual workflow configuration determines each step's recipient.
   choices. Success shall update workflow membership and step indicators without
   navigating away from an open task or changing the board's selected workflow.
 
+- **AC-TASKS-CHANGE-WORKFLOW-001.9:** Each destination-step option and the
+  selected step shall display its configured workflow color beside its name on
+  desktop and phone. The name shall remain readable and accessible independently
+  of color. Both configured background classes and previously supported CSS
+  colors, including hex values, shall remain visible. Changing workflows shall
+  clear the previous selected step indicator.
+
 ### REQ-TASKS-CHANGE-WORKFLOW-002: Consistent task transition
 
 **Intent:** Save the destination and agent choices as one task transition.
@@ -123,3 +130,5 @@ Those documents continue to own unrelated actions and bulk behavior.
 
 - [System design](../system-design/change-workflow.md)
 - [Implementation package](../../../plans/change-workflow/plan.md)
+
+- [Step color repair package](../../../plans/change-workflow-step-colors/plan.md)

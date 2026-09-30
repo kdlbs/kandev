@@ -89,16 +89,23 @@ export function ChangeWorkflowCurrentTask({ state }: { state: ChangeWorkflowStat
 function stepOptions(steps: readonly WorkflowStepDTO[]): ComboboxOption[] {
   return [...steps]
     .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id))
-    .map((step) => ({
-      value: step.id,
-      label: step.name,
-      renderLabel: () => (
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: step.color }} />
-          <span className="truncate">{step.name}</span>
-        </span>
-      ),
-    }));
+    .map((step) => {
+      const colorClass = step.color.startsWith("bg-") ? step.color : undefined;
+      return {
+        value: step.id,
+        label: step.name,
+        renderLabel: () => (
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              className={cn("size-2 shrink-0 rounded-full", colorClass)}
+              style={colorClass ? undefined : { backgroundColor: step.color }}
+              aria-hidden="true"
+            />
+            <span className="truncate">{step.name}</span>
+          </span>
+        ),
+      };
+    });
 }
 
 function WorkflowPickerSection({

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { useChangeWorkflow } from "@/hooks/domains/kanban/use-change-workflow";
 import { ChangeWorkflowDialog } from "./change-workflow-dialog";
 
+const STEP_PICKER_TEST_ID = "change-workflow-step";
+const STEP_DOT_SELECTOR = "span.rounded-full";
 const CURRENT_AGENT_LABEL = "Current agent";
 const CURRENT_PROFILE_ID = "profile-current";
 const SUBMIT_BUTTON_TEST_ID = "change-workflow-submit";
@@ -46,7 +48,7 @@ function makeHookState(): HookState {
     id,
     name,
     position: id === "build" ? 0 : 1,
-    color: "#abcdef",
+    color: id === "build" ? "bg-blue-500" : "bg-green-500",
     session_target: sessionTarget,
   });
   return {
@@ -130,6 +132,69 @@ beforeEach(() => {
   useChangeWorkflowMock.mockReturnValue(makeHookState());
 });
 
+describe("ChangeWorkflowDialog step colors", () => {
+  it.each(["#3b82f6", "rgb(59, 130, 246)", "blue"])(
+    "preserves configured CSS color %s in the selected value and options",
+    (color) => {
+      const state = makeHookState();
+      state.snapshot!.steps[0].color = color;
+      useChangeWorkflowMock.mockReturnValue(state);
+      render(
+        <ChangeWorkflowDialog
+          open
+          onOpenChange={vi.fn()}
+          taskId="task-1"
+          workspaceId="workspace-1"
+        />,
+      );
+      const trigger = screen.getByTestId(STEP_PICKER_TEST_ID);
+      const expected = document.createElement("span");
+      expected.style.backgroundColor = color;
+      expect((trigger.querySelector(STEP_DOT_SELECTOR) as HTMLElement).style.backgroundColor).toBe(
+        expected.style.backgroundColor,
+      );
+      fireEvent.click(trigger);
+      const option = screen.getByRole("option", { name: "Build" });
+      expect((option.querySelector(STEP_DOT_SELECTOR) as HTMLElement).style.backgroundColor).toBe(
+        expected.style.backgroundColor,
+      );
+    },
+  );
+
+  it("clears the selected dot when the workflow resets its selected step", () => {
+    const props = {
+      open: true,
+      onOpenChange: vi.fn(),
+      taskId: "task-1",
+      workspaceId: "workspace-1",
+    };
+    const { rerender } = render(<ChangeWorkflowDialog {...props} />);
+    expect(screen.getByTestId(STEP_PICKER_TEST_ID).querySelector(STEP_DOT_SELECTOR)).not.toBeNull();
+    useChangeWorkflowMock.mockReturnValue({ ...makeHookState(), selectedStepId: undefined });
+    rerender(<ChangeWorkflowDialog {...props} />);
+    expect(screen.getByTestId(STEP_PICKER_TEST_ID).querySelector(STEP_DOT_SELECTOR)).toBeNull();
+  });
+
+  // @covers AC-TASKS-CHANGE-WORKFLOW-001.9
+  it("renders configured step colors in options and selected value", () => {
+    render(
+      <ChangeWorkflowDialog
+        open
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        workspaceId="workspace-1"
+      />,
+    );
+    const trigger = screen.getByTestId(STEP_PICKER_TEST_ID);
+    expect(trigger.querySelector(".bg-blue-500")?.getAttribute("aria-hidden")).toBe("true");
+    fireEvent.click(trigger);
+    const review = screen.getByRole("option", { name: "Review" });
+    expect(review.querySelector(".bg-green-500")?.getAttribute("aria-hidden")).toBe("true");
+    fireEvent.click(review);
+    expect(useChangeWorkflowMock().setSelectedStepId).toHaveBeenCalledWith("review");
+  });
+});
+
 describe("ChangeWorkflowDialog", () => {
   it("shows the destination form, task-scoped agent mapping, and conversation relationships", () => {
     render(
@@ -144,7 +209,7 @@ describe("ChangeWorkflowDialog", () => {
     expect(screen.getByRole("dialog", { name: "Change workflow..." })).toBeTruthy();
     expect(screen.getByText("Backlog · Todo")).toBeTruthy();
     expect(screen.getByTestId("change-workflow-destination")).toBeTruthy();
-    expect(screen.getByTestId("change-workflow-step")).toBeTruthy();
+    expect(screen.getByTestId(STEP_PICKER_TEST_ID)).toBeTruthy();
     expect(
       screen.getByText(
         "Changing workflows replaces this task's existing workflow agent overrides.",
