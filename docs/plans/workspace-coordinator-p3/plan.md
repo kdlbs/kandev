@@ -37,6 +37,8 @@ system_design:
   - ../../specs/coordinator/system-design/wake.md
   - ../../specs/coordinator/system-design/wake-recording.md
   - ../../specs/coordinator/system-design/wake-backstop.md
+  - ../../specs/coordinator/system-design/wake-recovery.md
+  - ../../specs/coordinator/system-design/wake-screens.md
   - ../../specs/coordinator/system-design/containment.md
   - ../../specs/coordinator/system-design/spend.md
   - ../../specs/coordinator/system-design/relay.md

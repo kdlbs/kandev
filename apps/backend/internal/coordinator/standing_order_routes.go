@@ -70,7 +70,7 @@ func parseAddStandingOrder(body map[string]json.RawMessage) (AddStandingOrderInp
 		return AddStandingOrderInput{}, &FieldError{Field: fieldStandingOrderText, Message: "text is required"}
 	}
 	in := AddStandingOrderInput{Text: *text}
-	if raw, ok := body[fieldSourceProposalID]; ok && string(raw) != "null" {
+	if raw, ok := body[fieldSourceProposalID]; ok && string(raw) != jsonNullLiteral {
 		id, _, err := rawStringField(body, fieldSourceProposalID)
 		if err != nil {
 			return AddStandingOrderInput{}, err

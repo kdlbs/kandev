@@ -107,4 +107,4 @@ func checkAutonomyInterlock(patch CoordinatorPatch, merged *Coordinator) error {
 	return nil
 }
 
-var jsonNull = []byte("null")
+var jsonNull = []byte(jsonNullLiteral)

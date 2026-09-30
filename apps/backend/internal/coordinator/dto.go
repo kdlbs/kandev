@@ -228,6 +228,9 @@ func (r PatchCoordinatorRequest) StringField(field string) (*string, bool, error
 	return rawStringField(r, field)
 }
 
+// jsonNullLiteral is the JSON null token compared against raw request values.
+const jsonNullLiteral = "null"
+
 // rawStringField implements the absent/null/string decoding shared by
 // PatchCoordinatorRequest (Build decision 7) and ApproveProposalRequest
 // (Build decision 16): both tell an absent field apart from an explicit
@@ -237,7 +240,7 @@ func rawStringField(values map[string]json.RawMessage, field string) (*string, b
 	if !present {
 		return nil, false, nil
 	}
-	if string(raw) == "null" {
+	if string(raw) == jsonNullLiteral {
 		return nil, true, &FieldError{Field: field, Message: field + " must not be null"}
 	}
 	var value string
@@ -331,7 +334,7 @@ func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 	if ids == nil {
 		ids = []string{}
 	}
-	outcome := json.RawMessage("null")
+	outcome := json.RawMessage(jsonNullLiteral)
 	if p.OutcomeJSON != nil && json.Valid([]byte(*p.OutcomeJSON)) {
 		outcome = json.RawMessage(*p.OutcomeJSON)
 	}

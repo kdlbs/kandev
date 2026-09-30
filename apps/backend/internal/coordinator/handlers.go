@@ -218,7 +218,7 @@ func parseProposalListStatus(c *gin.Context) (ListProposalsStatus, *FieldError) 
 		return ListProposalsPending, nil
 	}
 	switch raw {
-	case "pending":
+	case string(ProposalStatusPending):
 		return ListProposalsPending, nil
 	case proposalStatusAll:
 		return ListProposalsAll, nil
