@@ -206,6 +206,13 @@ independent strict start resets projection before callbacks. Focused red-green
 tests cover same-execution recovery, source mismatch, missing-writer failure,
 strict restart, and session-less legacy recovery.
 
+Accepted trust boundary: explicit Resume permits provider-restored permissions
+that may be more permissive than the saved mode; provider enforcement and
+Kandev admission remain in force, with stop/advertised-mode selection available.
+Coverage includes `TestRecoverSessionProviderRestoredRejectsIneligibleSessionsWithoutLaunch`,
+`TestResumeTaskSessionWithOptionsRechecksProviderRestoredEligibilityUnderAttempt`,
+the two unknown-selector tests, and the desktop/mobile same-ACP-conversation E2E.
+
 Local implementation and verification are complete. PR CI and review remain
 external delivery checks.
 

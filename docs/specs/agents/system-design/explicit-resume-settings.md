@@ -75,6 +75,21 @@ remaining required settings succeed. Never mark ready solely because overrides
 were omitted. Existing locks and execution/attempt IDs fence cancellation,
 duplicate clicks, and delayed terminal events from older executions.
 
+By explicitly choosing Resume, the user accepts provider-restored permission
+behavior for this attempt, which may be more permissive than the saved mode.
+The provider enforces its permissions; Kandev still enforces authentication,
+recovery eligibility, and task/workspace/session access. If no mode report is
+available, Kandev keeps the mode unknown and leaves any effective default to
+the provider. The user can stop the session or choose an advertised mode through
+normal mode confirmation. Coverage includes
+`TestRecoverSessionProviderRestoredRejectsIneligibleSessionsWithoutLaunch`,
+`TestResumeTaskSessionWithOptionsRechecksProviderRestoredEligibilityUnderAttempt`,
+`keeps unknown provider-restored selectors empty instead of reviving saved inputs`,
+`keeps an unknown restored model selectable without showing a saved selection`,
+and the desktop/mobile `explains one-attempt settings omission and resumes the
+same ACP conversation` E2E cases, which verify selector changes and unknown
+state.
+
 Attempt IDs stored in selector snapshots and success-notice deduplication keys
 must not be a process-local counter that restarts at the same value. Seed the
 existing numeric identity range from a UUID and increment it within that
