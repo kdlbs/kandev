@@ -116,7 +116,7 @@ applies nothing.
 - Header "Improvement", title, rationale, and the pill "Changes coordinator
   context".
 - "Runs behind it": each `run_id` resolved through
-  `GET .../coordinators/:cid/runs/:runId` (`workspace.read`, 404 when pruned)
+  `GET .../coordinators/:cid/runs/:runId` ([run read](wake-screens.md#run-read), `workspace.read`, 404 `run_not_found` when pruned)
   shows start time, outcome and cost; a 404 shows "Run record expired". Each
   `task_id` shows the task's identifier and title from the workflow
   snapshots, or "Task no longer available".

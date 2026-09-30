@@ -225,7 +225,7 @@ In the copilot transcript, an unattended turn's message:
 
 ```text
 | (bolt) Woken by 3 events                           09:12     |
-|   > KAN-418  question   KAN-421  stall   KAN-430  completed  |
+|   > KAN-418  question   KAN-421  stall   KAN-430  stall      |
 |   1 permission denied (nobody to ask)                        |
 ```
 
