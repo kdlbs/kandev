@@ -64,6 +64,14 @@ export async function expectForkPRLaunchState(
 
   await page.reload();
   await session.waitForLoad();
+  await expectForkPRLaunchMetadata(apiClient, fixture, taskId);
+}
+
+export async function expectForkPRLaunchMetadata(
+  apiClient: ApiClient,
+  fixture: PRLinkForkLaunchFixture,
+  taskId: string,
+): Promise<void> {
   const task = await apiClient.getTask(taskId);
   expect(task.repositories?.[0]?.checkout_branch).toBe(fixture.headBranch);
   expect(task.repositories?.[0]?.base_branch).toBe("main");

@@ -3,6 +3,7 @@ created: 2026-09-28
 status: complete
 requirements:
   - REQ-EXECUTORS-IDLE-PARKING-001
+  - REQ-EXECUTORS-IDLE-PARKING-002
 system_design:
   - ../../specs/executors/system-design/idle-runtime-parking.md
 legacy_specs: []
@@ -21,6 +22,7 @@ The earlier OpenCode-only quiescence and macOS smoke gates are removed. They do 
 At revision `adc5d67f55d19dd76161eaec5ae725e20a345acb`, attached streams keep `Instance.IsIdle` false.
 The backend `classifyIdleReclaim` separately skips live runtimes. Existing focused tests confirmed both behaviors.
 These guards remain valid for disconnected reaping and dead-row repair; neither implements the requested workspace policy.
+Task 04 adds `REQ-EXECUTORS-IDLE-PARKING-002`: that reaping keeps a waiting session whose tokenless row lifecycle cleanup would delete.
 
 The implementation agent investigated the earlier provider gate and added no production or permanent test code.
 Its audit remains in Task 01 as historical evidence only. The user explicitly replaced that gate with a general opt-in retention policy.
@@ -102,6 +104,8 @@ This preview maps to AC-EXECUTORS-IDLE-PARKING-001.1 and .9.
 | .5, .7 | `TestFocusTaskSessionResumesIdleSuspensionWithNewLSPLease`, workflow/manual-stop exclusion tests, and session-resumption hook tests |
 | .5, .6 | Chromium E2E resumes on explicit focus without a prompt and observes another suspension after a fresh interval |
 
+`AC-EXECUTORS-IDLE-PARKING-002.1` through `.3` are covered by `TestClassifyIdleReclaimDisposition`, `TestReclaimIdleSessionRowOutcomeByResumeToken`, and `TestPromptAfterIdleReclaimLaunchesPreparedSession`. `TestDeleteExecutorRunningPrunesTokenlessNotRunningRow` pins the lifecycle row rule they rely on.
+
 The backend regression suite also covers stale suspension identities, retained workspace/task resources, and late lifecycle writes. The desktop and mobile E2E flows use the mock ACP runtime and actual lifecycle persistence.
 
 ## E2E tests
@@ -120,6 +124,7 @@ Sequential execution; no delegation is authorized.
 - [x] [Task 01: Shared ACP suspension primitive](task-01-conditional-parking.md) (done)
 - [x] [Task 02: Workspace policy and automatic recovery](task-02-idle-policy.md) (done)
 - [x] [Task 03: Complete-cycle validation and documentation](task-03-resume-validation.md) (done)
+- [x] [Task 04: Resume-safe idle reclaim](task-04-resume-safe-idle-reclaim.md) (done)
 
 ## Verification results
 

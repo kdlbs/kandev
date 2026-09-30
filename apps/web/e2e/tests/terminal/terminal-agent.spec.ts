@@ -210,8 +210,6 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       message: "the TUI source session did not become ready before the profile switch",
       timeout: 60_000,
     });
-    await waitForSessionAgentctlReady(testPage, task.session_id);
-
     await apiClient.moveTask(task.id, workflow.id, targetStep.id);
 
     let destinationSessionId = "";

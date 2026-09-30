@@ -1939,6 +1939,7 @@ message ResolveExecutorConnectionRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
   string purpose = 3;
+  // agentctl control port, or an instance port agentctl assigned to a session.
   uint32 runtime_port = 4;
 }
 

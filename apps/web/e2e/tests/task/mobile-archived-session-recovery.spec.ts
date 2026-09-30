@@ -9,11 +9,13 @@ import { waitForArchiveCancelledSession, waitForSessionDone } from "../../helper
 import {
   prepareArchiveRecoverySession,
   seedWorktreeRecoveryFixture,
+  waitForCascadeArchiveCleanup,
 } from "../../helpers/session-resume-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile: archived session recovery", () => {
   test("keeps archived history read-only, then resumes the same session after unarchive", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -40,6 +42,7 @@ test.describe("mobile: archived session recovery", () => {
       sessionId,
       "Waiting for archive cancellation to mark the mobile recovery session",
     );
+    await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
     const requests = captureGatewayRequests(testPage);
     await testPage.goto(`/t/${fixture.task.id}`);
@@ -105,6 +108,7 @@ test.describe("mobile: archived session recovery", () => {
   });
 
   test("honors prevent-auto-start after a mobile archived task is unarchived", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -127,6 +131,7 @@ test.describe("mobile: archived session recovery", () => {
         sessionId,
         "Waiting for archive cancellation to mark the mobile preference session",
       );
+      await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
       const requests = captureGatewayRequests(testPage);
       await testPage.goto(`/t/${fixture.task.id}`);
@@ -141,8 +146,12 @@ test.describe("mobile: archived session recovery", () => {
         response.url().endsWith(`/api/v1/tasks/${fixture.task.id}/unarchive`),
       );
       await unarchiveButton.tap();
-      await unarchiveResponse;
-      await expect(unarchiveButton).toHaveCount(0);
+      const response = await unarchiveResponse;
+      expect(
+        response.ok(),
+        `Unarchive request failed (${response.status()}): ${await response.text()}`,
+      ).toBe(true);
+      await expect(unarchiveButton).toHaveCount(0, { timeout: 30_000 });
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
       expect(sessionLaunchRequests(requests, sessionId)).toEqual([]);
     } finally {
@@ -151,6 +160,7 @@ test.describe("mobile: archived session recovery", () => {
   });
 
   test("keeps recovery causes accessible and retryable on touch", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -172,6 +182,7 @@ test.describe("mobile: archived session recovery", () => {
       sessionId,
       "Waiting for archive cancellation to mark the mobile feedback session",
     );
+    await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
     await routeRecoveryFailureAndRetry(testPage, {
       taskId: fixture.task.id,

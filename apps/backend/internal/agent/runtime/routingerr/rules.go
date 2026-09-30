@@ -12,6 +12,7 @@ type rule struct {
 var providerRules = map[string][]rule{
 	"claude-acp": {
 		mustRule("claude.stderr.quota.v1", `(?i)anthropic_quota_exceeded|credit balance|insufficient credits`, CodeQuotaLimited, ConfHigh),
+		mustRule("claude.stderr.session_limit.v1", `(?i)\b(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
 		// A proxy can reject every account credential before it sends a request
 		// upstream. This is a hard credential condition; a retry or a switch
@@ -36,6 +37,9 @@ var providerRules = map[string][]rule{
 	},
 	"opencode-acp": {
 		mustRule("opencode.stderr.usage_limit.v1", `(?i)\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		// Explicit credit exhaustion takes precedence over generic payment wording.
+		mustRule("opencode.stderr.credit.v1", `(?i)\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("opencode.stderr.subscription.v1", `(?i)\bpayment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", `(?i)quota`, CodeQuotaLimited, ConfMedium),
 		mustRule("opencode.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),

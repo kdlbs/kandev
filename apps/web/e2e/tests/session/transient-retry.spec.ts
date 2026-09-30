@@ -37,19 +37,24 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     seedData,
   }) => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Retry Test");
+    const sessionId = await session.activeChat().getAttribute("data-session-id");
+    if (!sessionId) throw new Error("active chat did not expose a session id");
+    const firstRetryNotice = waitForRetryNotice(apiClient, sessionId, 1);
 
     // /overloaded:9 keeps failing so the retry loop stays visible until cancel.
     await session.sendMessage("/overloaded:9");
-    const sessionId = await session.activeChat().getAttribute("data-session-id");
-    if (!sessionId) throw new Error("active chat did not expose a session id");
+    await firstRetryNotice;
 
     // The calm yellow "retrying" card + Cancel button must appear...
-    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
 
     // ...and the red recovery banner must NOT be shown yet (retries in flight).
     await expect(session.recoveryResumeButton()).toBeHidden();
+
+    // Stop the retry loop before this worker starts another task.
+    await session.recoveryCancelRetryButton().click();
+    await expect(session.recoveryResumeButton()).toBeVisible();
   });
 
   test("Cancel stops the retry loop and surfaces the recovery banner", async ({
@@ -62,12 +67,6 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     await session.sendMessage("/overloaded:9");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
-
-    await expect
-      .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
-        timeout: 30_000,
-      })
-      .toBe(1);
 
     await expect(session.recoveryCancelRetryButton()).toBeVisible({ timeout: 30_000 });
 
@@ -133,6 +132,10 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     expect(afterReload[0].attempt).toBeGreaterThanOrEqual(2);
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
+
+    await session.recoveryCancelRetryButton().click();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.transientRetryCard()).toBeHidden();
   });
 
   test("a 529 on the very first turn retries (launch prompt is cached)", async ({
@@ -160,5 +163,8 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
 
     await expect(session.chat.getByText(/attempt 1 of 5/i)).toBeVisible({ timeout: 30_000 });
     await expect(session.chat.getByText(/attempt 2 of 5/i)).toBeVisible({ timeout: 30_000 });
+
+    await session.recoveryCancelRetryButton().click();
+    await expect(session.recoveryResumeButton()).toBeVisible();
   });
 });

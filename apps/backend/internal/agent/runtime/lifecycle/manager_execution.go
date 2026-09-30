@@ -1074,6 +1074,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	for key, value := range info.Metadata {
 		metadata[key] = value
 	}
+	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath
 	}
@@ -1090,7 +1091,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		return nil, err
 	}
 	if len(comparisonTargets) == 0 {
-		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories)
+		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories, info.ExecutorType)
 		if err != nil {
 			return nil, err
 		}

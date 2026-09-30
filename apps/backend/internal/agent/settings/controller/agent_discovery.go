@@ -158,16 +158,13 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 	if !available {
 		return nil
 	}
-	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-	if !ok {
-		return nil
-	}
-	spec := managed.ManagedNPMRuntime()
-	if spec.Package == "" {
+	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	if err != nil {
 		return nil
 	}
 	defaultVersion := spec.DefaultVersionOrPinned()
 	item := &dto.RuntimeUpdateDTO{
+		ManagedFallback:  fallback,
 		Supported:        true,
 		Package:          spec.Package,
 		DefaultVersion:   defaultVersion,
@@ -179,6 +176,9 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 			item.ActiveVersion = selection.Version
 			item.EffectiveVersion = selection.Version
 		}
+	}
+	if fallback {
+		return item
 	}
 	if c.runtimeUpdater != nil {
 		if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
@@ -207,6 +207,7 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 	}
 	return &dto.LoginCommandDTO{
 		Cmd:         lc.Cmd,
+		Variants:    lc.Variants,
 		Description: lc.Description,
 	}
 }
@@ -475,6 +476,7 @@ func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p
 		DangerouslySkipPermissions: p.skipPermissions,
 		CLIPassthrough:             p.isPassthrough,
 		CursorMCPAuthEnabled:       true,
+		CursorPluginsMCPEnabled:    true,
 	}
 	return c.repo.CreateAgentProfile(ctx, defaultProfile)
 }

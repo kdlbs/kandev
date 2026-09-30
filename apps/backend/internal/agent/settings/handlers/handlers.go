@@ -63,6 +63,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
+	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -78,6 +79,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", cfg, h.interlock, h.httpInstallAgent)
 	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
+	api.PATCH("/agent-update/:agentName/automatic", cfg, h.interlock, h.httpSetAutomaticRuntimeUpdates)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
@@ -405,16 +407,17 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name                 string                 `json:"name"`
-	Model                string                 `json:"model"`
-	FallbackModel        string                 `json:"fallback_model,omitempty"`
-	AutoFallback         bool                   `json:"auto_fallback"`
-	RequireExactModel    bool                   `json:"require_exact_model"`
-	CursorMCPAuthEnabled *bool                  `json:"cursor_mcp_auth_enabled,omitempty"`
-	Mode                 string                 `json:"mode,omitempty"`
-	CLIFlags             []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars              []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix        string                 `json:"command_prefix,omitempty"`
+	Name                    string                 `json:"name"`
+	Model                   string                 `json:"model"`
+	FallbackModel           string                 `json:"fallback_model,omitempty"`
+	AutoFallback            bool                   `json:"auto_fallback"`
+	RequireExactModel       bool                   `json:"require_exact_model"`
+	CursorMCPAuthEnabled    *bool                  `json:"cursor_mcp_auth_enabled,omitempty"`
+	CursorPluginsMCPEnabled *bool                  `json:"cursor_plugins_mcp_enabled,omitempty"`
+	Mode                    string                 `json:"mode,omitempty"`
+	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -434,16 +437,17 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:                 profile.Name,
-			Model:                profile.Model,
-			FallbackModel:        profile.FallbackModel,
-			AutoFallback:         profile.AutoFallback,
-			RequireExactModel:    profile.RequireExactModel,
-			CursorMCPAuthEnabled: profile.CursorMCPAuthEnabled,
-			Mode:                 profile.Mode,
-			CLIFlags:             profile.CLIFlags,
-			EnvVars:              profile.EnvVars,
-			CommandPrefix:        profile.CommandPrefix,
+			Name:                    profile.Name,
+			Model:                   profile.Model,
+			FallbackModel:           profile.FallbackModel,
+			AutoFallback:            profile.AutoFallback,
+			RequireExactModel:       profile.RequireExactModel,
+			CursorMCPAuthEnabled:    profile.CursorMCPAuthEnabled,
+			CursorPluginsMCPEnabled: profile.CursorPluginsMCPEnabled,
+			Mode:                    profile.Mode,
+			CLIFlags:                profile.CLIFlags,
+			EnvVars:                 profile.EnvVars,
+			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{

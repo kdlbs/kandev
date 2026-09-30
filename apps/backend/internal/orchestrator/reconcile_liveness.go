@@ -268,10 +268,11 @@ func (s *Service) probeAgentRunning(ctx context.Context, sessionID string) (bool
 type idleReclaimDisposition string
 
 const (
-	idleReclaimDispositionReclaimed    idleReclaimDisposition = "reclaimed"
-	idleReclaimDispositionSkippedState idleReclaimDisposition = "skipped_state"
-	idleReclaimDispositionSkippedLive  idleReclaimDisposition = "skipped_live_runtime"
-	idleReclaimDispositionSkippedTurn  idleReclaimDisposition = "skipped_active_turn"
+	idleReclaimDispositionReclaimed      idleReclaimDisposition = "reclaimed"
+	idleReclaimDispositionSkippedState   idleReclaimDisposition = "skipped_state"
+	idleReclaimDispositionSkippedLive    idleReclaimDisposition = "skipped_live_runtime"
+	idleReclaimDispositionSkippedTurn    idleReclaimDisposition = "skipped_active_turn"
+	idleReclaimDispositionSkippedNoToken idleReclaimDisposition = "skipped_no_resume_token"
 )
 
 // classifyIdleReclaim is the single decision matrix for the idle-session
@@ -287,7 +288,11 @@ const (
 // Cancelled are deliberately excluded — those have separate cancellation
 // cleanup paths (handleTerminalSessionOnStartup and the cancel pipelines)
 // that already reconcile executor rows.
-func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool, hasActiveTurn bool) idleReclaimDisposition {
+func classifyIdleReclaim(
+	sessionState models.TaskSessionState,
+	agentRunning, hasActiveTurn, hasResumeToken bool,
+	rowStatus string,
+) idleReclaimDisposition {
 	switch sessionState {
 	case models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle,
@@ -300,6 +305,13 @@ func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool
 	}
 	if hasActiveTurn {
 		return idleReclaimDispositionSkippedTurn
+	}
+	// WaitingForInput and Idle rows without a resume token are reclaimed only
+	// while their status is running; lifecycle cleanup deletes any other
+	// tokenless row and the session could not be resumed.
+	if !hasResumeToken && rowStatus != models.ExecutorRunningStatusRunning &&
+		models.IsResumableSessionState(sessionState) {
+		return idleReclaimDispositionSkippedNoToken
 	}
 	return idleReclaimDispositionReclaimed
 }
@@ -355,12 +367,14 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		return nil
 	}
 	hasActiveTurn := s.sessionHasActiveTurn(ctx, sessionID)
-	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn)
+	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn, running.ResumeToken != "", running.Status)
 	if decision != idleReclaimDispositionReclaimed {
 		s.logger.Debug("idle reclaim skipped",
 			zap.String("session_id", sessionID),
 			zap.String("disposition", string(decision)),
 			zap.String("session_state", string(session.State)),
+			zap.Bool("has_resume_token", running.ResumeToken != ""),
+			zap.String("row_status", running.Status),
 			zap.Bool("agent_running", agentRunning),
 			zap.Bool("has_active_turn", hasActiveTurn))
 		return nil

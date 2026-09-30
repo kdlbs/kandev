@@ -145,9 +145,12 @@ test.describe("create task selector scroll", () => {
   test("wheel scrolls the agent profile list portaled inside the dialog", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const { agents } = await apiClient.listAgents();
-    const agentId = agents[0]?.id;
+    const agentId = agents.find((agent) =>
+      agent.profiles?.some((profile) => profile.id === seedData.agentProfileId),
+    )?.id;
     if (!agentId) throw new Error("no agent available in test fixtures");
     for (let i = 0; i < 20; i++) {
       await apiClient.createAgentProfile(agentId, `Scroll Agent Profile ${i}`, {

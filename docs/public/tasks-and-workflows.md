@@ -639,11 +639,16 @@ Choose **Last activity** when you want to review tasks by the least recent user 
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
-Returning to a recently opened sidebar view can show its first page immediately
-while **Updating tasks** refreshes it. These pages are kept only in the current
-browser session, for up to five minutes. Task changes, workspace changes, and
-signing out invalidate the relevant pages. Switching views still leaves your
-open conversation in place, including in the phone **Tasks** drawer.
+Views already covered by the current homepage data appear immediately, without
+another sidebar request. Larger covered views also page through the data already
+loaded. Archived views and incomplete data use bounded server pages.
+
+Returning to a recently opened server-backed view can show its first page while
+it refreshes in the background. Refreshing keeps the list in place; no updating
+banner shifts the rows. These pages are kept only in the current browser session,
+for up to five minutes. Task changes, workspace changes, and signing out invalidate
+the relevant pages. Switching views leaves your open conversation in place,
+including in the phone **Tasks** drawer.
 
 If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
 failure; rows already shown remain visible during a failed refresh. If a filter
@@ -652,9 +657,10 @@ and workflow selections support up to 1,000 values per filter; the limits apply
 to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
+- On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
-- **List** can group by **State**, **Workflow**, **Repository**, or **None**.
+- **List** can group by **Workflow step**, **Workflow**, **Repository**, or **None**. Workflow step uses configured step names and order, such as Backlog, Work, or Review. The icon on each task still shows its runtime status, which can differ from its workflow step. Old State grouping preferences and links open workflow step grouping.
 - **List** can sort by updated time, created time, or title in either direction.
 - **Show archived** reveals archived tasks in List.
 - List page sizes are 10, 25, or 50; the default is 25.

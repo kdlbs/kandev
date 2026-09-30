@@ -253,3 +253,13 @@ Headings do not count toward 100. Hidden descendants contribute to tree rank, no
 
 The shared requirement is [Sidebar task pagination](../../specs/ui/requirements/sidebar-task-pagination.md).
 Its original stable ID is retained after the scope expansion.
+
+## Native-memory follow-up
+
+[Sidebar query memory repair](../sidebar-query-memory/plan.md) adds SQLite preparation and reader-pool memory coverage.
+This package's completion and historical results remain unchanged.
+Its existing warm timing and Go allocation measurements do not establish the new native-memory budgets.
+The follow-up preserves this package's user-visible contracts and owns the expanded resource test matrix.
+
+The follow-up also proposes normalized homepage/sidebar records, complete-coverage local evaluation, lazy archive reads, and initial-load progress under soft invalidation.
+Its [shared-state decision](../../decisions/2026-09-29-shared-sidebar-task-state.md) identifies the revised rules. Historical completion remains unchanged.

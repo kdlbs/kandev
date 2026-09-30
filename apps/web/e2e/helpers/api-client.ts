@@ -137,6 +137,10 @@ export type MockReview = {
 };
 
 export type MockCheckRun = {
+  id?: number;
+  app_id?: number;
+  app_slug?: string;
+  check_suite_id?: number;
   name: string;
   source?: string;
   status: string;
@@ -710,7 +714,7 @@ export class ApiClient {
   /**
    * Delete kanban-only agent profiles except the ones in keepIds.
    *
-   * Office-scoped profiles (those with a non-empty `workspace_id`) are
+   * Office-scoped profiles (those with a non-empty `workspaceId`) are
    * always preserved — they belong to onboarded office workspaces and
    * are managed via the office agent endpoints, not by this helper.
    * Without this guard the per-test cleanup deletes the seeded CEO and
@@ -720,8 +724,7 @@ export class ApiClient {
     const { agents } = await this.listAgents();
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
-        const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
-        if (wsId) continue;
+        if (profile.workspaceId) continue;
         if (!keepIds.includes(profile.id)) {
           await this.deleteTestProfile(profile.id);
         }
@@ -1358,6 +1361,7 @@ export class ApiClient {
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
+    agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
@@ -2010,6 +2014,18 @@ export class ApiClient {
     merge_queue_last_removal_reason?: string;
     merge_queue_last_removal_before_sha?: string;
     checks?: Array<{
+      id?: number;
+      app_id?: number;
+      app_slug?: string;
+      check_suite_id?: number;
+      workflow_id?: number;
+      workflow_name?: string;
+      workflow_run_id?: number;
+      workflow_event?: string;
+      head_repo_id?: number;
+      head_repo_owner?: string;
+      head_repo_name?: string;
+      head_branch?: string;
       name: string;
       source?: string;
       status?: string;
@@ -2316,6 +2332,10 @@ export class ApiClient {
     repo: string;
     pr_number: number;
     checks?: Array<{
+      id?: number;
+      app_id?: number;
+      app_slug?: string;
+      check_suite_id?: number;
       name: string;
       source?: string;
       status?: string;
@@ -2350,6 +2370,7 @@ export class ApiClient {
     }>;
     workflow_runs?: Array<{
       id: number;
+      check_suite_id?: number;
       run_attempt?: number;
       workflow_id?: number;
       name: string;

@@ -151,12 +151,14 @@ type AgentExecution struct {
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
-	PrepareResult *EnvPrepareResult `json:"-"`
+	PrepareResult           *EnvPrepareResult `json:"-"`
+	prepareProgressRecorder *prepareProgressRecorder
 
 	// agentctl client for this execution
 	agentctl                  *agentctl.Client
 	agentctlOverride          atomic.Pointer[agentctl.Client]
 	agentctlLifecycleMu       sync.RWMutex
+	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
@@ -767,6 +769,12 @@ func (e *AgentExecution) startupAttemptSnapshot() uint64 {
 	return e.startupAttemptGeneration
 }
 
+// StartupAttemptGeneration returns the generation that fences callbacks from
+// the execution's active startup and stream attempt.
+func (e *AgentExecution) StartupAttemptGeneration() uint64 {
+	return e.startupAttemptSnapshot()
+}
+
 func (e *AgentExecution) restoreSessionSettingsSource(
 	sourceGeneration uint64,
 	attemptID string,
@@ -929,12 +937,30 @@ func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
 	return client, ae.agentctlLifecycleMu.RUnlock
 }
 
+// withAgentCtlClient keeps a workspace callback scoped to the client that
+// opened its stream. Holding the read lease through callback publication
+// fences it against a concurrent client replacement or detach.
+func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback func()) bool {
+	if ae == nil || client == nil || callback == nil {
+		return false
+	}
+	ae.agentctlSourceMu.RLock()
+	defer ae.agentctlSourceMu.RUnlock()
+	if ae.currentAgentCtlClient() != client {
+		return false
+	}
+	callback()
+	return true
+}
+
 // replaceAgentctlClient atomically publishes a replacement connection while
 // retaining the construction-time field for test/source compatibility.
 func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
 	if ae == nil || client == nil {
 		return nil
 	}
+	ae.agentctlSourceMu.Lock()
+	defer ae.agentctlSourceMu.Unlock()
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
@@ -946,6 +972,8 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
+	ae.agentctlSourceMu.Lock()
+	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
 	ae.agentctlOverride.Store(nil)
 }
@@ -1529,12 +1557,15 @@ type AgentProfileInfo struct {
 	AutoFallback bool
 	// RequireExactModel makes the configured model an explicit identity
 	// requirement. False preserves compatible pre-PR behavior.
-	RequireExactModel    bool
-	AllowIndexing        bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
-	CLIPassthrough       bool
-	CursorMCPAuthEnabled bool
-	NativeSessionResume  bool // Agent supports ACP session/load for resume
-	SupportsMCP          bool
+	RequireExactModel       bool
+	AllowIndexing           bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	CLIPassthrough          bool
+	CursorMCPAuthEnabled    bool
+	CursorPluginsMCPEnabled bool
+	MCPSelectionMode        string
+	MCPSelectedServers      []string
+	NativeSessionResume     bool // Agent supports ACP session/load for resume
+	SupportsMCP             bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag

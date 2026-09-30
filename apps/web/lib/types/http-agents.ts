@@ -260,10 +260,12 @@ export type ToolStatus = {
 
 export type LoginCommand = {
   cmd: string[];
+  variants?: Record<string, string[]>;
   description?: string;
 };
 
 export type RuntimeUpdate = {
+  managed_fallback?: boolean;
   supported: boolean;
   package: string;
   current_version?: string;

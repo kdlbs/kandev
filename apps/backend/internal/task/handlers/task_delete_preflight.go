@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/task/service"
+	"go.uber.org/zap"
 )
 
 type httpTaskDeletePreflightRequest struct {
@@ -35,6 +36,9 @@ func (h *TaskHandlers) httpTaskDeletePreflight(c *gin.Context) {
 		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "task deletion preview requires an authenticated user"})
 		case errors.Is(err, service.ErrTaskDeletePreflightUnavailable):
+			if fields := cleanupInspectionFields(err); len(fields) > 0 {
+				h.logger.Warn("task delete preflight inspection failed", append(fields, zap.Int("task_count", len(body.TaskIDs)))...)
+			}
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "task delete preflight unavailable"})
 		default:
 			handleNotFound(c, h.logger, err, "task not found")

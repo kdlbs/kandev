@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { routeNavigationResponses } from "../../helpers/navigation-response-hold";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionDone } from "../../helpers/session";
 import type { AppState } from "../../../lib/state/store";
 import type { StoreApi } from "zustand";
 
@@ -39,6 +40,15 @@ export async function seedNavigationTasks(
         repository_ids: [seed.repositoryId],
         executor_profile_id: executorProfileId,
       }),
+    );
+  }
+  for (const task of tasks) {
+    await waitForSessionDone(
+      api,
+      task.id,
+      task.session_id!,
+      "Navigation fixture turn settled",
+      30_000,
     );
   }
   return tasks;
@@ -76,7 +86,31 @@ export async function saveExpandedPaths(
 
 export async function showNavigationFiles(page: Page, mobile: boolean) {
   if (mobile) await page.getByRole("button", { name: "Files", exact: true }).tap();
-  else await new SessionPage(page).clickTab("Files");
+  else {
+    const session = new SessionPage(page);
+    await session.waitForDockviewReady();
+    await expect(page.getByTestId("dockview-task-layout")).toHaveAttribute("aria-busy", "false");
+    await session.clickTab("Files");
+  }
+}
+
+async function waitForNavigationGitHydration(page: Page, sessionId: string) {
+  // Initial commit discovery can activate Changes. Select Files after both Git reads settle.
+  await expect
+    .poll(() =>
+      page.evaluate((sessionId) => {
+        const state = (
+          window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
+        ).__KANDEV_E2E_STORE__.getState();
+        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
+        return (
+          state.gitStatus.byEnvironmentRepo[env] !== undefined &&
+          state.sessionCommits.byEnvironmentId[env] !== undefined &&
+          state.sessionCommits.loading[env] !== true
+        );
+      }, sessionId),
+    )
+    .toBe(true);
 }
 
 export async function selectNavigationTask(page: Page, title: string, mobile = false) {
@@ -105,11 +139,13 @@ export async function assertProgressiveNavigation(
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle();
+  await waitForNavigationGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
   await saveExpandedPaths(page, a.session_id!, [AVAILABLE, HELD], mobile);
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   await page.reload();
+  await waitForNavigationGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
   // This assertion is deliberately before release: an unfinished sibling cannot hide the root.
@@ -119,6 +155,8 @@ export async function assertProgressiveNavigation(
   const status = page.getByTestId("file-tree-refresh-status");
   await expect(status).toContainText("temporary navigation folder failure");
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
+  await showNavigationFiles(page, mobile);
+  await expect(status).toBeVisible();
   const retry = status.getByRole("button", { name: "Retry", exact: true });
   if (mobile) {
     const box = await retry.boundingBox();
@@ -131,6 +169,7 @@ export async function assertProgressiveNavigation(
   await selectNavigationTask(page, b.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${b.id}$`));
   await session.waitForChatIdle();
+  await waitForNavigationGitHydration(page, b.session_id!);
   await showNavigationFiles(page, mobile);
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
   gate.hold(

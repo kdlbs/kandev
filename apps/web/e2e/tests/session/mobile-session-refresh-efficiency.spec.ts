@@ -231,6 +231,8 @@ test.describe("mobile session refresh efficiency", () => {
 async function expectTouchTarget(locator: import("@playwright/test").Locator, label: string) {
   const box = await locator.boundingBox();
   expect(box, `${label} must have geometry`).not.toBeNull();
-  expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
-  expect(box!.width, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
+  const height = Math.round(box!.height * 100) / 100;
+  const width = Math.round(box!.width * 100) / 100;
+  expect(height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  expect(width, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
 }

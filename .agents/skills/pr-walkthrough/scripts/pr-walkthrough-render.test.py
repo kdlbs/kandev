@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import os
 import shutil
@@ -48,6 +49,7 @@ class PRWalkthroughRenderTest(unittest.TestCase):
             "PR_REPO": "kdlbs/kandev",
             "PR_BASE": "main",
             "PR_HEAD": "feature/walkthrough",
+            "HEAD_SHA": "a" * 40,
         }
 
     def run_render(
@@ -142,6 +144,83 @@ class PRWalkthroughRenderTest(unittest.TestCase):
         self.assertFalse((output / "pr-42.json").exists())
         self.assertFalse((output / "pr-42.html").exists())
         self.assertIn("why.problem is required", result.stderr)
+
+    def test_invalid_json_reports_location_without_source(self) -> None:
+        cases = (
+            ('{"x":"raw\ttab"}', "Invalid control character"),
+            ('{"x":"unescaped " quote"}', "Expecting ',' delimiter"),
+            ('{"x":"bad\\qescape"}', "Invalid \\escape"),
+        )
+        draft = self.worktree / ".pr-walkthrough" / "draft.json"
+        for source, parser_message in cases:
+            with self.subTest(parser_message=parser_message):
+                draft.write_text(source, encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, str(self.script)],
+                    cwd=self.worktree,
+                    env=self.env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(".pr-walkthrough/draft.json", result.stderr)
+                self.assertIn(parser_message, result.stderr)
+                self.assertRegex(result.stderr, r"line 1, column [0-9]+")
+                self.assertNotIn(source, result.stderr)
+
+    def test_successful_render_writes_completion_receipt_for_output_pair(self) -> None:
+        result = self.run_render(self.data)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        json_path = self.worktree / "docs" / "pr-walkthrough" / "pr-42.json"
+        html_path = self.worktree / "docs" / "pr-walkthrough" / "pr-42.html"
+        receipt_path = self.worktree / ".pr-walkthrough" / "render-complete.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            receipt,
+            {
+                "version": 1,
+                "pr_number": 42,
+                "head_sha": "a" * 40,
+                "json_path": "docs/pr-walkthrough/pr-42.json",
+                "html_path": "docs/pr-walkthrough/pr-42.html",
+                "json_sha256": hashlib.sha256(json_path.read_bytes()).hexdigest(),
+                "html_sha256": hashlib.sha256(html_path.read_bytes()).hexdigest(),
+            },
+        )
+
+    def test_failed_render_removes_previous_completion_receipt(self) -> None:
+        receipt_path = self.worktree / ".pr-walkthrough" / "render-complete.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text("stale", encoding="utf-8")
+
+        result = self.run_render({"pr": {}})
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(receipt_path.exists())
+
+    def test_managed_head_sha_requires_exact_lowercase_commit_identity(self) -> None:
+        draft = self.worktree / ".pr-walkthrough" / "draft.json"
+        draft.write_text(json.dumps(self.data), encoding="utf-8")
+        for invalid_sha in ("a" * 39, "A" * 40, "g" * 40):
+            with self.subTest(invalid_sha=invalid_sha):
+                env = {**self.env, "HEAD_SHA": invalid_sha}
+                result = subprocess.run(
+                    [sys.executable, str(self.script)],
+                    cwd=self.worktree,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    input=None,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("HEAD_SHA must be a full lowercase 40-character SHA", result.stderr)
+                self.assertFalse(
+                    (self.worktree / ".pr-walkthrough" / "render-complete.json").exists()
+                )
 
     def test_managed_renderer_requires_new_impact_contract(self) -> None:
         data = json.loads(json.dumps(self.data))

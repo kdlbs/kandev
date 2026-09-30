@@ -41,6 +41,13 @@ The template prompts are product behavior, not merely sample text. Review them b
 
 Choose this for short implementation work with a simple run-and-review loop.
 
+## Reorder workflow steps
+
+Saving a changed step order preserves each step's saved prompt, profile, and
+completion settings, including settings saved concurrently by another caller.
+If the reorder fails, the previous order is preserved. This guarantee applies
+to the reorder operation; saving multiple workflow settings uses separate writes.
+
 ## Duplicate a workflow
 
 Use **Duplicate** to create a new workflow from a saved workflow. The copy starts as a local draft.

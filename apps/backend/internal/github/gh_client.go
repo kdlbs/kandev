@@ -779,13 +779,21 @@ func (c *GHClient) ListPRComments(ctx context.Context, owner, repo string, numbe
 
 // ghCheckRun is the JSON shape from the check-runs API.
 type ghCheckRun struct {
+	ID          int64   `json:"id"`
 	Name        string  `json:"name"`
 	Status      string  `json:"status"`
 	Conclusion  *string `json:"conclusion"`
 	HTMLURL     string  `json:"html_url"`
 	StartedAt   string  `json:"started_at"`
 	CompletedAt string  `json:"completed_at"`
-	Output      struct {
+	App         *struct {
+		ID   int64  `json:"id"`
+		Slug string `json:"slug"`
+	} `json:"app"`
+	CheckSuite struct {
+		ID int64 `json:"id"`
+	} `json:"check_suite"`
+	Output struct {
 		Title   *string `json:"title"`
 		Summary *string `json:"summary"`
 	} `json:"output"`

@@ -19,6 +19,22 @@ import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings"
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+it("hydrates legacy state grouping as workflow step without changing sort", () => {
+  const mapped = mapUserSettingsResponse({
+    settings: {
+      user_id: DEFAULT_USER_ID,
+      workspace_id: toWorkspaceId(""),
+      repository_ids: [],
+      tasks_list_group: "state",
+      tasks_list_sort: "title_desc",
+      updated_at: UPDATED_AT,
+    },
+  });
+  expect(mapped.tasksListGroup).toBe("workflow_step");
+  expect(mapped.tasksListSort).toBe("title_desc");
+});
+
 describe("user settings revision ordering", () => {
   it("orders atomic revisions and hydrates the current revision", () => {
     expect(compareUserSettingsRevisions(3, 2)).toBe(1);
@@ -182,6 +198,20 @@ describe("agent-generated task title defaults", () => {
     expect(buildCoreFields({ agent_generated_task_titles: false }).agentGeneratedTaskTitles).toBe(
       false,
     );
+  });
+});
+
+describe("agent tab close behavior defaults", () => {
+  it("defaults unknown and missing values to delete_session", () => {
+    expect(buildCoreFields({}).agentTabCloseBehavior).toBe("delete_session");
+    expect(buildCoreFields({ agent_tab_close_behavior: "hide_panel" }).agentTabCloseBehavior).toBe(
+      "hide_panel",
+    );
+    expect(
+      buildCoreFields({ agent_tab_close_behavior: "unknown" } as unknown as Parameters<
+        typeof buildCoreFields
+      >[0]).agentTabCloseBehavior,
+    ).toBe("delete_session");
   });
 });
 

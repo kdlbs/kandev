@@ -139,10 +139,16 @@ test("phone sidebar pages 101 matching tasks and preserves the active chat", asy
   await filters.close();
 
   await archiveSidebarPaginationTasks(apiClient, matchingTaskIds);
-  await expect(rows).toHaveCount(0, { timeout: 20_000 });
-  await expect(controls).toBeHidden();
+  // These fixture mutations use the API directly, outside the app's task
+  // action/realtime path. Changing the query makes the list request a fresh
+  // server page before checking the resulting archive state.
   await filters.addFilterRow();
   await filters.setClauseDimension(1, "Archived");
+  await filters.setClauseBooleanValue(1, false);
+  await filters.close();
+  await expect(rows).toHaveCount(0, { timeout: 20_000 });
+  await expect(controls).toBeHidden();
+  await filters.open();
   await filters.setClauseBooleanValue(1, true);
   await filters.close();
   await expect(rows).toHaveCount(100, { timeout: 20_000 });

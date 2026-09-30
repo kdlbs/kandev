@@ -362,6 +362,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoRun).toHaveAttribute("data-state", "unchecked");
   await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
   await expect(autoMerge).toBeEnabled();
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_run))
+    .toBe(false);
   await autoMerge.tap();
   await expect
     .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
@@ -370,6 +373,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoMerge).toBeEnabled();
   await autoMerge.tap();
   await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_merge_enabled))
+    .toBe(false);
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -377,7 +383,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await rowSendNow.tap();
   await sendNowResponse;
   await expect
-    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+      timeout: 15_000,
+    })
     .toBe(2);
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
   await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);

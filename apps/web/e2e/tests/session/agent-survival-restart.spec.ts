@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 // AC-EXECUTORS-SURVIVAL-001..003: with the capability enabled, a worktree
@@ -106,12 +105,11 @@ test.describe("Agent survival across backend restart", () => {
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
 
-      // Board view: the card must not show the interrupted affordance either.
-      const kanban = new KanbanPage(testPage);
-      await kanban.goto();
-      const card = kanban.taskCard(task.id);
-      await expect(card).toBeVisible({ timeout: 20_000 });
-      await expect(card.getByTestId("task-state-interrupted")).toHaveCount(0);
+      // The completed Review task remains in the sidebar even when it has no
+      // active board column. Its row must not advertise an interrupted turn.
+      const taskRow = session.sidebarTaskItem("Agent Survival Restart Task");
+      await expect(taskRow).toBeVisible();
+      await expect(taskRow.getByTestId("task-state-interrupted")).toHaveCount(0);
     } finally {
       await releaseFeature();
     }

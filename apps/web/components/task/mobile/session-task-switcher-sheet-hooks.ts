@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- the mobile task switcher owns its complete data and action boundary */
 "use client";
 
+import { reconcileTaskWorkflowCoverage } from "@/lib/state/slices/task-workflow-coverage";
 import { useCallback, useMemo, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { linkToTask } from "@/lib/links";
@@ -20,7 +21,11 @@ import { type Repository, type SidebarTaskPageResponse, type Task } from "@/lib/
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
-import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
+import {
+  mapSnapshotToKanban,
+  reconcileMobileSnapshot,
+  sortByUpdatedAtDesc,
+} from "./session-task-switcher-sheet-helpers";
 import { toSheetItem, type SheetItemCtx } from "./session-task-switcher-sheet-item";
 import {
   selectTaskFromSheet,
@@ -56,7 +61,7 @@ function buildSheetItems(params: {
   repositoriesByWorkspace: Record<string, Repository[]>;
   allTasks: AggregatedSidebarTasks["allTasks"];
   allSteps: AggregatedSidebarTasks["allSteps"];
-  pageEntries: SidebarTaskPageResponse["entries"];
+  pageEntries: SidebarTaskPageResponse["entries"] | undefined;
   workflows: Array<{ id: string; name: string }>;
   wipQueueByTaskId: NonNullable<ReturnType<typeof useWorkspaceSidebarTasks>["wipQueueByTaskId"]>;
   acknowledgedAgentErrors: Record<string, string>;
@@ -90,7 +95,7 @@ function buildSheetItems(params: {
   const stepTitleById = new Map(allSteps.map((step) => [step.id, step.title]));
   const stepColorById = new Map(allSteps.map((step) => [step.id, step.color]));
   const titleById = new Map(allTasks.map((task) => [task.id, task.title]));
-  applySidebarPageMetadata(pageEntries, {
+  applySidebarPageMetadata(pageEntries ?? [], {
     titleById,
     workflowNameById,
     stepTitleById,
@@ -242,6 +247,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   store.getState().setActiveWorkspace(newWorkspaceId);
   const generation = store.getState().workspaceContextGeneration;
   const requestId = generateUUID();
+  const overviewRead = store.getState().beginTaskOverviewRead?.();
   store
     .getState()
     .setWorkspaceContextRead(
@@ -277,6 +283,18 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
     }
     const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
     if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
+    const kanban = reconcileMobileSnapshot(
+      store.getState(),
+      mapSnapshotToKanban(snapshot, firstWorkflow.id),
+      overviewRead,
+    );
+    if (!kanban) return;
+    const taskWorkflowCoverage = reconcileTaskWorkflowCoverage(
+      store.getState(),
+      workflowsResponse.task_workflow_coverage,
+      overviewRead,
+    );
+    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
     store
       .getState()
       .setWorkspaceContextRead(
@@ -303,10 +321,20 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
           })),
         ],
         activeId: firstWorkflow.id,
+        taskWorkflowCoverage,
       },
-      kanban: mapSnapshotToKanban(snapshot, firstWorkflow.id),
+      kanban,
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          ...state.kanbanMulti.snapshots,
+          [firstWorkflow.id]: { ...kanban, workflowName: firstWorkflow.name },
+        },
+      },
     }));
-    const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
+    const mostRecentTask = sortByUpdatedAtDesc(
+      kanban.tasks.map((task) => ({ id: task.id, updated_at: task.updatedAt })),
+    )[0];
     if (mostRecentTask) {
       const sessions = await loadWorkspaceTaskSessions(loadTaskSessionsForTask, mostRecentTask.id);
       if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
@@ -335,6 +363,8 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
       ...current,
       kanban: { ...current.kanban, isLoading: false },
     }));
+  } finally {
+    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
   }
 }
 

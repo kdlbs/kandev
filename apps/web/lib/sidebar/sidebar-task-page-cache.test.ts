@@ -187,7 +187,7 @@ it("invalidates only snapshots containing a changed task summary", async () => {
   expect(cache.get("unaffected")).not.toBeNull();
 });
 
-it("keeps render-time lookups read-only across a discarded workspace change", async () => {
+it("keeps lookups read-only and treats committed workspace changes as hard barriers", async () => {
   const { store, cache } = setup();
   await load(cache, "a");
   let resolve!: (value: SidebarTaskPageResponse) => void;
@@ -198,15 +198,19 @@ it("keeps render-time lookups read-only across a discarded workspace change", as
   );
   const request = cache.request("ws", query, "b");
   const signal = vi.mocked(querySidebarTasks).mock.calls.at(-1)?.[2]?.init?.signal;
+  const before = store.getState();
+  expect(cache.get("a")).not.toBeNull();
+  expect(store.getState()).toBe(before);
+  expect(signal?.aborted).toBe(false);
   store.setState({ workspaceContextGeneration: 2 });
   expect(cache.get("a")).toBeNull();
-  expect(signal?.aborted).toBe(false);
+  expect(signal?.aborted).toBe(true);
   store.setState({ workspaceContextGeneration: 1 });
-  expect(cache.get("a")).not.toBeNull();
+  expect(cache.get("a")).toBeNull();
   resolve(page("b"));
   await request.promise;
   request.release();
-  expect(cache.get("b")).not.toBeNull();
+  expect(cache.get("b")).toBeNull();
 });
 
 it("clears cached and in-flight pages on confirmed deletion and unsubscribes consumers", async () => {

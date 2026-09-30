@@ -5,6 +5,8 @@ import { ApiError } from "@/lib/api/client";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import { useSidebarTaskPage } from "./use-sidebar-task-page";
+import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
+import type { AppState } from "@/lib/state/store";
 
 const mocks = vi.hoisted(() => ({
   state: {
@@ -90,6 +92,33 @@ beforeEach(() => {
 });
 
 describe("useSidebarTaskPage", () => {
+  it("releases pending reads and drops the duplicate page when shared state takes over", async () => {
+    const pending = deferred<SidebarTaskPageResponse>();
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce(response(1, false, false));
+    const hook = renderHook(({ enabled }) => useSidebarTaskPage("ws-1", enabled), {
+      initialProps: { enabled: true },
+    });
+    await waitFor(() => expect(hook.result.current.response).not.toBeNull());
+    const key = hook.result.current.scopeKey;
+    const cache = sidebarTaskPageCache(store as unknown as { getState: () => AppState });
+    expect(cache.get(key)).not.toBeNull();
+    vi.mocked(querySidebarTasks).mockReturnValueOnce(pending.promise);
+    act(() => hook.result.current.refresh());
+    await waitFor(() => expect(querySidebarTasks).toHaveBeenCalledTimes(2));
+    const signal = vi.mocked(querySidebarTasks).mock.calls[1][2]?.init?.signal;
+    hook.rerender({ enabled: false });
+    expect(signal?.aborted).toBe(true);
+    expect(hook.result.current.response).toBeNull();
+    expect(cache.get(key)).toBeNull();
+    expect(hook.result.current.isLoading).toBe(false);
+    expect(hook.result.current.requestedPage).toBeNull();
+    await act(async () => pending.resolve(response(1, false, false)));
+    expect(cache.get(key)).toBeNull();
+    expect(hook.result.current.response).toBeNull();
+    act(() => hook.result.current.retry());
+    expect(querySidebarTasks).toHaveBeenCalledTimes(2);
+  });
+
   it("requests one bounded page and keeps the accepted page when a replacement fails", async () => {
     vi.mocked(querySidebarTasks)
       .mockResolvedValueOnce(response(1, false, true))
@@ -198,10 +227,13 @@ describe("useSidebarTaskPage request lifecycle", () => {
     expect(requests[1]?.signal?.aborted).toBe(false);
 
     await act(async () => requests[1]?.deferred.resolve(response(2, true, false)));
+    expect(requests).toHaveLength(2);
+    expect(result.current.response?.page).toBe(2);
+    expect(result.current.response?.provisional).toBe(true);
+    expect(afterNavigation).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(250));
     expect(requests).toHaveLength(3);
     expect(requests[2]?.query.page).toBe(2);
-    expect(result.current.response?.page).toBe(1);
-    expect(afterNavigation).not.toHaveBeenCalled();
     await act(async () => requests[2]?.deferred.resolve(response(2, true, false)));
     expect(result.current.requestedPage).toBeNull();
     expect(result.current.response?.page).toBe(2);
@@ -211,6 +243,38 @@ describe("useSidebarTaskPage request lifecycle", () => {
 });
 
 describe("useSidebarTaskPage refresh invalidation", () => {
+  it("shares one trailing refresh with updates arriving just after a slow first response", async () => {
+    const requests: Array<ReturnType<typeof deferred<SidebarTaskPageResponse>>> = [];
+    vi.mocked(querySidebarTasks).mockImplementation(() => {
+      const request = deferred<SidebarTaskPageResponse>();
+      requests.push(request);
+      return request.promise;
+    });
+    const { result, rerender } = renderHook(() => useSidebarTaskPage("ws-1"));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    vi.useFakeTimers();
+    act(() => {
+      mocks.state.sidebarArchivedTasks.revisionByWorkspaceId["ws-1"] = 1;
+      rerender();
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    await act(async () => requests[0]?.resolve(response(1, false, true)));
+    expect(result.current.response?.provisional).toBe(true);
+    expect(requests).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    act(() => {
+      mocks.state.sidebarArchivedTasks.revisionByWorkspaceId["ws-1"] = 2;
+      rerender();
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(150));
+    expect(requests).toHaveLength(2);
+    await act(async () => requests[1]?.resolve(response(1, false, true)));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(requests).toHaveLength(2);
+    expect(result.current.requestedPage).toBeNull();
+    expect(result.current.response?.provisional).toBe(false);
+  });
+
   it("coalesces task invalidations and refreshes once after the trailing window", async () => {
     vi.mocked(querySidebarTasks).mockResolvedValue(response(1, false, true));
     const { rerender } = renderHook(() => useSidebarTaskPage("ws-1"));
@@ -368,7 +432,7 @@ it.each([false, true])(
   },
 );
 
-it("does not display a response invalidated before the trailing refresh starts", async () => {
+it("displays a provisional response while its trailing refresh reconciles soft invalidations", async () => {
   const stale = deferred<SidebarTaskPageResponse>();
   vi.mocked(querySidebarTasks)
     .mockResolvedValueOnce(response(1, false, false))
@@ -380,7 +444,8 @@ it("does not display a response invalidated before the trailing refresh starts",
   mocks.state.sidebarArchivedTasks.revisionByWorkspaceId["ws-1"] = 1;
   hook.rerender();
   await act(async () => stale.resolve({ ...response(1, false, false), query_key: "deleted-row" }));
-  expect(hook.result.current.response?.query_key).toBe("query-1");
+  expect(hook.result.current.response?.query_key).toBe("deleted-row");
+  expect(hook.result.current.response?.provisional).toBe(true);
   vi.mocked(querySidebarTasks).mockResolvedValueOnce({
     ...response(1, false, false),
     query_key: "fresh",

@@ -14,6 +14,7 @@ test.describe("Office agent execution profile on mobile", () => {
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true",
     });
+    let dynamicProfileId: string | undefined;
 
     try {
       await expect
@@ -46,7 +47,7 @@ test.describe("Office agent execution profile on mobile", () => {
           `Dynamic profile creation failed (${response.status}): ${await response.text()}`,
         );
       }
-      const { id: dynamicProfileId } = (await response.json()) as { id: string };
+      dynamicProfileId = ((await response.json()) as { id: string }).id;
 
       await testPage.goto(`/office/agents/${officeSeed.agentId}/configuration`);
       const picker = testPage.getByTestId("agent-execution-profile-selector");
@@ -71,7 +72,17 @@ test.describe("Office agent execution profile on mobile", () => {
       const agent = await officeApi.getAgent(officeSeed.agentId);
       expect(agent.execution_agent_profile_id).toBe(dynamicProfileId);
     } finally {
-      await releaseFeature();
+      try {
+        await officeApi.updateAgent(officeSeed.agentId, {
+          agent_profile_id: seedData.agentProfileId,
+        });
+      } finally {
+        try {
+          if (dynamicProfileId) await apiClient.deleteAgentProfile(dynamicProfileId, true);
+        } finally {
+          await releaseFeature();
+        }
+      }
     }
   });
 });

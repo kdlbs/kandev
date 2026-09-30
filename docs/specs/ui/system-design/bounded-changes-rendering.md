@@ -106,6 +106,25 @@ variable heights. Only positive measurements replace cached sizes, following
 remeasurement. Zero-height observations during hiding retain estimates or the
 last positive measurement.
 
+`ChangesTimelineViewport` refreshes presentation measurements through
+`observeChangesTimelinePresentationChanges`. Invalidating the virtualizer's
+cache does not cause an unchanged mounted element to emit another
+`ResizeObserver` entry. A refresh must therefore repopulate mounted row sizes,
+including rows whose dimensions did not change, before restoring its anchor.
+Conservative estimates remain valid for unmounted rows only.
+
+Capture the anchor and collect the mounted wrappers' sizes before clearing the
+cache. Batch layout reads before publishing sizes. Accept positive current
+heights and retain each mounted row's previous positive keyed size when hidden
+geometry is unavailable. Rebuild the virtualizer's measurements, apply those
+sizes, then publish the pending anchor for restoration. This ordering prevents
+an intermediate estimate-only layout from moving the visible entry.
+
+Keep this explicit measurement pass limited to the mounted window on
+presentation invalidation. Initial mounting and ordinary scrolling retain the
+asynchronous `file-tree-measurement.ts` path. Do not measure the full collection,
+fix all row heights, or enlarge overscan to mask missing measurements.
+
 Capture the first visible key and offset before a same-context model change.
 Restore that anchor when it survives. Otherwise use the nearest surviving index
 and clamp the scroll position. Preserve scroll on ordinary background updates.
@@ -116,6 +135,31 @@ focus requests, measurements, and anchors before new rows appear. Use the
 current task/session/environment mapping and backend/auth context. Old requests
 cannot publish into a replacement context, including an A-to-B-to-A transition.
 Follow existing domain invalidation and unavailable-workspace rules.
+
+## Section spacing
+
+The [sidebar repair package](../../../plans/changes-sidebar-history-spacing/plan.md)
+implements existing geometry criteria .6 and .8. History and working-tree
+headers use one disclosure row, with descendants rendered as separate virtual
+items. Whole-section bottom padding does not belong inside these header rows.
+
+Both section kinds use one measured disclosure row: 28px at the standard root
+font on fine-pointer desktop, at least 44px on phone widths below 768px and
+coarse pointers. The header has no section-bottom padding or negative margins.
+Controls, counts, dots, and actions stay within the row. Section estimates
+match the corresponding presentation mode; positive measurements remain the
+authority for wrapping and font scaling. Do not set a fixed height on virtual
+wrappers or add spacer descriptors for this repair.
+
+History repository sub-headers also keep at least 44px disclosure targets on
+phone widths, including fine pointers, and on coarse pointers. Their measured
+wrappers retain the existing repository-row padding and desktop density.
+
+Rendered checks must measure the disclosures, header wrappers, and first
+descendants, as well as adjacent virtual transforms. Wrapper adjacency alone
+cannot detect excessive internal header padding. Exercise collapsed/expanded
+PR and commit sections, presentation refresh, and the 767/768px boundary with
+a fine pointer, plus phone/coarse-pointer target containment.
 
 ## Commit detail ownership
 
@@ -193,3 +237,4 @@ UI ownership. The design records sufficient rationale. Truncation loses access,
 CSS hiding retains components, and nested scrollers weaken navigation.
 
 - [Implementation plan](../../../plans/bounded-changes-rendering/plan.md)
+- [Measurement refresh repair](../../../plans/changes-timeline-measurement-refresh/plan.md)

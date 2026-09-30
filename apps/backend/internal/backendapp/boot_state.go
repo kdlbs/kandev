@@ -337,8 +337,9 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 	}
 	activeWorkflowID := resolveHomeWorkflowID(workflows, queryValue(req, "workflowId"), settingsWorkflowID, hasSettings)
 	state["workflows"] = map[string]any{
-		"items":    workflowItems,
-		"activeId": nullString(activeWorkflowID),
+		"items":                workflowItems,
+		"activeId":             nullString(activeWorkflowID),
+		"taskWorkflowCoverage": b.taskWorkflowCoverage(ctx, activeWorkspaceID),
 	}
 	if hasSettings {
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
@@ -651,6 +652,7 @@ func (b bootStateBuilder) workflowSnapshotState(ctx context.Context, workflow *t
 	return map[string]any{
 		"workflowId":   workflow.ID,
 		"workflowName": workflow.Name,
+		"taskCoverage": b.p.taskSvc.WorkflowTaskCoverage(workflow, len(tasks), len(taskStates)),
 		"steps":        steps,
 		"tasks":        taskStates,
 	}, true
@@ -1009,8 +1011,9 @@ func (b bootStateBuilder) addTaskDetailResourceState(ctx context.Context, state 
 		b.logBootError("list task detail workflows", err)
 	} else {
 		state["workflows"] = map[string]any{
-			"items":    workflowItemStates(workflows),
-			"activeId": nil,
+			"items":                workflowItemStates(workflows),
+			"activeId":             nil,
+			"taskWorkflowCoverage": b.taskWorkflowCoverage(ctx, task.WorkspaceID),
 		}
 	}
 	b.addRepositoriesState(ctx, state, task.WorkspaceID)

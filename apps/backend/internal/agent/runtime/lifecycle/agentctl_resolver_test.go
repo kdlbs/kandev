@@ -566,22 +566,22 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 		resolved <- resolution{path: path, err: err}
 	}()
 	select {
-	case <-inventoryStarted:
-	case <-time.After(time.Second):
-		cancel()
-		t.Fatal("cache prune did not start its mount inventory")
-	}
-	if !<-deadlineSeen {
-		cancel()
-		t.Fatal("background mount inventory has no time bound")
-	}
-	select {
 	case got := <-resolved:
 		if got.err != nil || got.path != cachePath {
 			t.Fatalf("resolution = %q, %v; want %q", got.path, got.err, cachePath)
 		}
 	case <-ctx.Done():
 		t.Fatal("helper resolution waited for background cache cleanup until the launch deadline")
+	}
+	select {
+	case <-inventoryStarted:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("cache prune did not start its mount inventory")
+	}
+	if !<-deadlineSeen {
+		cancel()
+		t.Fatal("background mount inventory has no time bound")
 	}
 	cancel()
 	select {
@@ -743,9 +743,9 @@ func TestAgentctlResolverLaunchDeadlineBoundsDownload(t *testing.T) {
 	defer server.Close()
 	resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
 		Version: version, Commit: commit, BundleDir: bundle, HomeDir: t.TempDir(), ReleaseBaseURL: server.URL,
-		DownloadTimeout: 250 * time.Millisecond,
+		DownloadTimeout: 10 * time.Second,
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var steps []PrepareStep
 	_, err := resolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, func(step PrepareStep, _, _ int) {

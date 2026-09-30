@@ -64,7 +64,8 @@ Stopping a session is not deletion. Resume needs the executor's session record. 
 When startup or resume fails:
 
 - Kandev adds one recovery entry to the selected session's chat.
-- The current unresolved failure replaces the blocked message composer with one recovery card. Older entries keep their message and technical details without stale controls.
+- The current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
+- In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
 
@@ -85,9 +86,9 @@ The expanded queue also lets you pause or discard stale work. Its compact header
 
 Use **Auto-run** for queue processing:
 
-| Setting | Queue behavior |
-| --- | --- |
-| **On** | Runs one eligible row per turn in FIFO order. |
+| Setting | Queue behavior                                         |
+| ------- | ------------------------------------------------------ |
+| **On**  | Runs one eligible row per turn in FIFO order.          |
 | **Off** | Lets the current response finish and holds later rows. |
 
 - The setting belongs to the session and survives an empty queue, reload, and backend restart.
@@ -352,6 +353,10 @@ On an inline commit file row, press Enter or Space to open its diff.
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+Kandev lists changed files before it finishes loading their diffs. Select a listed file to open its diff while it loads; the panel fills in the details automatically, without another file edit. If the diff cannot be loaded, Kandev shows **Diff is unavailable**.
+
+While the first status check runs, the panel shows **Checking changed files...** and waits before showing an empty state. If status cannot be refreshed, select **Retry**; when earlier status exists, Kandev keeps those rows and shows **Refresh failed. Showing last observed changes.** The clean empty state appears only after a complete status check finds no changed files; pull-request changes and commits remain available when workspace status fails.
+
 On phones and touch devices, working-tree rows give filenames the main space.
 Tap a filename to open its diff, or tap the row's **Show more actions** menu to
 stage or unstage, edit, or discard that file. The menu shows the full path, and
@@ -539,3 +544,9 @@ Before moving a task to done:
 - **Share is unavailable:** wait until the session leaves `CREATED`/`STARTING` and configure GitHub Gist access. CLI-passthrough conversations do not have the structured snapshot used by this feature.
 
 Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), and [Developer tools](developer-tools.md).
+
+## Agent tab close behavior
+
+On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
+
+Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.

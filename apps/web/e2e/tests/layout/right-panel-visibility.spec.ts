@@ -3,15 +3,23 @@ import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 async function createTask(apiClient: ApiClient, seedData: SeedData, title: string) {
-  return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
-    description: "/e2e:simple-message",
-    workflow_id: seedData.workflowId,
-    workflow_step_id: seedData.startStepId,
-    repository_ids: [seedData.repositoryId],
-  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  await waitForLatestSessionDone(apiClient, task.id, 1, `quiet layout fixture ${title}`);
+  return task;
 }
 
 type DesktopTaskOptions = {
@@ -50,6 +58,7 @@ test.describe("right-panel visibility", () => {
       { viewport: { width: 1600, height: 900 } },
     );
     const toggle = testPage.getByTestId("task-right-panels-toggle");
+    await session.clickTab("Files");
     await expect(toggle).toBeVisible();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -93,6 +102,7 @@ test.describe("right-panel visibility", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await expect(session.terminal).toBeVisible();
 
@@ -100,6 +110,7 @@ test.describe("right-panel visibility", () => {
     await session.waitForLoad();
     await session.waitForDockviewReady();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await expect(session.terminal).toBeVisible();
     await session.expectLayoutHealthy();
@@ -236,6 +247,7 @@ test.describe("right-panel visibility", () => {
     await session.clickMaximize();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
 
     await testPage.reload();
@@ -243,6 +255,7 @@ test.describe("right-panel visibility", () => {
     await session.waitForDockviewReady();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await session.expectLayoutHealthy();
   });

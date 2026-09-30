@@ -136,6 +136,9 @@ func stopRuntimeInstanceAndRelease(
 	if runtime == nil || instance == nil {
 		return nil
 	}
+	if instance.StopReason == "" {
+		instance.StopReason = StopReasonLaunchRollback
+	}
 	if err := runtime.StopInstance(ctx, instance, force); err != nil {
 		return err
 	}

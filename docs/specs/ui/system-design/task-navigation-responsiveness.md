@@ -286,3 +286,37 @@ session overwrites. There is no new persistent cache or backend API.
 
 This section implements `.7` and applies the `.5`/`.6` isolation and responsive
 contracts to whole-task presentation.
+
+## Browser work before task paint
+
+Cached route data must also avoid unnecessary synchronous browser work:
+
+- Responsive consumers share one event-updated snapshot and one set of media
+  listeners. Ordinary renders reuse that snapshot; the last unsubscribe clears
+  it so a later mount reads the current viewport.
+- File-tree rows initially use positive cached or estimated heights. Browser
+  ResizeObserver entries provide actual row and viewport sizes, including later
+  resizes and visibility changes. When ResizeObserver is unavailable, measure
+  mounted rows synchronously and keep the library's viewport fallback. Preserve
+  positive cached row geometry while hidden and retain the existing row window,
+  selection and scroll rules.
+- Pinned-pane enforcement reads container width once before changing constraints;
+  each subsequent layout event still measures the current container.
+- Spinner CSS provides initial motion; animation promotion runs after the first
+  frame and cancels on unmount. Existing visibility and reduced-motion ownership
+  remains unchanged.
+- Default static Markdown reuses context-free parsed element trees in an LRU
+  bounded by 128 entries and 512,000 source characters. Oversized messages bypass
+  retention. Custom renderers and active text motion bypass this cache; task and
+  file-link providers stay outside it so callbacks and diagram identity always
+  belong to the current consumer. This caches pure rendering, not authorized
+  task state, mounted views or component effects.
+- Unopened task-create forms do not mount. After first use they retain the
+  existing close, draft and focus lifecycle. Sidebar selection reaches unrelated
+  rows as an unchanged local boolean instead of a changing global task ID.
+
+Use deterministic regressions for those mechanisms and matched production-build
+Firefox/Chromium measurements for the aggregate effect. Animation-frame DOM
+readiness is a navigation proxy, not proof of compositor paint. Retaining complete
+chat views was considered but rejected: its modest measured benefit did not
+justify changing message refresh, composer and hidden-view lifecycles.

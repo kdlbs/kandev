@@ -64,7 +64,10 @@ export async function createWorkflowPeerResumeScenario(
   name: string,
   options: { sendPeerMessage?: boolean } = {},
 ): Promise<WorkflowPeerResumeScenario> {
-  const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+  const { profileA, profileB } = await createWorkflowAgentProfiles(
+    apiClient,
+    seedData.agentProfileId,
+  );
   const workflow = await apiClient.createWorkflow(seedData.workspaceId, `${name} workflow`);
   const initial = await apiClient.createWorkflowStep(workflow.id, "Plan", 0, {
     is_start_step: true,

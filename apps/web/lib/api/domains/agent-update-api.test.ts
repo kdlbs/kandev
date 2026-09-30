@@ -6,6 +6,7 @@ vi.mock("@/lib/config", () => ({
 
 import {
   listAgentUpdateStatuses,
+  setAgentAutomaticUpdates,
   previewAgentUpdate,
   previewAgentUpdateUseDefault,
   updateAgent,
@@ -82,4 +83,12 @@ describe("managed runtime update API", () => {
     expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/status`);
     expect(init?.cache).toBe("no-store");
   });
+});
+
+it("persists explicit runtime consent through the protected mutation client", async () => {
+  await setAgentAutomaticUpdates("gemini", true);
+  const [input, init] = fetchSpy.mock.calls[0] ?? [];
+  expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/gemini/automatic`);
+  expect(init?.method).toBe("PATCH");
+  expect(init?.body).toBe(JSON.stringify({ enabled: true }));
 });

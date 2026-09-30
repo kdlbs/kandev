@@ -1,12 +1,17 @@
+import { getMockAgent } from "../../helpers/agent-fixtures";
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
 export type WorkflowTaskSessions = Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"];
 
-export async function createWorkflowAgentProfiles(apiClient: ApiClient) {
+export async function createWorkflowAgentProfiles(apiClient: ApiClient, seedProfileId?: string) {
   const { agents } = await apiClient.listAgents();
-  if (agents.length === 0) throw new Error("no agents available in test fixtures");
-  const agentId = agents[0].id;
+  const mockAgent = getMockAgent(
+    seedProfileId
+      ? agents.filter((agent) => agent.profiles.some((profile) => profile.id === seedProfileId))
+      : agents,
+  );
+  const agentId = mockAgent.id;
   const profileA = await apiClient.createAgentProfile(agentId, "Profile A (fast)", {
     model: "mock-fast",
   });

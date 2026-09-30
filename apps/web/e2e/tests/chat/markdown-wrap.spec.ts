@@ -144,6 +144,8 @@ test.describe("Markdown text wrapping", () => {
     const firstColumnCode = table.locator("tbody tr").nth(1).locator("td").first().locator("code");
 
     await expect(table).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle();
+    await expect(firstColumnCode).toHaveText("strictDepBuilds: true");
     expect(await tableWrapper.evaluate((element) => element.clientWidth)).toBe(255);
     expect(
       await firstColumnCode.evaluate((code) => {
@@ -414,9 +416,9 @@ test.describe("Markdown text wrapping", () => {
     const tableWrapper = table.locator("xpath=..");
 
     await expect(table).toBeVisible();
-    expect(
-      await tableWrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
-    ).toBe(true);
+    await expect
+      .poll(() => tableWrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1))
+      .toBe(true);
     await expectNoMarkdownOverflow(testPage);
     await expectNoDocumentOverflow(testPage);
   });

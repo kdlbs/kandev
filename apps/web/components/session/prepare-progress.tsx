@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { stripAnsi } from "@/lib/utils/ansi";
 import { isSetupScriptMessage } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
+import { AgentMcpPrepareActions } from "@/components/task/agent-mcp-prepare-actions";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type {
   PrepareStepInfo,
@@ -134,12 +135,68 @@ function StepMessages({ step }: { step: PrepareStepInfo }) {
   );
 }
 
-function StepRow({ step }: { step: PrepareStepInfo }) {
+const AGENT_MCP_STEP_LABEL_KEYS: Record<string, string> = {
+  agent_mcp_discovery: "task:agentMcpDiscoveryStep",
+  agent_mcp_selection: "task:agentMcpSelectionStep",
+  agent_mcp_credentials: "task:agentMcpCredentialsStep",
+  agent_mcp_approval: "task:agentMcpApprovalStep",
+  agent_mcp_verification: "task:agentMcpVerificationStep",
+};
+
+function agentMcpStepLabel(t: TFunction, step: PrepareStepInfo): string {
+  const stage = t(AGENT_MCP_STEP_LABEL_KEYS[step.kind ?? ""] ?? "task:agentMcpPreparationStep");
+  return step.mcpServerId
+    ? t("task:agentMcpServerStep", { stage, server: step.mcpServerId })
+    : stage;
+}
+
+function StepRowActions({
+  isAgentMcp,
+  step,
+  sessionId,
+  taskId,
+}: {
+  isAgentMcp: boolean;
+  step: PrepareStepInfo;
+  sessionId: string;
+  taskId?: string;
+}) {
+  if (isAgentMcp) {
+    if (step.status === "failed" && taskId) {
+      return <AgentMcpPrepareActions step={step} sessionId={sessionId} taskId={taskId} />;
+    }
+    return null;
+  }
+  return <StepMessages step={step} />;
+}
+
+function resolveStepCommands(isAgentMcp: boolean, command?: string) {
+  if (isAgentMcp || !command) {
+    return { inlineCommand: undefined, blockCommand: undefined };
+  }
+  const isInline = isInlineCommand(command);
+  return {
+    inlineCommand: isInline ? command : undefined,
+    blockCommand: !isInline ? command : undefined,
+  };
+}
+
+function StepRow({
+  step,
+  sessionId,
+  taskId,
+}: {
+  step: PrepareStepInfo;
+  sessionId: string;
+  taskId?: string;
+}) {
   const { t } = useTranslation();
-  const displayName = remoteHelperDownloadStepLabel(t, step);
-  const inlineCommand = step.command && isInlineCommand(step.command) ? step.command : undefined;
-  const blockCommand = step.command && !isInlineCommand(step.command) ? step.command : undefined;
-  const hasExpandable = Boolean(step.output) || Boolean(blockCommand);
+  const isAgentMcp = step.kind?.startsWith("agent_mcp_") === true;
+  const displayName = isAgentMcp
+    ? agentMcpStepLabel(t, step)
+    : remoteHelperDownloadStepLabel(t, step);
+  const { inlineCommand, blockCommand } = resolveStepCommands(isAgentMcp, step.command);
+  const hasExpandable = !isAgentMcp && (Boolean(step.output) || Boolean(blockCommand));
   const [detailsExpanded, setDetailsExpanded] = useState(
     step.status === "running" || step.status === "failed",
   );
@@ -173,10 +230,9 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
           </button>
         )}
       </div>
-      {/* Content below the step header, indented past the icon */}
       <div className="ml-[22px]">
-        {detailsExpanded && <StepDetails step={step} blockCommand={blockCommand} />}
-        <StepMessages step={step} />
+        {detailsExpanded && !isAgentMcp && <StepDetails step={step} blockCommand={blockCommand} />}
+        <StepRowActions isAgentMcp={isAgentMcp} step={step} sessionId={sessionId} taskId={taskId} />
       </div>
     </div>
   );
@@ -191,9 +247,10 @@ type DeriveStatusInput = {
   hasFailedStep: boolean;
   hasWarnings: boolean;
   hasRunningStep: boolean;
+  hasPreparationAttempt?: boolean;
 };
 
-function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
+export function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
   const {
     prepareStatus,
     sessionState,
@@ -201,6 +258,7 @@ function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
     hasFailedStep,
     hasWarnings,
     hasRunningStep,
+    hasPreparationAttempt,
   } = input;
   if (prepareStatus === "failed") return "failed";
   if (prepareStatus === "completed") {
@@ -213,7 +271,9 @@ function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
   // prepareStatus === "preparing" from here on.
   // Agentctl ready implies preparation succeeded — treat as completed even if
   // the completed event hasn't arrived yet.
-  if (agentctlStatus === "ready" && !hasFailedStep && !hasWarnings) return "completed";
+  if (!hasPreparationAttempt && agentctlStatus === "ready" && !hasFailedStep && !hasWarnings) {
+    return "completed";
+  }
   // If the session reached a terminal state but prepare is still "preparing",
   // treat it as failed — the completed event may have been lost.
   const isSessionTerminal =
@@ -250,6 +310,7 @@ function usePrepareStatus(sessionId: string) {
     hasFailedStep: prepareState.steps.some((s) => s.status === "failed"),
     hasWarnings: prepareState.steps.some((s) => s.warning),
     hasRunningStep: prepareState.steps.some((s) => s.status === "running"),
+    hasPreparationAttempt: Boolean(prepareState.preparationId || prepareState.preparationStartedAt),
   });
   return { status, prepareState };
 }
@@ -331,6 +392,7 @@ function hasStepDetails(step: PrepareStepInfo): boolean {
 function isVisibleStep(step: PrepareStepInfo): boolean {
   if (step.status === "skipped" && !hasStepDetails(step)) return false;
   if (step.kind === "remote_helper_download") return true;
+  if (step.kind?.startsWith("agent_mcp_")) return true;
   return step.name.trim() !== "" || hasStepDetails(step);
 }
 
@@ -595,7 +657,7 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
         )}
         <div className="space-y-1">
           {visibleSteps.map((step, i) => (
-            <StepRow key={i} step={step} />
+            <StepRow key={i} step={step} sessionId={sessionId} taskId={session?.task_id} />
           ))}
         </div>
         <SessionInfo sessionId={sessionId} />
