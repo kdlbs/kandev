@@ -61,11 +61,10 @@ The measures of the second half of this document are read only with the flag.
 - **AC-COORDINATOR-OUTCOMES-001.2:** The system shall grade a proposal after a
   step transition of a task the coordinator created or moved, when the
   proposal is decided, and on a sweep every 24 hours over every proposal
-  decided in the last 400 days whose task result is not final. Grading the
+  decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, and when its task result is `merged` or `dropped`. Grading the
   same proposal any number of times, or from two grading paths at once, shall
   leave one row with the values derivable from the stored facts.
-- **AC-COORDINATOR-OUTCOMES-001.3:** A task result of `merged` or `dropped`
-  is final and shall not change again; `done` and `failed` are re-graded and a
+- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again; `done` and `failed` are re-graded and a
   task that leaves `done` shall raise the reopening count by one, once per
   observed transition, however many graders observe it.
 - **AC-COORDINATOR-OUTCOMES-001.4:** Cost shall be the sum of priced usage
@@ -106,8 +105,7 @@ The measures of the second half of this document are read only with the flag.
   fails shall be treated as not a manager.
 - **AC-COORDINATOR-OUTCOMES-002.4:** A card counts as moved back only when its
   destination step is earlier in the workflow's step order than the step the
-  coordinator's approved action left it in, and the move happened after that
-  action. A move to a later step, a move within the step, and a move of a card
+  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one. A move to a later step, a move within the step, and a move of a card
   the coordinator did not create or move shall store nothing.
 - **AC-COORDINATOR-OUTCOMES-002.5:** A rejection reason typed by a manager or
   a coded one shall map to one reason code of a closed set, `duplicate`,

@@ -36,9 +36,13 @@ this design adds the second predicate.
 `coordinator_watch_projects(coordinator_id, entry_kind, entry_id)` with
 `entry_kind` in `repository_set` or `repository`, primary key on all three,
 stored as a list of filters so a later group filter is one more `entry_kind`
-(`005.1`). Deleting a set or a repository removes its entries in the deletion
-path's existing hook (the one that prunes set membership and publishes the
-changed sets), and deleting the coordinator removes its rows (`005.6`). A
+(`005.1`). Repository deletion is soft and `DeleteRepository` and `DeleteRepositorySet`
+only publish events, so the coordinator service subscribes to those events and
+removes the entries of every coordinator that lists the deleted set or
+repository; deleting the coordinator removes its rows (`005.6`). An entry that
+outlives its target (a missed event) matches no task, because membership is
+resolved live from the set service, and is dropped by the next Projects save
+without failing it. A
 `selected` list that becomes empty with the toggle off means the coordinator
 watches no task; it is never switched to `all`. A set that loses its last
 repository stays listed and matches nothing.
@@ -64,9 +68,10 @@ a repository to a set widens every coordinator that lists it on the next read
 `InProjects`; every path below calls it and none compares repositories
 directly (`005.4`).
 
-The predicate resolves to the stored fields when the phase 3.1 flag is
-effective and to "no project filter" otherwise, so flag-off behaviour is
-phase 3 exactly (`005.9`).
+The predicate is compiled in and reads the stored fields whatever the phase 3.1
+flag, so a stored `selected` scope is never silently widened by turning the flag
+off; a coordinator that never had a scope is `all` and behaves as phase 3
+(`005.9`). Only the settings member, the lists and the controls are flag-gated.
 
 ## Enforcement paths
 
@@ -84,8 +89,9 @@ list steps), it is unchanged, since a workflow is not project-scoped.
 | Turn ledger snapshot and digest | snapshot and digest use `watch.Task`; the row stores `project_scope` as it was |
 | Dream window and evidence | proposals of tasks outside the projects are dropped from evidence |
 
-A `create_task` proposal names one optional `repository_id`; the refusal rule is
-the whole check, since a proposal has a single repository. Approve does not
+A `create_task` proposal names one optional `repository_id`; under `selected`
+the refusal rule is the whole check, since a proposal has a single repository,
+and under `all` nothing is refused for projects (`005.5`). Approve does not
 re-check projects: a proposal made in scope stays approvable, as for Watches
 (`005.5`).
 

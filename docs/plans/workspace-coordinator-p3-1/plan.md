@@ -58,11 +58,11 @@ phase 3 --> 06 projects   (anytime; before 01 if early, so the ledger records th
 
 Critical path: 01, 02, 03, 04. Work orders 05 and 06 run in parallel with them. If 06 lands first, 01 records `project_scope` from the start; if 01 lands first, 06 moves the ledger snapshot and digest to `watch.Task`. Work orders touch disjoint files except `internal/backendapp/coordinator.go`, where 01 adds one named registration function per later work order, and the coordinator settings page, where 01 adds no section and 04 adds Learning.
 
-**One PR** like phases 1 to 3: work orders are built and reviewed on their branches and merged into a phase 3.1 integration branch that ships as one pull request; recording work orders 01 and 02 may ship first as their own pull request since they add no visible behaviour.
+**One PR** like phases 1 to 3: work orders are built and reviewed on their branches and merged into a phase 3.1 integration branch that ships as one pull request; work orders 01 and 02 may ship first as their own pull request: their recording half adds no visible behaviour and their reader half (tool, routes) is behind the flag.
 
 | Work order | Package | Size | Depends on | Result |
 | --- | --- | --- | --- | --- |
-| [task-01](task-01-turn-ledger.md) | 3.1-1 | M | phase 3 merged | Ledger rows, stamp, call digest, board snapshot, links, tool, the flag |
+| [task-01](task-01-turn-ledger.md) | 3.1-1 | L | phase 3 merged | Ledger rows, stamp, call digest, board snapshot, links, tool, the flag |
 | [task-02](task-02-outcomes-overrides.md) | 3.1-2 | M | 01 | Outcome rows, override observations, five measures |
 | [task-03](task-03-replay-harness.md) | 3.1-3 | L | 01, 02 | Replay library, guard, judge, planted suite in CI |
 | [task-04](task-04-shadow-dream.md) | 3.1-4 | L | 01, 02, 03, 05 | Shadow dream, report, ratings, health, Learning section |
@@ -75,7 +75,7 @@ Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Every acceptance criterion o
 
 - `internal/coordinator/ledger`, `outcomes`, `replay`, `dream`, `pause`, `watch` packages with tests beside the code.
 - `internal/coordinator` store: ten additive tables and columns on `coordinators`, `coordinator_proposals`, `coordinator_activity` and `coordinator_unattended_turns` ([turn ledger](../../specs/coordinator/system-design/turn-ledger.md#tables)).
-- The guarded-call layer (`ledger.Call`, `turn_id`), the wake backstop pass (dream tick, paused retry), wake delivery and `TryAutomaticApproval` (pause precondition), the repository set and repository deletion hooks (projects).
+- The guarded-call layer (`ledger.Call`, `turn_id`), the wake backstop pass (dream tick, paused retry), wake delivery and `TryAutomaticApproval` (pause precondition), the repository and repository set deletion events (projects), the decision observer hook (outcomes), the spend reader's `ExtraSpend` term (replay).
 - `internal/runtimeflags/registry.go` and root `profiles.yaml`: `features.coordinatorPhase31`.
 
 ## Frontend
@@ -153,11 +153,11 @@ Watches
 
 | Criteria | Work order |
 | --- | --- |
-| `AC-COORDINATOR-TURN-LEDGER-001.1` to `6` (6); `AC-COORDINATOR-TURN-LEDGER-002.1` to `5` (5); `AC-COORDINATOR-TURN-LEDGER-003.1` to `3` (3); `AC-COORDINATOR-TURN-LEDGER-004.1` to `5` (5); `AC-COORDINATOR-TURN-LEDGER-005.1` to `4` (4); `AC-COORDINATOR-TURN-LEDGER-006.1` to `3` (3) | 01 |
+| `AC-COORDINATOR-TURN-LEDGER-001.1` to `7` (7); `AC-COORDINATOR-TURN-LEDGER-002.1` to `5` (5); `AC-COORDINATOR-TURN-LEDGER-003.1` to `3` (3); `AC-COORDINATOR-TURN-LEDGER-004.1` to `5` (5); `AC-COORDINATOR-TURN-LEDGER-005.1` to `4` (4); `AC-COORDINATOR-TURN-LEDGER-006.1` to `3` (3) | 01 |
 | `AC-COORDINATOR-OUTCOMES-001.1` to `6` (6); `AC-COORDINATOR-OUTCOMES-002.1` to `6` (6); `AC-COORDINATOR-OUTCOMES-003.1` to `3` (3) | 02 |
 | `AC-COORDINATOR-REPLAY-001.1` to `4` (4); `AC-COORDINATOR-REPLAY-002.1` to `6` (6); `AC-COORDINATOR-REPLAY-003.1` to `3` (3); `AC-COORDINATOR-REPLAY-004.1` to `4` (4); `AC-COORDINATOR-REPLAY-005.1` to `5` (4) | 03 |
 | `AC-COORDINATOR-SHADOW-DREAM-001.1` to `6` (6); `AC-COORDINATOR-SHADOW-DREAM-002.1` to `7` (7); `AC-COORDINATOR-SHADOW-DREAM-003.1` to `5` (5); `AC-COORDINATOR-SHADOW-DREAM-004.1` to `5` (5); `AC-COORDINATOR-SHADOW-DREAM-005.1` to `6` (6); `AC-COORDINATOR-SHADOW-DREAM-006.1` to `4` (4); `AC-COORDINATOR-REPLAY-005.4`; `AC-COORDINATOR-OUTCOMES-003.4` | 04 |
-| `AC-COORDINATOR-PAUSE-001.1` to `3` (3); `AC-COORDINATOR-PAUSE-002.1` to `6` (6); `AC-COORDINATOR-PAUSE-003.1` to `4` (4) | 05 |
+| `AC-COORDINATOR-PAUSE-001.1` to `3` (3); `AC-COORDINATOR-PAUSE-002.1` to `7` (7); `AC-COORDINATOR-PAUSE-003.1` to `4` (4) | 05 |
 | `AC-COORDINATOR-PERMISSIONS-005.1` to `9` (9) | 06 |
 
 The phase 2 criteria that Projects extends (`AC-COORDINATOR-PERMISSIONS-003.x`, `004.x`) stay owned by their phase 2 work orders; work order 06 updates the tests that pin them.

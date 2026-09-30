@@ -111,8 +111,14 @@ override capture and the daily retention job, with their tables and columns.
 **Behind the flag:** the query tool and every tool profile change, every read
 route (ledger, measures, dreams, ratings, learning), the Learning section and
 its screens, the shadow dream (scheduler, episode, gate, replay), the replay
-harness's entry point, Pause (state, route, precondition, controls), and Projects
-(fields, filter, enforcement, settings and setup UI, copilot hint).
+harness's entry point, and the ability to set Pause and Projects (their routes,
+settings members and controls).
+
+**Enforced whatever the flag.** The Pause precondition and the project filter are
+compiled in and read stored state, so a coordinator paused or scoped while the
+flag was on stays paused and scoped if the flag is turned off; only the controls
+disappear. A brake that failed open on a flag flip would not be a brake. With the
+flag never on no such state exists, so behaviour is phase 3's.
 
 **Why flag-off is safe.** Recording only observes events already published and
 writes its own tables; it adds no tool, prompt text, route, admission check or
@@ -120,15 +126,19 @@ decision input, and a recording failure is logged and swallowed, so it can never
 fail or delay a turn, a proposal or a decision. Migrations are additive and
 replayable on SQLite and PostgreSQL, so a phase 3 database upgrades in place.
 Read routes answer 404, and the flag-off boot differs from phase 3 only by extra
-write-side tables, columns and observers. The recorded data is dense in what a
+write-side tables, columns, observers and the nil-safe decision observer hook. The recorded data is dense in what a
 later phase needs and small in what it holds: no text, no argument, no result.
 
 ## Deltas to earlier designs
 
-No full-size design is edited. Pause runs before `Admit` and does not renumber
-the eight checks; the dream's spend counting relies on the existing
-coordinator-origin spend read; the projects filter is a new design that adds a
-second predicate beside the permissions design's workflow watch. The
+No full-size design document is edited. Code deltas, each additive and nil-safe:
+Pause runs before `Admit` and does not renumber the eight checks; the spend
+reader gains an additive `ExtraSpend` term for replay costs (a sessionless call
+writes no usage row); the dream runs in a dream task that spend counts and that
+conversation binding and cleanup skip; `ApproveProposal`, `RejectProposal` and
+the undo path gain a post-commit `DecisionObserver`; the backstop pass gains the
+dream tick and the paused `Stop` call; the projects filter is a new design that
+adds a second predicate beside the permissions design's workflow watch. The
 permissions requirements gain REQ-COORDINATOR-PERMISSIONS-005 and a definition of
 a watched task.
 

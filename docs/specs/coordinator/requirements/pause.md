@@ -54,7 +54,7 @@ start it again without losing its queue.
 
 ### REQ-COORDINATOR-PAUSE-002: What Pause stops
 
-**Intent:** Paused means nothing happens without a person.
+**Intent:** Paused means nothing happens without a person. A turn or dream that a pause finds running stops within one minute, and no new one starts after the pause commits.
 
 #### Acceptance criteria
 
@@ -70,14 +70,14 @@ start it again without losing its queue.
   `paused`.
 - **AC-COORDINATOR-PAUSE-002.3:** While a coordinator is paused, a proposal
   that the automatic class would approve shall stay `pending` for a manager,
-  with the note "Paused; a manager will decide", and shall count against the
-  ten-per-day limit of the automatic class in no way.
+  with the note "Paused; a manager will decide", and shall count against the ten-per-day limit of the automatic class in no way. Resume shall not approve it automatically; automatic approval is tried only when a proposal is created.
 - **AC-COORDINATOR-PAUSE-002.4:** A manager's message to a paused coordinator
   shall start a turn as it does when the coordinator is not paused, and the
   coordinator's proposals from it shall be created as usual.
 - **AC-COORDINATOR-PAUSE-002.5:** When the paused state cannot be read, the
   system shall treat the coordinator as paused for every act-on-its-own
   decision, and log it.
+- **AC-COORDINATOR-PAUSE-002.7:** When the phase 3.1 flag stops being effective while a coordinator is paused, the system shall keep it paused for every act-on-its-own decision and keep the stored state; only the route and the controls shall go.
 - **AC-COORDINATOR-PAUSE-002.6:** Pause shall not change autonomy, the ceiling,
   the policy, Watches, the conversation or any pending wake, proposal or
   stored spend.

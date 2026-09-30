@@ -77,7 +77,8 @@ the routes and the Learning section with the measures and report views.
 - Store: `coordinator_dreams`, `coordinator_dream_items`,
   `coordinator_dream_ratings`, `shadow_dream_enabled` on `coordinators`;
   routes for learning, dreams, detail and rating, all behind the flag; the
-  dream canceller registered with Pause's `Stopper`.
+  dream task (spend counts it, conversation binding and cleanup skip it) and
+  the dream canceller registered with Pause's `Stopper`.
 - The guard refuses every action but `list_coordinator_turns_kandev` from the
   episode session.
 - Web: the Learning section (switch, health line, the five measures, report

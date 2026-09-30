@@ -85,8 +85,7 @@ never twice at the same time.
   trigger `dream` shall be outside every window and every count.
 - **AC-COORDINATOR-SHADOW-DREAM-001.6:** When any admission condition fails
   (containment, spend unmeasurable, spend at the ceiling, Pause, autonomy off),
-  or the 24 hours since the last episode have not passed, the system shall start nothing and store no
-  row; the health state shall name the condition.
+  or the 24 hours since the last episode have not passed, the system shall start nothing and store no row; the health state shall name the condition. When autonomy is turned off, Pause is set or the containment check fails while an episode is running, the system shall cancel it within one minute and set its row `failed` with the reason `autonomy_off`, `paused` or `containment`. The lease of `001.2` shall cover the whole dream, replays included, and a running dream shall be expired whatever the coordinator's autonomy.
 
 ### REQ-COORDINATOR-SHADOW-DREAM-002: An episode with no write tools
 
@@ -94,12 +93,9 @@ never twice at the same time.
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-SHADOW-DREAM-002.1:** The episode shall run in its own
-  ephemeral session of the coordinator's workspace, not in the coordinator's
-  conversation, and shall touch neither the conversation nor its queue, and
-  shall not archive, repoint or create a conversation.
+- **AC-COORDINATOR-SHADOW-DREAM-002.1:** The episode shall run in its own ephemeral session, in a task of the coordinator's workspace that is marked as a dream task of that coordinator so that its usage counts as the coordinator's spend, and shall touch neither the conversation nor its queue, and shall not archive, repoint or create a conversation; conversation binding and cleanup shall ignore a dream task.
 - **AC-COORDINATOR-SHADOW-DREAM-002.2:** The episode's Kandev tool profile
-  shall hold exactly `list_coordinator_turns_kandev`. Every other Kandev
+  shall hold exactly `list_coordinator_turns_kandev`, which shall return no turn with the trigger `dream` to it. Every other Kandev
   action called from that session shall be refused as an unknown action by the
   guard and written nowhere; the profile shall never be derived from the
   coordinator's May do settings.

@@ -46,7 +46,7 @@ replay unchanged and adds only an apply path.
 `coordinator_dreams`: `id`, `coordinator_id`, `status` (`running`, `ok`,
 `clean`, `partial`, `failed`, `skipped`), `reason`, `window_start`,
 `window_end`, `input_hash`, `turn_ids` (JSON), `considered` (JSON, labelled
-agent-reported on read), `model`, `cost_micros` (nullable), `started_at`,
+agent-reported on read), `model`, `cost_subcents` (nullable), `started_at`,
 `refreshed_at`, `finished_at`. Index on `(coordinator_id, started_at, id)`.
 
 `coordinator_dream_items`: `id`, `dream_id`, `position`, `kind`, `text`,
@@ -59,7 +59,10 @@ key `(item_id, user_id)`.
 ## Trigger and lease
 
 `dream.Scheduler.Tick(coordinatorID)` runs at the end of each wake backstop pass
-(it adds a call in the pass, never a second timer). It evaluates in order and
+(it adds a call in the pass, never a second timer). The pass visits every
+coordinator with `shadow_dream_enabled` or a `running` dream row, whatever its
+autonomy, so an expired lease is found even when autonomy has been turned off.
+Tick first expires stale `running` rows (below), then evaluates in order and
 stops at the first failing condition, storing no row and reporting that
 condition to the health computation (`001.6`): flag effective; autonomy on;
 `shadow_dream_enabled`; not paused (paused first among admission-like
@@ -75,8 +78,11 @@ excluded from the window and every count (`001.5`).
 **Lease.** The insert of the `running` row is conditional: `INSERT INTO
 coordinator_dreams ... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM coordinator_dreams
 WHERE coordinator_id = ? AND status = 'running' AND refreshed_at > now - 5m)`.
-Zero rows inserted means another dream holds the lease and the tick ends. The
-running episode refreshes `refreshed_at` every minute. The backstop expires a
+Zero rows inserted means another dream holds the lease and the tick ends. A single orchestrating goroutine owns the whole dream (episode, gate, replays,
+report) and refreshes `refreshed_at` every minute for all of it; at each refresh
+it re-checks autonomy, Pause and the containment check and, when one fails,
+cancels the episode or the replay and sets the row `failed` with the reason
+`autonomy_off`, `paused` or `containment` (`001.6`). The backstop expires a
 `running` row past 5 minutes: `UPDATE ... SET status = 'failed', reason =
 'lease_lost', finished_at = ? WHERE id = ? AND status = 'running'`, cancels the
 episode if active, and leaves the window (the next window starts from the last
@@ -91,14 +97,22 @@ hash makes the tick store one `skipped`/`unchanged` row, at most once per hash
 
 ## The episode
 
-The episode is an ephemeral coordinator-origin session in the coordinator's
-workspace, created through the same runner and origin attribution as
-unattended turns of phase 3, so the containment check
+The spend reader counts only tasks whose metadata carries the coordinator's id
+(`ListCoordinatorOriginTasks`, [spend](spend.md)), so the episode needs a task.
+`dream.OpenTask` creates a dream task: coordinator-origin metadata with
+`coordinator_id` plus `coordinator_purpose = "dream"`, archived on end, in the
+coordinator's workspace. The conversation code that lists coordinator-origin
+tasks (binding, cleanup, `conversation.go`) skips any task whose purpose is
+`dream`, so a dream task is never a conversation, never repointed, and never
+archived as one; a test asserts both the spend inclusion and the conversation
+exclusion. The episode's session is created through the same runner and origin
+attribution as unattended turns of phase 3, so the containment check
 ([containment](containment.md#req-coordinator-containment-001-the-containment-check))
-and the spend reader and `CancelTurn` treat it as coordinator spend
-([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)) (`002.3`). It
-uses the coordinator's agent profile and never touches the conversation task,
-its reference or its queue (`002.1`).
+and `CancelTurn` treat it as coordinator spend
+([spend](spend.md#req-coordinator-spend-003-stopping-at-the-ceiling)) (`002.3`).
+It uses the coordinator's agent profile and never touches the conversation task,
+its reference or its queue (`002.1`). `list_coordinator_turns_kandev` called from
+a dream session excludes rows with trigger `dream` (`002.2`).
 
 **Tool profile.** The session is opened with an explicit profile
 `dreamProfile = {list_coordinator_turns_kandev}` defined as a constant in the
@@ -181,11 +195,13 @@ meets `not_useful` or `harmful` (`006.4`).
 ## Health
 
 `dream.Health(coordinatorID)` is a pure function of the stored rows and the same
-admission conditions the scheduler uses: `off` (not enabled), `running`,
-`waiting` (with the failing condition and its fix), `fresh` (last accepted within
-36 hours, or the evidence debt not older than 36 hours), `stale` (debt for more
-than 36 hours without an accepted dream), `failed` (more than 72 hours or last
-dream `failed`) (`006.3`). Fixes: "Turn autonomy on", "Resume", "Raise the
+admission conditions the scheduler uses. Precedence: `off` (not enabled), then
+`running`, then `failed` (last dream `failed`, or the debt older than 72 hours),
+then `stale` (debt older than 36 hours), then `waiting` (an admission condition
+fails or the trigger is not met, with the condition and its fix), then `fresh`.
+The **evidence debt age** is `now - max(last accepted window_end, completion time
+of the fifth completed non-dream turn after it)` when the trigger's evidence
+condition holds, and none otherwise (`006.3`). Fixes: "Turn autonomy on", "Resume", "Raise the
 ceiling". An unreadable input gives no health state and the section shows the
 failure, never `fresh`.
 

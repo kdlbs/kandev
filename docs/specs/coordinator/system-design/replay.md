@@ -56,18 +56,16 @@ no score.
 
 ## Sandbox
 
-A case runs in a sessionless model call through the `hostutility` runner the
-improvement judge and reviews already use: no task, no session, no workspace
-process. The prompt frame is the coordinator's instruction render for the
-configuration under test, and the user message is the turn's trigger as it was
-plus the snapshot as a data block, with task titles read from the original
-records.
-
-Tools are answered by `stub.Tools`, an in-memory implementation built from the
-snapshot and stored rows: reads return snapshot facts, and every propose tool
-returns an acknowledgement and appends `{kind, target, workflow_id, title}` to
-the run's list. Nothing else is implemented, so `stub.Tools` holds no store
-handle (`001.3`). The package imports no writer of proposals, activity,
+A case runs as one sessionless prompt through
+`hostutility.Manager.ExecuteProfilePrompt(ctx, profileID, prompt)` (one prompt in,
+text and token counts out; no task, no session, no tool round trip). The prompt
+is the coordinator's `StandingInstructions` render for the configuration under
+test, then the turn's trigger as it was, then the snapshot and stored records
+as a data block with task titles read from the original records, then a fixed
+answer schema: a JSON list of `{kind, target_task_id, workflow_id, title}`.
+`stub.Parse` reads the answer into decision keys and rejects anything else (an
+unreadable answer is a failed run). There are no tools, so nothing a model says
+is executed and `stub` holds no store handle (`001.3`). The package imports no writer of proposals, activity,
 settings or conversation, enforced by an import-boundary test that fails when
 `replay` or `stub` imports those packages (`001.4`). The only caller allowed to
 start a run is the dream episode's server-side code and tests; the tool
@@ -106,9 +104,16 @@ iteration order reaches a result.
 spend through the phase 3 spend reader; when the reading is unmeasurable or
 `spent + spentByThisReplay + bound >= ceiling`, no run starts and the replay
 stops `unmeasured`, reason `budget` (`002.4`). `bound` is the runner's
-configured per-call maximum. Spend of a replay counts as coordinator-origin
-usage through the same attribution the dream episode uses, so it appears in the
-24 hour spend.
+configured per-call maximum. A sessionless call writes no usage row, so the
+harness prices each run from its reported tokens and model with
+`commoncosts.CalculateCostSubcentsChecked` (the function the usage recorder uses);
+a model with no price stops the replay `unmeasured`, reason `cost_unknown`. The
+run's cost is stored in the result row, and the phase 3 spend reader gains one
+additive, nil-safe term, `ExtraSpend(coordinatorID, from, to)`, summing
+`cost_subcents` of `coordinator_replay_results` in the window (a NULL cost makes
+the reading unmeasurable), so replays count toward the 24 hour spend and the
+ceiling. The spend design is not edited; this term is listed as a delta in the
+ADR.
 
 ## Guard
 
@@ -124,7 +129,16 @@ returns the guard result `unmeasured`, never `pass`.
 Constants in `replay/constants.go`: `MinHeldOut = 20`, `MinGain = 0.05`,
 `CaseWindow = 50+50`. They have no setter and no config key (`004.4`).
 
-Held-out cases are cases whose turn id is not among the candidate's cited turns.
+Held-out cases are cases whose turn id is not among the candidate's cited turns
+(a candidate with no citations, such as the planted set, holds out every case).
+`replay.PromptVersion` is a constant of the harness, bumped on any change to the
+prompt frame or the answer schema, and keys baseline reuse.
+
+**Applying a candidate.** `context_diff` replaces the coordinator's context text
+with the diff's result; `note_add`, `standing_order_add` and
+`standing_order_retire` append or remove one dated section in the instruction
+render the way the standing-order sections are rendered; `note_update` and
+`note_retire` are never replayed (`no_target`).
 Verdict order: the guard `blocked` gives `not_an_improvement`; fewer than
 `MinHeldOut` held-out cases that ran gives `unmeasured` with the count (never an
 improvement, regression or tie) (`004.2`); score minus baseline on held-out
@@ -138,19 +152,24 @@ integer thousandths to avoid float boundary flips: 0.05 is 50.
 `item_id` (nullable), `candidate_hash`, `baseline_hash`, `model`, `cases`
 (JSON: per case run count, score, skip reason), `candidate_score`,
 `baseline_score`, `flips` (JSON), `unmatched_candidate`, `unmatched_baseline`,
-`guard` (`pass`, `blocked`, `unmeasured`), `verdict`, `cost_micros`, `created_at`.
+`guard` (`pass`, `blocked`, `unmeasured`), `verdict`, `reason` (for
+`unmeasured`: `budget`, `cost_unknown`, `too_few`, `no_cases`),
+`prompt_version`, `cost_subcents`, `created_at`.
 One row per replay, written after all runs in one transaction (`002.6`).
 Retention is 400 days, deleted with the coordinator.
 
 ## Planted suite
 
-`replay/testdata/planted/` holds a fixed case set and candidates as data
-files: three known-bad (one flips an approved proposal, one proposes nothing,
-one repeats a rejected proposal) and one known-good. The deterministic stub
+`replay/testdata/planted/` holds a fixed case set of at least 25 cases (so at
+least 20 are held out for every candidate) and candidates as data files: four
+known-bad (two flip an approved proposal, one proposes nothing, one repeats a
+rejected proposal, which scores as a miss of an expected avoided proposal, not a
+flip) and one known-good that reproduces every expected proposal and avoids every
+expected avoided one where the baseline does not. The deterministic stub
 model reads a marker in the candidate's context and answers from a fixture
 table, with no network. `TestPlantedCandidates` runs `Run` over them and fails
 unless every bad candidate is `blocked` or `not_an_improvement` and the good
-candidate is not blocked (`005.1`). It runs in the ordinary backend test run
+candidate is `improvement`, so both verdict paths are proven (`005.1`). It runs in the ordinary backend test run
 in CI; a mutation that makes a bad candidate pass, such as guard disabled by
 constant, fails it (`005.2`). A second test loads the constants and asserts
 values, so a silent edit is a visible diff. Nothing in the coordinator tool

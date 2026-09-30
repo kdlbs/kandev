@@ -71,18 +71,31 @@ uses), and never publishes.
 
 On start it builds the row and inserts with `INSERT ... ON CONFLICT
 (session_id, session_turn_id) DO NOTHING`. A redelivered start finds the row and
-does nothing (`001.1`). The trigger is `wake` when `coordinator_unattended_turns`
-has a non-terminal row for the session created before the start event, with
-its wake kinds copied (first 20 by kind then id); `dream` when the session is a
-dream episode session; else `message`. After the insert the recorder links the
+does nothing (`001.1`). The trigger is `wake` when a `coordinator_unattended_turns`
+row of the session has `session_turn_id` equal to this session turn, or has it
+unbound (`session_turn_id IS NULL`) and `reserved_turn_id` empty or equal to
+this session turn, the same match the unattended-turn binding already uses
+(`store_unattended.go`); a manager's message in a session with an open delivery
+therefore binds nothing and stays `message`. The wake kinds are copied (first
+20 by kind then id). The trigger is `dream` when the session is a dream episode
+session, else `message`. After the insert the recorder links the
 unattended row: `UPDATE coordinator_unattended_turns SET ledger_turn_id = ?
 WHERE id = ? AND ledger_turn_id IS NULL` (`003.2`); the unique index makes a
 second link fail and be logged.
 
 If the start event was lost, the completion handler inserts the row with the
-same `ON CONFLICT` rule and derives the stamp at that time. The trigger rule is
-the same, so a late row is correct except for a model or snapshot that was not
-available, which stay empty (`001.2`).
+same `ON CONFLICT` rule and derives the stamp at that time. The trigger match
+is the same but reads the unattended-turn row in any status, since turn end may
+already have settled it, so a late row is correct except for a model or snapshot
+that was not available, which stay empty (`001.2`). A delivery that failed
+before any turn started (`send_failed`, no `session_turn_id`) has no ledger row;
+the unattended-turn row already records it.
+
+The turn outcome is read from the unattended-turn row's `outcome` when one is
+bound (`completed`, `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`,
+`stopped_by_pause`), else from the `turn.completed` event's status, else
+`unknown`; `task_session_turns` carries no outcome column, so it is never a
+source.
 
 ### Ordering and ties
 
@@ -105,8 +118,8 @@ overwrites an earlier one.
 The verdict is computed from stored rows by a pure function
 `Verdict(inputs) string`, no I/O, table-tested in precedence order (`001.3`):
 
-1. `blocked`: outcome is failed, cancelled or stopped by the ceiling or by
-   Pause; or the delivery failed to send; or the turn has at least one call
+1. `blocked`: outcome is `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`
+   or `stopped_by_pause`; or the turn has at least one call
    row, every one refused, and no proposal with this turn id.
 2. `acted`: an automatic approval executed inside the turn. It is read from
    `coordinator_activity` rows with this turn id and the automatic actor.
@@ -123,18 +136,21 @@ the "every call refused" clause needs at least one call.
 
 The recorder reads, at start, the coordinator row: agent profile id,
 `config_revision`, `policy_revision` (`002.1`). The prompt hash is SHA-256 of
-`instructions.Render(coordinator)`, the same function that opens a
-conversation, called with the coordinator's current context, standing orders
-and goal. It does not read the session's stored first message, so a manager
+`StandingInstructions(...)` (`prompt.go`), the function that opens a
+conversation, called with the coordinator's current context and the sections
+rendered from its standing orders and goal, exactly as opening a conversation
+now would. It does not read the session's stored first message, so a manager
 edit that has not yet archived the conversation is reflected as the current
 render and the ledger row can disagree with the conversation's real opening
 text by design; the row says what the coordinator would be opened with now.
 Deviation is visible because a manager save archives the conversation
 (`PERMISSIONS-004.1`) and the next turn starts from the new render.
 
-The model is empty at start and set at completion from the provider-reported
-model of the turn's first usage row (`ORDER BY created_at, id`), lower-cased and
-trimmed. It is never derived from the agent profile (`002.2`). The harness is
+The model is empty at start and set at completion, and again by the ledger's
+own 10-minute pass over rows finished in the last 24 hours whose model is still
+empty (usage is often written after completion, as the turn cost recompute
+already handles), from the provider-reported model of the turn's first usage row
+(`ORDER BY created_at, id`), lower-cased and trimmed. It is never derived from the agent profile (`002.2`). The harness is
 `<agent type>@<build version>` built from the same usage row's agent type
 and `buildinfo.Version`, empty when the agent type is empty (`002.3`).
 
@@ -146,19 +162,22 @@ field is empty (`002.5`).
 
 ## Links
 
-The guarded-call layer already resolves the calling session. A new
-`ledger.ActiveTurnID(ctx, sessionID)` returns the row of the newest
-`coordinator_turns` for that session with `finished_at IS NULL`, or empty. The
-proposal insert and the activity insert of a guarded call read it and set
-`turn_id`. On an error the id is empty and the write proceeds (`003.1`).
+The guarded-call layer already resolves the calling session. `ledger.ActiveTurnID(sessionID)`
+reads an in-memory map from session id to the open ledger row id that the
+recorder maintains (set at insert, cleared at completion, rebuilt at startup
+from unfinished rows), so the proposal and activity inserts of a guarded call
+perform no extra database read. It returns empty when the session has no open
+row, and the write proceeds with an empty `turn_id` (`003.1`).
 Approvals and undos run outside a session and set nothing (`003.3`).
 
 ## Call digest
 
 The guarded-call layer's decision point (allowed or refused) calls
-`ledger.Call(sessionID, action, targetTaskID, allowed)`. It inserts one row
-unless the turn already has 100, in which case it sets `calls_truncated` once and
-drops the call. The action name is the tool's registered name; arguments and
+`ledger.Call(sessionID, action, targetTaskID, allowed)`. It only appends to a
+bounded in-process queue (1000 entries) drained by one writer goroutine; a full
+queue drops the entry and counts stage `call_queue_full`. The writer inserts one
+row unless the turn already has 100, in which case it sets `calls_truncated` once
+and drops the call. The action name is the tool's registered name; arguments and
 results are never passed in (`001.4`). Guard code holds no dependency on the
 recorder beyond this one function, which never returns an error to the guard.
 
@@ -167,19 +186,21 @@ recorder beyond this one function, which never returns an error to the guard.
 Every recorder entry point runs in `ledger.safe(stage, fn)`: it recovers a
 panic, logs, increments `coordinator_ledger_write_failed_total{stage}` with
 `stage` in `start`, `call`, `complete`, `snapshot`, `link`, and returns nothing
-to its caller. The event-bus subscription is asynchronous, so a slow write
-delays nothing on the turn path. The `call` hook is synchronous but is one
-insert with a short context timeout of 2 seconds, and its failure is swallowed
-(`001.6`).
+to its caller. The event-bus subscription is asynchronous and the call hook only enqueues, so
+no database write sits on the turn path, a guarded call or a decision (`001.6`).
+A stage name is added for `call_queue_full` and `settle`.
 
 ## Board snapshot
 
-At turn start the recorder builds the snapshot with the same server projections
-the Needs you and Queue screens read, filtered through the coordinator's watch
-set ([watch projects](watch-projects.md#the-filter)), capped at 200 items, and
-the open proposals capped at 50 (oldest first, ties by id). Per item it keeps
-task id, step id, state, last event time and pending action kinds only
-(`006.1`). The body is canonical JSON (keys sorted, arrays in projection
+Needs you and Queue are a client projection (`attention.ts`), so the snapshot does
+not port them: it is a separate server query, `board.Snapshot(coordinatorID)`.
+It selects the workspace's tasks that are not archived and not in a step that
+completes tasks, filtered through the coordinator's watch set
+([watch projects](watch-projects.md#the-filter)), ordered `(updated_at DESC,
+task_id)`, capped at 200, and the coordinator's open proposals capped at 50
+(oldest first, ties by id). Per task it keeps task id, step id, state, the
+task's last update time and the kinds of the coordinator's pending proposals
+that target it, only (`006.1`). The body is canonical JSON (keys sorted, arrays in projection
 order), its SHA-256 is the hash, and `INSERT ... ON CONFLICT (hash) DO NOTHING`
 stores it once. A snapshot capped by the item limit carries `"truncated":
 true` and the total. It holds no title or text (`006.2`); a failed build leaves
@@ -213,7 +234,10 @@ tables, columns and observers.
 
 ## Retention
 
-A daily job, also run at start, deletes in batches of 500, each batch its own
+A daily job, also run at start, first settles rows unfinished for more than 24
+hours (`UPDATE ... SET finished_at = started_at, outcome = 'interrupted', verdict
+= 'blocked' WHERE finished_at IS NULL AND started_at < ?`, batched like the
+deletes; `001.7`), then deletes in batches of 500, each batch its own
 transaction: ledger rows older than 400 days with their call rows
 (`DELETE ... WHERE turn_id IN (batch)` first), and snapshots older than 90
 days. Coordinator deletion deletes its rows in the same transaction as the

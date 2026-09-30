@@ -273,15 +273,12 @@ that belongs to another team.
   ([turn ledger](turn-ledger.md#req-coordinator-turn-ledger-004-the-query-tool)),
   and the shadow dream's window and evidence. A task outside the projects
   shall be answered as not found to a read tool and shall raise no wake.
-- **AC-COORDINATOR-PERMISSIONS-005.5:** `create_task` shall refuse, naming
-  `repository_id`, a repository that is neither listed nor in a listed set,
-  or no repository while the toggle is off; every other propose tool shall refuse a target task
+- **AC-COORDINATOR-PERMISSIONS-005.5:** While the scope is `selected`, `create_task` shall refuse, naming `repository_id`, a repository that is neither listed nor in a listed set, or no repository while the toggle is off; under `all` it shall refuse nothing for projects; every other propose tool shall refuse a target task
   outside the projects, naming the field. A proposal made while its target was
   in scope shall stay approvable after the scope changes, as it does for Watches
   (`AC-COORDINATOR-PERMISSIONS-002.6`).
 - **AC-COORDINATOR-PERMISSIONS-005.6:** When a listed set or repository is
-  deleted from the workspace, the system shall remove its entry from every
-  coordinator's list. When a `selected` list becomes empty with the toggle
+  deleted from the workspace, the system shall remove its entry from every coordinator's list; an entry that outlives its set or repository, for example through a missed event, shall match no task and shall not make a save fail. When a `selected` list becomes empty with the toggle
   off, the coordinator shall watch no task and Configure and Needs you shall
   say so, with a link for managers; the system shall never switch it to
   `all`. A set that loses its last repository stays listed and matches no
@@ -304,8 +301,7 @@ that belongs to another team.
 - **AC-COORDINATOR-PERMISSIONS-005.9:** When the sets or repositories cannot be
   loaded, the Projects part shall show "Could not load projects" with **Try
   again**, keep the switch on `all` only if it was, and never allow a
-  `selected` save. While the phase 3.1 flag is not effective, none of the above
-  shall exist: no field, no filter, no control.
+  `selected` save. While the phase 3.1 flag is not effective, no Projects field, route or control shall exist, and a stored Projects scope shall stay enforced in every path of `005.4`; a coordinator that never had one watches as before.
 
 ## Out of scope
 

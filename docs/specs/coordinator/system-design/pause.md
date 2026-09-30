@@ -35,6 +35,11 @@ settings, policy, Watches, the conversation, wakes, proposals or stored spend
 
 ## State
 
+The gate is compiled in and reads the stored state whatever the phase 3.1 flag:
+turning the flag off while a coordinator is paused leaves it paused for every
+act-on-its-own decision, and only the route and controls go (`002.7`). With
+the flag never on the state is never set, so behaviour is phase 3's.
+
 `coordinators` gains `paused_at` (nullable timestamp) and `paused_by`
 (nullable user id). Paused means `paused_at IS NOT NULL`. The pair is deleted
 with the coordinator. Pause is not part of `policy_revision`, and does not
@@ -71,13 +76,19 @@ anything else that has an effect:
 1. **Wake delivery:** in the delivery loop that calls `Admit` for a coordinator's
    pending wakes. When paused, delivery stops for that coordinator in that
    pass, before `Admit`, so no admission check, cooldown timestamp or
-   `coordinator_unattended_turns` row is created or consumed.
+   `coordinator_unattended_turns` row is created or consumed. The state is read
+   again, and the turn row reserved, inside one `withCoordinatorLock` section, and
+   Pause commits under the same lock: a turn is either reserved before the pause
+   commit, in which case `Stopper.Stop` (run after the commit) finds and stops
+   it, or refused. No turn starts after the pause commits.
 2. **Dream trigger:** first condition of `Scheduler.Tick`
    ([shadow dream](shadow-dream.md#trigger-and-lease)).
 3. **Automatic approval:** first check of `TryAutomaticApproval`.
 
 The wake recorder and the backstop keep recording wakes and supersede none
-because of Pause (`002.1`): Pause adds no code to them. A read error is a
+because of Pause (`002.1`): Pause adds no code to the recorder, and the only
+addition to the backstop pass is the `Stopper.Stop` call for paused coordinators
+below. A read error is a
 paused answer at every one of the three points, logged with the coordinator id
 (`002.5`). A pending wake that waits during pause keeps its `pending` status
 and its queue position; Pause adds no expiry to it.
@@ -157,10 +168,9 @@ second line (`003.4`). Copy is in six locales; no em dash.
 | Concurrent pause and resume | Commit order decides |
 
 A Stop that fails leaves a turn running after the state says paused. It does not
-start any new one, and the failure is visible in the log; a follow-up pass
-retries the stop while the state is paused and a running turn exists (the
-backstop calls `Stopper.Stop` for paused coordinators, which is a no-op when
-nothing runs).
+start any new one, and the failure is visible in the log; the backstop pass calls
+`Stopper.Stop` for every paused coordinator each minute, a no-op when nothing
+runs, so a running turn or dream stops within one minute at most (`002.2`).
 
 ## Testing
 

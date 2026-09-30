@@ -36,7 +36,7 @@ change them. Both record whether or not the phase 3.1 flag is on
 `coordinator_outcomes`: `proposal_id` (primary key), `coordinator_id`,
 `turn_id` (nullable), `kind`, `decision` (`approved`, `edited`, `rejected`,
 `returned`, `undone`), `decided_at`, `edited_fields` (JSON array of names),
-`reason_code`, `task_id` (nullable), `task_result` (nullable), `cost_micros`
+`reason_code`, `task_id` (nullable), `task_result` (nullable), `cost_subcents`
 (nullable), `reopen_count`, `approved_at`, `merged_at` (nullable),
 `last_step_id`, `final` (bool), `graded_at`. Index on `(coordinator_id,
 decided_at, proposal_id)` and on `(final, graded_at)`.
@@ -63,15 +63,24 @@ decision has no row (`001.5`).
 
 ## Grading paths
 
+No decision event exists today, so the decision paths gain a post-commit hook: an
+optional `DecisionObserver` on the coordinator service (nil-safe, a no-op when
+nothing registers) called by `ApproveProposal`, `RejectProposal` and
+`UndoActivity`/`markUndone` (`approve.go`, `reject.go`, `undo.go`) after their
+transaction commits, with `{proposalID, decision, actor, editedFields,
+reasonCode}`. The edited field names come from the approve request's edits
+(`carriesApproveEdits`); a call the observer makes never fails the decision, and
+a panic in it is recovered and counted.
+
 Three paths call `Grade` through one in-process queue (`grader.Enqueue(id)`,
 keyed set so a proposal is queued once at a time, a worker pool of 1):
 
-1. **Decision:** the proposal decision path publishes the existing
-   `coordinator.proposal.decided` event; the grader observes it.
-2. **Task transition:** the grader observes `task.step_changed` for tasks
-   present in `coordinator_outcomes.task_id` or in
-   `coordinator_activity.task_id` with the created or moved action; it
-   resolves the proposals of the task and enqueues each.
+1. **Decision:** the `DecisionObserver` hook above.
+2. **Task transition:** the grader observes `task.moved` (`events.TaskMoved`, a
+   step change) and `task.state_changed` for tasks present in
+   `coordinator_outcomes.task_id` or in `coordinator_activity.task_id` with the
+   created or moved action; it resolves the proposals of the task and enqueues
+   each.
 3. **Sweep:** every 24 hours (and at start) it enqueues proposals decided in
    the last 400 days with `final = false`, in batches of 200 ordered by
    `(graded_at, proposal_id)`.
@@ -91,18 +100,22 @@ merged), done (the step completes tasks), failed (latest session failed and
 not done), dropped (archived and not done or merged), else open. A task that
 was deleted keeps the last stored result (`001.5`).
 
-`final` is set when the result is `merged` or `dropped` (`001.3`). A `merged`
+`final` is set when the decision is `rejected`, `returned` or `undone`, when the
+proposal kind creates no task, or when the task result is `merged` or `dropped`
+(`001.3`); such a row is graded once at decision and the sweep skips it, so the
+sweep set is only approved task-creating proposals whose task is not yet merged
+or dropped and whose decision is within 400 days. A `merged`
 row's `merged_at` is set once from the first observed merged pull request
 time and never moves.
 
-**Reopen count.** `reopen_count` increments once per observed leave-done
-transition. The grader keeps `last_step_id`; a grade that sees the previous
-result `done` and the current result not `done`, in one conditional update
-`SET reopen_count = reopen_count + 1, task_result = ? WHERE proposal_id = ?
-AND task_result = 'done'`, counts it; the second grader finds the result no
-longer `done` and adds nothing (`001.3`).
+**Reopen count.** `Grade` runs in one transaction per proposal (a write
+transaction, so two graders serialize on the row). It reads the stored result,
+computes the new one, and when the stored result is `done` and the new one is not
+it adds one to `reopen_count` in that same transaction before writing the new
+result; the second grader then reads the already-updated result and adds nothing
+(`001.3`). No other statement writes `task_result` or `reopen_count`.
 
-**Cost.** `cost_micros` is the sum of priced usage rows of sessions of the
+**Cost.** `cost_subcents` is the sum of priced usage rows of sessions of the
 created task; when the task has no usage rows or one row is unpriced the
 column is NULL, never 0 (`001.4`). Time to merge is `merged_at - approved_at`,
 computed on read.
@@ -111,13 +124,17 @@ computed on read.
 
 `overrides.Capture` observes:
 
-- `coordinator.proposal.decided` with decision `rejected`, `edited` or `undone`;
-- `task.step_changed` for tasks the coordinator created or moved (the same
-  activity lookup as the grader).
+- the `DecisionObserver` hook with decision `rejected`, `edited` or `undone`;
+- `task.moved` for tasks the coordinator created or moved (the same activity
+  lookup as the grader). The mover is read from the event's user field; an
+  event without one is counted `coordinator_override_ignored_total{reason=
+  "actor_unknown"}` and stores nothing.
 
-Each candidate calls `authz.IsManager(userID, workspaceID)`. A false result
+Each candidate goes through the manager check the automatic class already uses
+for its raiser (`automatic_approve.go`, `workspace.manage` in the coordinator's
+workspace). A false result
 or an error stores nothing and counts `coordinator_override_ignored_total{reason}`
-with reason `not_manager`, `principal`, `system` or `authz_error`
+with reason `not_manager`, `principal`, `system`, `actor_unknown` or `authz_error`
 (`002.3`); the actor kind comes from the event's principal field. A manager
 override inserts one feedback row with `INSERT ... ON CONFLICT DO NOTHING` on
 the unique index (`002.2`), so redelivery, a grader run or a second observer
@@ -128,7 +145,9 @@ step the coordinator's approved action left the card in, both from the
 workflow's step order at the time of the event, and requires the move time to
 be later than the action's time (`002.4`). `transition_key` is the step
 transition's id, so two different moves back both count while one event
-redelivered does not. A step no longer in the workflow, or an equal or later
+redelivered does not. The observation names the newest approved proposal of the
+coordinator that created or moved the card (`proposal_id` is part of the unique
+key). A step no longer in the workflow, or an equal or later
 position, stores nothing.
 
 ## Reason codes
@@ -161,7 +180,9 @@ each `{value, numerator, denominator, null_reason}`:
 | Agreement | items rated and replayed, per shadow dream 006.4 |
 
 A zero denominator gives `null` with `no_data`; an unknown cost among the inputs
-`cost_unknown`; fewer than 5 rated items `too_few` (`003.2`). The median for an
+`cost_unknown`; fewer than 5 rated items `too_few` (`003.2`). Dollars per merged task includes the cost of dream turns, since they are
+coordinator turns; shadow items count for agreement only from dreams that started
+in the window. The median for an
 even count is the mean of the two middle values rounded down to the second;
 computed in Go from a bounded set (at most 2000 proposals in the window, newest
 first, the count reported).

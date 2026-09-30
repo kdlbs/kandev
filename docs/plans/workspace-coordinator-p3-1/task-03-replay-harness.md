@@ -43,15 +43,17 @@ system_design:
 
 ## Summary
 
-Builds the replay library: case selection, the stubbed sandbox, three-run
-scoring, the regression guard, the improvement judge, the result row, and the
-planted-regression suite that runs in CI.
+Builds the replay library: case selection, the one-prompt sandbox through
+`hostutility` with a structured answer, cost pricing and the spend reader's
+additive `ExtraSpend` term, three-run scoring, the regression guard, the
+improvement judge, the result row, and the planted-regression suite that runs
+in CI.
 
 ## In scope
 
-- `internal/coordinator/replay/`: `cases`, `stub`, `budget`, `Run`, `Key`, the
-  guard and judge, `constants.go`, and `testdata/planted/` with the
-  deterministic stub model.
+- `internal/coordinator/replay/`: `cases`, `stub` (answer parser), `budget`,
+  `Run`, `Key`, the guard and judge, `constants.go`, and `testdata/planted/`
+  with the deterministic stub model.
 - Store: `coordinator_replay_results` and its retention.
 - The import-boundary test that fails when `replay` or `stub` imports a writer
   of proposals, activity, settings or conversation.

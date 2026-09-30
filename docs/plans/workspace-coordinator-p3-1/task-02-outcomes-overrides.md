@@ -40,10 +40,11 @@ and capture record whether or not the flag is on.
 
 ## In scope
 
-- `internal/coordinator/outcomes/`: `Grade`, `TaskResult` (pure), the grader
-  queue and its three paths (decision event, step transition, 24-hour sweep),
-  `overrides.Capture`, `reasons.Code`, the measures reader, with tests beside
-  each.
+- `internal/coordinator/outcomes/`: the nil-safe `DecisionObserver` hook
+  called after commit by `ApproveProposal`, `RejectProposal` and the undo
+  path, `Grade`, `TaskResult` (pure), the grader queue and its three paths
+  (decision event, step transition, 24-hour sweep), `overrides.Capture`,
+  `reasons.Code`, the measures reader, with tests beside each.
 - Store: `coordinator_outcomes` and `coordinator_feedback` with the unique
   index that makes an observation unique per proposal, kind and transition.
 - `GET /coordinators/:id/measures?days=` behind the flag; the agreement

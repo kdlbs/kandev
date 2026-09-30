@@ -62,17 +62,10 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
   coordinator, the session and session turn, the trigger, the stamp, the
   board snapshot hash and the watch set in force. Starting the same session
   turn twice, or a redelivered start event, shall leave exactly one row.
-- **AC-COORDINATOR-TURN-LEDGER-001.2:** The trigger shall be `wake` when the
-  turn is an unattended turn of phase 3 (the row carries the wake kinds it
-  delivered, at most 20), `dream` when it is a shadow dream episode, and
-  `message` otherwise. A turn that has no row when it completes (a start event
-  that was lost) shall get one at completion with the stamp read then, and its
-  trigger derived by the same rule.
+- **AC-COORDINATOR-TURN-LEDGER-001.2:** The trigger shall be `wake` when the session turn is the one an unattended-turn row of phase 3 is bound to or has reserved (the row carries the wake kinds it delivered, at most 20), `dream` when it is a shadow dream episode, and `message` otherwise; a manager's message during an open delivery shall not make its turn a `wake`. A turn that has no row when it completes (a start event that was lost) shall get one at completion with the stamp read then, and its trigger derived by the same rule from the unattended-turn row in any status. A delivery that never started a turn shall have no ledger row.
 - **AC-COORDINATOR-TURN-LEDGER-001.3:** When a turn completes, the system
-  shall set the ledger row's finish time, the session turn outcome and one
-  verdict, chosen by this precedence: `blocked` when the turn failed, was
-  cancelled, was stopped by the ceiling or by Pause, or its delivery failed to
-  send, or when every guarded call of the turn was refused and none created a
+  shall set the ledger row's finish time, the turn outcome (`completed`, `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`, `stopped_by_pause` or `unknown`, read from the unattended-turn row when there is one and from the completion event otherwise) and one verdict, chosen by this precedence: `blocked` when the turn failed, was
+  cancelled, was interrupted, was stopped by the ceiling or by Pause, or when every guarded call of the turn was refused and none created a
   proposal; `acted` when an automatic approval of phase 3 executed in the turn;
   `proposed` when the turn created at least one proposal; `needs_you` when an
   unattended turn created no proposal and a question or permission wake it
@@ -91,8 +84,8 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
 - **AC-COORDINATOR-TURN-LEDGER-001.6:** If recording a row, a call, a snapshot
   or a completion fails, the system shall log it, count it in
   `coordinator_ledger_write_failed_total{stage}` and let the turn, the
-  proposal or the decision that triggered it proceed unchanged. A failed
-  recording shall never fail, delay or alter a turn.
+  proposal or the decision that triggered it proceed unchanged. A failed recording shall never fail, delay or alter a turn: no recording step shall wait on a database write in the path of a turn, a guarded call or a decision.
+- **AC-COORDINATOR-TURN-LEDGER-001.7:** At startup and once a day, the system shall settle every ledger row that has been unfinished for more than 24 hours with the outcome `interrupted` and the verdict `blocked`, and shall change no row that is finished.
 
 ### REQ-COORDINATOR-TURN-LEDGER-002: The stamp
 
@@ -102,15 +95,11 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
 
 - **AC-COORDINATOR-TURN-LEDGER-002.1:** The system shall read the agent profile
   id, configuration revision and policy revision from the coordinator row at
-  turn start, and the prompt hash as the SHA-256 of the standing instructions
-  the conversation was opened with, rendered from the coordinator's current
-  context, standing orders and goal.
+  turn start, and the prompt hash as the SHA-256 of the standing instructions a conversation opened at that moment would receive, rendered from the coordinator's current context, standing orders and goal. It is the hash of the current configuration, not of the text a still-open conversation was opened with.
 - **AC-COORDINATOR-TURN-LEDGER-002.2:** The system shall read the model from
   what the provider reported for that turn's usage, normalised by trimming
   and lower-casing, and shall never fill it from the agent profile's
-  configured model. Before any usage is reported the model is empty; when the
-  turn completes the row shall be updated once, only while the model is still
-  empty, with the reported model. A turn with several models shall carry the
+  configured model. Before any usage is reported the model is empty; when the turn completes, and once more when the turn's usage is priced later, the row shall be updated, only while the model is still empty, with the reported model. A turn with several models shall carry the
   first reported.
 - **AC-COORDINATOR-TURN-LEDGER-002.3:** The harness version shall be the
   Kandev build version and the agent type the provider-reported usage
@@ -213,11 +202,7 @@ anything a person or the agent can see.
 #### Acceptance criteria
 
 - **AC-COORDINATOR-TURN-LEDGER-006.1:** At turn start the system shall freeze
-  the coordinator's board state as its Needs you and Queue items within the
-  watch set (at most 200, in the order those projections use), its open
-  proposals (at most 50, oldest first, ties by id) and, for each item, only
-  its task id, workflow step id, state, last event time and pending action
-  kinds, and shall store it once per content hash; an identical board shall
+  the coordinator's board state as its open tasks within the watch set (not archived and not in a step that completes tasks; at most 200, newest updated first, ties by task id), its open proposals (at most 50, oldest first, ties by id) and, for each task, only its task id, workflow step id, state, last update time and the kinds of the coordinator's pending proposals that target it, and shall store it once per content hash; an identical board shall
   share one stored snapshot. When more items exist than the cap, the snapshot
   shall say so.
 - **AC-COORDINATOR-TURN-LEDGER-006.2:** The snapshot shall hold no task title,

@@ -20,6 +20,7 @@ acceptance_criteria:
   - AC-COORDINATOR-TURN-LEDGER-001.4
   - AC-COORDINATOR-TURN-LEDGER-001.5
   - AC-COORDINATOR-TURN-LEDGER-001.6
+  - AC-COORDINATOR-TURN-LEDGER-001.7
   - AC-COORDINATOR-TURN-LEDGER-002.1
   - AC-COORDINATOR-TURN-LEDGER-002.2
   - AC-COORDINATOR-TURN-LEDGER-002.3
@@ -56,20 +57,21 @@ job. Recording ships ahead of the flag.
 ## In scope
 
 - `internal/coordinator/ledger/`: `Recorder` (observes `turn.started` and
-  `turn.completed`), `Verdict` (pure), `Stamp`, `Call`, `ActiveTurnID`,
-  `Reader`, `safe(stage, fn)`, the snapshot builder and the daily retention
-  job, with tests beside each.
+  `turn.completed`), `Verdict` (pure), `Stamp`, the async `Call` queue, the
+  in-memory `ActiveTurnID` map, `Reader`, `safe(stage, fn)`, the server-side
+  `board.Snapshot` query (a new query, not a port of the client projection),
+  and the daily settle-and-retention job, with tests beside each.
 - Store: `coordinator_turns`, `coordinator_turn_calls`,
   `coordinator_turn_snapshots`, nullable `turn_id` on `coordinator_proposals`
   and `coordinator_activity`, `ledger_turn_id` on
   `coordinator_unattended_turns`; additive migrations replayable on SQLite and
-  PostgreSQL ([Migration](../../specs/coordinator/system-design/turn-
-  ledger.md#migration)).
+  PostgreSQL
+  ([Migration](../../specs/coordinator/system-design/turn-ledger.md#migration)).
 - The guarded-call layer calls `ledger.Call` at its allow/refuse decision
   point; the proposal and activity inserts read `ActiveTurnID`.
 - `features.coordinatorPhase31` in `internal/runtimeflags/registry.go` and
-  root `profiles.yaml` (off in `prod`, `dev` and `e2e`), through `/runtime-
-  feature-flags`; the tool profile extension that adds
+  root `profiles.yaml` (off in `prod`, `dev` and `e2e`), through
+  `/runtime-feature-flags`; the tool profile extension that adds
   `list_coordinator_turns_kandev` when the flag is effective; a phase 3.1
   registration function in `internal/backendapp/coordinator.go` that later
   work orders extend.

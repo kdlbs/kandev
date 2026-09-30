@@ -20,6 +20,7 @@ acceptance_criteria:
   - AC-COORDINATOR-PAUSE-002.4
   - AC-COORDINATOR-PAUSE-002.5
   - AC-COORDINATOR-PAUSE-002.6
+  - AC-COORDINATOR-PAUSE-002.7
   - AC-COORDINATOR-PAUSE-003.1
   - AC-COORDINATOR-PAUSE-003.2
   - AC-COORDINATOR-PAUSE-003.3
@@ -38,8 +39,9 @@ turn, and the Pause and Resume controls.
 
 ## In scope
 
-- `internal/coordinator/pause/`: `Gate.Active`, `Stopper` (with a registration
-  point for the dream canceller), tests beside each.
+- `internal/coordinator/pause/`: `Gate.Active` (compiled in, enforcing stored
+  state whatever the flag), `Stopper` (with a registration point for the dream
+  canceller), tests beside each.
 - Store: `paused_at` and `paused_by` on `coordinators`; `PUT
   /coordinators/:id/pause` behind the flag; the precondition call before
   `Admit`, at the start of `TryAutomaticApproval` and, through work order 04,

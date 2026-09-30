@@ -65,11 +65,7 @@ coordinator or a dream can change.
   longer exists (`input_gone`), when it has no expected reproduced and no
   expected avoided proposal (`no_expectation`), or when it was a dream
   (`dream_turn`). A skipped case shall not count in any score.
-- **AC-COORDINATOR-REPLAY-001.3:** A case shall run with every Kandev tool
-  answered from the case's frozen snapshot and stored records, never from
-  live board state, and with no tool able to write: a stubbed propose call
-  shall return an acknowledgement and record the proposal it would have
-  made, and nothing else.
+- **AC-COORDINATOR-REPLAY-001.3:** A case shall run as one prompt that holds the case's frozen snapshot and stored records, never live board state, with no tool available to the model: the candidate's proposals shall be read from a structured answer and recorded as data, and nothing shall be executed.
 - **AC-COORDINATOR-REPLAY-001.4:** A replay shall never write to a task,
   proposal, activity row, setting or conversation of the coordinator, never
   start a task session of the coordinator's workspace, and never be
@@ -93,11 +89,7 @@ coordinator or a dream can change.
   its output cannot be read, or its budget is exhausted), the case's run shall
   count as not run, never as a miss; a case with fewer than two of its three
   runs shall be excluded, and the result shall list how many cases ran.
-- **AC-COORDINATOR-REPLAY-002.4:** A replay shall be charged to the
-  coordinator's spend: it shall not start a run when the coordinator's
-  spend cannot be measured or the cost of the runs so far plus a run's
-  bound reaches the ceiling, and a replay stopped for that reason shall be
-  `unmeasured` with the reason `budget`.
+- **AC-COORDINATOR-REPLAY-002.4:** A replay shall be charged to the coordinator's spend, priced from the tokens each run reports with the price table the usage recorder uses: it shall not start a run when the coordinator's spend cannot be measured or the cost of the runs so far plus a run's bound reaches the ceiling, and a replay stopped for that reason shall be `unmeasured` with the reason `budget`; a run whose model has no price shall make the replay `unmeasured` with the reason `cost_unknown`.
 - **AC-COORDINATOR-REPLAY-002.5:** Two replays of the same candidate and the
   same cases with a model that answers identically shall return identical
   scores, flips and verdicts.
@@ -150,13 +142,7 @@ it.
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-REPLAY-005.1:** The repository shall hold a fixed set of
-  planted candidates with known-bad effects (each flips at least one expected
-  reproduced proposal of a fixed case set, one drops every proposal, one
-  repeats a rejected proposal) and one known-good candidate, and a test that
-  runs the harness over them with a deterministic stub model and no network,
-  and fails unless every planted candidate is blocked or reported
-  `not_an_improvement` and the known-good candidate is not blocked.
+- **AC-COORDINATOR-REPLAY-005.1:** The repository shall hold a fixed case set with at least 20 held-out cases and a fixed set of planted candidates with known-bad effects (two flip at least one expected reproduced proposal, one drops every proposal, one repeats a rejected proposal, which the harness scores as a miss of an expected avoided proposal) and one known-good candidate, and a test that runs the harness over them with a deterministic stub model and no network, and fails unless every planted candidate is blocked or reported `not_an_improvement` and the known-good candidate is reported `improvement`.
 - **AC-COORDINATOR-REPLAY-005.2:** That test shall run in the backend's
   ordinary test run in continuous integration, and a change that makes any
   planted candidate pass shall fail it.
