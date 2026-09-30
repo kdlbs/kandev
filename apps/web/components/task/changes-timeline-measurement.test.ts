@@ -45,6 +45,25 @@ describe("Changes timeline measurement", () => {
     ).toBeNull();
   });
 
+  it("uses the timeline index map instead of scanning fifty thousand rows", () => {
+    const rows = Array.from({ length: 50_000 }, (_, index) => ({ key: `row-${index}` }));
+    const anchor: { key: string; index: number; viewportOffset: number } = {
+      key: "row-49999",
+      index: 0,
+      viewportOffset: 0,
+    };
+    const indexByKey = new Map([[anchor.key, 49_999]]);
+    const findIndex = vi.spyOn(rows, "findIndex");
+
+    const resolveWithIndex = resolveChangesTimelineAnchor as unknown as (
+      rows: { key: string }[],
+      anchor: { key: string; index: number; viewportOffset: number },
+      indexByKey: ReadonlyMap<string, number>,
+    ) => { key: string; index: number } | null;
+    expect(resolveWithIndex(rows, anchor, indexByKey)).toEqual({ key: anchor.key, index: 49_999 });
+    expect(findIndex).not.toHaveBeenCalled();
+  });
+
   it("retains positive geometry when a hidden row measures zero", () => {
     const instance = {
       indexFromElement: () => 3,

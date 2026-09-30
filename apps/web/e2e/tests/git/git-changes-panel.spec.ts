@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
+import { scrollChangesToEnd } from "./large-changes-helpers";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -498,6 +499,7 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await session.expandChangesSection("unstaged-files-section");
     const row = testPage.getByTestId(`file-row-${filePath}`);
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     const stage = row.getByTitle("Stage file");
     await expect(stage).toBeVisible();
     expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
@@ -516,12 +518,14 @@ test.describe("Git Changes Panel", () => {
       .getByRole("navigation")
       .getByRole("button", { name: /Changes$/ })
       .click();
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     await expect(row.getByRole("button", { name: "Show more actions" })).toBeVisible();
     await expect(row.getByText(filePath, { exact: true })).toHaveCSS("white-space", "normal");
     await expect(stage).toHaveCount(0);
 
     await testPage.setViewportSize({ width: 768, height: 851 });
     await session.clickTab("Changes");
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     await expect(stage).toBeVisible();
     expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
     await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);

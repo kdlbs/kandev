@@ -363,7 +363,7 @@ function renderSectionTimelineRow(
         <div className="flex items-center justify-between gap-2 -mt-0.5 mb-1">
           <button
             type="button"
-            className="flex min-h-11 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            className="flex min-h-6 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 [@media(pointer:coarse)]:min-h-11"
             onClick={() => args.toggleSection(row.variant)}
             aria-expanded={!row.collapsed}
             data-testid={`${row.variant}-files-section-collapse-toggle`}
@@ -501,7 +501,7 @@ function ChangesRepositoryTimelineRow({
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
         <button
           type="button"
-          className="flex min-h-11 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 [@media(pointer:coarse)]:min-h-11"
           data-testid="changes-repo-header"
           data-changes-row-focus
           aria-expanded={!row.collapsed}
@@ -521,7 +521,7 @@ function ChangesRepositoryTimelineRow({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 min-h-11 px-1.5 text-[10px] cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+                className="h-6 min-h-6 px-1.5 text-[10px] cursor-pointer [@media(pointer:coarse)]:min-h-11"
                 data-testid="repo-group-action"
                 disabled={disabled}
                 onClick={() => onPrimaryAction(row.repositoryName)}
@@ -533,7 +533,7 @@ function ChangesRepositoryTimelineRow({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 min-h-11 px-1.5 text-[10px] text-muted-foreground cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+                className="h-6 min-h-6 px-1.5 text-[10px] text-muted-foreground cursor-pointer [@media(pointer:coarse)]:min-h-11"
                 data-testid="repo-group-secondary-action"
                 disabled={disabled}
                 onClick={() => onSecondaryAction(row.repositoryName)}

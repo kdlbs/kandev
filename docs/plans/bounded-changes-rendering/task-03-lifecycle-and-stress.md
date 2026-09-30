@@ -248,3 +248,17 @@ panel state into focused helpers and modules. All review regressions and the
 - `pnpm e2e:run --no-build --project chromium tests/git/large-changes-virtualization.spec.ts tests/git/commit-file-navigation.spec.ts tests/git/git-changes-panel.spec.ts tests/changes-panel-multi-select.spec.ts tests/git/changes-panel-section-order.spec.ts tests/git/changes-panel-multi-repo-indent.spec.ts`: 40 tests passed, including the two 50,000-file stress cases.
 - `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project chromium tests/git/commit-file-navigation.spec.ts -- --grep "opens a collapsible commit detail"` and `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project mobile-chrome tests/git/mobile-commit-file-navigation.spec.ts`: 1 test passed on each device project; four desktop/phone screenshots were captured and manifest-checked.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`, and `git diff --check`: passed; 331 decisions, 1,250 specifications, 62 public-doc tests, and 47 published pages validated.
+
+## PR fixup results (2026-09-30)
+
+The final PR fixup addressed the four requested review findings and the exact-head E2E failures. Context-owned selection and disclosure state now resets across task/session/environment changes; retired inline-detail requests cannot publish late results; bulk targets use per-repository membership sets; and keyboard activation of historical files preserves the full commit target. The E2E failures also exposed an existing task-sidebar reveal edge case: a partially clipped command-selected row could remain clipped with `block: "nearest"`. Reveal now centers rows that are not fully visible. The hover test separates title scrolling from hovering the row's fixed action area so its assertion does not sample a pointer-driven opacity transition.
+
+- The focused Vitest run passed 12 files and 59 tests, including both real panel owners, selection grouping, keyboard activation, viewport focus/measurement behavior, and sidebar reveal geometry.
+- `pnpm run typecheck`, `pnpm run build:vite`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed. The build reported existing deprecated chunk configuration, ineffective dynamic imports, and large-chunk warnings. No new user-facing copy was added.
+- Changed-file ESLint completed with zero warnings and zero errors. Prettier checks for changed and new web files plus `git diff --check` passed.
+- The final desktop E2E run passed 9/9 with retries disabled, including both 50,000-file layouts, compact desktop actions, symlink opening, review flows, profile cleanup, and the two previously failing sidebar tests.
+- The final mobile E2E run passed 4/4 with retries disabled, including 50,000-file list reachability, touch-sized tree controls at 393px and 767px, rewritten-history recovery, and mobile review navigation.
+- Final stress observations remained bounded after repeat scrolling. Tree: 19 mounted rows and 759 DOM nodes; flat: 19 rows and 1,524 DOM nodes. Heap samples were 72.2 MB. Longest observed tasks were 720 ms for tree and 640 ms for flat during synthetic inventory loading/scrolling; these are observations, not timing gates.
+- Fresh synthetic desktop and phone screenshots were captured and validated in `apps/web/.pr-assets/manifest.json`. They are PR media only and are not added to the product source tree.
+
+No public-document update was needed: the change remains an internal UI rendering, keyboard-navigation, and focus-preservation behavior.

@@ -59,11 +59,27 @@ import { ChangesPanelBody } from "./changes-panel-body";
 const COMMIT_SECTION_TOGGLE = "commits-section-collapse-toggle";
 const INLINE_DIRECTORY = "commit-file-tree-dir-src";
 const INLINE_FILE = "commit-file-src-file.ts";
+const FRONTEND_REPOSITORY = "frontend";
+const BACKEND_REPOSITORY = "backend";
+const FRONTEND_COMMIT = "frontend-commit";
+const TASK_A_CONTEXT = ["task-a", "session-a", "environment-a"] as const;
+const TASK_B_CONTEXT = ["task-b", "session-b", "environment-b"] as const;
+const TASK_B_NEW_ENVIRONMENT_CONTEXT = ["task-b", "session-b", "environment-c"] as const;
 const ARIA_EXPANDED = "aria-expanded";
 const EXPANDED = "true";
 const COLLAPSED = "false";
 
 let appStore: StoreApi<AppState>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function StoreCapture() {
   appStore = useAppStoreApi();
@@ -112,7 +128,10 @@ function panelProps(): ChangesPanelBodyProps {
     stagedFiles: [],
     prFiles: [],
     prCommits: [],
-    commits: [commit("frontend-commit", "frontend"), commit("backend-commit", "backend")],
+    commits: [
+      commit(FRONTEND_COMMIT, FRONTEND_REPOSITORY),
+      commit("backend-commit", BACKEND_REPOSITORY),
+    ],
     pendingStageFiles: new Set(),
     reviewedCount: 0,
     totalFileCount: 0,
@@ -178,6 +197,49 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ChangesPanelBody history context ownership", () => {
+  it("keeps a failed local commit detail request retryable", async () => {
+    mocks.requestCommitDetail
+      .mockReset()
+      .mockResolvedValueOnce({ source: "local", success: false })
+      .mockResolvedValueOnce({
+        source: "local",
+        success: true,
+        files: {
+          "src/file.ts": {
+            path: "src/file.ts",
+            status: "modified",
+            staged: false,
+            additions: 1,
+            deletions: 0,
+          },
+        },
+      });
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ChangesPanelBody {...panelProps()} />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+    act(() => {
+      appStore.setState((state) => ({
+        ...state,
+        userSettings: { ...state.userSettings, changesPanelLayout: "tree" },
+      }));
+    });
+
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent).not.toContain("No files in this commit");
+    expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByTestId(INLINE_FILE)).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(2);
+  });
+
   it("resets historical section, repository, and inline-directory expansion across task and environment changes", async () => {
     render(
       <TooltipProvider>
@@ -187,7 +249,7 @@ describe("ChangesPanelBody history context ownership", () => {
         </StateProvider>
       </TooltipProvider>,
     );
-    setContext("task-a", "session-a", "environment-a");
+    setContext(...TASK_A_CONTEXT);
     act(() => {
       appStore.setState((state) => ({
         ...state,
@@ -201,31 +263,102 @@ describe("ChangesPanelBody history context ownership", () => {
     expect(sectionToggle.getAttribute(ARIA_EXPANDED)).toBe(COLLAPSED);
     fireEvent.click(sectionToggle);
 
-    const frontendRepository = expandedRepository("frontend");
+    const frontendRepository = expandedRepository(FRONTEND_REPOSITORY);
     fireEvent.click(frontendRepository);
     expect(frontendRepository.getAttribute(ARIA_EXPANDED)).toBe(COLLAPSED);
     fireEvent.click(frontendRepository);
 
-    fireEvent.click(expandedCommit("frontend-commit"));
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
     const inlineDirectory = await screen.findByTestId(INLINE_DIRECTORY);
     fireEvent.click(inlineDirectory);
     expect(screen.queryByTestId(INLINE_FILE)).toBeNull();
 
-    setContext("task-b", "session-b", "environment-b");
+    setContext(...TASK_B_CONTEXT);
     const taskBSection = screen.getByTestId(COMMIT_SECTION_TOGGLE);
     expect(taskBSection.getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
     for (const repository of screen.getAllByTestId("commits-repo-header")) {
       expect(repository.getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
     }
 
-    fireEvent.click(expandedCommit("frontend-commit"));
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
     const taskBDirectory = await screen.findByTestId(INLINE_DIRECTORY);
     expect(taskBDirectory.getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
     expect(screen.getByTestId(INLINE_FILE)).toBeTruthy();
 
     fireEvent.click(taskBSection);
     expect(taskBSection.getAttribute(ARIA_EXPANDED)).toBe(COLLAPSED);
-    setContext("task-b", "session-b", "environment-c");
+    setContext(...TASK_B_NEW_ENVIRONMENT_CONTEXT);
     expect(screen.getByTestId(COMMIT_SECTION_TOGGLE).getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
+  });
+});
+
+describe("ChangesPanelBody inline request retirement", () => {
+  it("does not normalize inline files returned after the panel changes context", async () => {
+    const request = deferred<unknown>();
+    mocks.requestCommitDetail.mockReturnValueOnce(request.promise);
+    const staleFilesRead = vi.fn();
+    const staleFiles = new Proxy(
+      {
+        "src/stale.ts": {
+          path: "src/stale.ts",
+          status: "modified",
+          staged: false,
+          additions: 1,
+          deletions: 0,
+        },
+      },
+      {
+        ownKeys(target) {
+          staleFilesRead();
+          return Reflect.ownKeys(target);
+        },
+      },
+    );
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ChangesPanelBody {...panelProps()} />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
+    expect(mocks.requestCommitDetail).toHaveBeenCalledOnce();
+
+    setContext(...TASK_B_CONTEXT);
+    await act(async () => {
+      request.resolve({ source: "local", success: true, files: staleFiles });
+      await request.promise;
+      await Promise.resolve();
+    });
+
+    expect(staleFilesRead).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("commit-file-stale-file.ts")).toBeNull();
+  });
+
+  it("does not show an error toast for an inline request rejected after unmount", async () => {
+    const request = deferred<unknown>();
+    mocks.requestCommitDetail.mockReturnValueOnce(request.promise);
+    const view = render(
+      <TooltipProvider>
+        <StateProvider>
+          <ChangesPanelBody {...panelProps()} />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
+    expect(mocks.requestCommitDetail).toHaveBeenCalledOnce();
+
+    view.unmount();
+    await act(async () => {
+      request.reject(new Error("stale request failed"));
+      await request.promise.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 });

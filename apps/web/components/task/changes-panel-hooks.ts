@@ -11,10 +11,6 @@ import {
   type ChangedFileTarget,
 } from "./changes-timeline-selection";
 
-// Bug 7: drop the local GitOps shape — `SessionGit` is the single source of
-// truth for all the methods this module needs (pull, push, rebase, merge,
-// commit, stage, unstage, discard, revertCommit, reset, createPR, isLoading).
-// Callers pass the SessionGit returned by `useSessionGit` directly.
 type GitOps = Pick<
   SessionGit,
   | "pull"
@@ -122,9 +118,6 @@ export function useChangesGitHandlers(
     async (operation: () => Promise<GitOperationResultLike>, operationName: string) => {
       try {
         const result = await operation();
-        // Bug 2: when the underlying op fanned out across multiple repos,
-        // describe the per-repo breakdown instead of the legacy flat
-        // success/error so partial successes are visible.
         if (result.per_repo && result.per_repo.length > 1) {
           const { title, description, variant } = describePerRepo(result.per_repo, operationName);
           toast({ title, description, variant });

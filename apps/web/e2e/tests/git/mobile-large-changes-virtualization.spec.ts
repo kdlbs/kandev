@@ -85,4 +85,41 @@ test.describe("Mobile large Changes virtualization", () => {
       await scrollChangesToEnd(testPage, lastFileTestId);
     }
   });
+
+  test("keeps tree directory controls touch sized at phone and breakpoint widths", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 393, height: 851 });
+    await apiClient.saveUserSettings({ changes_panel_layout: "tree" });
+    const profile = await createStandardProfile(apiClient, "Mobile Directory Sizing Profile");
+    const title = "Mobile Directory Sizing";
+    await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const session = await openTaskSession(testPage, title);
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
+    await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 15_000 });
+    await seedLargeWorkingTree(testPage, "tree", 12);
+
+    const directory = testPage.locator("[data-changes-tree-directory]").first();
+    await expect(directory).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(() => testPage.evaluate(() => matchMedia("(pointer: coarse)").matches))
+      .toBe(true);
+    for (const width of [393, 767]) {
+      await testPage.setViewportSize({ width, height: 851 });
+      await expect(directory).toHaveCSS("min-height", "44px");
+      await expectTouchControl(directory);
+    }
+  });
 });

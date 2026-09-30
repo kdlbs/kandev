@@ -80,6 +80,7 @@ export class ChangesInlineCommitState {
   private readonly snapshots = new Map<string, CommitInlineDetailSnapshot>();
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly collapsedLru = new Map<string, number>();
+  private readonly mountedTargets = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
 
   constructor(options: ChangesInlineCommitStateOptions) {
@@ -99,6 +100,27 @@ export class ChangesInlineCommitState {
 
   get(target: CommitDetailTarget): CommitInlineDetailSnapshot {
     return this.snapshots.get(commitDetailTargetKey(target)) ?? EMPTY_SNAPSHOT;
+  }
+
+  registerMountedTargetKey(key: string): () => void {
+    if (this.retired) return () => {};
+    this.mountedTargets.set(key, (this.mountedTargets.get(key) ?? 0) + 1);
+    this.collapsedLru.delete(key);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = this.mountedTargets.get(key) ?? 0;
+      if (count > 1) {
+        this.mountedTargets.set(key, count - 1);
+        return;
+      }
+      this.mountedTargets.delete(key);
+      const snapshot = this.snapshots.get(key);
+      if (snapshot?.status === "loaded" && !snapshot.expanded) {
+        this.retainCollapsedSnapshot(key, snapshot.files.length);
+      }
+    };
   }
 
   activate(): void {
@@ -192,6 +214,10 @@ export class ChangesInlineCommitState {
   }
 
   private retainCollapsedSnapshot(key: string, fileCount: number): void {
+    if (this.mountedTargets.has(key)) {
+      this.collapsedLru.delete(key);
+      return;
+    }
     if (fileCount > this.maxCollapsedFiles || this.maxCollapsedTargets <= 0) {
       this.evict(key);
       return;
@@ -213,9 +239,11 @@ export class ChangesInlineCommitState {
     this.snapshots.clear();
     this.inFlight.clear();
     this.collapsedLru.clear();
+    this.mountedTargets.clear();
   }
 
   private evict(key: string): void {
+    if (this.mountedTargets.has(key)) return;
     this.collapsedLru.delete(key);
     const snapshot = this.snapshots.get(key);
     if (snapshot && !snapshot.expanded) this.snapshots.delete(key);

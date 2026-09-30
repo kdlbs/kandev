@@ -6,6 +6,7 @@ import {
   IconChevronRight,
   IconLoader2,
 } from "@tabler/icons-react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -46,6 +47,7 @@ export function ChangesTimelineHistoryRow({
   onToggleSection,
   onToggleRepository,
   onToggleCommit,
+  onCommitTargetMounted,
   onRetryCommit,
   onToggleInlineDirectory,
 }: ChangesTimelineHistoryRowProps) {
@@ -66,7 +68,14 @@ export function ChangesTimelineHistoryRow({
     case "pr-file":
       return <PRHistoryRow row={row} onOpenDiff={actions.onOpenDiff} />;
     case "commit":
-      return <CommitHistoryRow row={row} actions={actions} onToggleCommit={onToggleCommit} />;
+      return (
+        <CommitHistoryRow
+          row={row}
+          actions={actions}
+          onToggleCommit={onToggleCommit}
+          onCommitTargetMounted={onCommitTargetMounted}
+        />
+      );
     case "commit-directory":
       return (
         <CommitDirectoryHistoryRow row={row} onToggleInlineDirectory={onToggleInlineDirectory} />
@@ -85,6 +94,7 @@ type ChangesTimelineHistoryRowProps = {
   onToggleSection: (sectionKey: string) => void;
   onToggleRepository: (sectionKey: string, repositoryName: string) => void;
   onToggleCommit: (sectionKey: string, target: CommitDetailTarget, expanded: boolean) => void;
+  onCommitTargetMounted?: (targetKey: string) => () => void;
   onRetryCommit: (target: CommitDetailTarget) => void;
   onToggleInlineDirectory: (sectionKey: string, target: CommitDetailTarget, path: string) => void;
 };
@@ -133,7 +143,7 @@ function HistorySectionRow({
         <div className="mb-1 flex items-center justify-between gap-2 -mt-0.5">
           <button
             type="button"
-            className="flex min-h-11 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90"
+            className="flex min-h-6 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 [@media(pointer:coarse)]:min-h-11"
             onClick={() => onToggleSection(row.sectionKey)}
             aria-expanded={!row.collapsed}
             data-testid={`${toggleTestId}-collapse-toggle`}
@@ -178,7 +188,7 @@ function HistoryRepositoryRow({
     <div className="flex items-center justify-between gap-2 px-1 py-0.5">
       <button
         type="button"
-        className="flex min-h-11 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80"
+        className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 [@media(pointer:coarse)]:min-h-11"
         data-testid={row.historyKind === "pr" ? "pr-files-repo-header" : "commits-repo-header"}
         data-changes-row-focus
         aria-expanded={!row.collapsed}
@@ -234,11 +244,14 @@ function CommitHistoryRow({
   row,
   actions,
   onToggleCommit,
+  onCommitTargetMounted,
 }: {
   row: Extract<ChangesHistoryTimelineRow, { kind: "commit" }>;
   actions: HistoryRowActions;
   onToggleCommit: ChangesTimelineHistoryRowProps["onToggleCommit"];
+  onCommitTargetMounted: ChangesTimelineHistoryRowProps["onCommitTargetMounted"];
 }) {
+  useEffect(() => onCommitTargetMounted?.(row.targetKey), [onCommitTargetMounted, row.targetKey]);
   return (
     <CommitRow
       commit={row.commit}

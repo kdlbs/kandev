@@ -37,6 +37,8 @@ describe("TreeDirRow", () => {
   it("keeps a 44px touch target for directory expansion", () => {
     render(<TreeDirRow row={row()} baseIndentPx={0} onToggle={() => undefined} />);
 
-    expect(screen.getByRole("button", { name: "src" }).className).toContain("max-md:min-h-11");
+    const toggle = screen.getByRole("button", { name: "src" });
+    expect(toggle.className).toContain("[@media(pointer:coarse)]:min-h-11");
+    expect(toggle.className).not.toContain("max-md:min-h-11");
   });
 });

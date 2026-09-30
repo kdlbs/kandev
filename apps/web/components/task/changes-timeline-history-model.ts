@@ -8,7 +8,11 @@ import {
 } from "./changes-file-tree-model";
 import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 import type { CommitItem } from "./commit-row";
-import type { CommitInlineDetailSnapshot, CommitInlineFile } from "./changes-inline-commit-state";
+import {
+  commitDetailTargetKey,
+  type CommitInlineDetailSnapshot,
+  type CommitInlineFile,
+} from "./changes-inline-commit-state";
 import type { FileInfo } from "@/lib/state/store";
 
 const HISTORY_REPOSITORY_ROW_KIND = "history-repository" as const;
@@ -527,17 +531,4 @@ function inlineCommitFilesId(commit: CommitItem): string {
     /[^a-zA-Z0-9_-]/g,
     "-",
   );
-}
-
-function commitDetailTargetKey(target: CommitDetailTarget): string {
-  return target.source === "local"
-    ? JSON.stringify(["local", target.repo ?? "", target.sha])
-    : JSON.stringify([
-        "github",
-        target.workspaceId,
-        target.owner,
-        target.repo,
-        target.repositoryName ?? "",
-        target.sha,
-      ]);
 }

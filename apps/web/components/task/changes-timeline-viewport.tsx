@@ -14,22 +14,29 @@ import {
 import { measureFileTreeElement } from "./file-tree-measurement";
 import {
   captureChangesTimelineAnchor,
+  observeChangesTimelinePresentationChanges,
   resolveChangesTimelineAnchor,
   scrollTopForChangesTimelineAnchor,
+  type ChangesTimelineAnchor,
 } from "./changes-timeline-measurement";
 import {
   changesTimelineNextIndex,
   isChangesTimelineTextEntry,
   type ChangesTimelineNavigationKey,
 } from "./changes-timeline-interaction";
+import {
+  buildVisibleGroupTree,
+  resolveRetainedFocusIndex,
+  visibleNodeKey,
+  type ChangesTimelineGroup,
+  type ChangesTimelineRowIdentity,
+  type ChangesTimelineVisibleNode,
+} from "./changes-timeline-viewport-groups";
 
-export type ChangesTimelineRowIdentity = { key: string };
-
-export type ChangesTimelineGroup = {
-  key: string;
-  testId?: string;
-  attributes?: Record<string, string>;
-};
+export type {
+  ChangesTimelineGroup,
+  ChangesTimelineRowIdentity,
+} from "./changes-timeline-viewport-groups";
 
 export type ChangesTimelineFocusRequest = {
   rowKey: string;
@@ -68,6 +75,10 @@ export function ChangesTimelineViewport<Row extends ChangesTimelineRowIdentity>(
   const focusState = useTimelineViewportFocusState<Row>(rows, contextKey, focusRequest);
   const { focusedRowKey } = focusState;
   const indexByKey = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
+  const getRowGroups = useCallback(
+    (row: Row) => resolveRowGroups(row, getGroups, getGroup, getNestedGroup),
+    [getGroup, getGroups, getNestedGroup],
+  );
   const rangeExtractor = useCallback(
     (range: Range) => {
       const visible = defaultRangeExtractor(range);
@@ -90,9 +101,7 @@ export function ChangesTimelineViewport<Row extends ChangesTimelineRowIdentity>(
   });
   const viewportHeight = Math.max(0, virtualizer.getTotalSize() - scrollMargin);
   const visibleItems = virtualizer.getVirtualItems();
-  const groupTree = buildVisibleGroupTree(visibleItems, rows, (row) =>
-    resolveRowGroups(row, getGroups, getGroup, getNestedGroup),
-  );
+  const groupTree = buildVisibleGroupTree(visibleItems, rows, getRowGroups);
   useTimelineViewportLifecycle({
     rows,
     scrollElement,
@@ -102,6 +111,7 @@ export function ChangesTimelineViewport<Row extends ChangesTimelineRowIdentity>(
     virtualizer,
     viewportRef,
     state: focusState,
+    getRowGroups,
   });
   const handlers = useTimelineViewportHandlers({
     rows,
@@ -109,6 +119,7 @@ export function ChangesTimelineViewport<Row extends ChangesTimelineRowIdentity>(
     virtualizer,
     viewportRef,
     state: focusState,
+    getRowGroups,
   });
 
   return (
@@ -147,6 +158,8 @@ type ViewportFocusState<Row extends ChangesTimelineRowIdentity> = {
   setFocusedRowKey: React.Dispatch<React.SetStateAction<string | null>>;
   pendingFocusKey: string | null;
   setPendingFocusKey: React.Dispatch<React.SetStateAction<string | null>>;
+  lastFocusedGroupKeysRef: React.MutableRefObject<string[]>;
+  pendingPresentationAnchorRef: React.MutableRefObject<ChangesTimelineAnchor | null>;
 };
 
 function useTimelineViewportFocusState<Row extends ChangesTimelineRowIdentity>(
@@ -163,6 +176,8 @@ function useTimelineViewportFocusState<Row extends ChangesTimelineRowIdentity>(
     previousFocusRequestRef: useRef(focusRequest),
     focusRequestFramesRef: useRef<number[]>([]),
     lastFocusedIndexRef: useRef(0),
+    lastFocusedGroupKeysRef: useRef([]),
+    pendingPresentationAnchorRef: useRef(null),
     focusedRowKey,
     setFocusedRowKey,
     pendingFocusKey,
@@ -191,6 +206,7 @@ function useTimelineViewportLifecycle<Row extends ChangesTimelineRowIdentity>({
   virtualizer,
   viewportRef,
   state,
+  getRowGroups,
 }: {
   rows: Row[];
   scrollElement: HTMLDivElement | null;
@@ -200,11 +216,28 @@ function useTimelineViewportLifecycle<Row extends ChangesTimelineRowIdentity>({
   virtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, HTMLDivElement>>;
   viewportRef: React.RefObject<HTMLDivElement | null>;
   state: ViewportFocusState<Row>;
+  getRowGroups: (row: Row) => ChangesTimelineGroup[];
 }) {
+  const latestPresentationStateRef = useRef({ rows, scrollElement, virtualizer, state });
+  latestPresentationStateRef.current = { rows, scrollElement, virtualizer, state };
   const cancelFocusRequestFrames = useCallback(() => {
     state.focusRequestFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
     state.focusRequestFramesRef.current = [];
   }, [state.focusRequestFramesRef]);
+
+  useLayoutEffect(() => {
+    if (!scrollElement) return;
+    return observeChangesTimelinePresentationChanges(scrollElement, () => {
+      const current = latestPresentationStateRef.current;
+      const anchor = captureChangesTimelineAnchor(
+        current.rows,
+        current.virtualizer.getVirtualItems(),
+        current.scrollElement?.scrollTop ?? 0,
+      );
+      current.state.pendingPresentationAnchorRef.current = anchor;
+      current.virtualizer.measure();
+    });
+  }, [scrollElement, virtualizer]);
 
   useLayoutEffect(() => cancelFocusRequestFrames, [cancelFocusRequestFrames]);
   useLayoutEffect(() => {
@@ -218,7 +251,8 @@ function useTimelineViewportLifecycle<Row extends ChangesTimelineRowIdentity>({
       cancelFocusRequestFrames,
     });
     if (!contextChanged) {
-      restoreTimelineAnchor(rows, virtualizer, state);
+      restoreTimelineAnchor(rows, indexByKey, virtualizer, state);
+      restorePresentationAnchor(rows, indexByKey, virtualizer, state);
       scheduleRequestedFocus(
         focusRequest,
         indexByKey,
@@ -230,7 +264,14 @@ function useTimelineViewportLifecycle<Row extends ChangesTimelineRowIdentity>({
     }
     state.previousRowsRef.current = rows;
     state.previousContextKeyRef.current = contextKey;
-    reconcileRetainedFocus(rows, indexByKey, virtualizer, viewportRef, state);
+    reconcileRetainedFocus({
+      rows,
+      getRowGroups,
+      indexByKey,
+      virtualizer,
+      viewportRef,
+      state,
+    });
     focusPendingRow(viewportRef, state);
     recordTimelineAnchor(rows, scrollElement, virtualizer, state);
   });
@@ -262,6 +303,8 @@ function resetTimelineContext<Row extends ChangesTimelineRowIdentity>({
   }
   state.setFocusedRowKey(null);
   state.setPendingFocusKey(null);
+  state.lastFocusedGroupKeysRef.current = [];
+  state.pendingPresentationAnchorRef.current = null;
   state.anchorRef.current = null;
   if (scrollElement) scrollElement.scrollTop = 0;
   virtualizer.scrollToOffset(0);
@@ -270,12 +313,29 @@ function resetTimelineContext<Row extends ChangesTimelineRowIdentity>({
 
 function restoreTimelineAnchor<Row extends ChangesTimelineRowIdentity>(
   rows: Row[],
+  indexByKey: Map<string, number>,
   virtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, HTMLDivElement>>,
   state: ViewportFocusState<Row>,
 ) {
   const anchor = state.anchorRef.current;
   if (state.previousRowsRef.current === rows || !anchor) return;
-  const target = resolveChangesTimelineAnchor(rows, anchor);
+  const target = resolveChangesTimelineAnchor(rows, anchor, indexByKey);
+  const offset = target ? virtualizer.getOffsetForIndex(target.index, "start")?.[0] : undefined;
+  if (target && offset !== undefined) {
+    virtualizer.scrollToOffset(scrollTopForChangesTimelineAnchor(offset, anchor.viewportOffset));
+  }
+}
+
+function restorePresentationAnchor<Row extends ChangesTimelineRowIdentity>(
+  rows: Row[],
+  indexByKey: Map<string, number>,
+  virtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, HTMLDivElement>>,
+  state: ViewportFocusState<Row>,
+) {
+  const anchor = state.pendingPresentationAnchorRef.current;
+  if (!anchor) return;
+  state.pendingPresentationAnchorRef.current = null;
+  const target = resolveChangesTimelineAnchor(rows, anchor, indexByKey);
   const offset = target ? virtualizer.getOffsetForIndex(target.index, "start")?.[0] : undefined;
   if (target && offset !== undefined) {
     virtualizer.scrollToOffset(scrollTopForChangesTimelineAnchor(offset, anchor.viewportOffset));
@@ -307,18 +367,29 @@ function scheduleRequestedFocus<Row extends ChangesTimelineRowIdentity>(
   state.focusRequestFramesRef.current = [firstFrame];
 }
 
-function reconcileRetainedFocus<Row extends ChangesTimelineRowIdentity>(
-  rows: Row[],
-  indexByKey: Map<string, number>,
-  virtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, HTMLDivElement>>,
-  viewportRef: React.RefObject<HTMLDivElement | null>,
-  state: ViewportFocusState<Row>,
-) {
+function reconcileRetainedFocus<Row extends ChangesTimelineRowIdentity>({
+  rows,
+  getRowGroups,
+  indexByKey,
+  virtualizer,
+  viewportRef,
+  state,
+}: {
+  rows: Row[];
+  getRowGroups: (row: Row) => ChangesTimelineGroup[];
+  indexByKey: Map<string, number>;
+  virtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, HTMLDivElement>>;
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+  state: ViewportFocusState<Row>;
+}) {
   const { focusedRowKey } = state;
   if (!focusedRowKey || indexByKey.has(focusedRowKey)) return;
-  const fallbackIndex = rows.length
-    ? Math.min(state.lastFocusedIndexRef.current, rows.length - 1)
-    : -1;
+  const fallbackIndex = resolveRetainedFocusIndex(
+    rows,
+    getRowGroups,
+    state.lastFocusedGroupKeysRef.current,
+    state.lastFocusedIndexRef.current,
+  );
   const fallbackRow = rows[fallbackIndex];
   state.setFocusedRowKey(fallbackRow?.key ?? null);
   state.setPendingFocusKey(fallbackRow?.key ?? null);
@@ -359,12 +430,14 @@ function useTimelineViewportHandlers<Row extends ChangesTimelineRowIdentity>({
   virtualizer,
   viewportRef,
   state,
+  getRowGroups,
 }: {
   rows: Row[];
   indexByKey: Map<string, number>;
   virtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, HTMLDivElement>>;
   viewportRef: React.RefObject<HTMLDivElement | null>;
   state: ViewportFocusState<Row>;
+  getRowGroups: (row: Row) => ChangesTimelineGroup[];
 }) {
   const handleFocusCapture = useCallback(
     (event: FocusEvent<HTMLDivElement>) => {
@@ -372,10 +445,16 @@ function useTimelineViewportHandlers<Row extends ChangesTimelineRowIdentity>({
       const key = rowElement?.dataset.changesRowKey;
       if (!key) return;
       const index = indexByKey.get(key);
-      if (index !== undefined) state.lastFocusedIndexRef.current = index;
+      if (index !== undefined) {
+        const row = rows[index];
+        state.lastFocusedIndexRef.current = index;
+        state.lastFocusedGroupKeysRef.current = row
+          ? getRowGroups(row).map((group) => group.key)
+          : [];
+      }
       state.setFocusedRowKey(key);
     },
-    [indexByKey, state],
+    [getRowGroups, indexByKey, rows, state],
   );
   const handleBlurCapture = useCallback(
     (event: FocusEvent<HTMLDivElement>) => {
@@ -396,11 +475,12 @@ function useTimelineViewportHandlers<Row extends ChangesTimelineRowIdentity>({
       if (!row || nextIndex === currentIndex) return;
       event.preventDefault();
       state.lastFocusedIndexRef.current = nextIndex;
+      state.lastFocusedGroupKeysRef.current = getRowGroups(row).map((group) => group.key);
       state.setFocusedRowKey(row.key);
       state.setPendingFocusKey(row.key);
       virtualizer.scrollToIndex(nextIndex, { align: "auto" });
     },
-    [indexByKey, rows, state, virtualizer],
+    [getRowGroups, indexByKey, rows, state, virtualizer],
   );
   return { handleFocusCapture, handleBlurCapture, handleKeyDownCapture };
 }
@@ -448,7 +528,7 @@ function VisibleTimelineNode<Row extends ChangesTimelineRowIdentity>({
   virtualizer,
   parentStart,
 }: {
-  node: VisibleNode<Row>;
+  node: ChangesTimelineVisibleNode<Row>;
   rows: Row[];
   renderRow: (row: Row, index: number) => ReactNode;
   virtualizer: TimelineVirtualizer;
@@ -500,10 +580,6 @@ function VisibleTimelineNode<Row extends ChangesTimelineRowIdentity>({
   );
 }
 
-function visibleNodeKey<Row extends ChangesTimelineRowIdentity>(node: VisibleNode<Row>): string {
-  return node.kind === "row" ? String(node.item.key) : `group-${JSON.stringify(node.path)}`;
-}
-
 function isNewFocusRequest(
   request: ChangesTimelineFocusRequest | undefined,
   previous: ChangesTimelineFocusRequest | undefined,
@@ -519,63 +595,4 @@ function findRowElement(viewport: HTMLDivElement | null, key: string): HTMLEleme
     if (row.dataset.changesRowKey === key) return row;
   }
   return null;
-}
-
-type VirtualItem = { key: string | number | bigint; index: number; start: number; end: number };
-
-type VisibleNode<Row extends ChangesTimelineRowIdentity> =
-  | { kind: "row"; item: VirtualItem }
-  | {
-      kind: "group";
-      group: ChangesTimelineGroup;
-      path: string[];
-      items: VirtualItem[];
-      children: VisibleNode<Row>[];
-    };
-
-function buildVisibleGroupTree<Row extends ChangesTimelineRowIdentity>(
-  items: VirtualItem[],
-  rows: Row[],
-  getGroups: (row: Row) => ChangesTimelineGroup[],
-): VisibleNode<Row>[] {
-  const roots: VisibleNode<Row>[] = [];
-  let previousPath: ChangesTimelineGroup[] = [];
-  let ancestors: Array<{ path: string[]; node: Extract<VisibleNode<Row>, { kind: "group" }> }> = [];
-
-  for (const item of items) {
-    const row = rows[item.index];
-    if (!row) continue;
-    const path = getGroups(row);
-    let shared = 0;
-    while (
-      shared < path.length &&
-      shared < previousPath.length &&
-      path[shared]?.key === previousPath[shared]?.key
-    ) {
-      shared += 1;
-    }
-    ancestors = ancestors.slice(0, shared);
-    const destination = () => ancestors.at(-1)?.node.children ?? roots;
-    const pathKeys: string[] = [];
-    for (let index = 0; index < path.length; index += 1) {
-      const group = path[index];
-      if (!group) continue;
-      pathKeys.push(group.key);
-      if (index < shared) continue;
-      const node: Extract<VisibleNode<Row>, { kind: "group" }> = {
-        kind: "group",
-        group,
-        path: [...pathKeys],
-        items: [],
-        children: [],
-      };
-      destination().push(node);
-      ancestors.push({ path: [...pathKeys], node });
-    }
-    const destinationNode = ancestors.at(-1)?.node;
-    (destinationNode?.children ?? roots).push({ kind: "row", item });
-    for (const ancestor of ancestors) ancestor.node.items.push(item);
-    previousPath = path;
-  }
-  return roots;
 }

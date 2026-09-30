@@ -180,10 +180,9 @@ function useInlineCommitDetails(context: ChangesPanelContextIdentity) {
                 }
               : {}),
           });
-          if (result.source === "github" && !result.success) {
+          if (!result.success) {
             throw new CommitDetailProtocolError("invalid_response");
           }
-          if (result.source === "local" && !result.success) return {};
           return result.files ?? {};
         },
         onError: (_target, error) => {

@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
+import type { FileInfo } from "@/lib/state/store";
+import { ChangesInlineCommitState } from "./changes-inline-commit-state";
 import type { CommitItem } from "./commit-row";
 import { ChangesTimelineHistoryRow } from "./changes-timeline-history-row";
-import { buildChangesHistoryTimelineRows } from "./changes-timeline-model";
+import {
+  buildChangesHistoryTimelineRows,
+  changesCommitExpansionKey,
+} from "./changes-timeline-model";
 import { ChangesTimelineViewport } from "./changes-timeline-viewport";
 
 vi.mock("@/hooks/use-copy-repository-path", () => ({
@@ -12,6 +17,7 @@ vi.mock("@/hooks/use-copy-repository-path", () => ({
 }));
 
 const resizeObservers: ControlledResizeObserver[] = [];
+const INLINE_FILE_PATH = "src/file.ts";
 
 class ControlledResizeObserver {
   private readonly targets = new Set<Element>();
@@ -81,7 +87,7 @@ function inlineCommitRows(target: CommitDetailTarget) {
                 status: "loaded",
                 files: [
                   {
-                    path: "src/file.ts",
+                    path: INLINE_FILE_PATH,
                     status: "modified",
                     repositoryName: commit.repository_name,
                   },
@@ -135,6 +141,74 @@ function ExpandedCommitTimeline({
   );
 }
 
+function MountedCommitHeaders({
+  targets,
+  state,
+}: {
+  targets: CommitDetailTarget[];
+  state: ChangesInlineCommitState;
+}) {
+  const commits: CommitItem[] = targets.map((target) => ({
+    commit_sha: target.sha,
+    commit_message: `Commit ${target.sha}`,
+    insertions: 1,
+    deletions: 0,
+    statsAvailable: true,
+    detailTarget: target,
+    repository_name: target.source === "local" ? target.repo : target.repositoryName,
+  }));
+  const rows = buildChangesHistoryTimelineRows(
+    [
+      {
+        kind: "commits",
+        sectionKey: "history",
+        label: "Commits",
+        testId: "commits-section",
+        collapsed: false,
+        commits: commits.map((commit) => ({
+          commit,
+          detail: {
+            expanded: false,
+            status: "loaded" as const,
+            files: [
+              {
+                path: INLINE_FILE_PATH,
+                status: "modified" as const,
+                repositoryName: commit.repository_name,
+              },
+            ],
+          },
+        })),
+        collapsedRepositories: new Set(),
+        collapsedDirectories: new Set(),
+        layout: "flat",
+      },
+    ],
+    new Set(targets.map((target) => changesCommitExpansionKey("history", target))),
+  );
+  const onCommitTargetMounted = useCallback(
+    (targetKey: string) => state.registerMountedTargetKey(targetKey),
+    [state],
+  );
+  return (
+    <div>
+      {rows.map((row) => (
+        <ChangesTimelineHistoryRow
+          key={row.key}
+          row={row}
+          actions={{ onOpenDiff: vi.fn(), pushDisabled: true }}
+          onToggleSection={vi.fn()}
+          onToggleRepository={vi.fn()}
+          onToggleCommit={vi.fn()}
+          onRetryCommit={vi.fn()}
+          onToggleInlineDirectory={vi.fn()}
+          onCommitTargetMounted={onCommitTargetMounted}
+        />
+      ))}
+    </div>
+  );
+}
+
 describe("ChangesTimelineHistoryRow keyboard activation", () => {
   it("opens the complete commit target once for Enter and Space after ArrowDown reaches its file", async () => {
     const target: CommitDetailTarget = {
@@ -161,11 +235,57 @@ describe("ChangesTimelineHistoryRow keyboard activation", () => {
       expect(onOpenCommitDetail).toHaveBeenCalledTimes(expectedTokens.length + 1);
       const [actualTarget, navigation] = onOpenCommitDetail.mock.calls.at(-1) ?? [];
       expect(actualTarget).toEqual(target);
-      expect(navigation?.path).toBe("src/file.ts");
+      expect(navigation?.path).toBe(INLINE_FILE_PATH);
       expect(navigation?.token).toEqual(expect.any(Number));
       expectedTokens.push(navigation?.token ?? 0);
     }
     expect(expectedTokens[0]).toBeGreaterThan(0);
     expect(expectedTokens[1]).toBeGreaterThan(expectedTokens[0]);
+  });
+});
+
+describe("mounted collapsed commit details", () => {
+  it("keeps mounted headers cached and makes snapshots eviction candidates after unmount", async () => {
+    const targets: CommitDetailTarget[] = ["one", "two", "three"].map((sha) => ({
+      source: "local",
+      sha,
+      repo: "backend",
+    }));
+    const request = vi.fn(async () => ({
+      [INLINE_FILE_PATH]: {
+        path: INLINE_FILE_PATH,
+        status: "modified",
+        staged: false,
+        additions: 1,
+        deletions: 0,
+      } as FileInfo,
+    }));
+    const state = new ChangesInlineCommitState({
+      contextKey: "task/session/environment",
+      request,
+      maxCollapsedTargets: 1,
+    });
+    const view = render(<MountedCommitHeaders targets={targets.slice(0, 2)} state={state} />);
+
+    await waitFor(() => expect(screen.getAllByTestId("commit-toggle")).toHaveLength(2));
+    for (const target of targets.slice(0, 2)) {
+      await act(async () => {
+        await state.expand(target);
+        state.collapse(target);
+      });
+    }
+    await act(async () => state.expand(targets[0]!));
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(state.get(targets[1]!).status).toBe("loaded");
+
+    view.rerender(<MountedCommitHeaders targets={[targets[1]!]} state={state} />);
+    await act(async () => state.collapse(targets[0]!));
+    await act(async () => {
+      await state.expand(targets[2]!);
+      state.collapse(targets[2]!);
+    });
+    expect(state.get(targets[0]!).status).toBe("idle");
+    await act(async () => state.expand(targets[0]!));
+    expect(request).toHaveBeenCalledTimes(4);
   });
 });

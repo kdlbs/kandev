@@ -69,6 +69,28 @@ test.describe("Large Changes virtualization", () => {
       const lastFile = largeChangesFileTestId(LARGE_CHANGES_FILE_COUNT - 1);
       await expect(testPage.getByTestId(firstFile)).toBeVisible({ timeout: 30_000 });
       await expectBoundedTimeline(testPage);
+      if (layout === "tree") {
+        const directory = testPage.locator("[data-changes-tree-directory]").first();
+        await expect(directory).toBeVisible();
+        for (const width of [1280, 767]) {
+          await testPage.setViewportSize({ width, height: 900 });
+          if (width < 768) {
+            await testPage
+              .getByRole("navigation")
+              .getByRole("button", { name: /Changes$/ })
+              .click();
+            await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible();
+            await scrollChangesToStart(testPage, firstFile);
+          } else {
+            await expect(testPage.getByTestId("changes-panel")).toBeVisible({ timeout: 30_000 });
+          }
+          await expect(directory).toBeVisible({ timeout: 30_000 });
+          await expect
+            .poll(() => testPage.evaluate(() => matchMedia("(pointer: fine)").matches))
+            .toBe(true);
+          await expect(directory).toHaveCSS("min-height", "24px");
+        }
+      }
       const firstRow = testPage.getByTestId(firstFile);
       const lastRow = testPage.getByTestId(lastFile);
       await firstRow.focus();
@@ -89,6 +111,7 @@ test.describe("Large Changes virtualization", () => {
         contentType: "application/json",
       });
 
+      await testPage.setViewportSize({ width: 1280, height: 900 });
       const replacement = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         `${title} Replacement`,

@@ -561,7 +561,7 @@ function BulkActionBarContent({
           data-testid="bulk-stage"
           size="sm"
           variant="outline"
-          className="h-6 min-h-11 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer"
           onClick={onStage}
         >
           {t("task:stageCount", { selectionCount })}
@@ -572,7 +572,7 @@ function BulkActionBarContent({
           data-testid={`bulk-unstage-${variant}`}
           size="sm"
           variant="outline"
-          className="h-6 min-h-11 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer"
           onClick={onUnstage}
         >
           {t("task:unstageCount", { selectionCount })}
@@ -583,7 +583,7 @@ function BulkActionBarContent({
           data-testid={`bulk-discard-${variant}`}
           size="sm"
           variant="outline"
-          className="h-6 min-h-11 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
           onClick={(e) => onDiscard(e.currentTarget)}
         >
           {t("task:discardCount", { selectionCount })}

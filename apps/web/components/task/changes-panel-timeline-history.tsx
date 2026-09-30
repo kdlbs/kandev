@@ -54,44 +54,43 @@ export type HistoryRows = {
 export function useCommitSections(props: ChangesPanelTimelineContentProps): CommitSection[] {
   const { t } = useTranslation();
   const isDiverged = props.relation.presentation === "separate";
-  const separated = isDiverged
-    ? separateCommitHistories(props.commits, props.prCommits)
-    : { providerCommits: [], localCommits: [] };
-  const mergedCommits = isDiverged ? [] : mergeCommits(props.commits, props.prCommits);
-  const hasMergedCommits = isDiverged
-    ? separated.providerCommits.length > 0 || separated.localCommits.length > 0
-    : mergedCommits.length > 0;
-  const showCommitsList = props.hasStaged || hasMergedCommits;
-  const firstSection = firstVisibleSection({
-    hasPRFiles: props.hasPRFiles,
-    hasUnstaged: props.hasUnstaged,
-    hasStaged: props.hasStaged,
-    showCommitsList,
-    prFileCount: props.prFiles.length,
-  });
-
-  return useMemo(
-    () =>
-      createCommitSections({
-        isDiverged,
-        showCommitsList,
-        separated,
-        mergedCommits,
-        firstSection,
-        providerPRNumber: props.providerPRNumber,
-        t,
-      }),
-    [
-      firstSection,
-      isDiverged,
-      mergedCommits,
-      props.providerPRNumber,
-      separated.localCommits,
-      separated.providerCommits,
+  return useMemo(() => {
+    const separated = isDiverged
+      ? separateCommitHistories(props.commits, props.prCommits)
+      : { providerCommits: [], localCommits: [] };
+    const mergedCommits = isDiverged ? [] : mergeCommits(props.commits, props.prCommits);
+    const hasMergedCommits = isDiverged
+      ? separated.providerCommits.length > 0 || separated.localCommits.length > 0
+      : mergedCommits.length > 0;
+    const showCommitsList = props.hasStaged || hasMergedCommits;
+    const firstSection = firstVisibleSection({
+      hasPRFiles: props.hasPRFiles,
+      hasUnstaged: props.hasUnstaged,
+      hasStaged: props.hasStaged,
       showCommitsList,
+      prFileCount: props.prFiles.length,
+    });
+
+    return createCommitSections({
+      isDiverged,
+      showCommitsList,
+      separated,
+      mergedCommits,
+      firstSection,
+      providerPRNumber: props.providerPRNumber,
       t,
-    ],
-  );
+    });
+  }, [
+    isDiverged,
+    props.commits,
+    props.prCommits,
+    props.hasStaged,
+    props.hasUnstaged,
+    props.hasPRFiles,
+    props.prFiles.length,
+    props.providerPRNumber,
+    t,
+  ]);
 }
 
 function createCommitSections({
@@ -397,7 +396,26 @@ export function useHistoryRowRenderer(
   expansion: HistoryExpansionState,
 ): (row: ChangesHistoryTimelineRow) => ReactNode {
   const sectionCommits = useMemo(() => indexSectionCommits(commitSections), [commitSections]);
-  const actions = useMemo(() => createHistoryActions(props), [props]);
+  const actions = useMemo(
+    () => createHistoryActions(props),
+    [
+      props.dialogs.handleOpenAmendDialog,
+      props.dialogs.handleOpenResetDialog,
+      props.onOpenDiffFile,
+      props.onOpenCommitDetail,
+      props.onRevertCommit,
+      props.onRepoPush,
+      props.onRepoCreatePR,
+      props.repoDisplayName,
+      props.perRepoStatus,
+      props.prByRepo,
+      props.pushDisabled,
+    ],
+  );
+  const onCommitTargetMounted = useCallback(
+    (targetKey: string) => detailState.registerMountedTargetKey(targetKey),
+    [detailState],
+  );
 
   return useCallback(
     (row: ChangesHistoryTimelineRow) => (
@@ -406,6 +424,7 @@ export function useHistoryRowRenderer(
         row={row}
         sectionCommits={sectionCommits.get(row.sectionKey)}
         actions={actions}
+        onCommitTargetMounted={onCommitTargetMounted}
         onToggleSection={(sectionKey) => toggleHistorySection(sectionKey, expansion)}
         onToggleRepository={(sectionKey, repositoryName) => {
           const key = changesHistoryRepositoryExpansionKey(sectionKey, repositoryName);
@@ -426,7 +445,7 @@ export function useHistoryRowRenderer(
         }}
       />
     ),
-    [actions, detailState, expansion, sectionCommits],
+    [actions, detailState, expansion, onCommitTargetMounted, sectionCommits],
   );
 }
 
