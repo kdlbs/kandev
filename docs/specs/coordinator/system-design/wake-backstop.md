@@ -58,15 +58,16 @@ The backstop is a `WakeBackstop` value owned by the `Service`, with
 - The wake registration (`registerCoordinatorWakeState` in
   `internal/backendapp/coordinator.go`) keeps `PruneWakeState` first, then
   calls `svc.StartWakeBackstop(ctx)`, so the backstop starts after the wake
-  hook's own startup pass. The later startup hooks (delivery's settle of an
-  interrupted turn) need no ordering against it: the first pass is 60 seconds
-  after `Start`, and every settle both perform is conditional on the row's
-  `outcome IS NULL` (and `message_id IS NULL` for the no-message settle), so
-  whichever runs first wins and the other is a no-op.
-- `registerCoordinatorRoutes` registers `svc.StopWakeBackstop` through
-  `routeParams.addCleanup` when phase 3 is effective. Cleanups run in reverse
-  registration order and the database pool's cleanup was registered earlier,
-  so the backstop is joined before the store closes.
+  hook's own startup pass. The later startup hooks (delivery's
+  [startup pass](wake-recovery.md#startup-pass)) need no ordering against it:
+  the first pass is 60 seconds after `Start`, and every settle both perform is
+  conditional on `outcome IS NULL AND session_turn_id IS NULL`, so whichever
+  runs first wins and the other is a no-op.
+- One cleanup closure in `registerCoordinatorRoutes` (the existing phase 3
+  `p.addCleanup` closure) stops the recorder, `svc.StopWakeBackstop` and
+  `svc.StopDelivery`, in that order, when phase 3 is effective. Cleanups run in
+  reverse registration order and the database pool's cleanup was registered
+  earlier, so all three are joined before the store closes.
 - The `Hooks` value carries the three later-task duties: `TurnDuties(ctx,
   coordinatorID)` (steps 2.1 to 2.3; one field, task 05 composes spend's
   `CheckCeiling` into it), `Lowering(ctx, coordinatorID)` (step 2.4, task 09)
@@ -98,9 +99,15 @@ Each tick:
    skipped.
 2. For each coordinator in the visit set, re-reads the coordinator row and
    runs the turn and setting duties in this order:
-   1. message recovery for its open turn with `message_id` null
-      ([Finding the turn's message](wake.md#finding-the-turns-message));
+   1. send recovery for its open turn: a bound row with `message_id` null
+      records it, and an unbound row past two minutes with the session not
+      `RUNNING` or `STARTING` settles `send_failed`
+      ([Sent test](wake-recovery.md#sent-test),
+      [Settle rule](wake-recovery.md#settle-rule),
+      [Finding the turn's message](wake-recovery.md#finding-the-turns-message));
    2. missed-settle re-derivation for its open turn ([Turn end](wake.md#turn-end)),
+      only when the row's `session_turn_id` is non-null (an unbound row is
+      left to step 1),
       then the per-turn cost recompute for its turns settled in the last 11
       minutes ([spend](spend.md#per-turn-cost));
    3. the ceiling check `CheckCeiling` of [spend](spend.md#stopping) for its

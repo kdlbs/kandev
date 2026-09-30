@@ -83,6 +83,10 @@ type Service struct {
 	proposalSteps        WorkflowStepReader
 
 	conversationTasks    ConversationTaskManager
+	convReader           ConversationReader
+	deliverLocks         keyedLock
+	wakeFinder           WakeMessageFinder
+	wakeSender           WakeSender
 	conversationSessions SessionEnsurer
 
 	// decisionTasks, decisionSteps and eventBus back Approve and Reject
@@ -141,6 +145,7 @@ type Service struct {
 	recorderStopped bool
 	wakeInFlight    sync.WaitGroup
 	backstop        *WakeBackstop
+	delivery        deliveryWorker
 
 	// relayReader and relayTasks back the relay read; nil until SetRelayDeps.
 	relayReader RelayReader

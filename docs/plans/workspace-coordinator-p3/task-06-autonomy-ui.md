@@ -48,7 +48,7 @@ permission count. Adds the public docs section.
 ## In scope
 
 - Backend: `GET .../coordinators/:cid/autonomy`
-  ([Autonomy read](../../specs/coordinator/system-design/wake.md#autonomy-read)),
+  ([Autonomy read](../../specs/coordinator/system-design/wake-screens.md#autonomy-read)),
   `coordinator.updated` with `autonomy_changed`, and
   `GET .../coordinators/:cid/runs/:runId` (used by task 10; built here with
   the autonomy read), including `last_turn.stop_state` (`stop_failing` when
@@ -58,7 +58,7 @@ permission count. Adds the public docs section.
   count strip; `attention.ts` emitting the `autonomy` item (kind rank 4, id
   `autonomy:<cid>`), counted in the coordinator count only, and the updated
   phase 1 ordering test for the amended `AC-COORDINATOR-NEEDS-YOU-002.4`
-  ([Screens](../../specs/coordinator/system-design/wake.md#screens)).
+  ([Screens](../../specs/coordinator/system-design/wake-screens.md#screens)).
 - Settings: the Autonomy entry of the Sections row (`autonomy` after `goal` in
   `coordinator-sections.tsx`, present only while phase 3 is effective, with
   `sectionAutonomy` and `sectionAutonomyHelp` in six locales;
@@ -70,7 +70,7 @@ permission count. Adds the public docs section.
   [Settings display](../../specs/coordinator/system-design/containment.md#settings-display)).
 - Transcript: the "Woken by" entry keyed on
   `metadata.coordinator_wake_turn_id`
-  ([Transcript](../../specs/coordinator/system-design/wake.md#transcript)),
+  ([Transcript](../../specs/coordinator/system-design/wake-screens.md#transcript)),
   implemented as a renderer in the one message component so every surface
   that shows the conversation gets it
   ([Copilot everywhere](../../specs/coordinator/system-design/integration.md#copilot-everywhere)).

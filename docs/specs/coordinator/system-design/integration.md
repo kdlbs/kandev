@@ -136,7 +136,7 @@ Task 01's contract for the settings fields of [wake](wake.md#flag-and-settings) 
   PATCH path) both count as a failure. The `coordinator.updated`
   `autonomy_changed` field is added to the payload type in task 01 and
   published by this PATCH only (change-only); the other publish sites of
-  [Autonomy read](wake.md#autonomy-read) belong to task 04 (wake insert) and
+  [Autonomy read](wake-screens.md#autonomy-read) belong to task 04 (wake insert) and
   task 05 (delivery, turn settle).
 
 **Deletion of every phase 3 table.** Only `coordinator_wakes`
@@ -267,7 +267,10 @@ agentctl builds its exact-name approval allowlist from the same list
 `coordinator_activity` gains one nullable column, `unattended_turn_id`, by the
 `phase2ColumnMigrations` pattern (`ALTER TABLE ... ADD COLUMN`, replayable).
 `activityColumns`, `ActivityRow`, `InsertActivity` and the scan gain it, the
-activity DTO carries it, and the list read joins nothing. The column has no foreign key, because turn rows are pruned after 90 days
+activity DTO carries it, and the list read joins nothing. Task 01 adds the
+column, the read columns, the scan and the DTO field; task 05 adds the write
+side (`InsertActivity` and the insert column list write `unattended_turn_id`,
+which no writer does before) and the stamping. The column has no foreign key, because turn rows are pruned after 90 days
 while activity rows are kept 400 days; a pruned turn leaves the mark and
 nothing to link to.
 
@@ -278,10 +281,18 @@ coordinatorID)`: the open `coordinator_unattended_turns` row whose
 `session_turn_id` equals the conversation session's active turn id, the same
 comparison [Turn end](wake.md#turn-end) uses to tell an unattended turn from a
 manager's. It stamps `unattended_turn_id` on the row it writes: the
-`proposed` row, a `refused` row, and the row of an automatic approval made
-inside the propose call. Rows a manager's request writes (approve, reject,
+`proposed` row and a `refused` row (task 05). The row of an automatic approval
+made inside the propose call is stamped by task 09, which owns the automatic
+approval writer: its actor is the raising manager path, so the stamp comes
+from `currentUnattendedTurn` at that call site, not from the actor. Rows a manager's request writes (approve, reject,
 reply, undo) are never stamped, even while an unattended turn is open. A read
-that fails stamps nothing and logs at warn. A refusal coalesces into an
+that fails stamps nothing and logs at warn. A turn row whose `session_turn_id`
+is null (the message not yet found) stamps nothing either: the resolver never
+falls back to matching the session alone, so a manager's attended turn is never
+mistaken for the unattended one. The gap is bounded to the interval between the
+send and the message being recorded (Delivery step 5 records it in the same
+call; only the backstop's recovery leaves it longer than a moment), and a row
+written in it carries no mark rather than a wrong one. A refusal coalesces into an
 existing row only when both rows carry the same
 `unattended_turn_id` (both null counts as the same). The turn id, not a wake
 id, is stored because one turn delivers up to 20 wakes; the turn's wakes are
@@ -340,7 +351,7 @@ that session, so:
 
 - It carries the instructions its session was built with, with the same three
   sections. Delivery adds no orders, goal or context to the wake message; the
-  message stays the events list of [Transcript](wake.md#transcript).
+  message stays the events list of [Transcript](wake-screens.md#transcript).
 - `MarkApplied(tx, coordinatorID, orderIDs, at)` runs where phase 2 runs it,
   in the transaction that stores a proposal citing `standing_order_ids`
   (`ProposeTask` and the kind propose path). An unattended turn that proposes
@@ -442,7 +453,7 @@ denied count is the autonomy read (`AC-COORDINATOR-INTEGRATION-008.1`).
 | File (phase 2) | Additive change | Owner |
 | --- | --- | --- |
 | `store_phase2_schema.go` | column `coordinator_activity.unattended_turn_id`; table `coordinator_class_changes` ([automatic](automatic.md#phase-2-interfaces-consumed)) | task 01 |
-| `activity.go` | `returned` outcome, `automatic` authorization, `improvement` class, `unattended_turn_id` in row, columns, insert and scan, and the activity DTO field omitted while phase 3 is not effective; refusal coalescing key | task 01 (values, columns, DTO), 05 (stamping) |
+| `activity.go` | `returned` outcome, `automatic` authorization, `improvement` class, `unattended_turn_id` in row, columns, insert and scan, and the activity DTO field omitted while phase 3 is not effective; refusal coalescing key | task 01 (values, read columns, scan, DTO), 05 (insert write and stamping of proposals and refusals), 09 (stamping of automatic approvals) |
 | `activity_service.go`, `activity-text.ts`, `en/coordinator.json` and five locales | class list, copy table above | task 08 (returned, unattended), 09 (automatic), 10 (improvement) |
 | `policy.go`, `settings.go` | `Validate(p, phase3)`; change hook call and `LowerClass` in the locked transaction | task 09 |
 | `approve.go`, `approve_kinds.go`, `undo.go` | `returned` cases; `AuthAutomatic` rows; `recheckPolicy` skip; post-commit `OnUndo` | tasks 08, 09, 10 |

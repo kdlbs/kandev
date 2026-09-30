@@ -18,7 +18,8 @@ type OpenDenial struct {
 
 // RecordUnattendedDenial matches a permission request against the open
 // unattended turn of the conversation task and session: the row's
-// session_turn_id must equal activeTurnID or still be unbound. On a match it
+// session_turn_id must equal activeTurnID, or the row is still unbound and its
+// reserved_turn_id is null, empty or equal to activeTurnID. On a match it
 // records (turn id, pendingID) once and counts it once, and returns the turn
 // row id with matched true. A pendingID already recorded for the open turn
 // also matches without counting again, so a redelivery still resolves. A turn
@@ -27,8 +28,9 @@ func (s *Store) RecordUnattendedDenial(ctx context.Context, taskID, sessionID, p
 	err = s.db.QueryRowContext(ctx, s.db.Rebind(`
 		SELECT id FROM coordinator_unattended_turns
 		WHERE conversation_task_id = ? AND session_id = ? AND outcome IS NULL
-		  AND (session_turn_id IS NULL OR session_turn_id = ?)`),
-		taskID, sessionID, activeTurnID).Scan(&turnID)
+		  AND (session_turn_id = ?
+		       OR (session_turn_id IS NULL AND (reserved_turn_id IS NULL OR reserved_turn_id = '' OR reserved_turn_id = ?)))`),
+		taskID, sessionID, activeTurnID, activeTurnID).Scan(&turnID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

@@ -143,12 +143,12 @@ func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row Ac
 	}
 	row.WorkspaceID = workspaceID
 	row.Detail = truncateRunes(row.Detail, activityDetailMaxRunes)
-	_, err := exec.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_activity (`+activityColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	_, err := exec.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_activity (`+activityColumns+`, unattended_turn_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		row.ID, row.CoordinatorID, row.WorkspaceID, string(row.ActionClass), string(row.Outcome),
 		string(row.Authorization), row.TargetTaskID, row.ProposalID, row.ActorUserID, row.ReasonCode,
 		row.Detail, row.Edited, row.RefusalCount, row.UndoneAt, row.UndoneBy, row.UndoOfID,
-		row.CreatedAt, row.UpdatedAt)
+		row.CreatedAt, row.UpdatedAt, row.UnattendedTurnID)
 	if err != nil {
 		return fmt.Errorf("insert coordinator activity: %w", err)
 	}
@@ -191,8 +191,9 @@ func (s *Service) RecordRefusal(ctx context.Context, coordinatorID, workspaceID 
 	if !s.phase2 {
 		return nil
 	}
+	turnID := s.currentUnattendedTurn(ctx, coordinatorID)
 	err := s.store.withCoordinatorLock(ctx, coordinatorID, func(tx coordinatorExec) error {
-		return s.store.recordRefusalTx(ctx, tx, coordinatorID, workspaceID, class, reasonCode)
+		return s.store.recordRefusalTx(ctx, tx, coordinatorID, workspaceID, class, reasonCode, turnID)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return nil
@@ -216,13 +217,18 @@ func (s *Service) publishRefusal(ctx context.Context, coordinatorID string) {
 	s.publishCoordinatorUpdated(ctx, c.WorkspaceID, coordinatorID)
 }
 
-func (s *Store) recordRefusalTx(ctx context.Context, tx coordinatorExec, coordinatorID, workspaceID string, class Action, reasonCode string) error {
+func (s *Store) recordRefusalTx(ctx context.Context, tx coordinatorExec, coordinatorID, workspaceID string, class Action, reasonCode string, turnID *string) error {
 	now := s.now().UTC()
 	var id string
+	turnMatch, turnArgs := `unattended_turn_id IS NULL`, []any(nil)
+	if turnID != nil {
+		turnMatch, turnArgs = `unattended_turn_id = ?`, []any{*turnID}
+	}
+	args := append([]any{coordinatorID, string(class), reasonCode, string(ActivityRefused), now.Add(-refusalCoalesceWindow)}, turnArgs...)
 	err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT id FROM coordinator_activity
 		WHERE coordinator_id = ? AND action_class = ? AND reason_code = ? AND outcome = ? AND created_at >= ?
-		ORDER BY created_at DESC, id DESC LIMIT 1`),
-		coordinatorID, string(class), reasonCode, string(ActivityRefused), now.Add(-refusalCoalesceWindow)).Scan(&id)
+		AND `+turnMatch+`
+		ORDER BY created_at DESC, id DESC LIMIT 1`), args...).Scan(&id)
 	switch {
 	case err == nil:
 		_, err = tx.ExecContext(ctx, s.db.Rebind(`UPDATE coordinator_activity SET refusal_count = refusal_count + 1, updated_at = ? WHERE id = ?`), now, id)
@@ -233,12 +239,13 @@ func (s *Store) recordRefusalTx(ctx context.Context, tx coordinatorExec, coordin
 	case errors.Is(err, sql.ErrNoRows):
 		reason := reasonCode
 		return s.InsertActivity(ctx, tx, ActivityRow{
-			CoordinatorID: coordinatorID,
-			WorkspaceID:   workspaceID,
-			ActionClass:   class,
-			Outcome:       ActivityRefused,
-			Authorization: AuthDenied,
-			ReasonCode:    &reason,
+			CoordinatorID:    coordinatorID,
+			WorkspaceID:      workspaceID,
+			ActionClass:      class,
+			Outcome:          ActivityRefused,
+			Authorization:    AuthDenied,
+			ReasonCode:       &reason,
+			UnattendedTurnID: turnID,
 		})
 	default:
 		return fmt.Errorf("find refusal row: %w", err)
