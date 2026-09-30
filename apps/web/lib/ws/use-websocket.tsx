@@ -7,6 +7,7 @@ import { registerWsHandlers } from "@/lib/ws/router";
 import type { AppState } from "@/lib/state/store";
 import { setWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
+import { invalidatePrompts } from "@/lib/state/prompts-loader";
 import { ConnectionIssueMonitor } from "@/lib/ws/connection-issue-monitor";
 
 const debug = createDebugLogger("ws:connection");
@@ -29,6 +30,7 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
       (status) => {
         if (!active) return;
         connectionIssueMonitor.onStatusChange(status);
+        if (status === "connected") invalidatePrompts(store);
         const setConnectionStatus = store.getState().setConnectionStatus;
         debug("status transition", { status, timestamp: new Date().toISOString() });
         // WS client and ConnectionState share one ConnectionStatus vocabulary,

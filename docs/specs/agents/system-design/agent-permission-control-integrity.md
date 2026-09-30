@@ -13,6 +13,8 @@ requirements:
 
 # Agent Permission Control Integrity System Design
 
+[Explicit Auggie recovery](explicit-resume-settings.md) adds an attempt-scoped omission path. Ordinary mode application and confirmation below remain strict.
+
 ## Purpose and boundaries
 
 This design covers the three profile permission controls (`cli_flags`, `mode`,

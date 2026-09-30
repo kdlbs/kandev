@@ -1,14 +1,15 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 )
 
 const (
 	MaxSidebarTaskPageSize      = 100
 	MaxSidebarViewClauses       = 20
+	MaxSidebarViewListValues    = 1000
 	MaxSidebarViewValueBytes    = 256
 	MaxSidebarViewPreferenceIDs = 10000
 )
@@ -77,67 +78,80 @@ type SidebarTaskPageResult struct {
 	Tasks             []*Task                `json:"-"`
 }
 
+// SidebarQueryValidationError exposes only safe query correction metadata.
+type SidebarQueryValidationError struct {
+	Reason      string `json:"reason"`
+	FilterIndex *int   `json:"filter_index,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	message     string
+}
+
+func (e *SidebarQueryValidationError) Error() string {
+	if e.FilterIndex != nil {
+		return fmt.Sprintf("filter %d: %s", *e.FilterIndex, e.message)
+	}
+	return e.message
+}
+
+func sidebarValidationError(reason, message string, limit int) *SidebarQueryValidationError {
+	return &SidebarQueryValidationError{Reason: reason, message: message, Limit: limit}
+}
+
 func (q SidebarTaskViewQuery) Validate() error {
 	if q.Page < 1 {
-		return errors.New("page must be positive")
+		return sidebarValidationError("page_bounds", "page must be positive", 0)
 	}
 	if q.PageSize < 1 || q.PageSize > MaxSidebarTaskPageSize {
-		return fmt.Errorf("page_size must be between 1 and %d", MaxSidebarTaskPageSize)
+		return sidebarValidationError("page_bounds", "unsupported page size", MaxSidebarTaskPageSize)
 	}
 	if !oneOf(q.Sort.Key, "state", "updatedAt", "lastActivityAt", "createdAt", "title", "custom") {
-		return errors.New("unsupported sort key")
+		return sidebarValidationError("sorting", "unsupported sort key", 0)
 	}
 	if !oneOf(q.Sort.Direction, "asc", "desc") {
-		return errors.New("unsupported sort direction")
+		return sidebarValidationError("sorting", "unsupported sort direction", 0)
 	}
 	if !oneOf(q.Group, "none", "repository", "workflow", "workflowStep", "executorType", "state") {
-		return errors.New("unsupported group")
+		return sidebarValidationError("grouping", "unsupported group", 0)
 	}
 	if len(q.Filters) > MaxSidebarViewClauses {
-		return fmt.Errorf("at most %d filters are allowed", MaxSidebarViewClauses)
+		return sidebarValidationError("clause_count", "too many filters", MaxSidebarViewClauses)
 	}
 	if len(q.CollapsedGroupKeys)+len(q.CollapsedTaskIDs) > MaxSidebarViewPreferenceIDs {
-		return errors.New("too many collapsed sidebar entries")
+		return sidebarValidationError("collapsed_count", "too many collapsed sidebar entries", MaxSidebarViewPreferenceIDs)
 	}
 	for index, clause := range q.Filters {
 		if err := validateSidebarTaskViewClause(clause); err != nil {
-			return fmt.Errorf("filter %d: %w", index, err)
+			err.FilterIndex = &index
+			return err
 		}
 	}
 	if !oneOf(q.Locale, "en", "pt-pt", "zh-cn", "zh-hk", "zh-tw", "ja", "pseudo") {
-		return errors.New("unsupported locale")
+		return sidebarValidationError("locale", "unsupported locale", 0)
 	}
 	return nil
 }
 
-func validateSidebarTaskViewClause(clause SidebarTaskViewClause) error {
+func validateSidebarTaskViewClause(clause SidebarTaskViewClause) *SidebarQueryValidationError {
 	if !oneOf(clause.Dimension, "archived", "state", "workflow", "workflowStep", "executorType", "repository", "hasDiff", "hasPR", "isPRReview", "isIssueWatch", "titleMatch") {
-		return errors.New("unsupported dimension")
+		return sidebarValidationError("invalid_clause", "unsupported dimension", 0)
 	}
 	if !oneOf(clause.Op, "is", "is_not", "in", "not_in", "matches", "not_matches") {
-		return errors.New("unsupported operator")
+		return sidebarValidationError("invalid_clause", "unsupported operator", 0)
 	}
 	if (clause.Op == "matches" || clause.Op == "not_matches") && clause.Dimension != "titleMatch" {
-		return errors.New("text matching is supported only for titleMatch")
-	}
-	if len(clause.Value) == 0 || len(clause.Value) > MaxSidebarViewValueBytes {
-		return fmt.Errorf("value must contain 1 to %d bytes", MaxSidebarViewValueBytes)
+		return sidebarValidationError("invalid_clause", "text matching is supported only for titleMatch", 0)
 	}
 	return validateSidebarTaskClauseValue(clause)
 }
 
-func validateSidebarTaskClauseValue(clause SidebarTaskViewClause) error {
-	if clause.Op == "matches" || clause.Op == "not_matches" {
-		var value string
-		if err := json.Unmarshal(clause.Value, &value); err != nil {
-			return errors.New("text matching requires a string value")
-		}
-		return nil
-	}
+func validateSidebarTaskClauseValue(clause SidebarTaskViewClause) *SidebarQueryValidationError {
 	if clause.Op == "in" || clause.Op == "not_in" {
 		var values []json.RawMessage
 		if err := json.Unmarshal(clause.Value, &values); err != nil || values == nil {
-			return errors.New("in and not_in require an array value")
+			return sidebarValidationError("invalid_clause", "in and not_in require an array value", 0)
+		}
+		if len(values) > MaxSidebarViewListValues {
+			return sidebarValidationError("list_count", "too many selected values", MaxSidebarViewListValues)
 		}
 		for _, value := range values {
 			if err := validateSidebarTaskFilterValue(clause.Dimension, value); err != nil {
@@ -149,20 +163,26 @@ func validateSidebarTaskClauseValue(clause SidebarTaskViewClause) error {
 	return validateSidebarTaskFilterValue(clause.Dimension, clause.Value)
 }
 
-func validateSidebarTaskFilterValue(dimension string, raw json.RawMessage) error {
-	if dimension == "archived" || dimension == "hasDiff" || dimension == "hasPR" || dimension == "isPRReview" || dimension == "isIssueWatch" {
+func validateSidebarTaskFilterValue(dimension string, raw json.RawMessage) *SidebarQueryValidationError {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return sidebarValidationError("invalid_clause", "value must not be null", 0)
+	}
+	if oneOf(dimension, "archived", "hasDiff", "hasPR", "isPRReview", "isIssueWatch") {
 		var value bool
 		if err := json.Unmarshal(raw, &value); err != nil {
-			return errors.New("this dimension requires a boolean value")
+			return sidebarValidationError("invalid_clause", "this dimension requires a boolean value", 0)
 		}
 		return nil
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return errors.New("this dimension requires a string value")
+		return sidebarValidationError("invalid_clause", "this dimension requires a string value", 0)
+	}
+	if len(value) > MaxSidebarViewValueBytes {
+		return sidebarValidationError("scalar_length", "selected value is too long", MaxSidebarViewValueBytes)
 	}
 	if dimension == "state" && !oneOf(value, "review", "in_progress", "backlog") {
-		return errors.New("unsupported state bucket")
+		return sidebarValidationError("invalid_clause", "unsupported state bucket", 0)
 	}
 	return nil
 }

@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  memo,
-  type MutableRefObject,
-  type ReactNode,
-} from "react";
+import { useCallback, useRef, useState, memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { SheetHeader, SheetTitle } from "@kandev/ui/sheet";
@@ -20,16 +12,9 @@ import { useTaskReadStatus } from "./session-task-switcher-sheet-read-status";
 import { TaskPickerSurface, InlineTaskHeader } from "./task-picker-surface";
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
-import { TaskSwitcher } from "../task-switcher";
-import type { TaskSwitcherItem } from "../task-switcher";
-import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { MobileTaskMoveOptionsSurface, useMobileTaskMoveOptions } from "./mobile-task-move-options";
 import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
-import type { StepDef } from "../task-switcher-context-menu";
-import { applyView } from "@/lib/sidebar/apply-view";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
-import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import {
@@ -43,11 +28,9 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
-import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
 import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
-import { SidebarTaskPagination } from "../sidebar-task-pagination";
-import { groupSidebarTaskPage } from "../task-session-sidebar-grouped-view";
-import type { SidebarTaskPageEntry, SidebarTaskPageResponse } from "@/lib/types/http";
+import { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
+export { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -84,127 +67,6 @@ export function useMobileTaskLinking(workspaceId: string | null) {
     repositories,
     taskListHandlers,
   };
-}
-
-function useSidebarGroupToggle(viewId: string) {
-  const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
-  return useCallback(
-    (groupKey: string) => toggleSidebarGroupCollapsed(viewId, groupKey),
-    [toggleSidebarGroupCollapsed, viewId],
-  );
-}
-
-export type MobileTaskListProps = {
-  tasks: TaskSwitcherItem[];
-  workflows: TaskMoveWorkflow[];
-  stepsByWorkflowId: Record<string, StepDef[]>;
-  activeTaskId: string | null;
-  selectedTaskId: string | null;
-  onSelectTask: (taskId: string) => void;
-  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  onBeforeMoveOptionsOpen?: () => void;
-  onEditTask?: (task: TaskSwitcherItem) => void;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
-  onArchiveTask: (taskId: string, opts?: { cascade?: boolean }) => void;
-  onDeleteTask: (taskId: string) => Promise<void> | void;
-  onDetachTask: (taskId: string) => Promise<void> | void;
-  archivingTaskId?: string | null;
-  isArchiving?: boolean;
-  onNestTask?: (taskId: string, parentTaskId: string) => void;
-  onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
-  onLinkIssue?: (taskId: string, taskTitle?: string) => void;
-  onLinkMergeRequest?: (taskId: string, taskTitle?: string) => void;
-  onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
-  onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
-  onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
-  deletingTaskId: string | null;
-  isLoading?: boolean;
-  loadError?: string | null;
-  onRetryLoad?: () => void;
-  retryLabel?: string;
-  pageEntries?: SidebarTaskPageEntry[];
-  page?: SidebarTaskPageResponse | null;
-  pagePending?: boolean;
-  pageError?: string | null;
-  onPageChange?: (page: number, afterSuccess: () => void) => void;
-  onPageRetry?: () => void;
-  scrollContainerRef?: MutableRefObject<HTMLDivElement | null>;
-};
-
-/**
- * The mobile task tree surface: renders the shared TaskSwitcher with the
- * mobile drawer's view state (grouping, ordering, collapse, reorder, nest).
- */
-export function MobileTaskList(props: MobileTaskListProps) {
-  const view = useEffectiveSidebarView();
-  const {
-    pinnedTaskIds,
-    orderedTaskIds,
-    subtaskOrderByParentId,
-    togglePinnedTask,
-    handleReorderGroup,
-    handleReorderSubtasks,
-  } = useSidebarTaskPrefs();
-  const collapsedSubtaskParents = useAppStore((s) => s.collapsedSubtaskParents);
-  const toggleSubtaskCollapsed = useAppStore((s) => s.toggleSubtaskCollapsed);
-  const handleToggleGroup = useSidebarGroupToggle(view.id);
-  // See useGroupedSidebarView: the executorType group label is catalog-backed.
-  const { i18n } = useTranslation();
-  const grouped = useMemo(() => {
-    if (props.pageEntries !== undefined) {
-      return groupSidebarTaskPage(
-        props.tasks,
-        props.pageEntries,
-        view.group,
-        subtaskOrderByParentId,
-      );
-    }
-    return applyView(props.tasks, view, {
-      pinnedTaskIds,
-      orderedTaskIds,
-      subtaskOrderByParentId,
-    });
-  }, [
-    i18n.language,
-    pinnedTaskIds,
-    orderedTaskIds,
-    props.pageEntries,
-    props.tasks,
-    subtaskOrderByParentId,
-    view,
-  ]);
-  const switcherProps = buildMobileTaskSwitcherProps(props, {
-    grouped,
-    collapsedGroupKeys: view.collapsedGroups,
-    onToggleGroup: handleToggleGroup,
-    collapsedSubtaskParentIds: collapsedSubtaskParents,
-    onToggleSubtasks: toggleSubtaskCollapsed,
-    onTogglePin: togglePinnedTask,
-    onReorderGroup: handleReorderGroup,
-    onReorderSubtasks: handleReorderSubtasks,
-    pinnedTaskIds,
-    showActivityTime: view.sort.key === "lastActivityAt",
-    taskRowPresentation: view.taskRow,
-  });
-  return (
-    <>
-      <TaskSwitcher {...switcherProps} />
-      <SidebarTaskPagination
-        page={props.page ?? null}
-        pending={props.pagePending ?? false}
-        error={props.pageError ?? null}
-        onPageChange={(nextPage) =>
-          props.onPageChange?.(nextPage, () =>
-            props.scrollContainerRef?.current?.scrollTo({ top: 0 }),
-          )
-        }
-        onRetry={props.onPageRetry ?? (() => undefined)}
-        touchTargets
-      />
-    </>
-  );
 }
 
 function TaskSwitcherSurfaceHeader({
@@ -480,6 +342,7 @@ function TaskSwitcherSurfaceContent({
               page={data.page.response}
               pagePending={data.page.requestedPage !== null}
               pageError={data.page.error}
+              pageCanRetry={data.page.canRetry}
               onPageChange={data.page.goToPage}
               onPageRetry={data.page.retry}
               scrollContainerRef={listScrollRef}

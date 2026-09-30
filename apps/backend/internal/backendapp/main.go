@@ -690,6 +690,7 @@ func startAgentInfrastructure(
 	// terminal sees the same variables the agent subprocess and the repository
 	// setup script get.
 	lifecycleMgr.SetExecutorProfileReader(repos.Task)
+	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
@@ -1703,7 +1704,7 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, log))
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
 	return svc
 }
 

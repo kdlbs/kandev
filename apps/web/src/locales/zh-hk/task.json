@@ -1691,7 +1691,9 @@
   "splitView": "拆分視圖",
   "sprite": "Sprite",
   "stageAll": "全部暫存",
+  "stagedFiles": "已暫存",
   "stageAllChangesBeforeCommitting": "提交前暫存全部變更",
+  "unstagedFiles": "未暫存",
   "stageApproval": "批准",
   "stageCount": "暫存 {{selectionCount}}",
   "stageFile": "暫存檔案",
@@ -2538,5 +2540,7 @@
   "conversationUsage.estimatedCount_other": "{{count}} 個預估事件",
   "allowNetworkAccess": "允許網絡存取",
   "approveWithCommandPolicy": "按命令規則批准",
-  "blockNetworkAccess": "阻止網絡存取"
+  "blockNetworkAccess": "阻止網絡存取",
+  "providerRestoredResumeDisclosure": "恢復工作階段會保留目前對話，並在此次嘗試中跳過模式和模型覆蓋設定。",
+  "providerRestoredResumeSuccess": "工作階段已恢復，未應用模式或模型覆蓋設定。"
 }

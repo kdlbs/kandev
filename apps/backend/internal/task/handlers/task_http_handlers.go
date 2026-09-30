@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -430,11 +432,35 @@ func pendingActionRevisionPtr(
 	return &revision
 }
 
+type pendingActionProjectionReader func(
+	context.Context,
+	[]string,
+) (map[string]models.TaskPendingAction, map[string]models.PendingActionRevision, error)
+
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
+	return h.taskSessionDTOWithPendingActions(ctx, session, h.service.GetPendingActionProjectionsForSessions)
+}
+
+func (h *TaskHandlers) taskSessionDTOForFullRead(
+	ctx context.Context,
+	session *models.TaskSession,
+) dto.TaskSessionDTO {
+	return h.taskSessionDTOWithPendingActions(
+		ctx,
+		session,
+		h.service.GetPendingActionSnapshotProjectionsForSessions,
+	)
+}
+
+func (h *TaskHandlers) taskSessionDTOWithPendingActions(
+	ctx context.Context,
+	session *models.TaskSession,
+	read pendingActionProjectionReader,
+) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
-	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
+	actions, revisions, err := read(
 		ctx,
 		[]string{session.ID},
 	)
@@ -540,11 +566,46 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
-	sessionDTO := h.taskSessionDTO(c.Request.Context(), session)
+	sessionDTO := h.taskSessionDTOForFullRead(c.Request.Context(), session)
 	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
-	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
+	writeConditionalTaskSessionResponse(c, dto.GetTaskSessionResponse{
 		Session: sessionDTO,
 	})
+}
+
+func writeConditionalTaskSessionResponse(c *gin.Context, response dto.GetTaskSessionResponse) {
+	body, err := json.Marshal(response)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode task session"})
+		return
+	}
+
+	digest := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(digest[:]) + `"`
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "private, no-cache")
+	if ifNoneMatch(c.Request.Header.Values("If-None-Match"), etag) {
+		c.Status(http.StatusNotModified)
+		c.Writer.WriteHeaderNow()
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+func ifNoneMatch(values []string, etag string) bool {
+	for _, value := range values {
+		for _, candidate := range strings.Split(value, ",") {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "*" {
+				return true
+			}
+			candidate = strings.TrimPrefix(candidate, "W/")
+			if candidate == etag {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type dismissLastAgentErrorRequest struct {

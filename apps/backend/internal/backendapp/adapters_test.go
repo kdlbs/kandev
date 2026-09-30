@@ -266,6 +266,24 @@ func TestBuildLifecycleLaunchRequestCarriesMCPProviders(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestCarriesTaskScope(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		TaskScope: lifecycle.TaskLaunchScopeOffice,
+	}, "", "")
+	if launchReq.TaskScope != lifecycle.TaskLaunchScopeOffice {
+		t.Fatalf("TaskScope = %q, want %q", launchReq.TaskScope, lifecycle.TaskLaunchScopeOffice)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesSessionSettingsPolicy(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		SessionSettingsPolicy: orchestratorexecutor.ResumeSettingsPolicyProviderRestored,
+	}, "", "")
+	if launchReq.SessionSettingsPolicy != lifecycle.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("SessionSettingsPolicy = %d, want provider-restored", launchReq.SessionSettingsPolicy)
+	}
+}
+
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")
@@ -695,6 +713,48 @@ func TestMessageCreatorAdapter_StructFields(t *testing.T) {
 	}
 	if adapter.svc != nil {
 		t.Error("expected nil svc")
+	}
+}
+
+func TestMessageCreatorAdapter_CreateLifecycleSessionMessage(t *testing.T) {
+	ctx := context.Background()
+	harness := newBootStateTestHarness(t)
+	checkErr := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkErr(harness.taskRepo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws-lifecycle-message", Name: "Lifecycle test"}))
+	checkErr(harness.taskRepo.CreateTask(ctx, &taskmodels.Task{
+		ID: "task-lifecycle-message", WorkspaceID: "ws-lifecycle-message",
+		Title: "Lifecycle test", State: "todo",
+	}))
+	checkErr(harness.taskRepo.CreateTaskSession(ctx, &taskmodels.TaskSession{
+		ID: "session-lifecycle-message", TaskID: "task-lifecycle-message",
+		State: taskmodels.TaskSessionStateWaitingForInput,
+	}))
+
+	adapter := &messageCreatorAdapter{svc: harness.taskSvc}
+	checkErr(adapter.CreateLifecycleSessionMessage(ctx, "task-lifecycle-message", "Updated Todos",
+		"session-lifecycle-message", string(taskmodels.MessageTypeTodo), map[string]interface{}{
+			"todos": []map[string]interface{}{},
+		}))
+
+	messages, err := harness.taskRepo.ListMessages(ctx, "session-lifecycle-message")
+	checkErr(err)
+	if len(messages) != 1 {
+		t.Fatalf("message count = %d, want 1", len(messages))
+	}
+	turn, err := harness.taskRepo.GetTurn(ctx, messages[0].TurnID)
+	checkErr(err)
+	if turn.CompletedAt == nil || turn.Metadata[taskmodels.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("turn = %#v, want completed lifecycle-only turn", turn)
+	}
+	active, err := harness.taskSvc.GetActiveTurn(ctx, "session-lifecycle-message")
+	checkErr(err)
+	if active != nil {
+		t.Fatalf("active turn = %#v, want none", active)
 	}
 }
 

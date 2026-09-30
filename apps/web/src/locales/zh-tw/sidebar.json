@@ -130,5 +130,12 @@
   "nextPage": "下一頁",
   "pageLoadFailed": "無法載入此頁面。",
   "pageStatus": "第 {{page}} 頁，共 {{total}} 頁",
-  "previousPage": "上一頁"
+  "previousPage": "上一頁",
+  "queryRefreshing": "正在更新任務...",
+  "queryRefreshFailed": "無法重新整理任務。",
+  "queryInvalid": "無法載入此任務檢視。請檢查篩選條件和檢視設定。",
+  "filterListLimit": "篩選條件 {{filter}} 的選項過多。最多可選擇 {{limit}} 項。",
+  "filterValueLimit": "篩選條件 {{filter}} 中的值過長。請限制在 {{limit}} 位元組以內。",
+  "filterInvalid": "篩選條件 {{filter}} 無效。請檢查其值和運算子。",
+  "filterCountLimit": "此檢視的篩選條件過多。最多可使用 {{limit}} 個。"
 }

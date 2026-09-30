@@ -13,7 +13,7 @@ export function useJiraAuthed(workspaceId?: string | null): boolean {
     () => getJiraConfig(workspaceId ? { workspaceId } : undefined),
     [workspaceId],
   );
-  return useIntegrationAuthed(fetchConfig);
+  return useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId });
 }
 
 export function useJiraAvailable(workspaceId?: string | null): boolean {
@@ -22,6 +22,8 @@ export function useJiraAvailable(workspaceId?: string | null): boolean {
     [workspaceId],
   );
   return useIntegrationAvailable({
+    provider: "jira",
+    workspaceId,
     enabledState: useJiraEnabled(workspaceId),
     fetchConfig,
   });

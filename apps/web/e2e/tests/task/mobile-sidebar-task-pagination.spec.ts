@@ -1,3 +1,4 @@
+import { exerciseSidebarViewReuse } from "./sidebar-view-reuse-fixtures";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
@@ -241,4 +242,14 @@ test("phone app navigation task list pages the shared sidebar view", async ({
     viewport: window.innerWidth,
   }));
   expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+});
+
+test("sidebar view reuse preserves rows and offers one recovery action", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseSidebarViewReuse(testPage, apiClient, seedData, true, prCapture);
 });

@@ -350,6 +350,31 @@ func TestBuildResumeRequestWithOptions_ForwardsBranchReplacementPermission(t *te
 	}
 }
 
+func TestBuildResumeRequestWithOptions_ForwardsSettingsPolicy(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true, nil,
+		ResumeOptions{SettingsPolicy: ResumeSettingsPolicyProviderRestored},
+	)
+	if err != nil {
+		t.Fatalf("buildResumeRequestWithOptions returned error: %v", err)
+	}
+	if req.SessionSettingsPolicy != ResumeSettingsPolicyProviderRestored {
+		t.Fatalf("SessionSettingsPolicy = %q, want provider-restored", req.SessionSettingsPolicy)
+	}
+
+	normalReq, _, _, _, _, err := exec.buildResumeRequest(context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true)
+	if err != nil {
+		t.Fatalf("normal buildResumeRequest returned error: %v", err)
+	}
+	if normalReq.SessionSettingsPolicy != ResumeSettingsPolicyStrict {
+		t.Fatalf("legacy resume policy = %q, want strict zero value", normalReq.SessionSettingsPolicy)
+	}
+}
+
 type resumeCredentialStateIssuer struct {
 	repo          *mockRepository
 	observedState models.TaskSessionState
@@ -738,16 +763,18 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 		assignee     string
 		metadata     map[string]interface{}
 		wantMode     string
+		wantScope    lifecycle.TaskLaunchScope
 	}{
-		{name: "regular task", wantMode: ""},
-		{name: "unassigned Office task", isFromOffice: true, wantMode: McpModeOffice},
-		{name: "assigned Kanban task", assignee: "assigned-agent", wantMode: ""},
-		{name: "Config session", metadata: map[string]interface{}{"config_mode": true}, wantMode: McpModeConfig},
+		{name: "regular task", wantMode: "", wantScope: lifecycle.TaskLaunchScopeTask},
+		{name: "unassigned Office task", isFromOffice: true, wantMode: McpModeOffice, wantScope: lifecycle.TaskLaunchScopeOffice},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantMode: "", wantScope: lifecycle.TaskLaunchScopeTask},
+		{name: "Config session", metadata: map[string]interface{}{"config_mode": true}, wantMode: McpModeConfig, wantScope: lifecycle.TaskLaunchScopeTask},
 		{
 			name:         "Config session takes precedence for Office task",
 			isFromOffice: true,
 			metadata:     map[string]interface{}{"config_mode": true},
 			wantMode:     McpModeConfig,
+			wantScope:    lifecycle.TaskLaunchScopeOffice,
 		},
 	}
 
@@ -776,6 +803,9 @@ func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing
 			}
 			if capturedReq.McpMode != tt.wantMode {
 				t.Fatalf("McpMode = %q, want %q", capturedReq.McpMode, tt.wantMode)
+			}
+			if capturedReq.TaskScope != tt.wantScope {
+				t.Fatalf("TaskScope = %q, want %q", capturedReq.TaskScope, tt.wantScope)
 			}
 		})
 	}
@@ -1099,6 +1129,30 @@ func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *
 	}
 	if req.ACPSessionID != "" {
 		t.Fatalf("failed-session ACP session ID = %q, want empty", req.ACPSessionID)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_ProviderRestoredFailedSessionUsesPersistedToken(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskDescription:       "recover the failed task",
+		SessionSettingsPolicy: ResumeSettingsPolicyProviderRestored,
+	}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:                     "sess-1",
+		State:                  models.TaskSessionStateFailed,
+		DownstreamACPSessionID: "restored-conversation",
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, nil)
+
+	if req.ACPSessionID != "restored-conversation" {
+		t.Fatalf("provider-restored ACP session ID = %q, want persisted token", req.ACPSessionID)
+	}
+	if req.TaskDescription != "" {
+		t.Fatalf("TaskDescription = %q, want empty so recovery does not auto-prompt", req.TaskDescription)
 	}
 }
 

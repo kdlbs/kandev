@@ -21,7 +21,8 @@ func TestCodexAppServerProbeDiscoversModelsFromGeneratedManagedCommand(t *testin
 	workDir := t.TempDir()
 	argsPath := filepath.Join(workDir, "npx-args")
 	writeCodexAppServerFakeNpx(t, filepath.Join(workDir, "npx"), `#!/bin/sh
-printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS"
+printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS.tmp"
+mv "$CODEX_APP_SERVER_ARGS.tmp" "$CODEX_APP_SERVER_ARGS"
 while IFS= read -r request; do
   id=$(printf '%s\n' "$request" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$request" in
@@ -76,7 +77,8 @@ func TestCodexAppServerStartPreparesManagedPrefixForSharedUtilityLaunch(t *testi
 	workDir := t.TempDir()
 	argsPath := filepath.Join(workDir, "npx-args")
 	writeCodexAppServerFakeNpx(t, filepath.Join(workDir, "npx"), `#!/bin/sh
-printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS"
+printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS.tmp"
+mv "$CODEX_APP_SERVER_ARGS.tmp" "$CODEX_APP_SERVER_ARGS"
 cat >/dev/null
 `)
 	t.Setenv("PATH", workDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -117,7 +119,8 @@ func TestCodexAppServerStartRejectsUnpreparableManagedPrefixBeforeSpawn(t *testi
 	workDir := t.TempDir()
 	argsPath := filepath.Join(workDir, "npx-args")
 	writeCodexAppServerFakeNpx(t, filepath.Join(workDir, "npx"), `#!/bin/sh
-printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS"
+printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS.tmp"
+mv "$CODEX_APP_SERVER_ARGS.tmp" "$CODEX_APP_SERVER_ARGS"
 `)
 	t.Setenv("PATH", workDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CODEX_APP_SERVER_ARGS", argsPath)

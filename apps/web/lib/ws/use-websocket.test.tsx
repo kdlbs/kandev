@@ -4,6 +4,8 @@ import type { ConnectionStatus } from "@/lib/types/connection";
 import { createAppStore } from "@/lib/state/store";
 import { useWebSocket } from "./use-websocket";
 
+const TEST_WEBSOCKET_URL = "ws://kandev.test/ws";
+
 const mocks = vi.hoisted(() => ({
   clients: [] as Array<{
     disconnect: ReturnType<typeof vi.fn>;
@@ -42,7 +44,7 @@ describe("useWebSocket", () => {
   it("reflects a sustained WebSocket outage in the UI store and clears on reconnect", () => {
     vi.useFakeTimers();
     const store = createAppStore();
-    const { unmount } = renderHook(() => useWebSocket(store, "ws://kandev.test/ws"));
+    const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
 
     act(() => {
       mocks.onStatusChange?.("reconnecting");
@@ -79,7 +81,7 @@ describe("useWebSocket", () => {
 
   it("reconnects when the authenticated identity changes", () => {
     const store = createAppStore();
-    const { unmount } = renderHook(() => useWebSocket(store, "ws://kandev.test/ws"));
+    const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
 
     act(() => {
       store.getState().setAuthState({
@@ -102,7 +104,7 @@ describe("useWebSocket", () => {
 
   it("registers the user subscription once per client", () => {
     const store = createAppStore();
-    const { unmount } = renderHook(() => useWebSocket(store, "ws://kandev.test/ws"));
+    const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
     const client = mocks.clients[0];
 
     act(() => {
@@ -113,4 +115,13 @@ describe("useWebSocket", () => {
     expect(client.subscribeUser).toHaveBeenCalledOnce();
     unmount();
   });
+});
+
+it("invalidates saved prompts when a connection is restored", () => {
+  const store = createAppStore();
+  store.getState().setPrompts([]);
+  const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
+  act(() => mocks.onStatusChange?.("connected"));
+  expect(store.getState().prompts.loaded).toBe(false);
+  unmount();
 });

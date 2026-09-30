@@ -1051,7 +1051,7 @@ func (e *Executor) switchModel(
 	if err != nil {
 		return nil, err
 	}
-	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType)
+	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType, false)
 	if err != nil {
 		return nil, err
 	}

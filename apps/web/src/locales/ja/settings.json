@@ -881,5 +881,7 @@
   "queueMaximumShort": "セッションごとの保留メッセージ数を制限します。0 は無制限です。",
   "queueMergeShort": "エージェントが読む前に、関連する保留メッセージをまとめます。",
   "queueAutoMergeShort": "互換性のある連続メッセージを自動的にまとめます。",
-  "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。"
+  "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。",
+  "promptAllowAgentEdits": "エージェントによる編集を許可",
+  "promptAgentEditsDescription": "エージェントがこのプロンプトを変更すると、使用されているすべての箇所に反映されます。"
 }

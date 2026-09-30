@@ -52,7 +52,17 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
   let taskId = "";
   let navigationTaskId = "";
   let sessionReads = 0;
+  let environmentReads = 0;
   let statusUnauthorized = true;
+  let deferNextSessionRead = false;
+  let releaseSessionRead: () => void = () => undefined;
+  let markDeferredReadEntered: () => void = () => undefined;
+  const deferredReadEntered = new Promise<void>((resolve) => {
+    markDeferredReadEntered = resolve;
+  });
+  const deferredSessionRelease = new Promise<void>((resolve) => {
+    releaseSessionRead = resolve;
+  });
 
   try {
     const task = await apiClient.createTaskWithAgent(
@@ -100,6 +110,11 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
           return;
         }
         sessionReads += 1;
+        if (deferNextSessionRead) {
+          deferNextSessionRead = false;
+          markDeferredReadEntered();
+          await deferredSessionRelease;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -119,6 +134,11 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
         });
       },
     );
+    testPage.on("request", (request) => {
+      if (request.url().includes(`/api/v1/tasks/${task.id}/environment/live`)) {
+        environmentReads += 1;
+      }
+    });
 
     await testPage.clock.install();
     await testPage.goto(`/t/${navigationTaskId}`);
@@ -162,9 +182,11 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
     expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
     expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
 
+    deferNextSessionRead = true;
     await trigger.tap();
     const drawer = testPage.getByTestId("executor-settings-drawer");
     await expect(drawer).toBeVisible();
+    await deferredReadEntered;
     await expect(drawer.getByTestId("kubernetes-environment-summary")).toBeVisible();
     await expect(drawer.locator("svg.tabler-icon-package")).toBeVisible();
     await expect(drawer).toContainText(POD_NAME);
@@ -176,10 +198,16 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
       drawer.getByRole("button", { name: "Copy Pod" }),
       "Mobile Pod copy button",
     );
-    await expectTouchLocator(
-      drawer.getByTestId("executor-settings-refresh"),
-      "Mobile Kubernetes refresh action",
-    );
+    const refresh = drawer.getByTestId("executor-settings-refresh");
+    await expectTouchLocator(refresh, "Mobile Kubernetes refresh action");
+    const readsBeforeRefresh = { environmentReads, sessionReads };
+    await refresh.tap();
+    await expect(refresh).toHaveAttribute("aria-busy", "true");
+    await expect(drawer.getByTestId("executor-settings-refresh-spinner")).toBeVisible();
+    expect(environmentReads).toBe(readsBeforeRefresh.environmentReads);
+    expect(sessionReads).toBe(readsBeforeRefresh.sessionReads);
+    releaseSessionRead();
+    await expect(refresh).toHaveAttribute("aria-busy", "false");
     await expect(drawer.getByTestId("executor-settings-reset")).toHaveCount(0);
     await expect(drawer.getByTestId("executor-settings-link")).toHaveAttribute(
       "href",
@@ -191,6 +219,7 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
     );
     await assertNoDocumentHorizontalOverflow(testPage, "mobile Kubernetes task disclosure");
   } finally {
+    releaseSessionRead();
     if (navigationTaskId) await apiClient.deleteTask(navigationTaskId).catch(() => undefined);
     if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
     await apiClient.deleteExecutorProfile(profile.id).catch(() => undefined);

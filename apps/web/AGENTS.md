@@ -113,7 +113,7 @@ surface.
   browser-native behavior for the Vite SPA while legacy Next entrypoints are
   phased out.
 - Task links: `lib/links.ts::linkToTask` is the only `/t/:taskId` builder; pass raw IDs, use `TaskLink` or `AppLink`, and use `linkToTask` for router pushes. Keep compatibility `/tasks/:id`, Office/API paths, and route-recognition prefixes separate.
-- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection.
+- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection. `ChangesPanelBody` owns the sole scroller; route working-tree, PR, commit, inline-file, and status row descriptors through `ChangesTimelineViewport`, keeping full collections for counts/actions and keying state by task/session/environment.
 - **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
   the provider-neutral primitives in `components/integrations/` for
   change-request lists, rows, toolbars, scope controls, task preset menus, and
@@ -291,7 +291,7 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 
 ## Sidebar task views
 
-`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
+`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields. `SidebarTaskPageCache` is scoped to the app store and shares requests across sidebar consumers. It retains at most five first pages, 2 MiB, for five minutes from fetch; later pages remain display-only. Complete query identity and workspace/account generations fence reuse. Query revisions clear reusable pages, and summary changes invalidate affected snapshots before lookup. Access denial notifies every mounted consumer to clear displayed rows and cancel outstanding reads. Keep query status in `SidebarTaskQueryStatus`; do not also render query failures as archive errors.
 
 ## Testing notes
 
