@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"maps"
 
 	"go.uber.org/zap"
 )
@@ -16,16 +17,30 @@ type baseBranchSetter interface {
 // map for a task. Wired to the task service, which reads task_repositories.
 type BaseBranchProvider func(ctx context.Context, taskID string) (map[string]string, error)
 
-// SetBaseBranchProvider wires the DB-backed hydrator used to seed a workspace's
-// base-branch map at agentctl-ready time.
-//
-// Without it, the map reaches agentctl only through LaunchRequest metadata (the
-// full launch path) or an explicit user edit. Workspaces created any other way
-// — an agent starting on an already-prepared workspace, or lazy recovery after
-// a backend restart — got nothing, leaving WorkspaceTracker.BaseBranch() empty
-// so its diff stat fell back to an integration branch.
+// SetBaseBranchProvider wires the DB-backed hydrator used before instance
+// creation and before publishing agentctl readiness.
 func (m *Manager) SetBaseBranchProvider(fn BaseBranchProvider) {
 	m.baseBranchProvider = fn
+}
+
+// seedExecutionBaseBranches gives the create request its own base-branch map
+// before agentctl starts trackers and computes their initial Git state.
+func (m *Manager) seedExecutionBaseBranches(ctx context.Context, taskID, executionID string, metadata map[string]interface{}) {
+	branches := getMetadataStringMap(metadata, MetadataKeyBaseBranches)
+	if len(branches) == 0 && taskID != "" && m.baseBranchProvider != nil {
+		var err error
+		branches, err = m.baseBranchProvider(ctx, taskID)
+		if err != nil {
+			m.logger.Warn("failed to hydrate base branches before workspace creation",
+				zap.String("task_id", taskID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return
+		}
+	}
+	if len(branches) > 0 {
+		metadata[MetadataKeyBaseBranches] = maps.Clone(branches)
+	}
 }
 
 // pushTaskBaseBranches hydrates taskID's stored base-branch map and pushes it to
