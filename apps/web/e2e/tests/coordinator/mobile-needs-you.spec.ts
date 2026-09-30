@@ -170,4 +170,44 @@ test.describe("Coordinator screens on a phone viewport", () => {
       await apiClient.deleteWorkspace(workspace.id, workspace.name);
     }
   });
+
+  // The legacy nav path (no saved sidebar layout) is the default for every
+  // user who never customised the sidebar, so it gets its own case.
+  test("the default phone menu, with no saved sidebar layout, shows the Coordinators section above Automations (AC-COORDINATOR-NEEDS-YOU-006.1)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workspace = await apiClient.createWorkspace(`Coordinator Mobile Default ${Date.now()}`);
+    try {
+      const coordinator = await apiClient.createCoordinator(workspace.id, {
+        name: "Default Layout Coordinator",
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      });
+
+      await testPage.goto("/");
+      await testPage.getByTestId("app-nav-trigger").tap();
+      const picker = testPage.getByTestId("app-nav-sheet");
+      await expect(picker).toBeVisible();
+      await picker.getByTestId("mobile-workspace-trigger").tap();
+      await testPage.getByTestId(`mobile-workspace-item-${workspace.id}`).tap();
+
+      await testPage.getByTestId("app-nav-trigger").tap();
+      const menu = testPage.getByTestId("app-nav-sheet");
+      await expect(menu).toBeVisible();
+      const section = menu.getByTestId("mobile-coordinators-section");
+      await expect(section).toBeVisible();
+      await expect(
+        section.getByTestId(`mobile-sidebar-coordinator-${coordinator.id}`),
+      ).toBeVisible();
+      const sectionBox = await section.boundingBox();
+      const automationsBox = await menu.getByTestId("mobile-automations-section").boundingBox();
+      expect(sectionBox).not.toBeNull();
+      expect(automationsBox).not.toBeNull();
+      expect(sectionBox!.y).toBeLessThan(automationsBox!.y);
+    } finally {
+      await apiClient.deleteWorkspace(workspace.id, workspace.name);
+    }
+  });
 });
