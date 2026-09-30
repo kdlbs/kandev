@@ -18,6 +18,13 @@ type ConversationReader interface {
 	ActionPending(ctx context.Context, sessionID string) (bool, error)
 	// Queued reports whether the session has a queued message.
 	Queued(ctx context.Context, sessionID string) (bool, error)
+	// Turn returns a session turn, nil when it no longer exists.
+	Turn(ctx context.Context, turnID string) (*TurnInfo, error)
+}
+
+// TurnInfo is the part of a session turn the missed-settle check reads.
+type TurnInfo struct {
+	Completed bool
 }
 
 // ConversationSession is a session id and its persisted state.

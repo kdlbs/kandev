@@ -61,11 +61,14 @@ func (h *hookSources) PendingQuestionID(ctx context.Context, sessionID string) (
 
 type deliverFixture struct {
 	*wakeEnv
-	conv   *fakeConversationTasks
-	reader *fakeConvReader
-	sender *fakeSender
-	hooks  *hookSources
-	c      *Coordinator
+	conv      *fakeConversationTasks
+	reader    *fakeConvReader
+	sender    *fakeSender
+	hooks     *hookSources
+	ledger    *fakeSpendLedger
+	active    *fakeActiveTurns
+	canceller *fakeCanceller
+	c         *Coordinator
 }
 
 func newDeliverFixture(t *testing.T) *deliverFixture {
@@ -77,7 +80,8 @@ func newDeliverFixture(t *testing.T) *deliverFixture {
 	ledger.sumFn = func(spendCall) (taskmodels.UsageSum, error) { return taskmodels.UsageSum{}, nil }
 	ledger.turnFn = func(turnCall) (int64, error) { return 55, nil }
 	f.svc.conversationTasks = f.conv
-	f.svc.SetSpendDeps(ledger, &fakeActiveTurns{turns: map[string]string{}}, &fakeCanceller{})
+	f.ledger, f.active, f.canceller = ledger, &fakeActiveTurns{turns: map[string]string{}}, &fakeCanceller{}
+	f.svc.SetSpendDeps(ledger, f.active, f.canceller)
 	mustExec(t, f.store, `UPDATE coordinators SET cost_ceiling_subcents = 1000, conversation_task_id = ? WHERE id = ?`, ceilingConvTask, f.c.ID)
 	f.reader = &fakeConvReader{
 		primary: &ConversationSession{ID: ceilingSession, State: string(taskmodels.TaskSessionStateWaitingForInput)},

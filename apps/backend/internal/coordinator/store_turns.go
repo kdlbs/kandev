@@ -309,3 +309,70 @@ func (s *Store) settleUnsentTurn(ctx context.Context, id, outcome string) (bool,
 	}
 	return true, nil
 }
+
+// openTurnBySessionTurn returns the open row bound to a session turn, nil when none.
+func (s *Store) openTurnBySessionTurn(ctx context.Context, sessionTurnID string) (*unattendedTurn, error) {
+	t, err := scanUnattendedTurn(s.db.QueryRowContext(ctx, s.db.Rebind(
+		`SELECT `+unattendedTurnColumns+` FROM coordinator_unattended_turns
+		WHERE session_turn_id = ? AND outcome IS NULL`), sessionTurnID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read bound unattended turn: %w", err)
+	}
+	return t, nil
+}
+
+// settleOpenTurn settles an open row and reports whether this call changed it.
+func (s *Store) settleOpenTurn(ctx context.Context, id, outcome string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE coordinator_unattended_turns SET outcome = ?, finished_at = ?
+		WHERE id = ? AND outcome IS NULL`), outcome, at.UTC(), id)
+	return rowChanged(res, err, "settle unattended turn")
+}
+
+// recentSettledTurns returns the bound rows settled at or after since.
+func (s *Store) recentSettledTurns(ctx context.Context, coordinatorID string, since time.Time) ([]*unattendedTurn, error) {
+	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`SELECT `+unattendedTurnColumns+` FROM coordinator_unattended_turns
+		WHERE coordinator_id = ? AND outcome IS NOT NULL AND session_turn_id IS NOT NULL AND finished_at >= ?
+		ORDER BY finished_at, id`), coordinatorID, since.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("list recently settled turns: %w", err)
+	}
+	return scanTurnRows(rows, "recently settled")
+}
+
+// openUnattendedTurns returns the open turn rows of one coordinator, or of
+// every coordinator when coordinatorID is empty, oldest first.
+func (s *Store) openUnattendedTurns(ctx context.Context, coordinatorID string) ([]*unattendedTurn, error) {
+	query := `SELECT ` + unattendedTurnColumns + ` FROM coordinator_unattended_turns WHERE outcome IS NULL`
+	var args []any
+	if coordinatorID != "" {
+		query += ` AND coordinator_id = ?`
+		args = append(args, coordinatorID)
+	}
+	rows, err := s.db.QueryContext(ctx, s.db.Rebind(query+` ORDER BY started_at, id`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list open unattended turns: %w", err)
+	}
+	return scanTurnRows(rows, "open")
+}
+
+func scanTurnRows(rows *sql.Rows, what string) ([]*unattendedTurn, error) {
+	defer func() { _ = rows.Close() }()
+	var out []*unattendedTurn
+	for rows.Next() {
+		t, err := scanUnattendedTurn(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan %s unattended turn: %w", what, err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// recordFoundMessage sets message_id on an open row and reports a change.
+func (s *Store) recordFoundMessage(ctx context.Context, id, messageID string) (bool, error) {
+	return s.setTurnMessage(ctx, id, messageID)
+}

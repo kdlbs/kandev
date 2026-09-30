@@ -18,6 +18,8 @@ type fakeConvReader struct {
 	pendingErr error
 	queued     bool
 	queuedErr  error
+	turns      map[string]*TurnInfo
+	turnErr    error
 }
 
 func (f *fakeConvReader) PrimarySession(context.Context, string) (*ConversationSession, error) {
@@ -35,6 +37,10 @@ func (f *fakeConvReader) ActionPending(context.Context, string) (bool, error) {
 
 func (f *fakeConvReader) Queued(context.Context, string) (bool, error) {
 	return f.queued, f.queuedErr
+}
+
+func (f *fakeConvReader) Turn(_ context.Context, id string) (*TurnInfo, error) {
+	return f.turns[id], f.turnErr
 }
 
 type admitFixture struct {
