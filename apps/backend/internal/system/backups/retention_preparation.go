@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -122,8 +122,7 @@ func (s *Service) VerifyRetentionBackupUnderLease(ctx context.Context, receipt R
 }
 
 func verifySnapshot(ctx context.Context, path string) (string, error) {
-	uri := &url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
-	reader, err := sqlx.Open("sqlite3", uri.String())
+	reader, err := openSnapshotReader(path)
 	if err != nil {
 		return "", err
 	}
@@ -148,6 +147,18 @@ func verifySnapshot(ctx context.Context, path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// sqliteURIPath escapes the characters that SQLite decodes or treats as
+// delimiters in the path of a "file:" URI. SQLite reads every other character
+// of a clean absolute path literally, including a Windows drive colon and
+// backslashes.
+var sqliteURIPath = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
+
+// openSnapshotReader opens the snapshot file itself read-only and never
+// creates a file.
+func openSnapshotReader(path string) (*sqlx.DB, error) {
+	return sqlx.Open("sqlite3", "file:"+sqliteURIPath.Replace(path)+"?mode=ro")
 }
 
 type contextReader struct {

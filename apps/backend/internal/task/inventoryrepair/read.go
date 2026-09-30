@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -29,19 +30,24 @@ type inspection struct {
 	guards []observation
 }
 
+// sqliteURIPath escapes the characters that SQLite decodes or treats as
+// delimiters in the path of a "file:" URI. SQLite reads every other character
+// of a clean absolute path literally, including a Windows drive colon and
+// backslashes.
+var sqliteURIPath = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
+
+// openDatabase opens the database file itself; neither mode creates a file.
 func openDatabase(p Plan, write bool) (*sql.DB, error) {
 	mode := "ro"
 	if write {
 		mode = "rw"
 	}
-	u := url.URL{Scheme: "file", Path: p.Database}
 	q := url.Values{"mode": {mode}, "_foreign_keys": {"on"}, "_busy_timeout": {"5000"}}
 	if write {
 		q.Set("_txlock", "immediate")
 		q.Set("_synchronous", "FULL")
 	}
-	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite3", u.String())
+	db, err := sql.Open("sqlite3", "file:"+sqliteURIPath.Replace(p.Database)+"?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}

@@ -871,6 +871,14 @@ jobs:
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
 
+      # Keep SQLite path coverage targeted: other tests in these packages
+      # assert POSIX file modes or depend on Git path output.
+      - name: Test Windows SQLite database paths
+        shell: bash
+        run: |
+          go test -race -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
+          go test -race -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
+
       - name: Test Cursor project slug path normalization
         run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
 
