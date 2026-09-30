@@ -314,3 +314,14 @@ func TestUnknownKindStaleRowIsLeftAlone(t *testing.T) {
 		t.Fatalf("status = %q, want approving (untouched)", got)
 	}
 }
+
+func TestMoveExecute_OutcomeRecordsTheStepTheMoveLeft(t *testing.T) {
+	q := newKindsFixture(t)
+	// A concurrent move landed between the pre-read (step-1) and the write:
+	// the task service reports the step it actually left.
+	q.undo.committedFrom = "step-other"
+	got, err := q.approve(q.insertMove(t), nil)
+	if err != nil || got.OutcomeJSON == nil || *got.OutcomeJSON != `{"from_step_id":"step-other","to_step_id":"manual-step"}` {
+		t.Fatalf("outcome = %v, want the committed source step", got.OutcomeJSON)
+	}
+}

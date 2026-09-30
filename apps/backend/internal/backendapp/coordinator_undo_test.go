@@ -104,12 +104,12 @@ func TestUndoSeam_GetTask(t *testing.T) {
 }
 
 func TestUndoSeam_MoveOptionsAndResult(t *testing.T) {
-	api := &fakeUndoTaskAPI{moveResult: &taskservice.MoveTaskResult{Task: &taskmodels.Task{WIPAdmitted: true}}}
+	api := &fakeUndoTaskAPI{moveResult: &taskservice.MoveTaskResult{Task: &taskmodels.Task{WIPAdmitted: true}, FromStepID: "s0"}}
 	seam := &coordinatorUndoSeam{tasks: api}
-	admitted, err := seam.MoveTaskWithOptions(context.Background(), "t", "wf", "s1", 0,
+	res, err := seam.MoveTaskWithOptions(context.Background(), "t", "wf", "s1", 0,
 		coordinator.UndoMoveOptions{ExpectedWorkflowID: "wf", SkipStepPrompt: true})
-	if err != nil || !admitted {
-		t.Fatalf("admitted = %v err = %v", admitted, err)
+	if err != nil || !res.Admitted || res.FromStepID != "s0" {
+		t.Fatalf("result = %+v err = %v, want admitted from s0", res, err)
 	}
 	if api.moveOpts.ExpectedWorkflowID == nil || *api.moveOpts.ExpectedWorkflowID != "wf" ||
 		api.moveOpts.EntryOptions == nil || !api.moveOpts.EntryOptions.SkipStepPrompt {
