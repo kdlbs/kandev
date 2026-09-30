@@ -198,9 +198,17 @@ does, so no bound-list read and no activity row happens
   `apps/web/components/coordinators/context-diff.tsx`, built on the existing
   `lineDiff` and `DiffLine` of `components/task/task-plan-diff.ts` (the file
   diff viewers need file context and the plan dialog is bound to revisions, so
-  neither fits); the card and the settings rows both use it. Its left side is
-  labelled "Context when proposed", not "current", because the coordinator's
-  context may have changed since; the two labels are new copy in six locales. The card records that it was shown in component state.
+  neither fits); the card and the settings rows both use it. The diff is one
+  unified column in `lineDiff` order, not two panes. Every line starts with a
+  text marker, `-` for a removed line, `+` for an added line and a space for an
+  unchanged one, in addition to any colour, so the change never depends on
+  colour alone; long lines wrap and nothing is truncated (a context is at most
+  4,000 characters). Above the column a two-item key names what each marker
+  stands for: "Context when proposed" for `-` (never "current", because the
+  coordinator's context may have changed since) and "Proposed context" for `+`.
+  Those two strings are the component's only new copy, in six locales; the
+  markers are symbols, not copy. The card records that it was shown in
+  component state.
 - For managers on a `pending` improvement (a `failed` one shows only
   **Approve as a reviewable change** and **Reject**, with no **Reply**, because
   the reply route answers 409 for `failed`; the diff gate applies to its Approve
@@ -224,6 +232,32 @@ does, so no bound-list read and no activity row happens
   page scrolls it into view once its list has loaded. `change_status` is an improvement-only DTO field
   read with a left join on `coordinator_pending_changes.proposal_id`; it is
   absent for every other kind.
+
+The improvement branch replaces only what the shared `ProposalCard` shell
+renders for a create-task or task-kind card: the body, the `failed` and
+`approved` status lines, the approve toast, and the policy line. Everything
+else is the shell's kind-agnostic behaviour and applies unchanged: the working
+and non-stale `approving` line, the `rejected` line, the `returned` line with
+its reply text and **Send again** ([relay](relay.md#cards)), the
+"Revised after your reply" note (never present, because an improvement has no
+`in_reply_to`), the reply section, and the stale-`approving` card, which
+shows Approve and Reject and no Reply, with the diff gate applying to that
+Approve as to a `pending` or `failed` one. The improvement body still renders
+on every status, so a `rejected`, `returned` or `approved` card keeps its
+title, rationale, runs and **Show the change** (the gate only matters while
+Approve is offered).
+
+- A `failed` improvement reads "Approving did not finish. Nothing was applied.
+  You can approve again." for every error code; it never goes through
+  `kindFailureText`, whose per-kind table has no `improvement` entry and would
+  read `undefined`. The error text is not shown. This is one new string.
+- The approve toast of an improvement reads "Approved as a reviewable change.
+  Nothing was applied." with the shell's usual "Next" line; it is the same key
+  as the `pending` approved-card line below, so the toast adds no string.
+  `kindApprovedToast`'s kind union and switch gain the `improvement` case.
+- An improvement card shows no policy line and no policy-denied notice: it is
+  governed by none of the six settings, so `policyLineText` is not called for
+  it.
 
 The approve route refuses edits for an improvement with 400 naming `edits`.
 
@@ -364,10 +398,15 @@ context field of the Identity form's draft and of its saved baseline to the
 fetched context, discarding an unsaved context edit there (the draft was written
 against the base Apply just replaced). Unsaved edits to the name and the two
 profile fields are kept, and the page's dirty state then reflects only those.
-Apply adds no confirmation copy of its own: the row leaving the list and the
-Identity context showing the applied text are the confirmation, so this design
-adds no locale key for it (the error and 409 messages above are the only new
-copy). A page that does not hold the Identity form needs no reset. It is rendered in the phase 3 Autonomy body of settings
+The page's own save and Apply never run at once, because a save that finishes
+after Apply would set the saved baseline back to the form it submitted, with
+the old context: while a save is in flight the Apply buttons are disabled, and
+while an Apply request is in flight the page's save is not started (its
+contributor reports it cannot save). Apply adds no success message of its own:
+the row leaving the list and the Identity context showing the applied text are
+the confirmation, so there is no locale key for one. Every other string in this
+section (the heading, the empty and load-error texts, the retry control, Apply,
+Discard, the two 409 messages) is ordinary new copy in six locales. A page that does not hold the Identity form needs no reset. The section is rendered in the phase 3 Autonomy body of settings
 ([integration](integration.md#settings-layout)), only while phase 3 is
 effective.
 

@@ -104,7 +104,11 @@ Mockup:
   managers on a `pending` or `failed` improvement, **Approve as a reviewable
   change** shall stay disabled until the change has been shown in this card,
   with **Reject** available on both, **Reply with a condition** available on a
-  `pending` one only, and no **Edit**.
+  `pending` one only, and no **Edit**. The diff shall mark removed lines with `-`
+  and added lines with `+`, not by colour alone, and a `failed` improvement shall
+  read "Approving did not finish. Nothing was applied. You can approve again."
+  while a successful Approve shall toast "Approved as a reviewable change.
+  Nothing was applied."
 - **AC-COORDINATOR-IMPROVEMENTS-002.3:** An improvement proposal shall never be
   approved automatically, whatever the D17 settings say.
 
@@ -131,7 +135,9 @@ changes the coordinator.
   change shall stay pending, for the manager to discard. A manager's context
   edit and an Apply that race shall never lose either write: the one that
   commits second either sees the first (Apply then answers 409) or applies on
-  top of it (the edit).
+  top of it (the edit). The settings page shall not start an Apply while its own
+  save is in flight, nor a save while an Apply is in flight, so a finishing save
+  never restores the context Apply replaced.
 - **AC-COORDINATOR-IMPROVEMENTS-003.3:** Apply and Discard shall be refused to
   readers and to a coordinator principal on any transport, and each shall
   settle the pending change exactly once under concurrent calls; a call that
