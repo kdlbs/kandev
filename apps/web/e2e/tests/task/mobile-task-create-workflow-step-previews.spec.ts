@@ -2,9 +2,15 @@ import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import {
+  armWorkflowStepPreviewResponses,
   cleanupWorkflowStepPreviewScenario,
+  expectWorkflowOptionVisibleAndHitTestable,
+  expectWorkflowPickerOverflow,
+  expectWorkflowStepPreviewsLoaded,
   expectStepsInOrder,
+  getWorkflowPickerEndOptions,
   seedWorkflowStepPreviewScenario,
+  touchWorkflowOptionListToBoundary,
   workflowStepsResponse,
 } from "./workflow-step-previews-helpers";
 
@@ -180,6 +186,131 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
     await expect(dialog.getByTestId("task-create-launch-step")).toHaveText("Analysis");
     await expect(title).toHaveValue("Keep the phone draft");
     await expectTaskDescription(description, "Check long workflow previews on a phone.");
+
+    const documentWidth = await testPage.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(documentWidth.scroll).toBeLessThanOrEqual(documentWidth.client);
+  } finally {
+    await cleanupWorkflowStepPreviewScenario(apiClient, scenario);
+  }
+});
+
+// @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.5 AC-TASKS-CREATE-WORKFLOW-STEPS-001.6 AC-TASKS-CREATE-WORKFLOW-STEPS-001.7
+test("touch scrolls ten workflow options and selects either end", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId, {
+    extraWorkflowCount: 7,
+    longWorkflowSteps: true,
+  });
+
+  try {
+    for (const workflow of scenario.allWorkflows) {
+      expect(workflow.stepNames).toHaveLength(15);
+    }
+    await testPage.setViewportSize({ width: 390, height: 640 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await testPage.goto("/t/" + scenario.taskId);
+    await expect(testPage).toHaveURL(new RegExp("/t/" + scenario.taskId + "$"));
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    await testPage
+      .getByRole("dialog", { name: "Tasks", exact: true })
+      .getByRole("button", { name: "New", exact: true })
+      .tap();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    const title = dialog.getByTestId("task-title-input");
+    const description = dialog.getByTestId("task-description-input");
+    await title.fill("Keep the phone draft while scrolling");
+    await description.fill("Reach both ends of every long workflow preview.");
+    const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
+    await workflowSelector.scrollIntoViewIfNeeded();
+    const previewResponses = armWorkflowStepPreviewResponses(testPage, scenario.allWorkflows);
+    await workflowSelector.tap();
+
+    const popover = testPage.getByTestId("workflow-selector-popover");
+    await expect(popover).toBeVisible();
+    await expectWorkflowStepPreviewsLoaded(testPage, scenario.allWorkflows, previewResponses);
+    const { optionList } = await expectWorkflowPickerOverflow(testPage, scenario.allWorkflows);
+    const { first, last } = await getWorkflowPickerEndOptions(
+      testPage,
+      optionList,
+      scenario.allWorkflows,
+    );
+
+    const selectedBefore = await optionList
+      .locator("button[aria-pressed='true']")
+      .getAttribute("data-testid");
+    expect(selectedBefore).toBe(`workflow-option-select-${scenario.kanban.id}`);
+    await touchWorkflowOptionListToBoundary(testPage, optionList, "down");
+    await expect(popover).toBeVisible();
+    await expectWorkflowOptionVisibleAndHitTestable(testPage, optionList, last);
+    await expect(optionList.locator("button[aria-pressed='true']")).toHaveAttribute(
+      "data-testid",
+      selectedBefore!,
+    );
+    await expect(workflowSelector).toContainText("Preview Kanban");
+    await expect(title).toHaveValue("Keep the phone draft while scrolling");
+    await expectTaskDescription(description, "Reach both ends of every long workflow preview.");
+
+    await touchWorkflowOptionListToBoundary(testPage, optionList, "up");
+    await expect(popover).toBeVisible();
+    await expectWorkflowOptionVisibleAndHitTestable(testPage, optionList, first);
+    await expect(optionList.locator("button[aria-pressed='true']")).toHaveAttribute(
+      "data-testid",
+      selectedBefore!,
+    );
+    await expect(title).toHaveValue("Keep the phone draft while scrolling");
+    await expectTaskDescription(description, "Reach both ends of every long workflow preview.");
+
+    const firstName = await first.getAttribute("aria-label");
+    const firstPoint = await expectWorkflowOptionVisibleAndHitTestable(testPage, optionList, first);
+    await testPage.touchscreen.tap(firstPoint.x, firstPoint.y);
+    await expect(popover).toHaveCount(0);
+    await expect(workflowSelector).toContainText(firstName!);
+    await expect(workflowSelector).toBeFocused();
+    await expect(title).toHaveValue("Keep the phone draft while scrolling");
+    await expectTaskDescription(description, "Reach both ends of every long workflow preview.");
+
+    const reopenedPreviewResponses = armWorkflowStepPreviewResponses(
+      testPage,
+      scenario.allWorkflows,
+    );
+    await workflowSelector.tap();
+    await expect(popover).toBeVisible();
+    await expectWorkflowStepPreviewsLoaded(
+      testPage,
+      scenario.allWorkflows,
+      reopenedPreviewResponses,
+    );
+    const selectedFirst = await optionList
+      .locator("button[aria-pressed='true']")
+      .getAttribute("data-testid");
+    expect(selectedFirst).toBe(await first.getAttribute("data-testid"));
+    await touchWorkflowOptionListToBoundary(testPage, optionList, "down");
+    await expect(popover).toBeVisible();
+    await expectWorkflowOptionVisibleAndHitTestable(testPage, optionList, last);
+    await expect(optionList.locator("button[aria-pressed='true']")).toHaveAttribute(
+      "data-testid",
+      selectedFirst!,
+    );
+    await expect(title).toHaveValue("Keep the phone draft while scrolling");
+    await expectTaskDescription(description, "Reach both ends of every long workflow preview.");
+
+    const lastName = await last.getAttribute("aria-label");
+    const lastPoint = await expectWorkflowOptionVisibleAndHitTestable(testPage, optionList, last);
+    await testPage.touchscreen.tap(lastPoint.x, lastPoint.y);
+    await expect(popover).toHaveCount(0);
+    await expect(workflowSelector).toContainText(lastName!);
+    await expect(workflowSelector).toBeFocused();
+    await expect(title).toHaveValue("Keep the phone draft while scrolling");
+    await expectTaskDescription(description, "Reach both ends of every long workflow preview.");
 
     const documentWidth = await testPage.evaluate(() => ({
       scroll: document.documentElement.scrollWidth,
