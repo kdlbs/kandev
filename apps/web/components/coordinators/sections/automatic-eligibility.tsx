@@ -88,7 +88,7 @@ export function AutomaticEligibility({
           <Button
             variant="outline"
             size="sm"
-            className="cursor-pointer"
+            className="cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11"
             disabled={!reviewOpened}
             onClick={onMarkReviewed}
             data-testid="automatic-mark-reviewed"
