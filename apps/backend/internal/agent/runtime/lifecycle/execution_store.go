@@ -49,6 +49,12 @@ type ExecutionStore struct {
 	mu          sync.RWMutex
 }
 
+type promptLifecycleSnapshot struct {
+	generation           uint64
+	dispatchedGeneration uint64
+	completedGeneration  uint64
+}
+
 // NewExecutionStore creates a new ExecutionStore with initialized maps.
 func NewExecutionStore() *ExecutionStore {
 	return &ExecutionStore{
@@ -239,6 +245,21 @@ func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
 		return 0
 	}
 	return gen
+}
+
+func (s *ExecutionStore) promptLifecycleSnapshot(executionID string) (promptLifecycleSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return promptLifecycleSnapshot{}, false
+	}
+	return promptLifecycleSnapshot{
+		generation:           execution.promptGeneration,
+		dispatchedGeneration: execution.dispatchedPromptGeneration,
+		completedGeneration:  execution.promptCompletionGeneration,
+	}, true
 }
 
 // ExecutionReference identifies one registered execution without requiring a
