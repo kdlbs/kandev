@@ -165,7 +165,12 @@ func TestDelete_Postgres_WaitsForInFlightProposalInsert(t *testing.T) {
 				t.Fatalf("tx A pid: %v", err)
 			}
 			p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-			if err := peer.insertProposalBody(ctx, txA, txA.Rebind, p); err != nil {
+			// Phase 2 takes the row lock in the caller (withCoordinatorLock), as
+			// InsertProposal does on PostgreSQL, then inserts under it.
+			if err := lockCoordinatorRow(ctx, txA, txA.Rebind, c.ID, true); err != nil {
+				t.Fatalf("lock in tx A: %v", err)
+			}
+			if err := peer.insertProposalBody(ctx, txA, p, false, nil, nil); err != nil {
 				t.Fatalf("insert in tx A: %v", err)
 			}
 
@@ -231,7 +236,7 @@ func TestDelete_Postgres_InsertAfterLockIsNotFound(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				insertDone <- peer.InsertProposal(ctx, &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()})
+				insertDone <- peer.InsertProposal(ctx, &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}, false)
 			}()
 
 			waitForBlockedBy(t, obs, deletePID)

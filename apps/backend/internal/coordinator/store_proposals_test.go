@@ -792,7 +792,7 @@ func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
 	insert := func() *Proposal {
 		t.Helper()
 		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-		if err := store.InsertProposal(ctx, p); err != nil {
+		if err := store.InsertProposal(ctx, p, false); err != nil {
 			t.Fatalf("InsertProposal: %v", err)
 		}
 		return p
@@ -828,7 +828,7 @@ func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
 		t.Fatalf("CompleteProposal = %v, %v; want true, nil", ok, err)
 	}
 
-	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending)
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending, false)
 	if err != nil {
 		t.Fatalf("ListProposals(pending): %v", err)
 	}
@@ -849,7 +849,7 @@ func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
 		}
 	}
 
-	all, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll)
+	all, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll, false)
 	if err != nil {
 		t.Fatalf("ListProposals(all): %v", err)
 	}
