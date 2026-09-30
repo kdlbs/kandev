@@ -85,7 +85,7 @@ and 07.
   screens (header, selector, strip, item card with phase 1 actions, Queue
   groups, empty, missing and error states, with the tasks input's failure
   and load time read from `workspaceContextRead` and partial snapshots
-  classified); sidebar entries in `app-sidebar-primary-nav.tsx` and
+  classified); sidebar entries as the Coordinators section in `app-sidebar/sections/coordinators-section.tsx` (replacing the primary-nav rows; #3981 owner request 2026-09-30) and
   `MobileRequiredRows`; the badge store and `coordinator.updated` handler;
   six locales. With the flag off no sidebar entry or Coordinator route renders.
 - The header's **Configure** action links to the settings coordinator page at
@@ -272,7 +272,7 @@ only the failed reads, and each line clears when its own read succeeds.
 A component test asserts **Ask about this** renders on each item kind and is
 `disabled`.
 
-A component test on `app-sidebar-primary-nav.tsx` asserts the flag-off case
+A component test on `coordinators-section.tsx` asserts the flag-off case
 directly: with `features.coordinator` off, no coordinator sidebar entry
 renders and `spa-routes.tsx` does not register the `/coordinator` route, so
 the absence in the "In scope" summary above is a checked assertion, not an
@@ -338,6 +338,7 @@ implementation; none changes an acceptance criterion.
 - `apps/web/lib/coordinator/attention.ts` and test
 - `apps/web/app/coordinator/`, including `use-coordinator-inputs.ts`
 - `apps/web/components/app-sidebar/app-sidebar-primary-nav.tsx`
+- `apps/web/components/app-sidebar/sections/coordinators-section.tsx`
 - `apps/web/components/navigation/mobile-sidebar-layout-navigation.tsx`
 - `apps/web/src/locales/*/`
 - `apps/web/e2e/tests/coordinator/`, including `mobile-needs-you.spec.ts`

@@ -57,12 +57,6 @@ vi.mock("./app-sidebar-new-task-item", () => ({
   ),
 }));
 
-vi.mock("./app-sidebar-coordinator-rows", () => ({
-  AppSidebarCoordinatorRows: ({ workspaceId }: { workspaceId: string }) => (
-    <div data-testid="coordinator-rows" data-workspace-id={workspaceId} />
-  ),
-}));
-
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
 
 function renderNav(collapsed: boolean) {
@@ -249,38 +243,5 @@ describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
     // History's own total leaking into the Needs-you count.
     const link = screen.getByRole("link", { name: "Inbox" });
     expect(link.textContent).not.toContain("12");
-  });
-});
-
-describe("AppSidebarPrimaryNav — coordinator nav entries", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = "ws-1";
-    state.features = { ...defaultFeatureFlags };
-    mode = "kanban";
-    pathname = "/";
-  });
-
-  afterEach(() => cleanup());
-
-  it("is hidden when the feature flag is off", () => {
-    state.features.coordinator = false;
-    renderNav(false);
-
-    expect(screen.queryByTestId("coordinator-rows")).toBeNull();
-  });
-
-  it("renders for the active workspace when the feature flag is on", () => {
-    state.features.coordinator = true;
-    renderNav(false);
-
-    expect(screen.getByTestId("coordinator-rows").getAttribute("data-workspace-id")).toBe("ws-1");
-  });
-
-  it("is hidden when there is no active workspace", () => {
-    state.features.coordinator = true;
-    state.workspaces.activeId = null;
-    renderNav(false);
-
-    expect(screen.queryByTestId("coordinator-rows")).toBeNull();
   });
 });
