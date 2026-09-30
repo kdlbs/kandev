@@ -85,19 +85,30 @@ second link fail and be logged.
 
 If the start event was lost, the completion handler inserts the row with the
 same `ON CONFLICT` rule and derives the stamp at that time. The trigger match
-is the same but reads the unattended-turn row in any status, since turn end may
-already have settled it, so a late row is correct except for a model or snapshot
+is the same but reads the unattended-turn row in any status except `send_failed`
+(a failed delivery never started a turn, so an old `send_failed` row cannot
+turn a manager's message into a `wake`), since turn end may already have settled
+it; when several rows match, the newest by `(started_at DESC, id DESC)` wins. A late row is correct except for a model or snapshot
 that was not available, which stay empty (`001.2`). A delivery that failed
 before any turn started (`send_failed`, no `session_turn_id`) has no ledger row;
 the unattended-turn row already records it.
 
 The turn outcome is read from the unattended-turn row's `outcome` when one is
 bound (`completed`, `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`,
-`stopped_by_pause`), else from the session's state read at completion (`failed`, `cancelled`
+`stopped_by_pause`); when a row is bound but its `outcome` is still NULL because
+phase 3's own turn-end settle has not run yet, completion re-enqueues itself
+after 1 second, up to 3 times, and then falls through to the session-state read;
+otherwise from the session's state read at completion (`failed`, `cancelled`
 or ended normally), else `unknown` when that read fails or is ambiguous, so an
 attended turn whose state cannot be read is `completed`-unknown, never
 `blocked` by guess (the `turn.completed` payload carries no status); `task_session_turns` carries no outcome column, so it is never a
-source.
+source. A ledger outcome written from the session state is corrected by the
+10-minute model pass below: for a row finished in the last 24 hours whose bound
+unattended row now reads `stopped_at_ceiling` or `stopped_by_pause` and whose
+own outcome differs, one statement sets `outcome` to that value and `verdict` to
+`blocked` (`WHERE outcome NOT IN ('stopped_at_ceiling', 'stopped_by_pause')`), so
+first completion never records a ceiling or pause stop permanently as
+`cancelled` or `unknown`.
 
 ### Ordering and ties
 
@@ -135,8 +146,11 @@ The verdict is computed from stored rows by a pure function
    `coordinator_activity` rows with this turn id and the automatic actor.
 3. `proposed`: at least one proposal has this turn id.
 4. `needs_you`: trigger `wake`, no proposal, and a wake of kind question or
-   permission delivered in this turn is still unanswered (the wake row is not
-   settled).
+   permission delivered in this turn (the `wake_kinds` copy names the kinds; the
+   wake rows are those of the bound unattended row) is still `delivered` at
+   completion, that is not `superseded` by a later wake of the same episode key.
+   Wakes have only `pending`, `delivered` and `superseded`, so "unanswered" is
+   exactly "delivered and not superseded".
 5. `nothing_needed`.
 
 A turn with zero call rows and no proposal is `nothing_needed`, not `blocked`:
@@ -162,7 +176,8 @@ empty (usage is often written after completion, as the turn cost recompute
 already handles), from the provider-reported model of the turn's first usage row
 (`ORDER BY created_at, id`), lower-cased and trimmed. It is never derived from the agent profile (`002.2`). The harness is
 `<agent type>@<build version>` built from the same usage row's agent type
-and `buildinfo.Version`, empty when the agent type is empty (`002.3`).
+and the build version (a constructor argument the composition root sets from
+`backendapp.Version`; the ledger package imports no `backendapp`), empty when the agent type is empty (`002.3`).
 
 Tokens and cost are joined from `task_usage_events` by session turn id on read
 (`002.4`). A join with no rows returns `cost: null`; a set with an unpriced
@@ -176,15 +191,28 @@ The guarded-call layer already resolves the calling session. `ledger.ActiveTurnI
 reads an in-memory map from session id to the open ledger row id that the
 recorder maintains (set at insert, cleared at completion, rebuilt at startup
 from unfinished rows), so the proposal and activity inserts of a guarded call
-perform no extra database read. It returns empty when the session has no open
-row, and the write proceeds with an empty `turn_id` (`003.1`).
-Approvals and undos run outside a session and set nothing (`003.3`).
+perform no extra database read. The start handler generates the row id and sets
+the map entry before it issues the insert, so the entry never waits on the
+database; the handler itself is asynchronous, so a guarded call that beats it
+sees no entry and its write proceeds with an empty `turn_id` (`003.1`). Completion
+repairs those rows: for proposals and activity rows of the coordinator with a
+NULL `turn_id` and `created_at` between the turn's `started_at` and
+`finished_at`, one statement per table sets the turn id, but only when no other
+turn of the same coordinator overlaps that window (an overlap leaves NULL, never
+a guess). The repair runs before the verdict is computed. Approvals and undos run outside a session
+and set nothing (`003.3`).
 
 ## Call digest
 
 The guarded-call layer's decision point (allowed or refused) calls
 `ledger.Call(sessionID, action, targetTaskID, allowed)`. It only appends to a
-bounded in-process queue (1000 entries) drained by one writer goroutine; a full
+bounded in-process queue (1000 entries) drained by one writer goroutine; the
+entry carries the enqueue time, and the writer resolves the turn at write time as
+the coordinator's turn for that session with `started_at <=` enqueue time and
+`finished_at` NULL or `>=` enqueue time, newest by `(started_at DESC, id DESC)`,
+so a late write is never charged to the next turn. An entry that resolves to no
+turn is retried three times at 1 second spacing and then dropped, counting stage
+`call_unattributed`; a full
 queue drops the entry and counts stage `call_queue_full`. The writer inserts one
 row unless the turn already has 100, in which case it sets `calls_truncated` once
 and drops the call. The action name is the tool's registered name; arguments and
@@ -250,8 +278,12 @@ hours (`UPDATE ... SET finished_at = started_at, outcome = 'interrupted', verdic
 = 'blocked' WHERE finished_at IS NULL AND started_at < ?`, batched like the
 deletes; `001.7`), then deletes in batches of 500, each batch its own
 transaction: ledger rows older than 400 days with their call rows
-(`DELETE ... WHERE turn_id IN (batch)` first), and snapshots older than 90
-days. Coordinator deletion deletes its rows in the same transaction as the
+(`DELETE ... WHERE turn_id IN (batch)` first), and snapshots that no ledger row
+started within the last 90 days references (snapshots are shared by content
+hash and an existing hash is never refreshed by the insert, so age is judged by
+its newest referencing turn, never by the snapshot's own `created_at`; a quiet,
+unchanged board keeps its one snapshot while recent turns use it). A turn older
+than 90 days can therefore lose its snapshot and replay skips it `no_snapshot`. Coordinator deletion deletes its rows in the same transaction as the
 coordinator (`005.3`). A batch that fails is logged and the job ends; the next
 run resumes since deletion is keyed by age.
 

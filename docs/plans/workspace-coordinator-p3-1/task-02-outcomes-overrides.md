@@ -52,6 +52,12 @@ and capture record whether or not the flag is on.
   `no_data`, which work order 04 implements over ratings and replay verdicts.
 - Metrics `coordinator_outcome_grade_failed_total{reason}` and
   `coordinator_override_ignored_total{reason}`.
+- The decision observer is also called from the automatic-approval path
+  (`approveAutomatically`, `finishClaim`) and `ReturnProposalTx`; the
+  `automatic` column, the sweep over `coordinator_proposals` left-joined to
+  outcomes (with backfill), the per-task moved-back scan of step-history rows
+  with its retries and daily pass, and the counters above, per the
+  [outcomes design](../../specs/coordinator/system-design/outcomes.md#override-capture).
 
 ## Out of scope
 

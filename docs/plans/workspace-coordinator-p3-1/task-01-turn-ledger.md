@@ -76,6 +76,10 @@ job. Recording ships ahead of the flag.
   registration function in `internal/backendapp/coordinator.go` that later
   work orders extend.
 - Metrics `coordinator_ledger_write_failed_total{stage}`.
+- Completion repair of `turn_id` links, call turn resolution by enqueue time,
+  the model pass that corrects a ceiling or pause outcome, and retention of
+  snapshots by their newest referencing turn; the build version is a constructor
+  argument set from `backendapp.Version`.
 
 ## Out of scope
 

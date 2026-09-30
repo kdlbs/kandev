@@ -142,7 +142,7 @@ Watches
   Boards: [ ] Watch every board, including new ones  (phase 2)
   Projects
    [ ] Watch every project, including new ones
-       Include tasks with no repository [x]
+       Include tasks with no repository [ ]
        Sets:  Payments (repo-a, repo-b) In scope [Take this project out of scope]
               Mobile   (repo-c)         Out      [Put this project in scope]
        Repositories not in a set:  repo-d  Out  [Put this project in scope]
@@ -169,7 +169,7 @@ The phase 2 criteria that Projects extends (`AC-COORDINATOR-PERMISSIONS-003.x`, 
 - Import-boundary tests for `replay` and `dream` (no writer of proposals, activity, settings or conversation).
 - The planted-regression suite in the ordinary backend run (`TestPlantedCandidates`).
 - Vitest for `watch-filter.ts`, the API client and each new component's states.
-- Playwright in `apps/web/e2e/tests/coordinator/`: `learning.spec.ts`, `pause.spec.ts`, `watch-projects.spec.ts`, with `mobile-chrome` 390 px checks and the `auth` project for reader cases; the e2e profile turns the flag on and the mock agent scripts a dream answer.
+- Playwright in `apps/web/e2e/tests/coordinator/`: `learning.spec.ts`, `pause.spec.ts`, `watch-projects.spec.ts`, with `mobile-chrome` 390 px checks and the `auth` project for reader cases; the `e2e` profile keeps the flag off like every shipped profile, and these specs turn it on with the explicit environment override `KANDEV_FEATURES_COORDINATOR_PHASE31=true` in their backend fixture (an explicit environment variable outranks the profile), with the mock agent scripting a dream answer; one flag-off spec keeps the default.
 - `cd apps/web && pnpm run i18n:check` for every work order that adds copy.
 - Public docs `docs/public/coordinator.md` gain Learning, Pause and Projects sections through `/docs-maintainer` with the last UI work order to merge.
 
@@ -185,7 +185,7 @@ The phase 2 criteria that Projects extends (`AC-COORDINATOR-PERMISSIONS-003.x`, 
 
 ## Definition of done (phase 3.1)
 
-The flag is on in e2e; every work order's checks pass; tests prove one ledger row per turn, one outcome row per proposal, one observation per override, a replay that is deterministic and blocks every planted regression, a dream episode that can call nothing but the ledger tool and writes nothing a turn reads, Pause stopping everything the coordinator does on its own while keeping its queue, and the projects filter in every path; with the flag off the coordinator behaves as phase 3 except for the recorded rows; public docs are updated.
+The flag is off in every shipped profile including `e2e` and on only through the explicit override in the specs above; every work order's checks pass; tests prove one ledger row per turn, one outcome row per proposal, one observation per override, a replay that is deterministic and blocks every planted regression, a dream episode that can call nothing but the ledger tool and writes nothing a turn reads, Pause stopping everything the coordinator does on its own while keeping its queue, and the projects filter in every path; with the flag off the coordinator behaves as phase 3 except for the recorded rows; public docs are updated.
 
 ## E2E decision input
 

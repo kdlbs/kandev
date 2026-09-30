@@ -84,6 +84,10 @@ the routes and the Learning section with the measures and report views.
 - Web: the Learning section (switch, health line, the five measures, report
   list), the report detail with rating control, states, phone layout, copy in
   six locales.
+- The partial unique index that is the dream lease, the dream task created
+  ephemeral with the dream session resolved by the session-to-coordinator
+  lookup, and the health precedence table, per the
+  [shadow dream design](../../specs/coordinator/system-design/shadow-dream.md#health).
 
 ## Out of scope
 

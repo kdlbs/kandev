@@ -118,7 +118,12 @@ settings members and controls).
 compiled in and read stored state, so a coordinator paused or scoped while the
 flag was on stays paused and scoped if the flag is turned off; only the controls
 disappear. A brake that failed open on a flag flip would not be a brake. With the
-flag never on no such state exists, so behaviour is phase 3's.
+flag never on no such state exists, so behaviour is phase 3's. One carve-out keeps that
+true under a database error: with the flag not effective, an unreadable Pause
+state is a paused answer only for a coordinator the process already knows to be
+paused; with the flag effective it is always paused. The client receives the
+stored project scope as enforcement state (not a Projects field) whenever it is
+`selected`, whatever the flag, so Needs you and Queue stay narrowed.
 
 **Why flag-off is safe.** Recording only observes events already published and
 writes its own tables; it adds no tool, prompt text, route, admission check or

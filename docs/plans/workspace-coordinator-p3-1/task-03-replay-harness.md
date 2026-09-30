@@ -59,6 +59,10 @@ in CI.
   of proposals, activity, settings or conversation.
 - `TestPlantedCandidates` in the ordinary backend test run and a constants
   test.
+- The `ExtraSpend` term of the phase 3 spend reader with its own test (a
+  running row counted once; a zero-cost running row does not block admission),
+  the `MaxOutputTokens` and `ReplayTimeout` constants, and the refusal of a
+  profile with `AutoApprove` true (`profile_unsafe`).
 
 ## Out of scope
 

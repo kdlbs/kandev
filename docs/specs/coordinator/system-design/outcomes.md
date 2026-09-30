@@ -35,7 +35,8 @@ change them. Both record whether or not the phase 3.1 flag is on
 
 `coordinator_outcomes`: `proposal_id` (primary key), `coordinator_id`,
 `turn_id` (nullable), `kind`, `decision` (`approved`, `edited`, `rejected`,
-`returned`, `undone`), `decided_at`, `edited_fields` (JSON array of names),
+`returned`, `undone`), `automatic` (bool, true when the decision was the
+automatic-approval class), `decided_at`, `edited_fields` (JSON array of names),
 `reason_code`, `task_id` (nullable), `task_result` (nullable), `cost_subcents`
 (nullable), `reopen_count`, `approved_at`, `merged_at` (nullable),
 `last_step_id`, `final` (bool), `graded_at`. Index on `(coordinator_id,
@@ -56,6 +57,14 @@ recompute that reads the same facts writes the same values, so two graders
 racing produce one row with one value. The only non-derivable field is
 `reopen_count`, handled below.
 
+`decided_at` is the time of the first recorded decision and is written only by
+the insert: the observer stores the hook time, and a row created by the sweep
+(below) stores the proposal's `updated_at`, since `coordinator_proposals` has no
+decision time column. A re-grade and an undo never change it (an undo changes
+`decision` to `undone` only). `decision` is `edited` when `edited_fields` is
+non-empty and `approved` otherwise; a `returned` proposal is graded through the
+same insert.
+
 `edited_fields` is the sorted list of field names whose approved value differs
 from the proposed; values are never read into the row (`001.1`). The reject
 reason code comes from [reason codes](#reason-codes). A proposal with no
@@ -65,10 +74,13 @@ decision has no row (`001.5`).
 
 No decision event exists today, so the decision paths gain a post-commit hook: an
 optional `DecisionObserver` on the coordinator service (nil-safe, a no-op when
-nothing registers) called by `ApproveProposal`, `RejectProposal` and
-`UndoActivity`/`markUndone` (`approve.go`, `reject.go`, `undo.go`) after their
-transaction commits, with `{proposalID, decision, actor, editedFields,
-reasonCode}`. The edited field names come from the approve request's edits
+nothing registers) called by every path that decides a proposal:
+`ApproveProposal` and `finishClaim` (`approve.go`), the automatic class
+(`approveAutomatically`, `automatic_approve.go`, with `automatic = true`),
+`RejectProposal` (`reject.go`), `ReturnProposalTx` (`store_reply.go`, decision
+`returned`) and `UndoActivity`/`markUndone` (`undo.go`), after their
+transaction commits, with `{proposalID, decision, automatic, actor,
+editedFields, reasonCode}`. The edited field names come from the approve request's edits
 (`carriesApproveEdits`); a call the observer makes never fails the decision, and
 a panic in it is recovered and counted.
 
@@ -81,9 +93,12 @@ keyed set so a proposal is queued once at a time, a worker pool of 1):
    `coordinator_outcomes.task_id` or in `coordinator_activity.task_id` with the
    created or moved action; it resolves the proposals of the task and enqueues
    each.
-3. **Sweep:** every 24 hours (and at start) it enqueues proposals decided in
-   the last 400 days with `final = false`, in batches of 200 ordered by
-   `(graded_at, proposal_id)`.
+3. **Sweep:** every 24 hours (and at start) it enqueues, from
+   `coordinator_proposals` left-joined to `coordinator_outcomes`, decided
+   proposals (status other than pending) whose `updated_at` is within 400 days and
+   that have no outcome row or whose row has `final = false`, in batches of 200
+   ordered by `(graded_at NULLS FIRST, proposal_id)`. A proposal decided before
+   recording began therefore gets a row on the first sweep within that window.
 
 The queue never blocks the publisher; a full queue (1000) drops the enqueue and
 counts `coordinator_outcome_grade_failed_total{reason="queue_full"}`; the sweep
@@ -92,6 +107,10 @@ recovers it. A read error keeps the earlier row, counts the reason
 (`001.5`).
 
 ## Task result
+
+A decided proposal made automatically has `automatic = true`; the measures and
+replay treat it as a system decision, not a manager one (see [Measures](#measures)
+and [replay](replay.md)).
 
 `TaskResult(task)` is a pure function of the task's state, its linked pull
 request states, its step's completion flag and its latest session state, in
@@ -126,19 +145,24 @@ computed on read.
 
 - the `DecisionObserver` hook with decision `rejected`, `edited` or `undone`;
 - `task.moved` for tasks the coordinator created or moved (the same activity
-  lookup as the grader). `task.moved` carries no actor, so the mover is read from the step-transition
-  history row of that move (`SessionStepHistory`: `trigger` and nullable
-  `actor_id`; the table stores no actor kind). A mover counts as a person only
-  when `actor_id` is a user id of the workspace; an engine or agent move stores a
-  session id and a queue promotion stores none, so both are counted
-  `coordinator_override_ignored_total{reason="actor_unknown"}` and store nothing.
-  The table is keyed by session, so a task that never had a session has no row
-  and its moves are never observed; `moved_back` is a signal for tasks with a
-  session only. History rows are written asynchronously and may follow the
-  event: a move with no row yet stores nothing at event time and is picked up by
-  the 24-hour outcome sweep, which reads the history rows of every task the
-  coordinator created or moved after the action's time and captures the same
-  observation under the same `transition_key` (the history row id).
+  lookup as the grader). The event only triggers a scan of that task; it is never
+  matched to a history row. The scan reads the step-transition history rows
+  (`SessionStepHistory`: `trigger`, nullable `actor_id`, `created_at`, row id) of
+  every session of the task with `created_at` later than the coordinator action's
+  time, in order `(created_at, id)`, and treats each row as one candidate whose
+  `transition_key` is the row id. The mover is `actor_id`: a person only when it
+  is a user id of the workspace. Engine, agent, undo, plugin and queue-promotion
+  moves store a nil `actor_id`, so a nil or non-user value is counted
+  `coordinator_override_ignored_total{reason="actor_unknown"}` and stores
+  nothing. The table is keyed by session, so a task that never had a session
+  has no row and `moved_back` is a signal for tasks with a session only.
+  History rows are written asynchronously and may follow the event, so a scan
+  that finds no new row is retried by the in-process queue after 2 minutes, 10
+  minutes and 1 hour, and a separate daily **moved-back scan** (own pass, not
+  the outcome sweep set, so `final` rows are included) scans tasks with a
+  coordinator created or moved activity row in the last 30 days, in batches of
+  200 ordered by `task_id`. Every path reads the same rows and inserts under the
+  same key, so any of them may run first.
 
 Each candidate goes through the manager check the automatic class already uses
 for its raiser (`automatic_approve.go`, `workspace.manage` in the coordinator's
@@ -151,14 +175,16 @@ the unique index (`002.2`), so redelivery, a grader run or a second observer
 never duplicates one.
 
 `moved_back` compares the destination step's position with the position of the
-step the coordinator's approved action left the card in, both from the
-workflow's step order at the time of the event, and requires the move time to
-be later than the action's time (`002.4`). `transition_key` is the step
-transition's id, so two different moves back both count while one event
-redelivered does not. The observation names the newest approved proposal of the
-coordinator that created or moved the card (`proposal_id` is part of the unique
-key). A step no longer in the workflow, or an equal or later
-position, stores nothing.
+step the coordinator's approved action left the card in, both read from the
+workflow's step order when the candidate is processed, and requires the row time
+to be later than the action's time (`002.4`). `transition_key` is the history
+row id, so two different moves back both count while one row seen twice does
+not. The observation names the newest approved proposal of the coordinator that
+created or moved the card whose action time is not later than the row's
+`created_at`; that choice is fixed by the row, so every path names the same
+proposal and the unique key `(proposal_id, kind, transition_key)` admits one
+observation per row (`002.2`). A step no longer in the workflow, or an equal or
+later position, stores nothing.
 
 ## Reason codes
 
@@ -183,15 +209,16 @@ each `{value, numerator, denominator, null_reason}`:
 
 | Measure | Computation |
 | --- | --- |
-| Approval without edit | `decision = 'approved'` over decided proposals decided in the window |
-| Override recurrence | feedback rows of the window whose pattern key also appears in the previous 30 days before that row, over all rows of the window |
+| Approval without edit | `decision = 'approved'` over manager-decided proposals (`automatic = false`) decided in the window |
+| Override recurrence | feedback rows of the window whose pattern key also appears in the previous 30 days before that row, over all rows of the window; the pattern key is `(kind, reason_code, proposal kind)`, and for `moved_back` the destination step id replaces `reason_code` |
 | Dollars per merged task | priced cost of coordinator turns started in the window (joined from usage), over tasks with `merged_at` in the window |
 | Median wait | median of `decided_at - proposal.created_at` |
 | Agreement | items rated and replayed, per shadow dream 006.4 |
 
 A zero denominator gives `null` with `no_data`; an unknown cost among the inputs
 `cost_unknown`; fewer than 5 rated items `too_few` (`003.2`). Dollars per merged task includes the cost of dream turns, since they are
-coordinator turns, counted by turn start time; shadow items count for agreement
+coordinator turns, counted by turn start time, and of replay runs (their
+`cost_subcents` by result row `created_at`); shadow items count for agreement
 by their dream's start time. The median for an
 even count is the mean of the two middle values rounded down to the second;
 computed in Go from a bounded set (at most 2000 proposals in the window, newest

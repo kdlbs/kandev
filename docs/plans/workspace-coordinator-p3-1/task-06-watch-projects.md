@@ -60,7 +60,7 @@ Watches
   Boards: [ ] Watch every board, including new ones  (phase 2)
   Projects
    [ ] Watch every project, including new ones
-       Include tasks with no repository [x]
+       Include tasks with no repository [ ]
        Sets:  Payments (repo-a, repo-b) In scope [Take this project out of scope]
               Mobile   (repo-c)         Out      [Put this project in scope]
        Repositories not in a set:  repo-d  Out  [Put this project in scope]

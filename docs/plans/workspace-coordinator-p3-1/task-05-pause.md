@@ -50,6 +50,10 @@ turn, and the Pause and Resume controls.
   `Stopper.Stop` for a paused coordinator.
 - Web: the fourth state of the autonomy strip and the Autonomy section
   control, phone layout, copy in six locales.
+- Stop by binding state (`stop_requested_at`, `settleUnsentTurn` after 2
+  minutes, cancel on accepted binding), the in-memory known-paused set for the
+  flag-off read-error carve-out, and the read-only "Paused" badge shown with the
+  flag off, per the [pause design](../../specs/coordinator/system-design/pause.md).
 
 ## Out of scope
 

@@ -32,7 +32,7 @@ this design adds the second predicate.
 ## Storage
 
 `coordinators` gains `project_scope` (`all` default, or `selected`) and
-`include_no_repository` (bool, default true). New table
+`include_no_repository` (bool, default false: a coordinator that starts selecting projects does not watch repository-less tasks until the manager turns the toggle on). New table
 `coordinator_watch_projects(coordinator_id, entry_kind, entry_id)` with
 `entry_kind` in `repository_set` or `repository`, primary key on all three,
 stored as a list of filters so a later group filter is one more `entry_kind`
@@ -105,7 +105,18 @@ listed sets, so the client never resolves sets itself and a set change reaches
 open screens through `coordinator.updated` and the repository set events. `AttentionTask` gains `repositoryIds: string[]`, set from
 the snapshot. The rule is the server's: workflow watched and `InProjects`. An
 unknown repository list (snapshot lacks it) is treated as not watched, the same
-fail-closed rule as a missing workflow id. The "not available" and "watches
+fail-closed rule as a missing workflow id.
+
+**With the flag off.** The stored scope is still enforced on the client. The
+effective watch set in `GET .../settings` carries the `projects` member whenever
+the stored scope is `selected`, whatever the flag, because it is enforcement
+state read by the Needs you, Queue, counts and stalls paths, not a field of the
+Projects feature; when the scope is `all` (always the case for a coordinator that
+never had a scope) the member is absent and the payload is byte-identical to
+phase 2's. `005.9`'s "no Projects field, route or control" therefore refers to
+the settings write member, the lists, the routes and the controls, which stay
+flag-gated, and a test asserts both the flag-off `selected` payload and the
+flag-off `all` payload. The "not available" and "watches
 nothing" states of the phase 2 screens apply unchanged; the "watches nothing"
 notice also covers the empty project selection.
 

@@ -46,11 +46,13 @@ row, at most 50 more, deduplicated by turn id, in the same order (`001.1`). The
 window is the span of the first selection.
 
 A case is skipped, with one reason per turn recorded, in this order: `dream_turn`
-(trigger `dream`), `no_snapshot` (empty hash, missing or older than 90 days),
+(trigger `dream`), `no_snapshot` (empty hash, or the snapshot row is missing; turn age plays no part, only whether the row still exists under the [snapshot retention rule](turn-ledger.md#retention)),
 `input_gone` (the trigger message or a needed task title cannot be read),
 `no_expectation` (no expected reproduced and no expected avoided proposal)
 (`001.2`). The first matching reason is stored. Expected reproduced are
-proposals of the turn decided `approved`; expected avoided are `rejected`,
+proposals of the turn decided `approved` by a manager (`automatic = false`;
+an automatic approval is a system decision and is neither expected reproduced nor
+expected avoided); expected avoided are `rejected`,
 `returned` or `undone`; `edited` is neither (`003.3`). A skipped case counts in
 no score.
 
@@ -64,8 +66,12 @@ test, then the turn's trigger as it was, then the snapshot and stored records
 as a data block with task titles read from the original records, then a fixed
 answer schema: a JSON list of `{kind, target_task_id, workflow_id, title}`.
 `stub.Parse` reads the answer into decision keys and rejects anything else (an
-unreadable answer is a failed run). There are no tools, so nothing a model says
-is executed and `stub` holds no store handle (`001.3`). The package imports no writer of proposals, activity,
+unreadable answer is a failed run). No Kandev tool (coordinator tool profile or MCP server) is offered to the call,
+and nothing a model says is executed by Kandev; `stub` holds no store handle
+(`001.3`). `ExecuteProfilePrompt` drives the profile's agent CLI, whose own
+native tools cannot be removed by the harness, so the harness refuses a profile
+whose `AutoApprove` is true (the case is a failed run with reason
+`profile_unsafe`), which leaves any native tool that needs a permission denied. The package imports no writer of proposals, activity,
 settings or conversation, enforced by an import-boundary test that fails when
 `replay` or `stub` imports those packages (`001.4`). The only caller allowed to
 start a run is the dream episode's server-side code and tests; the tool
@@ -101,19 +107,32 @@ iteration order reaches a result.
 ## Budget
 
 `budget.Reserve(bound)` runs before each model call: it reads the coordinator's
-spend through the phase 3 spend reader; when the reading is unmeasurable or
-`spent + spentByThisReplay + bound >= ceiling`, no run starts and the replay
-stops `unmeasured`, reason `budget` (`002.4`). `bound` is the runner's
-configured per-call maximum. A sessionless call writes no usage row, so the
-harness prices each run from its reported tokens and model with
-`commoncosts.CalculateCostSubcentsChecked` (the function the usage recorder uses);
-a model with no price stops the replay `unmeasured`, reason `cost_unknown`. The
-run's cost is stored in the result row, and the phase 3 spend reader gains one
-additive, nil-safe term, `ExtraSpend(coordinatorID, from, to)`, summing
-`cost_subcents` of `coordinator_replay_results` in the window (a NULL cost makes
-the reading unmeasurable), so replays count toward the 24 hour spend and the
-ceiling. The spend design is not edited; this term is listed as a delta in the
-ADR.
+spend through the phase 3 spend reader, which already includes this replay's
+own `coordinator_replay_results` rows through `ExtraSpend` (below); the harness
+adds no separate running total. When the reading is unmeasurable or `spent +
+bound >= ceiling`, no run starts and the replay stops `unmeasured`, reason
+`budget` (`002.4`). `bound` is the price, computed by
+`commoncosts.CalculateCostSubcentsChecked`, of the configured replay maximum
+output of 4000 tokens plus the prompt's input tokens estimated as bytes / 3 (a
+constant `MaxOutputTokens = 4000` in `replay/constants.go`; the call has no
+per-call maximum of its own, so an actual run may exceed `bound` and the next
+`Reserve` sees the real figure). A sessionless call writes no usage row, so the
+harness prices each run from its reported tokens and model with the same
+function (the one the usage recorder uses); a model with no price stops the
+replay `unmeasured`, reason `cost_unknown`. Each run's cost is added to the
+result row's `cost_subcents`, which starts at 0 when the row is inserted, and the
+phase 3 spend reader gains one additive, nil-safe term,
+`ExtraSpend(coordinatorID, from, to)`, summing `cost_subcents` of
+`coordinator_replay_results` whose `created_at` is in the window, running rows
+included (only a NULL cost, which the design never writes, makes the reading
+unmeasurable), so replays count toward the 24 hour spend and the ceiling. The
+spend design is not edited; this term is listed as a delta in the ADR and has
+its own test (a running row is counted once; a zero-cost running row does not
+block admission). A replay also has a wall-clock bound of 20 minutes (a constant
+`ReplayTimeout`, the dream's episode bound); past it the replay stops
+`unmeasured`, reason `budget`, keeping the spend already incurred. Replay cost
+counts in "dollars per merged task" because it is part of the coordinator's
+spend.
 
 ## Guard
 

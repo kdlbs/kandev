@@ -78,10 +78,13 @@ The window is `(prev accepted window_end, or max(now-30d, first ledger row))` to
 `now`, computed once and stored (`001.2`). Turns with trigger `dream` are
 excluded from the window and every count (`001.5`).
 
-**Lease.** The insert of the `running` row is conditional: `INSERT INTO
-coordinator_dreams ... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM coordinator_dreams
-WHERE coordinator_id = ? AND status = 'running' AND refreshed_at > now - 5m)`.
-Zero rows inserted means another dream holds the lease and the tick ends. A single orchestrating goroutine owns the whole dream (episode, gate, replays,
+**Lease.** A partial unique index `CREATE UNIQUE INDEX ... ON
+coordinator_dreams (coordinator_id) WHERE status = 'running'` (valid on SQLite
+and PostgreSQL) enforces one running dream per coordinator whatever the
+isolation level, so the lease needs no read-then-insert. Tick first expires stale
+rows (below), then inserts the `running` row with a plain `INSERT`; a
+unique-violation means another dream holds the lease and the tick ends, storing
+nothing. A single orchestrating goroutine owns the whole dream (episode, gate, replays,
 report) and refreshes `refreshed_at` every minute for all of it; at each refresh
 it re-checks autonomy, Pause and the containment check and, when one fails,
 cancels the episode or the replay and sets the row `failed` with the reason
@@ -102,9 +105,15 @@ hash makes the tick store one `skipped`/`unchanged` row, at most once per hash
 
 The spend reader counts only tasks whose metadata carries the coordinator's id
 (`ListCoordinatorOriginTasks`, [spend](spend.md)), so the episode needs a task.
-`dream.OpenTask` creates a dream task: coordinator-origin metadata with
-`coordinator_id` plus `coordinator_purpose = "dream"`, archived on end, in the
-coordinator's workspace. The conversation code that lists coordinator-origin
+`dream.OpenTask` creates a dream task through the same `CreateTask` call the
+conversation uses, with `IsEphemeral: true` (so it is on no board and in no
+workflow step), `Origin: TaskOriginCoordinator`, `AllowReservedMetadata: true`,
+the coordinator's agent and executor profiles and workspace, and metadata
+`coordinator_id` plus `coordinator_purpose = "dream"`; it is archived on end.
+The service's session-to-coordinator lookup (the one the ledger recorder and the
+guard use) resolves a dream session through that metadata, returning the
+coordinator id with kind `dream`; a session that resolves to no coordinator makes
+the ledger tool return the phase-1 not-found error and write no row. The conversation code that lists coordinator-origin
 tasks (binding, cleanup, `conversation.go`) skips any task whose purpose is
 `dream`, so a dream task is never a conversation, never repointed, and never
 archived as one; a test asserts both the spend inclusion and the conversation
@@ -124,7 +133,8 @@ any other action as unknown before policy evaluation and writes no activity
 row. A test asserts the constant's length and content, and asserts a guarded
 call of each registered action from that session is refused.
 
-**One turn, bounded.** One prompt, a 20-minute wall clock; at expiry the system
+**One turn, bounded.** One prompt, a 20-minute wall clock that covers the episode only (the gate and
+each replay have their own bound, [replay](replay.md#budget)); at expiry the system
 cancels the session and sets the row `failed`, reason `timeout` (`002.4`). The
 ceiling stop uses the phase 3 `CancelTurn` path and sets `failed` with the
 reason `ceiling`. Pause during a running episode cancels it and sets `failed`,
@@ -198,15 +208,32 @@ meets `not_useful` or `harmful` (`006.4`).
 ## Health
 
 `dream.Health(coordinatorID)` is a pure function of the stored rows and the same
-admission conditions the scheduler uses. Precedence: `off` (not enabled), then
-`running`, then `failed` (last dream `failed`, or the debt older than 72 hours),
-then `stale` (debt older than 36 hours), then `waiting` (an admission condition
-fails or the trigger is not met, with the condition and its fix), then `fresh`.
-The **evidence debt age** is `now - max(last accepted window_end, completion time
-of the fifth completed non-dream turn after it)` when the trigger's evidence
-condition holds, and none otherwise (`006.3`). Fixes: "Turn autonomy on", "Resume", "Raise the
-ceiling". An unreadable input gives no health state and the section shows the
-failure, never `fresh`.
+admission conditions the scheduler uses. One precedence table holds for this
+design and the requirement (each state is decided by the first row that matches):
+
+| # | State | Matches when | Copy and fix |
+| --- | --- | --- | --- |
+| 1 | `off` | Shadow not enabled | none |
+| 2 | `running` | a dream is running | none |
+| 3 | `waiting` | autonomy off | "Waiting: autonomy is off", fix "Turn autonomy on" |
+| 3 | `waiting` | paused | "Waiting: paused", fix "Resume" |
+| 3 | `waiting` | containment check fails | "Waiting: the containment check fails", fix "Open containment" |
+| 3 | `waiting` | spend unmeasurable | "Waiting: spend cannot be measured", no fix |
+| 3 | `waiting` | spend at or above ceiling | "Waiting: the spend ceiling is reached", fix "Raise the ceiling" |
+| 4 | `failed` | last dream `failed`, or evidence debt older than 72 hours | "Last dream failed" with the reason, or "Overdue" |
+| 5 | `stale` | evidence debt older than 36 hours | "Overdue" |
+| 6 | `fresh` | last dream accepted within 36 hours; or an accepted dream exists and no evidence debt exists | none |
+| 7 | `waiting` | otherwise: no accepted dream yet and the evidence trigger unmet | "Waiting: not enough evidence yet (5 completed turns and one decision)", or "Waiting: next dream after {time}" when only the 24-hour spacing is unmet; no fix |
+
+Rows 3 come before `failed` so a coordinator that cannot dream because of a
+condition the manager can fix says so (`005.2`); a `failed` last dream shows
+again once the condition clears. Row 6 makes `fresh` reachable right after an
+accepted dream although the evidence trigger is then unmet. The **evidence debt
+age** is `now - max(last accepted window_end, completion time of the fifth
+completed non-dream turn after it)` when the trigger's evidence condition holds,
+and none otherwise (`006.3`). All copy is in six locales with no em dash. An
+unreadable input gives no health state and the section shows the failure, never
+`fresh`.
 
 ## Routes
 
