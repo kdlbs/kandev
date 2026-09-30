@@ -127,17 +127,25 @@ computed on read.
 - the `DecisionObserver` hook with decision `rejected`, `edited` or `undone`;
 - `task.moved` for tasks the coordinator created or moved (the same activity
   lookup as the grader). `task.moved` carries no actor, so the mover is read from the step-transition
-  history row of that move (`SessionStepHistory`, its actor kind and, when it
-  records one, the acting user id); a move whose row is missing, whose actor is
-  an agent or the system, or that names no user is counted `coordinator_override_ignored_total{reason=
-  "actor_unknown"}` and stores nothing.
+  history row of that move (`SessionStepHistory`: `trigger` and nullable
+  `actor_id`; the table stores no actor kind). A mover counts as a person only
+  when `actor_id` is a user id of the workspace; an engine or agent move stores a
+  session id and a queue promotion stores none, so both are counted
+  `coordinator_override_ignored_total{reason="actor_unknown"}` and store nothing.
+  The table is keyed by session, so a task that never had a session has no row
+  and its moves are never observed; `moved_back` is a signal for tasks with a
+  session only. History rows are written asynchronously and may follow the
+  event: a move with no row yet stores nothing at event time and is picked up by
+  the 24-hour outcome sweep, which reads the history rows of every task the
+  coordinator created or moved after the action's time and captures the same
+  observation under the same `transition_key` (the history row id).
 
 Each candidate goes through the manager check the automatic class already uses
 for its raiser (`automatic_approve.go`, `workspace.manage` in the coordinator's
 workspace). A false result
 or an error stores nothing and counts `coordinator_override_ignored_total{reason}`
 with reason `not_manager`, `principal`, `system`, `actor_unknown` or `authz_error`
-(`002.3`); the actor kind comes from the event's principal field. A manager
+(`002.3`); for decisions the kind comes from the observer's actor, for moves from the history row above. A manager
 override inserts one feedback row with `INSERT ... ON CONFLICT DO NOTHING` on
 the unique index (`002.2`), so redelivery, a grader run or a second observer
 never duplicates one.

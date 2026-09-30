@@ -105,7 +105,7 @@ The measures of the second half of this document are read only with the flag.
   fails shall be treated as not a manager.
 - **AC-COORDINATOR-OUTCOMES-002.4:** A card counts as moved back only when its
   destination step is earlier in the workflow's step order than the step the
-  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one. A move to a later step, a move within the step, and a move of a card
+  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one. A move is observed only when its step transition history records a user as the mover, so a card that never had a session is not observed. A move to a later step, a move within the step, and a move of a card
   the coordinator did not create or move shall store nothing.
 - **AC-COORDINATOR-OUTCOMES-002.5:** A rejection reason typed by a manager or
   a coded one shall map to one reason code of a closed set, `duplicate`,
