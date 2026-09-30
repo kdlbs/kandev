@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-29
+last_updated: 2026-09-30
 ---
 
 # Coordinator permissions and Watches Requirements
@@ -29,8 +29,20 @@ never read or change it. No write action is `automatic` in phase 2 (D13).
   `denied`.
 - **Watches:** `all` (every workflow of the workspace, including workflows
   created later) or `selected` (a list of the workspace's workflows).
-- **Watched task:** a task whose workflow is watched. A **watched workflow** is
-  one in scope under Watches.
+- **Watched task:** a task whose workflow is watched and, while the phase 3.1
+  flag is effective, that is also in the coordinator's projects. A **watched
+  workflow** is one in scope under Watches.
+- **Project:** a repository set of the workspace (a named group of its
+  repositories, `RepositorySet`), or one repository of the workspace that a
+  manager lists on its own. It is not an Office project. A task belongs to the
+  repositories it has, and to none when it has none.
+- **Project entry:** one listed project, either a repository set or a
+  repository.
+- **Projects scope:** `all` (no project filter, the default) or `selected` (a
+  list of at most 50 project entries) plus the toggle **include tasks with no
+  repository**. A task is in the projects when the scope is `all`, or one of
+  its repositories is a listed repository or belongs to a listed set at that
+  moment, or it has no repository and the toggle is on.
 - **Agent-starting step:** a workflow step that is not an eligible step as
   [proposals](proposals.md#terminology) defines it.
 - **Tool profile:** the Kandev tools on a coordinator session, derived from
@@ -226,12 +238,82 @@ one applies at once.
   section the manager last visited; the Identity fields, when also changed,
   are saved by their own request.
 
+### REQ-COORDINATOR-PERMISSIONS-005: Projects
+
+**Intent:** A manager narrows a coordinator to some projects as well as
+some boards, so that two coordinators can split one board by project.
+
+**User story:** As a workspace manager, I want a coordinator to see only the
+tasks of some projects, so that it never reads or proposes about work
+that belongs to another team.
+
+#### Acceptance criteria
+
+- **AC-COORDINATOR-PERMISSIONS-005.1:** While the phase 3.1 flag is effective,
+  the system shall return with every coordinator its Projects scope, and a
+  coordinator that existed before, or is created without one, shall have scope
+  `all` and the toggle on. Projects narrows Watches: a task is watched only
+  when its workflow is watched and it is in the projects.
+- **AC-COORDINATOR-PERMISSIONS-005.2:** The system shall refuse a Projects save
+  with 400 naming `projects`, storing nothing, when it is `selected` with no
+  entry and the toggle off, with more than 50 entries, with a duplicate entry,
+  or with a set or repository that is not in the coordinator's workspace. A
+  save that leaves Projects as stored, including a list emptied by a deleted
+  set or repository, shall not be refused for it.
+- **AC-COORDINATOR-PERMISSIONS-005.3:** The membership of a task shall be
+  resolved when it is read, from the task's repositories and the listed sets'
+  membership at that moment, and never cached on the coordinator: a task that
+  gains or loses a repository, and a repository added to or removed from a
+  listed set, shall move the affected tasks in or out of scope on their next
+  read, for every coordinator that lists the set.
+- **AC-COORDINATOR-PERMISSIONS-005.4:** The projects filter shall apply in every
+  path the workflow watch applies to: the read tools, Needs you, the Queue and
+  its counts, the wake recorder, the backstop and the automatic class's
+  counts, the stall reads, the turn ledger's board snapshot and call digest
+  ([turn ledger](turn-ledger.md#req-coordinator-turn-ledger-004-the-query-tool)),
+  and the shadow dream's window and evidence. A task outside the projects
+  shall be answered as not found to a read tool and shall raise no wake.
+- **AC-COORDINATOR-PERMISSIONS-005.5:** `create_task` shall refuse, naming
+  `repository_id`, a repository that is neither listed nor in a listed set,
+  or no repository while the toggle is off; every other propose tool shall refuse a target task
+  outside the projects, naming the field. A proposal made while its target was
+  in scope shall stay approvable after the scope changes, as it does for Watches
+  (`AC-COORDINATOR-PERMISSIONS-002.6`).
+- **AC-COORDINATOR-PERMISSIONS-005.6:** When a listed set or repository is
+  deleted from the workspace, the system shall remove its entry from every
+  coordinator's list. When a `selected` list becomes empty with the toggle
+  off, the coordinator shall watch no task and Configure and Needs you shall
+  say so, with a link for managers; the system shall never switch it to
+  `all`. A set that loses its last repository stays listed and matches no
+  task.
+- **AC-COORDINATOR-PERMISSIONS-005.7:** A save that changes Projects shall
+  archive the conversation and raise `policy_revision` once, as a Watches
+  change does (`AC-COORDINATOR-PERMISSIONS-004.1`,
+  `AC-COORDINATOR-PERMISSIONS-004.2`), and shall travel in the same request as
+  May do and Watches.
+- **AC-COORDINATOR-PERMISSIONS-005.8:** The Watches section shall show a
+  Projects part after the boards: the switch "Watch every project, including
+  new ones", and when it is off the workspace's repository sets, each with its
+  current repositories, and the repositories not in any set, each In scope or
+  Out with **Put this project in scope** or **Take this project out of
+  scope**, and the switch "Include tasks with no repository". A draft with no
+  entry and the toggle off shall disable Save and say why; a reader shall see
+  all of it disabled. The guided setup of the coordinator shall offer the same
+  choice as an optional step, and the copilot's scope hint shall name the
+  projects.
+- **AC-COORDINATOR-PERMISSIONS-005.9:** When the sets or repositories cannot be
+  loaded, the Projects part shall show "Could not load projects" with **Try
+  again**, keep the switch on `all` only if it was, and never allow a
+  `selected` save. While the phase 3.1 flag is not effective, none of the above
+  shall exist: no field, no filter, no control.
+
 ## Out of scope
 
 - Setting any action to `automatic`, and choosing which is first (phase 3,
   decision D13).
 - A stop proposal kind; `stop` stays `denied` (ADR D25).
-- Watching part of a workflow (by step, label or repository).
+- Watching part of a workflow by step or label; by repository it is the
+  Projects scope of `005`.
 - A warning when a watched workflow has no repository; the mockup's
   repository-resolution warning belongs to phase 4 intake.
 - Workspace-wide maxima set above the per-coordinator settings.
