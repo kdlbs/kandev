@@ -468,6 +468,7 @@ async function checkAndResume({
 }
 
 interface UseSessionResumptionReturn {
+  requestIdentity: import("@/lib/session-recovery-presentation").SessionRecoveryOwner["requestIdentity"];
   resumptionState: ResumptionState;
   sessionStatus: SessionStatus | null;
   error: string | null;
@@ -957,7 +958,18 @@ export function useSessionResumption(
     buildGuardedSettersFor,
   });
 
+  const request = captureRequest();
+  const ownsFeedback = request.key === getSessionRequestKey(taskId, sessionId, taskArchiveState);
   return {
+    requestIdentity:
+      ownsFeedback && taskId && sessionId
+        ? {
+            taskId,
+            sessionId,
+            generation: request.generation,
+            attemptId: recoveryAttemptIdRef.current,
+          }
+        : null,
     resumptionState,
     sessionStatus,
     error,

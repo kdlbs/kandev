@@ -1,5 +1,7 @@
 "use client";
 
+import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
+
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -249,27 +251,6 @@ function PreviewSessionTabDialogHost({
   );
 }
 
-function PreviewSessionRecoverySurface({
-  workspaceId,
-  resumption,
-}: {
-  workspaceId?: string | null;
-  resumption: ReturnType<typeof useSessionResumption>;
-}) {
-  return (
-    <SessionRecoveryFeedback
-      error={resumption.error}
-      notice={resumption.notice}
-      recoveryFailure={resumption.recoveryFailure}
-      onRetry={getSessionRecoveryRetry(resumption)}
-      retryDisabled={
-        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
-      }
-      workspaceId={workspaceId ?? null}
-    />
-  );
-}
-
 /**
  * Session tabs for the kanban preview panel.
  *
@@ -330,6 +311,13 @@ export function PreviewSessionTabs({
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId, isArchived ?? null);
+  const automaticRecoveryOwnedByChat = useAutomaticRecoveryChatOwner({
+    taskId,
+    sessionId: activeSessionId,
+    recovery: resumption,
+    summary: taskStatusSummary,
+    disabled: Boolean(isArchived),
+  });
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
   // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
   // closure at the moment delete is confirmed, and `session.delete` can take
@@ -410,7 +398,17 @@ export function PreviewSessionTabs({
       resumption={resumption}
     >
       <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-        <PreviewSessionRecoverySurface workspaceId={workspaceId} resumption={resumption} />
+        <SessionRecoveryFeedback
+          ownedByChat={automaticRecoveryOwnedByChat}
+          workspaceId={workspaceId ?? null}
+          error={resumption.error}
+          notice={resumption.notice}
+          recoveryFailure={resumption.recoveryFailure}
+          onRetry={getSessionRecoveryRetry(resumption)}
+          retryDisabled={
+            resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+          }
+        />
         <div className="border-b px-2 py-1">
           <SessionTabs
             tabs={tabs}

@@ -7,11 +7,13 @@ import { formatDateTime } from "@/lib/i18n/formats";
 import type { TaskLaunchErrorContextValue } from "../task-launch-error-context";
 import {
   buildRecoveryCardModel,
+  automaticRecoveryCauses,
   causeLabel,
   operationLabel,
 } from "./session-bootstrap-recovery-model";
 import {
   isSessionRecoveryBusy,
+  matchingAutomaticRecovery,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
@@ -168,7 +170,11 @@ export function useRecoveryPresentation(
   context: TaskLaunchErrorContextValue | null,
 ) {
   const { t } = useTranslation();
-  const automatic = matchingAutomaticRecovery(context, model.sessionId);
+  const automatic = matchingAutomaticRecovery(
+    context?.automaticRecovery,
+    context?.taskId,
+    model.sessionId,
+  );
   const managedCloneRelocation =
     model.kind === "managed_clone_relocation_required" ||
     Boolean(actions.managedCloneRecoveryStamp);
@@ -181,9 +187,26 @@ export function useRecoveryPresentation(
     isSessionRecoveryBusy(automatic?.resumptionState ?? "idle") ||
     actions.busyAction !== null;
   const busyAction = automatic?.resumptionState === "resuming" ? "resume" : actions.busyAction;
-  const details = recoveryPresentationDetails(model, bootstrap?.causes ?? [], actions, t);
+  const causes = bootstrap?.causes ?? automaticRecoveryCauses(automatic, t);
+  const details = recoveryPresentationDetails(model, causes, actions, t);
   const failure = recoveryFailureCopy(actions, t);
-  return { copy, busy, busyAction, details, failure };
+  return {
+    copy: withAutomaticNotice(copy, automatic, actions),
+    busy,
+    busyAction,
+    details,
+    failure,
+  };
+}
+
+function withAutomaticNotice(
+  copy: { title: string; summary: string },
+  automatic: SessionRecoveryOwner | null,
+  actions: SessionRecoveryActions,
+) {
+  return automatic?.notice && !actions.recoveryError
+    ? { ...copy, summary: automatic.notice }
+    : copy;
 }
 
 function buildBootstrapRecoveryModel(
@@ -261,12 +284,6 @@ function isBootstrapRecovery(model: ActiveSessionRecovery) {
     model.kind !== "provider_quota_limited" &&
     model.kind !== "managed_clone_relocation_required"
   );
-}
-
-function matchingAutomaticRecovery(context: TaskLaunchErrorContextValue | null, sessionId: string) {
-  return context?.statusSummary?.active_error?.session_id === sessionId
-    ? context.automaticRecovery
-    : null;
 }
 
 function isManagedRuntimeFailure(kind: string) {

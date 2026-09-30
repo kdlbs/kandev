@@ -244,6 +244,8 @@ function setTaskPlansState(patch: Partial<TaskPlansState>) {
 }
 
 type TestAppState = FakeAppState & {
+  taskSessions: { items: Record<string, TaskSession> };
+  messages: { bySession: Record<string, never[]> };
   kanban: {
     tasks: Array<{ id: string; primarySessionId: string | null }>;
   };
@@ -265,6 +267,8 @@ vi.mock("@/components/state-provider", () => ({
     useStore(fakeStore, (state) =>
       selector({
         ...state,
+        taskSessions: { items: mocks.taskSessionItems },
+        messages: { bySession: {} },
         agentProfiles: { items: mocks.agentProfiles },
         kanban: {
           tasks: mocks.kanbanTasks.map((task) => ({
