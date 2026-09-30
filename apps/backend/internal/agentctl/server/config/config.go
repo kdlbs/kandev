@@ -79,9 +79,12 @@ type Config struct {
 	// Empty means authentication is disabled (e.g. dev/test without nonce).
 	AuthToken string
 
-	// ListenHostOverride forces HTTP listeners to a specific host. It is used by
-	// SSH launches, whose controller and instance traffic stays inside explicit
-	// loopback SSH forwards even though bootstrap authentication is enabled.
+	// ListenHostOverride forces HTTP listeners to a specific host
+	// (AGENTCTL_LISTEN_HOST) even though bootstrap authentication is enabled.
+	// Launches that know the only address the backend dials set it: the local
+	// standalone launcher passes agent.standaloneHost, and SSH and Kubernetes
+	// launches pass 127.0.0.1 because the backend reaches them only through a
+	// forward.
 	ListenHostOverride string
 
 	// BootstrapNonce is a one-time-use nonce for the handshake protocol.

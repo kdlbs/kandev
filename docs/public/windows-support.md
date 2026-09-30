@@ -65,7 +65,7 @@ $env:KANDEV_SERVER_HOST = '127.0.0.1'
 kandev
 ```
 
-Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](configuration.md).
+Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. The core `agentctl` service does not listen on all interfaces by default: it listens on `agent.standaloneHost`, which is `127.0.0.1` by default, so it should not need an inbound firewall rule. See [Configuration](configuration.md).
 
 ## Windows paths and command discovery
 

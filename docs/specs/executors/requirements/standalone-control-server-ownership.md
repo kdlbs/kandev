@@ -172,6 +172,16 @@ each other's agents.
   server that is already shutting down is grouped here rather than with the refusals of
   AC-EXECUTORS-CONTROL-OWNERSHIP-001.6 because nothing about it was refused: it is a server
   that will not be there, and it needs no refusal reason of its own.
+- **AC-EXECUTORS-CONTROL-OWNERSHIP-001.12:** When the system starts a control server on
+  the local host, it shall make that server and every instance server it supervises listen
+  only on the host the backend dials it at, `agent.standaloneHost` (IPv4 loopback by
+  default). A listener it opens only to pick a fallback control port shall bind that host
+  when it is a specific IP address and IPv4 loopback otherwise, and never every interface.
+  Bootstrap authentication shall not by itself widen the listener to every interface:
+  identity and capability retrieval under AC-EXECUTORS-CONTROL-OWNERSHIP-004.6 needs no
+  credential, and the backend and the agent processes it supervises reach it over
+  loopback. A non-loopback standalone host that an operator configures applies to both
+  the dial and the listener.
 
 ### REQ-EXECUTORS-CONTROL-OWNERSHIP-004: An upgrade never adopts an incompatible control server
 

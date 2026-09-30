@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,15 +246,11 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inject bootstrap nonce and the resolved child contract. Remove inherited
-	// copies first so a managed child cannot observe a conflicting host value.
-	overrides := []string{"AGENTCTL_BOOTSTRAP_NONCE=" + nonce}
-	if l.startupConfig.Configured {
-		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
-		if err != nil {
-			return err
-		}
-		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	// Inject the launcher-owned child contract. Remove inherited copies first so
+	// a managed child cannot observe a conflicting host value.
+	overrides, err := l.childEnvOverrides(nonce)
+	if err != nil {
+		return err
 	}
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
@@ -267,7 +264,6 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	if l.startupConfig.AgentSurvivalEnabled {
 		clearInheritedLivenessPipeEnv(l.cmd)
 	} else {
-		var err error
 		pipeWrite, err = setupLivenessPipe(l.cmd)
 		if err != nil {
 			return err
@@ -307,6 +303,26 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	go l.monitorExit()
 
 	return nil
+}
+
+// childEnvOverrides returns the environment entries the launcher owns for the
+// agentctl child: the bootstrap nonce, the listen host, and the resolved
+// startup contract. The listen host is the host the backend dials (l.host), so
+// the control server and every instance server it supervises listen only there
+// rather than on every interface.
+func (l *Launcher) childEnvOverrides(nonce string) ([]string, error) {
+	overrides := []string{
+		"AGENTCTL_BOOTSTRAP_NONCE=" + nonce,
+		"AGENTCTL_LISTEN_HOST=" + l.host,
+	}
+	if l.startupConfig.Configured {
+		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
+		if err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	}
+	return overrides, nil
 }
 
 func environmentWithOverrides(base []string, overrides ...string) []string {
@@ -432,7 +448,7 @@ func (l *Launcher) closeParentPipeLocked() {
 // dual-stack loopback connect must find nothing listening AND a fresh
 // loopback bind must succeed.
 //
-// A bind alone is not enough. A surviving agentctl holds the wildcard
+// A bind alone is not enough. A surviving agentctl can hold the wildcard
 // address, and on macOS/BSD a bind against an active wildcard listener can
 // still succeed, which would report the occupied control port as free and
 // send this launch to a second server on a port the record does not name.
@@ -443,9 +459,30 @@ func checkPortAvailable(port int) error {
 	return nil
 }
 
-// findFreePort asks the OS for an available port by binding to :0.
-func findFreePort() (int, error) {
-	ln, err := net.Listen("tcp", ":0")
+// loopbackFreePortProbeAddr is the probe address for every host that is not a
+// specific IP literal.
+const loopbackFreePortProbeAddr = "127.0.0.1:0"
+
+// freePortProbeAddr returns the address findFreePort binds to learn a free
+// port for an agentctl child that will listen on host. A specific IP literal
+// (IPv4, or IPv6 bare or in brackets) is probed on that address, which is
+// where the child binds. localhost, an empty host, any other host name, and an
+// unspecified address are probed on IPv4 loopback: a host name is not resolved
+// here (Go binds a "tcp" listener for localhost on its first IPv4 address),
+// and the probe only learns a port number, so it never opens an
+// all-interfaces listener.
+func freePortProbeAddr(host string) string {
+	literal := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if ip, err := netip.ParseAddr(literal); err == nil && !ip.IsUnspecified() {
+		return net.JoinHostPort(ip.String(), "0")
+	}
+	return loopbackFreePortProbeAddr
+}
+
+// findFreePort asks the OS for a port that is free where an agentctl child
+// listening on host will bind.
+func findFreePort(host string) (int, error) {
+	ln, err := net.Listen("tcp", freePortProbeAddr(host))
 	if err != nil {
 		return 0, err
 	}
@@ -466,7 +503,7 @@ func (l *Launcher) ensurePortAvailable() error {
 	l.logger.Info("port already in use, selecting a free port",
 		zap.Int("port", l.port))
 
-	freePort, err := findFreePort()
+	freePort, err := findFreePort(l.host)
 	if err != nil {
 		return fmt.Errorf("port %d is in use and failed to find alternative: %w", originalPort, err)
 	}

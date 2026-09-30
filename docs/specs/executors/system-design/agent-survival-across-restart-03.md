@@ -22,7 +22,8 @@ boundaries and components this part assumes. This part holds the data contracts
 recovery itself consumes and produces: how instances are enumerated, how the
 durable records are read, what an execution is reconstructed from, how a turn
 that ended while nobody was attached is applied exactly once, and what agent
-events a detached instance must retain.
+events a detached instance must retain. It also covers the address the locally
+launched control server and its instance servers listen on.
 
 ## Requirement mapping
 
@@ -38,7 +39,7 @@ part 3 holds the recovery data contracts.
 | `REQ-EXECUTORS-SURVIVAL-003` | [Startup](agent-survival-across-restart-02.md#startup), [Persistence](agent-survival-across-restart-02.md#persistence) |
 | `REQ-EXECUTORS-SURVIVAL-004` | [Turn outcome across the detached gap](#turn-outcome-across-the-detached-gap) |
 | `REQ-EXECUTORS-SURVIVAL-005` | [Capability gating and scope](agent-survival-across-restart-02.md#capability-gating-and-scope) |
-| `REQ-EXECUTORS-CONTROL-OWNERSHIP-001` | [Ownership identity and credential](agent-survival-across-restart-01.md#ownership-identity-and-credential) |
+| `REQ-EXECUTORS-CONTROL-OWNERSHIP-001` | [Ownership identity and credential](agent-survival-across-restart-01.md#ownership-identity-and-credential), [Control-server listen address](#control-server-listen-address) |
 | `REQ-EXECUTORS-CONTROL-OWNERSHIP-002` | [Single driver](agent-survival-across-restart-01.md#single-driver) |
 | `REQ-EXECUTORS-CONTROL-OWNERSHIP-003` | [Unowned shutdown](agent-survival-across-restart-01.md#unowned-shutdown) |
 | `REQ-EXECUTORS-CONTROL-OWNERSHIP-004` | [Capability compatibility](agent-survival-across-restart-01.md#capability-compatibility) |
@@ -383,3 +384,41 @@ Validation lives with the other `agentctl.*` checks, and three of these criteria
 rules that only exist there: the retention limit's accepted range, the product of the
 per-read timeout and attempt count, and the unowned period's ordering, clamp and floor.
 All three reject rather than clamp where the criteria say reject.
+
+### Control-server listen address
+
+An agentctl that holds an auth token and receives no listen host binds every interface
+(`Config.ListenHost` in `internal/agentctl/server/config`). A Docker launch needs that,
+because the backend reaches that agentctl across the container boundary. The standalone
+control server has no such consumer: the backend dials it, and every instance server it
+supervises, only at `agent.standaloneHost`, which is also the host of the recorded control
+endpoint. The launcher therefore adds `AGENTCTL_LISTEN_HOST=<agent.standaloneHost>` to the
+child environment beside the bootstrap nonce, replacing any inherited value, as the SSH and
+Kubernetes launches already do for their forwards (`AC-EXECUTORS-CONTROL-OWNERSHIP-001.12`).
+
+The host is passed as written, because the child formats its listen address the same way
+the backend formats the dial URL (`host:port`). A loopback literal stays on loopback, an
+empty value becomes the launcher's existing `localhost` default, and a non-loopback host an
+operator configured is used for both the dial and the listener. A bracketed IPv6 literal
+works for the dial and the listen address; a bare one does not parse as a dial URL, so it
+was not a working setting before this listener change either. Docker, remote Docker,
+Sprites, SSH and Kubernetes start their own agentctl and never use this launcher.
+
+Agents do not dial `agent.standaloneHost`. agentctl hands each agent the Kandev MCP
+endpoints of its instance server as `http://localhost:<instance port>/mcp` and `/sse`. With
+the default IPv4 loopback listener, a client that tries only the first address `localhost`
+resolves to is refused when that address is `::1`, as it can be on Windows. Clients that
+try every resolved address in turn, such as Go's dialer, Node.js 20 and later with its
+default `autoSelectFamily`, curl and Python's `socket.create_connection`, reach
+`127.0.0.1`. SSH and Kubernetes launches already bind `127.0.0.1` and hand agents the same
+`localhost` URLs.
+
+When the configured control port is busy, the launcher asks the OS for a fallback port with
+a bind on the standalone host when it is a specific IP literal, which is where the child
+will listen, and on `127.0.0.1` for `localhost`, any other host name, and an unspecified
+address. The probe only learns a port number, so it never opens an all-interfaces
+listener, and a host name is not resolved for it. For a host name that does not resolve to
+loopback, or an unspecified address, the probe therefore checks loopback only; a port taken
+on another address makes the child's bind fail, and the launch reports the exit. With the
+default host this is the loopback bind the port-availability probe of
+[port collision safety](../requirements/port-collision-safety.md) uses.
