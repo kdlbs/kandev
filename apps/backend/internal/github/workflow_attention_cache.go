@@ -135,7 +135,13 @@ func (s *Service) collectWorkflowObservation(
 		return &workflowObservation{Attention: workflowAttentionUnknown("")}, nil
 	}
 	if isTerminalPR(pr) {
-		return &workflowObservation{Attention: workflowAttentionNone(pr.HeadSHA)}, nil
+		observation := &workflowObservation{Attention: workflowAttentionNone(pr.HeadSHA)}
+		if pr.HeadSHA == "" {
+			return observation, nil
+		}
+		runs, err := s.cachedWorkflowRuns(ctx, client, cacheScope, owner, repo, pr.HeadSHA)
+		observation.Runs = runs
+		return observation, err
 	}
 	if pr.HeadSHA == "" {
 		return &workflowObservation{Attention: workflowAttentionUnknown("")}, nil

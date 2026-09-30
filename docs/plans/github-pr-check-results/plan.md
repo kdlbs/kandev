@@ -331,4 +331,4 @@ screenshots changed.
 
 ## Delivery boundary
 
-Implementation is complete. The package remains unstaged and uncommitted.
+Implementation is complete and delivered in PR #4092.

@@ -177,3 +177,33 @@ Validation after the fix:
 - `go test ./internal/github -run '^(TestGetPRFeedbackPreservesUnmatchedActionsSuitesWhenWorkflowEvidenceUnavailable|TestSelectCurrentPRChecksSupersededSuiteWithoutReplacementJobs|TestSelectCurrentPRChecksQueuedReplacementAndPartialRerun)$' -count=1`: passed.
 - `go test ./internal/github -count=1`: passed.
 - `go test ./internal/orchestrator -run 'Test.*(CIAutomation|CIFix|CIMerge)' -count=1`: passed.
+
+### Further PR review remediation
+
+Follow-up review found three additional selection/status issues: duplicate
+same-name status contexts could remain beside identified check runs, terminal PR
+feedback skipped workflow-suite selection, and cached active workflow metadata
+could override fresh completed checks. The merge now lets identified runs shadow
+duplicate status contexts while preserving independent application/suite runs.
+Terminal PR feedback still reports no workflow attention but loads workflow runs
+for selection. Fresh check results determine state when present; an active
+workflow with no concrete checks remains pending. The non-empty precondition for
+`newestWorkflowRun` is documented at the helper.
+
+Regression coverage:
+
+- `TestMergeChecksDeduplicatesIdentifiedRunsAgainstStatusContexts`
+- `TestTerminalPRFeedbackSelectsCurrentWorkflowSuite`
+- `TestFreshCompletedChecksOverrideCachedActiveWorkflowStatus`
+
+Validation after review remediation:
+
+- `go test ./internal/github -run '^(TestMergeChecksDeduplicatesIdentifiedRunsAgainstStatusContexts|TestTerminalPRFeedbackSelectsCurrentWorkflowSuite|TestFreshCompletedChecksOverrideCachedActiveWorkflowStatus)$' -count=1`: passed.
+- `go test ./internal/github -count=1`: passed.
+- `go test ./internal/orchestrator -run 'Test.*(CIAutomation|CIFix|CIMerge)' -count=1`: passed.
+- `(cd apps/web && pnpm run typecheck)`: passed.
+- Desktop PR checks E2E, current checks case: passed, 1 test.
+- Mobile PR checks E2E, current checks case: passed, 1 test.
+- `python3 scripts/list-docs.py validate`: passed.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check`: passed.

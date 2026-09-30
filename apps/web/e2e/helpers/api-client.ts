@@ -2332,6 +2332,10 @@ export class ApiClient {
     repo: string;
     pr_number: number;
     checks?: Array<{
+      id?: number;
+      app_id?: number;
+      app_slug?: string;
+      check_suite_id?: number;
       name: string;
       source?: string;
       status?: string;

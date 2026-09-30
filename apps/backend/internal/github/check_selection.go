@@ -84,6 +84,8 @@ func (selection *workflowSuiteSelection) addMatchedRunGroup(group []WorkflowRun)
 	}
 }
 
+// newestWorkflowRun requires non-empty input. Groups are recorded only while
+// appending a matched run.
 func newestWorkflowRun(runs []WorkflowRun) WorkflowRun {
 	current := runs[0]
 	for _, candidate := range runs[1:] {
@@ -164,7 +166,7 @@ func workflowRunMatchesForCheckSelection(run WorkflowRun, pr *PR) bool {
 
 func workflowRunIsActive(run WorkflowRun) bool {
 	switch strings.ToLower(strings.TrimSpace(run.Status)) {
-	case "queued", "in_progress", checkStatusPending, "requested", "waiting":
+	case "queued", checkStatusInProgress, checkStatusPending, "requested", "waiting":
 		return true
 	default:
 		return false

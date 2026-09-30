@@ -208,7 +208,7 @@ func newPRStatusWithCheckState(
 
 func selectedPRChecksState(checks []CheckRun, hasActiveWorkflow bool) string {
 	state := computeOverallCheckStatus(checks)
-	if hasActiveWorkflow && state != checkConclusionFail {
+	if hasActiveWorkflow && state == "" {
 		return checkStatusPending
 	}
 	return state
@@ -443,7 +443,7 @@ func convertRawStatusContexts(raw []ghStatusContext) []CheckRun {
 		case commitStatusFailure, commitStatusError:
 			conclusion = checkConclusionFail
 		case commitStatusPending:
-			status = "in_progress"
+			status = checkStatusInProgress
 			conclusion = ""
 		}
 		checks[i] = CheckRun{
@@ -462,9 +462,8 @@ func convertRawStatusContexts(raw []ghStatusContext) []CheckRun {
 	return checks
 }
 
-// mergeChecks deduplicates check runs and commit statuses by normalized name.
-// Check-run source wins over status-context; among same-source duplicates the
-// most recent entry (by StartedAt) is kept.
+// mergeChecks keeps identified check runs independent while allowing their
+// normalized names to shadow duplicate status contexts.
 func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 	merged := make([]CheckRun, 0, len(checkRuns)+len(statusChecks))
 	byKey := make(map[string]int)
@@ -482,6 +481,13 @@ func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 	}
 	for _, check := range checkRuns {
 		key := checkRunMergeKey(check)
+		statusKey := "name:" + checkMergeKey(check)
+		if idx, ok := byKey[statusKey]; ok && merged[idx].Source == checkSourceStatusContext {
+			merged[idx] = check
+			delete(byKey, statusKey)
+			byKey[key] = idx
+			continue
+		}
 		if idx, ok := byKey[key]; ok {
 			if merged[idx].Source == checkSourceStatusContext {
 				if checkRunHasProviderIdentity(check) {

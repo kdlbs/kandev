@@ -116,10 +116,12 @@ Direct client tests can use the uncached reader once for the same request.
 `getPRFeedback` and `getPRStatus` perform selection before `newPRStatus`,
 `hasFailingChecks`, or feedback publication. Keep the same observation available
 for workflow-attention classification.
-Derive snapshot state from retained checks plus selected active workflows.
-A selected active workflow keeps an otherwise successful or empty reduction pending,
-even before any job exists. A retained failure still takes precedence.
-This changes summary state without adding a check or incrementing running counts.
+Derive snapshot state from retained checks. A selected active workflow with no
+concrete retained check result keeps an otherwise empty reduction pending, even
+before any job exists. Once check results are present, derive the state from
+those results; cached active workflow metadata must not override a fresh
+completed check state. A retained failure still takes precedence. This changes
+summary state without adding a check or incrementing running counts.
 Carry that state through `PRFeedback.checks_state` and its persistence path;
 legacy feedback without the field retains the existing reduction fallback.
 
