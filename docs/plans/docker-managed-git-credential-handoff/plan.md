@@ -200,7 +200,7 @@ Implementation verification:
 - `python3 scripts/list-docs.py validate` and
   `python3 scripts/lint-spec-files.py --all` passed.
 - `git diff --check` passed.
-Design-package validation passed:
+Design-package validation before implementation passed:
 
 - `python3 scripts/list-docs.py validate`: 333 decisions and 1262 specifications validated.
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
@@ -208,12 +208,11 @@ Design-package validation passed:
 - `.github/scripts/pr-docs.cjs` `validateCoverage`: both work orders covered, no errors. The local preflight supplied the planned runtime path and current document contents.
 - All package relative Markdown links resolve to existing files.
 - `git diff --check -- docs/specs docs/plans/docker-managed-git-credential-handoff`: passed.
-- `git status --short -- docs/plans/docker-managed-git-credential-handoff`: new package present and untracked.
 
-The updated design and package remain unstaged and uncommitted.
-The investigation's temporary overlay probes remained outside the repository;
-the implementation and permanent regression tests are now present in the
-workspace. No files are staged or committed.
+The investigation's temporary overlay probes remained outside the repository.
+The permanent implementation and regression tests now accompany the design
+and work orders as the completed package. Investigation findings and
+implementation results are recorded in their separate sections above.
 
 ## Related packages and documentation
 

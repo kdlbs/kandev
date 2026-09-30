@@ -1852,10 +1852,6 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	return nil
 }
 
-func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
-	return composeConfiguredAgentEnvironmentWithManagedGitTools(current, overlay, replaceIndexed, installedManagedGitTools{})
-}
-
 type installedManagedGitTools struct {
 	helperPath string
 	shimDir    string
@@ -1931,6 +1927,8 @@ func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools
 	if bashEnv == "" {
 		bashEnv = env[githubauth.CredentialCLIBashEnvEnv]
 	}
+	// Incoming snapshots can already carry managed PATH and BASH_ENV entries.
+	// Unwrap those owned entries before rebuilding the active environment.
 	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
 	config.ActivateManagedGitTools(env, shimDir, bashEnv)
 }
