@@ -323,6 +323,23 @@ func TestHTTPListProposals(t *testing.T) {
 		}
 	})
 
+	t.Run("404 for an unknown coordinator id", func(t *testing.T) {
+		h, _ := setup(t)
+		rec := runHandler(h.httpListProposals, http.MethodGet, "/api/v1/workspaces/ws-1/coordinators/missing/proposals", "", workspaceParams("missing"))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+		}
+	})
+
+	t.Run("404 for a coordinator of another workspace", func(t *testing.T) {
+		h, cid := setup(t)
+		params := gin.Params{{Key: "id", Value: "other-workspace"}, {Key: "cid", Value: cid}}
+		rec := runHandler(h.httpListProposals, http.MethodGet, "/api/v1/workspaces/other-workspace/coordinators/"+cid+"/proposals?status=all", "", params)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+		}
+	})
+
 	for _, raw := range []string{"", "PENDING", "approved"} {
 		t.Run("status="+raw+" is 400 naming status", func(t *testing.T) {
 			h, cid := setup(t)
