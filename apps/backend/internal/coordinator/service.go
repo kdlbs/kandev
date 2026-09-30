@@ -145,6 +145,7 @@ type Service struct {
 	recorderStopped bool
 	wakeInFlight    sync.WaitGroup
 	backstop        *WakeBackstop
+	delivery        deliveryWorker
 
 	// relayReader and relayTasks back the relay read; nil until SetRelayDeps.
 	relayReader RelayReader
