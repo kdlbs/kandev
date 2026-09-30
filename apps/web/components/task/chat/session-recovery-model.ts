@@ -200,7 +200,7 @@ export function useRecoveryPresentation(
 }
 
 function withAutomaticNotice(
-  copy: { title: string; summary: string },
+  copy: ReturnType<typeof recoveryPresentationCopy>,
   automatic: SessionRecoveryOwner | null,
   actions: SessionRecoveryActions,
 ) {

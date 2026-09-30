@@ -169,3 +169,11 @@ pending actions and workspace-only success. No prior RED result is claimed.
   full desktop and phone suites passed. The test also asserts history remains,
   View recovery focuses Chat, both actions disable during a deferred manual
   retry, and failure stays in the same card.
+
+PR integration validation found that the automatic-notice helper narrowed away
+the summary-visibility field added on the current base. Its parameter now derives
+from the presentation-copy return type, preserving that contract without changing
+runtime behavior. The synthetic merge's typecheck failed before this correction
+and passed afterward with a 4 GiB Node heap; its six focused suites passed all
+81 tests. The three affected recovery-card suites also passed on the PR branch.
+Remote CI and review validation remain pending.
