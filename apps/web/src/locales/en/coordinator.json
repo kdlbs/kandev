@@ -4,7 +4,6 @@
   "configure": "Configure",
   "addCoordinator": "Add coordinator",
   "selectCoordinator": "Select coordinator",
-  "sidebarGenericEntry": "Coordinator",
   "sidebarSectionLabel": "Coordinators",
   "openCoordinators": "Open coordinators",
   "setUpCoordinator": "Set up a coordinator",

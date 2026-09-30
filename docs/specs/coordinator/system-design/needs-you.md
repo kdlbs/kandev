@@ -219,9 +219,14 @@ with `detected_at` older than 30 days. There is no timer.
   the folded `collapsedSummary` is the badge sum when above zero, otherwise the
   coordinator count. The header shortcut links to `/workspaces/:id/coordinator`;
   with no coordinator the body is one "Set up a coordinator" row
-  (`sidebar-coordinators-empty`) linking to the settings list. `MobileRequiredRows` in
-  `components/navigation/mobile-sidebar-layout-navigation.tsx` renders the same
-  rows. Badge values come from a small store keyed by coordinator id, seeded by
+  (`sidebar-coordinators-empty`) linking to the settings list. The phone menu uses
+  `MobileCoordinatorsSection` (`components/navigation/mobile-coordinators-section.tsx`),
+  built like `MobileAutomationsSection`: a header toggle with `aria-expanded` and
+  `aria-controls`, the list shortcut, and the rows, all 44px targets. It shares the
+  desktop `appSidebar.sectionExpanded.coordinators` state (default expanded), folded
+  summary and empty row (`mobile-sidebar-coordinators-empty`). It is mounted above the
+  automations node in `mobile-sidebar-layout-navigation.tsx`, or in
+  `MobileRequiredRows` when the layout has no automations node. Badge values come from a small store keyed by coordinator id, seeded by
   the list route's `open_proposals` field and replaced by each
   `coordinator.updated` payload.
 
