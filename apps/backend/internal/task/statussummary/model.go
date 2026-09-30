@@ -22,17 +22,18 @@ const (
 
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
-	MaxActiveErrorPreviewBytes  = 512
-	MaxActiveErrorDetailsBytes  = 4096
-	maxSessionIDBytes           = 256
-	maxTaskRepositoryIDBytes    = 256
-	maxPendingActionBytes       = 128
-	maxActiveErrorStampBytes    = 64
-	maxActiveErrorCategoryBytes = 64
-	maxPullRequestStateBytes    = 64
-	maxPullRequestURLBytes      = 2048
-	maxLaunchQueueIDBytes       = 256
-	maxLaunchQueueReasonBytes   = 64
+	MaxActiveErrorPreviewBytes    = 512
+	MaxActiveErrorDetailsBytes    = 4096
+	maxSessionIDBytes             = 256
+	maxTaskRepositoryIDBytes      = 256
+	maxPendingActionBytes         = 128
+	maxActiveErrorStampBytes      = 64
+	maxActiveErrorCategoryBytes   = 64
+	maxPullRequestStateBytes      = 64
+	maxPullRequestURLBytes        = 2048
+	maxPullRequestRepositoryBytes = 256
+	maxLaunchQueueIDBytes         = 256
+	maxLaunchQueueReasonBytes     = 64
 )
 
 const (
@@ -131,17 +132,22 @@ type GitSummary struct {
 // PullRequestSummary is intentionally an aggregate plus one representative
 // identity. It is not a list of PR records.
 type PullRequestSummary struct {
-	Count                    int    `json:"count,omitempty"`
-	OpenCount                int    `json:"open_count,omitempty"`
-	Attention                bool   `json:"attention,omitempty"`
-	WorkflowApprovalRequired bool   `json:"workflow_approval_required,omitempty"`
-	AutoFixEnabled           bool   `json:"auto_fix_enabled,omitempty"`
-	AutoMergeEnabled         bool   `json:"auto_merge_enabled,omitempty"`
-	HasMergeConflicts        bool   `json:"has_merge_conflicts,omitempty"`
-	AggregateState           string `json:"aggregate_state,omitempty"`
-	State                    string `json:"state,omitempty"`
-	Number                   int    `json:"number,omitempty"`
-	URL                      string `json:"url,omitempty"`
+	Count                      int    `json:"count,omitempty"`
+	OpenCount                  int    `json:"open_count,omitempty"`
+	Attention                  bool   `json:"attention,omitempty"`
+	WorkflowApprovalRequired   bool   `json:"workflow_approval_required"`
+	WorkflowApprovalStale      bool   `json:"workflow_approval_stale,omitempty"`
+	WorkflowApprovalPRNumber   int    `json:"workflow_approval_pr_number,omitempty"`
+	WorkflowApprovalRepository string `json:"workflow_approval_repository,omitempty"`
+	AutoFixEnabled             bool   `json:"auto_fix_enabled,omitempty"`
+	AutoMergeEnabled           bool   `json:"auto_merge_enabled,omitempty"`
+	HasMergeConflicts          bool   `json:"has_merge_conflicts,omitempty"`
+	MergeConflictPRNumber      int    `json:"merge_conflict_pr_number,omitempty"`
+	MergeConflictRepository    string `json:"merge_conflict_repository,omitempty"`
+	AggregateState             string `json:"aggregate_state,omitempty"`
+	State                      string `json:"state,omitempty"`
+	Number                     int    `json:"number,omitempty"`
+	URL                        string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -286,7 +292,8 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	if pr == nil {
 		return nil
 	}
-	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 {
+	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 || pr.WorkflowApprovalPRNumber < 0 ||
+		pr.MergeConflictPRNumber < 0 {
 		return fmt.Errorf("pull request counts and number cannot be negative")
 	}
 	fields := []struct {
@@ -297,6 +304,8 @@ func validatePullRequest(pr *PullRequestSummary) error {
 		{"pull request state", pr.State, maxPullRequestStateBytes},
 		{"pull request aggregate state", pr.AggregateState, maxPullRequestStateBytes},
 		{"pull request URL", pr.URL, maxPullRequestURLBytes},
+		{"workflow approval repository", pr.WorkflowApprovalRepository, maxPullRequestRepositoryBytes},
+		{"merge conflict repository", pr.MergeConflictRepository, maxPullRequestRepositoryBytes},
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {

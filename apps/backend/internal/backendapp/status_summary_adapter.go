@@ -59,6 +59,8 @@ func (r *githubTaskStatusSummaryPRReader) ListTaskStatusSummaryPullRequests(
 			}
 			result[taskID] = append(result[taskID], statussummary.PullRequestInput{
 				Key:                      key,
+				Owner:                    pr.Owner,
+				Repo:                     pr.Repo,
 				State:                    pr.State,
 				Number:                   pr.PRNumber,
 				URL:                      pr.PRURL,
@@ -77,6 +79,7 @@ func (r *githubTaskStatusSummaryPRReader) ListTaskStatusSummaryPullRequests(
 				HeadSHA:                  pr.HeadSHA,
 				WorkflowAttentionState:   workflowAttentionState,
 				WorkflowAttentionHeadSHA: workflowAttentionHeadSHA,
+				WorkflowAttentionStale:   pr.WorkflowAttention != nil && pr.WorkflowAttention.Stale,
 			})
 		}
 	}

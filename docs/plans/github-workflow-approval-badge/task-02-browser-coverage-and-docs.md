@@ -126,11 +126,13 @@ Provider refresh retains existing cache latency. Use explicit refresh for author
 
 Implemented provider-backed desktop and phone coverage, and documented the amber lock and conflict priority in `docs/public/integrations.md`. The phone picker fixture starts with a same-head fork approval and no conflict, alongside one ready sibling. It then changes the provider PR to dirty on that same head and verifies conflict priority while retaining both explanations.
 
+Review fixup verification reran both browser suites after the compact-summary freshness and stale-disclosure changes. The desktop provider refresh now asserts the serialized `workflow_approval_required: false` value after clearing evidence. The phone task-picker scenario proves the approval-only padlock before disclosure, then changes the provider-backed PR to conflict state and verifies conflict priority with both explanations in the drawer.
+
 - Desktop E2E: `(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/pr/pr-status-badge.spec.ts -- --retries=0)`; 11 tests passed.
 - Phone E2E: `(cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/pr/mobile-pr-sidebar-automation-indicators.spec.ts tests/pr/mobile-pr-ci-chip.spec.ts -- --retries=0)`; 9 tests passed.
-- Focused phone capture E2E: `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/pr/mobile-pr-sidebar-automation-indicators.spec.ts -- --retries=0 --grep "shows touch indicators")`; 1 test passed and the approval-only phone capture was visually inspected with the amber lock visible.
-- Focused component regression suite: `(cd apps/web && pnpm exec vitest run components/github/pr-task-icon.workflow-approval.test.tsx --reporter=dot)`; 7 tests passed.
-- Component stale-evidence regression: `(cd apps/web && pnpm exec vitest run components/github/pr-task-icon.render.test.tsx components/github/pr-task-icon.workflow-approval.test.tsx components/github/pr-task-status-summary.test.ts components/github/pr-workflow-attention-summary.test.ts --reporter=dot)`; 49 tests passed.
+- Focused desktop capture E2E: `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --shards 1 --project chromium tests/pr/pr-status-badge.spec.ts -- --retries=0 --grep "explains a jobless fork workflow approval")`; 1 test passed.
+- Focused phone capture E2E: `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/pr/mobile-pr-sidebar-automation-indicators.spec.ts -- --retries=0 --grep "shows touch indicators")`; 1 test passed. The fresh approval-only task-picker image visibly contains the amber padlock and automation dots; all four phone images were checked against the manifest.
+- Combined changed and neighboring component regression suites: `(cd apps/web && pnpm exec vitest run lib/task-pr-info.test.ts components/github/pr-task-icon.render.test.tsx components/github/pr-task-icon.workflow-approval.test.tsx components/github/pr-task-icon-conflicts.test.ts components/github/pr-task-icon.automation.test.ts components/github/pr-task-status-summary.test.ts components/github/pr-workflow-attention-summary.test.ts components/github/pr-workflow-attention.test.ts components/github/pr-workflow-attention-icon.test.ts --reporter=dot)`; 73 tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm run build:vite`: passed.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet`: passed.
@@ -148,3 +150,5 @@ Implemented provider-backed desktop and phone coverage, and documented the amber
   - `mobile-pr-sidebar-automation-indicators--sidebar-workflow-conflict-priority-details-mobile.png`
 
 The desktop run verified the badge before hover, both computed amber colors, no narrow fine-pointer overflow, Kanban visibility, and clearing after refresh. The phone run verified the approval-only lock before tap, its containment within the task row, automation dots, two-PR attribution, drawer overflow, focus restoration, and unchanged task URL after dismissal. It then updated the provider-backed PR to a conflict on the same head and verified the red warning replaced the lock while the drawer retained both approval and conflict reasons. The approval-only capture shows the amber padlock; the conflict capture shows the red conflict triangle.
+
+Fresh fixup captures replace the earlier screenshots in the PR: the managed runner generated three desktop and four phone captures, and the complete seven-file manifest is verified before publication.

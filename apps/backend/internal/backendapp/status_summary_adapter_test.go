@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 func newStatusSummaryTestStore(t *testing.T) *github.Store {
@@ -122,10 +123,12 @@ func TestGitHubTaskStatusSummaryPRReaderIncludesWorkflowApprovalIdentity(t *test
 	store := newStatusSummaryTestStore(t)
 	approvalPR := &github.TaskPR{
 		TaskID: "task-workflow-approval-summary", RepositoryID: "repo-workflow-approval-summary", PRNumber: 42,
-		PRURL: "https://example.test/42", State: "open", HeadSHA: "head-a", CreatedAt: time.Now().UTC(),
+		Owner: "contributor", Repo: "fork", PRURL: "https://example.test/42", State: "open", HeadSHA: "head-a", CreatedAt: time.Now().UTC(),
 		WorkflowAttention: &github.WorkflowAttention{
-			State:   github.WorkflowAttentionApprovalRequired,
-			HeadSHA: "head-a",
+			State:      github.WorkflowAttentionApprovalRequired,
+			HeadSHA:    "head-a",
+			ObservedAt: time.Now().UTC(),
+			Stale:      true,
 		},
 	}
 	if err := store.CreateTaskPR(ctx, approvalPR); err != nil {
@@ -143,17 +146,28 @@ func TestGitHubTaskStatusSummaryPRReaderIncludesWorkflowApprovalIdentity(t *test
 	if len(inputs) != 1 {
 		t.Fatalf("summary inputs = %+v, want one input", inputs)
 	}
-	encoded, err := json.Marshal(inputs[0])
+	if inputs[0].HeadSHA != "head-a" || inputs[0].WorkflowAttentionState != "approval_required" ||
+		inputs[0].WorkflowAttentionHeadSHA != "head-a" || !inputs[0].WorkflowAttentionStale ||
+		inputs[0].Owner != "contributor" || inputs[0].Repo != "fork" {
+		t.Fatalf("workflow approval input = %+v", inputs[0])
+	}
+	summary := statussummary.BuildFromAuthoritative(statussummary.RebuildInput{
+		PRObserved:   true,
+		PullRequests: inputs,
+		Now:          time.Now().UTC(),
+	})
+	encoded, err := json.Marshal(summary.PullRequest)
 	if err != nil {
-		t.Fatalf("marshal summary input: %v", err)
+		t.Fatalf("marshal task pull request summary: %v", err)
 	}
 	var fields map[string]interface{}
 	if err := json.Unmarshal(encoded, &fields); err != nil {
-		t.Fatalf("unmarshal summary input: %v", err)
+		t.Fatalf("unmarshal task pull request summary: %v", err)
 	}
-	if fields["HeadSHA"] != "head-a" || fields["WorkflowAttentionState"] != "approval_required" ||
-		fields["WorkflowAttentionHeadSHA"] != "head-a" {
-		t.Fatalf("workflow approval identity fields = %s", encoded)
+	if fields["workflow_approval_required"] != true || fields["workflow_approval_stale"] != true ||
+		fields["workflow_approval_pr_number"] != float64(42) ||
+		fields["workflow_approval_repository"] != "contributor/fork" {
+		t.Fatalf("serialized workflow approval projection = %s", encoded)
 	}
 }
 

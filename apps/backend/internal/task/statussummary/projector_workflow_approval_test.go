@@ -8,6 +8,8 @@ import (
 func workflowApprovalEvent(state, headSHA, attentionState, attentionHeadSHA string) map[string]interface{} {
 	event := map[string]interface{}{
 		"repository_id": "repo-1",
+		"owner":         "contributor",
+		"repo":          "fork",
 		"pr_number":     42,
 		"state":         state,
 		"head_sha":      headSHA,
@@ -51,6 +53,7 @@ func TestWorkflowApprovalProjectionEligibility(t *testing.T) {
 		want  bool
 	}{
 		{name: "current open head", event: workflowApprovalEvent("open", "head-a", "approval_required", "head-a"), want: true},
+		{name: "case-insensitive current head", event: workflowApprovalEvent("open", "HEAD-A", "approval_required", "head-a"), want: true},
 		{name: "terminal pull request", event: workflowApprovalEvent("closed", "head-a", "approval_required", "head-a")},
 		{name: "head mismatch", event: workflowApprovalEvent("open", "head-b", "approval_required", "head-a")},
 		{name: "generic action required", event: workflowApprovalEvent("open", "head-a", "action_required", "head-a")},
@@ -65,6 +68,43 @@ func TestWorkflowApprovalProjectionEligibility(t *testing.T) {
 			}
 			assertWorkflowApproval(t, derivePullRequestSummary(state), test.want)
 		})
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.5, AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.6
+func TestWorkflowApprovalProjectionCarriesDisclosureIdentityAndStaleness(t *testing.T) {
+	event := workflowApprovalEvent("open", "head-a", "approval_required", "head-a")
+	event["workflow_attention"].(map[string]interface{})["stale"] = true
+	event["has_merge_conflicts"] = true
+	event["mergeable_state"] = "dirty"
+	state := newProjectionState()
+	if !(&Projector{}).applyPREventLocked(state, event) {
+		t.Fatal("initial PR event was not applied")
+	}
+
+	got := derivePullRequestSummary(state)
+	if got == nil {
+		t.Fatal("pull request summary is nil")
+	}
+	if !got.WorkflowApprovalRequired || !got.WorkflowApprovalStale {
+		t.Fatalf("workflow approval summary = %+v, want stale approval", got)
+	}
+	if got.WorkflowApprovalPRNumber != 42 || got.WorkflowApprovalRepository != "contributor/fork" {
+		t.Fatalf("workflow approval identity = %+v, want contributor/fork PR #42", got)
+	}
+	if !got.HasMergeConflicts || got.MergeConflictPRNumber != 42 || got.MergeConflictRepository != "contributor/fork" {
+		t.Fatalf("merge conflict identity = %+v, want contributor/fork PR #42", got)
+	}
+
+	missingRepository := workflowApprovalEvent("open", "head-a", "approval_required", "head-a")
+	delete(missingRepository, "owner")
+	delete(missingRepository, "repo")
+	withoutRepository := newProjectionState()
+	if !(&Projector{}).applyPREventLocked(withoutRepository, missingRepository) {
+		t.Fatal("PR event without repository identity was not applied")
+	}
+	if got := derivePullRequestSummary(withoutRepository); got == nil || got.WorkflowApprovalRepository != "" {
+		t.Fatalf("incomplete workflow approval repository identity = %+v, want empty", got)
 	}
 }
 
@@ -117,18 +157,29 @@ func TestWorkflowApprovalProjectionAggregatesOpenPRs(t *testing.T) {
 // @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.7
 func TestWorkflowApprovalProjectionEventRebuildParity(t *testing.T) {
 	var input RebuildInput
-	if err := json.Unmarshal([]byte(`{"PRObserved":true,"PullRequests":[{"Key":"repo-1#42","State":"open","HeadSHA":"head-a","WorkflowAttentionState":"approval_required","WorkflowAttentionHeadSHA":"head-a"}]}`), &input); err != nil {
+	if err := json.Unmarshal([]byte(`{"PRObserved":true,"PullRequests":[{"Key":"repo-1#42","Owner":"contributor","Repo":"fork","State":"open","Number":42,"HeadSHA":"head-a","WorkflowAttentionState":"approval_required","WorkflowAttentionHeadSHA":"head-a","WorkflowAttentionStale":true,"HasMergeConflicts":true,"MergeableState":"dirty"}]}`), &input); err != nil {
 		t.Fatalf("unmarshal rebuild fixture: %v", err)
 	}
 	rebuilt := BuildFromAuthoritative(input).PullRequest
 
 	state := newProjectionState()
-	if !(&Projector{}).applyPREventLocked(state, workflowApprovalEvent("open", "head-a", "approval_required", "head-a")) {
+	event := workflowApprovalEvent("open", "head-a", "approval_required", "head-a")
+	event["workflow_attention"].(map[string]interface{})["stale"] = true
+	event["has_merge_conflicts"] = true
+	event["mergeable_state"] = "dirty"
+	if !(&Projector{}).applyPREventLocked(state, event) {
 		t.Fatal("PR event was not applied")
 	}
 	eventSummary := derivePullRequestSummary(state)
 	assertWorkflowApproval(t, rebuilt, true)
 	assertWorkflowApproval(t, eventSummary, true)
+	if rebuilt.WorkflowApprovalPRNumber != eventSummary.WorkflowApprovalPRNumber ||
+		rebuilt.WorkflowApprovalRepository != eventSummary.WorkflowApprovalRepository ||
+		rebuilt.WorkflowApprovalStale != eventSummary.WorkflowApprovalStale ||
+		rebuilt.MergeConflictPRNumber != eventSummary.MergeConflictPRNumber ||
+		rebuilt.MergeConflictRepository != eventSummary.MergeConflictRepository {
+		t.Fatalf("rebuild/event workflow approval mismatch: rebuilt=%+v event=%+v", rebuilt, eventSummary)
+	}
 }
 
 // @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.4

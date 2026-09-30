@@ -26,7 +26,7 @@ The integration system owns this capability because GitHub evidence defines appr
 
 The user accepted an amber filled padlock, the upper-right warning position, and red conflict priority.
 Source inspection confirms stored workflow evidence and existing touch drawers.
-The compact projection currently omits approval. Adding one boolean closes that visibility gap without new reads.
+The compact projection currently omits approval. Add bounded approval/conflict identity and freshness metadata beside the aggregate flag without new reads.
 Reuse existing localized "Awaiting maintainer approval" text instead of introducing a second label.
 These reversible presentation choices do not require a new ADR or runtime flag.
 
@@ -48,21 +48,21 @@ These reversible presentation choices do not require a new ADR or runtime flag.
 
 ## Technical approach
 
-`statussummary.PullRequestInput` carries three bounded identity/classification strings.
+`statussummary.PullRequestInput` carries bounded repository identity, head/classification, and staleness facts.
 `githubTaskStatusSummaryPRReader` and `Projector.applyPREventLocked` populate the same facts.
-`derivePullRequestSummary` adds the optional `workflow_approval_required` boolean without expanding PR arrays.
-`taskPRInfoFromSummary` maps it to `TaskPRInfo.workflowApprovalRequired`.
+`derivePullRequestSummary` adds `workflow_approval_required`, one attributed approval identity with its stale flag, and one conflict identity without expanding PR arrays.
+`taskPRInfoFromSummary` maps the fields and summary timestamp to `TaskPRInfo`.
 
-`PRTaskIcon` derives the full-data flag through the existing attention helpers and falls back to compact data only before hydration.
+`PRTaskIcon` compares the compact summary time with every full PR sync/workflow observation time. It uses the compact workflow projection only when all cached full records are older; missing or malformed times keep full current-head evidence authoritative.
 `PRTaskIconGlyph` passes it to `PRStatusGlyph`, which selects conflict triangle, approval padlock, or no warning.
 Keep automation dots and status colors independent. Add approval text to both compact and full accessible names.
-Compact disclosures retain the projected reason during hydration errors; hydrated summaries remain per-PR.
+Compact-authoritative disclosures use the projected reason and per-PR identity instead of older cached workflow rows, including localized stale feedback. Preserve per-PR conflicts when both conditions apply.
 
 | Source | Shape | Behavior | Evidence | Missing/unsupported fallback |
 | --- | --- | --- | --- | --- |
 | GitHub full record | Open PR, matching head, `approval_required` | Eligible badge and per-PR explanation | Component and provider-fixture E2E | No approval inference |
-| GitHub compact row | Optional aggregated boolean | Badge before disclosure/hydration | Adapter, projector, mapping, mobile picker E2E | Omitted means false |
-| Legacy payload | No observation or boolean | Existing glyph behavior | Unit regressions | No badge |
+| GitHub compact row | Approval/conflict aggregates, one bounded identity per active reason, summary timestamp | Badge and disclosure when newer than cached PR evidence | Adapter, projector, mapping, desktop/phone E2E | Missing timestamps keep full-data authority |
+| Legacy payload | No observation or approval field | Existing glyph behavior | Unit regressions | No approval badge |
 | Other providers | Existing provider-specific controls | Existing behavior | No shared-provider logic changes | No GitHub approval claim |
 
 ## ASCII UI preview
@@ -163,7 +163,7 @@ Implementation completed on 2026-09-30. Both work orders passed, and the shared 
 - Desktop E2E: `(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/pr/pr-status-badge.spec.ts -- --retries=0)`; 11 tests passed.
 - Phone E2E: `(cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/pr/mobile-pr-sidebar-automation-indicators.spec.ts tests/pr/mobile-pr-ci-chip.spec.ts -- --retries=0)`; 9 tests passed.
 - Focused phone capture E2E: `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/pr/mobile-pr-sidebar-automation-indicators.spec.ts -- --retries=0 --grep "shows touch indicators")`; 1 test passed. The approval-only image was visually inspected with the amber lock visible.
-- Component stale-evidence regression: `(cd apps/web && pnpm exec vitest run components/github/pr-task-icon.render.test.tsx components/github/pr-task-icon.workflow-approval.test.tsx components/github/pr-task-status-summary.test.ts components/github/pr-workflow-attention-summary.test.ts --reporter=dot)`; 49 tests passed.
+- Component and projection regression: `(cd apps/web && pnpm exec vitest run lib/task-pr-info.test.ts components/github/pr-task-icon.render.test.tsx components/github/pr-task-icon.workflow-approval.test.tsx components/github/pr-task-icon-conflicts.test.ts components/github/pr-task-icon.automation.test.ts components/github/pr-task-status-summary.test.ts components/github/pr-workflow-attention-summary.test.ts components/github/pr-workflow-attention.test.ts components/github/pr-workflow-attention-icon.test.ts --reporter=dot)`; 73 tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm run build:vite`: passed.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet`: passed.
@@ -172,6 +172,20 @@ Implementation completed on 2026-09-30. Both work orders passed, and the shared 
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed; `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
 - Focused capture E2E runs passed with `CAPTURE_PR_ASSETS=1`; the seven PNGs are listed in `apps/web/.pr-assets/manifest.json`. The directory is ignored by Git.
+
+## Review remediation verification
+
+On 2026-09-30, fixup corrected compact/full PR freshness precedence and added current review regressions. A task summary supersedes cached full PR records only when its timestamp is strictly newer than every cached PR's required sync timestamp and any later workflow observation; missing or malformed timestamps retain full-record authority. Compact summaries keep approval and conflict identity by repository/PR and include the localized last-known explanation for same-head stale approval. Explicit negative and changed-head evidence clear the approval badge.
+
+- `go test ./internal/task/statussummary -count=1`: passed.
+- `go test ./internal/backendapp -run 'StatusSummary|WorkflowApproval' -count=1`: passed, including JSON serialization and case-insensitive SHA comparison.
+- Changed and neighboring component regression suites: 73 tests passed across nine files, including stale per-PR disclosure, compact freshness ordering, negative/changed-head clearing, conflict priority, and automation coexistence.
+- `pnpm run typecheck`, targeted ESLint, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`: passed.
+- `pnpm run build:vite`: passed.
+- Desktop E2E: 11 tests passed; phone E2E: 9 tests passed. Both suites passed after remediation.
+- Focused desktop and phone capture E2Es: 1 test each passed. Fresh captures were merged into a seven-image manifest, and the approval-only phone capture was visually inspected with the amber lock visible.
+- `python3 scripts/list-docs.py validate`: 337 decisions and 1,271 specifications passed. `python3 scripts/lint-spec-files.test.py`: 36 tests passed; `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check`: passed.
 
 Focused capture commands:
 
@@ -185,7 +199,7 @@ Captures: desktop light and dark task icons, desktop workflow explanation, phone
 ## Risks
 
 - A frontend-only badge would miss inactive task rows; cover both projection writers and reload.
-- A stale compact positive must not override authoritative full-data clearing.
+- A stale compact positive must not override newer full-data clearing; cached full rows must not hide a newer compact approval.
 - The small glyph needs rendered proof at normal density; conflict priority must preserve the hidden approval text.
 - Approval is a workflow gate, not PR review approval. The badge does not assert that the current user has approval permission.
 - Provider observations retain their existing refresh latency; this package adds no faster poller.

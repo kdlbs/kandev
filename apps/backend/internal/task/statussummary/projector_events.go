@@ -835,8 +835,11 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		state.prObserved = true
 	}
 	attention, _ := data["workflow_attention"].(map[string]interface{})
+	attentionStale, _ := attention["stale"].(bool)
 	observation := pullRequestObservation{
 		state:                    stringField(data, "state"),
+		owner:                    stringField(data, "owner"),
+		repo:                     stringField(data, "repo"),
 		number:                   intValueOrZero(data["pr_number"]),
 		url:                      stringField(data, "pr_url"),
 		reviewState:              stringField(data, "review_state"),
@@ -851,6 +854,7 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		headSHA:                  boundedWorkflowValue(stringField(data, "head_sha")),
 		workflowAttentionState:   boundedWorkflowValue(stringField(attention, "state")),
 		workflowAttentionHeadSHA: boundedWorkflowValue(stringField(attention, "head_sha")),
+		workflowAttentionStale:   attentionStale,
 	}
 	// PR refresh events do not carry the per-PR automation switches. Preserve
 	// the last authoritative values from the CI-options projection instead of

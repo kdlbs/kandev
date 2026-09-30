@@ -203,6 +203,8 @@ type pendingRequestIdentity struct {
 
 type pullRequestObservation struct {
 	state                    string
+	owner                    string
+	repo                     string
 	number                   int
 	url                      string
 	reviewState              string
@@ -220,6 +222,7 @@ type pullRequestObservation struct {
 	headSHA                  string
 	workflowAttentionState   string
 	workflowAttentionHeadSHA string
+	workflowAttentionStale   bool
 }
 
 func NewProjector(cfg ProjectorConfig) *Projector {

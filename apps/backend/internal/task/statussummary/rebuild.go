@@ -31,6 +31,8 @@ type RebuildGit struct {
 // package or to the WebSocket payload.
 type PullRequestInput struct {
 	Key                      string
+	Owner                    string
+	Repo                     string
 	State                    string
 	Number                   int
 	URL                      string
@@ -49,6 +51,7 @@ type PullRequestInput struct {
 	HeadSHA                  string
 	WorkflowAttentionState   string
 	WorkflowAttentionHeadSHA string
+	WorkflowAttentionStale   bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from

@@ -200,7 +200,7 @@ The provider collector, refresh cadence, persistence schema, check counts, and a
 For full PR records, reuse `getTaskPRWorkflowAttention` and `isWorkflowApprovalRequired` from `pr-workflow-attention.ts`.
 Eligible evidence requires an open PR, a nonempty current head SHA, and matching observation head SHA.
 The observation state must equal `approval_required`; `action_required`, `unknown`, missing evidence, and `none` do not qualify.
-Same-head stale positives remain eligible. Existing summaries explain their last-known status after disclosure hydration.
+Same-head stale positives remain eligible. The task summary retains their stale flag so the last-known status stays qualified by PR after hydration.
 
 Aggregate eligibility across open PRs independently from the status-color calculation.
 `PRTaskIconView` supplies the approval flag through `PRTaskIconGlyph` to `PRStatusGlyph`.
@@ -216,28 +216,29 @@ Render the red conflict triangle when both flags are true; retain both facts in 
 
 ### Bounded projection
 
-The current `PullRequestSummary` does not carry workflow approval.
-Add optional `workflow_approval_required` to `status_summary.pull_request` as a boolean, omitted when false.
+Add `workflow_approval_required` to `status_summary.pull_request` as a boolean and serialize both true and false for current payloads.
 It represents eligible approval on any open linked PR, independent of the representative PR and aggregate color.
 It is a display fact, never merge permission or an authorization claim about the current user.
-Old clients ignore it; old payloads default to false. Do not infer it from `attention` or `aggregate_state`.
+Old clients ignore it; old payloads without the field remain unknown. Do not infer it from `attention` or `aggregate_state`.
+When approval is present, also project one bounded approval PR number and repository plus whether that selected evidence is stale.
+When conflicts are present, project one bounded conflict PR number and repository. These identities attribute compact disclosure rows without expanding a PR array.
 
-Extend `statussummary.PullRequestInput` and its internal PR observation with three bounded strings:
-`HeadSHA`, `WorkflowAttentionState`, and `WorkflowAttentionHeadSHA` (proposed field names).
+Extend `statussummary.PullRequestInput` and its internal PR observation with bounded owner/repository identity, head SHA, workflow-attention state and head, and the stale flag.
 The package derives approval with the eligibility predicate above, without importing GitHub's full provider model.
 The `githubTaskStatusSummaryPRReader` adapter copies those fields from the stored observation.
 `Projector.applyPREventLocked` extracts the same fields from the existing `github.task_pr.updated` payload.
 Support the event payload normalization used by the projector; test malformed or omitted objects without approval inference.
 Carry these fields through `applyPullRequestInputs` and compare them during event deduplication.
-`derivePullRequestSummary` computes an OR over eligible open PRs.
+`derivePullRequestSummary` computes an OR over eligible open PRs, preferring a non-stale eligible observation for its single approval identity when one exists.
 Rebuild and live-event paths must agree. Authoritative head changes, terminal states, and empty PR lists clear the flag.
 Unavailable source reads retain the existing summary baseline policy.
 
-Extend `TaskStatusSummary` in `lib/types/task-status-summary.ts` and `TaskPRInfo` in `lib/task-pr-info.ts`.
-`taskPRInfoFromSummary` maps the new boolean to `workflowApprovalRequired` (proposed field name).
-Until full PR records exist, `PRTaskIcon` uses that projection for the badge and its accessible name.
-Once records hydrate, their current-head evidence is authoritative, including an explicit absence of approval.
-Never OR a stale compact flag into a hydrated negative result.
+Extend `TaskStatusSummary` in `lib/types/task-status-summary.ts` and `TaskPRInfo` in `lib/task-pr-info.ts` with approval/conflict identities, stale state, and the summary timestamp.
+`taskPRInfoFromSummary` preserves explicit false while leaving a missing legacy field unknown.
+When full PR records exist, compare the compact summary timestamp with every record's `last_synced_at` and any later workflow `observed_at`.
+Use compact workflow-attention status only when the timestamp is valid and strictly newer than all full records; otherwise current full evidence remains authoritative, including an explicit absence of approval.
+Compact-authoritative disclosure rows come from that bounded projection and retain per-PR attribution for both approval and conflicts.
+Never OR an older compact positive into a newer full negative result.
 No additional API request, provider poller, database column, or session subscription is necessary.
 
 ### Disclosure and accessibility
@@ -246,7 +247,8 @@ Reuse `github:workflowAwaitingApproval` for visible text and the approval portio
 Its existing English value is "Awaiting maintainer approval". This preserves established terminology and six-language localization.
 Do not add an approval-only tooltip over the icon's existing disclosure.
 Hydrated disclosures reuse `PRTaskStatusSummary` with per-PR approval and conflict rows.
-Compact disclosures show the projected approval reason alongside the existing hydration status until full details arrive.
+If the compact source is newer than cached full rows, the disclosure uses projected approval/conflict rows and the selected PR identities instead of those older workflow-attention rows.
+Compact same-head stale approval includes the existing localized last-known explanation and repository/PR attribution.
 Hydration failure must not leave a visible padlock with only a generic loading or unavailable message.
 
 The nearest phone exemplar is `PRTaskIconDrawer`, exercised by `mobile-pr-sidebar-automation-indicators.spec.ts`.

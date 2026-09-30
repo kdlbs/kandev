@@ -747,7 +747,7 @@ test.describe("PR status badge", () => {
         return response.tasks.find((candidate) => candidate.id === task.id)?.status_summary
           ?.pull_request?.workflow_approval_required;
       })
-      .toBeUndefined();
+      .toBe(false);
     await testPage.goto("/tasks");
     await expect(testPage.getByTestId("tasks-list")).toBeVisible();
     const clearedIcon = testPage

@@ -20,6 +20,8 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 		}
 		state.prs[key] = pullRequestObservation{
 			state:                    input.State,
+			owner:                    input.Owner,
+			repo:                     input.Repo,
 			number:                   maxInt(input.Number, 0),
 			url:                      input.URL,
 			reviewState:              input.ReviewState,
@@ -37,6 +39,7 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			headSHA:                  boundedWorkflowValue(input.HeadSHA),
 			workflowAttentionState:   boundedWorkflowValue(input.WorkflowAttentionState),
 			workflowAttentionHeadSHA: boundedWorkflowValue(input.WorkflowAttentionHeadSHA),
+			workflowAttentionStale:   input.WorkflowAttentionStale,
 		}
 	}
 }
@@ -48,6 +51,8 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	}
 	var summary PullRequestSummary
 	var representative *pullRequestObservation
+	var approvalRepresentative *pullRequestObservation
+	var conflictRepresentative *pullRequestObservation
 	keys := make([]string, 0, len(state.prs))
 	for key := range state.prs {
 		keys = append(keys, key)
@@ -56,15 +61,26 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	for _, key := range keys {
 		observation := state.prs[key]
 		summary.Count++
-		if strings.EqualFold(observation.state, prStateOpen) &&
+		hasMergeConflict := strings.EqualFold(observation.state, prStateOpen) &&
 			((observation.hasMergeConflicts != nil && *observation.hasMergeConflicts) ||
-				(observation.hasMergeConflicts == nil && strings.EqualFold(observation.mergeableState, "dirty"))) {
+				(observation.hasMergeConflicts == nil && strings.EqualFold(observation.mergeableState, "dirty")))
+		if hasMergeConflict {
 			summary.HasMergeConflicts = true
+			if conflictRepresentative == nil || betterPRRepresentative(observation, *conflictRepresentative) {
+				copy := observation
+				conflictRepresentative = &copy
+			}
 		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
 			if workflowApprovalRequired(observation) {
-				summary.WorkflowApprovalRequired = true
+				if approvalRepresentative == nil ||
+					(approvalRepresentative.workflowAttentionStale && !observation.workflowAttentionStale) ||
+					(approvalRepresentative.workflowAttentionStale == observation.workflowAttentionStale &&
+						betterPRRepresentative(observation, *approvalRepresentative)) {
+					copy := observation
+					approvalRepresentative = &copy
+				}
 			}
 			if observation.autoFixEnabled {
 				summary.AutoFixEnabled = true
@@ -88,13 +104,32 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	summary.Number = representative.number
 	summary.URL = truncateString(representative.url, maxPullRequestURLBytes)
 	summary.AggregateState = aggregatePullRequestState(state.prs)
+	if approvalRepresentative != nil {
+		summary.WorkflowApprovalRequired = true
+		summary.WorkflowApprovalStale = approvalRepresentative.workflowAttentionStale
+		summary.WorkflowApprovalPRNumber = approvalRepresentative.number
+		summary.WorkflowApprovalRepository = pullRequestRepositoryIdentity(*approvalRepresentative)
+	}
+	if conflictRepresentative != nil {
+		summary.MergeConflictPRNumber = conflictRepresentative.number
+		summary.MergeConflictRepository = pullRequestRepositoryIdentity(*conflictRepresentative)
+	}
 	return &summary
+}
+
+func pullRequestRepositoryIdentity(observation pullRequestObservation) string {
+	owner := strings.TrimSpace(observation.owner)
+	repo := strings.TrimSpace(observation.repo)
+	if owner == "" || repo == "" {
+		return ""
+	}
+	return truncateString(owner+"/"+repo, maxPullRequestRepositoryBytes)
 }
 
 func workflowApprovalRequired(pr pullRequestObservation) bool {
 	return strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) &&
 		pr.headSHA != "" &&
-		pr.headSHA == pr.workflowAttentionHeadSHA &&
+		strings.EqualFold(pr.headSHA, pr.workflowAttentionHeadSHA) &&
 		strings.EqualFold(pr.workflowAttentionState, "approval_required")
 }
 

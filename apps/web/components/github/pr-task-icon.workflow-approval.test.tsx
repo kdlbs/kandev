@@ -228,7 +228,171 @@ describe("PRTaskIcon compact workflow approval hydration", () => {
 });
 
 // @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.3-003.5
+describe("PRTaskIcon newer compact workflow projection", () => {
+  it("uses the newer compact projection without mixing in an older cached PR disclosure", async () => {
+    const prInfo = JSON.parse(
+      '{"number":41,"state":"open","statusSummaryUpdatedAt":"2026-09-30T12:00:00Z","workflowApprovalRequired":true,"workflowApprovalPRNumber":42,"workflowApprovalRepository":"contributor/fork","workflowApprovalStale":true}',
+    ) as NonNullable<Parameters<typeof PRTaskIcon>[0]["prInfo"]>;
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            [TASK_ID]: [
+              makePR({
+                pr_number: 41,
+                last_synced_at: "2026-09-30T11:00:00Z",
+                workflow_attention: {
+                  ...approvalAttention,
+                  state: "none",
+                  observed_at: "2026-09-30T10:30:00Z",
+                  runs: [],
+                },
+              }),
+            ],
+          },
+        },
+      },
+      <PRTaskIcon taskId={TASK_ID} prInfo={prInfo} />,
+    );
+
+    const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
+    expect(screen.getByTestId(APPROVAL_WARNING_TEST_ID)).not.toBeNull();
+    expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain(APPROVAL_LABEL);
+    const matches = vi.spyOn(icon, "matches").mockReturnValue(true);
+    fireEvent.focus(icon);
+    matches.mockRestore();
+
+    const entries = await screen.findAllByTestId("pr-task-status-entry");
+    expect(entries.length).toBeGreaterThan(0);
+    expect(
+      entries.every(
+        (entry) =>
+          entry.textContent?.includes("contributor/fork PR #42") &&
+          entry.textContent.includes(APPROVAL_LABEL) &&
+          !entry.textContent.includes("PR #41"),
+      ),
+    ).toBe(true);
+    const staleNotes = screen.getAllByTestId("pr-task-stale-workflow-evidence");
+    expect(staleNotes.length).toBeGreaterThan(0);
+    expect(
+      staleNotes.every(
+        (staleNote) =>
+          staleNote.textContent?.includes("contributor/fork PR #42") &&
+          staleNote.textContent.includes(STALE_STATUS_COPY),
+      ),
+    ).toBe(true);
+  });
+
+  it("uses a newer explicit negative compact projection to clear older stale approval", async () => {
+    const prInfo = JSON.parse(
+      '{"number":42,"state":"open","statusSummaryUpdatedAt":"2026-09-30T12:00:00Z","workflowApprovalRequired":false}',
+    ) as NonNullable<Parameters<typeof PRTaskIcon>[0]["prInfo"]>;
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            [TASK_ID]: [
+              makePR({
+                pr_number: 42,
+                last_synced_at: "2026-09-30T11:00:00Z",
+                head_sha: "head-a",
+                workflow_attention: {
+                  ...approvalAttention,
+                  observed_at: "2026-09-30T10:30:00Z",
+                  stale: true,
+                },
+              }),
+            ],
+          },
+        },
+      },
+      <PRTaskIcon taskId={TASK_ID} prInfo={prInfo} />,
+    );
+
+    const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
+    expect(screen.queryByTestId(APPROVAL_WARNING_TEST_ID)).toBeNull();
+    const matches = vi.spyOn(icon, "matches").mockReturnValue(true);
+    fireEvent.focus(icon);
+    matches.mockRestore();
+    await waitFor(() => expect(screen.queryByText(APPROVAL_LABEL)).toBeNull());
+    expect(screen.queryByTestId("pr-task-stale-workflow-evidence")).toBeNull();
+  });
+});
+
 describe("PRTaskIcon current-head workflow approval evidence", () => {
+  it("keeps current full evidence authoritative when it is newer than the compact projection", () => {
+    const prInfo = JSON.parse(
+      '{"number":9,"state":"open","statusSummaryUpdatedAt":"2026-09-30T12:00:00Z","workflowApprovalRequired":true,"workflowApprovalPRNumber":9}',
+    ) as NonNullable<Parameters<typeof PRTaskIcon>[0]["prInfo"]>;
+    const currentNone = {
+      state: "none" as const,
+      head_sha: "head-b",
+      observed_at: "2026-09-30T13:00:00Z",
+      stale: false,
+      runs: [],
+    };
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            [TASK_ID]: [
+              makePR({
+                head_sha: "head-b",
+                last_synced_at: "2026-09-30T13:00:00Z",
+                workflow_attention: currentNone,
+              }),
+            ],
+          },
+        },
+      },
+      <PRTaskIcon taskId={TASK_ID} prInfo={prInfo} />,
+    );
+
+    expect(screen.queryByTestId(APPROVAL_WARNING_TEST_ID)).toBeNull();
+  });
+
+  it("keeps compact approval and conflict reasons attributed to their respective PRs", async () => {
+    const prInfo = JSON.parse(
+      '{"number":41,"state":"open","statusSummaryUpdatedAt":"2026-09-30T12:00:00Z","workflowApprovalRequired":true,"workflowApprovalPRNumber":42,"workflowApprovalRepository":"contributor/fork","hasMergeConflicts":true,"mergeConflictPRNumber":43,"mergeConflictRepository":"org/repo"}',
+    ) as NonNullable<Parameters<typeof PRTaskIcon>[0]["prInfo"]>;
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            [TASK_ID]: [makePR({ pr_number: 41, last_synced_at: "2026-09-30T11:00:00Z" })],
+          },
+        },
+      },
+      <PRTaskIcon taskId={TASK_ID} prInfo={prInfo} />,
+    );
+
+    const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
+    expect(icon.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
+    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).toBeNull();
+    expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain("Conflicts");
+    expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain(APPROVAL_LABEL);
+    const matches = vi.spyOn(icon, "matches").mockReturnValue(true);
+    fireEvent.focus(icon);
+    matches.mockRestore();
+
+    const entries = await screen.findAllByTestId("pr-task-status-entry");
+    expect(
+      entries.some(
+        (entry) =>
+          entry.textContent?.includes("contributor/fork PR #42") &&
+          entry.textContent.includes(APPROVAL_LABEL),
+      ),
+    ).toBe(true);
+    expect(
+      entries.some(
+        (entry) =>
+          entry.textContent?.includes("org/repo PR #43") && entry.textContent.includes("Conflicts"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("PRTaskIcon hydrated workflow approval evidence", () => {
   it("uses hydrated negative evidence instead of a positive compact flag", () => {
     const prInfo = JSON.parse(
       '{"number":9,"state":"open","workflowApprovalRequired":true}',

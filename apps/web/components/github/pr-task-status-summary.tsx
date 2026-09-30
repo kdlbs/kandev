@@ -160,7 +160,7 @@ export function derivePRTaskStatusSummary(
 }
 
 export type StaleWorkflowAttentionPR = {
-  number: number | string;
+  number: number;
   repository?: string;
 };
 
