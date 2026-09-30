@@ -45,7 +45,7 @@ The adapter waits for process exit before accepting files. Its retry handles inc
 
 Task 01 extends the portable renderer and adds the fixed `pr-walkthrough-verify` entry point. It records hashes only after both outputs are complete. Verification uses `build.build()` for an in-memory comparison and does not rewrite final files.
 
-Task 02 adds `.github/scripts/pr-walkthrough-runner.py` as the trusted host adapter. It monitors the receipt, stops and reaps its process group, and runs the verifier. A 600-second total deadline covers both attempts. The generation job uses a 20-minute outer limit with bounded preparation steps and time for verification and artifact upload.
+Task 02 adds `.github/scripts/pr-walkthrough-runner.py` as the trusted host adapter. It monitors the receipt, stops live members of its process group, treats zombie-only groups as stopped, reaps its direct child, and runs the verifier. A 600-second total deadline covers both attempts. The generation job uses a 20-minute outer limit with bounded preparation steps and time for verification and artifact upload.
 
 Checkout uses depth one for the trusted SHA. A trusted history helper fetches only the trusted SHA and PR-head ref without shallow boundaries. It does not fetch every branch or tag. It fails before generation if the exact event head or merge base is unavailable.
 
@@ -81,8 +81,8 @@ Tasks run sequentially. Task 02 consumes Task 01's receipt and verifier.
 Implementation is complete. Task 01 and Task 02 are done. Focused regression
 checks passed:
 
-- Renderer diagnostics and receipt tests: 10 passed; verifier tests: 7 passed; renderer builder tests: 71 passed.
-- Runner supervision tests: 14 passed, including already-observed non-zero exits taking precedence over receipts, natural zero-exit receipt acceptance, and terminal cleanup failure; history tests passed against shallow and complete clones with blob filtering; workflow contract tests: 30 passed.
+- Renderer diagnostics and receipt tests: 10 passed; verifier tests: 8 passed; renderer builder tests: 71 passed.
+- Runner supervision tests: 17 passed, including already-observed non-zero exits taking precedence over receipts, natural zero-exit receipt acceptance, receipt-before-renderer-exit completion, zombie-only process groups, terminal cleanup failure, and cleanup diagnostics; verifier tests: 8 passed, including import and syntax error reporting; history tests passed against shallow and complete clones with blob filtering; workflow contract tests: 30 passed.
 - Context tests: 4 passed; PR-body tests: 9 passed; action-pin tests: 9 passed; all 25 workflow files passed action-pin scanning.
 - `go run github.com/rhysd/actionlint/cmd/actionlint@latest` passed for both changed workflows.
 - Python compile checks, Bash syntax checks, harness lint, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.

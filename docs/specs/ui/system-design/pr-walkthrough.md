@@ -76,7 +76,7 @@ Verification does not create missing outputs, rewrite final files, or infer comp
 
 The new `.github/scripts/pr-walkthrough-runner.py` is a GitHub adapter, outside the portable skill. Its executable command and parameters come only from the trusted workflow. It launches the agent in an owned process group and polls the fixed receipt every 250 milliseconds.
 
-The first observed receipt initiates SIGTERM for that group. After five seconds, remaining owned processes receive SIGKILL. Cleanup has a ten-second bound. The adapter reaps owned children and invokes the verifier before returning success. An expected supervisor-induced exit is distinct from an unexpected non-zero exit.
+The first observed receipt initiates SIGTERM for that group. After five seconds, remaining owned processes receive SIGKILL. Cleanup has a ten-second bound and treats zombie-only process groups as stopped because their members cannot execute. The adapter reaps its direct child and invokes the verifier before returning success. `Popen` uses `start_new_session=True`, so the child PID is also the owned process-group ID. An expected supervisor-induced exit is distinct from an unexpected non-zero exit.
 
 The adapter uses a 600-second monotonic deadline shared by both attempts. Only an incomplete zero-exit attempt can retry once. A retry removes the receipt, draft, and final outputs before starting. It consumes the remaining budget rather than receiving a fresh deadline.
 
@@ -94,9 +94,9 @@ The helper validates the fetched head against the exact event `HEAD_SHA`. It req
 
 ## Generation diagnostics
 
-Each attempt retains stdout, stderr, the draft, output files when present, and a structured outcome record. The record includes UTC start/end timestamps, elapsed time, raw exit status, stop reason, and verification result.
+Each attempt retains stdout, stderr, the draft, output files when present, and a structured outcome record. The record includes UTC start/end timestamps, elapsed time, raw exit status, stop reason, and verification result. Cleanup failure has its own stop reason and remains visible in the workflow summary.
 
-Stop reasons distinguish render completion, natural exit, deadline, cancellation, and verification failure. Logs include timestamps and errors without environment dumps. Diagnostic capture runs in the adapter's cleanup path, including timeout and cancellation.
+Stop reasons distinguish render completion, incomplete zero exit, unexpected exit, cleanup failure, deadline, cancellation, and launch failure. Verification results distinguish cleanup failure from verifier failure and cancellation. Logs include timestamps and errors without environment dumps. Diagnostic capture runs in the adapter's cleanup path, including timeout and cancellation.
 
 The workflow summary reports stage durations and the final generation result. It does not expose a completion marker as proof. Artifact upload retains the existing `always()` path. Publication still requires the generation job to succeed.
 

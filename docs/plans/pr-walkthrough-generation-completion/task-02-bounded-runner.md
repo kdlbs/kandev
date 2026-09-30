@@ -123,11 +123,11 @@ terminates the run before verification or retry.
 
 Verification passed:
 
-- `python3 .github/scripts/pr-walkthrough-runner_test.py` (14 tests, including regressions for a completed receipt paired with an observed natural non-zero exit, natural zero-exit receipt acceptance, and terminal cleanup failure)
+- `python3 .github/scripts/pr-walkthrough-runner_test.py` (17 tests, including regressions for observed natural exits, receipt-before-renderer-exit completion, zombie-only process groups, terminal cleanup failure, and cleanup-summary diagnostics)
 - `bash .github/scripts/pr-walkthrough-history_test.sh`
 - `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` (30 tests)
 - `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py` (10 tests)
-- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-verify.test.py` (7 tests)
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-verify.test.py` (8 tests, including renderer import and syntax diagnostics)
 - `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` (4 tests)
 - `python3 scripts/pr-walkthrough-pr-body.test.py` (9 tests)
 - `python3 .github/scripts/lint-action-pinning_test.py` (9 tests)

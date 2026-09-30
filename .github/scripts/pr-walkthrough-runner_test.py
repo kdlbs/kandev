@@ -47,6 +47,22 @@ class WaitForAgentExit:
         raise AssertionError("agent did not exit before the next runner poll")
 
 
+class WaitForPath:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def is_set(self) -> bool:
+        return False
+
+    def wait(self, timeout: float | None = None) -> bool:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if self.path.exists():
+                return False
+            time.sleep(0.001)
+        raise AssertionError(f"timed out waiting for {self.path}")
+
+
 class PRWalkthroughRunnerTest(unittest.TestCase):
     def test_trusted_runner_entry_point_exists(self) -> None:
         self.assertTrue(RUNNER.is_file(), "trusted walkthrough runner is missing")
@@ -157,6 +173,46 @@ class PRWalkthroughRunnerTest(unittest.TestCase):
         self.assertEqual((self.worktree / "initial-draft.json").read_text(), "{}\n")
         pid = int((self.worktree / "descendant.pid").read_text())
         self.assert_process_stopped(pid)
+
+    def test_receipt_is_accepted_before_renderer_process_exits(self) -> None:
+        slow_renderer = self.worktree / "slow-renderer.py"
+        slow_renderer.write_text(
+            "import runpy, time\n"
+            f"renderer = runpy.run_path({str(self.renderer)!r}, run_name='managed_renderer')\n"
+            "if renderer['main']() != 0: raise SystemExit(1)\n"
+            "from pathlib import Path\n"
+            "Path('renderer.ready').touch()\n"
+            "while True: time.sleep(0.01)\n",
+            encoding="utf-8",
+        )
+        source = self.render_agent_source().replace(
+            repr([sys.executable, str(self.renderer)]),
+            repr([sys.executable, str(slow_renderer)]),
+        )
+        command = self.write_agent(source)
+
+        result = self.run_agent(
+            command,
+            cancellation=WaitForPath(self.worktree / "renderer.ready"),
+        )
+
+        self.assertEqual(result, 0)
+        self.assertTrue((self.worktree / "renderer.ready").is_file())
+        self.assertEqual(self.outcome()["stop_reason"], "render_complete")
+        self.assertEqual(self.outcome()["verification_result"], "passed")
+
+    def test_zombie_only_process_group_is_not_live(self) -> None:
+        proc_root = self.worktree / "proc"
+        zombie_stat = proc_root / "1201" / "stat"
+        zombie_stat.parent.mkdir(parents=True)
+        zombie_stat.write_text("1201 (renderer ) child) Z 1 4242 4242 0\n", encoding="utf-8")
+
+        with mock.patch.object(runner, "PROC_ROOT", proc_root, create=True):
+            self.assertFalse(runner.group_has_live_members(4242))
+            live_stat = proc_root / "1202" / "stat"
+            live_stat.parent.mkdir()
+            live_stat.write_text("1202 (agent child) S 1 4242 4242 0\n", encoding="utf-8")
+            self.assertTrue(runner.group_has_live_members(4242))
 
     def test_unexpected_nonzero_exit_does_not_retry(self) -> None:
         command = self.write_agent("raise SystemExit(7)\n")
@@ -401,6 +457,33 @@ while True: time.sleep(0.01)
         self.assertIn("verified", summary)
         self.assertIn("4.25s", summary)
         self.assertIn("render_complete", summary)
+
+    def test_workflow_summary_reports_cleanup_failure(self) -> None:
+        attempt_dir = self.worktree / ".pr-walkthrough" / "attempt-1"
+        attempt_dir.mkdir(parents=True)
+        (attempt_dir / "outcome.json").write_text(
+            json.dumps(
+                {
+                    "elapsed_seconds": 1.25,
+                    "raw_exit_status": 0,
+                    "stop_reason": "cleanup_failure",
+                    "verification_result": "cleanup failed",
+                }
+            ),
+            encoding="utf-8",
+        )
+        summary_path = self.worktree / "step-summary.md"
+
+        runner.write_step_summary(
+            self.worktree,
+            {**self.env, "GITHUB_STEP_SUMMARY": str(summary_path)},
+            1,
+        )
+
+        summary = summary_path.read_text(encoding="utf-8")
+        self.assertIn("Attempt 1: cleanup_failure", summary)
+        self.assertIn("verification cleanup failed", summary)
+        self.assertNotIn("verification not run", summary)
 
     def wait_for_path(self, path: Path, timeout: float = 1) -> None:
         deadline = time.monotonic() + timeout

@@ -26,6 +26,7 @@ RECEIPT_PATH = WORK_DIR / "render-complete.json"
 DRAFT_PATH = WORK_DIR / "draft.json"
 OUTPUT_DIR = Path("docs/pr-walkthrough")
 VERIFIER_PATH = Path(".agents/skills/pr-walkthrough/scripts/pr-walkthrough-verify")
+PROC_ROOT = Path("/proc")
 
 
 @dataclass(frozen=True)
@@ -49,14 +50,28 @@ def positive_pr_number(env: dict[str, str]) -> int:
     return int(value)
 
 
-def group_exists(pgid: int) -> bool:
+def group_has_live_members(pgid: int) -> bool:
+    """Check for executing members; Linux keeps stopped children as zombies."""
     try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+        process_dirs = list(PROC_ROOT.iterdir())
+    except OSError:
         return True
-    return True
+
+    for process_dir in process_dirs:
+        if not process_dir.name.isdecimal():
+            continue
+        try:
+            stat_text = (process_dir / "stat").read_text(encoding="utf-8")
+            fields = stat_text.rsplit(")", 1)[1].split()
+            state = fields[0]
+            member_pgid = int(fields[2])
+        except FileNotFoundError:
+            continue
+        except (IndexError, OSError, ValueError):
+            return True
+        if member_pgid == pgid and state not in {"Z", "X"}:
+            return True
+    return False
 
 
 def signal_group(pgid: int, signum: int) -> None:
@@ -67,15 +82,18 @@ def signal_group(pgid: int, signum: int) -> None:
 
 
 def stop_process_group(process: subprocess.Popen[bytes], config: RunConfig) -> bool:
-    """Stop the owned group and reap its direct child within the cleanup bound."""
+    """Stop the group whose PGID equals process.pid and reap its direct child.
+
+    The process must be launched with start_new_session=True for this PGID invariant.
+    """
     cleanup_deadline = time.monotonic() + config.cleanup_timeout_seconds
     signal_group(process.pid, signal.SIGTERM)
     term_deadline = min(cleanup_deadline, time.monotonic() + config.term_grace_seconds)
-    while group_exists(process.pid) and time.monotonic() < term_deadline:
+    while group_has_live_members(process.pid) and time.monotonic() < term_deadline:
         process.poll()
         time.sleep(min(config.poll_interval_seconds, max(0, term_deadline - time.monotonic())))
 
-    if group_exists(process.pid):
+    if group_has_live_members(process.pid):
         signal_group(process.pid, signal.SIGKILL)
 
     remaining = max(0, cleanup_deadline - time.monotonic())
@@ -92,10 +110,10 @@ def stop_process_group(process: subprocess.Popen[bytes], config: RunConfig) -> b
         else:
             return False
 
-    while group_exists(process.pid) and time.monotonic() < cleanup_deadline:
+    while group_has_live_members(process.pid) and time.monotonic() < cleanup_deadline:
         signal_group(process.pid, signal.SIGKILL)
         time.sleep(min(config.poll_interval_seconds, max(0, cleanup_deadline - time.monotonic())))
-    return process.poll() is not None and not group_exists(process.pid)
+    return process.poll() is not None and not group_has_live_members(process.pid)
 
 
 def clear_attempt_outputs(cwd: Path, pr_number: int) -> None:
@@ -349,7 +367,7 @@ def write_step_summary(cwd: Path, env: dict[str, str], result: int) -> None:
         stop_reason = outcome.get("stop_reason")
         if stop_reason not in {
             "render_complete", "incomplete_zero_exit", "unexpected_exit",
-            "deadline", "cancellation", "launch_failure",
+            "deadline", "cancellation", "launch_failure", "cleanup_failure",
         }:
             stop_reason = "unknown"
         raw_exit_status = outcome.get("raw_exit_status")
@@ -357,6 +375,8 @@ def write_step_summary(cwd: Path, env: dict[str, str], result: int) -> None:
         verification = outcome.get("verification_result")
         if verification == "passed":
             verification_text = "passed"
+        elif verification == "cleanup failed":
+            verification_text = "cleanup failed"
         elif isinstance(verification, str) and verification.startswith("failed:"):
             verification_text = "failed"
         elif isinstance(verification, str) and verification.startswith("cancelled"):

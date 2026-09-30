@@ -177,7 +177,7 @@ def main() -> int:
         head_sha = managed_head_sha()
         data = load_draft()
         bound = bind_trusted_metadata(data)
-        validate_managed_draft(bound)
+        _ = validate_managed_draft(bound)
         json_path, html_path = render(bound)
         write_completion_receipt(int(bound["pr"]["number"]), head_sha, json_path, html_path)
     except (OSError, ValueError) as exc:

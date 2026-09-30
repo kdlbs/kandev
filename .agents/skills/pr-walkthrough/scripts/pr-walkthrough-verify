@@ -102,7 +102,7 @@ def verify() -> tuple[Path, Path]:
 def main() -> int:
     try:
         json_path, html_path = verify()
-    except (KeyError, OSError, TypeError, ValueError) as exc:
+    except (ImportError, KeyError, OSError, SyntaxError, TypeError, ValueError) as exc:
         print(f"walkthrough verification failed: {exc}", file=sys.stderr)
         return 1
     print(f"verified {json_path} and {html_path}")

@@ -168,6 +168,24 @@ class PRWalkthroughVerifyTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not accept command arguments", result.stderr)
 
+    def test_renderer_import_and_syntax_errors_are_reported_without_tracebacks(self) -> None:
+        self.render_valid_pair()
+        failures = (
+            ("import kandev_missing_renderer_dependency_for_test\n", "No module named"),
+            ("if True print('invalid')\n", "invalid syntax"),
+        )
+
+        for source, message in failures:
+            with self.subTest(message=message):
+                self.render_script.write_text(source, encoding="utf-8")
+
+                result = self.run_verify()
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("walkthrough verification failed:", result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
