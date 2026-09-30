@@ -250,6 +250,14 @@ export type WorkspacePayload = {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
+  /**
+   * Idle-suspension policy carried on workspace lifecycle events. Both keys
+   * are absent from payloads sent by older backends; each consumer checks
+   * key presence rather than reading the value, so it can keep its current
+   * state when an older backend omits them.
+   */
+  acp_idle_suspension_enabled?: boolean;
+  acp_idle_timeout_minutes?: number;
   created_at?: string;
   updated_at?: string;
 };
