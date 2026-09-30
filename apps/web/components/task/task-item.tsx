@@ -55,7 +55,7 @@ type TaskItemProps = {
    */
   parkedOnBackgroundWork?: boolean;
   isArchived?: boolean;
-  isPendingArchive?: boolean;
+  isPendingRemoval?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
   isMultiSelected?: boolean;
@@ -182,8 +182,8 @@ function taskItemRowClick(
   return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
-function pendingArchiveRowProps(isPendingArchive?: boolean) {
-  if (!isPendingArchive) return {};
+function pendingRemovalRowProps(isPendingRemoval?: boolean) {
+  if (!isPendingRemoval) return {};
   return {
     "aria-busy": true as const,
     "aria-disabled": true as const,
@@ -349,7 +349,7 @@ export const TaskItem = memo(function TaskItem({
   foregroundActivity,
   parkedOnBackgroundWork,
   isArchived,
-  isPendingArchive,
+  isPendingRemoval,
   isSelected = false,
   isMultiSelected = false,
   onClick,
@@ -391,7 +391,7 @@ export const TaskItem = memo(function TaskItem({
   taskRowPresentation,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const pendingProps = pendingArchiveRowProps(isPendingArchive);
+  const pendingProps = pendingRemovalRowProps(isPendingRemoval);
   const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
   const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
@@ -432,7 +432,7 @@ export const TaskItem = memo(function TaskItem({
         parkedOnBackgroundWork={parkedOnBackgroundWork}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
-        isPendingArchive={isPendingArchive}
+        isPendingRemoval={isPendingRemoval}
         interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
         showBackgroundTooltip

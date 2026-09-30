@@ -62,7 +62,7 @@ function buildSheetItems(params: {
   acknowledgedAgentErrors: Record<string, string>;
   dismissedAgentErrors: Record<string, string>;
   automaticColorSettings: SheetItemCtx["automaticColorSettings"];
-  pendingArchiveTaskIds: ReadonlySet<string>;
+  pendingRemovalTaskIds: ReadonlySet<string>;
   workspaceContextAccessDenied: boolean;
 }): TaskSwitcherItem[] {
   const {
@@ -76,7 +76,7 @@ function buildSheetItems(params: {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     workspaceContextAccessDenied,
   } = params;
   if (workspaceContextAccessDenied) return [];
@@ -107,7 +107,7 @@ function buildSheetItems(params: {
     repositoriesById,
     stepColorById,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
   };
   return allTasks.map((task) => toSheetItem(task, context));
 }
@@ -117,7 +117,7 @@ export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
     page,
@@ -156,7 +156,7 @@ export function useSheetData(workspaceId: string | null) {
         acknowledgedAgentErrors,
         dismissedAgentErrors,
         automaticColorSettings,
-        pendingArchiveTaskIds,
+        pendingRemovalTaskIds,
         workspaceContextAccessDenied,
       }),
     [
@@ -170,7 +170,7 @@ export function useSheetData(workspaceId: string | null) {
       dismissedAgentErrors,
       wipQueueByTaskId,
       automaticColorSettings,
-      pendingArchiveTaskIds,
+      pendingRemovalTaskIds,
       workspaceContextAccessDenied,
     ],
   );

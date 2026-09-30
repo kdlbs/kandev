@@ -2,12 +2,13 @@
 status: current
 system: tasks
 created: 2026-09-10
-updated: 2026-09-17
+updated: 2026-09-30
 requirements:
   - REQ-TASKS-REMOVAL-NAVIGATION-001
   - REQ-TASKS-REMOVAL-NAVIGATION-002
   - REQ-TASKS-REMOVAL-NAVIGATION-003
   - REQ-TASKS-REMOVAL-NAVIGATION-004
+  - REQ-TASKS-REMOVAL-NAVIGATION-005
 owners:
   - kandev
 ---
@@ -43,6 +44,44 @@ controlled delayed-response regressions before production changes.
 | REQ-TASKS-REMOVAL-NAVIGATION-002 | Operation state, reconciliation, failure recovery, tests |
 | REQ-TASKS-REMOVAL-NAVIGATION-003 | Pending archive presentation in shared task navigation   |
 | REQ-TASKS-REMOVAL-NAVIGATION-004 | Archive progress feedback and notification lifecycle     |
+| REQ-TASKS-REMOVAL-NAVIGATION-005 | Pending delete projection |
+
+## Pending delete projection
+
+REQ-TASKS-REMOVAL-NAVIGATION-005 extends the shipped archive projection below.
+Tasks owns this extension because membership and recovery follow task-removal
+operations. `useWorkspaceSidebarTasks` projects `taskRemoval` membership into
+`pendingRemovalTaskIds`; `buildSidebarItem` and `toSheetItem` carry it as
+`isPendingRemoval` through `TaskSwitcherItem`, `TaskSwitcherRow`, `TaskItem`, and
+`TaskStateIcon`. Membership comes from `pendingTokenByTaskId` and its matching
+`operationsByToken` record in the current workspace. An archive operation marks
+only active rows; a delete marks any visible target, including an archived row.
+Do not add hook-local delete tracking or another store. Use membership rather
+than departure ownership so unselected and bulk targets remain represented.
+
+Preserve the existing dimming, busy/disabled attributes, spinner, row geometry,
+and interaction treatment. Rename internal archive-specific helpers to removal
+names. If changing the spinner test ID, retain the old archive ID using
+`data-legacy-testid` and migrate every affected test selector together. No new
+user-facing strings or delete progress toast are required.
+
+The coordinator remains the sole authority for operation release, cache pruning,
+bulk outcomes, navigation, and recovery. Do not delay authoritative removal
+until an HTTP response or synthesize cache rows to retain a spinner. Refreshes
+must reapply pending membership to surviving rows; failures reveal current data.
+Keep archive-only filtering in the data projection rather than dropping pending
+flags on archived rows downstream.
+
+Mobile reuses `session-task-switcher-sheet.tsx`: its existing header trigger,
+inset drawer, visible overflow menu, fixed header, single scrolling list, safe
+areas, and touch targets remain unchanged. A reopened picker reads the same
+pending state as desktop. No composition or breakpoint changes are needed.
+
+Deferred hook/component tests cover AC-005.1 through AC-005.3, including wrong
+workspace, missing/stale tokens, archived delete, mixed bulk outcomes, and archive
+regressions. Desktop and phone browser tests hold DELETE before server processing,
+then prove pending, refusal recovery, and success; retain existing archive tests.
+See the [work package](../../../plans/sidebar-delete-loading/plan.md).
 
 ## Immediate sidebar archive projection
 

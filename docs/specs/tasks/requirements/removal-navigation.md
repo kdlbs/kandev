@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-10
-updated: 2026-09-17
+updated: 2026-09-30
 owners:
   - kandev
 ---
@@ -126,6 +126,30 @@ archive request takes time to finish.
   confirmation shall show no progress toast and issue no request. Programmatic,
   API, CLI, MCP, and agent-driven archive operations shall remain unchanged.
 
+### REQ-TASKS-REMOVAL-NAVIGATION-005: Pending delete visibility
+
+**Intent:** Give accepted deletions the same pending-row treatment
+as archiving, without presenting an unfinished deletion as success.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-005.1:** After delete acceptance, every visible
+  task in the removal set shall display a dimmed row and muted spinner in the
+  desktop sidebar and phone task picker on the next render, before network or
+  destination lookup completes. The row shall retain its position and expose
+  busy/disabled accessibility state. This includes archived tasks visible in
+  saved views. Opening or cancelling confirmation shall leave rows unchanged.
+- **AC-TASKS-REMOVAL-NAVIGATION-005.2:** Pending presentation shall survive
+  refreshes, live field updates, and reopening the phone picker. Confirmed
+  deletion shall remove the row; a failed deletion of an available task shall
+  restore its latest ordinary presentation. Recovery shall not recreate a task
+  removed by an authoritative event or override later navigation.
+- **AC-TASKS-REMOVAL-NAVIGATION-005.3:** Bulk and explicit cascade deletion shall
+  mark every visible member of the removal set; unrelated tasks and surviving
+  non-cascade children shall remain ordinary rows. Partial failure shall restore
+  only remaining failed targets. Archive presentation and existing saved-view
+  filtering shall retain their behavior.
+
 ## Compatibility and exclusions
 
 Existing archive confirmation preferences and cascade choices remain governed
@@ -147,3 +171,5 @@ Undo, new settings, and a new mobile navigation composition are excluded.
 
 - [Immediate sidebar archive](../../../plans/immediate-sidebar-archive/plan.md)
 - [Archive progress feedback](../../../plans/archive-progress-feedback/plan.md)
+
+- [Sidebar delete loading](../../../plans/sidebar-delete-loading/plan.md)

@@ -75,24 +75,24 @@ function setPageTasks(tasks: Task[]) {
   };
 }
 
-describe("useWorkspaceSidebarTasks", () => {
-  beforeEach(() => {
-    mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
-    mocks.state.kanbanMulti = { snapshots: {} };
-    mocks.state.sidebarStatusSummaryByWorkspaceId = {};
-    mocks.state.workflows = { items: [{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }] };
-    mocks.state.kanban = {
-      workflowId: null,
-      steps: [{ id: "step-1", title: "Start", color: "blue", position: 0 }],
-    };
-    mocks.state.workspaceContextGeneration = 0;
-    mocks.state.workspaceContextRead = undefined;
-    mocks.page.response = null;
-    mocks.page.isLoading = false;
-    mocks.page.error = null;
-    vi.clearAllMocks();
-  });
+beforeEach(() => {
+  mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
+  mocks.state.kanbanMulti = { snapshots: {} };
+  mocks.state.sidebarStatusSummaryByWorkspaceId = {};
+  mocks.state.workflows = { items: [{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }] };
+  mocks.state.kanban = {
+    workflowId: null,
+    steps: [{ id: "step-1", title: "Start", color: "blue", position: 0 }],
+  };
+  mocks.state.workspaceContextGeneration = 0;
+  mocks.state.workspaceContextRead = undefined;
+  mocks.page.response = null;
+  mocks.page.isLoading = false;
+  mocks.page.error = null;
+  vi.clearAllMocks();
+});
 
+describe("useWorkspaceSidebarTasks", () => {
   it("uses only the bounded page and does not leak workspace snapshot tasks", () => {
     setPageTasks([task("page-a"), task("page-b")]);
     mocks.state.kanbanMulti.snapshots = {
@@ -139,13 +139,13 @@ describe("useWorkspaceSidebarTasks", () => {
     };
     rerender();
     expect(result.current.allTasks.map((item) => item.id)).toEqual(["archive-target", "sibling"]);
-    expect(result.current.pendingArchiveTaskIds).toEqual(new Set(["archive-target"]));
+    expect(result.current.pendingRemovalTaskIds).toEqual(new Set(["archive-target"]));
 
     setPageTasks([task("sibling")]);
     mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
     rerender();
     expect(result.current.allTasks.map((item) => item.id)).toEqual(["sibling"]);
-    expect(result.current.pendingArchiveTaskIds).toEqual(new Set());
+    expect(result.current.pendingRemovalTaskIds).toEqual(new Set());
   });
 
   it("uses queue position computed across tasks outside the current view page", () => {
@@ -179,5 +179,75 @@ describe("useWorkspaceSidebarTasks", () => {
       total: 3,
       destinationTitle: "Start",
     });
+  });
+});
+
+describe("sidebar pending removal projection", () => {
+  // @covers AC-TASKS-REMOVAL-NAVIGATION-005.1, AC-TASKS-REMOVAL-NAVIGATION-005.2
+  it.each([false, true])(
+    "keeps delete loading through refresh and restores current data (archived=%s)",
+    (archived) => {
+      const target = task("delete-target", {
+        archived_at: archived ? "2026-09-29T10:00:00Z" : null,
+      });
+      setPageTasks([target, task("sibling")]);
+      const { result, rerender } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+      mocks.state.taskRemoval = {
+        pendingTokenByTaskId: { "delete-target": "delete-token" },
+        operationsByToken: { "delete-token": { action: "delete", workspaceId: "ws-1" } },
+      };
+      rerender();
+      expect(result.current.pendingRemovalTaskIds).toEqual(new Set(["delete-target"]));
+      setPageTasks([{ ...target, title: "Updated during deletion" }, task("sibling")]);
+      rerender();
+      expect(result.current.pendingRemovalTaskIds).toEqual(new Set(["delete-target"]));
+      mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
+      rerender();
+      expect(result.current.pendingRemovalTaskIds.size).toBe(0);
+      expect(result.current.allTasks[0].title).toBe("Updated during deletion");
+    },
+  );
+
+  // @covers AC-TASKS-REMOVAL-NAVIGATION-005.3
+  it("projects bulk and cascade membership and retains only failed targets after reconciliation", () => {
+    setPageTasks([task("parent"), task("child"), task("failed"), task("survivor")]);
+    mocks.state.taskRemoval = {
+      pendingTokenByTaskId: { parent: "batch", child: "batch", failed: "batch" },
+      operationsByToken: { batch: { action: "delete", workspaceId: "ws-1" } },
+    };
+    const { result, rerender } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.pendingRemovalTaskIds).toEqual(new Set(["parent", "child", "failed"]));
+    setPageTasks([task("failed"), task("survivor")]);
+    rerender();
+    expect(result.current.pendingRemovalTaskIds).toEqual(new Set(["failed"]));
+    mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
+    rerender();
+    expect(result.current.pendingRemovalTaskIds.size).toBe(0);
+    expect(result.current.allTasks.map((item) => item.id)).toEqual(["failed", "survivor"]);
+  });
+
+  it("ignores missing tokens, other workspaces, and archived archive targets", () => {
+    setPageTasks([
+      task("stale"),
+      task("foreign"),
+      task("archived", { archived_at: "2026-09-29T10:00:00Z" }),
+      task("active"),
+      task("unselected-child"),
+    ]);
+    mocks.state.taskRemoval = {
+      pendingTokenByTaskId: {
+        stale: "missing",
+        foreign: "other",
+        archived: "archive",
+        active: "archive",
+      },
+      operationsByToken: {
+        other: { action: "delete", workspaceId: "ws-2" },
+        archive: { action: "archive", workspaceId: "ws-1" },
+      },
+    };
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.pendingRemovalTaskIds).toEqual(new Set(["active"]));
+    expect(result.current.allTasks).toHaveLength(5);
   });
 });

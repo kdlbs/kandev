@@ -64,7 +64,7 @@ function buildSidebarTaskItems(params: {
   acknowledgedAgentErrors: Record<string, string>;
   dismissedAgentErrors: Record<string, string>;
   automaticColorSettings: SidebarItemContext["automaticColorSettings"];
-  pendingArchiveTaskIds: ReadonlySet<string>;
+  pendingRemovalTaskIds: ReadonlySet<string>;
 }): ReturnType<typeof buildSidebarItem>[] {
   const {
     workspaceId,
@@ -77,7 +77,7 @@ function buildSidebarTaskItems(params: {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
   } = params;
   const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
   const repositorySlugById = new Map(repositories.map((repo) => [repo.id, repositorySlug(repo)]));
@@ -108,7 +108,7 @@ function buildSidebarTaskItems(params: {
     repositoriesById,
     stepColorById,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
   };
   return allTasks.map((task) => buildSidebarItem(task, context));
 }
@@ -131,7 +131,7 @@ export function useSidebarData(workspaceId: string | null) {
 
   const {
     allTasks,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
     page,
@@ -160,7 +160,7 @@ export function useSidebarData(workspaceId: string | null) {
         acknowledgedAgentErrors,
         dismissedAgentErrors,
         automaticColorSettings,
-        pendingArchiveTaskIds,
+        pendingRemovalTaskIds,
       }),
     [
       repositoriesByWorkspace,
@@ -173,7 +173,7 @@ export function useSidebarData(workspaceId: string | null) {
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       automaticColorSettings,
-      pendingArchiveTaskIds,
+      pendingRemovalTaskIds,
     ],
   );
 
