@@ -341,6 +341,10 @@ Changes are grouped by repository and then by state:
 - **Staged** changes selected for the next commit;
 - **Commits** on the task branch.
 
+Focus a Changes row control. Press Arrow Up or Arrow Down to move between rows.
+Press Home to move to the first row. Press End to move to the last row.
+On an inline commit file row, press Enter or Space to open its diff.
+
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
 On phones and touch devices, working-tree rows give filenames the main space.

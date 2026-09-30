@@ -21,6 +21,7 @@ import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import type { ChangedFile } from "./changes-panel-helpers";
+import type { ChangedFileTarget } from "./changes-timeline-selection";
 import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -62,6 +63,8 @@ export type FileRowProps = {
   treeMode?: boolean;
   /** Tree mode: left padding in pixels driven by depth. */
   indentPx?: number;
+  /** Let the panel's logical row navigation focus this row without adding a Tab stop. */
+  keyboardNavigable?: boolean;
 };
 
 export type FileRowContentProps = FileRowProps & {
@@ -70,32 +73,93 @@ export type FileRowContentProps = FileRowProps & {
   onCopyPath: () => void;
 };
 
+function getFileRowClassName(props: FileRowProps, touchMode: boolean) {
+  const selected = props.isSelected || props.isActive;
+  return cn(
+    "group flex items-center justify-between rounded-md border border-transparent -mx-1 text-sm cursor-pointer",
+    touchMode ? "gap-1 px-1 py-0.5" : "gap-2 px-2 py-1.5 md:px-1 md:py-0.5",
+    selected ? "border-primary/50 bg-card text-foreground hover:bg-muted/70" : "hover:bg-muted/60",
+  );
+}
+
+function getFileRowPresentation(props: FileRowProps, touchMode: boolean) {
+  const { file, readOnly, keyboardNavigable, onSelect } = props;
+  return {
+    "data-testid": props.testId ?? `file-row-${file.path.replace(/[/\\]/g, "-")}`,
+    "data-changes-file": file.path,
+    "data-commit-file-entry": readOnly ? "true" : undefined,
+    "data-file-path": file.path,
+    "aria-label": readOnly ? file.path : undefined,
+    title: readOnly ? file.path : undefined,
+    "data-changes-row-focus": keyboardNavigable || readOnly ? "" : undefined,
+    tabIndex: keyboardNavigable || readOnly || onSelect ? -1 : undefined,
+    "data-selected": props.isSelected ? "true" : "false",
+    "data-active": props.isActive ? "true" : "false",
+    className: getFileRowClassName(props, touchMode),
+  };
+}
+
+function handleFileRowKeyDown(
+  event: React.KeyboardEvent<HTMLLIElement>,
+  keyboardNavigable?: boolean,
+) {
+  if (!keyboardNavigable || (event.key !== "Enter" && event.key !== " ")) return;
+  if (event.target !== event.currentTarget) return;
+  event.preventDefault();
+  event.currentTarget.click();
+}
+
+function FileRowDeviceContent({
+  props,
+  folder,
+  name,
+  touchMode,
+  onCopyPath,
+}: {
+  props: FileRowProps;
+  folder: string;
+  name: string;
+  touchMode: boolean;
+  onCopyPath: () => void;
+}) {
+  if (touchMode) {
+    return <TouchFileRowContent {...props} folder={folder} name={name} onCopyPath={onCopyPath} />;
+  }
+  return <DesktopFileRowContent {...props} folder={folder} name={name} onCopyPath={onCopyPath} />;
+}
+
+function handleFileRowClick(props: FileRowProps, event: React.MouseEvent<HTMLLIElement>) {
+  if (event.button === 2) return;
+  if (props.readOnly) {
+    props.onOpenDiff(props.file.path);
+    return;
+  }
+  handleChangedFileClick(props, event);
+}
+
+function handleChangedFileClick(props: FileRowProps, event: React.MouseEvent<HTMLLIElement>) {
+  const { file, onSelect, onOpenDiff, onEditFile } = props;
+  if (onSelect?.(file.path, event)) {
+    event.currentTarget.focus({ preventScroll: true });
+    return;
+  }
+  if (getFileCategory(file.path) === "image") {
+    onEditFile(file.path, file.repositoryName);
+    return;
+  }
+  onOpenDiff(file.path, {
+    source: "uncommitted",
+    repositoryName: file.repositoryName,
+    ...(file.changeLayer ? { changeLayer: file.changeLayer } : {}),
+  });
+}
+
 export function FileRow(props: FileRowProps) {
-  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff, readOnly } = props;
+  const { file } = props;
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const copyRepositoryPath = useCopyRepositoryPath();
   const touchMode = isMobile || !isFinePointer;
   const { folder, file: name } = splitPath(file.path);
-
-  const handleClick = (e: React.MouseEvent) => {
-    if (e.button === 2) return;
-    if (readOnly) {
-      onOpenDiff(file.path);
-      return;
-    }
-    const consumed = onSelect?.(file.path, e);
-    if (!consumed) {
-      if (getFileCategory(file.path) === "image") {
-        onEditFile(file.path, file.repositoryName);
-        return;
-      }
-      onOpenDiff(file.path, {
-        source: "uncommitted",
-        repositoryName: file.repositoryName,
-        ...(file.changeLayer ? { changeLayer: file.changeLayer } : {}),
-      });
-    }
-  };
 
   const handleCopyPath = () => {
     void copyRepositoryPath(file.path);
@@ -103,28 +167,17 @@ export function FileRow(props: FileRowProps) {
 
   return (
     <li
-      data-testid={props.testId ?? `file-row-${file.path.replace(/[/\\]/g, "-")}`}
-      data-changes-file={file.path}
-      data-commit-file-entry={readOnly ? "true" : undefined}
-      data-file-path={file.path}
-      aria-label={readOnly ? file.path : undefined}
-      title={readOnly ? file.path : undefined}
-      data-selected={isSelected ? "true" : "false"}
-      data-active={isActive ? "true" : "false"}
-      className={cn(
-        "group flex items-center justify-between rounded-md border border-transparent -mx-1 text-sm cursor-pointer",
-        touchMode ? "gap-1 px-1 py-0.5" : "gap-2 px-2 py-1.5 md:px-1 md:py-0.5",
-        isSelected || isActive
-          ? "border-primary/50 bg-card text-foreground hover:bg-muted/70"
-          : "hover:bg-muted/60",
-      )}
-      onClick={handleClick}
+      {...getFileRowPresentation(props, touchMode)}
+      onClick={(event) => handleFileRowClick(props, event)}
+      onKeyDown={(event) => handleFileRowKeyDown(event, props.keyboardNavigable)}
     >
-      {touchMode ? (
-        <TouchFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
-      ) : (
-        <DesktopFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
-      )}
+      <FileRowDeviceContent
+        props={props}
+        folder={folder}
+        name={name}
+        touchMode={touchMode}
+        onCopyPath={handleCopyPath}
+      />
     </li>
   );
 }
@@ -447,41 +500,91 @@ export function BulkActionBar({
   onBulkUnstage?: (paths: string[]) => void;
   onBulkDiscard?: (paths: string[], anchor?: HTMLElement) => void;
 }) {
-  const { t } = useTranslation();
   const paths = [...selectedPaths];
+  return (
+    <BulkActionBarContent
+      variant={variant}
+      selectionCount={selectionCount}
+      onStage={onBulkStage ? () => onBulkStage(paths) : undefined}
+      onUnstage={onBulkUnstage ? () => onBulkUnstage(paths) : undefined}
+      onDiscard={onBulkDiscard ? (anchor) => onBulkDiscard(paths, anchor) : undefined}
+    />
+  );
+}
+
+export function BulkActionTargetBar({
+  variant,
+  selectionCount,
+  selectedFiles,
+  onBulkStage,
+  onBulkUnstage,
+  onBulkDiscard,
+}: {
+  variant: "unstaged" | "staged";
+  selectionCount: number;
+  selectedFiles: ChangedFileTarget[];
+  onBulkStage?: (files: ChangedFileTarget[]) => void;
+  onBulkUnstage?: (files: ChangedFileTarget[]) => void;
+  onBulkDiscard?: (files: ChangedFileTarget[], anchor?: HTMLElement) => void;
+}) {
+  return (
+    <BulkActionBarContent
+      variant={variant}
+      selectionCount={selectionCount}
+      onStage={onBulkStage ? () => onBulkStage(selectedFiles) : undefined}
+      onUnstage={onBulkUnstage ? () => onBulkUnstage(selectedFiles) : undefined}
+      onDiscard={onBulkDiscard ? (anchor) => onBulkDiscard(selectedFiles, anchor) : undefined}
+    />
+  );
+}
+
+function BulkActionBarContent({
+  variant,
+  selectionCount,
+  onStage,
+  onUnstage,
+  onDiscard,
+}: {
+  variant: "unstaged" | "staged";
+  selectionCount: number;
+  onStage?: () => void;
+  onUnstage?: () => void;
+  onDiscard?: (anchor?: HTMLElement) => void;
+}) {
+  const { t } = useTranslation();
 
   return (
     <div data-testid={`bulk-actions-${variant}`} className="flex items-center gap-1.5">
       <span className="text-[11px] text-muted-foreground">{selectionCount} selected</span>
-      {variant === "unstaged" && onBulkStage && (
+      {variant === "unstaged" && onStage && (
         <Button
           data-testid="bulk-stage"
           size="sm"
           variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={() => onBulkStage(paths)}
+          className="h-6 min-h-11 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer"
+          onClick={onStage}
         >
           {t("task:stageCount", { selectionCount })}
         </Button>
       )}
-      {variant === "staged" && onBulkUnstage && (
+      {variant === "staged" && onUnstage && (
         <Button
           data-testid={`bulk-unstage-${variant}`}
           size="sm"
           variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={() => onBulkUnstage(paths)}
+          className="h-6 min-h-11 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer"
+          onClick={onUnstage}
         >
           {t("task:unstageCount", { selectionCount })}
         </Button>
       )}
-      {onBulkDiscard && (
+      {onDiscard && (
         <Button
           data-testid={`bulk-discard-${variant}`}
           size="sm"
           variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
-          onClick={(e) => onBulkDiscard(paths, e.currentTarget)}
+          className="h-6 min-h-11 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
+          onClick={(e) => onDiscard(e.currentTarget)}
         >
           {t("task:discardCount", { selectionCount })}
         </Button>

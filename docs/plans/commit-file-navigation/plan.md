@@ -242,3 +242,10 @@ Merged-base PR fixup validation completed on 2026-09-26:
 - Focused Vitest coverage passed 13 files and 104 tests. `pnpm run typecheck` and `pnpm run i18n:check` passed, including the added Japanese translation for **Open commit**.
 - `pnpm e2e:run --project chromium e2e/tests/git/commit-file-navigation.spec.ts e2e/tests/git/git-changes-panel.spec.ts` passed 29 tests; the corresponding `mobile-chrome` run for `git/mobile-commit-file-navigation.spec.ts` and `task/mobile-changes-panel.spec.ts` passed 10 tests. Both managed runs built the web assets successfully.
 - Public-doc validation passed 62 tests and validated 47 pages. Specification validation passed with 309 decisions and 1,185 specifications.
+
+## September 30 Changes rendering follow-up
+
+The [bounded Changes package](../bounded-changes-rendering/plan.md) owns
+virtualization of the Changes timeline, including inline historical files.
+This follow-up preserves the results and completed work orders recorded here.
+Its new regressions supplement the existing interaction and source-routing checks.

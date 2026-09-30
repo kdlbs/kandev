@@ -2486,20 +2486,34 @@ test.describe("Git Changes Panel", () => {
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
-    await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
+    await expect(
+      localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
+    ).toContainText("(6)");
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
-    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
-    await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("(15)");
     await expect(
       providerSection.locator('[data-commit-provenance="current_pr"]').first(),
     ).toHaveAttribute("title", "Current PR commit");
     await expect(
       localSection.locator('[data-commit-provenance="local_checkout"]').first(),
     ).toHaveAttribute("title", "Local checkout commit");
-    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
-    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
-      "Rewritten provider commit 15",
+    const firstProviderCommit = providerSection
+      .locator('[data-testid^="commit-row-"]')
+      .filter({ hasText: "Rewritten provider commit 15" });
+    const lastProviderCommit = providerSection.locator(
+      '[data-testid^="commit-row-"]:has([title="Rewritten provider commit 1"])',
     );
+    const firstProviderToggle = firstProviderCommit.getByTestId("commit-toggle");
+    const lastProviderToggle = lastProviderCommit.getByTestId("commit-toggle");
+    await testPage.keyboard.press("ArrowDown");
+    await expect(firstProviderToggle).toBeFocused();
+    for (let index = 1; index < 15; index += 1) {
+      await testPage.keyboard.press("ArrowDown");
+    }
+    await expect(lastProviderCommit).toBeVisible();
+    await expect(lastProviderToggle).toBeFocused();
 
     // A rewritten provider history must not label the preserved checkout as
     // six unpushed commits, and reading the panel must not mutate the checkout.

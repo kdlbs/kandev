@@ -1,133 +1,42 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
-
-vi.mock("./changes-panel-file-row", () => ({
-  FileRow: ({ file, indentPx }: { file: { path: string }; indentPx?: number }) => (
-    <li data-testid="file-row" data-indent={indentPx ?? 0}>
-      {file.path}
-    </li>
-  ),
-}));
-
-vi.mock("@/lib/state/dockview-store", () => ({
-  useDockviewStore: () => null,
-}));
-
-import { ChangesTree, RepoTreeGroup } from "./changes-panel-tree";
+import { TreeDirRow } from "./changes-panel-tree";
+import type { ChangesTreeNode } from "./changes-file-tree-model";
 
 afterEach(cleanup);
 
-type Props = ComponentProps<typeof ChangesTree>;
+type Props = ComponentProps<typeof TreeDirRow>;
 
-const stubMultiSelect: Props["multiSelect"] = {
-  selectedPaths: new Set<string>(),
-  isSelected: () => false,
-  handleClick: vi.fn(() => false),
-  clearSelection: vi.fn(),
-  selectAll: vi.fn(),
-  setSelectedPaths: vi.fn(),
-};
-
-const baseProps: Omit<Props, "files" | "variant"> = {
-  pendingStageFiles: new Set(),
-  onOpenDiff: vi.fn(),
-  onEditFile: vi.fn(),
-  onStage: vi.fn(),
-  onUnstage: vi.fn(),
-  onDiscard: vi.fn(),
-  multiSelect: stubMultiSelect,
-};
-
-function file(path: string): Props["files"][number] {
+function row(overrides: Partial<Props["row"]> = {}): Props["row"] {
+  const node: ChangesTreeNode = { name: "src", path: "src", isDir: true, children: [] };
   return {
-    path,
-    status: "modified",
-    staged: false,
-    plus: 1,
-    minus: 0,
-    oldPath: undefined,
+    node,
+    chainRoot: node,
+    displayName: "src",
+    path: "src",
+    depth: 2,
+    isExpanded: true,
+    isDir: true,
+    ...overrides,
   };
 }
 
-const APPS_WEB_DIR = "tree-dir-apps-web";
-const FOO_TS = "apps/web/foo.ts";
-const BAR_TS = "apps/web/bar.ts";
+describe("TreeDirRow", () => {
+  it("exposes expansion state and toggles the requested directory", () => {
+    const onToggle = vi.fn();
+    render(<TreeDirRow row={row({ isExpanded: false })} baseIndentPx={12} onToggle={onToggle} />);
 
-describe("ChangesTree", () => {
-  it("renders folders as dir rows and files as file rows", () => {
-    render(
-      <ChangesTree
-        {...baseProps}
-        variant="unstaged"
-        files={[file(FOO_TS), file(BAR_TS), file("README.md")]}
-      />,
-    );
-    // Two file rows under apps/web plus README at root.
-    expect(screen.getAllByTestId("file-row")).toHaveLength(3);
-    // A directory row exists for "apps/web" (chain-collapsed).
-    const dir = screen.getByTestId(APPS_WEB_DIR);
-    expect(dir.textContent).toContain("apps/web");
+    const toggle = screen.getByRole("button", { name: "src" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.style.paddingLeft).toBe("40px");
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledOnce();
   });
 
-  it("collapses a single-child dir chain into one row", () => {
-    render(<ChangesTree {...baseProps} variant="unstaged" files={[file("a/b/c/file.ts")]} />);
-    // The chain a/b/c renders as a single dir row keyed by the deepest path.
-    const dir = screen.getByTestId("tree-dir-a-b-c");
-    expect(dir.textContent).toContain("a/b/c");
-  });
+  it("keeps a 44px touch target for directory expansion", () => {
+    render(<TreeDirRow row={row()} baseIndentPx={0} onToggle={() => undefined} />);
 
-  it("hides children when a folder is collapsed", () => {
-    render(<ChangesTree {...baseProps} variant="unstaged" files={[file(FOO_TS), file(BAR_TS)]} />);
-    expect(screen.getAllByTestId("file-row")).toHaveLength(2);
-    fireEvent.click(screen.getByTestId(APPS_WEB_DIR));
-    expect(screen.queryAllByTestId("file-row")).toHaveLength(0);
-  });
-
-  it("uses the parent multiSelect (not an internal one) so bulk actions stay wired", () => {
-    // Regression: tree mode used to instantiate its own useMultiSelect, which
-    // left the section-level BulkActionBar blind to tree selections. Verify
-    // the prop is consulted by checking that isSelected/handleClick come from
-    // the supplied object.
-    const isSelected = vi.fn(() => true);
-    const handleClick = vi.fn(() => false);
-    render(
-      <ChangesTree
-        {...baseProps}
-        multiSelect={{ ...stubMultiSelect, isSelected, handleClick }}
-        variant="unstaged"
-        files={[file(FOO_TS)]}
-      />,
-    );
-    // Our FileRow mock surfaces isSelected via a data attribute when wired.
-    // Even without the attribute, the spy proves the parent's hook ran for
-    // this file's path during render.
-    expect(isSelected).toHaveBeenCalledWith(FOO_TS);
-  });
-
-  it("skips a file entry without a path instead of crashing the route", () => {
-    // Regression: archived-task DB snapshots can replay cumulative-diff
-    // entries lacking a `path` field; the tree used to crash with
-    // "Cannot read properties of undefined (reading 'split')".
-    const pathless = { ...file(FOO_TS), path: undefined as unknown as string };
-    render(<ChangesTree {...baseProps} variant="unstaged" files={[pathless, file(BAR_TS)]} />);
-    expect(screen.getAllByTestId("file-row")).toHaveLength(1);
-    expect(screen.getByTestId("file-row").textContent).toBe(BAR_TS);
-  });
-
-  it("indents root files beneath a repository header", () => {
-    render(
-      <RepoTreeGroup
-        {...baseProps}
-        variant="unstaged"
-        repositoryName="frontend"
-        files={[file("README.md")]}
-        collapsed={false}
-        onToggle={vi.fn()}
-        primaryLabel="Stage all"
-      />,
-    );
-
-    expect(screen.getByTestId("file-row").getAttribute("data-indent")).toBe("12");
+    expect(screen.getByRole("button", { name: "src" }).className).toContain("max-md:min-h-11");
   });
 });

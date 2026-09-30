@@ -92,7 +92,8 @@ test.describe("Commit file navigation", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const inlineFile = row.getByTestId("commit-file-src-navigation-one.ts");
+    const inlineGroup = testPage.locator(`#${await toggle.getAttribute("aria-controls")}`);
+    const inlineFile = inlineGroup.getByTestId("commit-file-src-navigation-one.ts");
     await expect(inlineFile).toBeVisible({ timeout: 15_000 });
     const dirtyFile = testPage.getByTestId("file-row-src-navigation-one.ts");
     await expect(dirtyFile).toBeVisible({ timeout: 15_000 });
@@ -107,11 +108,22 @@ test.describe("Commit file navigation", () => {
     await prCapture.screenshot("commit-file-navigation-desktop-inline", {
       caption: "Expanded commit files reuse the changes tree styling",
     });
-    await inlineFile.click();
 
+    await expect(toggle).toBeFocused();
+    for (let step = 0; step < 10; step += 1) {
+      await testPage.keyboard.press("ArrowDown");
+      if (await inlineFile.evaluate((element) => element === document.activeElement)) break;
+    }
+    await expect(inlineFile).toBeFocused();
+    await testPage.keyboard.press("Enter");
     const selectedHeader = detail.locator(
       'section[data-file-path="src/navigation-one.ts"] button[data-file-path]',
     );
+    await expect(selectedHeader).toBeFocused({ timeout: 15_000 });
+    await expect(selectedHeader).toHaveAttribute("aria-expanded", "true");
+
+    await inlineFile.click();
+
     await expect(selectedHeader).toBeFocused({ timeout: 15_000 });
     await expect(selectedHeader).toHaveAttribute("aria-expanded", "true");
   });

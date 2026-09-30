@@ -6,6 +6,10 @@ import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getLocalizedGitOperationError } from "@/hooks/use-git-operations";
 import type { useToast } from "@/components/toast-provider";
 import type { SessionGit, PerRepoOperationResult } from "@/hooks/domains/session/use-session-git";
+import {
+  groupChangedFileTargetsByRepository,
+  type ChangedFileTarget,
+} from "./changes-timeline-selection";
 
 // Bug 7: drop the local GitOps shape — `SessionGit` is the single source of
 // truth for all the methods this module needs (pull, push, rebase, merge,
@@ -35,6 +39,21 @@ type GitOperationResultLike = {
   per_repo?: PerRepoOperationResult[];
 };
 type GitOperationFn = (op: () => Promise<GitOperationResultLike>, name: string) => Promise<void>;
+
+function getDiscardOperations(
+  filesToDiscard: ChangedFileTarget[] | null,
+  fileToDiscard: string | null,
+  repoToDiscard: string | undefined,
+  gitOps: GitOps,
+) {
+  if (filesToDiscard) {
+    return groupChangedFileTargetsByRepository(filesToDiscard).map((group) =>
+      gitOps.discard(group.paths, group.repositoryName),
+    );
+  }
+  if (fileToDiscard) return [gitOps.discard([fileToDiscard], repoToDiscard)];
+  return [];
+}
 
 /**
  * Builds the toast description for a fan-out result. When `per_repo` is
@@ -204,7 +223,7 @@ function useChangesDiscardAmendHandlers(
 ) {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
-  const [filesToDiscard, setFilesToDiscard] = useState<string[] | null>(null);
+  const [filesToDiscard, setFilesToDiscard] = useState<ChangedFileTarget[] | null>(null);
   const discardAnchorRef = useRef<HTMLElement | null>(null);
   // Multi-repo: remember the clicked file's repo so the discard op routes to
   // the right git repo. Path alone is ambiguous when two repos share a name.
@@ -220,9 +239,9 @@ function useChangesDiscardAmendHandlers(
     },
     [],
   );
-  const handleBulkDiscardClick = useCallback((paths: string[], anchor?: HTMLElement) => {
+  const handleBulkDiscardClick = useCallback((files: ChangedFileTarget[], anchor?: HTMLElement) => {
     discardAnchorRef.current = anchor ?? null;
-    setFilesToDiscard(paths);
+    setFilesToDiscard(files);
     setFileToDiscard(null);
     setRepoToDiscard(undefined);
     setShowDiscardDialog(true);
@@ -233,14 +252,15 @@ function useChangesDiscardAmendHandlers(
     // replaces it, while confirmation clears it after the mutation settles.
   }, []);
   const handleDiscardConfirm = useCallback(async () => {
-    const paths = filesToDiscard ?? (fileToDiscard ? [fileToDiscard] : null);
-    if (!paths) return;
+    const operations = getDiscardOperations(filesToDiscard, fileToDiscard, repoToDiscard, gitOps);
+    if (operations.length === 0) return;
     try {
-      const result = await gitOps.discard(paths, repoToDiscard);
-      if (!result.success)
+      const results = await Promise.all(operations);
+      const failedResult = results.find((result) => !result.success);
+      if (failedResult)
         toast({
           title: t("task:failedToDiscardChanges"),
-          description: result.error || t("common:anUnknownErrorOccurred"),
+          description: failedResult.error || t("common:anUnknownErrorOccurred"),
           variant: "error",
         });
     } catch (error) {
