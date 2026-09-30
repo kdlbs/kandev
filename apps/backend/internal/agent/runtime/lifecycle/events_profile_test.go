@@ -72,8 +72,8 @@ func TestAgentEventPayloadCarriesPromptTurnID(t *testing.T) {
 
 func TestAgentEventPayloadCarriesHostSettingsPolicy(t *testing.T) {
 	providerRestored := newAgentEventPayload(&AgentExecution{
-		ID:                    "exec-provider-restored",
-		SessionSettingsPolicy: SessionSettingsPolicyProviderRestored,
+		ID:                              "exec-provider-restored",
+		SessionSettingsProjectionPolicy: SessionSettingsPolicyProviderRestored,
 	})
 	if providerRestored.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
 		t.Fatalf("provider-restored policy = %q, want provider_restored", providerRestored.SessionSettingsPolicy)

@@ -1132,6 +1132,30 @@ func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *
 	}
 }
 
+func TestApplyRunningRecordToResumeRequest_ProviderRestoredFailedSessionUsesPersistedToken(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskDescription:       "recover the failed task",
+		SessionSettingsPolicy: ResumeSettingsPolicyProviderRestored,
+	}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:                     "sess-1",
+		State:                  models.TaskSessionStateFailed,
+		DownstreamACPSessionID: "restored-conversation",
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, nil)
+
+	if req.ACPSessionID != "restored-conversation" {
+		t.Fatalf("provider-restored ACP session ID = %q, want persisted token", req.ACPSessionID)
+	}
+	if req.TaskDescription != "" {
+		t.Fatalf("TaskDescription = %q, want empty so recovery does not auto-prompt", req.TaskDescription)
+	}
+}
+
 func TestApplyRunningRecordToResumeRequest_CompletedTokenlessRunningRowClearsTaskDescription(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

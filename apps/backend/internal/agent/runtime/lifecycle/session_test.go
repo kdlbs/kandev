@@ -716,7 +716,9 @@ func TestInitializeAndPromptWithLayers_ProviderRestoredOmitsSavedStartupSettings
 	execution := &AgentExecution{
 		ID: "exec-provider-restored", TaskID: "task-provider-restored", SessionID: "session-provider-restored",
 		ACPSessionID: "saved-native-token", TaskScope: TaskLaunchScopeTask,
-		SessionSettingsPolicy: SessionSettingsPolicyProviderRestored, WorkspacePath: "/workspace", agentctl: client,
+		SessionSettingsPolicy:           SessionSettingsPolicyProviderRestored,
+		SessionSettingsProjectionPolicy: SessionSettingsPolicyProviderRestored,
+		WorkspacePath:                   "/workspace", agentctl: client,
 		promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
 	agentConfig := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{

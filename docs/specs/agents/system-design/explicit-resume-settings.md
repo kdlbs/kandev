@@ -11,7 +11,8 @@ requirements:
 ## Mapping and evidence
 
 REQ-AGENTS-EXPLICIT-RESUME-SETTINGS-001 maps to admission, settings application, identity, and
-presentation below. This is planned behavior, not the current implementation.
+presentation below. The implementation and evidence are recorded in the linked plan and work
+orders.
 
 For task `781ecde0-0e25-4c5f-8f45-f96cfdd90d53`, retained backend logs on
 2026-09-29 at 09:44:00 +0100 show an Auggie resume failing because requested
@@ -77,8 +78,36 @@ duplicate clicks, and delayed terminal events from older executions.
 Attempt IDs stored in selector snapshots and success-notice deduplication keys
 must not be a process-local counter that restarts at the same value. Seed the
 existing numeric identity range from a UUID and increment it within that
-process. Treat source generations as ordered only when their attempt IDs match;
-a new identity starts a fresh generation sequence.
+process. Keep this attempt identity separate from settings source ordering: a
+process restart preserves the recovery attempt ID but starts a new host source
+generation. Persist the source execution ID and source generation alongside
+the selector snapshot. Within one source execution, reject lower source
+generations; a higher generation replaces the effective snapshot. A report
+from another execution is accepted only when the current executor ownership
+for the session identifies that execution. Epoch-less legacy reports may merge
+with legacy snapshots, but cannot overwrite a snapshot with a known source
+epoch.
+
+When lifecycle reconstructs an adopted execution, it reserves and persists the
+next source generation in task-session metadata while holding recovery
+ownership, before tracking, publishing, or reconnecting the execution. If the
+durable reservation cannot be written, recovery stops instead of reconnecting
+with an epoch that could be rejected as stale. A matching execution keeps its
+effective selector values while resetting adapter-local sequence counters; a
+different current execution starts with an unknown effective projection and
+does not change saved launch selections or the native conversation token.
+Reconstruction restores provider-report provenance only. Startup authority
+remains strict, and each independent start synchronizes its report projection
+from the accepted startup policy before callbacks are wired.
+An adopted execution with no task session has no selector metadata to fence, so
+it keeps the legacy zero source generation and strict report projection.
+
+The ACP adapter's settings-generation counter orders reports only within one
+host source execution and generation. Keep it monotonic across session load
+and reset transitions handled by that adapter. A process restart can reset the
+adapter counter because the host advances the source generation before
+replacement callbacks are wired. A different attempt replaces the effective
+selector snapshot, including when a legacy event has an empty attempt ID.
 
 ## Presentation, persistence, and observability
 
@@ -108,9 +137,12 @@ unsolicited reports from the restored execution, startup configuration RPC
 outcomes, and lifecycle-generated startup snapshots. Later explicit selector
 RPC outcomes retain ordinary persistence. Do not infer event provenance from
 current readiness or an admission registry that may already have released its
-attempt. Source generations reject older settings reports before persistence
-and broadcast; existing execution/attempt ownership guards reject reports from
-superseded executions.
+attempt. Serialize mode and model snapshot read/merge/write and publication per
+session so concurrent reports preserve both independent selector values. Host
+source execution/generation and adapter-local settings generation reject old
+reports before persistence and broadcast. Existing session and
+execution/attempt ownership guards reject reports from superseded sessions and
+executions.
 Live and replay selector projections explicitly identify strict or restored
 state. The frontend must not infer that distinction from `STARTING` or other
 session-state events, which can arrive independently of selector updates.

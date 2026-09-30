@@ -466,7 +466,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
 	providerDefaultConfig := execution.GetModelState()
-	if execution.SessionSettingsPolicy == SessionSettingsPolicyProviderRestored {
+	if execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
 		// The provider has already restored this conversation with its own
 		// effective settings. Retrying saved launch selections here would turn
 		// recovery into another failed start, so omit those values for this
@@ -649,7 +649,7 @@ func (sm *SessionManager) initializeACPConnection(
 	}
 	result, err := sm.InitializeSessionWithSettingsPolicy(
 		ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers,
-		execution.SessionSettingsPolicy,
+		execution.sessionSettingsStartupPolicy(),
 	)
 	releaseClient()
 	if err != nil {
@@ -793,7 +793,7 @@ func setStartupSessionConfigOption(
 	client *agentctl.Client,
 	configID, value string,
 ) error {
-	if execution != nil && execution.SessionSettingsPolicy == SessionSettingsPolicyProviderRestored {
+	if execution != nil && execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
 		return client.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyProviderRestored)
 	}
 	return client.SetConfigOption(ctx, configID, value)
@@ -1044,10 +1044,10 @@ func (sm *SessionManager) publishOriginalConfigOptionsWithProfile(
 }
 
 func providerRestoredSettingsPolicy(execution *AgentExecution) streams.SessionSettingsPolicy {
-	if execution != nil && execution.SessionSettingsPolicy == SessionSettingsPolicyProviderRestored {
-		return streams.SessionSettingsPolicyProviderRestored
+	if execution == nil {
+		return ""
 	}
-	return ""
+	return sessionSettingsProjectionPolicy(execution.sessionSettingsProjectionPolicy())
 }
 
 func setConfigOptionValue(options []streams.ConfigOption, configID, value string) bool {

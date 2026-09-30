@@ -2009,7 +2009,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 		// after runtime cleanup removed the operational row.
 		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
 			isRecoverableCancelledResumeSession(session) ||
-			session.State == models.TaskSessionStateCompleted
+			session.State == models.TaskSessionStateCompleted ||
+			(session.State == models.TaskSessionStateFailed &&
+				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
 		if startAgent && noAutoPromptState {
 			if token := persistedSessionResumeToken(session); token != "" {
 				req.ACPSessionID = token

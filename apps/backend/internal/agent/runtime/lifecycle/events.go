@@ -136,36 +136,31 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 	evidence *PromptAttemptEvidence,
 ) AgentEventPayload {
 	payload := AgentEventPayload{
-		AgentExecutionID:   execution.ID,
-		AttemptID:          execution.currentStartupAttemptID(),
-		OwnerKind:          executionOwnerKind(execution),
-		WorkspaceID:        execution.WorkspaceID,
-		RunID:              execution.RunID,
-		RunSessionID:       execution.RunSessionID,
-		RunAttempt:         execution.RunAttempt,
-		TaskID:             execution.TaskID,
-		SessionID:          execution.SessionID,
-		TaskEnvironmentID:  execution.TaskEnvironmentID,
-		TurnID:             turnID,
-		AgentID:            execution.AgentID,
-		AgentProfileID:     execution.officeProfileID(),
-		ExecutionProfileID: execution.AgentProfileID,
-		ContainerID:        execution.ContainerID,
-		Status:             string(execution.Status),
-		StartedAt:          execution.StartedAt,
-		FinishedAt:         execution.FinishedAt,
-		ErrorMessage:       execution.ErrorMessage,
-		FailureCode:        execution.FailureCode,
-		FailureDetails:     execution.FailureDetails,
-		ProviderError:      execution.ProviderError,
-		SessionSettingsPolicy: func() streams.SessionSettingsPolicy {
-			if execution.SessionSettingsPolicy == SessionSettingsPolicyProviderRestored {
-				return streams.SessionSettingsPolicyProviderRestored
-			}
-			return ""
-		}(),
-		ExitCode:         execution.ExitCode,
-		PromptGeneration: execution.promptGeneration,
+		AgentExecutionID:      execution.ID,
+		AttemptID:             execution.currentStartupAttemptID(),
+		OwnerKind:             executionOwnerKind(execution),
+		WorkspaceID:           execution.WorkspaceID,
+		RunID:                 execution.RunID,
+		RunSessionID:          execution.RunSessionID,
+		RunAttempt:            execution.RunAttempt,
+		TaskID:                execution.TaskID,
+		SessionID:             execution.SessionID,
+		TaskEnvironmentID:     execution.TaskEnvironmentID,
+		TurnID:                turnID,
+		AgentID:               execution.AgentID,
+		AgentProfileID:        execution.officeProfileID(),
+		ExecutionProfileID:    execution.AgentProfileID,
+		ContainerID:           execution.ContainerID,
+		Status:                string(execution.Status),
+		StartedAt:             execution.StartedAt,
+		FinishedAt:            execution.FinishedAt,
+		ErrorMessage:          execution.ErrorMessage,
+		FailureCode:           execution.FailureCode,
+		FailureDetails:        execution.FailureDetails,
+		ProviderError:         execution.ProviderError,
+		SessionSettingsPolicy: sessionSettingsProjectionPolicy(execution.sessionSettingsProjectionPolicy()),
+		ExitCode:              execution.ExitCode,
+		PromptGeneration:      execution.promptGeneration,
 	}
 	if evidence != nil {
 		payload.EvidenceKnown = evidence.EvidenceKnown
@@ -261,6 +256,9 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
 // This is different from PublishAgentEvent which publishes lifecycle events (started, stopped, etc.).
 func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	p.publishAgentStreamEventWithAttempt(execution, event, event.AttemptID)
 }
 
@@ -286,21 +284,22 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AttemptID:      attemptID,
-		OwnerKind:      executionOwnerKind(execution),
-		WorkspaceID:    execution.WorkspaceID,
-		RunID:          execution.RunID,
-		RunSessionID:   execution.RunSessionID,
-		RunAttempt:     execution.RunAttempt,
-		AgentProfileID: execution.officeProfileID(),
-		AgentType:      execution.AgentID,
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           eventData,
+		Type:                            "agent/event",
+		Timestamp:                       time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:                         execution.ID,
+		ExecutionID:                     execution.ID,
+		AttemptID:                       attemptID,
+		SessionSettingsSourceGeneration: event.SessionSettingsSourceGeneration,
+		OwnerKind:                       executionOwnerKind(execution),
+		WorkspaceID:                     execution.WorkspaceID,
+		RunID:                           execution.RunID,
+		RunSessionID:                    execution.RunSessionID,
+		RunAttempt:                      execution.RunAttempt,
+		AgentProfileID:                  execution.officeProfileID(),
+		AgentType:                       execution.AgentID,
+		TaskID:                          execution.TaskID,
+		SessionID:                       execution.SessionID,
+		Data:                            eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)

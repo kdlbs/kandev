@@ -97,7 +97,7 @@ Verification:
 
 - Focused changed suites passed:
   `GOCACHE=/private/tmp/kandev-go-cache go test -tags fts5 ./internal/agent/runtime/lifecycle ./internal/backendapp ./internal/orchestrator/executor -run '^(TestAuggieTaskStartRequiresSelectedModel|TestInitializeAndPromptWithLayers_AuggieTaskRejectsUnappliedMode|TestLaunchPreparedSession_Success|TestBuildLifecycleLaunchRequestCarriesTaskScope|TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager)$' -count=1`.
-- The merged full orchestrator subtree and backendapp checks passed. The full
+- The merged full orchestrator subtree and backendapp checks passed. The final
   lifecycle package passed with these four unrelated SSH orphan-process tests
   skipped: `TestSSHOrphanStopCommandKillsProcessAndDirectChildProcessGroup`,
   `TestSSHOrphanStopCommandSessionDirSurvivesWhenLiveAgentctlMatchesTaskDir`,
@@ -106,6 +106,17 @@ Verification:
   unchanged-baseline checkout reproduces all four failures. The lifecycle run
   used `TMPDIR=/private/tmp`; the socket-path test
   `TestBuildAuthMethodsIdentityAgentOverridesEnvironment` passed with this
-  shorter temporary root. Changed lifecycle tests and the adjusted orchestrator
-  suite passed. This work order is `done`; no unrelated SSH or worktree tests
-  were modified.
+  shorter temporary root. The final run also excluded
+  `TestMissingCheckoutRecoveryLifecycleRestoresAndProjectsSelectedWorkspace`,
+  whose `/dev/fd/3` permission failure was reproduced on unchanged main. The
+  changed lifecycle tests and adjusted orchestrator suite passed. No unrelated
+  SSH or worktree tests were modified.
+
+After the source-epoch remediation, the full lifecycle package passed in
+145.860s with those five baseline-reproduced tests excluded. The full
+orchestrator subtree and backendapp passed; the executor aggregate excluded
+only `TestMissingCheckoutRecoveryLaunchAndResume`, whose three `/dev/fd/3`
+subcases also reproduce unchanged on the baseline. The source-reservation and
+startup-projection regressions passed under `-race -count=3`. Session-less
+recovery remains on the legacy zero-epoch path with strict report projection.
+This work order is `done`; no unrelated tests were modified.

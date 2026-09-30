@@ -3905,7 +3905,15 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
-	if sessionSettingsEventIsStale(ctx, s.repo, sessionID, payload.AttemptID, payload.Data.SessionSettingsGeneration, true) {
+	settingsLock := s.sessionSettingsSnapshotLock(sessionID)
+	settingsLock.Lock()
+	defer settingsLock.Unlock()
+	identity := sessionSettingsEventIdentity{
+		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		SourceGeneration:   payload.SessionSettingsSourceGeneration,
+		SettingsGeneration: payload.Data.SessionSettingsGeneration,
+	}
+	if sessionSettingsEventIsStale(ctx, s.repo, sessionID, identity, true) {
 		return
 	}
 	// Persist the agent-reported mode to session metadata so the user's chosen
@@ -3916,15 +3924,15 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 		if payload.Data.SessionSettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
 			// Keep provider-effective state in the selector projection without
 			// replacing the mode that ordinary launches must still enforce.
-			s.persistProviderRestoredSessionModeSnapshot(ctx, sessionID, payload.AttemptID, mode, payload.Data.SessionSettingsGeneration)
+			s.persistProviderRestoredSessionModeSnapshot(ctx, sessionID, identity, mode)
 		} else {
 			s.persistSessionMode(ctx, sessionID, mode)
-			s.persistSessionModeSnapshot(ctx, sessionID, payload.AttemptID, mode, payload.Data.SessionSettingsGeneration)
+			s.persistSessionModeSnapshot(ctx, sessionID, identity, mode)
 		}
 	} else if payload.Data.SessionSettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
 		// Empty means the restored effective mode is unknown. Clear a snapshot
 		// from an older recovery attempt rather than presenting it as current.
-		s.persistProviderRestoredSessionModeSnapshot(ctx, sessionID, payload.AttemptID, "", payload.Data.SessionSettingsGeneration)
+		s.persistProviderRestoredSessionModeSnapshot(ctx, sessionID, identity, "")
 	}
 
 	eventPayload := lifecycle.SessionModeEventPayload{
@@ -3932,7 +3940,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 		SessionID:             sessionID,
 		AgentID:               payload.AgentID,
 		CurrentModeID:         payload.Data.CurrentModeID,
-		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, payload.AttemptID, payload.Data.SessionSettingsPolicy),
+		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, identity, payload.Data.SessionSettingsPolicy),
 		AvailableModes:        payload.Data.AvailableModes,
 		RequestedModeID:       payload.Data.RequestedModeID,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),
@@ -3995,7 +4003,15 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
-	if sessionSettingsEventIsStale(ctx, s.repo, sessionID, payload.AttemptID, payload.Data.SessionSettingsGeneration, false) {
+	settingsLock := s.sessionSettingsSnapshotLock(sessionID)
+	settingsLock.Lock()
+	defer settingsLock.Unlock()
+	identity := sessionSettingsEventIdentity{
+		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		SourceGeneration:   payload.SessionSettingsSourceGeneration,
+		SettingsGeneration: payload.Data.SessionSettingsGeneration,
+	}
+	if sessionSettingsEventIsStale(ctx, s.repo, sessionID, identity, false) {
 		return
 	}
 	if failures := workflowSessionConfigFailures(payload.Data.Data); len(failures) > 0 {
@@ -4052,13 +4068,13 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	}
 	if providerRestored {
 		s.persistProviderRestoredSessionModelsSnapshot(
-			ctx, sessionID, payload.AttemptID, payload.Data.SessionSettingsGeneration,
+			ctx, sessionID, identity,
 			payload.Data.CurrentModelID, payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 		)
 	} else {
 		s.persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
 			ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
-			payload.AttemptID, payload.Data.SessionSettingsGeneration,
+			identity,
 		)
 	}
 
@@ -4067,7 +4083,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		SessionID:             sessionID,
 		AgentID:               payload.AgentID,
 		CurrentModelID:        payload.Data.CurrentModelID,
-		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, payload.AttemptID, payload.Data.SessionSettingsPolicy),
+		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, identity, payload.Data.SessionSettingsPolicy),
 		Models:                payload.Data.SessionModels,
 		ConfigOptions:         payload.Data.ConfigOptions,
 		ConfigOptionsSettled:  settled,
@@ -4083,10 +4099,17 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
 }
 
+type sessionSettingsEventIdentity struct {
+	AttemptID          string
+	ExecutionID        string
+	SourceGeneration   uint64
+	SettingsGeneration uint64
+}
+
 func (s *Service) sessionSettingsProjectionPolicy(
 	ctx context.Context,
 	sessionID string,
-	attemptID string,
+	identity sessionSettingsEventIdentity,
 	sourcePolicy streams.SessionSettingsPolicy,
 ) streams.SessionSettingsPolicy {
 	if s.repo == nil {
@@ -4100,13 +4123,16 @@ func (s *Service) sessionSettingsProjectionPolicy(
 	if !ok {
 		return defaultSessionSettingsProjectionPolicy(sourcePolicy)
 	}
-	if snapshot.SettingsAttemptID == attemptID {
+	if !sessionSettingsSnapshotMatchesSource(snapshot, identity.ExecutionID, identity.SourceGeneration) {
+		return streams.SessionSettingsPolicyStrict
+	}
+	if snapshot.SettingsAttemptID == identity.AttemptID {
 		if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
 			return streams.SessionSettingsPolicyProviderRestored
 		}
 		return streams.SessionSettingsPolicyStrict
 	}
-	if attemptID != "" && snapshot.SettingsAttemptID != "" {
+	if identity.AttemptID != "" && snapshot.SettingsAttemptID != "" {
 		return streams.SessionSettingsPolicyStrict
 	}
 	return defaultSessionSettingsProjectionPolicy(sourcePolicy)
@@ -4124,11 +4150,11 @@ func sessionSettingsEventIsStale(
 	repo interface {
 		GetTaskSession(context.Context, string) (*models.TaskSession, error)
 	},
-	sessionID, attemptID string,
-	generation uint64,
+	sessionID string,
+	identity sessionSettingsEventIdentity,
 	mode bool,
 ) bool {
-	if repo == nil || attemptID == "" || generation == 0 {
+	if repo == nil || sessionID == "" {
 		return false
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
@@ -4136,13 +4162,86 @@ func sessionSettingsEventIsStale(
 		return false
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
-	if !ok || snapshot.SettingsAttemptID != attemptID {
+	if !ok {
+		return false
+	}
+	sourceStale, sameSource := sessionSettingsSourceEventIsStale(snapshot, session.AgentExecutionID, identity)
+	if sourceStale {
+		return true
+	}
+	if !sameSource {
+		return false
+	}
+	if identity.SourceGeneration == 0 && identity.AttemptID == "" {
+		return false
+	}
+	if snapshot.SettingsAttemptID != identity.AttemptID || identity.SettingsGeneration == 0 {
 		return false
 	}
 	if mode {
-		return generation <= snapshot.CurrentModeGeneration
+		return identity.SettingsGeneration <= snapshot.CurrentModeGeneration
 	}
-	return generation <= snapshot.CurrentModelGeneration
+	return identity.SettingsGeneration <= snapshot.CurrentModelGeneration
+}
+
+func sessionSettingsSourceEventIsStale(
+	snapshot lifecycle.SessionModelsSnapshot,
+	currentExecutionID string,
+	identity sessionSettingsEventIdentity,
+) (stale bool, sameSource bool) {
+	if snapshot.SettingsSourceGeneration == 0 {
+		return false, identity.SourceGeneration == 0
+	}
+	if identity.SourceGeneration == 0 {
+		return true, false
+	}
+	if snapshot.SettingsSourceExecutionID != identity.ExecutionID {
+		return identity.ExecutionID == "" || currentExecutionID != identity.ExecutionID, false
+	}
+	if identity.SourceGeneration < snapshot.SettingsSourceGeneration {
+		return true, false
+	}
+	if identity.SourceGeneration > snapshot.SettingsSourceGeneration {
+		return false, false
+	}
+	return false, true
+}
+
+func sessionSettingsSnapshotMatchesSource(
+	snapshot lifecycle.SessionModelsSnapshot,
+	executionID string,
+	sourceGeneration uint64,
+) bool {
+	if sourceGeneration == 0 {
+		return snapshot.SettingsSourceGeneration == 0 && snapshot.SettingsSourceExecutionID == ""
+	}
+	return snapshot.SettingsSourceGeneration == sourceGeneration &&
+		snapshot.SettingsSourceExecutionID == executionID
+}
+
+func newSessionSettingsSnapshot(
+	identity sessionSettingsEventIdentity,
+	policy streams.SessionSettingsPolicy,
+) lifecycle.SessionModelsSnapshot {
+	snapshot := lifecycle.SessionModelsSnapshot{
+		SettingsAttemptID: identity.AttemptID,
+		SettingsPolicy:    policy,
+	}
+	setSessionSettingsSnapshotSource(&snapshot, identity)
+	return snapshot
+}
+
+func setSessionSettingsSnapshotSource(
+	snapshot *lifecycle.SessionModelsSnapshot,
+	identity sessionSettingsEventIdentity,
+) {
+	if identity.SourceGeneration == 0 {
+		snapshot.SettingsSourceExecutionID = ""
+		snapshot.SettingsSourceGeneration = 0
+		return
+	}
+	snapshot.SettingsSourceExecutionID = identity.ExecutionID
+	snapshot.SettingsSourceGeneration = identity.SourceGeneration
 }
 
 // handleSessionModelFallbackEvent broadcasts session_model_fallback events to
@@ -4639,7 +4738,7 @@ func (s *Service) persistSessionModelAndRuntimeConfigWithSettlement(
 	configOptionsSettled bool,
 ) {
 	s.persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
-		ctx, sessionID, model, mode, availableModels, options, configOptionsSettled, "", 0,
+		ctx, sessionID, model, mode, availableModels, options, configOptionsSettled, sessionSettingsEventIdentity{},
 	)
 }
 
@@ -4649,8 +4748,7 @@ func (s *Service) persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
 	configOptionsSettled bool,
-	attemptID string,
-	settingsGeneration uint64,
+	identity sessionSettingsEventIdentity,
 ) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -4666,13 +4764,13 @@ func (s *Service) persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
 	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
-	s.persistSessionModelsSnapshot(ctx, sessionID, session, model, availableModels, options, configOptionsSettled, attemptID, settingsGeneration, "")
+	s.persistSessionModelsSnapshot(ctx, sessionID, session, model, availableModels, options, configOptionsSettled, identity, "")
 }
 
 func (s *Service) persistProviderRestoredSessionModelsSnapshot(
 	ctx context.Context,
-	sessionID, attemptID string,
-	settingsGeneration uint64,
+	sessionID string,
+	identity sessionSettingsEventIdentity,
 	model string,
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
@@ -4688,15 +4786,16 @@ func (s *Service) persistProviderRestoredSessionModelsSnapshot(
 		return
 	}
 	s.persistSessionModelsSnapshot(
-		ctx, sessionID, session, model, availableModels, options, configOptionsSettled, attemptID, settingsGeneration,
+		ctx, sessionID, session, model, availableModels, options, configOptionsSettled, identity,
 		streams.SessionSettingsPolicyProviderRestored,
 	)
 }
 
 func (s *Service) persistProviderRestoredSessionModeSnapshot(
 	ctx context.Context,
-	sessionID, attemptID, mode string,
-	settingsGeneration uint64,
+	sessionID string,
+	identity sessionSettingsEventIdentity,
+	mode string,
 ) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -4708,19 +4807,17 @@ func (s *Service) persistProviderRestoredSessionModeSnapshot(
 		return
 	}
 	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
-	if snapshot.SettingsAttemptID != attemptID {
-		snapshot = lifecycle.SessionModelsSnapshot{
-			SettingsAttemptID: attemptID,
-			SettingsPolicy:    streams.SessionSettingsPolicyProviderRestored,
-		}
+	if snapshot.SettingsAttemptID != identity.AttemptID ||
+		!sessionSettingsSnapshotMatchesSource(snapshot, identity.ExecutionID, identity.SourceGeneration) {
+		snapshot = newSessionSettingsSnapshot(identity, streams.SessionSettingsPolicyProviderRestored)
 	}
 	snapshot.SettingsPolicy = streams.SessionSettingsPolicyProviderRestored
-	if settingsGeneration > 0 && settingsGeneration <= snapshot.CurrentModeGeneration {
+	if identity.SettingsGeneration > 0 && identity.SettingsGeneration <= snapshot.CurrentModeGeneration {
 		return
 	}
 	snapshot.CurrentModeID = mode
-	if settingsGeneration > 0 {
-		snapshot.CurrentModeGeneration = settingsGeneration
+	if identity.SettingsGeneration > 0 {
+		snapshot.CurrentModeGeneration = identity.SettingsGeneration
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyACPModelState, snapshot); err != nil {
@@ -4729,7 +4826,7 @@ func (s *Service) persistProviderRestoredSessionModeSnapshot(
 	}
 }
 
-func (s *Service) persistSessionModeSnapshot(ctx context.Context, sessionID, attemptID, mode string, settingsGeneration uint64) {
+func (s *Service) persistSessionModeSnapshot(ctx context.Context, sessionID string, identity sessionSettingsEventIdentity, mode string) {
 	if s.repo == nil {
 		return
 	}
@@ -4738,15 +4835,16 @@ func (s *Service) persistSessionModeSnapshot(ctx context.Context, sessionID, att
 		return
 	}
 	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
-	if snapshot.SettingsAttemptID != attemptID && attemptID != "" {
-		snapshot = lifecycle.SessionModelsSnapshot{SettingsAttemptID: attemptID}
+	if snapshot.SettingsAttemptID != identity.AttemptID ||
+		!sessionSettingsSnapshotMatchesSource(snapshot, identity.ExecutionID, identity.SourceGeneration) {
+		snapshot = newSessionSettingsSnapshot(identity, "")
 	}
-	if settingsGeneration > 0 && settingsGeneration <= snapshot.CurrentModeGeneration {
+	if identity.SettingsGeneration > 0 && identity.SettingsGeneration <= snapshot.CurrentModeGeneration {
 		return
 	}
 	snapshot.CurrentModeID = mode
-	if settingsGeneration > 0 {
-		snapshot.CurrentModeGeneration = settingsGeneration
+	if identity.SettingsGeneration > 0 {
+		snapshot.CurrentModeGeneration = identity.SettingsGeneration
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyACPModelState, snapshot); err != nil {
@@ -4763,8 +4861,7 @@ func (s *Service) persistSessionModelsSnapshot(
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
 	configOptionsSettled bool,
-	attemptID string,
-	settingsGeneration uint64,
+	identity sessionSettingsEventIdentity,
 	settingsPolicy streams.SessionSettingsPolicy,
 ) {
 	modelsForBoot := make([]streams.SessionModelInfo, 0, len(availableModels))
@@ -4784,41 +4881,45 @@ func (s *Service) persistSessionModelsSnapshot(
 		ConfigOptions:        options,
 		ConfigOptionsSettled: configOptionsSettled,
 	}
+	setSessionSettingsSnapshotSource(&snapshot, identity)
 	if previous, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok {
-		if attemptID == "" || previous.SettingsAttemptID == attemptID {
+		sameOwner := previous.SettingsAttemptID == identity.AttemptID &&
+			sessionSettingsSnapshotMatchesSource(previous, identity.ExecutionID, identity.SourceGeneration)
+		if sameOwner {
 			snapshot.ConfigOptionsSettled = snapshot.ConfigOptionsSettled || previous.ConfigOptionsSettled
 			snapshot.CurrentModeID = previous.CurrentModeID
 			snapshot.CurrentModeGeneration = previous.CurrentModeGeneration
 			snapshot.CurrentModelGeneration = previous.CurrentModelGeneration
 			snapshot.SettingsAttemptID = previous.SettingsAttemptID
+			snapshot.SettingsSourceExecutionID = previous.SettingsSourceExecutionID
+			snapshot.SettingsSourceGeneration = previous.SettingsSourceGeneration
 			if settingsPolicy == "" {
 				snapshot.SettingsPolicy = previous.SettingsPolicy
 			}
 		}
-		if attemptID != "" && previous.SettingsAttemptID != attemptID {
-			snapshot = lifecycle.SessionModelsSnapshot{
-				CurrentModelID:       currentModelID,
-				SettingsPolicy:       settingsPolicy,
-				Models:               modelsForBoot,
-				ConfigOptions:        options,
-				ConfigOptionsSettled: configOptionsSettled,
-				SettingsAttemptID:    attemptID,
-			}
+		if !sameOwner {
+			snapshot = newSessionSettingsSnapshot(identity, settingsPolicy)
+			snapshot.CurrentModelID = currentModelID
+			snapshot.Models = modelsForBoot
+			snapshot.ConfigOptions = options
+			snapshot.ConfigOptionsSettled = configOptionsSettled
 		}
 	}
-	if attemptID != "" {
-		snapshot.SettingsAttemptID = attemptID
+	if identity.AttemptID != "" {
+		snapshot.SettingsAttemptID = identity.AttemptID
 	}
-	if attemptID != "" && snapshot.CurrentModelID == "" {
-		if previous, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok && previous.SettingsAttemptID == attemptID {
+	if identity.AttemptID != "" && snapshot.CurrentModelID == "" {
+		if previous, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok &&
+			previous.SettingsAttemptID == identity.AttemptID &&
+			sessionSettingsSnapshotMatchesSource(previous, identity.ExecutionID, identity.SourceGeneration) {
 			snapshot.CurrentModelID = previous.CurrentModelID
 		}
 	}
-	if settingsGeneration > 0 && settingsGeneration <= snapshot.CurrentModelGeneration {
+	if identity.SettingsGeneration > 0 && identity.SettingsGeneration <= snapshot.CurrentModelGeneration {
 		return
 	}
-	if settingsGeneration > 0 {
-		snapshot.CurrentModelGeneration = settingsGeneration
+	if identity.SettingsGeneration > 0 {
+		snapshot.CurrentModelGeneration = identity.SettingsGeneration
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	if err := s.repo.SetSessionMetadataKey(

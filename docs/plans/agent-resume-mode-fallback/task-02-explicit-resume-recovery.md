@@ -222,7 +222,43 @@ Verification:
 - `python3 scripts/list-docs.py validate`,
   `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 
-This work order is `done`. The lifecycle package has four unrelated SSH
-orphan-process tests skipped after reproducing on the unchanged baseline. No
-real Auggie smoke test was run; PR CI and review remain external delivery
-checks.
+Post-merge review regressions passed on 2026-09-30. Mode and model event
+consumers share a per-session serialization boundary across stale checks,
+fresh snapshot reads, merges, persistence, and broadcast. The ACP adapter keeps
+settings generations monotonic across LoadSession and ResetSession; a new
+attempt replaces the effective snapshot, including on a strict mode-only
+event with an empty legacy attempt ID. Red-green coverage verifies concurrent
+mode/model updates preserve both values and generations, older reports do not
+broadcast, and old-session notifications remain rejected after reset and load.
+The concurrency regression passed under `-race -count=3`.
+
+Earlier post-merge package and E2E receipts above predate the source-epoch
+remediation. The final checks passed on 2026-09-30: orchestrator 59.571s,
+executor 26.656s, backendapp 52.319s, and ACP transport 12.513s. The executor
+aggregate excluded only `TestMissingCheckoutRecoveryLaunchAndResume`; its three
+`/dev/fd/3` subcases are established unchanged-baseline environment failures.
+The final lifecycle package passed in 145.860s with the four baseline SSH
+orphan-process tests and `TestMissingCheckoutRecoveryLifecycleRestoresAndProjectsSelectedWorkspace`
+excluded; the latter's `/dev/fd/3` permission failure also reproduces on
+unchanged main. The focused source-reservation, attempt provenance, and
+projection regressions passed under `-race -count=3`. Scoped golangci-lint
+reported 0 issues; gofmt, `git diff --check`, documentation validation, and
+spec lint passed.
+
+Final managed Docker runs rebuilt the Linux backend, Vite bundle, and fixture
+plugin. Chromium passed 1/1 in 1.4m; mobile-chrome passed 1/1 in 1.3m using the
+same artifacts. Both preserved the same native ACP token, omitted model/mode
+overrides for recovery, accepted a later prompt and selectors, and displayed
+the durable notice after reload. The six validated publication PNGs and
+manifest were restored from the immutable media commit after Playwright
+cleanup. No UI source changed in this review remediation.
+
+This work order is `done`. The lifecycle package excluded four SSH
+orphan-process tests and one `/dev/fd/3` missing-checkout test, all reproduced
+on the unchanged baseline. Session-less recovery retains its legacy zero source
+generation and strict report projection; durable epochs are reserved only for
+task-session-backed adoption. No real Auggie smoke test was run. The published
+head's frontend CI failure was limited to four recovery-hook test cases missing
+a `StateProvider`; the test fixture is fixed and the updated 17-file, 194-test
+web suite passed locally. CI and review for the next pushed head remain external
+delivery checks.

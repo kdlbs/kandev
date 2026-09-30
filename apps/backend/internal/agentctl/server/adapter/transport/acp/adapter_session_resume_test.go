@@ -196,6 +196,110 @@ func TestProviderRestoredLoadWithoutSettingsEmitsEmptySnapshots(t *testing.T) {
 	}
 }
 
+func TestSessionSettingsGenerationContinuesAcrossLoadAndReset(t *testing.T) {
+	a, fake := newSessionResumeAdapter(t, true, true)
+	restored := streams.WithSessionSettingsPolicy(t.Context(), streams.SessionSettingsPolicyProviderRestored)
+	if err := a.LoadSession(restored, "saved-session", nil); err != nil {
+		t.Fatalf("initial LoadSession: %v", err)
+	}
+	initial := drainEvents(a)
+	initialMax := maxSessionSettingsGeneration(initial)
+	if initialMax == 0 {
+		t.Fatalf("initial load emitted no settings generations: %+v", initial)
+	}
+
+	var newResponse acpsdk.NewSessionResponse
+	if err := json.Unmarshal([]byte(`{
+		"sessionId":"reset-session",
+		"modes":{"currentModeId":"plan","availableModes":[{"id":"plan","name":"Plan"}]},
+		"configOptions":[{"type":"select","id":"model","name":"Model","category":"model",
+			"currentValue":"reset-model","options":[{"value":"reset-model","name":"Reset model"}]}]
+	}`), &newResponse); err != nil {
+		t.Fatalf("decode session/new response: %v", err)
+	}
+	fake.newResponse = &newResponse
+	resetSessionID, err := a.ResetSession(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+	if resetSessionID != "reset-session" {
+		t.Fatalf("ResetSession ID = %q, want reset-session", resetSessionID)
+	}
+	resetEvents := drainEvents(a)
+	resetMode := findSessionModeEvent(t, resetEvents)
+	resetModels := findSessionModelsEvent(t, resetEvents)
+	if resetMode.SessionSettingsGeneration <= initialMax ||
+		resetModels.SessionSettingsGeneration <= resetMode.SessionSettingsGeneration {
+		t.Fatalf("session/new settings generations did not continue after load: load=%d resetMode=%+v resetModels=%+v",
+			initialMax, resetMode, resetModels)
+	}
+	if resetMode.SessionSettingsPolicy != "" || resetModels.SessionSettingsPolicy != "" {
+		t.Fatalf("session/new inherited provider-restored policy: mode=%+v models=%+v", resetMode, resetModels)
+	}
+
+	// A queued notification from the superseded session must remain rejected
+	// without consuming a generation belonging to the current session.
+	a.handleACPUpdate(makeNotification("saved-session", acpsdk.SessionUpdate{
+		CurrentModeUpdate: &acpsdk.SessionCurrentModeUpdate{
+			SessionUpdate: "current_mode_update", CurrentModeId: "stale-mode",
+		},
+	}), 0)
+	if stale := drainEvents(a); len(stale) != 0 {
+		t.Fatalf("old-session settings report escaped after reset: %+v", stale)
+	}
+	a.handleACPUpdate(makeNotification(resetSessionID, acpsdk.SessionUpdate{
+		CurrentModeUpdate: &acpsdk.SessionCurrentModeUpdate{
+			SessionUpdate: "current_mode_update", CurrentModeId: "current-mode",
+		},
+	}), 0)
+	current := drainEvents(a)
+	if len(current) != 1 || current[0].Type != streams.EventTypeSessionMode ||
+		current[0].SessionSettingsGeneration <= resetModels.SessionSettingsGeneration {
+		t.Fatalf("current-session report generation did not continue: prior=%+v event=%+v", resetModels, current)
+	}
+
+	if err := a.LoadSession(restored, "next-session", nil); err != nil {
+		t.Fatalf("subsequent LoadSession: %v", err)
+	}
+	loaded := drainEvents(a)
+	loadedMode := findSessionModeEvent(t, loaded)
+	loadedModels := findSessionModelsEvent(t, loaded)
+	if loadedMode.SessionSettingsGeneration <= current[0].SessionSettingsGeneration ||
+		loadedModels.SessionSettingsGeneration <= loadedMode.SessionSettingsGeneration {
+		t.Fatalf("subsequent session/load reset generations: previous=%+v loadedMode=%+v loadedModels=%+v",
+			current[0], loadedMode, loadedModels)
+	}
+	a.handleACPUpdate(makeNotification(resetSessionID, acpsdk.SessionUpdate{
+		CurrentModeUpdate: &acpsdk.SessionCurrentModeUpdate{
+			SessionUpdate: "current_mode_update", CurrentModeId: "late-reset-mode",
+		},
+	}), 0)
+	if stale := drainEvents(a); len(stale) != 0 {
+		t.Fatalf("old reset-session report escaped after load: %+v", stale)
+	}
+}
+
+func maxSessionSettingsGeneration(events []streams.AgentEvent) uint64 {
+	var max uint64
+	for _, event := range events {
+		if event.SessionSettingsGeneration > max {
+			max = event.SessionSettingsGeneration
+		}
+	}
+	return max
+}
+
+func findSessionModeEvent(t *testing.T, events []streams.AgentEvent) streams.AgentEvent {
+	t.Helper()
+	for _, event := range events {
+		if event.Type == streams.EventTypeSessionMode {
+			return event
+		}
+	}
+	t.Fatalf("session_mode event missing: %+v", events)
+	return streams.AgentEvent{}
+}
+
 func TestLoadSessionFallsBackToReplayOnlyWhenResumeUnsupported(t *testing.T) {
 	for _, advertised := range []bool{true, false} {
 		t.Run(fmt.Sprintf("resume_advertised_%t", advertised), func(t *testing.T) {

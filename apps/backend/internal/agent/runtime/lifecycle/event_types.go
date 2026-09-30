@@ -310,21 +310,22 @@ type AgentStreamEventData struct {
 // for execution-scoped logic (e.g., resume-token CAS that must reject writes from
 // a defunct execution).
 type AgentStreamEventPayload struct {
-	Type           string                `json:"type"` // Always "agent/event"
-	Timestamp      string                `json:"timestamp"`
-	AgentID        string                `json:"agent_id"`             // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID    string                `json:"execution_id"`         // Lifecycle execution ID; stable across the payload's lifetime.
-	AttemptID      string                `json:"attempt_id,omitempty"` // Immutable recovery attempt that owns this callback.
-	OwnerKind      ExecutionOwnerKind    `json:"owner_kind,omitempty"`
-	WorkspaceID    string                `json:"workspace_id,omitempty"`
-	RunID          string                `json:"run_id,omitempty"`
-	RunSessionID   string                `json:"run_session_id,omitempty"`
-	RunAttempt     int                   `json:"run_attempt,omitempty"`
-	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
-	AgentType      string                `json:"agent_type,omitempty"`
-	TaskID         string                `json:"task_id"`
-	SessionID      string                `json:"session_id"` // Task session ID
-	Data           *AgentStreamEventData `json:"data"`
+	Type                            string                `json:"type"` // Always "agent/event"
+	Timestamp                       string                `json:"timestamp"`
+	AgentID                         string                `json:"agent_id"`             // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID                     string                `json:"execution_id"`         // Lifecycle execution ID; stable across the payload's lifetime.
+	AttemptID                       string                `json:"attempt_id,omitempty"` // Immutable recovery attempt that owns this callback.
+	SessionSettingsSourceGeneration uint64                `json:"session_settings_source_generation,omitempty"`
+	OwnerKind                       ExecutionOwnerKind    `json:"owner_kind,omitempty"`
+	WorkspaceID                     string                `json:"workspace_id,omitempty"`
+	RunID                           string                `json:"run_id,omitempty"`
+	RunSessionID                    string                `json:"run_session_id,omitempty"`
+	RunAttempt                      int                   `json:"run_attempt,omitempty"`
+	AgentProfileID                  string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	AgentType                       string                `json:"agent_type,omitempty"`
+	TaskID                          string                `json:"task_id"`
+	SessionID                       string                `json:"session_id"` // Task session ID
+	Data                            *AgentStreamEventData `json:"data"`
 }
 
 // GitEventType discriminates the type of git event
@@ -693,15 +694,17 @@ func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
 // SessionModelsSnapshot is the persisted provider-derived state needed to
 // hydrate the task model selector before live session events reconnect.
 type SessionModelsSnapshot struct {
-	CurrentModelID         string                        `json:"current_model_id"`
-	CurrentModeID          string                        `json:"current_mode_id,omitempty"`
-	SettingsAttemptID      string                        `json:"settings_attempt_id,omitempty"`
-	SettingsPolicy         streams.SessionSettingsPolicy `json:"settings_policy,omitempty"`
-	CurrentModelGeneration uint64                        `json:"current_model_generation,omitempty"`
-	CurrentModeGeneration  uint64                        `json:"current_mode_generation,omitempty"`
-	Models                 []streams.SessionModelInfo    `json:"models"`
-	ConfigOptions          []streams.ConfigOption        `json:"config_options,omitempty"`
-	ConfigOptionsSettled   bool                          `json:"config_options_settled,omitempty"`
+	CurrentModelID            string                        `json:"current_model_id"`
+	CurrentModeID             string                        `json:"current_mode_id,omitempty"`
+	SettingsAttemptID         string                        `json:"settings_attempt_id,omitempty"`
+	SettingsPolicy            streams.SessionSettingsPolicy `json:"settings_policy,omitempty"`
+	SettingsSourceExecutionID string                        `json:"settings_source_execution_id,omitempty"`
+	SettingsSourceGeneration  uint64                        `json:"settings_source_generation,omitempty"`
+	CurrentModelGeneration    uint64                        `json:"current_model_generation,omitempty"`
+	CurrentModeGeneration     uint64                        `json:"current_mode_generation,omitempty"`
+	Models                    []streams.SessionModelInfo    `json:"models"`
+	ConfigOptions             []streams.ConfigOption        `json:"config_options,omitempty"`
+	ConfigOptionsSettled      bool                          `json:"config_options_settled,omitempty"`
 }
 
 // LoadSessionModelsSnapshot decodes typed and JSON-rehydrated metadata values.
@@ -725,7 +728,8 @@ func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
 
 func sessionModelsSnapshotPresent(snapshot SessionModelsSnapshot) bool {
 	return snapshot.CurrentModelID != "" || snapshot.CurrentModeID != "" ||
-		snapshot.SettingsAttemptID != "" || snapshot.SettingsPolicy != "" || len(snapshot.Models) > 0 ||
+		snapshot.SettingsAttemptID != "" || snapshot.SettingsPolicy != "" ||
+		snapshot.SettingsSourceExecutionID != "" || snapshot.SettingsSourceGeneration != 0 || len(snapshot.Models) > 0 ||
 		len(snapshot.ConfigOptions) > 0 || snapshot.ConfigOptionsSettled
 }
 

@@ -292,7 +292,8 @@ type Adapter struct {
 	// sessionSettingsPolicy is host-selected provenance for unsolicited
 	// settings reports from the currently loaded session. Explicit setter
 	// outcomes are emitted separately without this marker.
-	sessionSettingsPolicy     streams.SessionSettingsPolicy
+	sessionSettingsPolicy streams.SessionSettingsPolicy
+	// sessionSettingsGeneration is monotonic for this adapter across session transitions.
 	sessionSettingsGeneration uint64
 
 	dialect acpDialect

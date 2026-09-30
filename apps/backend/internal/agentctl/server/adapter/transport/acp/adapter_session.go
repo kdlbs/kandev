@@ -215,7 +215,6 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.sessionSettingsPolicy = ""
-	a.sessionSettingsGeneration = 0
 	a.configGeneration++
 	clear(a.contextSamples)
 	// Reset session-scoped model caches before computing the new session's
@@ -631,7 +630,6 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
-	a.sessionSettingsGeneration = 0
 	a.configGeneration++
 	clear(a.contextSamples)
 	a.consumeUsageBaselineLocked(sessionID)

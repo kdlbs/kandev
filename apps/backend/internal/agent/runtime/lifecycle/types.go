@@ -47,10 +47,15 @@ type AgentExecution struct {
 	OwnerAdmission        OwnerAdmission
 	TaskScope             TaskLaunchScope
 	SessionSettingsPolicy SessionSettingsPolicy
-	TaskID                string
-	SessionID             string
-	TaskEnvironmentID     string // Env owning this execution; sessions in the same task share one env
-	WorkspaceID           string
+	// SessionSettingsProjectionPolicy describes provider reports from the
+	// running conversation. It is separate from startup authority so a
+	// reconstructed provider-restored session never opts into omission on a
+	// later independent launch.
+	SessionSettingsProjectionPolicy SessionSettingsPolicy
+	TaskID                          string
+	SessionID                       string
+	TaskEnvironmentID               string // Env owning this execution; sessions in the same task share one env
+	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
 	ExecutorType string
@@ -639,6 +644,53 @@ func (e *AgentExecution) beginStartupAttemptWithID(attemptID string) uint64 {
 	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
+	e.SessionSettingsProjectionPolicy = e.SessionSettingsPolicy
+	e.startupAttemptGeneration++
+	e.startupRecoveryStarted = false
+	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
+	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) setSessionSettingsStartupPolicy(policy SessionSettingsPolicy) {
+	if e == nil {
+		return
+	}
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.SessionSettingsPolicy = policy
+	e.SessionSettingsProjectionPolicy = policy
+}
+
+func (e *AgentExecution) sessionSettingsProjectionPolicy() SessionSettingsPolicy {
+	if e == nil {
+		return SessionSettingsPolicyStrict
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.SessionSettingsProjectionPolicy
+}
+
+func (e *AgentExecution) sessionSettingsStartupPolicy() SessionSettingsPolicy {
+	if e == nil {
+		return SessionSettingsPolicyStrict
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.SessionSettingsPolicy
+}
+
+func (e *AgentExecution) beginStartupAttemptPreservingIdentity() uint64 {
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.SessionSettingsProjectionPolicy = e.SessionSettingsPolicy
+	attemptID := e.startupAttemptIDs[e.startupAttemptGeneration]
+	if attemptID == "" {
+		attemptID = e.ResumeAttemptID
+	}
 	e.startupAttemptGeneration++
 	e.startupRecoveryStarted = false
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
@@ -713,6 +765,26 @@ func (e *AgentExecution) startupAttemptSnapshot() uint64 {
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
 	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) restoreSessionSettingsSource(
+	sourceGeneration uint64,
+	attemptID string,
+	projectionPolicy SessionSettingsPolicy,
+) {
+	if e == nil {
+		return
+	}
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.startupAttemptGeneration = sourceGeneration
+	e.startupAttemptIDs = nil
+	e.startupRecoveryStarted = false
+	e.ResumeAttemptID = attemptID
+	e.SessionSettingsProjectionPolicy = projectionPolicy
+	e.recordStartupAttemptIDLocked(sourceGeneration, attemptID)
 }
 
 func (e *AgentExecution) startupGenerationForAttemptID(attemptID string) (uint64, bool) {

@@ -146,6 +146,24 @@ func TestAppendSessionModeMessageReplaysUnknownRestoredMode(t *testing.T) {
 	}
 }
 
+func TestAppendSessionModeMessageSkipsLegacyModelOnlySnapshot(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "saved-model",
+				Models:         []streams.SessionModelInfo{{ModelID: "saved-model", Name: "Saved model"}},
+			},
+		},
+	}
+
+	messages := appendSessionModeMessage(session.ID, session, nil, nil)
+	if len(messages) != 0 {
+		t.Fatalf("messages = %d, want no mode replay for model-only legacy snapshot", len(messages))
+	}
+}
+
 func TestAppendSessionModeMessageReplaysStrictUnknownMode(t *testing.T) {
 	session := &models.TaskSession{
 		ID:     "session-1",

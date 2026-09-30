@@ -622,7 +622,13 @@ func appendSessionModeMessage(sessionID string, session *models.TaskSession, lif
 	if modeState == nil && hasSnapshot {
 		modeState = &lifecycle.CachedModeState{CurrentModeID: snapshot.CurrentModeID}
 	}
-	if modeState == nil || (modeState.CurrentModeID == "" && len(modeState.AvailableModes) == 0 && !hasSnapshot) {
+	if modeState == nil {
+		return result
+	}
+	hasKnownMode := modeState.CurrentModeID != "" || len(modeState.AvailableModes) > 0
+	hasExplicitUnknownMode := hasSnapshot && (snapshot.SettingsAttemptID != "" ||
+		snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored)
+	if !hasKnownMode && !hasExplicitUnknownMode {
 		return result
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionModeChanged, lifecycle.SessionModeEventPayload{
