@@ -344,7 +344,8 @@ func scanProposalRow(rows *sql.Rows, r *proposalRow) error {
 	if err := rows.Scan(&r.ID, &r.CoordinatorID, &r.WorkspaceID, &r.Status, &r.SpecJSON, &r.FinalSpecJSON, &r.ClaimedAt,
 		&r.ClaimToken, &r.TaskID, &r.Error, &r.RejectReason, &r.DecidedBy, &r.CreatedAt, &r.UpdatedAt, &r.Kind,
 		&r.TargetTaskID, &r.StandingIDs, &r.StartsAgent, &r.OutcomeJSON, &r.ReplyText, &r.ReplyDeliveredAt,
-		&r.ReplyDeliveryClaimedAt, &r.InReplyTo, &r.ChangeStatus); err != nil {
+		&r.ReplyDeliveryClaimedAt, &r.InReplyTo, &r.DecidedAutomatically, &r.ClaimedAutomatically, &r.AutomaticAt,
+		&r.ChangeStatus); err != nil {
 		return fmt.Errorf("scan proposal: %w", err)
 	}
 	return nil

@@ -71,10 +71,37 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	result := map[string]interface{}{
 		proposalIDKey:     proposal.ID,
 		stopTaskStatusKey: string(proposal.Status),
-	})
+	}
+	h.applyAutomaticApproval(ctx, proposal, result)
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// applyAutomaticApproval runs the automatic path for a stored proposal and
+// overlays its status, task id and note on the tool result. A nil outcome or an
+// error leaves the pending proposal as phase 1 returned it.
+func (h *Handlers) applyAutomaticApproval(ctx context.Context, proposal *coordinator.Proposal, result map[string]interface{}) {
+	if !h.coordinatorSvc.Phase3Enabled() {
+		return
+	}
+	auto, err := h.coordinatorSvc.TryAutomaticApproval(ctx, proposal)
+	if err != nil {
+		h.logger.Warn("automatic approval failed unexpectedly",
+			zap.String("proposal_id", proposal.ID), zap.Error(err))
+		return
+	}
+	if auto == nil {
+		return
+	}
+	result[stopTaskStatusKey] = string(auto.Status)
+	if auto.TaskID != "" {
+		result["task_id"] = auto.TaskID
+	}
+	if auto.Note != "" {
+		result["note"] = auto.Note
+	}
 }
 
 // proposeTaskErrorResponse maps a ProposeTask error to a WS error response:

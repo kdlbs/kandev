@@ -137,15 +137,21 @@ func (s *Service) approveApproving(ctx context.Context, workspaceID, coordinator
 // approvePending validates and claims a never-claimed proposal (proposals.md#approve
 // step 2 and step 3, pending branch).
 func (s *Service) approvePending(ctx context.Context, workspaceID, coordinatorID, proposalID, decidedBy string, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
-	candidate, err := s.buildCandidateSpec(ctx, workspaceID, proposal.Spec, edits)
-	if err != nil {
-		return nil, err
-	}
-	validated, err := s.validateProposalSpecFor(ctx, workspaceID, candidate, proposal.StartsAgent)
+	validated, err := s.prepareApproval(ctx, workspaceID, proposal, edits)
 	if err != nil {
 		return nil, err
 	}
 	return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, validated, proposal.StartsAgent, nil)
+}
+
+// prepareApproval builds and validates the frozen spec of a never-claimed
+// proposal from its proposed spec and edits. It writes nothing.
+func (s *Service) prepareApproval(ctx context.Context, workspaceID string, proposal *Proposal, edits ApproveProposalRequest) (ProposalSpec, error) {
+	candidate, err := s.buildCandidateSpec(ctx, workspaceID, proposal.Spec, edits)
+	if err != nil {
+		return ProposalSpec{}, err
+	}
+	return s.validateProposalSpecFor(ctx, workspaceID, candidate, proposal.StartsAgent)
 }
 
 // approveFailed handles an approve request against a failed row
@@ -304,6 +310,12 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 	if !matched {
 		return s.claimRaceResult(ctx, workspaceID, coordinatorID, proposalID)
 	}
+	return s.finishClaim(ctx, workspaceID, coordinatorID, proposalID, token, spec, startsAgent, foundTask)
+}
+
+// finishClaim continues a just-committed claim: it publishes the update and
+// runs the create sequence.
+func (s *Service) finishClaim(ctx context.Context, workspaceID, coordinatorID, proposalID, token string, spec ProposalSpec, startsAgent bool, foundTask *taskmodels.Task) (*Proposal, error) {
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal claimed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))

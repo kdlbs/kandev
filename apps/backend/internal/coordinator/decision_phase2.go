@@ -105,6 +105,9 @@ func (s *Service) completeProposalStore(ctx context.Context, workspaceID, coordi
 		TargetTaskID: &taskID, ProposalID: &proposalID, ActorUserID: actor,
 		Detail: approvedDetail(current),
 	}
+	if current.ClaimedAutomatically {
+		row.Authorization, row.UnattendedTurnID = AuthAutomatic, automaticTurnFrom(ctx)
+	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.CompleteProposalTx(ctx, tx, proposalID, token, taskID, time.Now())
 	})
@@ -118,6 +121,16 @@ func (s *Service) failProposalStore(ctx context.Context, workspaceID, coordinato
 		CoordinatorID: coordinatorID, WorkspaceID: workspaceID, ActionClass: ActionCreateTask,
 		Outcome: ActivityFailed, Authorization: AuthRequiresApproval, ReasonCode: optString(approvalFailedCode),
 		ProposalID: &proposalID, ActorUserID: optString(decidingUserID(ctx)), Detail: errMsg,
+	}
+	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	if err == nil && current.ClaimedAutomatically {
+		row.Authorization, row.UnattendedTurnID = AuthAutomatic, automaticTurnFrom(ctx)
+		if current.DecidedBy != nil {
+			row.ActorUserID = optString(*current.DecidedBy)
+		}
 	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.FailProposalTx(ctx, tx, proposalID, token, errMsg, time.Now())

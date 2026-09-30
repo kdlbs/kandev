@@ -171,6 +171,27 @@ describe("useControlDraft failures and validity", () => {
     expect(toastError).toHaveBeenCalledTimes(1);
   });
 
+  it("names a 409 not_eligible raise refusal inline instead of toasting", async () => {
+    getMock.mockResolvedValue(settings());
+    const { result } = mount();
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.setAction("create_task", "automatic"));
+    putMock.mockRejectedValueOnce(
+      new ApiError("not_eligible", 409, {
+        error: "not_eligible",
+        code: "not_eligible",
+        field: "policy.actions.create_task",
+        condition: "volume",
+      }),
+    );
+    await act(async () => {
+      await expect(contributor?.save()).rejects.toBeTruthy();
+    });
+    expect(result.current.fieldError?.code).toBe("not_eligible");
+    expect(result.current.fieldError?.field).toBe("policy.actions.create_task");
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   it("blocks Save for an edited zero-board draft but not for an unedited stored empty set", async () => {
     getMock.mockResolvedValueOnce(settings({ watches: { scope: "selected", workflow_ids: [] } }));
     const { result } = mount();

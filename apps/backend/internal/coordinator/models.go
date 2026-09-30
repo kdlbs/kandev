@@ -142,6 +142,14 @@ type Proposal struct {
 	// ChangeStatus is the status of the pending change an approved improvement
 	// produced; nil for every other proposal.
 	ChangeStatus *string
+
+	// DecidedAutomatically and AutomaticAt record that the automatic path
+	// claimed the proposal, and when; a later failure or recovery keeps them.
+	// ClaimedAutomatically is true while the current claim (or its terminal
+	// row) is the automatic path's, false after a manager's claim.
+	DecidedAutomatically bool
+	ClaimedAutomatically bool
+	AutomaticAt          *time.Time
 }
 
 // Proposal kinds.

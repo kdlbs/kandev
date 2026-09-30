@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useCoordinatorSection } from "@/hooks/domains/coordinator/use-coordinator-section";
 import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
@@ -51,6 +51,15 @@ function AutonomyBody({
   );
 }
 
+function MayDoBody(props: ComponentProps<typeof MayDoSection>) {
+  return (
+    <>
+      <MayDoSection {...props} />
+      <ControlError error={props.control.fieldError} />
+    </>
+  );
+}
+
 /** The phase-2 coordinator page body: Identity holds the phase-1 fields unchanged. */
 export function CoordinatorSections({
   workspaceId,
@@ -89,15 +98,13 @@ export function CoordinatorSections({
       label: t("coordinator:sectionMayDo"),
       help: t("coordinator:sectionMayDoHelp"),
       render: () => (
-        <>
-          <MayDoSection
-            workspaceId={workspaceId}
-            coordinatorId={coordinatorId}
-            canManage={canManage}
-            control={control}
-          />
-          <ControlError error={control.fieldError} />
-        </>
+        <MayDoBody
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          canManage={canManage}
+          control={control}
+          phase3={phase3}
+        />
       ),
     },
     {

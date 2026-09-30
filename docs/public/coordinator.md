@@ -56,6 +56,24 @@ Autonomy runs without a person watching, so Kandev requires four conditions firs
 
 In the coordinator conversation, an unattended turn opens with a **Woken by N events** entry. Select **Show** to list the events, each with its kind, task, and title. The entry also shows how many permission requests were denied during the turn. If Kandev has pruned the record of an old turn, the entry reads "Woken by events" and shows the original message text behind **Show**.
 
+## Let it create tasks on its own
+
+Under **May do**, a coordinator's **Create a card** permission can be raised from **Requires approval** to **Automatic**. Automatic is available for this permission only; every other action shows **Cannot be raised**. An automatic create makes one ordinary task and never starts an agent.
+
+The **Automatic** option stays off until the coordinator has earned it. The settings list each condition as **Met** or **Not met** with its current value:
+
+- Its first decided card is at least 30 days old.
+- The last 30 days hold at least 20 decided cards.
+- At least 90% of them were approved without edits.
+- No task it created in the last 30 days was undone.
+- You reviewed the last 30 days within the past 7 days.
+
+Select **Review the last 30 days** to open the log filtered to this coordinator, then **Mark as reviewed**. To raise the permission, choose **Automatic** and save. The settings then show who raised it and when.
+
+Automatic approvals appear in **What it did** with the authorization **Automatic** and the manager who raised the permission. At most 10 are approved in any 24 hours; further proposals wait for you. If an automatic approval fails, the proposal stays for you to approve, edit, or reject.
+
+You can lower the permission back to **Requires approval** at any time. Undoing a task an automatic approval created lowers it for you.
+
 ## Related pages
 
 - [Coordinate work](coordination.md)

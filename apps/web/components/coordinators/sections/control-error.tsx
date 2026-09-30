@@ -7,6 +7,7 @@ export const CODE_KEYS: Record<string, string> = {
   invalid_setting: "coordinator:controlErrorInvalidSetting",
   stop_denied_only: "coordinator:controlErrorInvalidSetting",
   automatic_not_available: "coordinator:controlErrorAutomatic",
+  not_eligible: "coordinator:controlErrorNotEligible",
   watches_foreign_workflow: "coordinator:controlErrorForeignBoard",
   watches_empty: "coordinator:watchesKeepOneBoard",
   watches_too_many: "coordinator:watchesAtMost",

@@ -109,13 +109,13 @@ func TestAllActionsFixedOrderExcludesUnknown(t *testing.T) {
 
 func TestValidatePolicy(t *testing.T) {
 	ok := PhaseOnePolicy()
-	if err := Validate(ok); err != nil {
+	if err := Validate(ok, false); err != nil {
 		t.Fatalf("phase-1 policy invalid: %v", err)
 	}
 	all := allDenied()
 	all[ActionMove] = SettingRequiresApproval
 	all[ActionResume] = SettingRequiresApproval
-	if err := Validate(Policy{Version: 1, Actions: all}); err != nil {
+	if err := Validate(Policy{Version: 1, Actions: all}, false); err != nil {
 		t.Fatalf("valid policy rejected: %v", err)
 	}
 	cases := []struct {
@@ -137,7 +137,7 @@ func TestValidatePolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := allDenied()
 			tc.mutate(m)
-			err := Validate(Policy{Version: 1, Actions: m})
+			err := Validate(Policy{Version: 1, Actions: m}, false)
 			var fe *PolicyFieldError
 			if !errors.As(err, &fe) {
 				t.Fatalf("err = %v, want PolicyFieldError", err)
