@@ -193,7 +193,7 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if env == nil {
 		env = runtimeEnvFromMetadata(execution.MetadataSnapshot())
 	}
-	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
+	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
 	if execution.AgentCommand == "" {
 		return "", fmt.Errorf("execution %q has no recorded agent command for Kubernetes restart", execution.ID)
 	}

@@ -880,8 +880,11 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == windowsOS)
-		configureGitHubCLIStartupEnv(envMap)
+		ActivateManagedGitTools(
+			envMap,
+			envMap[githubauth.CredentialCLIShimDirEnv],
+			envMap[githubauth.CredentialCLIBashEnvEnv],
+		)
 	}
 
 	// Convert back to slice
@@ -890,6 +893,39 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		result = append(result, k+"="+v)
 	}
 	return result, nil
+}
+
+// ActivateManagedGitTools adds the installed GitHub CLI shims to an agent's
+// executable path and wraps its Bash startup hook while preserving the parent.
+func ActivateManagedGitTools(env map[string]string, shimDir, startupEnv string) {
+	if shimDir != "" {
+		env[githubauth.CredentialCLIShimDirEnv] = shimDir
+		prependPathEntry(env, shimDir, runtime.GOOS == windowsOS)
+	}
+	if startupEnv == "" {
+		return
+	}
+	env[githubauth.CredentialCLIBashEnvEnv] = startupEnv
+	configureGitHubCLIStartupEnv(env)
+}
+
+// DeactivateManagedGitTools removes only PATH and Bash entries owned by the
+// installed managed tools. An unrelated replacement hook remains untouched.
+func DeactivateManagedGitTools(env map[string]string, shimDir, startupEnv string) {
+	if shimDir != "" && env[githubauth.CredentialCLIShimDirEnv] == shimDir {
+		removePathEntry(env, shimDir, runtime.GOOS == windowsOS)
+	}
+	if runtime.GOOS == windowsOS || startupEnv == "" || env[githubauth.CredentialCLIBashEnvEnv] != startupEnv {
+		return
+	}
+	if !samePathEntry(env["BASH_ENV"], startupEnv, false) {
+		return
+	}
+	if parentEnv := env[githubauth.CredentialParentBashEnv]; parentEnv != "" {
+		env["BASH_ENV"] = parentEnv
+	} else {
+		delete(env, "BASH_ENV")
+	}
 }
 
 func configureGitHubCLIStartupEnv(env map[string]string) {
@@ -979,11 +1015,34 @@ func prependPathEntry(env map[string]string, entry string, caseInsensitive bool)
 	filtered := make([]string, 0, len(parts)+1)
 	filtered = append(filtered, entry)
 	for _, part := range parts {
-		if filepath.Clean(part) != cleanEntry {
+		if !samePathEntry(part, cleanEntry, caseInsensitive) {
 			filtered = append(filtered, part)
 		}
 	}
 	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func removePathEntry(env map[string]string, entry string, caseInsensitive bool) {
+	key := searchPathKey(env, caseInsensitive)
+	if _, exists := env[key]; !exists {
+		return
+	}
+	parts := filepath.SplitList(env[key])
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if !samePathEntry(part, entry, caseInsensitive) {
+			filtered = append(filtered, part)
+		}
+	}
+	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func samePathEntry(left, right string, caseInsensitive bool) bool {
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if caseInsensitive {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 // searchPathKey returns the key env already carries the executable search path

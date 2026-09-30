@@ -109,8 +109,9 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
-	cfg    *config.InstanceConfig
-	logger *logger.Logger
+	cfg             *config.InstanceConfig
+	logger          *logger.Logger
+	managedGitTools installedManagedGitTools
 
 	// Process state
 	cmd                *exec.Cmd
@@ -410,6 +411,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                  cfg,
 		logger:               log.WithFields(zap.String("component", "process-manager")),
+		managedGitTools:      installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
 		updatesCh:            make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:   make(map[string]*PendingPermission),
 		lifetimeCtx:          lifetimeCtx,
@@ -1818,7 +1820,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 	// Compose the environment before changing any other configuration so a
 	// malformed indexed Git block leaves the instance fully unchanged.
-	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
+	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
@@ -1851,8 +1853,32 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 }
 
 func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
+	return composeConfiguredAgentEnvironmentWithManagedGitTools(current, overlay, replaceIndexed, installedManagedGitTools{})
+}
+
+type installedManagedGitTools struct {
+	helperPath string
+	shimDir    string
+	bashEnv    string
+}
+
+func installedManagedGitToolsFromEnvironment(env []string) installedManagedGitTools {
+	values := environmentMapFromSlice(env)
+	return installedManagedGitTools{
+		helperPath: values[githubauth.CredentialHelperPathEnv],
+		shimDir:    values[githubauth.CredentialCLIShimDirEnv],
+		bashEnv:    values[githubauth.CredentialCLIBashEnvEnv],
+	}
+}
+
+func composeConfiguredAgentEnvironmentWithManagedGitTools(current []string, overlay map[string]string, replaceIndexed bool, tools installedManagedGitTools) ([]string, error) {
 	base := environmentMapFromSlice(current)
 	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
+	config.DeactivateManagedGitTools(
+		base,
+		base[githubauth.CredentialCLIShimDirEnv],
+		base[githubauth.CredentialCLIBashEnvEnv],
+	)
 	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
@@ -1877,6 +1903,7 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 	if err != nil {
 		return nil, err
 	}
+	activateManagedGitToolsForCurrentAuthorization(merged, tools)
 	keys := make([]string, 0, len(merged))
 	for key := range merged {
 		keys = append(keys, key)
@@ -1887,6 +1914,25 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 		result = append(result, key+"="+merged[key])
 	}
 	return result, nil
+}
+
+func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools installedManagedGitTools) {
+	if env[githubauth.CredentialBrokerURLEnv] == "" || env[githubauth.CredentialLeaseEnv] == "" {
+		return
+	}
+	if env[githubauth.CredentialHelperPathEnv] == "" {
+		env[githubauth.CredentialHelperPathEnv] = tools.helperPath
+	}
+	shimDir := tools.shimDir
+	if shimDir == "" {
+		shimDir = env[githubauth.CredentialCLIShimDirEnv]
+	}
+	bashEnv := tools.bashEnv
+	if bashEnv == "" {
+		bashEnv = env[githubauth.CredentialCLIBashEnvEnv]
+	}
+	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
+	config.ActivateManagedGitTools(env, shimDir, bashEnv)
 }
 
 func removeObsoleteManagedCredentialEnvironment(env map[string]string) {

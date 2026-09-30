@@ -2558,7 +2558,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
 	}
-	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
+	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
