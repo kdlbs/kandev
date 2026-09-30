@@ -3,7 +3,7 @@ id: "04-workspace-integration"
 title: "Workspace and integration settings"
 status: complete
 wave: 4
-depends_on: 
+depends_on:
   - 03-agent-executor
 plan: "plan.md"
 requirements:

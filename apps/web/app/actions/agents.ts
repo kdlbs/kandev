@@ -15,6 +15,8 @@ import type {
 import type { PermissionKey } from "@/lib/agent-permissions";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
+import type { AgentMcpDiscoveryResponse } from "@/lib/types/agent-mcp-discovery";
+import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
@@ -53,6 +55,14 @@ export async function listAgentDiscoveryAction(): Promise<ListAgentDiscoveryResp
   return agentSettingsRequest<ListAgentDiscoveryResponse>(`${apiBaseUrl}/api/v1/agents/discovery`);
 }
 
+export async function getAgentMcpDiscoveryAction(
+  agentId: string,
+): Promise<AgentMcpDiscoveryResponse> {
+  return agentSettingsRequest<AgentMcpDiscoveryResponse>(
+    `${apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentId)}/mcp-discovery`,
+  );
+}
+
 export async function listAgentsAction(): Promise<ListAgentsResponse> {
   const res = await agentSettingsRequest<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
   return { ...res, agents: (res.agents ?? []).map(normalizeAgentInPlace) };
@@ -69,6 +79,9 @@ export async function createAgentAction(payload: {
       mode?: string;
       cli_passthrough: boolean;
       cursor_mcp_auth_enabled?: boolean;
+      cursor_plugins_mcp_enabled?: boolean;
+      mcp_selection_mode?: MCPSelectionMode;
+      mcp_selected_servers?: string[];
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
@@ -115,6 +128,9 @@ export async function createAgentProfileAction(
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
     cursor_mcp_auth_enabled?: boolean;
+    cursor_plugins_mcp_enabled?: boolean;
+    mcp_selection_mode?: MCPSelectionMode;
+    mcp_selected_servers?: string[];
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     provider_kind?: string;
@@ -149,6 +165,9 @@ export async function updateAgentProfileAction(
     auto_approve?: boolean;
     cli_passthrough?: boolean;
     cursor_mcp_auth_enabled?: boolean;
+    cursor_plugins_mcp_enabled?: boolean;
+    mcp_selection_mode?: MCPSelectionMode;
+    mcp_selected_servers?: string[];
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;

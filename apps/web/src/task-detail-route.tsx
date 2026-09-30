@@ -374,6 +374,16 @@ function useTaskDetailRouteFetch(args: {
     navigationContext,
   } = args;
   useEffect(() => {
+    const previous = previousLoadedRouteRef.current;
+    const activeWorkspaceId = store.getState().workspaces.activeId;
+    if (
+      activeWorkspaceId &&
+      previous?.status === "loaded" &&
+      previous.routeKey === routeKey &&
+      previous.data.task.workspace_id !== activeWorkspaceId
+    ) {
+      return;
+    }
     if (routeDataMatchesSelection(routeInitialData, taskId, sessionId)) {
       const loadedState: TaskDetailRouteState = {
         routeKey,

@@ -240,6 +240,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
 | Share local Cursor MCP credentials | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory. |
+| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision. |
 
 Agents can inspect and update declared profile settings through the compact
 `search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,
@@ -529,15 +530,47 @@ Terminal custom profiles use passthrough and preserve the CLI's native PTY inter
 
 > **MCP credential exposure:** MCP headers and environment values are stored in profile configuration. Codex may place them in process arguments, and Cursor or Pi may leave them in project files after teardown. Use short-lived, narrowly scoped credentials and review persisted files.
 
+### Choose and prepare local Cursor MCP servers
+
+On a saved Cursor agent profile, enable importing local MCP servers and choose
+whether to inherit enabled servers or use only your selected servers. Refresh
+discovery to see available server names grouped by plugin and whether reusable
+credentials exist. A credential badge means data is available, not that a
+connection has been verified. Selecting no servers in selected-only mode imports
+none. Saved selections remain visible if discovery is temporarily unavailable.
+
+The task's workspace preparation shows discovery, selection, credential reuse,
+server approval and connection verification. Kandev applies the source
+repository and task workspace disables before approving imported connections.
+A profile selection cannot override those disables or executor policy. Host
+imports are limited to eligible local/worktree executions using the backend's
+home directory.
+
+When verification requires provider consent, choose **Authenticate** on the
+preparation step. Kandev opens Cursor's native login flow in the task terminal;
+complete its browser consent and choose **Retry connection**. For Cursor ACP,
+recovery reloads the same task conversation. Automatic reload of a running
+Cursor terminal session is currently unavailable because Kandev does not own
+its native chat ID; Kandev never resumes an arbitrary latest chat. Preparation commands do not create agent chat
+turns, and automatic server approval does not bypass tool-call permissions.
+The login-terminal action currently requires a POSIX host shell; native Windows
+login recovery is unavailable.
+
 ### Share local Cursor MCP credentials
 
 The **Share local Cursor MCP credentials** profile option is enabled by default for Cursor ACP and custom terminal profiles that use Cursor's MCP strategy. It applies only to local and worktree executions that use the same home directory as the Kandev backend. Remote and container executors, and profiles that set a different `HOME`, do not share the backend user's credentials.
 
-On launch, Kandev combines valid `mcp-auth.json` files from other local Cursor projects into `~/.cursor/kandev-mcp-auth-unified.json`. For duplicate server names, the newest source file wins. Equal timestamps use project path order. Kandev links the current project's auth path to this private shared file. It preserves an existing regular `mcp-auth.json` file. While sharing is enabled, it replaces an existing symlink at that path when it points elsewhere. Disabling sharing does not restore the replaced target. On a disabled launch, Kandev removes only its own project auth link and leaves unrelated symlinks unchanged.
+On launch, Kandev combines valid `mcp-auth.json` files from other local Cursor projects into `~/.cursor/kandev-mcp-auth-unified.json`. For duplicate server names, an object containing an access or refresh token takes precedence over registration-only data. Within each group, the newest source file wins; equal timestamps use project path order. Kandev selects the entire object, preserving its matching client registration, without combining credentials from different sources.
+
+Kandev links the current project's auth path to this private shared file. It preserves an existing regular `mcp-auth.json` file. While sharing is enabled, it replaces an existing symlink at that path when it points elsewhere. Disabling sharing does not restore the replaced target. On a disabled launch, Kandev removes only its own project auth link and leaves unrelated symlinks unchanged.
+
+Imported plugin definitions retain Cursor's `plugin-<plugin-name>-<server-name>` identity so existing workspace credentials match. Credential sharing and server import are separate preferences. Importing servers authorizes Kandev to approve only the eligible imported connections through Cursor's native CLI before starting the agent. This does not grant permission to invoke their tools. Automatic imports honor disabled-server preferences from the task's primary source repository and its own workspace. Other workspaces can supply credentials, but their disabled settings are not inherited.
+
+For marketplace plugins, Kandev reads Cursor's enabled-plugin inventory and uses only the exact cached revision it identifies. This currently supports the observed macOS keychain installation. If the inventory cannot be read, local plugin and global MCP definitions remain eligible. If the selected workspace disable state cannot be read safely, automatic imports are skipped. Explicit profile and user-owned project entries are preserved. Kandev does not sign you in automatically, refresh Cursor account tokens, install plugins, or automatically approve tools. Provider consent starts only when you choose Authenticate.
 
 The shared auth file is keyed by MCP server name. Kandev does not compare server URLs or OAuth issuers between projects. A project with a matching server name can therefore use a copied credential even when its MCP configuration points to a different endpoint. Enable sharing only for trusted local project configurations. If a credential may have reached an unintended endpoint, revoke it through that provider.
 
-To stop sharing, clear the option and launch that profile again. That launch removes only the Kandev-created link for its project. Running processes keep credentials they already loaded. Cursor may refresh credentials through the link, but Kandev does not copy refreshed credentials back to source projects. A later launch rebuilds the shared file from those source projects.
+To stop sharing, clear the option and launch that profile again. That launch removes only the Kandev-created link for its project. Running processes keep credentials they already loaded. Cursor may refresh credentials through the link, but Kandev does not copy refreshed credentials back to source projects. A later launch rebuilds the shared file from those source projects. Kandev preserves a native-refreshed credential while its original source remains unchanged. Changed or removed source credentials invalidate that preservation; Kandev does not treat an old shared snapshot as an independent source.
 
 <details>
 <summary>Configure external MCP servers</summary>

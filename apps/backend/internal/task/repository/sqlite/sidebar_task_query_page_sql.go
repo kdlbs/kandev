@@ -12,75 +12,14 @@ import (
 func sidebarPageCTEs(driver string, query models.SidebarTaskViewQuery, prefs models.SidebarTaskViewPreferences) (string, []any) {
 	page := sidebarPageBuildContextFor(driver, query, prefs)
 	groupCTEs, treeRootSQL := sidebarPageGroupExpressions(query, page)
-	ctes := sidebarPageTreeCTEs(driver, query, page, groupCTEs, treeRootSQL)
-	ctes += sidebarPageCountsAndWindowCTEs(query, &page)
-	ctes += sidebarPageQueueCTEs(driver, page)
+	ctes := sidebarPageTreeCTEs(page) + groupCTEs
+	ctes += sidebarRootWindowCTEs(driver, query, treeRootSQL, &page)
 	page.args = append(page.args, query.PageSize, query.Page)
+	ctes += sidebarSelectedTreeCTEs(query, page)
+	page.args = append(page.args, page.childArgs...)
+	ctes += sidebarPageResultCTEs(query.Group)
+	ctes += sidebarPageQueueCTEs(driver, page)
 	return ctes, page.args
-}
-
-func sidebarPageCountsAndWindowCTEs(query models.SidebarTaskViewQuery, page *sidebarPageBuildContext) string {
-	groupCountSQL := `SELECT root_group_key AS group_key, root_group_label AS group_label, COUNT(*) AS task_count
-			FROM tree WHERE 1=1`
-	if query.Group == sidebarGroupNone {
-		groupCountSQL = `SELECT '__all__' AS group_key, '__all__' AS group_label, COUNT(*) AS task_count
-			FROM tree WHERE 1=1`
-	}
-	ctes := groupCountSQL
-	if len(query.CollapsedTaskIDs) > 0 {
-		ctes += ` AND id NOT IN (SELECT id FROM hidden_tasks)`
-	}
-	if query.Group != sidebarGroupNone {
-		ctes += ` GROUP BY root_group_key, root_group_label`
-	}
-	ctes += `
-		), display_tree AS (
-			SELECT tree.* FROM tree WHERE 1=1`
-	if len(query.CollapsedTaskIDs) > 0 {
-		ctes += ` AND tree.id NOT IN (SELECT id FROM hidden_tasks)`
-	}
-	if len(query.CollapsedGroupKeys) > 0 {
-		ctes += ` AND tree.root_group_key NOT IN (` + placeholders(len(query.CollapsedGroupKeys)) + `)`
-		for _, key := range query.CollapsedGroupKeys {
-			page.args = append(page.args, key)
-		}
-	}
-	ctes += `
-	), page_ordered_tree AS (
-		SELECT display_tree.*, ROW_NUMBER() OVER (PARTITION BY group_order ORDER BY order_path) AS group_position
-		FROM display_tree
-	), page_summary AS (
-		SELECT (SELECT COUNT(*) FROM filtered) AS total_tasks,
-			(SELECT COUNT(*) FROM display_tree) AS total_visible_tasks,
-			` + sidebarTotalGroupCountSQL(query.Group) + ` AS total_groups
-	), page_options AS (
-		SELECT request.page_size,
-			CASE
-				WHEN summary.total_visible_tasks = 0 THEN 1
-				WHEN request.requested_page <= ((summary.total_visible_tasks + request.page_size - 1) / request.page_size)
-					THEN request.requested_page
-				ELSE ((summary.total_visible_tasks + request.page_size - 1) / request.page_size)
-			END AS page
-		FROM (SELECT CAST(? AS BIGINT) AS page_size, CAST(? AS BIGINT) AS requested_page) request
-		CROSS JOIN page_summary summary
-	), page_window AS (
-		SELECT id FROM page_ordered_tree
-		ORDER BY group_order ASC, order_path ASC
-		LIMIT (SELECT page_size FROM page_options)
-		OFFSET (SELECT (page - 1) * page_size FROM page_options)
-	), page_subtask_walk(ancestor_id, descendant_id) AS (
-		SELECT page.id, page.id FROM page_window page
-		UNION ALL
-		SELECT walk.ancestor_id, child.id
-		FROM page_subtask_walk walk
-		JOIN ranked current ON current.id = walk.descendant_id
-		JOIN ranked child ON child.display_parent_id = current.id
-		), page_subtask_counts AS (
-			SELECT ancestor_id, COUNT(*) - 1 AS subtask_count
-			FROM page_subtask_walk
-			GROUP BY ancestor_id
-		)`
-	return ctes
 }
 
 func sidebarPageQueueCTEs(driver string, page sidebarPageBuildContext) string {
@@ -132,7 +71,7 @@ func sidebarPageGroupExpressions(query models.SidebarTaskViewQuery, page sidebar
 					AND meta.named_group_count = 1 THEN meta.named_group_label ELSE raw.group_label END AS display_group_label
 			FROM root_groups_raw raw CROSS JOIN repository_group_meta meta
 		), root_display_order AS (
-			SELECT root.id,
+			SELECT root.*,
 				ROW_NUMBER() OVER (PARTITION BY identity.display_group_key, identity.display_group_label ORDER BY
 					CASE WHEN root.root_pin_order IS NULL THEN 1 ELSE 0 END,
 					root.root_pin_order, root.global_root_sort_order, root.id) AS display_root_order
@@ -156,7 +95,7 @@ func sidebarPageGroupExpressions(query models.SidebarTaskViewQuery, page sidebar
 			FROM ranked root WHERE root.display_parent_id IS NULL
 			HAVING COUNT(*) > 0
 		), root_display_order AS (
-			SELECT root.id, root.sibling_order AS display_root_order
+			SELECT root.*, root.sibling_order AS display_root_order
 			FROM ranked root WHERE root.display_parent_id IS NULL
 		), ordered_groups AS (
 			SELECT display_group_key AS group_key, display_group_label AS group_label,
@@ -168,8 +107,7 @@ func sidebarPageGroupExpressions(query models.SidebarTaskViewQuery, page sidebar
 			identity.display_group_label AS root_group_label, groups.group_order,
 			root.workflow_id, root.workflow_step_id,
 			root.display_parent_id AS parent_id, 0 AS depth, ` + page.rootPathPart + ` AS order_path
-		FROM ranked root
-		JOIN root_display_order root_order ON root_order.id = root.id
+		FROM root_display_order root
 		JOIN root_group_identity identity ON identity.group_key = root.task_group_key
 			AND identity.group_label = root.task_group_label
 		JOIN ordered_groups groups ON groups.group_key = identity.display_group_key
@@ -180,104 +118,91 @@ func sidebarPageGroupExpressions(query models.SidebarTaskViewQuery, page sidebar
 			root.task_group_label AS root_group_label, 1 AS group_order,
 			root.workflow_id, root.workflow_step_id,
 			root.display_parent_id AS parent_id, 0 AS depth, ` + page.rootPathPart + ` AS order_path
-		FROM ranked root JOIN root_display_order root_order ON root_order.id = root.id
+		FROM root_display_order root
 		WHERE root.display_parent_id IS NULL`
 	}
 	return groupCTEs, treeRootSQL
 }
 
-func sidebarPageTreeCTEs(driver string, query models.SidebarTaskViewQuery, page sidebarPageBuildContext, groupCTEs, treeRootSQL string) string {
+func sidebarPageTreeCTEs(page sidebarPageBuildContext) string {
 	//nolint:dupword // SQL CTE keys follow the task identifier schema.
-	cycleCTEs := `, cycle_probe(start_key, current_key, visited, closed_by_key, min_key) AS (
-			SELECT id, id, '/' || id || '/', NULL, id
+	cycleCTEs := `, cycle_probe(start_key, current_key, parent_key, visited, closed_by_key, min_key) AS (
+			SELECT id, id, parent_id, '/' || id || '/', NULL, id
 			FROM filtered
 			WHERE parent_id >= id
 			UNION ALL
-			SELECT cycle_probe.start_key, parent.id, cycle_probe.visited || parent.id || '/',
+			SELECT cycle_probe.start_key, parent.id, parent.parent_id, cycle_probe.visited || parent.id || '/',
 				CASE WHEN ` + page.cycleProbeGuard + ` THEN NULL ELSE parent.id END,
 				CASE WHEN parent.id < cycle_probe.min_key THEN parent.id ELSE cycle_probe.min_key END
 			FROM cycle_probe
-			JOIN filtered current ON current.id = cycle_probe.current_key
-			JOIN filtered parent ON parent.id = current.parent_id
+			JOIN filtered parent ON parent.id = cycle_probe.parent_key
 			WHERE cycle_probe.closed_by_key IS NULL
 		), cycle_roots(root_key) AS (
 			SELECT DISTINCT min_key FROM cycle_probe WHERE closed_by_key = start_key
 		)`
-	globalRootOrder := `CASE WHEN ` + page.rootCondition + ` THEN ROW_NUMBER() OVER (ORDER BY ` + page.sortExpr + `, v.updated_at DESC, ` + taskTitleOrder(driver, "v.", "ASC") + `, v.id ASC) END`
-	ctes := cycleCTEs + page.stateCTEs + page.activityCTEs + `, ranked_ordered AS (
-			SELECT v.*, CASE WHEN ` + page.rootCondition + ` THEN NULL ELSE parent.id END AS display_parent_id,
-				` + page.treeActivityExpr + ` AS tree_activity_at, ` + page.groupKey + ` AS task_group_key, ` + page.groupLabel + ` AS task_group_label,
-				ROW_NUMBER() OVER (PARTITION BY CASE
-					WHEN ` + page.rootCondition + ` THEN 'root:' || ` + page.groupKey + ` ELSE 'parent:' || parent.id END
-					ORDER BY ` + page.order + `) AS sibling_order,
-				` + globalRootOrder + ` AS global_root_sort_order,
-				CASE WHEN ` + page.rootCondition + ` THEN ` + page.rootPinExpr + ` END AS root_pin_order
-			FROM filtered v LEFT JOIN filtered parent ON parent.id = v.parent_id
-			LEFT JOIN cycle_roots cycle_root ON cycle_root.root_key = v.id
-			` + page.activityJoin + page.stateJoin + `
-		), ranked AS (
-			SELECT ranked_ordered.*,
-				CASE WHEN display_parent_id IS NULL THEN sibling_order END AS root_sort_order
-			FROM ranked_ordered
-		)` + groupCTEs + `, tree AS (
-			` + treeRootSQL + `
-			UNION ALL
-			SELECT child.id, tree.root_id, tree.root_group_key, tree.root_group_label,
-				tree.group_order, child.workflow_id, child.workflow_step_id,
-				child.parent_id, tree.depth + 1, tree.order_path || '.' || ` + page.childPathPart + `
-			FROM tree
-			JOIN filtered child_source ON child_source.parent_id = tree.id
-			JOIN ranked child ON child.id = child_source.id AND child.display_parent_id = tree.id
-		), group_task_counts AS (`
-	return ctes
+	return cycleCTEs + sidebarRootMembershipCTEs() + page.repositoryCTEs + page.ancestorCTEs + page.stateCTEs + page.activityCTEs + `, ranked_ordered AS (
+		SELECT v.id, v.workflow_id, v.workflow_step_id, CAST(NULL AS TEXT) AS display_parent_id,
+			` + page.groupKey + ` AS task_group_key, ` + page.groupLabel + ` AS task_group_label,
+			ROW_NUMBER() OVER (ORDER BY ` + page.rootOrder + `) AS global_root_sort_order,
+			` + page.rootPinExpr + ` AS root_pin_order
+		FROM display_roots v
+		` + page.activityJoin + page.stateJoin + page.repositoryJoin + `
+	), ranked AS (
+		SELECT ranked_ordered.*, global_root_sort_order AS sibling_order,
+			global_root_sort_order AS root_sort_order FROM ranked_ordered
+	)`
 }
 
 type sidebarPageBuildContext struct {
-	sortExpr, groupOrder, rootPathPart, childPathPart string
-	rootPinExpr                                       string
-	cycleProbeGuard                                   string
-	wipAdmittedFalse, order, groupKey, groupLabel     string
-	stateJoin, rootCondition, stateCTEs               string
-	activityCTEs, activityJoin, treeActivityExpr      string
-	args                                              []any
+	groupOrder, rootPathPart, childPathPart                  string
+	rootPinExpr                                              string
+	cycleProbeGuard                                          string
+	wipAdmittedFalse, order, rootOrder, groupKey, groupLabel string
+	stateJoin, stateCTEs                                     string
+	ancestorCTEs, activityCTEs, activityJoin                 string
+	repositoryCTEs, repositoryJoin                           string
+	args, childArgs                                          []any
 }
 
 func sidebarPageBuildContextFor(driver string, query models.SidebarTaskViewQuery, prefs models.SidebarTaskViewPreferences) sidebarPageBuildContext {
 
 	sortExpr, sortArgs := sidebarSortExpression(driver, query.Sort.Key, query.Sort.Direction, prefs.OrderedTaskIDs)
 	groupOrder := sidebarGroupOrderExpression(query.Group)
-	pinExpr, pinArgs := sidebarIDOrder(prefs.PinnedTaskIDs)
-	subtaskExpr, subtaskArgs := sidebarSubtaskOrder(prefs.SubtaskOrderByParentID)
+	pinExpr, pinArgs := sidebarIDOrder(driver, prefs.PinnedTaskIDs)
+	subtaskExpr, subtaskArgs := sidebarSubtaskOrder(driver, prefs.SubtaskOrderByParentID)
 	cycleProbeGuard := `instr(cycle_probe.visited, '/' || parent.id || '/') = 0`
-	activityCycleGuard := `instr(activity_walk.visited, '/' || parent.id || '/') = 0`
-	stateCycleGuard := `instr(state_walk.visited, '/' || parent.id || '/') = 0`
-	rootPathPart := `printf('%010d', root_order.display_root_order)`
+	rootPathPart := `printf('%010d', root.display_root_order)`
 	childPathPart := `printf('%010d', child.sibling_order)`
 	if dialect.IsPostgres(driver) {
 		cycleProbeGuard = `POSITION('/' || parent.id || '/' IN cycle_probe.visited) = 0`
-		activityCycleGuard = `POSITION('/' || parent.id || '/' IN activity_walk.visited) = 0`
-		stateCycleGuard = `POSITION('/' || parent.id || '/' IN state_walk.visited) = 0`
-		rootPathPart = `LPAD(CAST(root_order.display_root_order AS TEXT), 10, '0')`
+		rootPathPart = `LPAD(CAST(root.display_root_order AS TEXT), 10, '0')`
 		childPathPart = `LPAD(CAST(child.sibling_order AS TEXT), 10, '0')`
 	}
 	wipAdmittedFalse := `COALESCE(queue_task.wip_admitted, 0) = 0`
-	rootPinOrder := `CASE WHEN parent.id IS NULL OR cycle_root.root_key IS NOT NULL THEN ` + pinExpr + ` ELSE 0 END`
-	manualChildOrder := `CASE WHEN parent.id IS NOT NULL AND cycle_root.root_key IS NULL
-			AND (` + subtaskExpr + `) IS NOT NULL THEN 0 ELSE 1 END,
-		CASE WHEN parent.id IS NOT NULL AND cycle_root.root_key IS NULL THEN ` + subtaskExpr + ` ELSE 0 END`
-	order := rootPinOrder + ` ASC, ` + manualChildOrder + ` ASC,
-			` + sortExpr + `, v.updated_at DESC, ` + taskTitleOrder(driver, "v.", "ASC") + `, v.id ASC`
-	orderArgs := make([]any, 0, len(pinArgs)+2*len(subtaskArgs)+len(sortArgs))
-	orderArgs = append(orderArgs, pinArgs...)
-	orderArgs = append(orderArgs, subtaskArgs...)
-	orderArgs = append(orderArgs, subtaskArgs...)
-	orderArgs = append(orderArgs, sortArgs...)
-	args := append([]any(nil), orderArgs...)
-	args = append(args, sortArgs...)
-	args = append(args, pinArgs...)
+	canonicalOrder := sortExpr + `, v.updated_at DESC, ` + taskTitleOrder(driver, "v.", "ASC") + `, v.id ASC`
+	rootOrder := canonicalOrder
+	rootPinExpr := pinExpr
+	args := append([]any(nil), sortArgs...)
+	if query.Group == sidebarGroupNone {
+		rootOrder = pinExpr + ` ASC, ` + canonicalOrder
+		rootPinExpr = sidebarSQLNull
+		args = append(append([]any(nil), pinArgs...), sortArgs...)
+	} else {
+		args = append(args, pinArgs...)
+	}
+	order := `CASE WHEN (` + subtaskExpr + `) IS NOT NULL THEN 0 ELSE 1 END,
+		` + subtaskExpr + ` ASC, ` + canonicalOrder
+	childArgs := append(append(append([]any(nil), subtaskArgs...), subtaskArgs...), sortArgs...)
 
 	groupKey := "v.group_key"
 	groupLabel := "v.group_label"
+	repositoryCTEs, repositoryJoin := "", ""
+	if query.Group == sidebarRepositoryKey {
+		repositoryCTEs = sidebarRepositoryCTEs(driver)
+		repositoryJoin = ` LEFT JOIN sidebar_repository_groups repository_group ON repository_group.task_id = v.id`
+		groupKey = `COALESCE(repository_group.group_key, '__unassigned__')`
+		groupLabel = `COALESCE(repository_group.group_label, '__unassigned__')`
+	}
 	stateJoin := ""
 	if query.Group == sidebarStateKey {
 		groupKey = `COALESCE(effective_state.effective_group_key, '__not_started__')`
@@ -286,88 +211,119 @@ func sidebarPageBuildContextFor(driver string, query models.SidebarTaskViewQuery
 	if query.Group == sidebarStateKey || query.Sort.Key == sidebarStateKey {
 		stateJoin = ` LEFT JOIN effective_tree_state effective_state ON effective_state.task_id = v.id`
 	}
-	rootCondition := `parent.id IS NULL OR cycle_root.root_key IS NOT NULL`
-	stateCTEs := sidebarStateCTEs(query, stateCycleGuard)
-	activityCTEs, activityJoin, treeActivityExpr := sidebarActivityCTEs(query, activityCycleGuard)
+	stateCTEs := sidebarStateCTEs(query)
+	activityCTEs, activityJoin := sidebarActivityCTEs(query)
 	return sidebarPageBuildContext{
-		sortExpr: sortExpr, groupOrder: groupOrder, rootPathPart: rootPathPart, childPathPart: childPathPart,
-		rootPinExpr:      pinExpr,
+		groupOrder: groupOrder, rootPathPart: rootPathPart, childPathPart: childPathPart,
+		rootPinExpr:      rootPinExpr,
 		cycleProbeGuard:  cycleProbeGuard,
-		wipAdmittedFalse: wipAdmittedFalse, order: order, groupKey: groupKey, groupLabel: groupLabel,
-		stateJoin: stateJoin, rootCondition: rootCondition, stateCTEs: stateCTEs,
-		activityCTEs: activityCTEs, activityJoin: activityJoin, treeActivityExpr: treeActivityExpr, args: args,
+		wipAdmittedFalse: wipAdmittedFalse, order: order, rootOrder: rootOrder, groupKey: groupKey, groupLabel: groupLabel,
+		stateJoin: stateJoin, stateCTEs: stateCTEs,
+		repositoryCTEs: repositoryCTEs, repositoryJoin: repositoryJoin,
+		ancestorCTEs: sidebarAncestorCTE(driver, query), activityCTEs: activityCTEs, activityJoin: activityJoin, args: args, childArgs: childArgs,
 	}
 }
 
-func sidebarStateCTEs(query models.SidebarTaskViewQuery, stateCycleGuard string) string {
-	var stateCTEs string
-	if query.Group == sidebarStateKey || query.Sort.Key == sidebarStateKey {
-		//nolint:dupword // SQL CTE keys follow the task identifier schema.
-		stateCTEs = `, state_walk(source_key, ancestor_key, visited) AS (
-			SELECT id, id, '/' || id || '/' FROM filtered
-			UNION ALL
-			SELECT state_walk.source_key, parent.id, state_walk.visited || parent.id || '/'
-			FROM state_walk
-			JOIN filtered current ON current.id = state_walk.ancestor_key
-			JOIN filtered parent ON parent.id = current.parent_id
-			WHERE ` + stateCycleGuard + `
-		), state_aggregate AS (
-			SELECT state_walk.ancestor_key AS task_id,
-				MAX(CASE WHEN member.state = 'IN_PROGRESS' OR member.primary_session_state = 'RUNNING' THEN 1 ELSE 0 END) AS has_active,
-				MAX(CASE WHEN member.state = 'SCHEDULING' THEN 1 ELSE 0 END) AS has_scheduling,
-				CASE WHEN SUM(CASE WHEN member.state = 'COMPLETED' THEN 1 ELSE 0 END) = COUNT(*) THEN 1 ELSE 0 END AS all_completed
-			FROM state_walk JOIN filtered member ON member.id = state_walk.source_key
-			GROUP BY state_walk.ancestor_key
-		), state_candidates AS (
-			SELECT state_walk.ancestor_key AS task_id, member.state, member.state_bucket,
-				ROW_NUMBER() OVER (PARTITION BY state_walk.ancestor_key ORDER BY
-					CASE member.state_bucket WHEN 'review' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
-					CASE member.state WHEN '__not_started__' THEN 0 WHEN 'CREATED' THEN 1 WHEN 'SCHEDULING' THEN 2
-						WHEN 'TODO' THEN 3 WHEN 'IN_PROGRESS' THEN 4 WHEN 'WAITING_FOR_INPUT' THEN 5
-						WHEN 'REVIEW' THEN 6 WHEN 'BLOCKED' THEN 7 WHEN 'FAILED' THEN 8
-						WHEN 'COMPLETED' THEN 9 WHEN 'CANCELLED' THEN 10 ELSE 99 END,
-					CASE WHEN member.id = state_walk.ancestor_key THEN 0 ELSE 1 END, member.id) AS candidate_order
-			FROM state_walk JOIN filtered member ON member.id = state_walk.source_key
-			WHERE member.state IS NOT NULL AND member.state <> 'COMPLETED'
-		), effective_tree_state AS (
-			SELECT aggregate.task_id,
-				CASE WHEN aggregate.has_active = 1 THEN 'IN_PROGRESS'
-					WHEN aggregate.has_scheduling = 1 THEN 'SCHEDULING'
-					WHEN aggregate.all_completed = 1 THEN 'COMPLETED'
-					ELSE COALESCE(candidate.state, '__not_started__') END AS effective_group_key,
-				CASE WHEN aggregate.has_active = 1 OR aggregate.has_scheduling = 1 THEN 'in_progress'
-					WHEN aggregate.all_completed = 1 THEN 'review'
-					ELSE COALESCE(candidate.state_bucket, 'backlog') END AS effective_bucket
-			FROM state_aggregate aggregate
-			LEFT JOIN state_candidates candidate ON candidate.task_id = aggregate.task_id AND candidate.candidate_order = 1
-		)`
+func sidebarAncestorCTE(driver string, query models.SidebarTaskViewQuery) string {
+	state := query.Sort.Key == sidebarStateKey
+	activity := query.Sort.Key == sidebarActivitySortField
+	if !state && !activity {
+		return ""
 	}
-	return stateCTEs
+	activityValue, stateValue, bucketValue, primaryValue := sidebarSQLNull, sidebarSQLNull, sidebarSQLNull, sidebarSQLNull
+	if activity {
+		activityValue = "source.activity_at"
+	}
+	if state {
+		stateValue, bucketValue, primaryValue = "source.state", "source.state_bucket", "source.primary_session_state"
+	}
+	//nolint:dupword // A state projection includes the source itself before its ancestors.
+	anchorIdentity := `source.id, source.id, source.parent_id, '/' || source.id || '/'`
+	anchorSource := `filtered source`
+	if !state {
+		// Activity aggregation only needs proper descendants; each row keeps its own value.
+		anchorIdentity = `source.id, parent.id, parent.parent_id, '/' || source.id || '/' || parent.id || '/'`
+		anchorSource += ` JOIN filtered parent ON parent.id = source.parent_id AND parent.id <> source.id`
+	}
+	guard := `instr(walk.visited, '/' || parent.id || '/') = 0`
+	if dialect.IsPostgres(driver) {
+		guard = `POSITION('/' || parent.id || '/' IN walk.visited) = 0`
+	}
+	// Each source carries its projections through one shared ancestor traversal.
+	return `, ancestor_walk(source_key, ancestor_key, parent_key, visited, activity_at, state, state_bucket, primary_session_state) AS (
+		SELECT ` + anchorIdentity + `, ` + activityValue + `, ` + stateValue + `, ` + bucketValue + `, ` + primaryValue + ` FROM ` + anchorSource + `
+		UNION ALL
+		SELECT walk.source_key, parent.id, parent.parent_id, walk.visited || parent.id || '/',
+			walk.activity_at, walk.state, walk.state_bucket, walk.primary_session_state
+		FROM ancestor_walk walk JOIN filtered parent ON parent.id = walk.parent_key
+		WHERE ` + guard + `
+	)`
 }
 
-func sidebarActivityCTEs(query models.SidebarTaskViewQuery, activityCycleGuard string) (string, string, string) {
-	activityCTEs := ""
-	activityJoin := ""
-	treeActivityExpr := sidebarSQLNull
-	if query.Sort.Key == sidebarActivitySortField {
-		//nolint:dupword // SQL CTE keys follow the task identifier schema.
-		activityCTEs = `, activity_walk(source_key, ancestor_key, visited) AS (
-			SELECT id, id, '/' || id || '/' FROM filtered
-			UNION ALL
-			SELECT activity_walk.source_key, parent.id, activity_walk.visited || parent.id || '/'
-			FROM activity_walk
-			JOIN filtered current ON current.id = activity_walk.ancestor_key
-			JOIN filtered parent ON parent.id = current.parent_id
-			WHERE ` + activityCycleGuard + `
-		), tree_activity AS (
-			SELECT activity_walk.ancestor_key AS ancestor_id, MAX(task.activity_at) AS tree_activity_at
-			FROM activity_walk JOIN filtered task ON task.id = activity_walk.source_key
-			GROUP BY activity_walk.ancestor_key
-		)`
-		activityJoin = ` LEFT JOIN tree_activity activity ON activity.ancestor_id = v.id`
-		treeActivityExpr = "COALESCE(activity.tree_activity_at, v.activity_at)"
+func sidebarStateCTEs(query models.SidebarTaskViewQuery) string {
+	if query.Group != sidebarStateKey && query.Sort.Key != sidebarStateKey {
+		return ""
 	}
-	return activityCTEs, activityJoin, treeActivityExpr
+	members := `, state_members AS NOT MATERIALIZED (
+		SELECT source_key, ancestor_key, state, state_bucket, primary_session_state FROM ancestor_walk
+	)`
+	if query.Sort.Key != sidebarStateKey {
+		// Group identity uses the same complete root memberships as page counts.
+		members = `, state_members AS MATERIALIZED (
+			SELECT source.id AS source_key, member.root_id AS ancestor_key,
+				source.state, source.state_bucket, source.primary_session_state
+			FROM root_members member JOIN filtered source ON source.id = member.id
+		)`
+	}
+	return members + `, state_aggregate AS (
+		SELECT member.ancestor_key AS task_id,
+			MAX(CASE WHEN member.state = 'IN_PROGRESS' OR member.primary_session_state = 'RUNNING' THEN 1 ELSE 0 END) AS has_active,
+			MAX(CASE WHEN member.state = 'SCHEDULING' THEN 1 ELSE 0 END) AS has_scheduling,
+			CASE WHEN SUM(CASE WHEN member.state = 'COMPLETED' THEN 1 ELSE 0 END) = COUNT(*) THEN 1 ELSE 0 END AS all_completed,
+			MIN(CASE WHEN member.state <> 'COMPLETED' THEN member.state END) AS first_state,
+			MAX(CASE WHEN member.state <> 'COMPLETED' THEN member.state END) AS last_state,
+			MIN(CASE WHEN member.state <> 'COMPLETED' THEN member.state_bucket END) AS first_bucket,
+			MAX(CASE WHEN member.state <> 'COMPLETED' THEN member.state_bucket END) AS last_bucket
+		FROM state_members member
+		GROUP BY member.ancestor_key
+	), state_candidates AS (
+		SELECT member.ancestor_key AS task_id, member.state, member.state_bucket,
+			ROW_NUMBER() OVER (PARTITION BY member.ancestor_key ORDER BY
+				CASE member.state_bucket WHEN 'review' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+				CASE member.state WHEN '__not_started__' THEN 0 WHEN 'CREATED' THEN 1 WHEN 'SCHEDULING' THEN 2
+					WHEN 'TODO' THEN 3 WHEN 'IN_PROGRESS' THEN 4 WHEN 'WAITING_FOR_INPUT' THEN 5
+					WHEN 'REVIEW' THEN 6 WHEN 'BLOCKED' THEN 7 WHEN 'FAILED' THEN 8
+					WHEN 'COMPLETED' THEN 9 WHEN 'CANCELLED' THEN 10 ELSE 99 END,
+				CASE WHEN member.source_key = member.ancestor_key THEN 0 ELSE 1 END, member.source_key) AS candidate_order
+		FROM state_members member JOIN state_aggregate aggregate ON aggregate.task_id = member.ancestor_key
+		WHERE member.state IS NOT NULL AND member.state <> 'COMPLETED'
+			AND aggregate.has_active = 0 AND aggregate.has_scheduling = 0 AND aggregate.all_completed = 0
+			AND (aggregate.first_state <> aggregate.last_state OR aggregate.first_bucket <> aggregate.last_bucket)
+	), effective_tree_state AS (
+		SELECT aggregate.task_id,
+			CASE WHEN aggregate.has_active = 1 THEN 'IN_PROGRESS'
+				WHEN aggregate.has_scheduling = 1 THEN 'SCHEDULING'
+				WHEN aggregate.all_completed = 1 THEN 'COMPLETED'
+				WHEN aggregate.first_state = aggregate.last_state AND aggregate.first_bucket = aggregate.last_bucket THEN aggregate.first_state
+				ELSE COALESCE(candidate.state, '__not_started__') END AS effective_group_key,
+			CASE WHEN aggregate.has_active = 1 OR aggregate.has_scheduling = 1 THEN 'in_progress'
+				WHEN aggregate.all_completed = 1 THEN 'review'
+				WHEN aggregate.first_state = aggregate.last_state AND aggregate.first_bucket = aggregate.last_bucket THEN aggregate.first_bucket
+				ELSE COALESCE(candidate.state_bucket, 'backlog') END AS effective_bucket
+		FROM state_aggregate aggregate
+		LEFT JOIN state_candidates candidate ON candidate.task_id = aggregate.task_id AND candidate.candidate_order = 1
+	)`
+}
+
+func sidebarActivityCTEs(query models.SidebarTaskViewQuery) (string, string) {
+	if query.Sort.Key != sidebarActivitySortField {
+		return "", ""
+	}
+	return `, tree_activity AS (
+		SELECT ancestor_key AS ancestor_id, MAX(activity_at) AS tree_activity_at
+		FROM ancestor_walk WHERE source_key <> ancestor_key
+		GROUP BY ancestor_key
+	)`, ` LEFT JOIN tree_activity activity ON activity.ancestor_id = v.id`
 }
 
 func sidebarGroupOrderExpression(group string) string {
@@ -388,8 +344,16 @@ func sidebarGroupOrderExpression(group string) string {
 	}
 }
 
-func sidebarSubtaskOrder(orders map[string][]string) (string, []any) {
+func sidebarSubtaskOrder(driver string, orders map[string][]string) (string, []any) {
 	if len(orders) == 0 {
+		return sidebarSQLNull, nil
+	}
+	if !dialect.IsPostgres(driver) {
+		for _, ids := range orders {
+			if len(ids) > 0 {
+				return sidebarPreferenceOrder("child", "v.parent_id"), nil
+			}
+		}
 		return sidebarSQLNull, nil
 	}
 	parents := make([]string, 0, len(orders))
@@ -426,7 +390,7 @@ func sidebarSortExpression(driver, key, direction string, orderIDs []string) (st
 	case "updatedAt":
 		return "v.updated_at " + order, nil
 	case sidebarActivitySortField:
-		return "COALESCE(activity.tree_activity_at, v.activity_at) " + order, nil
+		return "CASE WHEN v.activity_at IS NULL OR activity.tree_activity_at > v.activity_at THEN activity.tree_activity_at ELSE v.activity_at END " + order, nil
 	case "createdAt":
 		return "v.created_at " + order, nil
 	case "title":
@@ -434,6 +398,9 @@ func sidebarSortExpression(driver, key, direction string, orderIDs []string) (st
 	case sidebarCustomSortKey:
 		if len(orderIDs) == 0 {
 			return "v.created_at DESC", nil
+		}
+		if !dialect.IsPostgres(driver) {
+			return sqliteSidebarIDOrder("ordered", len(orderIDs)) + " ASC, v.created_at DESC", nil
 		}
 		cases := make([]string, 0, len(orderIDs))
 		args := make([]any, 0, len(orderIDs)*2)
@@ -447,9 +414,12 @@ func sidebarSortExpression(driver, key, direction string, orderIDs []string) (st
 	}
 }
 
-func sidebarIDOrder(ids []string) (string, []any) {
+func sidebarIDOrder(driver string, ids []string) (string, []any) {
 	if len(ids) == 0 {
 		return "CASE WHEN 1=1 THEN 0 ELSE 0 END", nil
+	}
+	if !dialect.IsPostgres(driver) {
+		return sqliteSidebarIDOrder("pinned", len(ids)), nil
 	}
 	cases := make([]string, 0, len(ids))
 	args := make([]any, 0, len(ids)*2)

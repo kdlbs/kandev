@@ -6,7 +6,11 @@ import { useAppStore } from "@/components/state-provider";
 import { Trans, useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
+import {
+  useActionMessageSession,
+  useAgentBootOutcomeAfterMessage,
+  useRunningNoticeResolved,
+} from "./action-message-state";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
@@ -80,9 +84,14 @@ function shouldShowRecoveryActions({
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
   const owner = useSessionComposerRecovery(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
+  const runningNoticeResolved = useRunningNoticeResolved(
+    comment,
+    metadata?.action_visibility === "running" && comment.type === "status",
+  );
   const sessionMetadata = useAppStore((state) =>
     comment.session_id ? state.taskSessions.items[comment.session_id]?.metadata : undefined,
   );
+  if (runningNoticeResolved) return null;
   const historyState = resolveRecoveryHistoryState(
     comment,
     metadata,

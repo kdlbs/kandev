@@ -104,7 +104,7 @@ async function configureProfileSessionWorkflow(
   startPolicy: ProfileSessionStartPolicy,
   endPolicy: ProfileSessionEndPolicy,
 ) {
-  const { profileA, profileB } = await createProfiles(apiClient);
+  const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
   const workflow = await apiClient.createWorkflow(
     seedData.workspaceId,
     `Profile Session ${startPolicy}-${endPolicy}`,
@@ -329,7 +329,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Create workflow: Inbox → Step1 (profileA, auto_start) → Step2 (profileB, auto_start) → Done
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Agent Switch Manual");
@@ -396,7 +396,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Create workflow: Inbox → Step1 (profileA, auto_start, move_to_next) → Step2 (profileB, auto_start) → Done
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Agent Switch Auto");
@@ -445,7 +445,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Create workflow: Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "UI Switch Test");
@@ -515,7 +515,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Backlog (on_turn_start: move_to_next) → Step1 (profileB)
     // Per PR #743, on_turn_start fires on user-message dispatch (not agent boot),
@@ -588,7 +588,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Step1 (profileA, auto_start, is_start) → Step2 (profileB, prompt but NO auto_start)
     const workflow = await apiClient.createWorkflow(
@@ -656,7 +656,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Env Inherit Test");
@@ -727,7 +727,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA } = await createProfiles(apiClient);
+    const { profileA } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Create workflow with Step1 (profileA, auto_start, is_start)
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Initial Profile Tab");
@@ -772,7 +772,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Manual Profile Picker");
     const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
@@ -862,7 +862,7 @@ test.describe("Workflow agent profile switching", () => {
     // Two agent boots (git worktree checkouts) — one before the move, one after —
     // can outlast the default budget under CI shard contention; give headroom.
     test.setTimeout(180_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Active Tab Switch");
@@ -945,7 +945,7 @@ test.describe("Workflow agent profile switching", () => {
     // Cascade boots two agents sequentially (step1 turn, then step2 on move_to_next);
     // under CI shard contention that can outlast the default budget — give headroom.
     test.setTimeout(180_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Step1 (profileA, auto_start, move_to_next) → Step2 (profileB, auto_start)
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Cascade Tab Switch");
@@ -1007,7 +1007,7 @@ test.describe("Workflow agent profile switching", () => {
     // Two agent boots (git worktree checkouts) — one before the move, one after —
     // can outlast the default budget under CI shard contention; give headroom.
     test.setTimeout(180_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Primary Star Test");
     const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
@@ -1078,7 +1078,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Step1 (profileB, auto_start) → Step2 (NO override, auto_start)
     // Task created with profileA → Step1 overrides to profileB → Step2 preserves profileB.
@@ -1164,7 +1164,7 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
 
     // Step1: no override, auto_start + on_turn_complete → next.
     // Step2: no override (this is the trigger condition for the bug).
@@ -1274,7 +1274,7 @@ test.describe("Workflow agent profile switching", () => {
     apiClient,
     seedData,
   }) => {
-    const { profileA } = await createProfiles(apiClient);
+    const { profileA } = await createProfiles(apiClient, seedData.agentProfileId);
     const stepId = seedData.steps[0].id;
 
     try {

@@ -67,6 +67,31 @@ func ApplyExecutorPolicy(base Policy, value any) (Policy, []string, error) {
 
 func parseExecutorPolicy(value any) (*ExecutorPolicyConfig, error) {
 	switch v := value.(type) {
+	case Policy:
+		return &ExecutorPolicyConfig{
+			AllowStdio:          &v.AllowStdio,
+			AllowHTTP:           &v.AllowHTTP,
+			AllowSSE:            &v.AllowSSE,
+			AllowStreamableHTTP: &v.AllowStreamableHTTP,
+			URLRewrite:          v.URLRewrite,
+			EnvInjection:        v.EnvInjection,
+			AllowlistServers:    v.AllowlistServers,
+			DenylistServers:     v.DenylistServers,
+		}, nil
+	case *Policy:
+		if v == nil {
+			return nil, nil
+		}
+		return &ExecutorPolicyConfig{
+			AllowStdio:          &v.AllowStdio,
+			AllowHTTP:           &v.AllowHTTP,
+			AllowSSE:            &v.AllowSSE,
+			AllowStreamableHTTP: &v.AllowStreamableHTTP,
+			URLRewrite:          v.URLRewrite,
+			EnvInjection:        v.EnvInjection,
+			AllowlistServers:    v.AllowlistServers,
+			DenylistServers:     v.DenylistServers,
+		}, nil
 	case ExecutorPolicyConfig:
 		return &v, nil
 	case *ExecutorPolicyConfig:

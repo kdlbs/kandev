@@ -30,7 +30,10 @@ export async function createWorkflowSessionFocusScenario(
   seedData: SeedData,
   target: "new" | "initial" | "profile",
 ): Promise<WorkflowSessionFocusScenario> {
-  const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+  const { profileA, profileB } = await createWorkflowAgentProfiles(
+    apiClient,
+    seedData.agentProfileId,
+  );
   const workflow = await apiClient.createWorkflow(
     seedData.workspaceId,
     `Workflow session focus ${target}`,

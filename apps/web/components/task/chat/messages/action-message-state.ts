@@ -1,5 +1,6 @@
 import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
+import { hasAgentActivityAfterNotice } from "@/lib/state/slices/session/running-notice-activity";
 import {
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
@@ -77,4 +78,12 @@ export function useActionMessageSession(sessionId: Message["session_id"]) {
     sessionId ? (state.turns.activeBySession[sessionId] ?? undefined) : undefined,
   );
   return { sessionState, sessionError, sessionMetadata, activeTurnId };
+}
+
+export function useRunningNoticeResolved(comment: Message, enabled: boolean): boolean {
+  return useAppStore((state) =>
+    enabled && comment.session_id
+      ? hasAgentActivityAfterNotice(state.messages.bySession[comment.session_id], comment)
+      : false,
+  );
 }

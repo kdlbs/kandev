@@ -266,6 +266,9 @@ test.describe("System storage maintenance", () => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
     await testPage.goto("/settings/system/storage");
     await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
+    // The overview card is also rendered as a placeholder while its request is
+    // pending. Wait for loaded analysis data before reading its layout.
+    await expect(testPage.getByTestId("storage-analysis-total")).toBeVisible();
     await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
     const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
     const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();

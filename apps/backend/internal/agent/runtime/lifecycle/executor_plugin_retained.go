@@ -32,7 +32,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	inventory.Phase = pluginExecutorPhaseReady
 	inventory.Revision++
 	inventory.Generation++
-	client, err := r.newRecoveredAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource), r.logger, state.runtimeIdentity, state.token)
+	client, err := r.newRecoveredAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort), r.logger, state.runtimeIdentity, state.token)
 	if err != nil {
 		return nil, errors.New("plugin executor retained agentctl transport is unavailable")
 	}
@@ -44,7 +44,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	metadata[MetadataKeyPluginExecutor] = inventory
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
-		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: "/workspace",
+		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: pluginExecutorWorkspacePath,
 		Metadata: metadata, AuthToken: state.token, BootstrapNonce: req.BootstrapNonce,
 		AgentProfileID: req.AgentProfileID,
 	}, nil
@@ -122,7 +122,7 @@ func pluginExecutorRetainedRequestIdentityComplete(req *ExecutorCreateRequest) b
 }
 
 func pluginExecutorInventoryRetainedAttachable(inventory pluginExecutorInventory, environmentID string) bool {
-	return inventory.Phase == pluginExecutorPhaseReady && inventory.Resource != nil && inventory.EnvironmentID == environmentID &&
+	return inventory.Phase == pluginExecutorPhaseReady && inventory.Resource != nil && inventory.InstancePort != 0 && inventory.EnvironmentID == environmentID &&
 		inventory.EnvironmentGeneration > 0 && inventory.ProfileID != "" && inventory.OperationID != "" && inventory.InputDigest != ""
 }
 

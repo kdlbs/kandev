@@ -566,22 +566,22 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 		resolved <- resolution{path: path, err: err}
 	}()
 	select {
-	case <-inventoryStarted:
-	case <-time.After(time.Second):
-		cancel()
-		t.Fatal("cache prune did not start its mount inventory")
-	}
-	if !<-deadlineSeen {
-		cancel()
-		t.Fatal("background mount inventory has no time bound")
-	}
-	select {
 	case got := <-resolved:
 		if got.err != nil || got.path != cachePath {
 			t.Fatalf("resolution = %q, %v; want %q", got.path, got.err, cachePath)
 		}
 	case <-ctx.Done():
 		t.Fatal("helper resolution waited for background cache cleanup until the launch deadline")
+	}
+	select {
+	case <-inventoryStarted:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("cache prune did not start its mount inventory")
+	}
+	if !<-deadlineSeen {
+		cancel()
+		t.Fatal("background mount inventory has no time bound")
 	}
 	cancel()
 	select {

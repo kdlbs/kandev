@@ -1934,28 +1934,53 @@ func waitForPendingDispatchedPrompt(ctx context.Context, execution *AgentExecuti
 	if !execution.dispatchedPromptPending.Load() {
 		return nil
 	}
+	generation := execution.promptGenerationSnapshot()
 	timer := time.NewTimer(pendingDispatchedPromptWaitTimeout)
 	defer timer.Stop()
-	select {
-	case <-execution.promptDoneCh:
-		execution.dispatchedPromptPending.Store(false)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		// Prefer a completion that arrived at the timeout boundary. If no
-		// signal is available, retain the gate for cancellation escalation.
+	for {
 		select {
-		case <-execution.promptDoneCh:
-			execution.dispatchedPromptPending.Store(false)
-			return nil
-		default:
-			return &PendingDispatchedPromptTimeoutError{
-				ExecutionID: execution.ID,
-				Timeout:     pendingDispatchedPromptWaitTimeout,
+		case signal := <-execution.promptDoneCh:
+			if err, accepted := acceptPendingPromptSignal(execution, generation, signal); accepted || err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			// Prefer a matching completion that arrived at the timeout boundary.
+			// Stale signals cannot release a later generation's dispatch gate.
+			for {
+				select {
+				case signal := <-execution.promptDoneCh:
+					if err, accepted := acceptPendingPromptSignal(execution, generation, signal); accepted || err != nil {
+						return err
+					}
+				default:
+					return &PendingDispatchedPromptTimeoutError{
+						ExecutionID: execution.ID,
+						Timeout:     pendingDispatchedPromptWaitTimeout,
+					}
+				}
 			}
 		}
 	}
+}
+
+func acceptPendingPromptSignal(
+	execution *AgentExecution,
+	generation uint64,
+	signal PromptCompletionSignal,
+) (error, bool) {
+	if signal.PromptGeneration != generation {
+		if current := execution.promptGenerationSnapshot(); current != generation {
+			return ErrPromptActivityNotOwned, false
+		}
+		return nil, false
+	}
+	if execution.promptGenerationSnapshot() != generation {
+		return ErrPromptActivityNotOwned, false
+	}
+	execution.dispatchedPromptPending.Store(false)
+	return nil, true
 }
 
 func (sm *SessionManager) finishAcceptedPrompt(

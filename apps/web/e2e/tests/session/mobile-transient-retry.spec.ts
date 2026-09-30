@@ -18,10 +18,12 @@ test.describe("mobile: transient provider error retry", () => {
     if (!sessionId) throw new Error("active chat did not expose a session id");
 
     await session.sendMessageViaButton("/overloaded:9");
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
-        timeout: 30_000,
-        message: "the transient retry notice should be persisted",
+        timeout: 10_000,
+        intervals: [250],
+        message: "the visible transient retry notice should be persisted",
       })
       .toBe(1);
     const [retryNotice] = await listTransientRetryNotices(apiClient, sessionId);
@@ -29,7 +31,6 @@ test.describe("mobile: transient provider error retry", () => {
     const retryNoticeId = retryNotice.id;
 
     // Yellow retry card + Cancel button render on the narrow viewport.
-    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
     await expect(session.recoveryResumeButton()).toBeHidden();

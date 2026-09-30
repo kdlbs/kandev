@@ -2,8 +2,53 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestProfileMCPSelectionContractPreservesDefaultsAndExplicitEmpty(t *testing.T) {
+	fields := ProfileContractFields()
+	fieldByPath := make(map[string]ProfileContractField, len(fields))
+	for _, field := range fields {
+		fieldByPath[field.Path] = field
+	}
+	if field, ok := fieldByPath["mcp_selection_mode"]; !ok || field.JSONType != "string" || field.Support != "read_write" {
+		t.Fatalf("mcp_selection_mode contract = %#v, want writable string", field)
+	}
+	if field, ok := fieldByPath["mcp_selected_servers"]; !ok || field.JSONType != "array" || field.Support != "read_write" || !field.Replacement {
+		t.Fatalf("mcp_selected_servers contract = %#v, want writable replacement array", field)
+	}
+
+	var omitted ProfileCreateRequest
+	if err := json.Unmarshal([]byte(`{"agent_id":"agent-1","name":"profile"}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	if omitted.MCPSelectionMode != nil {
+		t.Fatal("omitted create mode must remain distinguishable for the inherit default")
+	}
+	if omitted.MCPSelectedServers != nil {
+		t.Fatal("omitted create selection must remain distinguishable from an explicit empty list")
+	}
+
+	var patch ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"profile-1","mcp_selection_mode":"selected","mcp_selected_servers":[]}`), &patch); err != nil {
+		t.Fatal(err)
+	}
+	if patch.MCPSelectionMode == nil || *patch.MCPSelectionMode != "selected" {
+		t.Fatalf("explicit selected mode was not preserved: %#v", patch.MCPSelectionMode)
+	}
+	if patch.MCPSelectedServers == nil || len(*patch.MCPSelectedServers) != 0 {
+		t.Fatalf("explicit empty list was not preserved: %#v", patch.MCPSelectedServers)
+	}
+
+	var omittedPatch ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"profile-1"}`), &omittedPatch); err != nil {
+		t.Fatal(err)
+	}
+	if omittedPatch.MCPSelectionMode != nil || omittedPatch.MCPSelectedServers != nil {
+		t.Fatal("omitted patch fields must preserve the saved selection")
+	}
+}
 
 func TestProfileUpdateRequestPreservesOmissionAndExplicitValues(t *testing.T) {
 	var req ProfileUpdateRequest
@@ -51,3 +96,36 @@ func TestProfileCreateRequestValidatesRequiredIdentity(t *testing.T) {
 		t.Fatalf("profile create request with optional model rejected: %v", err)
 	}
 }
+
+func TestProfileMCPSelectionValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    *string
+		servers *[]string
+		wantErr string
+	}{
+		{name: "unknown mode", mode: stringPointer("all"), wantErr: "mcp_selection_mode"},
+		{name: "empty id", servers: stringSlicePointer([]string{" "}), wantErr: "mcp_selected_servers[0]"},
+		{name: "duplicate id", servers: stringSlicePointer([]string{"github", "github"}), wantErr: "duplicate identifier"},
+		{name: "too many ids", servers: stringSlicePointer(make([]string, maxMCPSelectedServers+1)), wantErr: "cannot contain more than"},
+		{name: "valid explicit empty", mode: stringPointer(MCPSelectionModeSelected), servers: stringSlicePointer([]string{})},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateMCPSelection(tc.mode, tc.servers)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateMCPSelection() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ValidateMCPSelection() error = %v, want containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
+func stringSlicePointer(value []string) *[]string { return &value }

@@ -128,6 +128,11 @@ contract. PR #2936 provides the live post-merge workflow test.
 
 ## Post-Merge Validation
 
+The [generation completion package](../pr-walkthrough-generation-completion/plan.md)
+adds a render receipt and narrows history fetching after its implementation.
+It preserves this package's trusted checkout and fixed renderer permissions.
+The recorded results below remain evidence for the original implementation.
+
 After the fix reaches `main`, add the `generate-pr-walkthrough` label to PR
 `#2936`. Require successful generation, publication, and link jobs. Open the
 hosted HTML and make sure that the PR description contains the owned callout.

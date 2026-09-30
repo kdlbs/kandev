@@ -54,6 +54,8 @@ export function bumpSidebarTaskQueryRevision(state: AppState, workspaceId?: stri
 }
 
 export function findArchivedTaskInCache(state: AppState, taskId: string): KanbanTask | undefined {
+  const canonical = state.taskOverview?.byId[taskId];
+  if (canonical?.isArchived) return canonical;
   for (const tasks of Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {})) {
     const task = tasks.find((item) => item.id === taskId);
     if (task) return task;

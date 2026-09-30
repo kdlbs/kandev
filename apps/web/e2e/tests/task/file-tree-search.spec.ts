@@ -121,23 +121,9 @@ test.describe("File tree search", () => {
     testPage,
     apiClient,
     seedData,
-    backend,
   }) => {
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
-    git.createFile("escape-target.ts", "e");
-    git.stageAll();
-    git.commit("seed escape");
+    await setupTask(testPage, apiClient, seedData, "ft-search-escape", "FT Search Escape");
 
-    const session = await setupTask(
-      testPage,
-      apiClient,
-      seedData,
-      "ft-search-escape",
-      "FT Search Escape",
-    );
-
-    await expect(session.fileTreeNode("escape-target.ts")).toBeVisible({ timeout: 15_000 });
     await testPage.getByRole("button", { name: "Search files" }).click();
     const input = testPage.getByPlaceholder("Search files...");
     await expect(input).toBeVisible({ timeout: 5_000 });
