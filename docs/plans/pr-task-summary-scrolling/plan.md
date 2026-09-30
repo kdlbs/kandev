@@ -15,7 +15,9 @@ legacy_specs: []
 A task with five PRs can show a summary taller than the viewport.
 The desktop tooltip has no height limit or scroll owner.
 It also ignores pointer events and closes when the pointer leaves its trigger.
-One sequential work order corrects both geometry and input behavior.
+The follow-up review also identified tooltip description and keyboard-focus
+visibility gaps. One sequential work order corrects containment, input behavior,
+and accessibility.
 
 UI owns this repair because the existing shared task-summary contract owns disclosure presentation.
 Provider state, associations, and hydration remain under their existing owners.
@@ -45,6 +47,7 @@ This design package changes internal documentation only.
 
 - Bound the outer tooltip by Radix available height and dynamic viewport height.
 - Place summaries and automation details inside one keyboard-focusable scrolling body.
+- Name the scroll body as a region, preserve rendered PR details in the Tooltip description, and show a visible keyboard-focus indicator.
 - Enable pointer input only on this tooltip. Keep the arrow outside the scrolling body.
 - Add an opt-in hoverable mode to `useTaskIconTooltipState` through its existing provider-neutral alias.
 - Reuse `useHoverPopover` for trigger/content presence and a short gap delay.
@@ -108,10 +111,16 @@ content focus, Escape, unmount cleanup, and unchanged default mode.
 Extend `pr-task-icon.render.test.tsx` for focus transfer and hydration continuity.
 jsdom class assertions alone do not prove scroll behavior.
 
+## Component tests
+
+- `pr-task-icon.render.test.tsx`: verify that the Tooltip description retains PR details and its named scroll region is discoverable (AC 001.24).
+
 ## E2E tests
 
 - `pr-sidebar-hover-hydration.spec.ts`, chromium: add five-PR overflow, wheel, keyboard, and short-summary cases (AC 001.21 and 001.22).
+- `pr-sidebar-hover-hydration.spec.ts`, chromium: verify the keyboard focus indicator on the scroll region (AC 001.25).
 - `mobile-pr-sidebar-automation-indicators.spec.ts`, mobile-chrome: add five-PR drawer reachability and containment (AC 001.23).
+- `pr-status-badge.spec.ts`: keep existing automation and summary selectors aligned with the scroll-body wrapper.
 - Measure tooltip bounds at a short viewport and at 767px/768px fine-pointer widths.
 - Require actual positive scroll movement, final-entry containment, and zero document horizontal overflow.
 - Capture the desktop overflow panel and phone drawer after scrolling.

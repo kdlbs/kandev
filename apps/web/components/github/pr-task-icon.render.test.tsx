@@ -188,6 +188,45 @@ describe("PRTaskIcon corrupted store entry", () => {
   });
 });
 
+describe("PRTaskIcon tooltip accessibility", () => {
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.24
+  it("describes the PR details and names the keyboard scroll region", async () => {
+    listTaskPRsMock.mockResolvedValue({
+      task_prs: {
+        [TASK_ID]: [
+          makePR({ review_state: "approved", checks_state: "success", mergeable_state: "clean" }),
+        ],
+      },
+    });
+    renderWithStore(
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
+      <TaskContributionIcons
+        taskId={TASK_ID}
+        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
+      />,
+    );
+
+    fireEvent.pointerEnter(screen.getByTestId(`pr-task-icon-${TASK_ID}`), {
+      pointerType: "mouse",
+    });
+
+    const tooltip = await screen.findByRole("tooltip");
+    screen.getByRole("img", { name: /Pull request #1 status/, description: /Test PR/ });
+    expect(tooltip.textContent).toContain("PR #1");
+    expect(tooltip.textContent).toContain("Test PR");
+    expect(tooltip.textContent).toContain("alice");
+    expect(tooltip.textContent).toContain("Approved");
+    expect(tooltip.textContent).toContain("Passed");
+    expect(tooltip.textContent).toContain("Ready to merge");
+    const scrollRegion = screen.getByRole("region", {
+      name: "Pull request CI status, reviews, and checks summary.",
+    });
+    expect(scrollRegion.getAttribute("role")).toBe("region");
+    expect(scrollRegion.textContent).toContain("Test PR");
+    expect(screen.getAllByTestId("pr-task-summary-scroll-body")).toHaveLength(1);
+  });
+});
+
 describe("PRTaskIcon disclosure hydration", () => {
   it("keeps keyboard focus and the open tooltip when hydration completes", async () => {
     let resolveResponse!: (value: { task_prs: Record<string, TaskPR[]> }) => void;
@@ -224,6 +263,12 @@ describe("PRTaskIcon disclosure hydration", () => {
       expect(screen.getAllByTestId("pr-task-status-summary").length).toBeGreaterThan(0),
     );
     expect(document.activeElement).toBe(scrollBody);
+    expect(
+      screen.getByRole("img", {
+        name: /Pull request #1 status/,
+        description: /Test PR/,
+      }),
+    ).toBeTruthy();
   });
 
   it("keeps the hovered tooltip open through pointer transfer and hydrates only once", async () => {

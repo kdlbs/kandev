@@ -45,6 +45,8 @@ the bounded task-status projection and not the full pull-request record.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.21:** When a GitHub task summary exceeds the available viewport height, its disclosure shall stay inside the viewport. One internal vertical scroll region shall make every PR entry and the final automation detail reachable.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.22:** The desktop disclosure shall remain open while the pointer moves from its trigger into its content and scrolls. Keyboard users shall reach and scroll the same content. Escape shall dismiss the disclosure.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.23:** The existing phone PR drawer shall make the same long summary reachable through internal scrolling. Its fixed header and final entry shall remain inside the viewport without document horizontal overflow.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.24:** The desktop tooltip description shall retain the rendered PR identities and status details. Its keyboard-focusable scroll region shall have a localized accessible name.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.25:** Keyboard focus on the desktop scroll region shall have a visible focus indicator.
 
 ## Migrated source detail
 

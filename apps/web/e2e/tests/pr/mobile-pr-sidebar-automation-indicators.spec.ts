@@ -31,7 +31,6 @@ async function seedSidebarAutomation(
     task_id: targetTask.task_id,
     workspace_id: seedData.workspaceId,
     repository_id: seedData.repositoryId,
-    repository_id: seedData.repositoryId,
     owner: OWNER,
     repo: REPO,
     pr_number: PR_NUMBER,

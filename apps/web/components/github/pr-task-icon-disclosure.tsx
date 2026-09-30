@@ -2,7 +2,9 @@
 
 import {
   forwardRef,
+  useLayoutEffect,
   useRef,
+  useState,
   type KeyboardEventHandler,
   type FocusEventHandler,
   type MouseEventHandler,
@@ -112,6 +114,15 @@ export function PRTaskIconTooltip({
   const { t } = useTranslation();
   const triggerRef = useRef<HTMLElement>(null);
   const scrollBodyRef = useRef<HTMLDivElement>(null);
+  const [tooltipDescription, setTooltipDescription] = useState(props.ariaLabel);
+  useLayoutEffect(() => {
+    const scrollBody = scrollBodyRef.current;
+    if (!scrollBody) return;
+    const description = (scrollBody.innerText || scrollBody.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (description) setTooltipDescription(description);
+  }, [props.ariaLabel, props.content, tooltip.open]);
   const onEscapeKeyDown = (event: Event) => {
     if (tooltip.onEscapeKeyDown(event)) triggerRef.current?.focus();
   };
@@ -141,7 +152,7 @@ export function PRTaskIconTooltip({
         onPointerLeave={tooltip.onContentPointerLeave}
         onFocus={tooltip.onContentFocus}
         onBlur={tooltip.onContentBlur}
-        aria-label={t("github:pullRequestCiStatusReviewsAnd")}
+        aria-label={tooltipDescription}
         className="pointer-events-auto flex w-80 max-w-[calc(100vw-1rem)] flex-col p-3"
         style={{
           maxHeight: "min(var(--radix-tooltip-content-available-height), calc(100dvh - 1rem))",
@@ -151,8 +162,9 @@ export function PRTaskIconTooltip({
           ref={scrollBodyRef}
           data-testid="pr-task-summary-scroll-body"
           tabIndex={0}
+          role="region"
           aria-label={t("github:pullRequestCiStatusReviewsAnd")}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {props.content}
         </div>

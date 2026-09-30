@@ -128,10 +128,14 @@ and content presence. It reuses `useHoverPopover` for the short close delay
 across the six-pixel gap. Other task indicators retain their current defaults.
 Hydration remains trigger-owned and does not repeat when the pointer enters content.
 
-The scroll body accepts keyboard focus and has an accessible name from existing
-localized PR status copy. Focus can move from the trigger into the body without
-closing the disclosure. Escape dismisses it until a new disclosure interaction.
-Leaving both regions closes it after the gap delay. Unmount clears timers.
+The scroll body is a named `region` using existing localized PR status copy.
+The Tooltip description is plain text derived from the rendered content, so it
+retains the PR identities and status details without placing a duplicate,
+focusable scroll body in Radix's visually hidden description node. The body
+accepts keyboard focus and shows a visible focus indicator. Focus can move from
+the trigger into the body without closing the disclosure. Escape dismisses it
+until a new disclosure interaction. Leaving both regions closes it after the
+gap delay. Unmount clears timers.
 
 The existing `PRTaskIconDrawer` keeps its fixed header and single scrolling body.
 Its `80dvh` limit and shared Drawer safe-area handling contain long summaries.
@@ -192,7 +196,10 @@ PR-status drawer, and checks the author identity and page containment.
 Scrolling coverage seeds five linked PRs with wrapped titles and automation
 details. Desktop coverage measures viewport containment, crosses the trigger
 gap, and uses real wheel input to reach the final entry. Keyboard coverage
-moves focus into the scroll body and uses scroll keys before Escape.
+moves focus into the named scroll region, checks its visible focus indicator,
+and uses scroll keys before Escape. Component coverage checks that the Tooltip
+description retains rendered PR details and that the scroll region has a
+localized accessible name.
 Phone coverage taps the existing task-icon drawer and reaches the last entry.
 Short-content coverage confirms that no unnecessary scroll region appears.
 

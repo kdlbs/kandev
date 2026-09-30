@@ -25,6 +25,8 @@ async function expectVisibleTooltipInsideViewport(page: Page) {
 test.describe("inactive task PR summary hydration", () => {
   // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.21
   // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.22
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.24
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.25
   test("keeps a long PR summary inside the desktop viewport and scrollable", async ({
     testPage,
     apiClient,
@@ -133,6 +135,10 @@ test.describe("inactive task PR summary hydration", () => {
     const keyboardBody = keyboardTooltip.getByTestId("pr-task-summary-scroll-body");
     await testPage.keyboard.press("Tab");
     await expect(keyboardBody).toBeFocused();
+    await expect(keyboardBody).not.toHaveCSS("box-shadow", "none");
+    await prCapture.screenshot("desktop-pr-sidebar-overflow-keyboard-focus", {
+      caption: "Desktop PR summary shows a visible focus indicator on the keyboard scroll region",
+    });
     await keyboardBody.evaluate((element) => {
       element.scrollTop = 0;
     });
