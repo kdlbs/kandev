@@ -179,10 +179,10 @@ test.describe("shared panel toolbars", () => {
     const expectedPath = await readTaskWorkspacePath(testPage, apiClient);
     expect(expectedPath.startsWith("/")).toBe(true);
     await copyButton.click();
+    await expectFileBrowserIconCentered(copyButton, 1, "copied");
     await expect
       .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
       .toBe(expectedPath);
-    await expectFileBrowserIconCentered(copyButton, 1, "copied");
 
     const pathLabel = session.files.getByTestId("file-browser-workspace-path");
     const [target, path] = await Promise.all([copyButton.boundingBox(), pathLabel.boundingBox()]);

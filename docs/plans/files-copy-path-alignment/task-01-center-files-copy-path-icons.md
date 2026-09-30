@@ -116,3 +116,10 @@ Passing checks:
 - `make build-web`
 - `pnpm e2e:run --host --no-build --project chromium tests/panel-toolbars.spec.ts -g "centers Files copy path icons in every state"`
 - `pnpm e2e:run --host --no-build --project mobile-chrome tests/mobile-panel-toolbars.spec.ts -g "centers Files copy path icons before and after copying"`
+
+PR review follow-up:
+
+- Check the copied-state icon geometry immediately after activation, before
+  clipboard polling, because the success indicator is transient.
+- Re-ran the focused desktop and phone Playwright tests after reordering the
+  assertions; both passed (one test each).

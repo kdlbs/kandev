@@ -151,10 +151,10 @@ test.describe("touch panel toolbars", () => {
     expect(expectedPath.startsWith("/")).toBe(true);
     // Touch has no hover state; tapping copies directly and reveals the check glyph.
     await copyButton.tap();
+    await expectFileBrowserIconCentered(copyButton, 1, "copied phone");
     await expect
       .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
       .toBe(expectedPath);
-    await expectFileBrowserIconCentered(copyButton, 1, "copied phone");
 
     const pathLabel = filesPanel.getByTestId("file-browser-workspace-path");
     const [target, path] = await Promise.all([copyButton.boundingBox(), pathLabel.boundingBox()]);
