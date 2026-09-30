@@ -252,7 +252,9 @@ that belongs to another team.
 - **AC-COORDINATOR-PERMISSIONS-005.1:** While the phase 3.1 flag is effective,
   the system shall return with every coordinator its Projects scope, and a
   coordinator that existed before, or is created without one, shall have scope
-  `all` and the toggle on. Projects narrows Watches: a task is watched only
+  `all` and the toggle off (the toggle has no effect while the scope is `all`, which watches
+  every task; it matters only once the manager switches to `selected`, so switching
+  never silently starts watching repository-less tasks). Projects narrows Watches: a task is watched only
   when its workflow is watched and it is in the projects.
 - **AC-COORDINATOR-PERMISSIONS-005.2:** The system shall refuse a Projects save
   with 400 naming `projects`, storing nothing, when it is `selected` with no

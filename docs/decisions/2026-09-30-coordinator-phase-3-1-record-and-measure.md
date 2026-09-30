@@ -140,8 +140,9 @@ No full-size design document is edited. Code deltas, each additive and nil-safe:
 Pause runs before `Admit` and does not renumber the eight checks; the spend
 reader gains an additive `ExtraSpend` term for replay costs (a sessionless call
 writes no usage row); the dream runs in a dream task that spend counts and that
-conversation binding and cleanup skip; `ApproveProposal`, `RejectProposal` and
-the undo path gain a post-commit `DecisionObserver`; the backstop pass gains the
+conversation binding and cleanup skip; `ApproveProposal`, `finishClaim`, the automatic class
+(`approveAutomatically`), `RejectProposal`, `ReturnProposalTx` and the undo path
+gain a post-commit `DecisionObserver`; the backstop pass gains the
 dream tick and the paused `Stop` call; the projects filter is a new design that
 adds a second predicate beside the permissions design's workflow watch. The
 permissions requirements gain REQ-COORDINATOR-PERMISSIONS-005 and a definition of
@@ -171,8 +172,10 @@ need condition 1 only and may start when phase 3 merges; work orders 03, 04 and
   design.
 - The ledger retains a digest of tool calls, which names task ids. It is limited
   to the coordinator's watch set on read and holds no text.
-- Pause stops turns at the next ceiling-stop path; a failed stop leaves a turn
-  running while the state says paused, and the state refuses every new start.
+- Pause stops turns through its own `Stopper` (it reuses the ceiling's
+  `CancelTurn` call and never writes `stop_requested_at`); a failed stop leaves a
+  turn running while the state says paused, the backstop retries the stop every
+  pass, and the state refuses every new start.
 
 ## Prior art
 
@@ -194,7 +197,7 @@ need condition 1 only and may start when phase 3 merges; work orders 03, 04 and
   `coordinator_activity` and `coordinator_unattended_turns`, plus observers,
   a retention job and, behind the flag, a scheduler tick, routes and the
   Learning section.
-- The wake backstop pass gains one call (the dream tick); admission is unchanged.
+- The wake backstop pass gains two calls (the dream tick and the paused `Stop`); admission is unchanged.
 - A planted-regression suite runs in CI on every backend run.
 - Screens: Learning section and report detail, the Pause control on the
   autonomy strip and in settings, the Projects part of Watches and setup, and the

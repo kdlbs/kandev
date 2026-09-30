@@ -72,16 +72,26 @@ uses), and never publishes.
 On start it builds the row and inserts with `INSERT ... ON CONFLICT
 (session_id, session_turn_id) DO NOTHING`. A redelivered start finds the row and
 does nothing (`001.1`). The trigger is `wake` when a `coordinator_unattended_turns`
-row of the session has `session_turn_id` equal to this session turn, or has it
-unbound (`session_turn_id IS NULL`) and `reserved_turn_id` empty or equal to
-this session turn, the same match the unattended-turn binding already uses
-(`store_unattended.go`); a manager's message in a session with an open delivery
-therefore binds nothing and stays `message`. The wake kinds are copied (first
+row of the session has `session_turn_id` equal to this session turn or
+`reserved_turn_id` equal to it. Unlike the unattended-turn binding
+(`store_unattended.go`), an unbound row with an empty reservation does not match:
+the reservation is the id of the turn the message was stored on
+(`OnReserved`), so the wake's own turn always carries it, and a manager's
+message in a session with an open delivery matches nothing and stays `message`
+and never `needs_you`. When the start event is handled before `OnReserved` has
+committed, the turn is recorded `message` and the completion handler corrects it
+(below). The wake kinds are copied (first
 20 by kind then id). The trigger is `dream` when the session is a dream episode
 session, else `message`. After the insert the recorder links the
 unattended row: `UPDATE coordinator_unattended_turns SET ledger_turn_id = ?
 WHERE id = ? AND ledger_turn_id IS NULL` (`003.2`); the unique index makes a
 second link fail and be logged.
+
+At completion, a row recorded `message` is re-evaluated by the same match; if an
+unattended-turn row now matches, one conditional statement (`WHERE trigger =
+'message'`) sets the trigger `wake` and copies the wake kinds, and the link step
+runs, so a start that beat the reservation ends as a `wake`. Nothing else ever
+changes a stored trigger (`001.2`).
 
 If the start event was lost, the completion handler inserts the row with the
 same `ON CONFLICT` rule and derives the stamp at that time. The trigger match

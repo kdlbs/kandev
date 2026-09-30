@@ -181,7 +181,8 @@ updated after every run, so a crash mid-replay keeps the spend already incurred
 written at the end with `status = 'done'`, in one statement conditional on
 `status = 'running'` (`002.6`). The settle of a stale row belongs to the dream
 scheduler's backstop step (`Scheduler.Tick`, run each backstop pass for every
-visited coordinator): `UPDATE ... SET status = 'done', guard = 'unmeasured',
+visited coordinator, and a coordinator holding a `running` result row is always
+visited): `UPDATE ... SET status = 'done', guard = 'unmeasured',
 verdict = 'unmeasured', reason = 'interrupted' WHERE status = 'running' AND
 created_at < now - 30 minutes`; a late write by a replay that finished after
 that matches nothing. `ExtraSpend` counts rows of both statuses.

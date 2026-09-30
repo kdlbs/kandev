@@ -51,12 +51,18 @@ turn, and the Pause and Resume controls.
 - Web: the fourth state of the autonomy strip and the Autonomy section
   control, phone layout, copy in six locales.
 - Existing code changed: `coordinator_unattended_turns` gains nullable
-  `pause_requested_at` (migration in `runMigrations()`, replay test);
+  `pause_requested_at` (an idempotent column add in `Store.migratePhase2`, `store_phase2_schema.go`, replay test);
   `boundTurnOutcome` in `turn_end.go` maps `pause_requested_at` (when
-  `stop_requested_at` is unset) to `stopped_by_pause`; `settleBoundTurn`
+  `stop_requested_at` is unset and the session state reads cancelled or absent)
+  to `stopped_by_pause` and keeps `completed` or `failed` otherwise; `settleBoundTurn`
   returns the wakes of a row it settles `stopped_by_pause` to `pending` in the
   settle transaction; `ceiling.go` stays reading `stop_requested_at` only, with a
-  test that a pause-marked turn is never settled `stopped_at_ceiling`.
+  test that a turn marked by Pause alone is never settled `stopped_at_ceiling`
+  and one marked by both is (the ceiling wins); tests for a turn that finishes
+  on its own after the pause mark (`completed`, wakes stay handled), for
+  `ErrTurnNotActive` from the stop (nothing settled), for a reservation landing
+  before `settleUnsentTurn` (not settled) and for a late accepted send on a
+  paused coordinator (cancelled, `coordinator_pause_late_send_total`).
 - Stop by binding state (`pause_requested_at`, `settleUnsentTurn` after 2
   minutes, cancel on accepted binding), the in-memory known-paused set for the
   flag-off read-error carve-out, and the read-only "Paused" badge shown with the

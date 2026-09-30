@@ -62,8 +62,9 @@ the insert: the insert takes the queue entry's `decidedAt` (the hook time) when 
 (below) stores the proposal's `updated_at`, since `coordinator_proposals` has no
 decision time column. A re-grade and an undo never change it (an undo changes
 `decision` to `undone` only). `decision` is `edited` when `edited_fields` is
-non-empty and `approved` otherwise; a `returned` proposal is graded through the
-same insert.
+non-empty and `approved` otherwise, for a proposal whose status is `approved`;
+`rejected`, `returned` and `undone` come from the status and the activity row
+as [grading paths](#grading-paths) derives them, which is the one rule.
 
 `edited_fields` is the sorted list of field names whose approved value differs
 from the proposed; values are never read into the row (`001.1`). The reject
@@ -164,8 +165,12 @@ computed on read.
   is a user id of the workspace. Engine, agent, undo, plugin and queue-promotion
   moves store a nil `actor_id`, so a nil or non-user value is counted
   `coordinator_override_ignored_total{reason="actor_unknown"}` and stores
-  nothing. The table is keyed by session, so a task that never had a session
-  has no row and `moved_back` is a signal for tasks with a session only.
+  nothing. The table is keyed by session and a row is written only when the task had a
+  primary or active session at the moment of the move (the workflow service writes
+  nothing for a sessionless move), so a card moved while none of its sessions was
+  active has no row and `moved_back` is a signal for moves made with an active
+  session only. A test moves a card with only a completed session and asserts no
+  observation and no error.
   History rows are written asynchronously and may follow the event, so a scan
   that finds no new row is retried by the in-process queue after 2 minutes, 10
   minutes and 1 hour, and a separate daily **moved-back scan** (own pass, not
@@ -223,7 +228,7 @@ each `{value, numerator, denominator, null_reason}`:
 | Approval without edit | `decision = 'approved'` over manager-decided proposals (`automatic = false`) decided in the window |
 | Override recurrence | feedback rows of the window whose pattern key also appears in the previous 30 days before that row, over all rows of the window; the pattern key is `(kind, reason_code, proposal kind)`, and for `moved_back` the destination step id replaces `reason_code` |
 | Dollars per merged task | priced cost of coordinator turns started in the window (joined from usage), over tasks with `merged_at` in the window |
-| Median wait | median of `decided_at - proposal.created_at` |
+| Median wait | median of `decided_at - proposal.created_at` over manager-decided proposals (`automatic = false`) whose `decision` is `approved`, `edited`, `rejected` or `undone` (an undone proposal was first approved); `returned` proposals are not counted, as no decision was taken |
 | Agreement | items rated and replayed, per shadow dream 006.4 |
 
 A zero denominator gives `null` with `no_data`; an unknown cost among the inputs
