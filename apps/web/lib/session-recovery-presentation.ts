@@ -9,6 +9,7 @@ import type {
   ResumptionState,
   SessionRecoveryFailure,
 } from "@/hooks/domains/session/use-session-resumption";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 /** Automatic recovery state shared with the session-owned bootstrap card. */
 export type SessionRecoveryOwner = {
@@ -94,9 +95,9 @@ function newerRecoveryError(
   persisted: TaskStatusSummaryActiveError,
   current: TaskStatusSummaryActiveError,
 ): TaskStatusSummaryActiveError {
-  const persistedTime = Date.parse(persisted.occurred_at);
-  const currentTime = Date.parse(current.occurred_at);
-  if (!Number.isNaN(persistedTime) && !Number.isNaN(currentTime)) {
+  const persistedTime = parseTurnTimestamp(persisted.occurred_at);
+  const currentTime = parseTurnTimestamp(current.occurred_at);
+  if (persistedTime !== null && currentTime !== null) {
     return currentTime >= persistedTime ? current : persisted;
   }
   return current;

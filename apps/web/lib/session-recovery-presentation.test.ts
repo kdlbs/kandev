@@ -109,6 +109,29 @@ describe("session recovery presentation", () => {
   });
 });
 
+describe("session recovery timestamp selection", () => {
+  it("uses a valid active error when the persisted timestamp is malformed", () => {
+    const metadata = {
+      last_agent_error: {
+        message: "The agent could not start.",
+        occurred_at: "2026-02-30T10:00:00Z",
+        stamp: "failure-malformed-time",
+        phase: "bootstrap",
+      },
+    };
+    const active = {
+      ...bootstrapError,
+      stamp: "failure-valid-time",
+      occurred_at: "2026-02-28T10:00:00Z",
+    };
+
+    expect(selectSessionRecoveryError(active, "session-1", metadata)).toMatchObject({
+      stamp: "failure-valid-time",
+      occurred_at: "2026-02-28T10:00:00Z",
+    });
+  });
+});
+
 describe("persisted session recovery presentation", () => {
   it("selects an older session's persisted bootstrap error instead of the task-wide newest error", () => {
     const selectedSessionMetadata = {

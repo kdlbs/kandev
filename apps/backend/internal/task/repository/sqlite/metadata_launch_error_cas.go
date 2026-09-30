@@ -77,8 +77,7 @@ func (r *Repository) RecordSessionRecoveryResolution(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	raw, err := r.lockMetadataRow(ctx, tx, "task_sessions", "agent session", sessionID)
+	raw, err := r.lockSessionRecoveryResolutionMetadata(ctx, tx, sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -130,6 +129,16 @@ func (r *Repository) RecordSessionRecoveryResolution(
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *Repository) lockSessionRecoveryResolutionMetadata(ctx context.Context, tx *sqlx.Tx, sessionID string) (string, error) {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := "session-recovery-resolution:" + sessionID
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return "", fmt.Errorf("lock session recovery resolution: %w", err)
+		}
+	}
+	return r.lockMetadataRow(ctx, tx, "task_sessions", "agent session", sessionID)
 }
 
 func (r *Repository) setMetadataKeyIfStamp(

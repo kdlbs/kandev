@@ -269,6 +269,26 @@ func TestSelectionCauseRoundTrip(t *testing.T) {
 	require.Equal(t, true, cause["prompt_not_sent"])
 }
 
+func TestNormalizeAgentErrorDetailsCountsAttemptedModelInBudget(t *testing.T) {
+	cause := AgentErrorCause{
+		Operation:      AgentErrorCauseOperationStart,
+		Code:           AgentErrorCauseCodeModelSelectionFailed,
+		Reason:         AgentErrorCauseReasonApplicationFailed,
+		RequestedModel: "vendor/primary",
+		AttemptedModel: "vendor/fallback",
+	}
+	causes := NormalizeAgentErrorCauses([]AgentErrorCause{cause})
+	require.Len(t, causes, 1)
+	causes = []AgentErrorCause{causes[0]}
+
+	details := NormalizeAgentErrorDetails(strings.Repeat("d", maxLaunchErrorDetailsBytes), causes)
+	cause = causes[0]
+	evidenceBytes := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
+		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
+		len(cause.RequestedMode) + len(cause.EffectiveMode)
+	require.LessOrEqual(t, len(details)+evidenceBytes, maxLaunchErrorDetailsBytes)
+}
+
 func TestNormalizeSelectionCauseRejectsUnsafeSelectorIDs(t *testing.T) {
 	unsafeSelectors := []string{
 		"model\u0085id",

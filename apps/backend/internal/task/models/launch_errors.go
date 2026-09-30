@@ -314,7 +314,8 @@ func NormalizeAgentErrorDetails(details string, causes []AgentErrorCause) string
 
 func agentErrorCauseEvidenceBytes(cause AgentErrorCause) int {
 	total := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
-		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.RequestedMode) + len(cause.EffectiveMode)
+		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
+		len(cause.RequestedMode) + len(cause.EffectiveMode)
 	if cause.PromptNotSent != nil {
 		total++
 	}
