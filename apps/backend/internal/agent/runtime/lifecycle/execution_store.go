@@ -50,6 +50,7 @@ type ExecutionStore struct {
 }
 
 type promptLifecycleSnapshot struct {
+	execution            *AgentExecution
 	generation           uint64
 	dispatchedGeneration uint64
 	completedGeneration  uint64
@@ -256,6 +257,7 @@ func (s *ExecutionStore) promptLifecycleSnapshot(executionID string) (promptLife
 		return promptLifecycleSnapshot{}, false
 	}
 	return promptLifecycleSnapshot{
+		execution:            execution,
 		generation:           execution.promptGeneration,
 		dispatchedGeneration: execution.dispatchedPromptGeneration,
 		completedGeneration:  execution.promptCompletionGeneration,

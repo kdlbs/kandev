@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,6 +461,150 @@ func TestManager_CancelAgent_DispatchCompletionBeforePromptAcknowledgement(t *te
 	}
 }
 
+func TestManager_CancelAgent_AdmittedDispatchWaitsForCompletion(t *testing.T) {
+	previousWait := cancelWaitTimeout
+	cancelWaitTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { cancelWaitTimeout = previousWait })
+
+	fixture := newDispatchCancelFixture(t, dispatchCancelFixtureOptions{})
+	fixture.complete(t, fixture.generation)
+	fixture.setStaleClosedBarrier()
+
+	admitted := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	var admittedOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseDispatch) }) }
+	t.Cleanup(release)
+	fixture.manager.sessionManager.beforePromptDispatchHook = func() {
+		admittedOnce.Do(func() { close(admitted) })
+		<-releaseDispatch
+	}
+	promptResult := make(chan error, 1)
+	go func() {
+		_, err := fixture.manager.PromptAgent(context.Background(), fixture.execution.ID, "admitted", nil, true)
+		promptResult <- err
+	}()
+	select {
+	case <-admitted:
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not pause after admission and before dispatch")
+	}
+
+	prompt, exists := fixture.manager.executionStore.promptLifecycleSnapshot(fixture.execution.ID)
+	require.True(t, exists)
+	require.Greater(t, prompt.generation, fixture.generation)
+	require.NotEqual(t, prompt.generation, prompt.dispatchedGeneration)
+	require.NotEqual(t, prompt.generation, prompt.completedGeneration)
+	require.False(t, fixture.execution.dispatchedPromptPending.Load())
+
+	cancelCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	cancelResult := fixture.startCancel(cancelCtx)
+	fixture.waitForCancelAcknowledgement(t)
+	select {
+	case err := <-cancelResult:
+		t.Fatalf("cancellation returned before the admitted prompt completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	fixture.complete(t, prompt.generation)
+	release()
+	select {
+	case err := <-promptResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("admitted prompt did not finish after dispatch was released")
+	}
+	select {
+	case err := <-cancelResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not accept completion for the admitted generation")
+	}
+	require.False(t, fixture.execution.dispatchedPromptPending.Load(),
+		"completion of the admitted generation must release its dispatch gate")
+}
+
+func TestManager_CancelAgent_AdmittedDispatchTimeoutReleasesPredecessor(t *testing.T) {
+	previousWait := cancelWaitTimeout
+	previousEscalation := cancelEscalationTimeout
+	cancelWaitTimeout = 60 * time.Millisecond
+	cancelEscalationTimeout = 50 * time.Millisecond
+	t.Cleanup(func() {
+		cancelWaitTimeout = previousWait
+		cancelEscalationTimeout = previousEscalation
+	})
+
+	fixture := newDispatchCancelFixture(t, dispatchCancelFixtureOptions{})
+	fixture.complete(t, fixture.generation)
+
+	admitted := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	var admittedOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseDispatch) }) }
+	t.Cleanup(release)
+	fixture.manager.sessionManager.beforePromptDispatchHook = func() {
+		admittedOnce.Do(func() { close(admitted) })
+		<-releaseDispatch
+	}
+	promptResult := make(chan error, 1)
+	go func() {
+		_, err := fixture.manager.PromptAgent(context.Background(), fixture.execution.ID, "admitted", nil, true)
+		promptResult <- err
+	}()
+	select {
+	case <-admitted:
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not pause after admission and before dispatch")
+	}
+	prompt, exists := fixture.manager.executionStore.promptLifecycleSnapshot(fixture.execution.ID)
+	require.True(t, exists)
+	require.NotEqual(t, prompt.generation, prompt.dispatchedGeneration)
+	require.False(t, fixture.execution.dispatchedPromptPending.Load())
+
+	cancelCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	cancelResult := fixture.startCancel(cancelCtx)
+	fixture.waitForCancelAcknowledgement(t)
+	select {
+	case err := <-cancelResult:
+		require.ErrorIs(t, err, ErrCancelEscalated)
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not escalate the admitted generation within its budget")
+	}
+	require.Equal(t, v1.AgentStatusReady, fixture.execution.Status,
+		"local escalation must settle the captured generation")
+
+	release()
+	select {
+	case err := <-promptResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("admitted prompt did not finish after dispatch was released")
+	}
+	require.True(t, fixture.execution.dispatchedPromptPending.Load(),
+		"the accepted dispatch remains gated until its generation's signal is consumed")
+
+	_, err := fixture.manager.PromptAgent(context.Background(), fixture.execution.ID, "successor", nil, true)
+	require.NoError(t, err, "the generation-bound escalation must release the predecessor gate")
+	successor, exists := fixture.manager.executionStore.promptLifecycleSnapshot(fixture.execution.ID)
+	require.True(t, exists)
+	require.Greater(t, successor.generation, prompt.generation)
+	require.Equal(t, v1.AgentStatusRunning, fixture.execution.Status,
+		"predecessor escalation must not overwrite the successor's status")
+	require.True(t, fixture.execution.dispatchedPromptPending.Load(),
+		"predecessor escalation must not clear the successor's gate")
+	require.False(t, fixture.manager.handleCompleteEvent(fixture.execution, &agentctl.AgentEvent{
+		Type:             "complete",
+		SessionID:        fixture.execution.SessionID,
+		PromptGeneration: prompt.generation,
+	}), "a late predecessor completion must be rejected after successor admission")
+	require.Equal(t, v1.AgentStatusRunning, fixture.execution.Status)
+	require.True(t, fixture.execution.dispatchedPromptPending.Load())
+}
+
 func TestManager_CancelAgent_DispatchCompletionRejectsReplacementGeneration(t *testing.T) {
 	previousWait := cancelWaitTimeout
 	cancelWaitTimeout = 500 * time.Millisecond
@@ -565,4 +710,29 @@ func TestManager_CancelAgent_DispatchCompletionTransportFailureEscalates(t *test
 	require.ErrorIs(t, err, ErrCancelEscalated)
 	require.ErrorContains(t, err, "test transport failure")
 	require.False(t, fixture.execution.dispatchedPromptPending.Load())
+}
+
+func TestManager_CancelAgent_DispatchCompletionTimeoutPreservesTransportFailure(t *testing.T) {
+	previousWait := cancelWaitTimeout
+	previousEscalation := cancelEscalationTimeout
+	cancelWaitTimeout = 80 * time.Millisecond
+	cancelEscalationTimeout = 20 * time.Millisecond
+	t.Cleanup(func() {
+		cancelWaitTimeout = previousWait
+		cancelEscalationTimeout = previousEscalation
+	})
+
+	fixture := newDispatchCancelFixture(t, dispatchCancelFixtureOptions{})
+	fixture.execution.promptDoneCh <- PromptCompletionSignal{
+		IsError:          true,
+		Error:            "provider stream failed at completion deadline",
+		PromptGeneration: fixture.generation,
+	}
+
+	err := fixture.manager.finishDispatchCancelTimeout(
+		context.Background(), fixture.execution, fixture.generation, nil,
+	)
+	require.ErrorIs(t, err, ErrCancelEscalated)
+	require.ErrorContains(t, err, "dispatch completion transport failure")
+	require.ErrorContains(t, err, "provider stream failed at completion deadline")
 }

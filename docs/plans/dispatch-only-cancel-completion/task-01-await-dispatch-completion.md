@@ -54,7 +54,9 @@ Use the [plan's lifecycle approach](plan.md#lifecycle-completion-wait).
 Capture prompt ownership before the cancel RPC.
 The dispatch helper uses deadline-bound `promptMu.TryLock` retries and rechecks identity after acquisition.
 Do not block cancellation on an ordinary `SendPrompt` mutex owner.
+Treat the current admitted generation as cancellation-owned before dispatch bookkeeping. A nil or closed predecessor barrier does not prove that an admitted prompt is idle.
 If the predecessor waiter still owns the mutex at escalation, update readiness before sending a generation-bound wake signal; the existing waiter alone receives it and clears the old gate.
+For an admitted prompt that still holds `promptMu` before dispatch acknowledgement, set the pending gate before queueing that same generation-bound signal so the existing prompt path will consume it after dispatch returns.
 Route ordinary prompts through their existing completion barrier.
 Do not restart the deadline after a barrier or stale signal.
 
@@ -125,6 +127,10 @@ Review corrections:
 - Added `TestManager_CancelAgent_DispatchCompletionCompetingWaiterEscalates` for non-acknowledged cancellation, disconnected stream, and acknowledged cancellation timeout while the predecessor waiter holds `promptMu`. The cases failed before the correction with `ErrPromptActivityNotOwned`; they now return `ErrCancelEscalated`, release the existing consumer, clear only the old gate, admit a successor, and reject a late predecessor completion without changing successor state.
 - Updated `waitForPendingDispatchedPrompt` to ignore signals for another generation, so a stale completion cannot release the successor gate while the consumer retries for its own signal. `TestWaitForPendingDispatchedPrompt_IgnoresStaleGenerationSignal` verifies it consumes only its own signal.
 - Updated `TestSendPrompt_DispatchOnlyBlocksNextPromptUntilItsCompletion` and `TestSendPrompt_AdvancesGenerationForEveryDispatch` to attach the generation identity required by the lifecycle completion contract.
+- Added `TestManager_CancelAgent_AdmittedDispatchWaitsForCompletion` with a stale closed predecessor barrier. Cancellation waits while the current generation is admitted but not dispatched, then succeeds only after that generation completes.
+- Added `TestManager_CancelAgent_AdmittedDispatchTimeoutReleasesPredecessor`. Timeout escalation now fences and wakes the same admitted generation, and a successor prompt can proceed without the predecessor clearing or rejecting successor state.
+- Added `TestManager_CancelAgent_DispatchCompletionTimeoutPreservesTransportFailure` to retain same-generation stream failure detail when the error signal is drained at the deadline.
+- Review note: `sendPromptCompletionSignalBounded` runs under `promptLifecycleMu` so the generation remains fenced until its wake is queued. The send is bounded; the existing consumer receives before taking that lock, which frees channel capacity and releases the waiter.
 
 Verification passed:
 
@@ -134,6 +140,19 @@ Verification passed:
 (cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run 'TestManager_CancelAgent|TestSendPrompt_DispatchOnly|TestWaitForPendingDispatchedPrompt|TestMarkReadyAsync|TestSendPrompt_AdvancesGenerationForEveryDispatch' -count=1)
 (cd apps/backend && go test -tags fts5 -race ./internal/orchestrator -run 'TestResetAgentContext_|TestProcessOnEnter_.*Reset|TestHasActiveResetTurn_' -count=1)
 (cd apps/backend && go test -tags fts5 -race ./internal/integration -run 'TestWorkflowReset(ConfirmedDispatchCancelStartsStep|EscalationLeavesSessionDeletable)' -count=1)
+make -C apps/backend build
+make -C apps/backend lint
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+PR review remediation verification passed:
+
+```bash
+(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run '^TestManager_CancelAgent_(AdmittedDispatch(WaitsForCompletion|TimeoutReleasesPredecessor)|DispatchCompletion(TimeoutPreservesTransportFailure|BeforePromptAcknowledgement|CompetingWaiterEscalates))$' -count=1 -v)
+(cd apps/backend && go test ./internal/agent/runtime/lifecycle -count=1)
+(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run 'TestManager_CancelAgent|TestSendPrompt_DispatchOnly|TestWaitForPendingDispatchedPrompt|TestMarkReadyAsync|TestSendPrompt_AdvancesGenerationForEveryDispatch' -count=1)
 make -C apps/backend build
 make -C apps/backend lint
 python3 scripts/list-docs.py validate

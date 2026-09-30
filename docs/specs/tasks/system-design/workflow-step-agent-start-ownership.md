@@ -202,16 +202,20 @@ If ownership changed, return an ownership error without clearing or escalating t
 
 An accepted completion for the captured current generation remains authoritative if it arrives while `triggerPrompt` is still returning and before dispatch bookkeeping records that generation. Execution identity and current-generation checks still fence successors.
 
+An admitted current generation is cancellation-owned before `MarkPromptDispatched` records it. A nil or closed predecessor `promptFinished` barrier cannot make that unresolved generation appear idle. The lifecycle waits for its dispatch/completion transition within the original cancellation budget.
+
 If cancellation cannot acquire `promptMu` because the predecessor waiter holds it, cancellation rechecks the captured execution and generation under the prompt-lifecycle lock. For an unresolved dispatched generation, it marks that generation ready and queues a generation-bound synthetic completion signal before releasing the lifecycle lock. The existing waiter remains the only receiver and clears the pending gate. The cancellation path does not read from `promptDoneCh`, clear the gate behind that consumer, or mutate execution state after signaling it. The waiter ignores signals for any other generation, and cancellation returns `ErrCancelEscalated` for this local release.
+
+The same lockless escalation applies while an admitted prompt is still waiting for its dispatch acknowledgement. It raises the pending gate before queuing the wake signal so the existing prompt path consumes that generation's signal after dispatch returns.
 
 A matching completion clears the captured dispatch gate before cancellation returns success.
 A stale signal cannot satisfy the wait or release a later generation's gate. A transport-error signal cannot prove provider quiescence.
-At the deadline, check for an available matching completion before escalation.
+At the deadline, check for an available matching completion before escalation. Preserve a matching transport-error signal's detail when escalation reports the missing completion.
 A missing completion retains `ErrCancelEscalated` and the existing bounded cleanup.
 Cancellation never resets its deadline after observing a closed barrier or stale signal.
 
-Tests cover nil and closed barriers, completion before and after cancel, timeout, caller cancellation, and competing predecessor waiters.
-They also cover ordinary prompts, generation replacement, stale signals, and the existing asynchronous escalation publication.
+Tests cover nil and closed barriers, pre-dispatch admission, completion before and after cancel, timeout, caller cancellation, and competing predecessor waiters.
+They also cover ordinary prompts, generation replacement, stale signals, timeout transport details, and the existing asynchronous escalation publication.
 Workflow tests retain the distinction between confirmed completion and local escalation.
 
 ## Completion ownership

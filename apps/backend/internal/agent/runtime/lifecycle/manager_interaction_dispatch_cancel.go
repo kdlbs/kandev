@@ -32,25 +32,39 @@ type cancelPromptSnapshot struct {
 func (m *Manager) captureCancelPromptSnapshot(execution *AgentExecution) cancelPromptSnapshot {
 	execution.promptFinishedMu.Lock()
 	finished := execution.promptFinished
+	prompt, exists := m.executionStore.promptLifecycleSnapshot(execution.ID)
 	execution.promptFinishedMu.Unlock()
 
-	prompt, exists := m.executionStore.promptLifecycleSnapshot(execution.ID)
 	if !exists {
 		return cancelPromptSnapshot{
 			finished:          finished,
 			ownershipConflict: execution.dispatchedPromptPending.Load(),
 		}
 	}
+	if prompt.execution != execution {
+		return cancelPromptSnapshot{finished: finished, ownershipConflict: true}
+	}
 	pending := execution.dispatchedPromptPending.Load()
-	activePrompt := prompt.generation != 0 &&
-		(prompt.dispatchedGeneration == prompt.generation || prompt.completedGeneration == prompt.generation)
+	activePrompt := prompt.generation != 0
 	dispatchOnly := activePrompt &&
-		(pending || (finished == nil && prompt.completedGeneration != prompt.generation))
+		(pending || (!promptBarrierOpen(finished) && prompt.completedGeneration != prompt.generation))
 	return cancelPromptSnapshot{
 		finished:          finished,
 		prompt:            prompt,
 		dispatchOnly:      dispatchOnly,
 		ownershipConflict: pending && !activePrompt,
+	}
+}
+
+func promptBarrierOpen(finished <-chan struct{}) bool {
+	if finished == nil {
+		return false
+	}
+	select {
+	case <-finished:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -137,16 +151,12 @@ func (m *Manager) escalateCapturedDispatchWithoutPromptLock(
 	execution.promptLifecycleMu.Lock()
 	defer execution.promptLifecycleMu.Unlock()
 	current, exists := m.executionStore.promptLifecycleSnapshot(execution.ID)
-	if !exists || current.generation != generation {
+	if !exists || current.execution != execution || current.generation != generation {
 		return ErrPromptActivityNotOwned
 	}
 	if current.completedGeneration == generation {
 		return nil
 	}
-	if current.dispatchedGeneration != generation {
-		return ErrPromptActivityNotOwned
-	}
-
 	state, storeErr := m.prepareCapturedDispatchReady(execution, generation, attemptID)
 	if state.ownershipLost {
 		return ErrPromptActivityNotOwned
@@ -164,21 +174,19 @@ func (m *Manager) escalateCapturedDispatchWithoutPromptLock(
 		go m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, state.payload)
 	}
 
-	// The waiter owns the receive and gate release. Keep the old gate set until
-	// its existing consumer receives this generation's wake signal.
-	signalQueued := !execution.dispatchedPromptPending.Load()
-	if !signalQueued {
-		signalQueued = sendPromptCompletionSignalBounded(
-			execution,
-			PromptCompletionSignal{
-				IsError:           true,
-				Error:             "cancel escalated: agent did not complete turn within timeout",
-				PromptGeneration:  generation,
-				StartupGeneration: startupGeneration,
-			},
-			cancelEscalationTimeout,
-		)
-	}
+	// Keep the generation fence until the wake is queued. The existing consumer
+	// receives before taking promptLifecycleMu, so this bounded send can release it.
+	execution.dispatchedPromptPending.Store(true)
+	signalQueued := sendPromptCompletionSignalBounded(
+		execution,
+		PromptCompletionSignal{
+			IsError:           true,
+			Error:             "cancel escalated: agent did not complete turn within timeout",
+			PromptGeneration:  generation,
+			StartupGeneration: startupGeneration,
+		},
+		cancelEscalationTimeout,
+	)
 	if !signalQueued {
 		m.logger.Warn("dispatch cancellation escalation could not enqueue completion signal",
 			zap.String("execution_id", execution.ID),
@@ -203,10 +211,6 @@ func (m *Manager) prepareCapturedDispatchReady(
 		}
 		if current.promptCompletionGeneration == generation {
 			state.completionAccepted = true
-			return
-		}
-		if current.dispatchedPromptGeneration != generation {
-			state.ownershipLost = true
 			return
 		}
 		if current.Status == v1.AgentStatusReady {
@@ -286,8 +290,7 @@ func (m *Manager) validatePromptAfterBarrier(execution *AgentExecution, generati
 
 func (m *Manager) ownsCapturedPrompt(execution *AgentExecution, generation uint64) bool {
 	current, exists := m.executionStore.promptLifecycleSnapshot(execution.ID)
-	return exists && current.generation == generation &&
-		(current.dispatchedGeneration == generation || current.completedGeneration == generation)
+	return exists && current.execution == execution && current.generation == generation
 }
 
 func (m *Manager) waitForCapturedDispatchCompletion(
@@ -350,9 +353,14 @@ func (m *Manager) finishDispatchCancelTimeout(
 		execution.dispatchedPromptPending.Store(false)
 		return nil
 	}
-	if _, ok := tryReceivePromptSignal(execution.promptDoneCh); ok && m.promptCompletionAccepted(execution, generation) {
-		execution.dispatchedPromptPending.Store(false)
-		return nil
+	if signal, ok := tryReceivePromptSignal(execution.promptDoneCh); ok {
+		if signal.PromptGeneration == generation && signal.IsError && signal.Error != "" && transportFailure == nil {
+			transportFailure = errors.New(signal.Error)
+		}
+		if m.promptCompletionAccepted(execution, generation) {
+			execution.dispatchedPromptPending.Store(false)
+			return nil
+		}
 	}
 	escalationErr := m.escalateStuckCancel(ctx, execution, nil)
 	if transportFailure == nil {
@@ -379,5 +387,6 @@ func (m *Manager) confirmCapturedPromptOwnership(execution *AgentExecution, gene
 
 func (m *Manager) promptCompletionAccepted(execution *AgentExecution, generation uint64) bool {
 	current, exists := m.executionStore.promptLifecycleSnapshot(execution.ID)
-	return exists && current.generation == generation && current.completedGeneration == generation
+	return exists && current.execution == execution &&
+		current.generation == generation && current.completedGeneration == generation
 }

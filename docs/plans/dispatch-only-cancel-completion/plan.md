@@ -189,11 +189,15 @@ The package reuses the existing requirement document without changing its criter
 Implementation:
 
 - Dispatch-only cancellation now waits within one deadline for the captured generation's accepted completion. It serializes completion consumption, preserves ordinary prompt ownership, rejects successor-generation mutation, and retains escalation for a missing completion.
+- Cancellation also owns an admitted generation before dispatch bookkeeping records it. Nil or closed predecessor barriers cannot turn an unresolved admitted prompt into a no-op; a lockless timeout raises the pending gate before waking the existing consumer.
+- A stream-error signal drained at the completion deadline remains attached to the resulting escalation error.
 - Added nil and stale-closed barrier coverage for available and delayed completion, plus timeout, caller cancellation, stale signal, competing consumer, generation replacement, deadline-boundary completion, transport failure, immediate non-acknowledgement, and ordinary-prompt cases.
+- Added regressions for admitted-generation completion and timeout escalation, including successor admission after the predecessor wake, plus preservation of stream failure detail at the deadline.
 - The workflow reset regression confirms cancellation completion precedes provider reset, which precedes exactly one destination prompt. The integration pair verifies successful reset and the existing genuine-escalation failure behavior.
 - `make -C apps/backend build` passed.
 - Lifecycle, orchestrator, and workflow integration tests passed, including race-enabled lifecycle, orchestrator, and integration runs.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
+- PR review remediation passed `go test ./internal/agent/runtime/lifecycle -count=1` and the lifecycle cancellation/dispatch race suite with `-race`.
 
 The integration simulator was extended to model prompt admission and the executor inventory row expected from the production lifecycle manager. It does not model the lifecycle cancellation wait; the lifecycle regression exercises that contract directly.
 
