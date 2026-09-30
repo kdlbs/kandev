@@ -137,7 +137,7 @@ export function NeedsYouItemPrimaryActions({
   answerHere,
 }: NeedsYouItemPrimaryActionsProps) {
   const { enabled } = usePhase2CardContext();
-  if (item.kind === "proposal") return null;
+  if (item.kind === "proposal" || item.kind === "autonomy") return null;
   const sessionId =
     item.kind === "stall" && enabled && canManage ? resumableSessionId(item.task) : undefined;
   return (

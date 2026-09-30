@@ -820,6 +820,31 @@
       ]
     },
     {
+      "id": "coordinator-autonomy",
+      "audiences": [
+        "user"
+      ],
+      "stability": "experimental",
+      "docs": [
+        "coordinator"
+      ],
+      "sources": [
+        "apps/backend/internal/coordinator/autonomy_read.go",
+        "apps/backend/internal/coordinator/ceiling.go",
+        "apps/web/app/coordinator/components/autonomy-strip.tsx",
+        "apps/web/components/coordinators/sections/autonomy-section.tsx",
+        "apps/web/components/task/chat/messages/woken-by-entry.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/coordinator/autonomy_read_test.go",
+        "apps/backend/internal/coordinator/ceiling_test.go",
+        "apps/web/app/coordinator/components/autonomy-strip.test.tsx",
+        "apps/web/components/coordinators/sections/autonomy-section.test.tsx",
+        "apps/web/components/task/chat/messages/woken-by-entry.test.tsx",
+        "apps/web/e2e/tests/coordinator/autonomy.spec.ts"
+      ]
+    },
+    {
       "id": "plugin-system",
       "audiences": [
         "operator",

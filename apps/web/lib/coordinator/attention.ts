@@ -1,3 +1,4 @@
+import { isPersistentHoldReason, type PersistentHoldReason } from "@/lib/coordinator/autonomy";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 // Minimal, store-independent shapes classify() needs. Deliberately narrower
@@ -59,7 +60,7 @@ export type AttentionProposal = {
   created_at: string;
 };
 
-export type NeedsYouItemKind = "proposal" | "question" | "stall" | "error";
+export type NeedsYouItemKind = "proposal" | "question" | "stall" | "error" | "autonomy";
 
 type NeedsYouItemBase = {
   id: string;
@@ -91,11 +92,38 @@ export type NeedsYouErrorItem = NeedsYouItemBase & {
   taskError: AttentionActiveError | null;
 };
 
+/** The held-autonomy facts classify() needs, from the latest usable autonomy read. */
+export type AttentionAutonomyInput = {
+  coordinatorId: string;
+  enabled: boolean;
+  reason: string | undefined;
+  detail: string;
+  pendingWakes: number;
+  oldestPendingAt: string | null;
+  loadedAt: number;
+  conditions: { name: string; met: boolean; detail: string }[];
+};
+
+export type NeedsYouAutonomyItem = NeedsYouItemBase & {
+  kind: "autonomy";
+  reason: PersistentHoldReason;
+  detail: string;
+  pendingWakes: number;
+  conditions: { name: string; met: boolean; detail: string }[];
+};
+
 export type NeedsYouItem =
   | NeedsYouProposalItem
   | NeedsYouQuestionItem
   | NeedsYouStallItem
-  | NeedsYouErrorItem;
+  | NeedsYouErrorItem
+  | NeedsYouAutonomyItem;
+
+/** A Needs you item that names a task (every kind except a proposal or the autonomy hold). */
+export type NeedsYouTaskItem = NeedsYouQuestionItem | NeedsYouStallItem | NeedsYouErrorItem;
+
+/** A Needs you item the copilot can be asked about: everything except the autonomy hold. */
+export type NeedsYouAskableItem = Exclude<NeedsYouItem, NeedsYouAutonomyItem>;
 
 export type QueueGroupKind = "ready_to_merge" | "in_review" | "working" | "done" | "other";
 
@@ -127,6 +155,7 @@ const NEEDS_YOU_KIND_RANK: Record<NeedsYouItemKind, number> = {
   question: 1,
   stall: 2,
   error: 3,
+  autonomy: 4,
 };
 
 const RUNNING_SESSION_STATES = new Set(["RUNNING", "STARTING"]);
@@ -325,6 +354,23 @@ function proposalItem(proposal: AttentionProposal, nowMs: number): NeedsYouPropo
   };
 }
 
+function autonomyItem(input: AttentionAutonomyInput, nowMs: number): NeedsYouAutonomyItem | null {
+  if (!input.enabled || !isPersistentHoldReason(input.reason) || input.pendingWakes <= 0) {
+    return null;
+  }
+  const referenceTimeMs = toEpochMs(input.oldestPendingAt ?? undefined) ?? input.loadedAt;
+  return {
+    kind: "autonomy",
+    id: `autonomy:${input.coordinatorId}`,
+    reason: input.reason,
+    detail: input.detail,
+    pendingWakes: input.pendingWakes,
+    conditions: input.conditions,
+    referenceTimeMs,
+    ageMs: ageFrom(referenceTimeMs, nowMs),
+  };
+}
+
 function sortNeedsYou(items: NeedsYouItem[]): NeedsYouItem[] {
   return [...items].sort((a, b) => {
     if (a.referenceTimeMs !== b.referenceTimeMs) {
@@ -361,6 +407,7 @@ export function classify(
   stalls: AttentionStall[],
   proposals: AttentionProposal[],
   now: Date | number,
+  autonomy?: AttentionAutonomyInput | null,
 ): ClassifyResult {
   const nowMs = toMs(now);
   const stallsByTaskId = new Map(stalls.map((stall) => [stall.task_id, stall]));
@@ -368,6 +415,9 @@ export function classify(
   const needsYou: NeedsYouItem[] = proposals
     .filter((proposal) => OPEN_PROPOSAL_STATUSES.has(proposal.status))
     .map((proposal) => proposalItem(proposal, nowMs));
+
+  const held = autonomy ? autonomyItem(autonomy, nowMs) : null;
+  if (held) needsYou.push(held);
 
   const queue: Record<QueueGroupKind, QueueItem[]> = {
     ready_to_merge: [],

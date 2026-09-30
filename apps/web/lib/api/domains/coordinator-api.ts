@@ -96,6 +96,9 @@ export type PatchCoordinatorRequest = {
   agent_profile_id?: string;
   executor_profile_id?: string;
   context?: string;
+  // Phase 3: the ceiling is a two-place dollar string, or null to clear it.
+  autonomy_enabled?: boolean;
+  cost_ceiling_usd?: string | null;
 };
 
 // Mirrors internal/coordinator/models.go's ProposalKind* constants.
@@ -238,6 +241,8 @@ export type CoordinatorUpdatedPayload = {
   workspace_id: string;
   coordinator_id: string;
   open_proposals: number;
+  // Present only when the event is an autonomy re-read signal.
+  autonomy_changed?: boolean;
 };
 
 // Mirrors internal/coordinator/dto.go's ConversationResponse: the
@@ -344,7 +349,7 @@ function workspacePath(workspaceId: string, suffix: string): string {
   return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}${suffix}`;
 }
 
-function coordinatorPath(workspaceId: string, coordinatorId: string, suffix = ""): string {
+export function coordinatorPath(workspaceId: string, coordinatorId: string, suffix = ""): string {
   return workspacePath(workspaceId, `/coordinators/${encodeURIComponent(coordinatorId)}${suffix}`);
 }
 

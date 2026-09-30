@@ -28,6 +28,7 @@ import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
 import { useMessageTaskOrigin } from "./message-task-origin-context";
+import { WokenByEntry, wakeTurnIdOf } from "./woken-by-entry";
 
 type ChatMessageProps = {
   comment: Message;
@@ -399,8 +400,8 @@ export const ChatMessage = memo(function ChatMessage({
     );
   }
 
-  if (comment.author_type === "user") {
-    return (
+  const ordinary =
+    comment.author_type === "user" ? (
       <UserMessageContent
         comment={comment}
         showRaw={showRaw}
@@ -410,19 +411,19 @@ export const ChatMessage = memo(function ChatMessage({
         onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
       />
+    ) : (
+      <AgentMessageContent
+        comment={comment}
+        showRaw={showRaw}
+        onToggleRaw={toggleRaw}
+        showRichBlocks={showRichBlocks}
+        sessionId={sessionId}
+        isTurnActive={isTurnActive}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
     );
-  }
-
-  return (
-    <AgentMessageContent
-      comment={comment}
-      showRaw={showRaw}
-      onToggleRaw={toggleRaw}
-      showRichBlocks={showRichBlocks}
-      sessionId={sessionId}
-      isTurnActive={isTurnActive}
-      worktreePath={worktreePath}
-      onOpenFile={onOpenFile}
-    />
-  );
+  const wakeTurnId = wakeTurnIdOf(comment.metadata);
+  if (wakeTurnId) return <WokenByEntry comment={comment} turnId={wakeTurnId} fallback={ordinary} />;
+  return ordinary;
 });

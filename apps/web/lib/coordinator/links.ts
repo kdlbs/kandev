@@ -62,3 +62,11 @@ export function linkToCoordinatorSettings(workspaceId: string, coordinatorId: st
 export function linkToCoordinatorAdd(workspaceId: string): string {
   return `${linkToCoordinatorSettingsList(workspaceId)}/new`;
 }
+
+/** The coordinator's settings page opened on its Autonomy section. */
+export function linkToCoordinatorAutonomySettings(
+  workspaceId: string,
+  coordinatorId: string,
+): string {
+  return `${linkToCoordinatorSettings(workspaceId, coordinatorId)}?section=autonomy`;
+}

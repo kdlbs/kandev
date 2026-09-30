@@ -6,6 +6,7 @@ import { useCoordinatorSection } from "@/hooks/domains/coordinator/use-coordinat
 import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
 import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
+import { AutonomySection } from "./autonomy-section";
 import { GoalSection } from "./goal-section";
 import { ControlError } from "./control-error";
 import { MayDoSection } from "./may-do-section";
@@ -100,7 +101,13 @@ export function CoordinatorSections({
       slug: "autonomy",
       label: t("coordinator:sectionAutonomy"),
       help: t("coordinator:sectionAutonomyHelp"),
-      render: () => null,
+      render: () => (
+        <AutonomySection
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          canManage={canManage}
+        />
+      ),
     });
   }
   return (

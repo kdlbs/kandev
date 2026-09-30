@@ -3,6 +3,7 @@ import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import { useNeedsYouFocusAfterDecision } from "../use-needs-you-focus";
 import { useNeedsYouFormNavigation } from "../use-needs-you-navigation";
 import { EmptyNeedsYouState } from "./empty-needs-you-state";
+import { AutonomyItemCard } from "./autonomy-item-card";
 import { NeedsYouItemCard } from "./needs-you-item-card";
 
 export type NeedsYouItemsPanelProps = {
@@ -97,24 +98,34 @@ export function NeedsYouItemsPanel({
 
   return (
     <div className="space-y-3" data-testid="needs-you-item-list">
-      {displayItems.map((item) => (
-        <NeedsYouItemCard
-          key={item.id}
-          item={item}
-          workspaceId={workspaceId}
-          stepNameByTaskId={attentionMaps.stepNameByTaskId}
-          workflowNameById={attentionMaps.workflowNameById}
-          stepNameByWorkflowStep={attentionMaps.stepNameByWorkflowStep}
-          openTasksById={attentionMaps.openTasksById}
-          coordinatorName={coordinatorName}
-          coordinatorId={coordinatorId}
-          canManage={canManage}
-          computeNeedsYouCount={computeNeedsYouCount}
-          onExpandedChange={onExpandedChange}
-          autoOpenForm={item.id === autoOpenProposalId ? autoOpenForm : null}
-          onAutoFormOpened={item.id === autoOpenProposalId ? onAutoFormOpened : undefined}
-        />
-      ))}
+      {displayItems.map((item) =>
+        item.kind === "autonomy" ? (
+          <AutonomyItemCard
+            key={item.id}
+            item={item}
+            workspaceId={workspaceId}
+            coordinatorId={coordinatorId}
+            canManage={canManage}
+          />
+        ) : (
+          <NeedsYouItemCard
+            key={item.id}
+            item={item}
+            workspaceId={workspaceId}
+            stepNameByTaskId={attentionMaps.stepNameByTaskId}
+            workflowNameById={attentionMaps.workflowNameById}
+            stepNameByWorkflowStep={attentionMaps.stepNameByWorkflowStep}
+            openTasksById={attentionMaps.openTasksById}
+            coordinatorName={coordinatorName}
+            coordinatorId={coordinatorId}
+            canManage={canManage}
+            computeNeedsYouCount={computeNeedsYouCount}
+            onExpandedChange={onExpandedChange}
+            autoOpenForm={item.id === autoOpenProposalId ? autoOpenForm : null}
+            onAutoFormOpened={item.id === autoOpenProposalId ? onAutoFormOpened : undefined}
+          />
+        ),
+      )}
     </div>
   );
 }
