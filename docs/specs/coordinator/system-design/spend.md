@@ -75,9 +75,10 @@ includes `ErrSpendScope`; no decision (admit, hold, stop) ever inspects the
 amounts of an unmeasurable reading. Unmeasurable is the fail-closed reading: a
 failed read, a task list that cannot be read, or an unpriced row is never
 treated as zero spend. The values of a degraded reading (nil error,
-`Measurable` false) are defined, because the autonomy read displays them:
+`Measurable` false) are defined, because the autonomy read displays the mean
+([wire shape](wake-screens.md#autonomy-read)):
 `WindowSubcents` is the sum of the priced rows in the 24-hour window (a lower
-bound, shown to no decision), `Degraded` is true, and `Mean7dSubcents` and
+bound, never sent), `Degraded` is true, and `Mean7dSubcents` and
 `Mean7dKnown` are computed exactly as for a measurable reading, so the
 seven-day mean stays visible while the window holds an unpriced row. A reading
 with a non-nil error has every amount zero and `Mean7dKnown` false, and the
@@ -319,8 +320,9 @@ and sessions were deleted with it, so nothing is running to stop):
    the ceiling; the log carries the coordinator id, window and ceiling) or
    `unmeasurable` (the log carries the coordinator id and no amounts, because
    an unmeasurable reading's amounts are never inspected). This is the only
-   place either happens, so a stop is counted once whichever path later settles
-   the row. An
+   place either happens, so a stop counts once. When it affected one row it also publishes `autonomy_changed`
+   ([wake-screens](wake-screens.md#autonomy-read)); a retry that affects no row
+   publishes nothing. An
    unmeasurable reading stops the same way, because the ceiling can no longer
    be shown to hold. When it affected no row the row is re-read: settled
    returns nil; open and already marked (another process won the mark)
@@ -466,8 +468,7 @@ residual is made visible, not hidden: each
 failed cancel increments `coordinator_ceiling_cancel_failed_total`, and once
 a row has `stop_requested_at` older than five minutes and is still open, the
 autonomy read reports `last_turn.stop_state: "stop_failing"` and the autonomy strip
-shows "Stop at ceiling not confirmed: the turn is still running" with the
-panel's Stop, so a manager can act (`AC-COORDINATOR-SPEND-003.4`, task 06).
+shows "Stop at ceiling not confirmed" with Stop ([screens](wake-screens.md#screens); `AC-COORDINATOR-SPEND-003.4`).
 Admission already holds new unattended turns while any turn is open, so the
 failing turn is the only one spending.
 
@@ -475,15 +476,19 @@ failing turn is the only one spending.
 
 - **Autonomy strip (UI-01).** From the autonomy read's `spend` block: "Spend
   <window> of <ceiling> USD in 24 h" and a pill "Inside" (window below
-  ceiling) or "Over". With no ceiling: "Spend <window> USD in 24 h" and "No
-  ceiling". Not measurable: "Spend unknown: some usage is unpriced" when
-  `degraded`, else "Spend unavailable".
+  ceiling) or "Over" (window at or above the ceiling); autonomy on requires a
+  ceiling, so the strip has no "No ceiling" form. Not measurable: "Spend unknown: some usage is unpriced" if `degraded`, else "Spend unavailable", no pill.
 - **Settings, Autonomy section (UI-04).** A "Cost ceiling (USD per 24 hours)"
-  field with the same validation client-side, the same spend line and pill,
-  "7-day daily mean <mean> USD" and "Last unattended turn <cost> USD" or
-  "No unattended turns yet".
-- Amounts render with two decimals through the existing currency formatter in
-  `apps/web/lib/i18n/formats`. Copy goes through `t()` in six locales.
+  field with the same validation client-side, the same spend line and pill
+  (no ceiling: "Spend <window> USD in 24 h" and the pill "No ceiling"),
+  "7-day daily mean <mean> USD" ("... unavailable",
+  `spendMeanUnavailable`, when `mean_known` is false) and "Last unattended
+  turn <cost> USD", or "Last unattended turn: cost unknown"
+  (`spendLastTurnCostUnknown`) when `last_turn.cost_subcents` is null, or "No
+  unattended turns yet" when `last_turn` is null.
+- Amounts are subcents / 10000 through `formatNumber` (`apps/web/lib/i18n/formats`)
+  with 2 minimum and maximum fraction digits; the copy supplies "USD". Copy goes
+  through `t()` in six locales.
 
 ## Failure and recovery
 

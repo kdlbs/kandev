@@ -287,8 +287,23 @@ test pins it for a session started by delivery.
 
 The Autonomy section of the coordinator's settings (UI-04) reads the
 `containment` block of the autonomy read ([wake](wake-screens.md#autonomy-read)) when
-it opens and on **Check again**, and lists the four conditions with Met or
-Not met and a fix line:
+it opens and on **Check again**, and lists exactly the four conditions once each, in the order of
+[Check](#check) (the route returns them in that order and the client renders them
+as received), each with a display label and Met or Not met. The fix line and the
+condition's `detail` text (when non-empty) render only under a Not met
+condition; a Met condition shows neither.
+The display labels (`containmentLabel_<name>`, six locales) are
+`executor_isolated` "Isolated executor", `auth_enabled` "Authentication
+enabled", `no_kandev_credential` "No Kandev credential in the environment"
+and `no_extra_tools` "No extra MCP servers". A condition name the client does
+not know renders its raw name and its Met state with no fix line.
+A non-empty `detail` that is not one of the three overrides below (an executor
+type, `disabled`, `setup`, `KANDEV_API_KEY`, `KANDEV_RUN_TOKEN`, `pat_value`)
+is a machine token: it renders as received, untranslated, in a code span on
+its own line under the fix line, only under Not met. The section
+reads on open and on **Check again**; a second press while a read is in flight
+is ignored (the button is disabled), and a response older than the latest
+requested read is dropped, so the list always shows the most recent read:
 
 | Condition | Fix text |
 | --- | --- |
@@ -297,10 +312,10 @@ Not met and a fix line:
 | `no_kandev_credential` | "Remove Kandev tokens from this coordinator's executor and agent profile environment." |
 | `no_extra_tools` | "Remove extra MCP servers from this coordinator's agent profile." |
 
-The `no_kandev_credential` fix names the source that matched: the detail
-`KANDEV_API_KEY`, `KANDEV_RUN_TOKEN` or `pat_value` shows the line above; the
-executor-profile, agent-profile and provider-key sources share it. Three details
-replace the condition's own fix line while they hold:
+The `no_kandev_credential` fix line is the same whichever source matched
+(executor profile, agent profile, provider key or credentials manager); its
+detail is only ever `KANDEV_API_KEY`, `KANDEV_RUN_TOKEN` or `pat_value`. Three
+details replace the condition's own fix line while they hold:
 
 | Detail | Fix text |
 | --- | --- |
@@ -312,8 +327,14 @@ replace the condition's own fix line while they hold:
 restart, because the phase 1 conversation is what launches from current
 settings. All three are added in all six locales.
 
-A read failure of the autonomy route shows "Containment unavailable" with
-Check again. Copy goes through `t()` in six locales; `features.auth` is a
+A read failure of the autonomy route is one surface for the whole section, the
+"Autonomy state unavailable" with **Try again** of the
+[settings layout](integration.md#settings-layout), not a separate containment
+message. **Check again** and **Try again** are the same read. A failed read
+after a successful one keeps the last loaded conditions on screen beneath the
+error; only a section whose first read failed shows no list. While a read is in
+flight the list keeps its last data, and before the first read settles the
+section shows a one-line skeleton in place of the list. Copy goes through `t()` in six locales; `features.auth` is a
 verbatim config key.
 
 ## Security

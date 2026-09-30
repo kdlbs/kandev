@@ -31,6 +31,7 @@ acceptance_criteria:
   - AC-COORDINATOR-INTEGRATION-008.1
 system_design:
   - ../../specs/coordinator/system-design/wake.md
+  - ../../specs/coordinator/system-design/wake-screens.md
   - ../../specs/coordinator/system-design/spend.md
   - ../../specs/coordinator/system-design/containment.md
   - ../../specs/coordinator/system-design/integration.md
@@ -50,8 +51,10 @@ permission count. Adds the public docs section.
 - Backend: `GET .../coordinators/:cid/autonomy`
   ([Autonomy read](../../specs/coordinator/system-design/wake-screens.md#autonomy-read)),
   `coordinator.updated` with `autonomy_changed`, and
-  `GET .../coordinators/:cid/runs/:runId` (used by task 10; built here with
-  the autonomy read), including `last_turn.stop_state` (`stop_failing` when
+  `GET .../coordinators/:cid/runs/:runId`
+  ([Run read](../../specs/coordinator/system-design/wake-screens.md#run-read);
+  the source of the "Woken by" entry and, later, of task 10's improvement
+  card; built here with the autonomy read), including `last_turn.stop_state` (`stop_failing` when
   an open row's `stop_requested_at` is older than five minutes,
   [Stopping](../../specs/coordinator/system-design/spend.md#stopping)).
 - Web: the autonomy input in `use-coordinator-inputs.ts`; the strip above the
@@ -59,23 +62,28 @@ permission count. Adds the public docs section.
   `autonomy:<cid>`), counted in the coordinator count only, and the updated
   phase 1 ordering test for the amended `AC-COORDINATOR-NEEDS-YOU-002.4`
   ([Screens](../../specs/coordinator/system-design/wake-screens.md#screens)).
-- Settings: the Autonomy entry of the Sections row (`autonomy` after `goal` in
-  `coordinator-sections.tsx`, present only while phase 3 is effective, with
-  `sectionAutonomy` and `sectionAutonomyHelp` in six locales;
-  `?section=autonomy` opens Identity otherwise)
-  ([Settings layout](../../specs/coordinator/system-design/integration.md#settings-layout));
-  the Autonomy section's toggle, ceiling field with client
-  validation, spend lines, containment list with fix lines and **Check
+- Settings: the body of the Autonomy section. Task 01 already added the
+  Sections entry (`autonomy` after `goal` in `coordinator-sections.tsx`, gated
+  on phase 3 through `BASE_SLUGS`, with `sectionAutonomy` and
+  `sectionAutonomyHelp` in six locales, and an empty `render`); this task
+  replaces that `render` and does not touch the gating
+  ([Settings layout](../../specs/coordinator/system-design/integration.md#settings-layout)).
+  The body is the toggle and ceiling field with client
+  validation and one-PATCH save, spend lines, containment list with fix lines and **Check
   again** ([spend Screens](../../specs/coordinator/system-design/spend.md#screens),
   [Settings display](../../specs/coordinator/system-design/containment.md#settings-display)).
 - Transcript: the "Woken by" entry keyed on
-  `metadata.coordinator_wake_turn_id`
-  ([Transcript](../../specs/coordinator/system-design/wake-screens.md#transcript)),
+  `metadata.coordinator_wake_turn_id`, filled from the run read
+  ([Transcript](../../specs/coordinator/system-design/wake-screens.md#transcript),
+  [Run read](../../specs/coordinator/system-design/wake-screens.md#run-read)),
   implemented as a renderer in the one message component so every surface
   that shows the conversation gets it
   ([Copilot everywhere](../../specs/coordinator/system-design/integration.md#copilot-everywhere)).
 - Copy in six locales; `docs/public/coordinator.md` Autonomy section through
-  `/docs-maintainer`.
+  `/docs-maintainer`. That page does not exist on this branch (the earlier
+  phases' plans name it and it has not landed), so this task creates it with
+  the Autonomy section and registers it in `docs/public/meta.json`, then runs
+  `node scripts/validate-public-docs.mjs`.
 
 ## Out of scope
 
@@ -93,7 +101,7 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
 
 ## Acceptance
 
-- Strip states Active, each Held reason, no ceiling, degraded, unavailable
+- Strip states Active, each Held reason, degraded spend, unavailable
   with Try again, rendered from the autonomy read and refreshed on
   `coordinator.updated`; Needs you keeps its other items on a read error.
 - The held item appears only for the five persistent reasons with at least
@@ -105,7 +113,8 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
   `conversation_busy` and "Autonomy: Active (Between turns until <time>)"
   from `admission.until` for `cooldown`, with no **Open settings** and no
   `autonomy` item; the read route returns `admission.until` only for
-  `cooldown`.
+  `cooldown`. The strip has no "no ceiling" state (autonomy on requires a
+  ceiling); "No ceiling" is a settings-section pill only.
 - An open unattended turn whose ceiling stop was requested more than five
   minutes ago shows "Stop at ceiling not confirmed" with Stop on the strip;
   at four minutes it does not (`synctest` on the read). With autonomy
@@ -119,13 +128,37 @@ Autonomy: Held (Cost ceiling reached) . Last woke 2h ago . 5 pending
   the conversation task view (`AC-COORDINATOR-INTEGRATION-008.1`).
 - The transcript renders the unattended message as "Woken by N events" with
   the expandable list and the denied count, distinct from a manager message;
-  the 390px layout matches the plan's phone views.
+  at 390px in `en` with a held `containment` reason for `no_kandev_credential`, a last-woke age, a pending count and the spend pill, the strip's line 1 wraps to at most three lines (the stop-warning row is separate and not counted) with no horizontal scroll
+  (`document.documentElement.scrollWidth <= 390`), the Stop and Open settings
+  buttons are at least 44px tall, and the list toggle of the entry stays inside
+  the message bubble. The e2e asserts these, not a screenshot comparison.
+- The "Woken by" entry reads its count, list and denied count from the run
+  read, never the message body; when the run read is a 404 it renders "Woken
+  by events" with the message text behind the toggle. Two entries on one page
+  cause one run read each, and a settled run is not re-read.
+- The autonomy response carries `server_time`; `stop_state` is `stop_failing`
+  only when the difference is strictly more than five minutes (exactly five is
+  not), and an open page flips the strip without a reload through the timed
+  re-read of [Screens](../../specs/coordinator/system-design/wake-screens.md#screens),
+  and a page opened before the stop was requested learns of it from the
+  `autonomy_changed` the ceiling-stop mark publishes.
+  Stop is disabled while in flight and a failure shows "Could not stop the
+  turn. Try again."
+- The spend wire shape is one of three rows (measurable, unpriced,
+  failed); a failed seven-day read shows "7-day daily mean unavailable", never
+  0.00. An `Admit` result with detail `read_error` is a 500, not a hold reason.
+- A server 400 on `cost_ceiling` shows a keyed string, never the server text;
+  the decision toast's "Next" count includes the `autonomy` item; the held
+  item's containment fix text is the settings display's, including detail
+  overrides; a spend read failure is a 200 with `measurable` false.
+- Saving turns autonomy on and sets the first ceiling in one PATCH; the toggle
+  on with an empty ceiling keeps Save disabled with the required-ceiling hint.
 
 ## Verification
 
 ```bash
 cd apps/backend && go test ./internal/coordinator/... -run 'AutonomyRead|RunRead' -count=1
-cd apps/web && pnpm test -- lib/coordinator/attention app/coordinator app/settings/workspace
+cd apps/web && pnpm test -- lib/coordinator/attention app/coordinator components/coordinators components/task/chat
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/autonomy.spec.ts
 ```

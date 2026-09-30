@@ -410,14 +410,51 @@ bound on open improvements. The automatic path never sees this kind.
 
 The coordinator page's Sections row (`coordinator-sections.tsx`) gains a sixth
 entry `autonomy` after `goal` (added by task 01 with an empty body, so it is
-visible and translated from the start; task 06 fills it), present in `SLUGS` and `entries` only while
+visible and translated from the start; task 06 fills it), present in the slug list (`BASE_SLUGS` plus `autonomy`) and `entries` only while
 phase 3 is effective (the flag the web already reads for the Autonomy
 section, task 01), so a stored `?section=autonomy` opens Identity
 otherwise. Its label and help are `sectionAutonomy` "Autonomy" and
-`sectionAutonomyHelp` "Let this coordinator act on its own tasks while nobody
-is watching, within a cost ceiling.", in six locales. It holds
-[the controls](spend.md#screens) and "Changes waiting for you" of task 10, and
-the section entry keeps phase 2's `useCoordinatorSection` behaviour.
+`sectionAutonomyHelp` "Let the coordinator act on its own within a spending
+ceiling." (the strings task 01 shipped), in six locales. Task 01 already
+added the entry, its labels, the phase 3 gating and the empty `render`; task
+06 supplies the body. The body holds [the controls](spend.md#screens) and
+"Changes waiting for you" of task 10, and the section entry keeps phase 2's
+`useCoordinatorSection` behaviour.
+
+**Autonomy controls (task 06).** The section reads the coordinator's stored
+`autonomy_enabled` and `cost_ceiling_usd` from the coordinator GET and the
+spend, containment and last-turn lines from the [autonomy
+read](wake-screens.md#autonomy-read). It keeps a draft of the toggle
+("Let this coordinator act on its own") and the ceiling text and saves through
+`useSettingsSaveContributor` like the other sections: Save sends one PATCH
+carrying only the changed keys (`autonomy_enabled` as a boolean,
+`cost_ceiling_usd` as a two-place decimal string or `null`), so turning
+autonomy on and setting the first ceiling is one atomic request. Client
+validation, in order: a non-empty ceiling must match the [ceiling
+pattern](spend.md#ceiling) (message `autonomyCeilingInvalid`); the toggle on
+with an empty ceiling is refused with `autonomyCeilingRequired` "Set a cost
+ceiling before turning autonomy on." and Save stays disabled. The pattern
+includes the 0.01 to 10000.00 range, so `0.00` and `99999.99` are invalid. A
+server 400 naming `cost_ceiling` (a race with another manager, or a rule the
+client missed) is never shown as the server's text: it shows
+`autonomyCeilingRequired` when the request turned autonomy on with no ceiling
+and `autonomyCeilingInvalid` otherwise, under the field, and leaves the draft
+unchanged. The draft's baseline is the last coordinator GET; after a successful
+Save or a coordinator refresh the baseline is replaced, a key whose draft
+equals the new baseline is clean, and a key edited after the PATCH was sent (or
+after that refresh began) stays dirty and is not overwritten. A successful PATCH
+is a successful Save whatever follows: the coordinator GET and the autonomy
+read then run in that order, and a failure of either leaves Save successful
+and shows only that read's own error. A user who cannot manage
+the workspace sees the values with disabled controls and no Save. The
+autonomy read behind the spend, containment and last-turn lines is the page's
+shared autonomy input, so the section also refreshes on `autonomy_changed`, and
+also on open, **Check again** and after Save. Before its first read settles
+those lines show a one-line skeleton. A failed read shows "Autonomy state
+unavailable" with **Try again** in place of all three lines (the only failure
+surface; [containment](containment.md#settings-display) keeps the last list
+under it after an earlier success) while the toggle and ceiling still render
+from the GET.
 
 **Automatic option.** May do keeps one radio group per action and no second
 control. For every action but `create_task`, when phase 3 is effective the
@@ -445,8 +482,11 @@ The "Woken by" entry is a transcript renderer keyed on
 `metadata.coordinator_wake_turn_id`, part of the conversation's message list.
 Every surface that renders that message list (the copilot panel on any page,
 the popover and the conversation task view) gets it from the one message
-component, with no page-specific branch, and the turn read that supplies the
-denied count is the autonomy read (`AC-COORDINATOR-INTEGRATION-008.1`).
+component, with no page-specific branch, and the data that fills it (count,
+list, denied count) is the [run read](wake-screens.md#run-read) of the turn
+id, not the autonomy read and not the message body
+(`AC-COORDINATOR-INTEGRATION-008.1`). While phase 3 is not effective the
+renderer is inert and the message renders as an ordinary one.
 
 ## Phase 2 touch points
 
