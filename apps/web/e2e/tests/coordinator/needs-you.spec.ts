@@ -215,4 +215,49 @@ test.describe("Coordinator Needs you and Queue", () => {
     // plain link, not a button with a menu.
     await expect(readyRow).toHaveAttribute("href", new RegExp(readyTask.id));
   });
+
+  test("a coordinator page opened by URL for a non-active workspace activates it and stays live (AC-COORDINATOR-NEEDS-YOU-003.3)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const { workspaces } = await apiClient.listWorkspaces();
+    const target = workspaces.find((w) => w.id === seedData.workspaceId);
+    if (!target) throw new Error("seed workspace missing from the workspace list");
+    const other = await apiClient.createWorkspace(`Coordinator Deep Link Other ${Date.now()}`);
+    try {
+      const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+        name: "Deep Link Coordinator",
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Deep Link Live Task",
+        seedData.agentProfileId,
+        {
+          description: "/sleep 60",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+
+      await testPage.goto("/");
+      await testPage.getByTestId("sidebar-workspace-trigger").click();
+      await testPage.getByTestId(`sidebar-workspace-item-${other.id}`).click();
+      await expect(testPage.getByTestId("sidebar-workspace-trigger")).toContainText(other.name);
+
+      await testPage.goto(linkToCoordinatorQueue(seedData.workspaceId, coordinator.id));
+      await expect(testPage.getByTestId("sidebar-workspace-trigger")).toContainText(target.name);
+      const row = testPage.getByTestId(`queue-row-${task.id}`);
+      await expect(row).toBeVisible();
+
+      await apiClient.archiveTask(task.id);
+      await expect(row).toHaveCount(0);
+    } finally {
+      await apiClient.deleteWorkspace(other.id, other.name);
+    }
+  });
 });

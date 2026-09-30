@@ -16,6 +16,7 @@ import { usePathname } from "@/lib/routing/client-router";
 import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { AppNavTrigger } from "./app-nav-trigger";
 import { AppNavSurface } from "./app-nav-surface";
 
@@ -255,7 +256,10 @@ function NavigationAutomations({
   const hasSavedSidebarLayout = useHasSavedSidebarLayout();
   if (!isMobile || !open || inOffice || !workspaceId || hasSavedSidebarLayout) return null;
   return (
-    <MobileAutomationsSection key={workspaceId} workspaceId={workspaceId} onNavigate={close} />
+    <>
+      <MobileCoordinatorsSection onNavigate={close} />
+      <MobileAutomationsSection key={workspaceId} workspaceId={workspaceId} onNavigate={close} />
+    </>
   );
 }
 
