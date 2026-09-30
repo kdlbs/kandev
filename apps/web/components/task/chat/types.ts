@@ -297,7 +297,7 @@ export type StatusMetadata = {
   status?: string;
   stage?: string;
   message?: string;
-  variant?: "default" | "warning" | "error";
+  variant?: "default" | "warning" | "error" | "resume_settings_provider_restored";
   cancelled?: boolean;
   // Transient provider-error retry state. Present on the yellow "retrying"
   // status message the orchestrator emits during backoff.

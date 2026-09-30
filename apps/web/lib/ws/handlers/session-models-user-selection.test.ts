@@ -8,6 +8,7 @@ import { registerSessionModelsHandlers } from "./session-models";
 
 const providerModelId = "gpt-5.6-sol";
 const providerModelName = "GPT-5.6 Sol";
+const providerEffectiveModelId = "provider-effective-model";
 
 function makeStore(overrides: Partial<AppState> = {}): StoreApi<AppState> {
   const state = {
@@ -16,6 +17,7 @@ function makeStore(overrides: Partial<AppState> = {}): StoreApi<AppState> {
     sessionModels: { bySessionId: {} },
     taskSessions: { items: {} },
     setActiveModel: vi.fn(),
+    clearActiveModel: vi.fn(),
     ...overrides,
   } as unknown as AppState;
   state.setSessionModels = vi.fn((sessionId, data) => {
@@ -212,5 +214,107 @@ describe("session.models_updated startup guard", () => {
       currentModelId: providerModelId,
       configOptions: [expect.objectContaining({ id: "model", currentValue: providerModelId })],
     });
+  });
+});
+
+describe("session.models_updated provider-restored projection", () => {
+  it("uses the provider-restored projection, preserves later selections, and clears it for a strict launch", () => {
+    const store = makeStore({
+      activeModel: { bySessionId: { "session-1": providerModelId } } as AppState["activeModel"],
+      taskSessions: {
+        items: {
+          "session-1": {
+            ...makeTaskSession({
+              runtime_config: {
+                model: providerModelId,
+                config_options: { model: providerModelId },
+              },
+            }),
+            state: "STARTING",
+          },
+        },
+      },
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerEffectiveModelId, {
+          session_settings_policy: "provider_restored",
+          config_options_settled: true,
+          models: [{ model_id: providerEffectiveModelId, name: "Provider effective" }],
+          config_options: [
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              category: "model",
+              current_value: providerEffectiveModelId,
+            },
+          ],
+        }),
+      ),
+    );
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: providerEffectiveModelId,
+      settingsPolicy: "provider_restored",
+      configOptions: [
+        expect.objectContaining({ id: "model", currentValue: providerEffectiveModelId }),
+      ],
+    });
+    expect(store.getState().clearActiveModel).toHaveBeenCalledWith("session-1");
+
+    store.getState().taskSessions.items["session-1"].state = "WAITING_FOR_INPUT";
+    handler(makeMessage(makePayload("explicit-user-model")));
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: "explicit-user-model",
+      settingsPolicy: "provider_restored",
+    });
+
+    store.getState().taskSessions.items["session-1"].state = "WAITING_FOR_INPUT";
+    handler(
+      makeMessage(
+        makePayload("strict-start-model", {
+          session_settings_policy: "strict",
+          config_options_settled: true,
+          models: [{ model_id: "strict-start-model", name: "Strict start" }],
+        }),
+      ),
+    );
+    expect(store.getState().sessionModels.bySessionId["session-1"].settingsPolicy).toBeUndefined();
+  });
+
+  it("clears a previous selector projection when a restored provider reports unknown values", () => {
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: providerModelId,
+            models: [{ modelId: providerModelId, name: providerModelName }],
+            configOptions: [],
+            configOptionsSettled: true,
+          },
+        },
+      } as AppState["sessionModels"],
+      activeModel: { bySessionId: { "session-1": providerModelId } } as AppState["activeModel"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload("", {
+          session_settings_policy: "provider_restored",
+          config_options_settled: true,
+        }),
+      ),
+    );
+
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: "",
+      models: [],
+      configOptions: [],
+      settingsPolicy: "provider_restored",
+    });
+    expect(store.getState().clearActiveModel).toHaveBeenCalledWith("session-1");
   });
 });

@@ -3,6 +3,10 @@ import type { SeedData } from "../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
+import {
+  expectFileBrowserIconCentered,
+  readTaskWorkspacePath,
+} from "../helpers/panel-toolbar-geometry";
 
 async function createToolbarTask(
   page: Page,
@@ -118,6 +122,48 @@ async function expectTouchControls(page: Page, surface: string) {
 }
 
 test.describe("touch panel toolbars", () => {
+  test("centers Files copy path icons before and after copying", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+
+    await createToolbarTask(testPage, apiClient, seedData, "Phone copy path icon alignment");
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    await expect(testPage.getByTestId("file-tree-scroll")).toBeVisible();
+
+    const filesPanel = testPage.getByTestId("files-panel");
+    const copyButton = filesPanel.getByRole("button", {
+      name: "Copy workspace path",
+      exact: true,
+    });
+    await expect(copyButton).toBeVisible({ timeout: 20_000 });
+    const buttonBox = await copyButton.boundingBox();
+    expect(buttonBox).not.toBeNull();
+    expect(buttonBox!.width).toBeGreaterThanOrEqual(44);
+    expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+    await expectFileBrowserIconCentered(copyButton, 0, "normal phone");
+
+    const expectedPath = await readTaskWorkspacePath(testPage, apiClient);
+    expect(expectedPath.startsWith("/")).toBe(true);
+    // Touch has no hover state; tapping copies directly and reveals the check glyph.
+    await copyButton.tap();
+    await expectFileBrowserIconCentered(copyButton, 1, "copied phone");
+    await expect
+      .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
+      .toBe(expectedPath);
+
+    const pathLabel = filesPanel.getByTestId("file-browser-workspace-path");
+    const [target, path] = await Promise.all([copyButton.boundingBox(), pathLabel.boundingBox()]);
+    expect(target).not.toBeNull();
+    expect(path).not.toBeNull();
+    expect(target!.x + target!.width).toBeLessThanOrEqual(path!.x + 1);
+    await expectNoOverflow(testPage, "Files copy path");
+  });
+
   test("keeps the 390px phone panels contained and preserves task navigation", async ({
     testPage,
     apiClient,

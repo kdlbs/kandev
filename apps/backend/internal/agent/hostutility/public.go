@@ -146,6 +146,9 @@ func (m *Manager) ResolveModelConfig(
 	agentType string,
 	req ModelConfigResolutionRequest,
 ) (ModelConfigResolution, error) {
+	if req.ProfileContext != nil {
+		return m.resolveProfileModelConfig(ctx, agentType, req)
+	}
 	if m == nil || m.modelCache == nil {
 		return ModelConfigResolution{}, errors.New("host utility manager not configured")
 	}
@@ -312,6 +315,7 @@ func (m *Manager) PublishCapabilities(agentType string, caps AgentCapabilities) 
 		return
 	}
 	m.invalidateModelConfigCache(agentType)
+	m.invalidateProfileCapabilities(agentType)
 	m.cache.set(caps)
 }
 

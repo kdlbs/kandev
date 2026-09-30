@@ -182,6 +182,11 @@ test.describe("sidebar scrolling", () => {
     await expect
       .poll(() => titleText.evaluate((element) => element.style.transform))
       .toMatch(/^translateX\(-/);
+    const rowBoxBeforeHover = await taskRow.boundingBox();
+    if (!rowBoxBeforeHover) throw new Error("Long-title sidebar row has no layout box");
+    await taskRow.hover({
+      position: { x: rowBoxBeforeHover.width - 2, y: rowBoxBeforeHover.height / 2 },
+    });
     await expect(actions.locator("..")).toHaveCSS("opacity", "1");
     await expect(actions).toBeInViewport();
 
@@ -537,6 +542,7 @@ test.describe("sidebar scrolling", () => {
       "aria-current",
       "true",
     );
+    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
         async () => {

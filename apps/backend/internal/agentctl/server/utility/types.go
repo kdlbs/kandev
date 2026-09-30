@@ -82,6 +82,10 @@ type ProbeRequest struct {
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
 	Refresh bool `json:"refresh,omitempty"`
+	// ProfileContext marks probes started from a concrete profile discovery
+	// request. It prevents launch settings and provider diagnostics from entering
+	// command logs or client-visible errors.
+	ProfileContext bool `json:"profile_context,omitempty"`
 
 	// InferenceConfig is the agent's inference configuration.
 	// Command and WorkDir are required; Model is intentionally omitted for probes.
@@ -148,6 +152,11 @@ const (
 	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
 	// package version under a date-qualified release policy.
 	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
+	// ProbeFailureUnsupportedContext means the selected inference protocol
+	// cannot honor the profile's command prefix or CLI flags.
+	ProbeFailureUnsupportedContext ProbeFailureCode = "unsupported_profile_context"
+	// ProbeFailureAuthenticationRequired is a sanitized authentication failure.
+	ProbeFailureAuthenticationRequired ProbeFailureCode = "authentication_required"
 )
 
 // ProbeAuthMethod is a single advertised authentication method.

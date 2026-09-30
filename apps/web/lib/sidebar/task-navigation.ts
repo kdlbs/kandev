@@ -139,7 +139,7 @@ export function revealSidebarTask(
         if (!isInsideViewport(match.row, match.viewport)) {
           match.row.scrollIntoView({
             behavior: prefersReducedMotion() ? "auto" : "smooth",
-            block: "nearest",
+            block: "center",
             inline: "nearest",
           });
         }

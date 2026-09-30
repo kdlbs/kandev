@@ -68,7 +68,7 @@ test.describe("Native code review — on demand", () => {
     await expect(changesTab).toBeVisible();
     await changesTab.click();
     await expect(
-      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
     ).toBeVisible({
       timeout: 30_000,
     });
@@ -198,7 +198,7 @@ test.describe("Native code review — on demand", () => {
 
     await testPage.getByTestId("dockview-tab-changes").click();
     await expect(
-      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
     ).toBeVisible({
       timeout: 30_000,
     });

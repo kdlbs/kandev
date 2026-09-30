@@ -881,5 +881,7 @@
   "queueMaximumShort": "限制每個工作階段的待處理訊息數。0 表示無限制。",
   "queueMergeShort": "在代理讀取前合併佇列中的相關訊息。",
   "queueAutoMergeShort": "自動合併兼容的連續訊息。",
-  "sleepShort": "任務執行期間防止執行 Kandev 的計算機休眠。"
+  "sleepShort": "任務執行期間防止執行 Kandev 的計算機休眠。",
+  "promptAllowAgentEdits": "允許代理程式編輯",
+  "promptAgentEditsDescription": "代理程式可以修改此提示詞，影響所有使用它的位置。"
 }

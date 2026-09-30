@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/prompts/controller"
 	"github.com/kandev/kandev/internal/prompts/dto"
 	"github.com/kandev/kandev/internal/prompts/service"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
 
 type Handlers struct {
@@ -90,6 +91,8 @@ func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
 			status, message = http.StatusBadRequest, err.Error()
 		case errors.Is(err, service.ErrPromptNotFound):
 			status, message = http.StatusNotFound, err.Error()
+		case errors.Is(err, promptstore.ErrPromptWriteRejected):
+			status, message = http.StatusConflict, err.Error()
 		case errors.Is(err, service.ErrPromptAlreadyExists):
 			status, message = http.StatusConflict, err.Error()
 		}

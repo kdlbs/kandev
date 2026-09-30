@@ -18,11 +18,16 @@ import { sessionRecoveryAction } from "./messages/action-message-recovery";
 
 function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
   if (model.kind === "managed_runtime_npm_resolution")
-    return { title: t("chat:managedRuntimeNpmTitle"), summary: t("chat:managedRuntimeNpmBody") };
+    return {
+      title: t("chat:managedRuntimeNpmTitle"),
+      summary: t("chat:managedRuntimeNpmBody"),
+      showSummary: true,
+    };
   if (model.kind === "managed_runtime_npm_policy")
     return {
       title: t("chat:managedRuntimeNpmPolicyTitle"),
       summary: t("chat:managedRuntimeNpmPolicyBody"),
+      showSummary: true,
     };
   if (model.kind === "provider_quota_limited") {
     const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
@@ -34,18 +39,21 @@ function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTran
         reset && !Number.isNaN(reset.getTime())
           ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
           : t("chat:providerQuotaResetUnknown"),
+      showSummary: true,
     };
   }
   if (model.kind === "managed_clone_relocation_required")
     return {
       title: t("task:managedCloneRelocationTitle"),
       summary: t("task:managedCloneRelocationBody"),
+      showSummary: true,
     };
   const summary = model.summary?.trim();
   const safe = summary && summary.length <= 240 && sanitizeSessionErrorDetails(summary) === summary;
   return {
     title: t("task:sessionRecoveryFailed"),
     summary: safe ? summary : t("task:agentHasStopped"),
+    showSummary: true,
   };
 }
 
@@ -145,6 +153,10 @@ function createRecoveryChoice({
     kind,
     label: copy.label,
     testId: copy.testId,
+    disclosure:
+      kind === "resume" && actions.providerRestoredResumeEligible
+        ? t("task:providerRestoredResumeDisclosure")
+        : undefined,
     disabled: kind === "resume" && !profileExists,
     tooltip: model.metadata?.actions?.find((action) => sessionRecoveryAction(action) === kind)
       ?.tooltip,
@@ -217,7 +229,12 @@ function recoveryPresentationCopy(
 ) {
   if (managedCloneRelocation)
     return recoveryCopy({ ...model, kind: "managed_clone_relocation_required" }, t);
-  if (bootstrap) return { title: t(bootstrap.titleKey), summary: bootstrap.summary };
+  if (bootstrap)
+    return {
+      title: t(bootstrap.titleKey),
+      summary: bootstrap.summary,
+      showSummary: bootstrap.showSummary,
+    };
   return recoveryCopy(model, t);
 }
 

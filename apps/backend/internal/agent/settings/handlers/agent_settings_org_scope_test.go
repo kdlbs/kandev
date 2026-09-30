@@ -26,6 +26,7 @@ var mutatingSettingsRoutes = []struct {
 	{http.MethodPatch, "/api/v1/agents/agent-1"},
 	{http.MethodDelete, "/api/v1/agents/agent-1"},
 	{http.MethodPost, "/api/v1/agents/agent-1/profiles"},
+	{http.MethodPost, "/api/v1/agent-models/codex-acp/probe"},
 	{http.MethodPost, "/api/v1/agent-install/agent-1"},
 	{http.MethodPost, "/api/v1/agent-update/agent-1"},
 	{http.MethodPatch, "/api/v1/agent-profiles/profile-1"},

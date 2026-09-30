@@ -571,6 +571,7 @@ func TestPrepareSession_WithRepository(t *testing.T) {
 
 func TestLaunchPreparedSession_Success(t *testing.T) {
 	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123"}
 
 	// Pre-create session (as PrepareSession would)
 	session := &models.TaskSession{
@@ -599,6 +600,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 			}
 			if req.TaskEnvironmentID == "" {
 				t.Error("Expected non-empty task environment ID")
+			}
+			if req.TaskScope != lifecycle.TaskLaunchScopeTask {
+				t.Errorf("task scope = %q, want %q from the canonical task row", req.TaskScope, lifecycle.TaskLaunchScopeTask)
 			}
 			launchedEnvID = req.TaskEnvironmentID
 			return &LaunchAgentResponse{

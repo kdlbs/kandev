@@ -266,6 +266,24 @@ func TestBuildLifecycleLaunchRequestCarriesMCPProviders(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestCarriesTaskScope(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		TaskScope: lifecycle.TaskLaunchScopeOffice,
+	}, "", "")
+	if launchReq.TaskScope != lifecycle.TaskLaunchScopeOffice {
+		t.Fatalf("TaskScope = %q, want %q", launchReq.TaskScope, lifecycle.TaskLaunchScopeOffice)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesSessionSettingsPolicy(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		SessionSettingsPolicy: orchestratorexecutor.ResumeSettingsPolicyProviderRestored,
+	}, "", "")
+	if launchReq.SessionSettingsPolicy != lifecycle.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("SessionSettingsPolicy = %d, want provider-restored", launchReq.SessionSettingsPolicy)
+	}
+}
+
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")

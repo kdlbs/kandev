@@ -544,7 +544,9 @@
         "get_mcp_config_kandev",
         "update_mcp_config_kandev",
         "list_shared_prompts_kandev",
-        "get_shared_prompt_kandev"
+        "get_shared_prompt_kandev",
+        "create_shared_prompt_kandev",
+        "update_shared_prompt_kandev"
       ]
     },
     {

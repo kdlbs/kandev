@@ -229,6 +229,7 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 	}
+	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
@@ -262,6 +263,31 @@ func (a *Adapter) handleACPUpdate(
 			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
 	}
+}
+
+func (a *Adapter) stampSessionSettingsReports(sessionID string, events ...*AgentEvent) {
+	needsStamp := false
+	for _, event := range events {
+		if event != nil && (event.Type == streams.EventTypeSessionMode || event.Type == streams.EventTypeSessionModels) {
+			needsStamp = true
+			break
+		}
+	}
+	if !needsStamp {
+		return
+	}
+	a.mu.Lock()
+	if a.sessionID == sessionID && !a.closed {
+		a.sessionSettingsGeneration++
+		for _, event := range events {
+			if event == nil || (event.Type != streams.EventTypeSessionMode && event.Type != streams.EventTypeSessionModels) {
+				continue
+			}
+			event.SessionSettingsPolicy = providerRestoredPolicy(a.sessionSettingsPolicy)
+			event.SessionSettingsGeneration = a.sessionSettingsGeneration
+		}
+	}
+	a.mu.Unlock()
 }
 
 func (a *Adapter) observesResponseAttemptReset(promptGeneration uint64, event *AgentEvent) bool {

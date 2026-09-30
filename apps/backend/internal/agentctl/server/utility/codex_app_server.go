@@ -48,8 +48,17 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	if strings.TrimSpace(req.InferenceConfig.WorkDir) == "" {
 		return &ProbeResponse{Error: "work_dir is required for Codex app-server probe"}, nil
 	}
+	if req.ProfileContext && (len(req.InferenceConfig.CLIFlags) > 0 || len(req.InferenceConfig.CommandPrefix) > 0) {
+		return &ProbeResponse{
+			Error:       "profile launch settings are unsupported by the Codex app-server probe",
+			FailureCode: ProbeFailureUnsupportedContext,
+		}, nil
+	}
 	command, args, err := resolveCodexAppServerCommand(req.InferenceConfig)
 	if err != nil {
+		if req.ProfileContext {
+			return &ProbeResponse{Error: "profile capability probe failed"}, nil
+		}
 		return &ProbeResponse{Error: err.Error()}, nil
 	}
 	start := time.Now()
@@ -60,28 +69,46 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	defer cleanup()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
 		stderrTail := stderr.tail()
-		e.logger.Error("Codex app-server probe failed",
-			zap.String("agent_id", req.AgentID),
-			zap.Error(err),
-			zap.String("stderr", stderrTail))
+		failureMessage := utilityUpstreamError(err, stderrTail)
+		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
+		if req.ProfileContext {
+			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
+			e.logger.Error("Codex app-server profile probe failed",
+				zap.String("agent_id", req.AgentID),
+				zap.String("failure_code", string(failureCode)))
+		} else {
+			e.logger.Error("Codex app-server probe failed",
+				zap.String("agent_id", req.AgentID),
+				zap.Error(err),
+				zap.String("stderr", stderrTail))
+		}
 		return &ProbeResponse{
 			Success:     false,
-			Error:       utilityUpstreamError(err, stderrTail),
-			FailureCode: managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail),
+			Error:       failureMessage,
+			FailureCode: failureCode,
 			DurationMs:  int(time.Since(start).Milliseconds()),
 		}, nil
 	}
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
 		stderrTail := stderr.tail()
-		e.logger.Error("Codex app-server probe failed to list models",
-			zap.String("agent_id", req.AgentID),
-			zap.Error(err),
-			zap.String("stderr", stderrTail))
+		failureMessage := utilityUpstreamError(err, stderrTail)
+		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
+		if req.ProfileContext {
+			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
+			e.logger.Error("Codex app-server profile probe failed to list models",
+				zap.String("agent_id", req.AgentID),
+				zap.String("failure_code", string(failureCode)))
+		} else {
+			e.logger.Error("Codex app-server probe failed to list models",
+				zap.String("agent_id", req.AgentID),
+				zap.Error(err),
+				zap.String("stderr", stderrTail))
+		}
 		return &ProbeResponse{
 			Success:     false,
-			Error:       utilityUpstreamError(err, stderrTail),
-			FailureCode: managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail),
+			Error:       failureMessage,
+			FailureCode: failureCode,
 			DurationMs:  int(time.Since(start).Milliseconds()),
 		}, nil
 	}

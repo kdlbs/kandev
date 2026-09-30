@@ -43,7 +43,7 @@ import type { BranchRow, PerRepoStatus } from "./changes-panel-branch-rows";
 
 const ACTION_MENU_ITEM_CLASS = "cursor-pointer gap-2";
 const PANEL_ACTION_BUTTON_CLASS =
-  "h-6 min-h-6 text-[11px] px-1.5 gap-1 cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
+  "h-6 min-h-6 text-[11px] px-1.5 gap-1 cursor-pointer [@media(pointer:coarse)]:min-h-11";
 const WALKTHROUGH_LABEL_KEY = "task:walkMeThroughTheseChanges";
 const REVIEW_LABEL_KEY = "task:filterStateReview";
 
@@ -94,7 +94,7 @@ function RenameBranchButton({
         type="button"
         size="icon"
         variant="ghost"
-        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
+        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
         disabled={!onRenameBranch || isRenaming}
         aria-label={t("task:editBranch", { branch })}
         onClick={openDialog}

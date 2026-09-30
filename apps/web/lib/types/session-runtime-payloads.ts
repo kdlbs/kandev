@@ -48,6 +48,7 @@ export type SessionModelsPayload = {
   config_options: ConfigOptionPayload[];
   config_options_settled?: boolean;
   config_baseline?: Record<string, string>;
+  session_settings_policy?: "strict" | "provider_restored";
   timestamp: string;
 };
 

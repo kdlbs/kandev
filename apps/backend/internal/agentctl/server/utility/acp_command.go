@@ -1,6 +1,7 @@
 package utility
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -8,6 +9,38 @@ import (
 
 	"go.uber.org/zap"
 )
+
+func runACPCommandWithOutput(ctx context.Context, cmd *exec.Cmd, log *zap.Logger) ([]byte, error) {
+	configureACPCommand(cmd, log)
+	cmd.WaitDelay = 2 * acpCommandTerminateGrace
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		acpCommandLogger(log).Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
+	defer releaseACPCommandLifecycle(lifecycle)
+
+	pid := cmd.Process.Pid
+	waitErr := cmd.Wait()
+	cleanupCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		2*acpCommandTerminateGrace+2*acpCommandForceKillGrace,
+	)
+	reapACPProcessGroup(cleanupCtx, pid, log)
+	cancel()
+	if waitErr != nil {
+		return nil, commandErrorWithStderr(waitErr, stderr.String())
+	}
+	return stdout.Bytes(), nil
+}
 
 func configureACPCommand(cmd *exec.Cmd, log *zap.Logger) {
 	log = acpCommandLogger(log)
@@ -51,9 +84,7 @@ func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, lifecycle acpCommandL
 	)
 	defer cancel()
 	log.Debug("ACP command cleanup requested",
-		zap.Int("pid", pid),
-		zap.String("path", cmd.Path),
-		zap.Strings("args", cmd.Args))
+		zap.Int("pid", pid))
 	log.Debug("ACP command process group SIGTERM requested",
 		zap.Int("pgid", pid),
 		zap.String("reason", "cleanup"))

@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
+import { PromptAgentPermission } from "@/components/settings/prompt-agent-permission";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { SettingsGroup } from "@/components/settings/settings-group";
@@ -14,16 +15,19 @@ import { SettingsPromptEditor } from "@/components/settings/settings-prompt-edit
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
 
-const defaultFormState = {
+type PromptFormState = { name: string; content: string; allowAgentEdits?: boolean };
+
+const defaultFormState: PromptFormState = {
   name: "",
   content: "",
+  allowAgentEdits: undefined,
 };
 
 /** The sigil the chat input matches on. Typed verbatim, so never translated. */
@@ -50,8 +54,6 @@ async function runPromptSave(
     throw error;
   }
 }
-
-type PromptFormState = typeof defaultFormState;
 
 type PromptCreateFormProps = {
   formState: PromptFormState;
@@ -115,6 +117,63 @@ type PromptListItemProps = {
   isDeleteTarget: boolean;
 };
 
+type PromptEditFormProps = Pick<
+  PromptListItemProps,
+  "prompt" | "formState" | "onFormChange" | "onCancel" | "isBusy"
+>;
+
+function PromptEditForm({
+  prompt,
+  formState,
+  onFormChange,
+  onCancel,
+  isBusy,
+}: PromptEditFormProps) {
+  const { t } = useTranslation();
+  const nameIsDirty = formState.name !== prompt.name;
+  const contentIsDirty = formState.content !== prompt.content;
+  return (
+    <div className="space-y-3">
+      <Input
+        value={formState.name}
+        onChange={(event) => onFormChange({ name: event.target.value })}
+        placeholder={t("settings:promptNamePlaceholder")}
+        data-testid="prompt-name-input"
+        disabled={isBusy}
+        data-settings-dirty={nameIsDirty}
+      />
+      <SettingsPromptEditor
+        value={formState.content}
+        onChange={(value) => onFormChange({ content: value })}
+        promptReferences
+        excludedPromptIds={[prompt.id]}
+        readOnly={isBusy}
+        testId="prompt-content-input"
+        isDirty={contentIsDirty}
+        dirtyLevel="field"
+      />
+      {!prompt.builtin && (
+        <PromptAgentPermission
+          allowed={formState.allowAgentEdits ?? prompt.allow_agent_edits ?? false}
+          saved={prompt.allow_agent_edits ?? false}
+          disabled={isBusy}
+          onChange={(allowed) =>
+            onFormChange({
+              allowAgentEdits:
+                allowed === (prompt.allow_agent_edits ?? false) ? undefined : allowed,
+            })
+          }
+        />
+      )}
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
+          {t("settings:cancel")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function PromptListItem({
   prompt,
   isEditing,
@@ -135,6 +194,10 @@ function PromptListItem({
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
+  const permissionIsDirty =
+    isEditing &&
+    formState.allowAgentEdits !== undefined &&
+    formState.allowAgentEdits !== (prompt.allow_agent_edits ?? false);
 
   return (
     <div
@@ -142,7 +205,7 @@ function PromptListItem({
       ref={isEditing ? editingRef : null}
       data-testid="prompt-list-item"
       data-prompt-name={prompt.name}
-      data-settings-dirty={nameIsDirty || contentIsDirty}
+      data-settings-dirty={nameIsDirty || contentIsDirty || permissionIsDirty}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -177,31 +240,13 @@ function PromptListItem({
         onConfirm={onDeleteConfirm}
       />
       {isEditing ? (
-        <div className="space-y-3">
-          <Input
-            value={formState.name}
-            onChange={(event) => onFormChange({ name: event.target.value })}
-            placeholder={t("settings:promptNamePlaceholder")}
-            data-testid="prompt-name-input"
-            disabled={isBusy}
-            data-settings-dirty={nameIsDirty}
-          />
-          <SettingsPromptEditor
-            value={formState.content}
-            onChange={(value) => onFormChange({ content: value })}
-            promptReferences
-            excludedPromptIds={[prompt.id]}
-            readOnly={isBusy}
-            testId="prompt-content-input"
-            isDirty={contentIsDirty}
-            dirtyLevel="field"
-          />
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
-              {t("settings:cancel")}
-            </Button>
-          </div>
-        </div>
+        <PromptEditForm
+          prompt={prompt}
+          formState={formState}
+          onFormChange={onFormChange}
+          onCancel={onCancel}
+          isBusy={isBusy}
+        />
       ) : (
         <div className="text-xs text-muted-foreground whitespace-pre-wrap">
           <div className="truncate">{getPromptPreview(prompt.content)}</div>
@@ -313,16 +358,18 @@ function usePromptsState() {
 
 /** The three prompt mutations, sharing the post-write list refresh and reset. */
 function usePromptRequests(
-  prompts: CustomPrompt[],
   setPrompts: (next: CustomPrompt[]) => void,
   editingId: string | null,
   resetForm: () => void,
 ) {
+  const store = useAppStoreApi();
   const applyPrompts = useCallback(
-    (next: CustomPrompt[]) => {
-      setPrompts([...next].sort((a, b) => a.name.localeCompare(b.name)));
+    (change: (current: CustomPrompt[]) => CustomPrompt[]) => {
+      setPrompts(
+        change(store.getState().prompts.items).sort((a, b) => a.name.localeCompare(b.name)),
+      );
     },
-    [setPrompts],
+    [setPrompts, store],
   );
 
   const createRequest = useRequest(async (s: typeof defaultFormState) => {
@@ -330,23 +377,27 @@ function usePromptRequests(
       { name: s.name.trim(), content: s.content.trim() },
       { cache: "no-store" },
     );
-    applyPrompts([...prompts, prompt]);
+    applyPrompts((current) => [...current.filter((p) => p.id !== prompt.id), prompt]);
     resetForm();
   });
 
   const updateRequest = useRequest(async (id: string, s: typeof defaultFormState) => {
     const updated = await updatePrompt(
       id,
-      { name: s.name.trim(), content: s.content.trim() },
+      {
+        name: s.name.trim(),
+        content: s.content.trim(),
+        ...(s.allowAgentEdits === undefined ? {} : { allow_agent_edits: s.allowAgentEdits }),
+      },
       { cache: "no-store" },
     );
-    applyPrompts(prompts.map((p: CustomPrompt) => (p.id === id ? updated : p)));
+    applyPrompts((current) => current.map((p) => (p.id === id ? updated : p)));
     resetForm();
   });
 
   const deleteRequest = useRequest(async (id: string) => {
     await deletePrompt(id, { cache: "no-store" });
-    applyPrompts(prompts.filter((p: CustomPrompt) => p.id !== id));
+    applyPrompts((current) => current.filter((p) => p.id !== id));
     if (editingId === id) resetForm();
   });
 
@@ -355,7 +406,6 @@ function usePromptRequests(
 
 function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   const {
-    prompts,
     setPrompts,
     editingId,
     setEditingId,
@@ -379,7 +429,6 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   );
 
   const { createRequest, updateRequest, deleteRequest } = usePromptRequests(
-    prompts,
     setPrompts,
     editingId,
     resetForm,
@@ -405,7 +454,11 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   const startEditing = (prompt: CustomPrompt) => {
     setEditingId(prompt.id);
     setShowCreate(false);
-    setFormState({ name: prompt.name, content: prompt.content });
+    setFormState({
+      name: prompt.name,
+      content: prompt.content,
+      allowAgentEdits: undefined,
+    });
   };
   const startCreate = () => {
     setEditingId(null);
@@ -444,10 +497,14 @@ export function getPromptDraftMeta(
   formState: PromptFormState,
 ) {
   const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
-  const revision = JSON.stringify(formState);
+  const revision = JSON.stringify({
+    ...formState,
+    allowAgentEdits: formState.allowAgentEdits ?? editingPrompt?.allow_agent_edits ?? false,
+  });
   const savedRevision = JSON.stringify({
     name: editingPrompt?.name ?? "",
     content: editingPrompt?.content ?? "",
+    allowAgentEdits: editingPrompt?.allow_agent_edits ?? false,
   });
   return {
     isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),
@@ -535,7 +592,7 @@ export function PromptsSettings() {
 
           <div className="space-y-3">
             <PromptListContent
-              promptsLoaded={promptsLoaded}
+              promptsLoaded={promptsLoaded || prompts.length > 0}
               prompts={prompts}
               editingId={editingId}
               editingRef={editingRef}

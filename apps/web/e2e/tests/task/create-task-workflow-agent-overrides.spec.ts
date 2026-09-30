@@ -31,6 +31,7 @@ async function selectWorkflow(page: Page, dialog: Locator, workflowName: string)
     .getByRole("button", { name: new RegExp(`^${escapeRegExp(workflowName)}`) })
     .last()
     .click();
+  await expect(page.getByTestId("workflow-selector-popover")).toHaveCount(0);
 }
 
 test.describe("task-specific workflow agent overrides", () => {

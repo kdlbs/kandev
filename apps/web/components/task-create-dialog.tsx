@@ -191,6 +191,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         workflows={workflows as Parameters<typeof WorkflowSection>[0]["workflows"]}
         snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
+        previewWorkspaceId={isCreateMode ? props.workspaceId : undefined}
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}

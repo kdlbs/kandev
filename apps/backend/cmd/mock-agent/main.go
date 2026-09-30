@@ -66,6 +66,10 @@ type mockAgent struct {
 var _ acp.Agent = (*mockAgent)(nil)
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--profile-probe-wrapper" {
+		os.Exit(runProfileProbeWrapper(os.Args[2:], os.Getenv(profileProbeEvidenceEnv)))
+	}
+	recordProfileProbeChildEvidence(os.Args, os.Getenv(profileProbeEvidenceEnv))
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing
@@ -153,6 +157,7 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 	a.mu.Lock()
 	a.nextSessionID++
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d-%d", os.Getpid(), a.nextSessionID))
+	traceACP("session_new", string(sid), nil)
 	a.sessions[sid] = true
 	if a.sessionModes == nil {
 		a.sessionModes = make(map[acp.SessionId]acp.SessionModeId)
@@ -241,6 +246,7 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 		{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
 	}
 	modelOptions = append(modelOptions, mockModelVariationOptions()...)
+	modelOptions = append(modelOptions, mockProfileModelOptions()...)
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
@@ -271,6 +277,46 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			Type:         "select",
 		}},
 	}
+}
+
+func mockProfileModelOptions() []acp.SessionConfigSelectOption {
+	options := make([]acp.SessionConfigSelectOption, 0, 2)
+	if component := profileModelComponent(os.Getenv("MOCK_AGENT_PROFILE_CATALOG")); component != "" {
+		options = append(options, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId("profile-env-" + component),
+			Name:  "Profile env " + component,
+		})
+	}
+	if component := profileModelComponent(profileCatalogFlag(os.Args)); component != "" {
+		options = append(options, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId("profile-cli-" + component),
+			Name:  "Profile CLI " + component,
+		})
+	}
+	return options
+}
+
+func profileCatalogFlag(args []string) string {
+	for index := 1; index < len(args); index++ {
+		if value, found := strings.CutPrefix(args[index], "--profile-catalog="); found {
+			return value
+		}
+		if args[index] == "--profile-catalog" && index+1 < len(args) {
+			return args[index+1]
+		}
+	}
+	return ""
+}
+
+func profileModelComponent(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var result strings.Builder
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			result.WriteRune(char)
+		}
+	}
+	return strings.Trim(result.String(), "-")
 }
 
 func mockModelVariationOptions() []acp.SessionConfigSelectOption {
@@ -310,6 +356,7 @@ func ptr(s string) *string {
 // When --fail-on-resume is set, exit before completing the load — LoadSession
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	traceACP("session_load", string(req.SessionId), nil)
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
@@ -370,6 +417,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
+	traceACP("prompt", string(req.SessionId), map[string]string{"prompt": prompt})
 	acceptanceMarker, cancelHoldPrompt := cancelHoldAcceptanceMarker(prompt)
 	var cancelHold chan struct{}
 	if cancelHoldPrompt {
@@ -472,6 +520,7 @@ func (a *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (
 // SetSessionMode reports the accepted mode through the ACP update that real
 // agents use. The host must observe this report before it claims convergence.
 func (a *mockAgent) SetSessionMode(_ context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	traceACP("set_mode", string(req.SessionId), map[string]string{"mode_id": string(req.ModeId)})
 	if req.ModeId != mockDefaultMode && req.ModeId != mockPlanMode {
 		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mock mode %q", req.ModeId)
 	}
@@ -510,6 +559,12 @@ func (a *mockAgent) emitCurrentModeAfterDelay(sid acp.SessionId, mode acp.Sessio
 }
 
 func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	fields := map[string]string{}
+	if req.ValueId != nil {
+		fields["config_id"] = string(req.ValueId.ConfigId)
+		fields["value"] = string(req.ValueId.Value)
+		traceACP("set_config_option", string(req.ValueId.SessionId), fields)
+	}
 	if req.ValueId == nil {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("mock agent supports select config options only")
 	}

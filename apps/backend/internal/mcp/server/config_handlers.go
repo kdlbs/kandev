@@ -256,6 +256,7 @@ func (s *Server) registerConfigMcpTools() {
 // --- Saved prompt tools ---
 
 func (s *Server) registerConfigPromptTools() {
+	s.registerConfigPromptWriteTools()
 	listTool := mcp.NewToolWithRawSchema(
 		"list_shared_prompts_kandev",
 		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",

@@ -7,10 +7,14 @@ const recoveryActionState = vi.hoisted(() => ({
   busyAction: null as string | null,
   recoveryError: null as Error | null,
   manualRecoveryFailure: null as { operation: "resume" | "restore_workspace" } | null,
-  branchDetails: null,
+  branchDetails: null as {
+    kind: "branch_unrecoverable";
+    recovery_action: "resume_new_branch";
+  } | null,
   guardDetails: null as { retryable: boolean } | null,
   recoveryNotice: null as string | null,
   managedCloneRecoveryStamp: null as string | null,
+  providerRestoredResumeEligible: false,
   handleRecover: vi.fn().mockResolvedValue(true),
   handleRestore: vi.fn().mockResolvedValue(undefined),
   handleNewBranch: vi.fn().mockResolvedValue(true),
@@ -68,11 +72,24 @@ afterEach(() => {
   recoveryActionState.guardDetails = null;
   recoveryActionState.recoveryNotice = null;
   recoveryActionState.managedCloneRecoveryStamp = null;
+  recoveryActionState.providerRestoredResumeEligible = false;
   vi.clearAllMocks();
 });
 
 // eslint-disable-next-line max-lines-per-function -- recovery outcomes share one focused card harness.
 describe("SessionBootstrapRecoveryCard", () => {
+  it("explains skipped overrides before an eligible explicit Resume", () => {
+    recoveryActionState.providerRestoredResumeEligible = true;
+    render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+
+    const disclosure = screen.getByTestId("provider-restored-resume-disclosure");
+    const resume = screen.getByTestId(RESUME_BUTTON_TEST_ID);
+    expect(disclosure.textContent).toBe("task:providerRestoredResumeDisclosure");
+    expect(
+      disclosure.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("shows safe cause details and exposes mobile-sized recovery actions", () => {
     render(
       <SessionBootstrapRecoveryCard
@@ -127,7 +144,7 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(screen.getByTestId("session-bootstrap-recovery-card").getAttribute("role")).toBe(
       "status",
     );
-    expect(screen.getAllByText("task:resumeFailedWorkspaceReadOnly").length).toBe(2);
+    expect(screen.getAllByText("task:resumeFailedWorkspaceReadOnly").length).toBe(1);
     fireEvent.click(
       screen.getByTestId("session-bootstrap-recovery-details").querySelector("summary")!,
     );
@@ -138,6 +155,33 @@ describe("SessionBootstrapRecoveryCard", () => {
       "raw-resume-secret",
     );
     expect(screen.queryByTestId("session-bootstrap-recovery-error")).toBeNull();
+  });
+
+  it("keeps distinct branch guidance visible in the read-only result", () => {
+    recoveryActionState.branchDetails = {
+      kind: "branch_unrecoverable",
+      recovery_action: "resume_new_branch",
+    };
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={error}
+        automaticRecovery={{
+          resumptionState: "resumed",
+          error: null,
+          notice: "task:resumeFailedWorkspaceReadOnly",
+          recoveryFailure: {
+            outcome: "workspace_read_only",
+            resumeError: "resume failed",
+          },
+          resumeSession: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText("task:resumeFailedWorkspaceReadOnly")).toHaveLength(1);
+    expect(screen.getByText("task:branchIsNoLongerAvailable")).toBeTruthy();
   });
 
   it("keeps automatic resume and restore failures as labeled sanitized causes", () => {

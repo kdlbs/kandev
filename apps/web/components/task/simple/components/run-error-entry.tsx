@@ -71,6 +71,7 @@ export function RunErrorEntry({
     guardDetails,
     recoveryNotice,
     manualRecoveryFailure,
+    providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
     handleNewBranch,
@@ -123,6 +124,7 @@ export function RunErrorEntry({
       onNewBranch={handleNewBranch}
       recoveryError={recoveryError}
       recoveryNotice={recoveryNotice}
+      providerRestoredResumeEligible={providerRestoredResumeEligible}
       branchDetails={branchDetails}
       busyAction={busyAction}
       blocked={Boolean(guardDetails && !guardDetails.retryable)}
