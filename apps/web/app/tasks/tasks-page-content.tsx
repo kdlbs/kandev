@@ -2,6 +2,7 @@ import type { PaginationState } from "@tanstack/react-table";
 import type { ReactNode } from "react";
 import type { Repository, Task, Workflow } from "@/lib/types/http";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
+import type { TaskListStepPreviews } from "@/lib/tasks/task-list-sections";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import { TasksListView } from "./tasks-list-view";
@@ -15,6 +16,7 @@ type Props = {
   repositories: Repository[];
   facetOptions: ReadonlyArray<{ value: string; label: string }>;
   facetValues: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews: TaskListStepPreviews;
   total: number;
   pageCount: number;
   pagination: PaginationState;
@@ -58,6 +60,7 @@ export function TasksPageContent(props: Props) {
         onTasksListGroupChange={props.onGroupChange}
         facetOptions={props.facetOptions}
         facetValues={props.facetValues}
+        workflowStepPreviews={props.workflowStepPreviews}
         tasks={props.tasks}
         workflows={props.workflows}
         repositories={props.repositories}

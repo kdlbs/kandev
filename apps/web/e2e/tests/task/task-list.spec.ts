@@ -108,18 +108,21 @@ test.describe("Task List", () => {
     await expect.poll(() => taskRowTitles(testPage)).toEqual(["Zulu sort task", "Alpha sort task"]);
 
     await selectListOption(testPage, "tasks-list-sort", "Title A-Z");
-    await selectListOption(testPage, "tasks-list-group", "State");
+    await selectListOption(testPage, "tasks-list-group", "Workflow step");
 
     await expect(testPage).toHaveURL((url) => {
       return (
-        url.searchParams.get("sort") === "title_asc" && url.searchParams.get("group") === "state"
+        url.searchParams.get("sort") === "title_asc" &&
+        url.searchParams.get("group") === "workflow_step"
       );
     });
     await expect.poll(() => taskRowTitles(testPage)).toEqual(["Alpha sort task", "Zulu sort task"]);
 
     const settings = await apiClient.getUserSettings();
     expect(settings.settings.tasks_list_sort).toBe("title_asc");
-    expect(settings.settings.tasks_list_group).toBe("state");
+    expect(settings.settings.tasks_list_group).toBe("workflow_step");
+    await testPage.reload();
+    await expect(testPage.getByTestId("tasks-list-group")).toContainText("Workflow step");
   });
 
   test("workflow grouping keeps duplicate workflow names separate", async ({
@@ -162,6 +165,84 @@ test.describe("Task List", () => {
     await expect
       .poll(() => taskRowTitles(testPage))
       .toEqual(["Duplicate group Alpha", "Duplicate group Beta"]);
+  });
+
+  test("cold list groups by configured steps across workflows", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const delivery = await apiClient.createWorkflow(seedData.workspaceId, "Delivery");
+    const support = await apiClient.createWorkflow(seedData.workspaceId, "Support");
+    const planning = await apiClient.createWorkflowStep(delivery.id, "Planning", 0, {
+      is_start_step: true,
+    });
+    const implementation = await apiClient.createWorkflowStep(delivery.id, "Implementation", 1);
+    const supportImplementation = await apiClient.createWorkflowStep(
+      support.id,
+      "Implementation",
+      0,
+      {
+        is_start_step: true,
+      },
+    );
+    await apiClient.createTask(seedData.workspaceId, "Draft release checklist", {
+      workflow_id: delivery.id,
+      workflow_step_id: planning.id,
+    });
+    const completed = await apiClient.createTask(seedData.workspaceId, "Improve task navigation", {
+      workflow_id: delivery.id,
+      workflow_step_id: implementation.id,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Add workflow filters", {
+      workflow_id: delivery.id,
+      workflow_step_id: implementation.id,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Resolve notification issue", {
+      workflow_id: support.id,
+      workflow_step_id: supportImplementation.id,
+    });
+    await apiClient.updateTaskState(completed.id, "COMPLETED");
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    await testPage.goto("/tasks?sort=title_asc&group=state");
+    await expect(testPage.getByTestId("tasks-list-group")).toContainText("Workflow step");
+    const sections = testPage.getByTestId("tasks-list-section");
+    await expect(sections).toHaveCount(3);
+    await expect(sections.nth(0)).toContainText("Delivery / Planning");
+    await expect(sections.nth(1)).toContainText("Delivery / Implementation");
+    await expect(sections.nth(1).getByTestId("tasks-list-row-title")).toHaveText([
+      "Add workflow filters",
+      "Improve task navigation",
+    ]);
+    await expect(sections.nth(2)).toContainText("Support / Implementation");
+    const rename = await apiClient.rawRequest(
+      "PUT",
+      `/api/v1/workflow/steps/${implementation.id}`,
+      {
+        name: "Build",
+      },
+    );
+    expect(rename.ok, await rename.text()).toBe(true);
+    await expect(sections.nth(1)).toContainText("Delivery / Build");
+    const restore = await apiClient.rawRequest(
+      "PUT",
+      `/api/v1/workflow/steps/${implementation.id}`,
+      {
+        name: "Implementation",
+      },
+    );
+    expect(restore.ok, await restore.text()).toBe(true);
+    await expect(sections.nth(1)).toContainText("Delivery / Implementation");
+    await expect(testPage.getByTestId("sidebar-task-item").first()).toBeVisible();
+    await expect(testPage.getByText("Updating tasks...", { exact: true })).not.toBeVisible();
+    await prCapture.screenshot("desktop-workflow-step-groups", {
+      caption: "Desktop task list groups by configured steps and distinguishes workflows.",
+    });
   });
 
   test("pagination shows totals, rows per page, and page numbers", async ({

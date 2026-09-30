@@ -41,7 +41,6 @@
   "gitlabMergeRequest": "GitLab マージリクエスト",
   "goToTask": "タスクへ移動",
   "group": "グループ",
-  "groupTasksIntoSectionsByState": "タスクを状態、ワークフロー、リポジトリ、またはなしでセクションにまとめます。",
   "healthIssues": "健康上の問題",
   "improveKandev": "Kandev を改善する",
   "jiraTicket": "Jira チケット",
@@ -133,5 +132,6 @@
   "bulkSelected_other": "{{count}}件選択中",
   "bulkActions": "操作",
   "selectTasks": "タスクを選択",
-  "cancelTaskSelection": "選択をキャンセル"
+  "cancelTaskSelection": "選択をキャンセル",
+  "groupTasksIntoSectionsByWorkflowStep": "タスクをワークフローのステップ、ワークフロー、リポジトリでセクションにまとめるか、グループ化しない設定を選びます。"
 }

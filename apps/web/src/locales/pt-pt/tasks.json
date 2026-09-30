@@ -22,7 +22,6 @@
   "group": "Agrupar",
   "groupByNone": "Nenhum",
   "groupByRepository": "Repositório",
-  "groupByState": "Estado",
   "groupByWorkflow": "Fluxo de trabalho",
   "ungrouped": "Sem grupo",
   "loading": "A carregar...",
@@ -56,5 +55,10 @@
   "unarchivedBranchesMissing_one": "O ramo {{branches}} já não existe localmente nem no remoto; a próxima sessão começa de novo a partir do ramo base.",
   "unarchivedBranchesMissing_other": "Os ramos {{branches}} já não existem localmente nem no remoto; a próxima sessão começa de novo a partir do ramo base.",
   "unarchivedTaskRestored": "A tarefa foi restaurada.",
-  "unarchiveTask": "Desarquivar tarefa"
+  "unarchiveTask": "Desarquivar tarefa",
+  "groupByWorkflowStep": "Etapa do fluxo de trabalho",
+  "noWorkflowStep": "Sem etapa do fluxo de trabalho",
+  "loadingWorkflowStep": "A carregar a etapa do fluxo de trabalho...",
+  "unknownWorkflowStep": "Etapa do fluxo de trabalho desconhecida",
+  "workflowStepSection": "{{workflow}} / {{step}}"
 }
