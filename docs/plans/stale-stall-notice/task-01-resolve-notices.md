@@ -24,6 +24,7 @@ same session and turn. Preserve terminal diagnostics and existing controls.
 
 - A pure timestamp/activity predicate and a boolean store selector.
 - Live-update regression coverage and desktop/mobile hydration evidence.
+- Whole-turn backend read projection and browser evidence for unloaded tool updates.
 - Synthetic before/after screenshot assets outside the PR branch.
 
 ## Out of scope
@@ -37,6 +38,8 @@ Changing watchdog thresholds, cancelling quiet work, or new backend events.
 2. Agent text, reasoning, tools, plans, and permission rows resolve it;
    user/system rows and other sessions/turns do not.
 3. Terminal error diagnostics remain available.
+4. Updates outside the newest history page resolve the notice live and after
+   reload; stale hydration cannot undo known resolution.
 
 ## ASCII UI preview
 
@@ -53,9 +56,13 @@ geometry remains in place.
 ## Verification
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/chat/messages/action-message.test.tsx components/task/chat/messages/running-notice-activity.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/chat/messages/action-message.test.tsx lib/state/slices/session/running-notice-activity.test.ts lib/state/slices/session/session-slice.update-messages.test.ts lib/state/slices/session/message-signature.test.ts lib/state/slices/session/session-slice.merge-messages.test.ts lib/state/slices/session/session-slice.upsert.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint components/task/chat/messages/action-message.tsx components/task/chat/messages/action-message-state.ts components/task/chat/messages/running-notice-activity.ts)
+(cd apps/web && pnpm exec eslint components/task/chat/messages/action-message.tsx components/task/chat/messages/action-message-state.ts lib/state/slices/session/running-notice-activity.ts lib/state/slices/session/session-slice.ts lib/state/slices/session/message-signature.ts)
+(cd apps/backend && go test -race ./internal/task/service ./internal/task/repository/sqlite -count=1)
+(cd apps/backend && go run ./cmd/sqlguard ./internal)
+(cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1)
+(cd apps/backend && golangci-lint run ./... --new-from-rev=origin/main --timeout=5m)
 (cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --project chromium e2e/tests/session/stall-notice-recovery.spec.ts)
 (cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/session/mobile-stall-notice-recovery.spec.ts)
 python3 scripts/list-docs.py validate
@@ -71,8 +78,13 @@ then merge and validate manifests before publication.
 - `apps/web/components/task/chat/messages/action-message.tsx`
 - `apps/web/components/task/chat/messages/action-message-state.ts`
 - `apps/web/components/task/chat/messages/action-message.test.tsx`
-- `apps/web/components/task/chat/messages/running-notice-activity.ts`
-- `apps/web/components/task/chat/messages/running-notice-activity.test.ts`
+- `apps/web/lib/state/slices/session/running-notice-activity.ts`
+- `apps/web/lib/state/slices/session/running-notice-activity.test.ts`
+- `apps/web/lib/state/slices/session/session-slice.ts`
+- `apps/web/lib/state/slices/session/message-signature.ts`
+- `apps/backend/internal/task/service/service_messages.go`
+- `apps/backend/internal/task/service/service_running_notice.go`
+- `apps/backend/internal/task/repository/sqlite/message_running_notice.go`
 - `apps/web/e2e/tests/session/stall-notice-recovery.spec.ts`
 - `apps/web/e2e/tests/session/mobile-stall-notice-recovery.spec.ts`
 
@@ -93,13 +105,18 @@ Keep timestamp precision and distinguish agent activity from status traffic.
 
 - RED: the compaction-row live-update assertion failed in the existing
   action-message harness and in Chromium E2E before the production change.
-- GREEN: targeted Vitest, 57 tests passed across two files.
+- GREEN: targeted Vitest, 128 tests passed across six files after review remediation.
 - TypeScript typecheck and targeted ESLint passed with no errors or warnings.
-- Desktop Chromium and phone mobile-chrome E2E each passed, including
-  the same running turn before/after activity and after reload.
+- Desktop Chromium E2E passed for both loaded and paginated-out compaction
+  tools, including live resolution and reload. Phone mobile-chrome passed with
+  a 44px Cancel turn target, inline geometry, and reload.
+- Backend service/repository race tests passed. The new query passed on real
+  SQLite and PostgreSQL; SQL guard and store conformance passed.
+- Backend changed-code lint passed with zero issues.
 - Specification catalog validation, specification lint, and diff whitespace
   checks passed.
 - Fresh synthetic quiet/resumed screenshots captured for both viewports;
   screenshot binaries are published only on a separate media ref.
+- Review RED: unloaded-tool live updates failed in both reducer actions; a
+  backend paginated read also left the notice unresolved before the projection.
 - PR CI, automated review, and merge are tracked in the platform task plan.
-

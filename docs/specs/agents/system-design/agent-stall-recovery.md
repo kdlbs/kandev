@@ -94,8 +94,18 @@ notice. System status rows, queued user input, and other turns do not resolve
 it. Terminal error diagnostics retain their settled rendering.
 
 The store selector returns a boolean and subscribes only for running-only
-status notices. Both live message events and hydrated persisted rows provide
-the same resolution evidence, so reload does not restore a stale notice.
+status notices. Live message reducers record monotonic
+`metadata.running_notice_resolved` on a loaded notice before discarding an
+update whose older tool row is outside the loaded history window. Reconciliation
+preserves this evidence through stale snapshots and includes it in message
+identity even when the notice timestamp is unchanged.
+
+The task service projects the same metadata on full and paginated transcript
+reads. The repository aggregates the latest eligible agent creation/update
+timestamp across the entire scoped turn without reading tool payloads. This
+read projection does not change stored metadata or require a migration, and
+query failures propagate rather than supplying incorrect evidence. Both live
+events and reload therefore resolve notices independently of the loaded page.
 The advisory message remains persisted and the watchdog still publishes at
 most once per prompt generation; resolution adds no automatic cancellation.
 

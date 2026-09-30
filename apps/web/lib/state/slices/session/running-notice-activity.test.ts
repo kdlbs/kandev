@@ -28,6 +28,12 @@ function activity(overrides: Partial<Message> = {}): Message {
 
 // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.6
 describe("hasAgentActivityAfterNotice", () => {
+  it("uses whole-turn evidence projected onto a paginated notice", () => {
+    const resolved = { ...notice, metadata: { ...notice.metadata, running_notice_resolved: true } };
+    expect(hasAgentActivityAfterNotice(undefined, resolved)).toBe(true);
+    expect(hasAgentActivityAfterNotice([resolved], notice)).toBe(true);
+  });
+
   it.each<MessageType>([
     "message",
     "content",

@@ -1,15 +1,16 @@
+/** Phone coverage for resumed compaction, inline notice geometry, and reload. */
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.6
-test("a compaction stall notice clears on tool activity and stays cleared after reload", async ({
+test("a phone compaction notice has a touch target and clears live and after reload", async ({
   testPage,
   apiClient,
   seedData,
   prCapture,
 }) => {
-  const task = await apiClient.createTask(seedData.workspaceId, "Compaction status recovery", {
+  const task = await apiClient.createTask(seedData.workspaceId, "Phone compaction recovery", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
   });
@@ -50,6 +51,14 @@ test("a compaction stall notice clears on tool activity and stays cleared after 
   const notice = session.activeChat().getByTestId("running-action-notice");
   await expect(notice).toHaveCount(1);
   await expect(notice).toContainText("Still waiting on Compact conversation.");
+  const cancel = notice.getByTestId("stall-cancel-turn-button");
+  const [noticeBox, cancelBox] = await Promise.all([notice.boundingBox(), cancel.boundingBox()]);
+  expect(noticeBox).not.toBeNull();
+  expect(cancelBox).not.toBeNull();
+  expect(noticeBox!.height).toBeLessThanOrEqual(56);
+  expect(cancelBox!.height).toBeGreaterThanOrEqual(44);
+  expect(cancelBox!.width).toBeLessThan(noticeBox!.width);
+  await assertNoDocumentHorizontalOverflow(testPage);
   await expect(session.agentStatus()).toBeVisible();
   await prCapture.screenshot("quiet-turn", {
     caption: "Synthetic running turn with a current compaction notice.",

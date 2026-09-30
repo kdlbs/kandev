@@ -27,7 +27,9 @@ notice incorrectly continues to describe the earlier tool.
 
 One sequential slice: derive subsequent agent activity from existing message
 timestamps, subscribe the action renderer to that boolean, and cover live
-updates and reload. No protocol, persistence schema, provider-specific logic,
+updates and reload. Preserve unloaded tool evidence in the browser and project
+whole-turn resolution metadata on backend transcript reads. No protocol schema,
+persistence schema, provider-specific logic,
 or watchdog frequency changes. Ignore queued user and system status rows.
 Amend AC-AGENTS-AGENT-STALL-RECOVERY-001.6 to capture resumed-turn visibility.
 
@@ -66,14 +68,20 @@ reload to verify persistence. Capture synthetic before/after evidence.
 
 - RED: the compaction-row live-update assertion failed in the existing
   action-message harness and in Chromium E2E before the production change.
-- GREEN: targeted Vitest, 57 tests passed across two files.
+- GREEN: targeted Vitest, 128 tests passed across six files after review remediation.
 - TypeScript typecheck and targeted ESLint passed with no errors or warnings.
-- Desktop Chromium and phone mobile-chrome E2E each passed, including
-  the same running turn before/after activity and after reload.
+- Desktop Chromium E2E passed for both loaded and paginated-out compaction
+  tools, including live resolution and reload. Phone mobile-chrome passed with
+  a 44px Cancel turn target, inline geometry, and reload.
+- Backend service/repository race tests passed. The new query passed on real
+  SQLite and PostgreSQL; SQL guard and store conformance passed.
+- Backend changed-code lint passed with zero issues.
 - Specification catalog validation, specification lint, and diff whitespace
   checks passed.
 - Fresh synthetic quiet/resumed screenshots captured for both viewports;
   screenshot binaries are published only on a separate media ref.
+- Review RED: unloaded-tool live updates failed in both reducer actions; a
+  backend paginated read also left the notice unresolved before the projection.
 - PR CI, automated review, and merge are tracked in the platform task plan.
 
 Public documentation terminology and controls are unchanged. This repair is
@@ -83,3 +91,12 @@ recorded in the owning internal requirement and design.
 
 Using only creation timestamps misses updates to an existing tool. Resolving
 from arbitrary system rows or queued input could hide a legitimate notice.
+The loaded transcript window can omit the resumed tool. Whole-turn reads and
+monotonic live resolution must cover this case without loading its payload.
+
+## Review remediation
+
+PR #4091 identified missing evidence when an older tool falls outside the newest
+100 messages. Extend the same work order with an aggregate read projection,
+live reducer evidence, stale hydration coverage, and a long-history E2E case.
+Strengthen mobile assertions for the existing inline Cancel turn touch target.

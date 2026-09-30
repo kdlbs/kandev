@@ -16,6 +16,13 @@ const AGENT_ACTIVITY_TYPES = new Set<MessageType>([
 ]);
 
 export function hasAgentActivityAfterNotice(messages: Message[] | undefined, notice: Message) {
+  if (
+    notice.metadata?.running_notice_resolved === true ||
+    messages?.some(
+      (message) => message.id === notice.id && message.metadata?.running_notice_resolved === true,
+    )
+  )
+    return true;
   const noticeAt = messageTimestampNanoseconds(notice.created_at);
   if (!notice.turn_id || noticeAt === null) return false;
 
@@ -35,4 +42,18 @@ export function hasAgentActivityAfterNotice(messages: Message[] | undefined, not
       (createdAt !== null && createdAt > noticeAt) || (updatedAt !== null && updatedAt > noticeAt)
     );
   });
+}
+
+/** Preserve evidence from an update whose tool row is outside the loaded window. */
+export function resolveRunningNotices(messages: Message[], activity: Message): void {
+  for (const notice of messages) {
+    if (
+      notice.type === "status" &&
+      notice.metadata?.action_visibility === "running" &&
+      notice.metadata.running_notice_resolved !== true &&
+      hasAgentActivityAfterNotice([activity], notice)
+    ) {
+      notice.metadata.running_notice_resolved = true;
+    }
+  }
 }
