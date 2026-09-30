@@ -468,30 +468,34 @@ describe("ActionMessage — running stall notice", () => {
   });
 
   // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.6
-  it("hides a running notice when the existing compaction tool resumes in the same turn", () => {
-    const notice = stalledMessage();
-    const { addMessage, updateMessage } = renderActionWithStore(notice, "RUNNING", "", "turn-1");
-    const tool: Message = {
-      ...notice,
-      id: "compaction-tool",
-      author_type: "agent",
-      type: "tool_call",
-      content: "Compact conversation",
-      created_at: "2026-05-29T23:59:00Z",
-      updated_at: "2026-05-29T23:59:00Z",
-      metadata: { tool_call_id: "compact-1", status: "running" },
-    };
-    addMessage(tool);
-    expect(screen.queryByTestId("running-action-notice")).not.toBeNull();
+  it.each(["loaded", "unloaded"])(
+    "hides a running notice when a %s compaction tool resumes in the same turn",
+    (toolWindow) => {
+      const notice = stalledMessage();
+      const { addMessage, updateMessage } = renderActionWithStore(notice, "RUNNING", "", "turn-1");
+      const tool: Message = {
+        ...notice,
+        id: "compaction-tool",
+        author_type: "agent",
+        type: "tool_call",
+        content: "Compact conversation",
+        created_at: "2026-05-29T23:59:00Z",
+        updated_at: "2026-05-29T23:59:00Z",
+        metadata: { tool_call_id: "compact-1", status: "running" },
+      };
+      if (toolWindow === "loaded") addMessage(tool);
+      else addMessage(notice);
+      expect(screen.queryByTestId("running-action-notice")).not.toBeNull();
 
-    updateMessage({
-      ...tool,
-      updated_at: "2026-05-30T00:00:01Z",
-      metadata: { ...tool.metadata, status: "complete" },
-    });
+      updateMessage({
+        ...tool,
+        updated_at: "2026-05-30T00:00:01Z",
+        metadata: { ...tool.metadata, status: "complete" },
+      });
 
-    expect(screen.queryByTestId("running-action-notice")).toBeNull();
-  });
+      expect(screen.queryByTestId("running-action-notice")).toBeNull();
+    },
+  );
 
   it("hides a running-only notice without a turn ID", () => {
     const message = stalledMessage();

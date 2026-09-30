@@ -68,7 +68,7 @@ reload to verify persistence. Capture synthetic before/after evidence.
 
 - RED: the compaction-row live-update assertion failed in the existing
   action-message harness and in Chromium E2E before the production change.
-- GREEN: targeted Vitest, 128 tests passed across six files after review remediation.
+- GREEN: targeted Vitest, 129 tests passed across six files after review remediation.
 - TypeScript typecheck and targeted ESLint passed with no errors or warnings.
 - Desktop Chromium E2E passed for both loaded and paginated-out compaction
   tools, including live resolution and reload. Phone mobile-chrome passed with
@@ -100,3 +100,12 @@ PR #4091 identified missing evidence when an older tool falls outside the newest
 100 messages. Extend the same work order with an aggregate read projection,
 live reducer evidence, stale hydration coverage, and a long-history E2E case.
 Strengthen mobile assertions for the existing inline Cancel turn touch target.
+
+## Final history-window proof
+
+The corrected rendered-text assertion exposed automatic history loading when
+all padding rows were hidden logs. Seed visible earlier tool activity instead,
+verify the compaction row is present in the short case and absent in the long
+case, then verify live resolution and reload. The action renderer harness also
+covers an unloaded tool update with only the notice in the message store.
+Both Chromium cases and the focused frontend checks pass.

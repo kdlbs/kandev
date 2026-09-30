@@ -32,9 +32,10 @@ for (const outsideWindow of [false, true]) {
     if (outsideWindow) {
       for (let index = 0; index < 105; index++) {
         await apiClient.seedSessionMessage(sessionId, {
-          type: "log",
-          content: `Earlier status ${index}`,
+          type: "tool_call",
+          content: `Earlier activity ${index}`,
           createdAt: "2026-09-30T00:01:00Z",
+          metadata: { tool_call_id: `history-${index}`, tool_name: "history", status: "complete" },
         });
       }
     }
@@ -60,11 +61,9 @@ for (const outsideWindow of [false, true]) {
     const notice = session.activeChat().getByTestId("running-action-notice");
     await expect(notice).toHaveCount(1);
     await expect(notice).toContainText("Still waiting on Compact conversation.");
-    if (outsideWindow) {
-      await expect(
-        session.activeChat().getByText("Compact conversation", { exact: true }),
-      ).toHaveCount(0);
-    }
+    await expect(
+      session.activeChat().getByText("Compacting conversation", { exact: true }),
+    ).toHaveCount(outsideWindow ? 0 : 1);
     await expect(session.agentStatus()).toBeVisible();
     if (!outsideWindow)
       await prCapture.screenshot("quiet-turn", {
