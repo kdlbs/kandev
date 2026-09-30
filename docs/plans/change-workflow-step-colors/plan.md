@@ -101,7 +101,9 @@ saved class colors. Inspect nontransparent computed backgrounds while choosing
 each option and after selection, then switch workflows and prove the old color
 and selection disappear. Complete the move and verify the destination step.
 Phone coverage uses tap and checks containment, 44px step targets, and document
-overflow. Capture each picker once for rendered visual verification.
+overflow. Capture each picker once for rendered visual verification. PR review follow-up
+extends both scenarios to all nine editor colors, missing/unsupported fallbacks,
+and a custom hex color, checking computed option and selected-trigger styles.
 
 ## Work orders
 

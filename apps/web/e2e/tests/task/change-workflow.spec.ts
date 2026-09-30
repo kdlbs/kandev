@@ -3,6 +3,7 @@ import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
+import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
   waitForNewWorkflowProfileSession,
@@ -29,6 +30,7 @@ test.describe("Change workflow", () => {
         (await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${id}`, { color })).ok,
       ).toBe(true);
     }
+    const remainingColors = await seedRemainingStepColors(apiClient, destination.id);
     const other = await apiClient.createWorkflow(seedData.workspaceId, "Another destination");
     const incoming = await apiClient.createWorkflowStep(other.id, "Incoming", 0);
     const task = await apiClient.createTask(seedData.workspaceId, "Step color task", {
@@ -53,6 +55,12 @@ test.describe("Change workflow", () => {
       await prCapture.screenshot("desktop-step-colors", {
         caption: "Destination step colors in the desktop Change workflow picker",
       });
+    }
+    // Reviewer-requested coverage of the existing palette and fallback CSS.
+    for (const step of remainingColors) {
+      await form.expectStepOptionColor(step.id, step.cssColor);
+      await form.chooseStep(step.id);
+      await form.expectSelectedStepColor(step.cssColor);
     }
     await form.chooseStep(analysis.id);
     await form.expectSelectedStepColor("var(--color-blue-500)");

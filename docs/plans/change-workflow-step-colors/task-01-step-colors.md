@@ -151,3 +151,27 @@ disable finite animations to avoid inspecting a partially entered popover.
 Documentation and diff gates: recorded by the plan's final validation results.
 The user subsequently requested PR publication. Desktop and phone PR assets
 are captured through the shared manifest fixture after finite animations settle.
+
+
+### PR review follow-up
+
+Greptile identified a browser coverage gap: blue and green alone cannot prove
+that the remaining saved palette and fallback classes have generated CSS.
+This follow-up extends the existing desktop and phone scenarios with all nine
+editor colors, missing and unsupported values (slate fallback), and a custom
+hex value. Every additional case checks both the option and selected trigger
+against computed CSS in the production build. The seed data is shared in
+`e2e/tests/task/change-workflow-color-helpers.ts`.
+
+This is reviewer-requested coverage of behavior already implemented; it requires
+no production change or new failing behavior. The original search, reset, move,
+and phone containment/touch assertions remain in the scenarios. Existing PR
+screenshots remain representative because the rendered product is unchanged.
+
+Validation: desktop managed command in Verification with `--retries=0` passed,
+one test covering all twelve color cases. The matching phone command with
+`--retries=0` also passed, one test covering the same twelve cases through taps.
+Targeted ESLint passed for both scenarios and their new shared seed helper.
+The 4 GB-heap typecheck and local PR-documentation coverage validator passed.
+No product behavior, palette, copy, or layout changed; no public-docs update is
+needed. Current-head CI/review readiness remains externally pending after push.

@@ -4,6 +4,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
+import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import { ThreadActionsPage } from "./threads-task-actions-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
@@ -30,6 +31,7 @@ test("shows step colors when selecting a destination on phone", async ({
       true,
     );
   }
+  const remainingColors = await seedRemainingStepColors(apiClient, destination.id);
   const other = await apiClient.createWorkflow(seedData.workspaceId, "Phone other destination");
   const incoming = await apiClient.createWorkflowStep(other.id, "Incoming", 0);
   const task = await apiClient.createTask(seedData.workspaceId, "Phone step color task", {
@@ -55,6 +57,12 @@ test("shows step colors when selecting a destination on phone", async ({
     await prCapture.screenshot("phone-step-colors", {
       caption: "Destination step colors in the phone Change workflow picker",
     });
+  }
+  // Reviewer-requested coverage of the existing palette and fallback CSS.
+  for (const step of remainingColors) {
+    await form.expectStepOptionColor(step.id, step.cssColor);
+    await form.chooseStep(step.id);
+    await form.expectSelectedStepColor(step.cssColor);
   }
   await form.chooseStep(analysis.id);
   await form.expectSelectedStepColor("var(--color-blue-500)");
