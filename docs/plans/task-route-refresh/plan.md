@@ -31,6 +31,8 @@ navigation ownership contract in
 ## Results
 
 The task page now refreshes the task selected by its route and drops stale fetch
-responses. E2E coverage waits for durable archive cleanup and server shell
-teardown before it asserts the resulting state. Focused repeated E2E runs and the
+responses. A delayed unarchive callback from an earlier route cannot invalidate
+the current route's pending request. E2E coverage waits for durable archive
+cleanup and server shell teardown before it asserts the resulting state.
+Focused repeated E2E runs and the
 task-page unit suite passed locally.

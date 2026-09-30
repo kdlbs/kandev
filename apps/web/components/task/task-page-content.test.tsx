@@ -143,6 +143,45 @@ describe("useTaskDetails reconnect refresh", () => {
   });
 });
 
+describe("useTaskDetails delayed unarchive navigation", () => {
+  it("keeps the new route load when an old unarchive callback completes", async () => {
+    const archivedTask = {
+      id: taskId(TASK_A),
+      title: "Archived task",
+      archived_at: TASK_CREATED_AT,
+    } as Task;
+    const newTask = { id: taskId(TASK_B), title: "New route task" } as Task;
+    let resolveNewRoute!: (task: Task) => void;
+    const newRouteResponse = new Promise<Task>((resolve) => {
+      resolveNewRoute = resolve;
+    });
+    const fetchTask = vi
+      .spyOn(api, "fetchTask")
+      .mockImplementation((id) =>
+        id === TASK_B ? newRouteResponse : Promise.resolve(archivedTask),
+      );
+    const { result, rerender } = renderHook(
+      ({ activeId, initialTask }) => useTaskDetails(activeId, initialTask),
+      {
+        wrapper: createStateWrapper({}),
+        initialProps: { activeId: TASK_A, initialTask: archivedTask as Task | null },
+      },
+    );
+    const oldUnarchiveCallback = result.current.onTaskUnarchived;
+
+    rerender({ activeId: TASK_B, initialTask: null });
+    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_B, { cache: "no-store" }));
+    act(() => oldUnarchiveCallback(TASK_A));
+
+    await act(async () => {
+      resolveNewRoute(newTask);
+      await newRouteResponse;
+    });
+    await waitFor(() => expect(result.current.task?.id).toBe(TASK_B));
+    expect(fetchTask.mock.calls.map(([id]) => id)).toEqual([TASK_B]);
+  });
+});
+
 describe("useTaskDetails unarchive refresh", () => {
   it("refreshes the route task after unarchive before active-task hydration", async () => {
     const archivedTask = {

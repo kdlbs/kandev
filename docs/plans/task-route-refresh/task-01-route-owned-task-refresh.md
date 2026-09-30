@@ -25,6 +25,7 @@ request for a previous task must not overwrite data for the task now shown.
 - Scope task-page hydration and foreground refresh to the routed task ID.
 - Reject a fetch response when a later navigation has started another request.
 - Add regressions for a stale global task selection and out-of-order responses.
+- Ignore a previous route's delayed unarchive callback before starting a refresh.
 - Make archive recovery and terminal E2E assertions wait for durable lifecycle
   state.
 
@@ -46,3 +47,11 @@ request for a previous task must not overwrite data for the task now shown.
 - Task-page unit tests pass.
 - Focused mobile and desktop E2E cases pass repeated runs with retries disabled.
 - Changed-file lint and the PR documentation-coverage evaluator pass.
+
+## Results
+
+The delayed-unarchive regression failed before the request guard: an old callback
+invalidated the new route's pending load and left its details unresolved. The
+guard now rejects the old task before advancing the request generation. The
+task-page unit suite passes, including the delayed callback and older-response
+regressions.

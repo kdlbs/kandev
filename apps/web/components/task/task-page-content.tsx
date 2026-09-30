@@ -210,7 +210,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   });
   const loadTaskDetails = useCallback(
     async (refresh = true, taskId = effectiveTaskId) => {
-      if (!taskId) return;
+      if (!taskId || effectiveTaskIdRef.current !== taskId) return;
       const requestedTaskId = taskId;
       const requestId = ++taskDetailsRequestIdRef.current;
       try {
