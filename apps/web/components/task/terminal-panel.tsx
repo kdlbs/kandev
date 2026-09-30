@@ -21,7 +21,8 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   const type = (params.type as string) ?? "shell";
   const isDevServer = type === DEV_SERVER_PANEL_ID;
 
-  const environmentId = useEnvironmentId();
+  const hookEnvironmentId = useEnvironmentId();
+  const environmentId = (params.environmentId as string | undefined) ?? hookEnvironmentId;
 
   // The dev process is restarted under a new id on every start, so the store is
   // the authoritative source and a `processId` in the panel params is ignored:

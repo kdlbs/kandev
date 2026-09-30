@@ -103,5 +103,11 @@ eligibility checks and inventory preservation preflight ordering remain intact.
 
 Validation: affected executor, orchestrator, and handler suites passed locally,
 including the strict-policy regression. Documentation catalog and specification
-lint and backend lint passed (zero issues). Normal commit hooks and fresh GitHub
-CI remain pending.
+lint and backend lint passed (zero issues). The provider-settings merge passed
+normal commit hooks without bypass.
+
+After integrating newer upstream changes, all six affected package suites and
+the offline inventory-repair package and command suites passed. Backend lint
+passed with zero issues on retry after its initial five-minute timeout. Harness,
+documentation catalog, and specification validation passed. Remote delivery and
+fresh GitHub CI remain pending because authenticated GitHub access is unavailable.

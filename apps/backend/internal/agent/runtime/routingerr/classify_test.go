@@ -222,6 +222,99 @@ func TestClassify_OpenCodePeriodUsageLimitsAreHighConfidenceQuota(t *testing.T) 
 	}
 }
 
+func TestClassify_OpenCodeCreditLimitReachedIsHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name   string
+		stderr string
+	}{
+		{"observed DevPass message", "AI_APICallError: Dev Plan credit limit reached. Upgrade your plan or wait for renewal on 10/08/2026 Or enable pay-as-you-go overflow in your DevPass dashboard to keep going past your allowance"},
+		{"plural credits exhausted", "AI_APICallError: out of credits"},
+		{"singular credit exhausted", "AI_APICallError: out of credit"},
+		{"insufficient plural credits", "AI_APICallError: insufficient credits for this request"},
+		{"insufficient singular credit", "AI_APICallError: insufficient credit"},
+		{"insufficient balance", "AI_APICallError: insufficient balance"},
+		{"case insensitive", "AI_APICallError: CREDIT LIMIT REACHED"},
+		{"variable whitespace", "AI_APICallError: out\t of  credits"},
+		{"payment with exhausted allowance", "AI_APICallError: payment required: credit limit reached"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{
+				Phase:      PhaseStreaming,
+				ProviderID: "opencode-acp",
+				Stderr:     tc.stderr,
+			})
+			if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard {
+				t.Fatalf("classification = %+v, want high-confidence hard quota_limited", e)
+			}
+			if e.ClassifierRule != "opencode.stderr.credit.v1" {
+				t.Fatalf("classifier rule = %s, want opencode.stderr.credit.v1", e.ClassifierRule)
+			}
+			if !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
+				t.Fatalf("credit exhaustion recovery flags violated: %+v", e)
+			}
+		})
+	}
+}
+
+func TestClassify_OpenCodeCreditRuleRejectsUnrelatedText(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name     string
+		provider string
+		stderr   string
+	}{
+		{"bare credit", "opencode-acp", "credit"},
+		{"bare credits", "opencode-acp", "credits"},
+		{"purchase suggestion", "opencode-acp", "Visit the dashboard to purchase more credits"},
+		{"allowance remains", "opencode-acp", "Your credit limit is approaching"},
+		{"leading word boundary", "opencode-acp", "discredit limit reached"},
+		{"trailing word boundary", "opencode-acp", "out of creditsuffix"},
+		{"credit word suffix", "opencode-acp", "insufficient creditworthiness"},
+		{"other provider", "codex-acp", "credit limit reached"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{Phase: PhaseStreaming, ProviderID: tc.provider, Stderr: tc.stderr})
+			if e.Code != CodeAgentRuntime || e.Confidence != ConfLow || e.FallbackAllowed {
+				t.Fatalf("unrelated credit text must retain ambiguous post-start recovery: %+v", e)
+			}
+		})
+	}
+}
+
+func TestClassify_OpenCodePaymentRequiredNeedsUserAction(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name       string
+		stderr     string
+		httpStatus int
+		wantRule   string
+	}{
+		{"plain payment error", "AI_APICallError: payment required to continue", 0, "opencode.stderr.subscription.v1"},
+		{"case and whitespace", "AI_APICallError: PAYMENT\tREQUIRED", 0, "opencode.stderr.subscription.v1"},
+		{"unrelated credit mention", "payment required: update your credit card", 0, "opencode.stderr.subscription.v1"},
+		{"HTTP status precedes credit text", "AI_APICallError: credit limit reached", http.StatusPaymentRequired, "http.402"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{
+				Phase:      PhaseStreaming,
+				ProviderID: "opencode-acp",
+				Stderr:     tc.stderr,
+				HTTPStatus: tc.httpStatus,
+			})
+			if e.Code != CodeSubscriptionRequired || e.Confidence != ConfHigh || e.ClassifierRule != tc.wantRule {
+				t.Fatalf("payment classification = %+v, want high-confidence subscription_required via %s", e, tc.wantRule)
+			}
+			if !e.UserAction || e.AutoRetryable || !e.FallbackAllowed {
+				t.Fatalf("payment recovery flags violated: %+v", e)
+			}
+		})
+	}
+}
+
 func TestHasProviderRules(t *testing.T) {
 	if !HasProviderRules("opencode-acp") {
 		t.Fatal("opencode-acp should have provider rules")

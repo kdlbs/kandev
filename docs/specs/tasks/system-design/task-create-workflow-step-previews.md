@@ -104,6 +104,24 @@ The primary action is selecting a workflow; retry is secondary. Keep phone and
 coarse-pointer targets at least 44 CSS pixels. Ordinary desktop retry buttons
 use standard control sizing. Do not change safe-area handling of the parent dialog.
 
+### Vertical scrolling
+
+`WorkflowSelectorOptionList` renders a bounded `PopoverContent`. The shared
+`apps/packages/ui/src/popover.tsx` primitive supplies its flex column layout.
+Use Radix's available-height variable and collision padding for viewport
+containment. The heading remains outside the option list.
+
+`workflow-selector-option-list` is the single vertical scroll owner. Its
+minimum height permits flex shrinking. Its maximum height reserves space for
+the heading, padding, and border. Keep horizontal overflow hidden and wrap step
+groups. Keep the popover in the task dialog's portal container so the modal
+permits wheel and touch events in the picker.
+
+Verify AC-TASKS-CREATE-WORKFLOW-STEPS-001.7 with overflowing workflow inventory.
+Native wheel or touch input must reach both ends before selection. Direct
+`scrollTop` assignments alone do not verify that modal input reaches the list.
+Keyboard navigation must reveal the focused option inside the same scroll owner.
+
 ## Persistence, security, and diagnostics
 
 No schema, persisted preference, API authorization, or runtime flag changes are
@@ -126,3 +144,4 @@ prove all workflow previews without first visiting the board.
 ## Implementation plans
 
 - [Workflow step preview repair](../../../plans/task-create-workflow-step-previews/plan.md)
+- [Workflow picker scrolling regression](../../../plans/task-create-workflow-scroll/plan.md)

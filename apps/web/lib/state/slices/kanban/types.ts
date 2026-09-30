@@ -4,6 +4,8 @@ import type {
   ReorderedTaskPosition,
   TaskPendingAction,
   TaskOrigin,
+  TaskCoverage,
+  TaskWorkflowCoverage,
   TaskPriority,
   TaskState as TaskStatus,
   WorkflowProfileSessionEndPolicy,
@@ -50,6 +52,9 @@ export type TaskDependencyRef = {
 };
 
 export type KanbanState = {
+  taskCoverage?: TaskCoverage;
+  /** Ordered membership; tasks is the canonical compatibility projection. */
+  taskIds?: string[];
   workflowId: string | null;
   steps: Array<{
     id: string;
@@ -215,6 +220,8 @@ export type KanbanState = {
 };
 
 export type WorkflowSnapshotData = {
+  taskIds?: string[];
+  taskCoverage?: TaskCoverage;
   workflowId: string;
   workflowName: string;
   steps: KanbanState["steps"];
@@ -265,6 +272,7 @@ export type SidebarArchivedTasksState = {
 };
 
 export type WorkflowsState = {
+  taskWorkflowCoverage?: TaskWorkflowCoverage;
   items: Array<{
     id: string;
     workspaceId: string;
@@ -367,7 +375,7 @@ export type KanbanSliceActions = {
   ) => void;
   requestWorkspaceContextRefresh: (resetRetryCycle?: boolean) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  setWorkflows: (workflows: WorkflowsState["items"], coverage?: TaskWorkflowCoverage) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   /** Automatic task selection that must not invalidate a user navigation revision. */

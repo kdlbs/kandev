@@ -77,6 +77,24 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
   });
+  await apiClient.archiveTask(task.id);
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seedData.workspaceId,
+      views: [
+        {
+          id: "cold-archive",
+          name: "Cold archive",
+          filters: [{ id: "archive", dimension: "archived", op: "is", value: true }],
+          sort: { key: "title", direction: "asc" },
+          group: "none",
+          collapsed_groups: [],
+        },
+      ],
+      active_view_id: "cold-archive",
+      draft: null,
+    },
+  });
   let sidebarPageUnavailable = true;
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -98,22 +116,22 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   const workflowListLoaded = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.ok(),
   });
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+  await workflowListLoaded;
+
+  const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
   const failedSidebarPageRead = waitForHttp(
     testPage,
     "POST",
     new RegExp(`^/api/v1/workspaces/${seedData.workspaceId}/sidebar/query$`),
     { predicate: (response) => response.status() === 503 },
   );
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
-  await workflowListLoaded;
-  await failedSidebarPageRead;
-
-  const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
+  await failedSidebarPageRead;
   await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 

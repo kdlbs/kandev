@@ -37,6 +37,8 @@ type Repository struct {
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
+	// sidebarQueryStage injects failures at resource boundaries in repository tests.
+	sidebarQueryStage func(string, *sqlx.Tx) error
 	// failCutoverAfter is a test-only failpoint for the worktree ownership
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
