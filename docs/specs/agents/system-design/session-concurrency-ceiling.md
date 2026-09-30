@@ -207,6 +207,30 @@ Office automatic starts do not use workflow-step auto-start eligibility when the
 sweep evaluates a `start` record. This keeps Office scheduling ownership in the
 Office path.
 
+An automation run's start refused at seam 1 is queued, not failed. The `start`
+payload records the run ID and thread disposition under `automation_run`. The
+automation dispatcher receives `ErrRunDeferred`, so it leaves the run
+`triggered` and bound to its task, and the run keeps its concurrency slot while
+the ceiling stays full. The orchestrator skips failure cleanup, so the task and
+its record remain. The sweep replays that start through the same dispatcher. It
+binds the new session and turn to the run, or fails the run when the launch
+fails for a non-ceiling reason. When the launch succeeds but the binding fails,
+the run is failed and the launched session is stopped, since no completion
+would settle the run; the task is kept. Workflow-step auto-start eligibility
+does not apply because the trigger is the start signal.
+
+The sweep drops a start whose run was deleted or is no longer `triggered`, such
+as a stopped, bound, failed, or startup-reconciled run, without launching. A run
+that closes between that check and the replay's dispatch is reported by the
+replay, and the start is dropped the same way. Dropping any other queued
+automation start first fails its run, because no completion event will settle
+it; the record is cleared only after the run is no longer waiting, so a failed
+run update leaves the record for the next sweep. A queued automation start does
+not survive a backend restart: startup reconciliation fails the unbound run, and
+the sweep then drops the start. When the task is hard-deleted while its start is
+queued, the record goes with the task and the `triggered` run keeps its slot
+until it is stopped or until the next backend start.
+
 ## Persistence
 
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
