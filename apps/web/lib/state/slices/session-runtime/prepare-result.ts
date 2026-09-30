@@ -9,6 +9,8 @@ type RawPrepareStep = {
   name: string;
   kind?: string;
   remote_platform?: string;
+  mcp_server_id?: string;
+  mcp_provider?: string;
   failure_code?: string;
   command?: string;
   status: string;
@@ -25,6 +27,8 @@ type RawPrepareResult = {
   steps?: RawPrepareStep[];
   error_message?: string;
   duration_ms?: number;
+  preparation_id?: string;
+  preparation_started_at?: string;
 };
 
 /**
@@ -46,20 +50,27 @@ export function prepareResultToSessionState(
   return {
     sessionId,
     status: pr.status ?? "completed",
-    steps: (pr.steps ?? []).map((s) => ({
-      name: s.name,
-      kind: s.kind,
-      remotePlatform: s.remote_platform,
-      failureCode: s.failure_code,
-      command: s.command,
-      status: s.status,
-      output: s.output,
-      error: s.error,
-      warning: s.warning,
-      warningDetail: s.warning_detail,
-      startedAt: s.started_at,
-      endedAt: s.ended_at,
-    })),
+    preparationId: pr.preparation_id,
+    preparationStartedAt: pr.preparation_started_at,
+    steps: (pr.steps ?? []).map((s) => {
+      const isMcp = s.kind?.startsWith("agent_mcp_") === true;
+      return {
+        name: isMcp ? "" : s.name,
+        kind: s.kind,
+        remotePlatform: s.remote_platform,
+        mcpServerId: s.mcp_server_id,
+        mcpProvider: s.mcp_provider,
+        failureCode: s.failure_code,
+        command: isMcp ? undefined : s.command,
+        status: s.status,
+        output: isMcp ? undefined : s.output,
+        error: isMcp ? undefined : s.error,
+        warning: isMcp ? undefined : s.warning,
+        warningDetail: isMcp ? undefined : s.warning_detail,
+        startedAt: s.started_at,
+        endedAt: s.ended_at,
+      };
+    }),
     errorMessage: pr.error_message,
     durationMs: pr.duration_ms,
   };

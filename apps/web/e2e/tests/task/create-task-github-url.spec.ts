@@ -236,6 +236,7 @@ test.describe("Task creation from GitHub URL", () => {
       await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
       const session = new SessionPage(testPage);
       await session.waitForLoad();
+      await session.waitForChatIdle({ requireEditable: true });
       await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
       await expect(session.idleInput()).toBeVisible();
 

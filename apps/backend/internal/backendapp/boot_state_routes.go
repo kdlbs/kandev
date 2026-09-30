@@ -833,6 +833,18 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 	}
 	return map[string]any{
 		"id":                          task.ID,
+		"workspaceId":                 task.WorkspaceID,
+		"workflowId":                  task.WorkflowID,
+		"origin":                      task.Origin,
+		"metadata":                    task.Metadata,
+		"isArchived":                  task.ArchivedAt != nil,
+		"isFromOffice":                task.IsFromOffice,
+		"primaryExecutorId":           task.PrimaryExecutorID,
+		"primaryExecutorProfileId":    task.PrimaryExecutorProfileID,
+		"primaryExecutorType":         task.PrimaryExecutorType,
+		"primaryExecutorName":         task.PrimaryExecutorName,
+		"isRemoteExecutor":            task.IsRemoteExecutor,
+		"foregroundActivity":          task.ForegroundActivity,
 		"workflowStepId":              task.WorkflowStepID,
 		"title":                       task.Title,
 		"description":                 task.Description,

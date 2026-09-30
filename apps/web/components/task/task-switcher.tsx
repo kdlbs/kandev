@@ -191,8 +191,7 @@ function LoadErrorNotice({
   if (!error) return null;
   return (
     <div
-      role="status"
-      aria-live="polite"
+      role="alert"
       className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
       data-testid="sidebar-task-load-error"
     >

@@ -647,3 +647,26 @@ describe("ProfileFormFields save coordination", () => {
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
   });
 });
+
+describe("ProfileFormFields Cursor MCP preferences", () => {
+  it("renders Cursor plugin MCP import preference when supported and toggles it", () => {
+    const onChange = vi.fn();
+    renderForm(formData({ cursor_plugins_mcp_enabled: true }), modelConfig, onChange, true);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Import local Cursor plugin MCP servers",
+    });
+    expect(checkbox).toBeDefined();
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({ cursor_plugins_mcp_enabled: false });
+  });
+
+  it("hides Cursor plugin MCP import preference when not supported", () => {
+    renderForm(formData(), modelConfig, vi.fn(), false);
+    expect(
+      screen.queryByRole("checkbox", { name: "Import local Cursor plugin MCP servers" }),
+    ).toBeNull();
+  });
+});

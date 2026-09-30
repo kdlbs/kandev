@@ -198,11 +198,13 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
-	MetadataKeyRepositoryPath  = "repository_path"
-	MetadataKeySetupScript     = "setup_script"
-	MetadataKeyCleanupScript   = "cleanup_script"
-	MetadataKeyRepoSetupScript = "repository_setup_script"
-	MetadataKeyBaseBranch      = "base_branch"
+	MetadataKeyRepositoryPath = "repository_path"
+	// MetadataKeyRepositoryConfigured is set by launch from RepoSpecs, not task metadata.
+	MetadataKeyRepositoryConfigured = "repository_configured"
+	MetadataKeySetupScript          = "setup_script"
+	MetadataKeyCleanupScript        = "cleanup_script"
+	MetadataKeyRepoSetupScript      = "repository_setup_script"
+	MetadataKeyBaseBranch           = "base_branch"
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.

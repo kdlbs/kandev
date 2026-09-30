@@ -52,6 +52,7 @@ type mockAgentServer struct {
 	server               *httptest.Server
 	mu                   sync.Mutex
 	actionLog            []string // ordered log of actions received
+	httpActionLog        []string
 	rejectStreamAttempts int
 	agentStatus          string
 	upgrader             websocket.Upgrader
@@ -80,6 +81,30 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		m.httpActionLog = append(m.httpActionLog, "stop")
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true}`)
+	})
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		m.httpActionLog = append(m.httpActionLog, "configure")
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true}`)
+	})
+	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		m.httpActionLog = append(m.httpActionLog, "start")
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"command":"cursor-agent acp"}`)
+	})
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		m.mu.Lock()
 		status := m.agentStatus
@@ -293,6 +318,12 @@ func (m *mockAgentServer) getActionLog() []string {
 	result := make([]string, len(m.actionLog))
 	copy(result, m.actionLog)
 	return result
+}
+
+func (m *mockAgentServer) getHTTPActionLog() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.httpActionLog...)
 }
 
 func (m *mockAgentServer) Close() {

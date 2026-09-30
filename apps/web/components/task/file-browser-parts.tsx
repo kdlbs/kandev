@@ -26,7 +26,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
-import { measureFileTreeElement } from "./file-tree-measurement";
+import { measureFileTreeElement, observeFileTreeRect } from "./file-tree-measurement";
 import { InlineFileInput } from "./inline-file-input";
 import {
   FileContextMenu,
@@ -528,6 +528,7 @@ function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
       return row?.type === "create" ? `create:${row.parentPath}` : (row?.row.path ?? index);
     },
     measureElement: measureFileTreeElement,
+    observeElementRect: observeFileTreeRect,
     overscan: 5,
   });
 

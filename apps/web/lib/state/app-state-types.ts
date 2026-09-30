@@ -78,6 +78,7 @@ import type {
   KanbanSlice,
   NeedsYouInboxBootSeed,
 } from "./slices";
+import type { TaskOverviewSlice } from "./slices/task-overview-types";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type {
   AvailableCommand,
@@ -693,7 +694,8 @@ export type AppState = KanbanSlice & {
   restoreChatAnimations: UIA["restoreChatAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & AppStateExtraActions &
+} & TaskOverviewSlice &
+  AppStateExtraActions &
   Pick<UIA, "setQuickChatInitialPrompt" | "requestQuickChatOpen" | "setQuickChatSelectionIdentity">;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see

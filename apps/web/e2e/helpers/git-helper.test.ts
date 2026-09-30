@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../pages/kanban-page", () => ({ KanbanPage: vi.fn() }));
 vi.mock("../pages/session-page", () => ({ SessionPage: vi.fn() }));
-import { GitHelper, makeGitEnv } from "./git-helper";
+import type { ApiClient } from "./api-client";
+import { GitHelper, makeGitEnv, createStandardProfile } from "./git-helper";
 
 describe("GitHelper.pushMainWithRetry", () => {
   it("does not rebase or retry a server-side rejection", () => {
@@ -73,5 +74,45 @@ describe("GitHelper.pushMainWithRetry", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("createStandardProfile", () => {
+  it("creates a mock profile when disabled and virtual agents precede the mock agent", async () => {
+    const createAgentProfile = vi.fn().mockResolvedValue({ id: "profile-id" });
+    const apiClient = {
+      listAgents: vi.fn().mockResolvedValue({
+        agents: [
+          { id: "disabled-id", name: "openai-compatible" },
+          { id: "dynamic", name: "dynamic" },
+          { id: "mock-id", name: "mock-agent" },
+        ],
+      }),
+      createAgentProfile,
+    } as unknown as ApiClient;
+
+    await expect(createStandardProfile(apiClient, "file-viewer")).resolves.toEqual({
+      id: "profile-id",
+    });
+    expect(createAgentProfile).toHaveBeenCalledWith("mock-id", "file-viewer", {
+      model: "mock-fast",
+      auto_approve: true,
+      cli_passthrough: false,
+    });
+  });
+
+  it("reports a missing mock agent instead of creating a profile for another family", async () => {
+    const createAgentProfile = vi.fn();
+    const apiClient = {
+      listAgents: vi.fn().mockResolvedValue({
+        agents: [{ id: "dynamic", name: "dynamic" }],
+      }),
+      createAgentProfile,
+    } as unknown as ApiClient;
+
+    await expect(createStandardProfile(apiClient, "file-viewer")).rejects.toThrow(
+      "mock-agent unavailable in test fixtures",
+    );
+    expect(createAgentProfile).not.toHaveBeenCalled();
   });
 });

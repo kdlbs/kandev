@@ -109,6 +109,12 @@ func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string
 	for _, w := range workflows {
 		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
 	}
+	if includeHidden {
+		result.TaskWorkflowCoverage, err = h.service.TaskWorkflowCoverage(ctx, workspaceID)
+		if err != nil {
+			h.logger.Warn("workflow task coverage unavailable", zap.Error(err))
+		}
+	}
 	return result, nil
 }
 
@@ -334,6 +340,7 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 		return
 	}
 
+	totalTasks := len(tasks)
 	tasks = applyTaskLimit(c, tasks)
 
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
@@ -343,9 +350,10 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
-		Workflow: dto.FromWorkflow(workflow),
-		Steps:    steps,
-		Tasks:    taskDTOs,
+		Workflow:     dto.FromWorkflow(workflow),
+		Steps:        steps,
+		Tasks:        taskDTOs,
+		TaskCoverage: h.service.WorkflowTaskCoverage(workflow, totalTasks, len(taskDTOs)),
 	})
 }
 
@@ -396,6 +404,7 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 		return
 	}
 
+	totalTasks := len(tasks)
 	tasks = applyTaskLimit(c, tasks)
 
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
@@ -405,9 +414,10 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
-		Workflow: dto.FromWorkflow(workflow),
-		Steps:    steps,
-		Tasks:    taskDTOs,
+		Workflow:     dto.FromWorkflow(workflow),
+		Steps:        steps,
+		Tasks:        taskDTOs,
+		TaskCoverage: h.service.WorkflowTaskCoverage(workflow, totalTasks, len(taskDTOs)),
 	})
 }
 

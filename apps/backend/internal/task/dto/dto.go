@@ -553,9 +553,10 @@ type ListTaskSessionsResponse struct {
 }
 
 type WorkflowSnapshotDTO struct {
-	Workflow WorkflowDTO       `json:"workflow"`
-	Steps    []WorkflowStepDTO `json:"steps"`
-	Tasks    []TaskDTO         `json:"tasks"`
+	Workflow     WorkflowDTO          `json:"workflow"`
+	Steps        []WorkflowStepDTO    `json:"steps"`
+	Tasks        []TaskDTO            `json:"tasks"`
+	TaskCoverage *models.TaskCoverage `json:"task_coverage,omitempty"`
 }
 
 type ListMessagesResponse struct {
@@ -598,8 +599,9 @@ type ListTurnsResponse struct {
 }
 
 type ListWorkflowsResponse struct {
-	Workflows []WorkflowDTO `json:"workflows"`
-	Total     int           `json:"total"`
+	Workflows            []WorkflowDTO                `json:"workflows"`
+	Total                int                          `json:"total"`
+	TaskWorkflowCoverage *models.TaskWorkflowCoverage `json:"task_workflow_coverage,omitempty"`
 }
 
 type ListWorkspacesResponse struct {

@@ -639,11 +639,16 @@ Choose **Last activity** when you want to review tasks by the least recent user 
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
-Returning to a recently opened sidebar view can show its first page immediately
-while **Updating tasks** refreshes it. These pages are kept only in the current
-browser session, for up to five minutes. Task changes, workspace changes, and
-signing out invalidate the relevant pages. Switching views still leaves your
-open conversation in place, including in the phone **Tasks** drawer.
+Views already covered by the current homepage data appear immediately, without
+another sidebar request. Larger covered views also page through the data already
+loaded. Archived views and incomplete data use bounded server pages.
+
+Returning to a recently opened server-backed view can show its first page while
+it refreshes in the background. Refreshing keeps the list in place; no updating
+banner shifts the rows. These pages are kept only in the current browser session,
+for up to five minutes. Task changes, workspace changes, and signing out invalidate
+the relevant pages. Switching views leaves your open conversation in place,
+including in the phone **Tasks** drawer.
 
 If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
 failure; rows already shown remain visible during a failed refresh. If a filter

@@ -17,6 +17,13 @@ function gate() {
   return { promise, release };
 }
 
+function taskRowTop(surface: ReturnType<Page["locator"]>, taskId: string) {
+  return surface.evaluate((element, id) => {
+    const row = element.querySelector(`[data-task-row-id="${id}"]`)!;
+    return row.getBoundingClientRect().top - element.getBoundingClientRect().top;
+  }, taskId);
+}
+
 async function seedViews(api: ApiClient, seed: SeedData, directories: string[]) {
   const names: string[] = [];
   const taskIds: string[] = [];
@@ -53,6 +60,7 @@ async function seedViews(api: ApiClient, seed: SeedData, directories: string[]) 
   });
   await api.updateTaskState(current.id, "COMPLETED");
   await api.archiveTask(current.id);
+  await Promise.all([...taskIds, other.id].map((id) => api.archiveTask(id)));
   const views = [
     {
       id: "reuse-a",
@@ -66,6 +74,7 @@ async function seedViews(api: ApiClient, seed: SeedData, directories: string[]) 
     },
   ].map((view) => ({
     ...view,
+    filters: [...view.filters, { id: "archive", dimension: "archived", op: "is", value: true }],
     sort: { key: "updatedAt", direction: "desc" },
     group: "none",
     collapsed_groups: [],
@@ -103,6 +112,11 @@ async function verifySidebarViewReuse(
   // Real backend membership proves the previously rejected selection loads.
   for (const id of taskIds)
     await expect(surface.locator(`[data-task-row-id="${id}"]`)).toBeVisible();
+  const refreshStatus = surface.getByRole("status").filter({ hasText: "Updating tasks" });
+  await expect(refreshStatus).toHaveCount(0);
+  // The view sorts newest first; lower rows can grow as their metadata hydrates.
+  const firstTaskId = taskIds.at(-1)!;
+  const settledRowTop = await taskRowTop(surface, firstTaskId);
   const filters = mobile
     ? {
         selectViewByName: async (name: string) => {
@@ -131,17 +145,19 @@ async function verifySidebarViewReuse(
       });
     return route.continue();
   });
+  const refreshed = waitForHttp(page, "POST", /\/sidebar\/query$/);
   try {
-    const refreshed = waitForHttp(page, "POST", /\/sidebar\/query$/);
     await filters.selectViewByName("Repositories");
     await arrived.promise;
     for (const id of taskIds)
       await expect(surface.locator(`[data-task-row-id="${id}"]`)).toBeVisible();
     await expect(surface.locator(`[data-task-row-id="${other.id}"]`)).toHaveCount(0);
-    await expect(surface.getByRole("status").filter({ hasText: "Updating tasks" })).toContainText(
-      "Updating tasks",
-    );
+    await expect(refreshStatus).toContainText("Updating tasks");
+    expect(await taskRowTop(surface, firstTaskId)).toBeCloseTo(settledRowTop, 0);
     await expect(page).toHaveURL(new RegExp(`/t/${current.id}$`));
+    await capture?.screenshot(mobile ? "phone-background-refresh" : "desktop-background-refresh", {
+      caption: "Background refresh keeps the saved-view task rows in place.",
+    });
     failRefresh = true;
     release.release();
     await refreshed;
@@ -161,13 +177,16 @@ async function verifySidebarViewReuse(
     await retry.click();
     await recovered;
     await expect(surface.getByRole("alert")).toHaveCount(0);
+    await expect(refreshStatus).toHaveCount(0);
+    expect(await taskRowTop(surface, firstTaskId)).toBeCloseTo(settledRowTop, 0);
   } finally {
     release.release();
+    await Promise.allSettled([refreshed]);
     await page.unrouteAll({ behavior: "wait" });
   }
 
   const invalidated = waitForHttp(page, "POST", /\/sidebar\/query$/);
-  await api.archiveTask(taskIds[0]);
+  await api.unarchiveTask(taskIds[0]);
   await invalidated;
   await expect(surface.locator(`[data-task-row-id="${taskIds[0]}"]`)).toHaveCount(0);
   await filters.selectViewByName("Other");
@@ -253,6 +272,10 @@ async function verifyQueryRejections(
   } finally {
     await page.unrouteAll({ behavior: "wait" });
   }
+  await page.reload();
+  await new SessionPage(page).waitForLoad();
+  const mobilePicker = page.getByTestId("mobile-task-picker-trigger");
+  if (await mobilePicker.isVisible()) await mobilePicker.tap();
   await filters.selectViewByName("Other");
   await filters.selectViewByName("Repositories");
   for (const id of ids) await expect(surface.locator(`[data-task-row-id="${id}"]`)).toBeVisible();
