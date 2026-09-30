@@ -60,7 +60,8 @@ Do not add hook-local delete tracking or another store. Use membership rather
 than departure ownership so unselected and bulk targets remain represented.
 
 Preserve the existing dimming, busy/disabled attributes, spinner, row geometry,
-and interaction treatment. Rename internal archive-specific helpers to removal
+and block row selection while pending so disabled semantics match behavior.
+Rename internal archive-specific helpers to removal
 names. If changing the spinner test ID, retain the old archive ID using
 `data-legacy-testid` and migrate every affected test selector together. No new
 user-facing strings or delete progress toast are required.

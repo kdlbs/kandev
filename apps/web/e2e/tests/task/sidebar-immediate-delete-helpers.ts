@@ -65,6 +65,11 @@ export async function checkImmediateDelete(options: {
     await expect(targetRow().getByTestId("task-state-removal-pending")).toBeVisible();
     await expect(targetRow()).toBeInViewport({ ratio: 1 });
     await expect(rows().filter({ hasText: "Keep selected" })).not.toHaveAttribute("aria-busy");
+    // The row is aria-disabled, so use DOM activation to exercise its own guard.
+    await targetRow().evaluate((row: HTMLElement) => row.click());
+    await targetRow().focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
   };
   try {

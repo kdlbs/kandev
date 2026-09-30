@@ -168,3 +168,15 @@ hooks/use-task-removal`). Typecheck, targeted ESLint/Prettier, catalog and spec
 lint passed. The same desktop and phone E2E commands above passed two scenarios
 each with retries disabled; deletion now holds the post-delete query to assert
 immediate pruning. Both viewport screenshots were refreshed and inspected.
+
+The additional outside-diff review finding reproduced mouse/Enter/Space
+activation despite `aria-disabled`. Pending row handlers now ignore selection/click
+activation while retaining keyboard default prevention; failure restores it.
+Two callback-path regression cases and both browser scenarios cover this.
+Claude's missing-token guard suggestion is applied. The legacy test attribute
+is retained under the scoped web guide's explicit selector-migration convention.
+
+Final interaction remediation verification: the focused ten-suite command now
+passes 74 tests. Typecheck, targeted lint, and both desktop/phone delete/archive
+scenarios pass with retries disabled. Pending activation is ignored and failed
+removal re-enables selection. Catalog, spec lint and diff checks pass.

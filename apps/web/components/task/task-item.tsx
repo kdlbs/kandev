@@ -131,9 +131,11 @@ function handleTaskItemKeyDown(
   e: React.KeyboardEvent<HTMLDivElement>,
   onSelect: ((e: React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
+  isPendingRemoval?: boolean,
 ): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
+  if (isPendingRemoval) return;
   // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
   // Enter/Space toggles/extends the selection just like a click would.
   if (onSelect) onSelect(e);
@@ -178,8 +180,13 @@ function taskItemRowClassName(
 function taskItemRowClick(
   onSelect: ((e: React.MouseEvent | React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
+  isPendingRemoval?: boolean,
 ): (e: React.MouseEvent) => void {
-  return (e) => (onSelect ? onSelect(e) : onClick?.());
+  return (e) => {
+    if (isPendingRemoval) return;
+    if (onSelect) onSelect(e);
+    else onClick?.();
+  };
 }
 
 function pendingRemovalRowProps(isPendingRemoval?: boolean) {
@@ -406,8 +413,8 @@ export const TaskItem = memo(function TaskItem({
       data-task-row-id={taskId}
       {...pendingProps}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
-      onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      onClick={taskItemRowClick(onSelect, onClick, isPendingRemoval)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick, isPendingRemoval)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
         taskItemRowClassName(

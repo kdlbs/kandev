@@ -137,7 +137,8 @@ as archiving, without presenting an unfinished deletion as success.
   task in the removal set shall display a dimmed row and muted spinner in the
   desktop sidebar and phone task picker on the next render, before network or
   destination lookup completes. The row shall retain its position and expose
-  busy/disabled accessibility state. This includes archived tasks visible in
+  busy/disabled accessibility state and ignore pointer/keyboard row activation.
+  This includes archived tasks visible in
   saved views. Opening or cancelling confirmation shall leave rows unchanged.
 - **AC-TASKS-REMOVAL-NAVIGATION-005.2:** Pending presentation shall survive
   refreshes, live field updates, and reopening the phone picker. Confirmed

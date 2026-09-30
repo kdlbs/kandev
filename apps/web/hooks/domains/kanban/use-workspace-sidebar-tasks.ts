@@ -243,6 +243,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     const pending = new Set<string>();
     for (const task of allTasks) {
       const token = taskRemoval.pendingTokenByTaskId[task.id];
+      if (!token) continue;
       const operation = taskRemoval.operationsByToken[token];
       if (
         operation?.workspaceId === workspaceId &&
