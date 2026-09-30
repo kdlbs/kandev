@@ -208,7 +208,7 @@ Review remediation completed on 2026-09-29:
   option; another failure retains Retry focus. A pending-route desktop E2E and
   the phone E2E cover these behaviors.
 
-PR fixup completed on 2026-09-29:
+PR fixup completed on 2026-09-30:
 
 - The unbroken step assertion now checks every rendered text line against its
   preview group at a 640px viewport. Retry sizing is verified at 28px on a wide
@@ -221,11 +221,18 @@ PR fixup completed on 2026-09-29:
   popover also uses the task dialog's portal container.
 - A later full-suite run exposed an existing agent-override E2E reopening
   controls before the workflow selector finished closing. Its selection helper
-  now waits for the selector popover to unmount. The focused test passed once
-  and then twice consecutively; remote checks must be rerun on the updated head.
+  now waits for the selector popover to unmount. The focused test passed three
+  consecutive local runs and passed in the exact-head CI run.
+- Exact PR head `4f68fbe3df84c3adf8d8e2d5c0d3233dfd21c693` completed CI with 53
+  passed, 16 skipped, 0 failed, and 0 pending checks. The review-thread list was
+  empty. The PR base had advanced, so a synthetic merge was checked separately.
+- Current `main` `abc7a85f1aa16762f33aca7c8d1f8947a206f939` and captured base
+  `d7280234aff7a5b6dd170850dc09e66f24dc0305` both merge cleanly with the PR
+  head. Synthetic commit `bb4ac20bfa417b63662bf04d4a30ae517846e2c7` passed 35
+  focused unit tests, desktop and phone preview E2E, and the agent-override E2E.
 - Final verification passed: 52 focused Vitest tests, desktop preview E2E (1),
   phone preview E2E (3 consecutive repeats), typecheck, E2E Vite build, targeted
-  ESLint, and `git diff --check`.
+  ESLint, and `git diff --check`. The synthetic-merge Vite build also passed.
 
 ## Risks
 

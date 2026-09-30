@@ -176,6 +176,18 @@ ESLint; and `git diff --check`.
 
 A later CI run found the existing agent-override E2E reopened dialog controls
 before the workflow selector popover unmounted. The selection helper now waits
-for that popover to detach after each selection. The affected test passed once
-and then twice consecutively locally; CI verification is pending on the updated
-head.
+for that popover to detach after each selection. The affected test passed three
+consecutive local runs and in exact-head CI.
+
+Exact PR head `4f68fbe3df84c3adf8d8e2d5c0d3233dfd21c693` completed CI with 53
+passed, 16 skipped, 0 failed, and 0 pending checks. The review-thread list was
+empty. The captured base `d7280234aff7a5b6dd170850dc09e66f24dc0305` and current
+`main` `abc7a85f1aa16762f33aca7c8d1f8947a206f939` both merge cleanly with that
+head. Synthetic commit `bb4ac20bfa417b63662bf04d4a30ae517846e2c7` passed the
+focused integration checks.
+
+The synthetic tree passed 35 focused unit tests, the desktop preview E2E, the
+phone preview E2E, and the affected agent-override E2E. Its Vite E2E build
+passed with `MAKEFLAGS=-e GOFLAGS=-buildvcs=false`, which disables Go VCS
+stamping for the detached `/tmp` worktree. The temporary synthetic worktree was
+removed after verification.
