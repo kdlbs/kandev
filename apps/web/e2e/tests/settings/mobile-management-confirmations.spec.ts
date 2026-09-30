@@ -66,9 +66,11 @@ test("phone workflow removal preserves its form and retries a failed request in 
     await new WorkflowSettingsPage(testPage).goto(seedData.workspaceId);
     await testPage.getByTestId("workflow-sync-open").tap();
     const dialog = testPage.getByTestId("workflow-sync-dialog");
+    await expect(dialog.getByTestId("workflow-sync-save")).toBeEnabled();
     const dialogId = await dialog.getAttribute("id");
     const branch = dialog.getByTestId("workflow-sync-branch-input");
     await branch.fill("draft-branch");
+    await expect(branch).toHaveValue("draft-branch");
     const trigger = dialog.getByTestId("workflow-sync-remove");
     await trigger.tap();
     await expect(testPage.getByRole("dialog")).toHaveCount(1);

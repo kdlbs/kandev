@@ -153,6 +153,47 @@ export function readManagedCloneRecoveryConsumers(
   }
 }
 
+/** Read the durable state of the task's cascade archive cleanup job. */
+export function readCascadeArchiveCleanupState(tmpDir: string, taskId: string): string | null {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
+  };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  try {
+    const row = db
+      .prepare(
+        `
+        SELECT state
+        FROM task_resource_cleanup_jobs
+        WHERE task_id = ? AND trigger = 'cascade_archive'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      )
+      .get(taskId) as { state?: unknown } | undefined;
+    return typeof row?.state === "string" ? row.state : null;
+  } finally {
+    db.close();
+  }
+}
+
+export async function waitForCascadeArchiveCleanup(tmpDir: string, taskId: string) {
+  await expect
+    .poll(() => readCascadeArchiveCleanupState(tmpDir, taskId), {
+      timeout: 30_000,
+      intervals: [250, 500, 1_000],
+      message: `Waiting for cascade archive cleanup job row to be created for task ${taskId}`,
+    })
+    .not.toBeNull();
+  await expect
+    .poll(() => readCascadeArchiveCleanupState(tmpDir, taskId), {
+      timeout: 60_000,
+      intervals: [250, 500, 1_000],
+      message: `Waiting for cascade archive cleanup to finish for task ${taskId}`,
+    })
+    .toBe("succeeded");
+}
+
 /** Remove relocation test tasks and return the worker's shared repository to its local fixture. */
 export async function cleanupManagedCloneRelocationFixture(
   apiClient: ApiClient,

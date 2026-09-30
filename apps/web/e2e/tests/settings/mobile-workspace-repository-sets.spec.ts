@@ -98,6 +98,7 @@ test.describe("Mobile workspace repository sets", () => {
 
     const surface = testPage.getByTestId("repository-set-editor-surface");
     await expect(surface).toBeVisible();
+    await waitForFiniteAnimations(surface);
     await expect(surface).toHaveClass(/h-\[100dvh\]/);
     await expect.poll(async () => (await surface.boundingBox())?.height).toBeCloseTo(844, 0);
     await expect(testPage.getByTestId("repository-set-editor-form")).toHaveClass(
@@ -107,14 +108,21 @@ test.describe("Mobile workspace repository sets", () => {
       "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
-    const [membersHintBox, addRepositoryBox] = await Promise.all([
-      membersHint.boundingBox(),
-      addRepository.boundingBox(),
-    ]);
-    expect(membersHintBox).not.toBeNull();
-    expect(addRepositoryBox).not.toBeNull();
-    expect(addRepositoryBox!.y).toBeGreaterThan(membersHintBox!.y + membersHintBox!.height);
-    expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
+    const membersLayout = await membersHint.evaluate((hint) => {
+      const addControl = document.querySelector<HTMLElement>(
+        '[data-testid="repository-set-add-repository"]',
+      );
+      if (!addControl) return null;
+      const hintBox = hint.getBoundingClientRect();
+      const addBox = addControl.getBoundingClientRect();
+      return {
+        hint: { y: hintBox.y, height: hintBox.height, width: hintBox.width },
+        add: { y: addBox.y, width: addBox.width },
+      };
+    });
+    if (!membersLayout) throw new Error("repository section controls are not mounted");
+    expect(membersLayout.add.y).toBeGreaterThan(membersLayout.hint.y + membersLayout.hint.height);
+    expect(membersLayout.add.width).toBeCloseTo(membersLayout.hint.width, 0);
     await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
     await addRepository.tap();
     await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
@@ -152,10 +160,6 @@ test.describe("Mobile workspace repository sets", () => {
     await expect(remoteMainOption).toBeVisible();
     await expect(remoteMainOption.getByText("origin", { exact: true })).toBeVisible();
 
-    const search = dropdown.getByPlaceholder("Search branches...");
-    await search.fill("origin");
-    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
-    await expect(dropdown.getByRole("option", { name: /^main local/ })).toHaveCount(0);
     const refreshButton = dropdown.getByTestId("branch-refresh-button");
     await expect(refreshButton).toBeVisible();
     await expect(refreshButton).toBeEnabled();
@@ -163,9 +167,24 @@ test.describe("Mobile workspace repository sets", () => {
     expect(refreshButtonBox).not.toBeNull();
     expect(refreshButtonBox!.height).toBeGreaterThanOrEqual(44);
     expect(refreshButtonBox!.width).toBeGreaterThanOrEqual(44);
+    await refreshButton.scrollIntoViewIfNeeded();
     await waitForFiniteAnimations(dropdown);
+    const refreshReceivesCenterTap = await refreshButton.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      );
+      return target === element || (target instanceof Node && element.contains(target));
+    });
+    expect(refreshReceivesCenterTap).toBe(true);
     await refreshButton.tap({ timeout: 5_000 });
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+
+    const search = dropdown.getByPlaceholder("Search branches...");
+    await search.fill("origin");
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^main local/ })).toHaveCount(0);
 
     const dropdownBox = await dropdown.boundingBox();
     const viewport = testPage.viewportSize();

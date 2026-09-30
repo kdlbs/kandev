@@ -149,6 +149,7 @@ test.describe("Mobile resource metrics display", () => {
 
     for (const width of [393, 320, 767]) {
       await testPage.setViewportSize({ width, height: 851 });
+      await expect.poll(() => testPage.evaluate(() => window.innerWidth)).toBe(width);
       const trigger = testPage.getByTestId("app-nav-trigger");
       await trigger.tap();
       const menu = testPage.getByTestId("app-nav-sheet");
@@ -161,17 +162,31 @@ test.describe("Mobile resource metrics display", () => {
       expect(
         Math.abs(heading.y + heading.height / 2 - host.y - host.height / 2),
       ).toBeLessThanOrEqual(1);
-      const boxes = [];
       for (const label of ["CPU", "Memory", "Disk"]) {
         await expect(metrics.getByText(label, { exact: true })).toBeVisible();
         const reading = metrics.getByLabel(new RegExp(`^${label} `));
-        boxes.push(await requireBox(reading, label));
         await assertNoElementHorizontalOverflow(reading, label);
       }
+      const boxes = await metrics.evaluate((element) => {
+        const labels = ["CPU", "Memory", "Disk"];
+        return labels.map((label) => {
+          const reading = Array.from(
+            element.querySelectorAll<HTMLElement>("span[aria-label]"),
+          ).filter((candidate) => {
+            const ariaLabel = candidate.getAttribute("aria-label") ?? "";
+            return label === "CPU"
+              ? ariaLabel.startsWith("CPU ") && !ariaLabel.startsWith("CPU temperature ")
+              : ariaLabel.startsWith(`${label} `);
+          })[0];
+          if (!reading) throw new Error(`Missing ${label} metric`);
+          const { x, y, width, height } = reading.getBoundingClientRect();
+          return { label, x, y, width, height };
+        });
+      });
       for (const box of boxes) {
-        expect(box.y).toBeCloseTo(boxes[0].y, 0);
-        expect(box.width).toBeCloseTo(boxes[0].width, 0);
-        expect(box.height).toBeGreaterThanOrEqual(44);
+        expect(box.y, `${box.label} y at ${width}px`).toBeCloseTo(boxes[0].y, 0);
+        expect(box.width, `${box.label} width at ${width}px`).toBeCloseTo(boxes[0].width, 0);
+        expect(box.height, `${box.label} height at ${width}px`).toBeGreaterThanOrEqual(44);
       }
       await assertNoElementHorizontalOverflow(metrics);
       await assertNoDocumentHorizontalOverflow(testPage);

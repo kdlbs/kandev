@@ -71,9 +71,11 @@ test.describe("Task creation with branch policies", () => {
       await expectPolicyOptionUsesOneLine(option, policy.name);
       const policyInfo = testPage.getByTestId(`branch-policy-option-info-${policy.id}`);
       await policyInfo.hover();
-      await expect(testPage.getByRole("tooltip")).toContainText(
-        "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
-      );
+      const policyTooltip = testPage.getByRole("tooltip").filter({
+        hasText: "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
+      });
+      await expect(policyTooltip).toHaveCount(1);
+      await expect(policyTooltip).toBeVisible();
       await testPage.mouse.move(0, 0);
       await policyInfo.focus();
       await expect(policyInfo).toBeFocused();

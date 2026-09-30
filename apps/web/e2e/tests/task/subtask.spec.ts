@@ -116,7 +116,8 @@ test.describe("Subtask basics", () => {
     seedData,
     prCapture,
   }) => {
-    // Create a task with an agent so we have a session to navigate to
+    // The dialog inherits the active session's branch, but the agent does not
+    // need to finish before the task context menu can be exercised.
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Subtask Parent",
@@ -128,14 +129,16 @@ test.describe("Subtask basics", () => {
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 30_000,
+      })
+      .toBe("ready");
 
     // Navigate to the session page
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-
-    // Wait for agent to complete
-    await session.waitForChatIdle({ timeout: 30_000 });
 
     await session.openCreateSubtaskForSidebarTask("Subtask Parent");
 

@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -166,14 +165,8 @@ test.describe("Executor reuse", () => {
     expect(envBefore).not.toBeNull();
     expect(envBefore!.executor_type).toBe("worktree");
 
-    // Navigate to task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Reset Env Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // Open the API-created task directly; its Kanban projection may still be settling.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

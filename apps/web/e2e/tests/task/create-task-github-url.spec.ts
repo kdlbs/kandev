@@ -239,6 +239,9 @@ test.describe("Task creation from GitHub URL", () => {
       await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
       await expect(session.idleInput()).toBeVisible();
 
+      await session.clickTab("Terminal", { force: true });
+      await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+      await session.expectTerminalConnected();
       await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
       await expect(session.prTopbarButton()).toContainText("#3879", { timeout: 15_000 });
     } finally {
@@ -800,6 +803,22 @@ test.describe("Task creation from GitHub URL", () => {
     }
 
     const kanban = new KanbanPage(testPage);
+    const currentTaskId = () => {
+      const taskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)$/)?.[1];
+      if (!taskId) throw new Error(`Expected task route, got ${testPage.url()}`);
+      return taskId;
+    };
+    const waitForWorktree = async (taskId: string) => {
+      await expect
+        .poll(async () => (await apiClient.getTaskEnvironment(taskId))?.status ?? null, {
+          timeout: 30_000,
+          message: `Task ${taskId} has a ready worktree environment`,
+        })
+        .toBe("ready");
+      const environment = await apiClient.getTaskEnvironment(taskId);
+      if (!environment) throw new Error(`Task ${taskId} has no environment`);
+      return environment;
+    };
     await kanban.goto();
 
     // Helper: select worktree executor in the create dialog
@@ -845,10 +864,12 @@ test.describe("Task creation from GitHub URL", () => {
     });
     await expect(sessionA.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Task A should have the direct PR branch
-    await expect(sessionA.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionA.typeInTerminal("git branch --show-current");
-    await sessionA.expectTerminalHasText("feature/shared-pr");
+    const taskAId = currentTaskId();
+    const environmentA = await waitForWorktree(taskAId);
+    const repoA = environmentA.repos?.find((repo) => repo.repository_id);
+    expect(repoA?.worktree_branch).toMatch(/^feature\/shared-pr-/);
+    const worktreePathA = repoA?.worktree_path ?? environmentA.worktree_path;
+    expect(worktreePathA).toBeTruthy();
 
     // --- Task B: second task from the same PR URL ---
     await testPage.goto("/");
@@ -874,9 +895,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Task B follows a full navigation away from Task A. Dockview can keep
-    // Task A's terminal mounted while Task B hydrates, so this also guards
-    // SessionPage against reading a stale, hidden terminal buffer.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();
@@ -884,11 +902,14 @@ test.describe("Task creation from GitHub URL", () => {
       timeout: 30_000,
     });
 
-    // Task B should have a suffixed branch (not the original PR branch)
-    await expect(sessionB.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionB.typeInTerminal("git branch --show-current");
-    // Branch should start with the PR branch name but have a random suffix
-    await sessionB.expectTerminalHasText("feature/shared-pr-");
+    const taskBId = currentTaskId();
+    const environmentB = await waitForWorktree(taskBId);
+    const repoB = environmentB.repos?.find((repo) => repo.repository_id);
+    expect(repoB?.worktree_branch).toMatch(/^feature\/shared-pr-/);
+    expect(repoB?.worktree_branch).not.toBe(repoA?.worktree_branch);
+    const worktreePathB = repoB?.worktree_path ?? environmentB.worktree_path;
+    expect(worktreePathB).toBeTruthy();
+    expect(worktreePathB).not.toBe(worktreePathA);
   });
 
   test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {
